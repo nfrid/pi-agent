@@ -3,6 +3,7 @@ import { DelegateWorkflowCoordinator } from './workflow-coordinator';
 import {
   attachWorkflowStore,
   latestWorkflowState,
+  persistWorkflowState,
   WORKFLOW_ENTRY_TYPE,
 } from './workflow-store';
 
@@ -113,6 +114,32 @@ describe('workflow store', () => {
     );
     expect(JSON.stringify(entries)).not.toContain('secret');
     await coordinator.dispose();
+  });
+
+  test('defers owner snapshots while a sibling runtime is active', () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    const entries: unknown[] = [];
+    let ownerActive = false;
+    attachWorkflowStore(coordinator, piFor(entries), {
+      isOwnerActive: () => ownerActive,
+    });
+
+    coordinator.schedule({
+      logicalId: 'deferred',
+      mode: 'single',
+      tasks: ['deferred'],
+      execute: async () => ({ runs: [], handoff: 'owner-only' }),
+    });
+    expect(entries).toHaveLength(0);
+
+    ownerActive = true;
+    persistWorkflowState(coordinator, piFor(entries), {
+      isOwnerActive: () => ownerActive,
+    });
+    expect(entries).toHaveLength(1);
+    expect(JSON.stringify(entries)).not.toContain('owner-only');
   });
 
   test('detach stops appending snapshots', () => {

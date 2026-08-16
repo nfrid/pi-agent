@@ -267,6 +267,7 @@ async function createAsyncHarness(initialScope = 'parent') {
     ctx,
     pi,
     finish,
+    hasFinish: (task: string) => finishes.has(task),
     handlers,
     sendMessage,
     tools,
@@ -1385,6 +1386,173 @@ describe('async delegate extension', () => {
     expect(sendMessage.mock.calls[2]?.[0].content).not.toContain(
       'Third finding.',
     );
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('isolates same IDs and inherits only current branch workflow entries', async () => {
+    const { ctx, pi, finish, hasFinish, handlers, tools } =
+      await createAsyncHarness();
+    type Path = { entries: unknown[]; leaf: string };
+    const paths = new Map<string, Path>([
+      ['left', { entries: [], leaf: 'left' }],
+      ['right', { entries: [], leaf: 'right' }],
+    ]);
+    let activePath = 'left';
+    let sequence = 0;
+    const manager = ctx.sessionManager as unknown as {
+      getLeafId: () => string;
+      getBranch: () => unknown[];
+      getEntries: () => unknown[];
+      getChildren: (parentId: string) => unknown[];
+    };
+    manager.getLeafId = () => paths.get(activePath)?.leaf ?? activePath;
+    manager.getBranch = () => paths.get(activePath)?.entries ?? [];
+    manager.getEntries = () =>
+      [...paths.values()].flatMap((path) => path.entries);
+    manager.getChildren = (parentId) =>
+      manager
+        .getEntries()
+        .filter(
+          (entry) => (entry as { parentId?: string }).parentId === parentId,
+        );
+    const api = pi as unknown as {
+      appendEntry: (type: string, data: unknown) => void;
+    };
+    api.appendEntry = (type, data) => {
+      const path = paths.get(activePath);
+      if (!path) throw new Error(`Unknown test path ${activePath}`);
+      const id = `${activePath}-${++sequence}`;
+      path.entries = [
+        ...path.entries,
+        { id, parentId: path.leaf, type: 'custom', customType: type, data },
+      ];
+      path.leaf = id;
+    };
+
+    handlers.get('session_tree')?.({ oldLeafId: null, newLeafId: 'left' }, ctx);
+    const leftReceipt = await tools
+      .get('delegate')
+      ?.execute(
+        'left-call',
+        { id: 'impl', task: 'left task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(leftReceipt?.content[0]?.text).toContain('impl@1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finish('left task');
+    await vi.waitFor(async () => {
+      const listed = await tools
+        .get('delegate_jobs')
+        ?.execute('left-list', { action: 'list' }, undefined, undefined, ctx);
+      expect(JSON.stringify(listed)).toContain('impl@1');
+    });
+
+    const leftEntries = [...(paths.get('left')?.entries ?? [])];
+    const leftLeaf = paths.get('left')?.leaf ?? 'left';
+    const ownerMarkerIndex = leftEntries.findIndex(
+      (entry) =>
+        (entry as { customType?: string }).customType ===
+        'delegate-branch-owner:v1',
+    );
+    expect(ownerMarkerIndex).toBeGreaterThanOrEqual(0);
+    const forkEntries = leftEntries.slice(0, ownerMarkerIndex + 1);
+    const forkLeaf = (forkEntries.at(-1) as { id?: string } | undefined)?.id;
+    if (!forkLeaf) throw new Error('missing mapped ancestor leaf');
+    paths.set('right', { entries: forkEntries, leaf: forkLeaf });
+    activePath = 'right';
+    handlers.get('session_tree')?.(
+      { oldLeafId: leftLeaf, newLeafId: forkLeaf },
+      ctx,
+    );
+    const rightReceipt = await tools
+      .get('delegate')
+      ?.execute(
+        'right-call',
+        { id: 'impl', task: 'right task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(rightReceipt?.content[0]?.text).toContain('impl@1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finish('right task');
+    await vi.waitFor(async () => {
+      const status = await tools
+        .get('delegate_jobs')
+        ?.execute(
+          'right-status',
+          { action: 'status', id: 'impl@1' },
+          undefined,
+          undefined,
+          ctx,
+        );
+      expect(status?.content[0]?.text).toContain('impl@1 success');
+      const rightWorkflow = [...(paths.get('right')?.entries ?? [])]
+        .reverse()
+        .find(
+          (entry) =>
+            (entry as { customType?: string }).customType ===
+            'delegate-workflow:v1',
+        ) as
+        | {
+            data?: {
+              state?: {
+                attempts?: Array<{
+                  identity?: string;
+                  ownerBranchId?: string;
+                  state?: string;
+                }>;
+              };
+            };
+          }
+        | undefined;
+      expect(rightWorkflow?.data?.state?.attempts?.[0]).toMatchObject({
+        identity: 'impl@1',
+        state: 'success',
+      });
+      expect(rightWorkflow?.data?.state?.attempts?.[0]?.ownerBranchId).not.toBe(
+        (
+          leftEntries.find(
+            (entry) =>
+              (entry as { customType?: string }).customType ===
+              'delegate-workflow:v1',
+          ) as
+            | {
+                data?: {
+                  state?: {
+                    attempts?: Array<{ ownerBranchId?: string }>;
+                  };
+                };
+              }
+            | undefined
+        )?.data?.state?.attempts?.[0]?.ownerBranchId,
+      );
+    });
+
+    paths.set('descendant', { entries: leftEntries, leaf: 'descendant' });
+    activePath = 'descendant';
+    handlers.get('session_tree')?.(
+      { oldLeafId: 'right', newLeafId: 'descendant' },
+      ctx,
+    );
+    const continued = await tools.get('delegate')?.execute(
+      'descendant-call',
+      {
+        id: 'review',
+        task: 'descendant task',
+        route: 'quick',
+        after: ['impl'],
+        inputs: [{ node: 'impl', include: ['report'] }],
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(continued?.content[0]?.text).toContain('review@1');
+    await vi.waitFor(() => expect(hasFinish('descendant task')).toBe(true));
+    finish('descendant task');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 

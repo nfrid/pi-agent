@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { isBranchOwnerId } from './branch-ownership';
 import type {
   DelegateWorkflowCoordinator,
   DelegateWorkflowMetadataHistory,
@@ -61,6 +62,8 @@ function validAttempt(
 ): value is DelegateWorkflowMetadataSnapshot {
   if (!isRecord(value)) return false;
   if (
+    (value.ownerBranchId !== undefined &&
+      !isBranchOwnerId(value.ownerBranchId)) ||
     typeof value.logicalId !== 'string' ||
     value.logicalId.length === 0 ||
     value.logicalId.length > 64 ||
@@ -121,6 +124,9 @@ function boundedState(
   const attempts = state.attempts
     .slice(-MAX_WORKFLOW_HISTORY_ATTEMPTS)
     .map((attempt) => ({
+      ...(attempt.ownerBranchId
+        ? { ownerBranchId: attempt.ownerBranchId }
+        : {}),
       logicalId: attempt.logicalId.slice(0, 64),
       attempt: attempt.attempt,
       identity: attempt.identity.slice(0, 80),
@@ -153,17 +159,27 @@ function boundedState(
   return Object.freeze({ version: 1, attempts: Object.freeze(attempts) });
 }
 
+export interface WorkflowStoreWriteGuard {
+  /** False defers the owner write until its branch runtime is active again. */
+  isOwnerActive?: () => boolean;
+  /** Host adapters can update their leaf-to-runtime alias after appendEntry. */
+  onPersist?: () => void;
+}
+
 /** Append one metadata-only snapshot. Execution payloads are never accepted. */
 export function persistWorkflowState(
   coordinator: DelegateWorkflowCoordinator,
   pi: AppendOnly,
+  guard: WorkflowStoreWriteGuard = {},
 ): void {
+  if (guard.isOwnerActive && !guard.isOwnerActive()) return;
   const state = boundedState(coordinator.metadataSnapshot());
   pi.appendEntry(WORKFLOW_ENTRY_TYPE, {
     version: 1,
     kind: 'snapshot',
     state,
   } satisfies WorkflowStoreEntry);
+  guard.onPersist?.();
 }
 
 function workflowHistory(
@@ -201,24 +217,33 @@ export function latestWorkflowState(
 export function attachWorkflowStore(
   coordinator: DelegateWorkflowCoordinator,
   pi: AppendOnly,
+  guard: WorkflowStoreWriteGuard = {},
 ): () => void {
   return coordinator.subscribeChanges(() =>
-    persistWorkflowState(coordinator, pi),
+    persistWorkflowState(coordinator, pi, guard),
   );
 }
 
 /** Small adapter facade useful at extension/session boundaries. */
 export class WorkflowStore {
-  persist(coordinator: DelegateWorkflowCoordinator, pi: AppendOnly): void {
-    persistWorkflowState(coordinator, pi);
+  persist(
+    coordinator: DelegateWorkflowCoordinator,
+    pi: AppendOnly,
+    guard: WorkflowStoreWriteGuard = {},
+  ): void {
+    persistWorkflowState(coordinator, pi, guard);
   }
 
   latest(ctx: SessionBranch): DelegateWorkflowMetadataHistory | undefined {
     return latestWorkflowState(ctx);
   }
 
-  attach(coordinator: DelegateWorkflowCoordinator, pi: AppendOnly): () => void {
-    return attachWorkflowStore(coordinator, pi);
+  attach(
+    coordinator: DelegateWorkflowCoordinator,
+    pi: AppendOnly,
+    guard: WorkflowStoreWriteGuard = {},
+  ): () => void {
+    return attachWorkflowStore(coordinator, pi, guard);
   }
 }
 

@@ -522,6 +522,19 @@ describe('structured delegate output handoff', () => {
     );
     expect(handoff).not.toContain('Artifact:');
     expect(run.artifact).toBeUndefined();
+
+    const siblingResult = await delegateToolResult(
+      {} as never,
+      { sessionManager: { getSessionId: () => 'owner-session' } } as never,
+      'single',
+      [run],
+      'owner-session',
+      'owner-branch',
+      () => false,
+    );
+    expect(JSON.stringify(siblingResult)).not.toMatch(
+      /owner-only background result|stale-structured-prose|stale-structured-stderr/,
+    );
   });
 
   test('stale foreground details carry the bounded fallback without the owner handle', async () => {
