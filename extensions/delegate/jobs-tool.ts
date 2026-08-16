@@ -5,7 +5,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
-import { loadGuidelines } from '../shared/instructions';
 import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
 
 const Parameters = Type.Object({
@@ -75,6 +74,27 @@ function result(job: DelegateJobSnapshot): string {
   return `${summary(job)}\nCompletion will be delivered automatically.`;
 }
 
+function alreadyDelivered(job: DelegateJobSnapshot): string {
+  return `Automatic result for ${job.id} was already delivered; no duplicate completion is returned.`;
+}
+
+function compactJob(job: DelegateJobSnapshot): DelegateJobSnapshot {
+  return {
+    id: job.id,
+    name: job.name,
+    mode: job.mode,
+    state: job.state,
+    // The already-delivered response is a status, not another task replay.
+    tasks: [],
+    createdAt: job.createdAt,
+    startedAt: job.startedAt,
+    settledAt: job.settledAt,
+    deliveryEpoch: job.deliveryEpoch,
+    route: job.route,
+    allowWrites: job.allowWrites,
+  };
+}
+
 export function registerDelegateJobsTool(
   pi: ExtensionAPI,
   manager: DelegateJobManager,
@@ -94,8 +114,6 @@ export function registerDelegateJobsTool(
     name: 'delegate_jobs',
     label: 'Delegate Jobs',
     description: DELEGATE_JOBS_DESCRIPTION,
-    promptSnippet: 'Inspect, steer, or cancel asynchronous delegate jobs',
-    promptGuidelines: loadGuidelines('jobs-instructions.md', __dirname),
     parameters: Parameters,
     async execute(
       _toolCallId,
@@ -127,28 +145,23 @@ export function registerDelegateJobsTool(
             signal,
             ctx,
           );
-          job = await manager.materialize(job.id, ctx);
           const automaticQueued = isAutomaticDeliveryQueued(job);
-          if (
-            !automaticQueued &&
-            job.state !== 'queued' &&
-            job.state !== 'running'
-          )
+          if (automaticQueued) {
+            return {
+              content: [{ type: 'text', text: alreadyDelivered(job) }],
+              details: {
+                action: 'peek',
+                job: compactJob(job),
+                delivery: 'automatic-queued',
+              },
+            };
+          }
+          job = await manager.materialize(job.id, ctx);
+          if (job.state !== 'queued' && job.state !== 'running')
             onResultEntered([job]);
           return {
-            content: [
-              {
-                type: 'text',
-                text: automaticQueued
-                  ? `Automatic result for ${job.id} is already queued and will enter context shortly.`
-                  : result(job),
-              },
-            ],
-            details: {
-              action: 'peek',
-              job,
-              ...(automaticQueued ? { delivery: 'automatic-queued' } : {}),
-            },
+            content: [{ type: 'text', text: result(job) }],
+            details: { action: 'peek', job },
           };
         }
         case 'feedback': {
@@ -189,7 +202,7 @@ export function registerDelegateJobsTool(
                 text: jobs
                   .map((job) =>
                     automaticQueuedIds.has(job.id)
-                      ? `Automatic result for ${job.id} is already queued and will enter context shortly.`
+                      ? alreadyDelivered(job)
                       : result(job),
                   )
                   .join('\n\n'),
@@ -197,7 +210,9 @@ export function registerDelegateJobsTool(
             ],
             details: {
               action: 'cancel',
-              jobs,
+              jobs: jobs.map((job) =>
+                automaticQueuedIds.has(job.id) ? compactJob(job) : job,
+              ),
               ...(automaticQueuedIds.size > 0
                 ? {
                     delivery: 'automatic-queued',

@@ -103,7 +103,7 @@ describe('output', () => {
       reportedRun('Outcome: partial\nConclusion: only the audit was completed'),
     ]);
 
-    expect(handoff).toContain('Delegated results: 1 run(s)');
+    expect(handoff).not.toContain('Delegated results: 1 run(s)');
     expect(handoff).toContain('Outcome: partial');
     expect(handoff).not.toMatch(
       /Delegated task .*succeeded|Delegated task .*failed/,
@@ -331,7 +331,7 @@ describe('output', () => {
     expect(persisted).toEqual([exact]);
     expect(run.artifact?.handle).toBe(artifact().handle);
     expect(handoff).toContain(`Artifact: ${artifact().handle}`);
-    expect(handoff).toContain('Truncation: original report omitted');
+    expect(handoff).not.toContain('Truncation: none');
     expect(handoff).not.toContain(`Output\n${exact}`);
     expect(handoff).not.toContain(exact);
   });

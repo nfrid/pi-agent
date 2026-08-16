@@ -308,8 +308,7 @@ export function createCompletionDelivery(options: {
     },
     hasQueuedAutomaticDeliveries: () =>
       [...automaticDeliveryStates.values()].some((state) => state === 'queued'),
-    automaticDeliveryQueued: (job) =>
-      automaticDeliveryStates.get(job.id) === 'queued',
+    automaticDeliveryQueued: (job) => automaticDeliveryStates.has(job.id),
     pendingCount: () => pendingCompletions.length,
     filterPending: (keep) => {
       pendingCompletions = pendingCompletions.filter(keep);

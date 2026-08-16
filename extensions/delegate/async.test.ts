@@ -200,6 +200,7 @@ function createAsyncHarness(initialScope = 'parent') {
 
   const handlers = new Map<string, Handler>();
   const tools = new Map<string, RegisteredTool>();
+  const activeTools = new Set(['delegate', 'artifact_retrieve']);
   const sendMessage = vi.fn();
   const eventListeners = new Map<string, Set<(value: unknown) => void>>();
   const entries: Array<{ type: string; customType?: string; data?: unknown }> =
@@ -210,6 +211,13 @@ function createAsyncHarness(initialScope = 'parent') {
     },
     registerTool(tool: RegisteredTool) {
       tools.set(tool.name, tool);
+    },
+    getActiveTools() {
+      return [...activeTools];
+    },
+    setActiveTools(names: string[]) {
+      activeTools.clear();
+      for (const name of names) activeTools.add(name);
     },
     registerCommand: vi.fn(),
     registerMessageRenderer: vi.fn(),
@@ -262,10 +270,36 @@ function createAsyncHarness(initialScope = 'parent') {
     handlers,
     sendMessage,
     tools,
+    activeTools,
   };
 }
 
 describe('async delegate extension', () => {
+  test('state-gates broker tools until their state is actionable', async () => {
+    const { ctx, finish, handlers, sendMessage, tools, activeTools } =
+      createAsyncHarness();
+    expect(activeTools).toEqual(new Set(['delegate', 'artifact_retrieve']));
+
+    await tools.get('delegate')?.execute(
+      'call-gated-background',
+      {
+        name: 'Gated background task',
+        task: 'gated',
+        route: 'quick',
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(activeTools).toContain('delegate_jobs');
+    expect(activeTools).not.toContain('delegate_branches');
+
+    finish('gated');
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
   test('enrolls a delegate control channel opened after pause was requested', async () => {
     const { ctx, handlers, pi } = createAsyncHarness();
     const requested = requestRuntimePause(pi, ctx);
@@ -794,7 +828,7 @@ describe('async delegate extension', () => {
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
     expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
       customType: 'delegate-job-result',
-      content: expect.stringContaining('Delegated results: 1 run(s)'),
+      content: expect.not.stringContaining('Delegated results: 1 run(s)'),
       display: true,
     });
     expect(sendMessage.mock.calls[0]?.[1]).toEqual({
@@ -862,13 +896,6 @@ describe('async delegate extension', () => {
         ctx,
       );
     expect(peek?.content[0]?.text).not.toContain('Background finding.');
-    const peekDetails = peek?.details as {
-      job?: {
-        runs?: Array<{ artifact?: { handle?: string; size?: number } }>;
-      };
-    };
-    const handle = peekDetails.job?.runs?.[0]?.artifact?.handle;
-    expect(handle).toBeDefined();
     expect(entries).toHaveLength(1);
 
     sessionId = 'foreign';
@@ -882,7 +909,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(foreignPeek?.content[0]?.text).not.toContain(`Artifact: ${handle}`);
+    expect(foreignPeek?.content[0]?.text).not.toContain('Artifact:');
     expect(
       (
         foreignPeek?.details as {
@@ -902,10 +929,14 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(ownerPeek?.content[0]?.text).toContain(`Artifact: ${handle}`);
-    expect(ownerPeek?.content[0]?.text).toContain(
-      'Delegated results: 1 run(s)',
-    );
+    expect(ownerPeek?.content[0]?.text).toContain('Artifact:');
+    const ownerPeekDetails = ownerPeek?.details as {
+      job?: {
+        runs?: Array<{ artifact?: { handle?: string; size?: number } }>;
+      };
+    };
+    const handle = ownerPeekDetails.job?.runs?.[0]?.artifact?.handle;
+    expect(handle).toBeDefined();
 
     sessionId = 'foreign';
     handlers.get('session_tree')?.({}, ctx);
@@ -971,7 +1002,9 @@ describe('async delegate extension', () => {
       }
     ).jobs?.[0];
     expect(ownerListedJob?.runs?.[0]?.artifact?.handle).toBe(handle);
-    expect(ownerListedJob?.handoff).toContain('Delegated results: 1 run(s)');
+    expect(ownerListedJob?.handoff).not.toContain(
+      'Delegated results: 1 run(s)',
+    );
 
     rmSync(artifactRoot, { recursive: true, force: true });
     expect(
@@ -1054,17 +1087,14 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(queuedPeek?.content[0]?.text).toContain('already queued');
+    expect(queuedPeek?.content[0]?.text).toContain('already delivered');
     expect(queuedPeek?.content[0]?.text).not.toContain('third finding');
     expect(queuedPeek?.details).toMatchObject({
       action: 'peek',
       delivery: 'automatic-queued',
-      job: {
-        id: 'dj-3',
-        state: 'success',
-        handoff: expect.stringContaining('Truncation: original report omitted'),
-      },
+      job: { id: 'dj-3', state: 'success' },
     });
+    expect(JSON.stringify(queuedPeek?.details)).not.toContain('third finding');
     const queuedCancel = await tools
       .get('delegate_jobs')
       ?.execute(
@@ -1074,20 +1104,16 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(queuedCancel?.content[0]?.text).toContain('already queued');
+    expect(queuedCancel?.content[0]?.text).toContain('already delivered');
     expect(queuedCancel?.details).toMatchObject({
       action: 'cancel',
       delivery: 'automatic-queued',
       automaticQueuedJobIds: ['dj-3'],
-      jobs: [
-        {
-          id: 'dj-3',
-          handoff: expect.stringContaining(
-            'Truncation: original report omitted',
-          ),
-        },
-      ],
+      jobs: [{ id: 'dj-3', state: 'success' }],
     });
+    expect(JSON.stringify(queuedCancel?.details)).not.toContain(
+      'third finding',
+    );
 
     handlers.get('context')?.({
       messages: [sendMessage.mock.calls[0]?.[0]],
@@ -1101,10 +1127,12 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
+    expect(deliveredPeek?.content[0]?.text).toContain('already delivered');
     expect(deliveredPeek?.content[0]?.text).not.toContain('third finding.');
     expect(deliveredPeek?.details).toMatchObject({
       action: 'peek',
       job: { id: 'dj-3', state: 'success' },
+      delivery: 'automatic-queued',
     });
     await handlers.get('session_shutdown')?.({}, ctx);
   });

@@ -155,29 +155,30 @@ const NameSchema = Type.String({
     'Required for fresh batch items; valid new-format continuation items inherit it when omitted. Short human-readable subagent name shown in status UI, such as "Phase 5 review" or "Audit for regressions".',
 });
 
+const TaskSchema = Type.String({
+  minLength: 1,
+  maxLength: 32 * 1024,
+  description: 'Focused task or continuation feedback',
+});
+const CwdSchema = Type.String({ maxLength: 4096 });
+const ContextNoteSchema = Type.String({
+  maxLength: 64 * 1024,
+  description: 'Curated context from the parent agent',
+});
+const ContinuationSchema = Type.String({
+  maxLength: 512,
+  description: 'Opaque token from a previous delegate run',
+});
+
 const TaskItem = Type.Object({
   name: Type.Optional(NameSchema),
-  task: Type.String({
-    minLength: 1,
-    maxLength: 32 * 1024,
-    description: 'Focused task or continuation feedback',
-  }),
-  cwd: Type.Optional(Type.String({ maxLength: 4096 })),
+  task: TaskSchema,
+  cwd: Type.Optional(CwdSchema),
   route: Type.Optional(RouteSchema),
   context: Type.Optional(ContextSchema),
-  contextNote: Type.Optional(
-    Type.String({
-      maxLength: 64 * 1024,
-      description: 'Curated context from the parent agent',
-    }),
-  ),
+  contextNote: Type.Optional(ContextNoteSchema),
   scope: Type.Optional(ScopeSchema),
-  continuation: Type.Optional(
-    Type.String({
-      maxLength: 512,
-      description: 'Opaque token from a previous delegate run',
-    }),
-  ),
+  continuation: Type.Optional(ContinuationSchema),
   allowWrites: Type.Optional(AllowWritesSchema),
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
@@ -188,28 +189,15 @@ const TaskItem = Type.Object({
 });
 
 const DelegateParamsSchema = Type.Object({
-  name: Type.Optional(
-    Type.String({
-      minLength: 1,
-      maxLength: 120,
-      description:
-        'Required for fresh tasks; valid new-format continuations inherit it when omitted. Short human-readable subagent name shown in status UI.',
-    }),
-  ),
-  task: Type.Optional(
-    Type.String({
-      minLength: 1,
-      maxLength: 32 * 1024,
-      description: 'Focused task or follow-up feedback',
-    }),
-  ),
+  name: Type.Optional(NameSchema),
+  task: Type.Optional(TaskSchema),
   tasks: Type.Optional(Type.Array(TaskItem, { maxItems: 20 })),
-  cwd: Type.Optional(Type.String({ maxLength: 4096 })),
+  cwd: Type.Optional(CwdSchema),
   route: Type.Optional(RouteSchema),
   context: Type.Optional(ContextSchema),
-  contextNote: Type.Optional(Type.String({ maxLength: 64 * 1024 })),
+  contextNote: Type.Optional(ContextNoteSchema),
   scope: Type.Optional(ScopeSchema),
-  continuation: Type.Optional(Type.String({ maxLength: 512 })),
+  continuation: Type.Optional(ContinuationSchema),
   allowWrites: Type.Optional(AllowWritesSchema),
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
@@ -238,6 +226,8 @@ export interface DelegateBackgroundRuntime {
   manager: DelegateJobManager;
   statuses: DelegateStatusStore;
   getDeliveryEpoch: () => number;
+  activateJobs?: () => void;
+  activateBranches?: () => void;
 }
 
 export function registerDelegateTool(
@@ -405,6 +395,9 @@ export function registerDelegateTool(
               jobs[index].id,
             );
         }
+        backgroundRuntime.activateJobs?.();
+        if (initialRuns.some((run) => run.worktree))
+          backgroundRuntime.activateBranches?.();
         const jobLines = initialRuns.map((run, index) => {
           const id = jobs[index]?.id ?? `job ${index + 1}`;
           return `${id}${run.continuation ? ` continuation: ${run.continuation}` : ''}`;
@@ -446,6 +439,8 @@ export function registerDelegateTool(
       } finally {
         for (const control of controls) control.close();
       }
+      if (runs.some((run) => run.worktree))
+        backgroundRuntime?.activateBranches?.();
       const result = await delegateToolResult(
         pi,
         ctx,

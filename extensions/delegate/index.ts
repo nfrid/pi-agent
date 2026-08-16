@@ -20,6 +20,7 @@ import {
   type SessionScopeId,
 } from '../shared/runtime/scoped-services';
 import { createRailPanel } from '../shared/ui/rail';
+import { listBranchEntries } from './branches';
 import { registerDelegateBranchesTool } from './branches-tool';
 import {
   completionCard,
@@ -61,6 +62,30 @@ import { registerDelegateWorktreesCommand } from './worktrees-command';
 export const DELEGATES_COMMAND_DESCRIPTION =
   'Toggle detailed subagent status or inspect delegate config';
 
+function setDelegateToolActive(
+  pi: ExtensionAPI,
+  name: 'delegate_jobs' | 'delegate_branches',
+  active: boolean,
+): void {
+  // Older test/runtime shims do not expose active-tool selection; registration
+  // remains useful there, while the host keeps these tools out of the model
+  // tool list until their state makes them actionable.
+  const api = pi as unknown as {
+    getActiveTools?: () => string[];
+    setActiveTools?: (names: string[]) => void;
+  };
+  if (!api.getActiveTools || !api.setActiveTools) return;
+  const current = api.getActiveTools();
+  const next = active
+    ? [...new Set([...current, name])]
+    : current.filter((candidate) => candidate !== name);
+  if (
+    next.length !== current.length ||
+    next.some((item, index) => item !== current[index])
+  )
+    api.setActiveTools(next);
+}
+
 /** Stable registration facade; orchestration and broker commands have separate owners. */
 export default defineExtension('delegate', (pi: ExtensionAPI) => {
   registerDelegateCapability();
@@ -86,6 +111,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let deliveryEpoch = 0;
   let runtimeActive = false;
   let widgetDetailed = true;
+  const activateJobsTool = () =>
+    setDelegateToolActive(pi, 'delegate_jobs', true);
+  const activateBranchesTool = () =>
+    setDelegateToolActive(pi, 'delegate_branches', true);
   let promptSnapshot:
     | {
         fingerprint: string;
@@ -219,6 +248,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   pi.on('session_start', (event, ctx) => {
     const sessionScopeId = getSessionScopeId(ctx);
+    const resumedJobs = jobs?.list(ctx).length ?? 0;
     if (jobs && scopeId !== 'default' && scopeId !== sessionScopeId) {
       const closingJobs = jobs;
       const closingStatuses = statuses;
@@ -270,6 +300,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         manager: jobs,
         statuses,
         getDeliveryEpoch: () => deliveryEpoch,
+        activateJobs: activateJobsTool,
+        activateBranches: activateBranchesTool,
       },
       promptConfig,
     );
@@ -291,6 +323,22 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       delivery.automaticDeliveryQueued,
     );
     registerDelegateBranchesTool(pi);
+    // Keep the broker tools registered for stable extension ownership, but do
+    // not expose either one until a job or retained branch makes it useful.
+    setDelegateToolActive(pi, 'delegate_jobs', false);
+    setDelegateToolActive(pi, 'delegate_branches', false);
+    if (resumedJobs > 0) activateJobsTool();
+    void listBranchEntries({
+      scope: 'session',
+      sessionId: sessionScopeId,
+    })
+      .then((entries) => {
+        if (runtimeActive && scopeId === sessionScopeId && entries.length > 0)
+          activateBranchesTool();
+      })
+      .catch(() => {
+        // A corrupt or concurrently removed record must not block the session.
+      });
     syncWidget();
   });
 
@@ -299,8 +347,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     delivery.resetAutomaticDelivery();
   });
   pi.on('context', (event) => {
-    // A queued steer cannot be retracted. Once it is in context, later peeks
-    // intentionally return the retained full result again.
+    // Keep the automatic-delivery marker through context entry so a later
+    // peek does not replay the same settled completion.
     delivery.markAutomaticDeliveriesEntered(event.messages);
   });
   // Unlike background-terminals, this widget is not force-remounted at agent

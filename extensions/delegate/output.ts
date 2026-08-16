@@ -168,17 +168,14 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     `Status: ${getRunState(run)}`,
     ...(structured
       ? [
-          `Structured result: ${structured.settlement.valid ? 'valid' : 'invalid'}`,
-          ...(structured.settlement.errors.length
-            ? [
-                `Validation errors: ${clip(structured.settlement.errors.join('; '), 900)}`,
-              ]
-            : []),
+          ...(structured.settlement.valid
+            ? []
+            : [
+                `Structured result invalid: ${clip(structured.settlement.errors.join('; '), 900)}`,
+              ]),
           ...(structured.projection
             ? [`Projection: ${structured.projection}`]
-            : getDelegateResultSpec(run)?.projection.length
-              ? ['Projection: {}']
-              : []),
+            : []),
           ...(structured.omittedPaths.length
             ? [`Projection omissions: ${structured.omittedPaths.join(', ')}`]
             : []),
@@ -233,18 +230,39 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     const lifecycle = ensureDelegateLifecycle(run);
     if (lifecycle) {
       lines.push(`Lifecycle reason: ${lifecycle.reason}`);
-      if (lifecycle.diagnostic) lines.push(`Failure: ${lifecycle.diagnostic}`);
+      // Structured validation already carries the actionable failure above;
+      // repeating the same diagnostic here only adds ceremony. Preserve any
+      // recovery-only prose appended by the structured repair path.
+      if (structured && lifecycle.reason === 'child-result-invalid') {
+        if (lifecycle.diagnosticArtifact)
+          lines.push(
+            `Failure artifact: ${lifecycle.diagnosticArtifact.handle} (${lifecycle.diagnosticArtifact.size} bytes, sha256 ${lifecycle.diagnosticArtifact.sha256})`,
+          );
+        else {
+          const recoveryPrefix = 'Unvalidated child prose (recovery only):';
+          const recoveryIndex =
+            lifecycle.diagnostic?.indexOf(recoveryPrefix) ?? -1;
+          if (recoveryIndex >= 0)
+            lines.push(
+              clip(lifecycle.diagnostic?.slice(recoveryIndex) ?? '', 900),
+            );
+        }
+      } else if (lifecycle.diagnostic)
+        lines.push(`Failure: ${lifecycle.diagnostic}`);
       else if (lifecycle.diagnosticArtifact)
         lines.push(
           `Failure artifact: ${lifecycle.diagnosticArtifact.handle} (${lifecycle.diagnosticArtifact.size} bytes, sha256 ${lifecycle.diagnosticArtifact.sha256})`,
         );
       else
         lines.push('Failure: owner-session diagnostic artifact unavailable.');
-      lines.push(
-        `Continuation usable: ${lifecycle.continuationUsable ? 'yes' : 'no'}`,
-        `Writable branch retained: ${lifecycle.writableBranchRetained ? 'yes' : 'no'}`,
-        `Read-only snapshot retained: ${lifecycle.readOnlySnapshotRetained ? 'yes' : 'no'}`,
-      );
+      if (lifecycle.continuationUsable)
+        lines.push('Continuation available for recovery.');
+      if (lifecycle.writableBranchRetained)
+        lines.push('Writable branch retained for review or integration.');
+      if (lifecycle.readOnlySnapshotRetained)
+        lines.push(
+          'Read-only snapshot retained for inspection or continuation.',
+        );
     } else {
       const failure = structured
         ? run.errorMessage?.trim() || 'Structured result settlement failed.'
@@ -255,7 +273,14 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
   const recoveryNote = continuationRecoveryNote(run);
   if (recoveryNote) lines.push(`Note: ${recoveryNote}`);
   const warnings = [run.routing?.warning, ...(run.warnings ?? [])].filter(
-    (item): item is string => Boolean(item),
+    (item): item is string =>
+      typeof item === 'string' &&
+      item.length > 0 &&
+      !(
+        structured &&
+        !structured.settlement.valid &&
+        item.startsWith('Structured result rejected')
+      ),
   );
   if (warnings.length)
     lines.push(`Warnings: ${clip(warnings.join('; '), 120)}`);
@@ -265,7 +290,6 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     const risks = extractReportField(originalBody, 'Risks', 240);
     if (risks) lines.push(`Risks: ${risks}`);
   }
-  lines.push('Truncation: none');
   return {
     run,
     envelope: lines.join('\n'),
@@ -274,16 +298,6 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     ...(inlineFallback && originalReport
       ? { inlineFallbackBody: originalBody }
       : {}),
-  };
-}
-
-function withTruncationMarker(item: PreparedRun): PreparedRun {
-  return {
-    ...item,
-    envelope: item.envelope.replace(
-      /Truncation: none/,
-      `Truncation: ${item.originalReport ? 'original report omitted' : 'none'}`,
-    ),
   };
 }
 
@@ -312,13 +326,10 @@ export function buildParentHandoffResult(
 ): ParentHandoffResult {
   const parallel = runs.length > 1;
   const totalCap = parallel ? caps.aggregateMaxBytes : caps.singleMaxBytes;
-  const summary = `Delegated results: ${runs.length} run(s)`;
-  let prepared = runs
-    .map((run) =>
-      prepareRun(run, options.inlineFallbackRuns?.has(run) ?? false),
-    )
-    .map(withTruncationMarker);
-  const mandatory = `${summary}\n\n${envelopeBlock(prepared, parallel)}`;
+  let prepared = runs.map((run) =>
+    prepareRun(run, options.inlineFallbackRuns?.has(run) ?? false),
+  );
+  const mandatory = envelopeBlock(prepared, parallel);
   const overflow = Buffer.byteLength(mandatory, 'utf8') > totalCap;
   const fallbackCap = parallel ? caps.perTaskMaxBytes : caps.singleMaxBytes;
   let remaining = Math.max(0, totalCap - Buffer.byteLength(mandatory, 'utf8'));
@@ -351,7 +362,7 @@ export function buildParentHandoffResult(
     ? 'Mandatory metadata exceeds the handoff size cap; inline fallbacks may not fit and the child session remains authoritative.'
     : 'Mandatory metadata exceeds the handoff size cap; exact reports remain artifact-only.';
   const envelopes = envelopeBlock(prepared, parallel);
-  const text = `${summary}${overflow ? `\n${overflowWarning}` : ''}\n\n${envelopes}${fallbackBlocks ? `\n\n${fallbackBlocks}` : ''}`;
+  const text = `${overflow ? `${overflowWarning}\n\n` : ''}${envelopes}${fallbackBlocks ? `${envelopes ? '\n\n' : ''}${fallbackBlocks}` : ''}`;
   const omittedOriginalReports = new Set(
     prepared
       .filter((item) => item.originalReport !== undefined)
