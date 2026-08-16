@@ -7,7 +7,14 @@ import {
   getSettledDelegateResult,
   selectStructuredPath,
 } from './structured-result';
-import { type DelegatedRun, getExactFinalAssistantText } from './types';
+import {
+  type DelegatedRun,
+  type DelegateWorkflowBranchDescriptor,
+  type DelegateWorkflowResultRecord,
+  type DelegateWorkflowRunProjection,
+  type DelegateWorkflowTextEvidence,
+  getExactFinalAssistantText,
+} from './types';
 import type {
   AttemptIdentity,
   WorkflowAttempt,
@@ -19,6 +26,24 @@ export const WORKFLOW_INPUT_CAPS = {
   perItemMaxBytes: 16 * 1024,
   aggregateMaxBytes: 48 * 1024,
 } as const;
+
+/** A marker is retained instead of clipping evidence that cannot be forwarded. */
+export const WORKFLOW_OVERSIZED_EVIDENCE_MARKER =
+  '[oversized workflow evidence omitted]' as const;
+
+/** Capture exact text only when it fits the existing raw per-item bound. */
+export function captureWorkflowText(
+  value: string,
+): DelegateWorkflowTextEvidence {
+  const bytes = Buffer.byteLength(value, 'utf8');
+  if (bytes <= WORKFLOW_INPUT_CAPS.perItemMaxBytes)
+    return Object.freeze({ text: value, bytes });
+  return Object.freeze({
+    text: WORKFLOW_OVERSIZED_EVIDENCE_MARKER,
+    bytes,
+    oversized: true as const,
+  });
+}
 
 export type WorkflowInputKind =
   | 'report'
@@ -46,7 +71,8 @@ export interface WorkflowInputSource {
   readonly startedAt?: number;
   readonly route?: string;
   readonly jobId?: string;
-  readonly result?: DelegateJobResult;
+  /** Full execution results are accepted only at legacy/test boundaries. */
+  readonly result?: DelegateJobResult | DelegateWorkflowResultRecord;
 }
 
 export interface WorkflowBranchSource {
@@ -131,14 +157,47 @@ function frameOne(label: string, text: string): string {
   return frame;
 }
 
-function canonicalRuns(result: DelegateJobResult): DelegatedRun[] {
-  return result.retainedRuns ?? result.runs;
+type WorkflowSourceRun = DelegatedRun | DelegateWorkflowRunProjection;
+type WorkflowSourceResult = DelegateJobResult | DelegateWorkflowResultRecord;
+
+function isCompactResult(
+  result: WorkflowSourceResult,
+): result is DelegateWorkflowResultRecord {
+  return (
+    'version' in result &&
+    result.version === 1 &&
+    'reports' in result &&
+    Array.isArray(result.reports)
+  );
+}
+
+function canonicalRuns(
+  result: WorkflowSourceResult,
+): readonly WorkflowSourceRun[] {
+  return isCompactResult(result)
+    ? result.runs
+    : (result.retainedRuns ?? result.runs);
+}
+
+function legacyRuns(result: WorkflowSourceResult): readonly DelegatedRun[] {
+  return isCompactResult(result) ? [] : (result.retainedRuns ?? result.runs);
 }
 
 function proseRuns(result: DelegateJobResult): DelegatedRun[] {
-  return canonicalRuns(result).filter(
+  return (result.retainedRuns ?? result.runs).filter(
     (run) => !getDelegateResultSpec(run) && !run.structuredResult,
   );
+}
+
+function exactEvidence(
+  evidence: DelegateWorkflowTextEvidence | undefined,
+  label: string,
+): string | undefined {
+  if (!evidence || evidence.oversized)
+    throw new WorkflowInputBlockedError(
+      `${label} is unavailable because the retained evidence exceeded the workflow input cap.`,
+    );
+  return evidence.text;
 }
 
 function resolveReport(source: WorkflowInputSource): string {
@@ -147,6 +206,16 @@ function resolveReport(source: WorkflowInputSource): string {
     throw new WorkflowInputBlockedError(
       'Required report is unavailable: source has no retained result.',
     );
+  if (isCompactResult(result)) {
+    const reports = result.reports
+      .map((evidence) => exactEvidence(evidence, 'Required report'))
+      .filter((text): text is string => Boolean(text?.trim()));
+    if (reports.length === 0)
+      throw new WorkflowInputBlockedError(
+        `Required report is unavailable for ${source.attempt.identity}.`,
+      );
+    return reports.join('\n\n');
+  }
   const report = proseRuns(result)
     .map((run) => getExactFinalAssistantText(run.messages))
     .filter((text) => text.trim())
@@ -159,12 +228,17 @@ function resolveReport(source: WorkflowInputSource): string {
 }
 
 function resolveHandoff(source: WorkflowInputSource): string {
-  const handoff = source.result?.handoff;
-  if (!handoff?.trim())
-    throw new WorkflowInputBlockedError(
-      `Required handoff is unavailable for ${source.attempt.identity}.`,
-    );
-  return handoff;
+  const result = source.result;
+  const handoff =
+    result && isCompactResult(result) ? result.handoff : undefined;
+  if (handoff) {
+    const exact = exactEvidence(handoff, 'Required handoff');
+    if (exact?.trim()) return exact;
+  } else if (result && !isCompactResult(result) && result.handoff?.trim())
+    return result.handoff;
+  throw new WorkflowInputBlockedError(
+    `Required handoff is unavailable for ${source.attempt.identity}.`,
+  );
 }
 
 function resolveView(source: WorkflowInputSource, view: string): unknown {
@@ -175,8 +249,25 @@ function resolveView(source: WorkflowInputSource, view: string): unknown {
     throw new WorkflowInputBlockedError(
       `Structured view "${view}" is unavailable: source has no retained result.`,
     );
+  if (isCompactResult(result)) {
+    const matches = result.runs
+      .map((run) => run.structured?.views)
+      .filter(
+        (views): views is Readonly<Record<string, unknown>> =>
+          views !== undefined && Object.hasOwn(views, view),
+      )
+      .map((views) => views[view]);
+    if (matches.length > 1)
+      throw new WorkflowInputBlockedError(
+        `Structured view "${view}" is ambiguous across multiple runs for ${source.attempt.identity}.`,
+      );
+    if (matches.length === 1) return matches[0];
+    throw new WorkflowInputBlockedError(
+      `Structured view "${view}" is unavailable or invalid for ${source.attempt.identity}.`,
+    );
+  }
   const matches: unknown[] = [];
-  for (const run of canonicalRuns(result)) {
+  for (const run of legacyRuns(result)) {
     const spec = getDelegateResultSpec(run);
     const settlement = getSettledDelegateResult(run);
     const viewPath = spec?.views[view];
@@ -198,32 +289,62 @@ function resolveView(source: WorkflowInputSource, view: string): unknown {
   );
 }
 
+function compactMetadataRun(
+  run: DelegateWorkflowRunProjection,
+): Record<string, unknown> {
+  return {
+    runId: run.runId,
+    name: run.name,
+    state: run.state,
+    exitCode: run.exitCode,
+    ...(run.model ? { model: run.model } : {}),
+    ...(run.routing?.route ? { route: run.routing.route } : {}),
+    ...(run.lifecycle
+      ? {
+          lifecycle: {
+            reason: run.lifecycle.reason,
+            continuationUsable: run.lifecycle.continuationUsable,
+            writableBranchRetained: run.lifecycle.writableBranchRetained,
+            readOnlySnapshotRetained: run.lifecycle.readOnlySnapshotRetained,
+          },
+        }
+      : {}),
+  };
+}
+
 function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
-  const runs = canonicalRuns(source.result ?? { runs: [], handoff: '' }).map(
-    (run) => {
-      if (['error', 'aborted', 'timed-out'].includes(run.state))
-        ensureDelegateLifecycle(run);
-      const lifecycle = getDelegateLifecycle(run, { includeArtifact: false });
-      return {
-        runId: run.runId,
-        name: run.name,
-        state: run.state,
-        exitCode: run.exitCode,
-        ...(run.model ? { model: run.model } : {}),
-        ...(run.routing?.route ? { route: run.routing.route } : {}),
-        ...(lifecycle
-          ? {
-              lifecycle: {
-                reason: lifecycle.reason,
-                continuationUsable: lifecycle.continuationUsable,
-                writableBranchRetained: lifecycle.writableBranchRetained,
-                readOnlySnapshotRetained: lifecycle.readOnlySnapshotRetained,
-              },
-            }
-          : {}),
-      };
-    },
-  );
+  const result = source.result;
+  const runs =
+    result && isCompactResult(result)
+      ? result.runs.map(compactMetadataRun)
+      : result
+        ? legacyRuns(result).map((run) => {
+            if (['error', 'aborted', 'timed-out'].includes(run.state))
+              ensureDelegateLifecycle(run);
+            const lifecycle = getDelegateLifecycle(run, {
+              includeArtifact: false,
+            });
+            return {
+              runId: run.runId,
+              name: run.name,
+              state: run.state,
+              exitCode: run.exitCode,
+              ...(run.model ? { model: run.model } : {}),
+              ...(run.routing?.route ? { route: run.routing.route } : {}),
+              ...(lifecycle
+                ? {
+                    lifecycle: {
+                      reason: lifecycle.reason,
+                      continuationUsable: lifecycle.continuationUsable,
+                      writableBranchRetained: lifecycle.writableBranchRetained,
+                      readOnlySnapshotRetained:
+                        lifecycle.readOnlySnapshotRetained,
+                    },
+                  }
+                : {}),
+            };
+          })
+        : [];
   return {
     identity: source.attempt.identity,
     logicalId: source.attempt.logicalId,
@@ -250,11 +371,22 @@ function safeBranchString(value: string, maxLength: number): boolean {
 }
 
 function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
-  const candidates = canonicalRuns(source.result ?? { runs: [], handoff: '' })
+  const candidates = canonicalRuns(
+    source.result ?? {
+      version: 1,
+      reports: [],
+      handoff: captureWorkflowText(''),
+      runs: [],
+      continuationAmbiguous: false,
+    },
+  )
     .map((run) => run.worktree)
     .filter(
-      (worktree): worktree is NonNullable<DelegatedRun['worktree']> =>
-        !!worktree,
+      (
+        worktree,
+      ): worktree is
+        | DelegateWorkflowBranchDescriptor
+        | NonNullable<DelegatedRun['worktree']> => !!worktree,
     );
   if (candidates.length !== 1)
     throw new WorkflowInputBlockedError(

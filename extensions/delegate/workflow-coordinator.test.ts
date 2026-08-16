@@ -5,12 +5,22 @@ import {
   type DelegateJobStartOptions,
 } from './jobs';
 import { getDelegateLifecycle } from './lifecycle';
+import {
+  captureDelegateResultEvent,
+  normalizeInternalDelegateResultSpec,
+  setDelegateResultSpec,
+  settleDelegateResult,
+} from './structured-result';
 import { createRun } from './types';
 import {
   type DelegateWorkflowAttemptSnapshot,
   DelegateWorkflowCoordinator,
 } from './workflow-coordinator';
-import type { SymbolicWorkflowSelector } from './workflow-inputs';
+import {
+  type SymbolicWorkflowSelector,
+  WORKFLOW_INPUT_CAPS,
+  WORKFLOW_OVERSIZED_EVIDENCE_MARKER,
+} from './workflow-inputs';
 import {
   assertWorkflowAttemptTransition,
   canTransitionWorkflowAttemptState,
@@ -747,8 +757,170 @@ describe('DelegateWorkflowCoordinator', () => {
     }
     await settle(coordinator);
     expect(manager.get('dj-1')).toBeUndefined();
-    expect(coordinator.getResult('first@1')).toBe(firstResult);
+    const retained = coordinator.getResult('first@1');
+    expect(retained).toBeDefined();
+    expect(retained).not.toBe(firstResult);
+    expect(retained?.runs[0]).toMatchObject({
+      task: 'first',
+      state: 'success',
+    });
+    expect(JSON.stringify(retained)).not.toContain('child-secret');
     await manager.dispose();
+  });
+
+  test('retains bounded canonical evidence without child execution data', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const upstream = coordinator.schedule({
+      ...scheduleOptions('evidence', async () => {
+        const run = createRun('evidence', undefined, {
+          sessionId: 'child-session-secret',
+        });
+        run.state = 'success';
+        run.exitCode = 0;
+        run.messages = [
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hidden earlier chatter' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'exact retained report' }],
+          },
+        ] as never;
+        run.stderr = 'hidden stderr';
+        run.activities = [
+          {
+            type: 'tool',
+            label: 'hidden activity',
+            status: 'completed',
+            toolResult: 'hidden activity result',
+          },
+        ];
+        return { runs: [run], handoff: 'exact retained handoff' };
+      }),
+    });
+    await settle(coordinator);
+    const evidence = coordinator.getResultEvidence(upstream.identity);
+    expect(evidence).toBeDefined();
+    expect(Object.isFrozen(evidence)).toBe(true);
+    expect(evidence?.reports[0]).toEqual({
+      text: 'exact retained report',
+      bytes: Buffer.byteLength('exact retained report'),
+    });
+    expect(evidence?.handoff.text).toBe('exact retained handoff');
+    expect(JSON.stringify(evidence)).not.toContain('hidden earlier chatter');
+    expect(JSON.stringify(evidence)).not.toContain('hidden stderr');
+    expect(JSON.stringify(evidence)).not.toContain('hidden activity');
+    expect(JSON.stringify(evidence)).not.toContain('child-session-object');
+    const publicResult = coordinator.getResult(upstream.identity);
+    expect(JSON.stringify(publicResult)).not.toContain('hidden');
+    await coordinator.dispose();
+  });
+
+  test('retains private validated structured values and declared named views', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const upstream = coordinator.schedule(
+      scheduleOptions('structured', async () => {
+        const run = createRun('structured');
+        run.state = 'success';
+        run.exitCode = 0;
+        const spec = normalizeInternalDelegateResultSpec({
+          schema: {
+            type: 'object',
+            properties: {
+              summary: { type: 'string' },
+              secret: { type: 'string' },
+            },
+            required: ['summary', 'secret'],
+          },
+          projection: ['/summary'],
+          views: { summary: '/summary' },
+        });
+        setDelegateResultSpec(run, spec);
+        captureDelegateResultEvent(
+          run,
+          { details: { summary: 'view value', secret: 'private value' } },
+          false,
+        );
+        settleDelegateResult(run);
+        return { runs: [run], handoff: 'structured handoff' };
+      }),
+    );
+    await settle(coordinator);
+    const evidence = coordinator.getResultEvidence(upstream.identity);
+    expect(evidence?.runs[0]?.structured?.value).toEqual({
+      summary: 'view value',
+      secret: 'private value',
+    });
+    expect(evidence?.runs[0]?.structured?.views).toEqual({
+      summary: 'view value',
+    });
+    let view: unknown;
+    const dependent = coordinator.schedule({
+      logicalId: 'view-consumer',
+      inputs: [{ node: upstream.identity, view: 'summary' }],
+      prepare: async (context) => {
+        view = context.inputs.find((input) => input.kind === 'view')?.value;
+        return {
+          mode: 'single' as const,
+          tasks: ['view-consumer'],
+          execute: async () => result('view-consumer'),
+        };
+      },
+    });
+    await settle(coordinator);
+    expect(view).toBe('view value');
+    expect(coordinator.require(dependent.identity).state).toBe('success');
+    await coordinator.dispose();
+  });
+
+  test('retains an oversized marker without clipping future report evidence', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const oversized = '🙂'.repeat(WORKFLOW_INPUT_CAPS.perItemMaxBytes);
+    const upstream = coordinator.schedule(
+      scheduleOptions('oversized', async () => {
+        const run = createRun('oversized');
+        run.state = 'success';
+        run.exitCode = 0;
+        run.messages = [
+          { role: 'assistant', content: [{ type: 'text', text: oversized }] },
+        ] as never;
+        return { runs: [run], handoff: 'oversized handoff' };
+      }),
+    );
+    await settle(coordinator);
+    const evidence = coordinator.getResultEvidence(upstream.identity);
+    expect(evidence?.reports[0]).toMatchObject({
+      text: WORKFLOW_OVERSIZED_EVIDENCE_MARKER,
+      oversized: true,
+    });
+    expect(evidence?.reports[0]?.text).not.toContain('🙂');
+    const dependent = coordinator.schedule({
+      logicalId: 'needs-report',
+      inputs: [{ node: upstream.identity, include: ['report'] }],
+      prepare: async () => ({
+        mode: 'single' as const,
+        tasks: ['needs-report'],
+        execute: async () => result('needs-report'),
+      }),
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(dependent.identity).state).toBe('blocked'),
+    );
+    await coordinator.dispose();
+  });
+
+  test('rejects schedule before identity at the hard attempt admission bound', () => {
+    const coordinator = new DelegateWorkflowCoordinator({ maxAttempts: 1 });
+    coordinator.schedule(scheduleOptions('first', async () => result('first')));
+    expect(() =>
+      coordinator.schedule(
+        scheduleOptions('second', async () => result('second')),
+      ),
+    ).toThrow(/attempt limit of 1/);
+    expect(coordinator.list().map(({ identity }) => identity)).toEqual([
+      'first@1',
+    ]);
   });
 
   test('snapshots are detached and lifecycle transitions are enforced', async () => {
