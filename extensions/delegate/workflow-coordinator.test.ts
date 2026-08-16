@@ -115,6 +115,24 @@ describe('DelegateWorkflowCoordinator', () => {
     await manager.dispose();
   });
 
+  test('rejects an explicit dependency that duplicates the implicit continuation predecessor', () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const execute = async () => result();
+    coordinator.schedule(scheduleOptions('impl', execute));
+
+    expect(() =>
+      coordinator.schedule(
+        scheduleOptions('impl', execute, {
+          continuation: true,
+          after: ['impl'],
+        }),
+      ),
+    ).toThrow(/Duplicate workflow dependency "impl@1"/);
+    expect(coordinator.list().map(({ identity }) => identity)).toEqual([
+      'impl@1',
+    ]);
+  });
+
   test('waits for a running upstream and launches a dependent once', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
@@ -378,6 +396,7 @@ describe('DelegateWorkflowCoordinator', () => {
     });
     const child = coordinator.schedule({
       logicalId: 'child',
+      after: ['impl'],
       inputs: [{ node: 'impl' }],
       prepare,
     });

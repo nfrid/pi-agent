@@ -476,13 +476,15 @@ export class DelegateWorkflowCoordinator {
         throw new Error(
           `Unknown workflow attempt "${dependency.identity}" in coordinator.`,
         );
-      if (explicit.has(dependency.identity))
+      if (
+        explicit.has(dependency.identity) ||
+        dependencies.includes(dependency.identity)
+      )
         throw new Error(
           `Duplicate workflow dependency "${dependency.identity}".`,
         );
       explicit.add(dependency.identity);
-      if (!dependencies.includes(dependency.identity))
-        dependencies.push(dependency.identity);
+      dependencies.push(dependency.identity);
     }
     for (const selector of selectors)
       if (!dependencies.includes(selector.identity))

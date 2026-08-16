@@ -166,6 +166,18 @@ describe('workflow symbolic inputs', () => {
         source(structuredResult),
       ),
     ).toThrow(/Required report/);
+
+    const persistedStructured = runWithReport('must remain private');
+    persistedStructured.structuredResult = {
+      valid: true,
+      value: { summary: 'public projection' },
+      errors: [],
+    };
+    expect(() =>
+      resolveWorkflowInputs([bound('impl', ['report'])], () =>
+        source({ runs: [persistedStructured], handoff: '' }),
+      ),
+    ).toThrow(/Required report/);
   });
 
   test('resolves named views from private validated structured values', () => {
@@ -195,6 +207,20 @@ describe('workflow symbolic inputs', () => {
         source({ runs: [run], handoff: '' }),
       ),
     ).toThrow(/unavailable or invalid/);
+
+    const duplicate = runWithReport('second structured result');
+    setDelegateResultSpec(duplicate, normalizeInternalDelegateResultSpec(spec));
+    captureDelegateResultEvent(
+      duplicate,
+      { details: { summary: 'second value' } },
+      false,
+    );
+    expect(settleDelegateResult(duplicate)?.valid).toBe(true);
+    expect(() =>
+      resolveWorkflowInputs([bound('impl', undefined, 'summary')], () =>
+        source({ runs: [run, duplicate], handoff: '' }),
+      ),
+    ).toThrow(/ambiguous across multiple runs/);
   });
 
   test('resolves only verified durable branch descriptors and rejects conflicts', () => {
@@ -229,6 +255,7 @@ describe('workflow symbolic inputs', () => {
         kind: 'branch',
         worktreeId: id,
         headCommit: 'b'.repeat(40),
+        workingDirectory: 'src',
       });
       expect(Object.isFrozen(resolved.inputs[0]?.branch)).toBe(true);
       const mismatched = {
@@ -248,6 +275,12 @@ describe('workflow symbolic inputs', () => {
           () => source(result),
         ),
       ).toThrow(/at most one branch source/);
+      writeWorktreeRecord({ ...record, carryCommit: 'unsafe' });
+      expect(() =>
+        resolveWorkflowInputs([bound('impl', ['branch'])], () =>
+          source(result),
+        ),
+      ).toThrow(/unsafe durable worktree record/);
       rmSync(join(root, 'delegate-worktrees'), {
         recursive: true,
         force: true,
@@ -256,7 +289,7 @@ describe('workflow symbolic inputs', () => {
         resolveWorkflowInputs([bound('impl', ['branch'])], () =>
           source(result),
         ),
-      ).toThrow(/missing or mismatched/);
+      ).toThrow(/missing, mismatched/);
     } finally {
       if (previousRoot === undefined) delete process.env.PI_DELEGATE_STATE_DIR;
       else process.env.PI_DELEGATE_STATE_DIR = previousRoot;

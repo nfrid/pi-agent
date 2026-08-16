@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import type { DelegateJobResult } from './jobs';
 import { ensureDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
 import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
@@ -53,6 +54,7 @@ export interface WorkflowBranchSource {
   readonly worktreeId: string;
   readonly repositoryRoot: string;
   readonly worktreePath: string;
+  readonly workingDirectory: string;
   readonly branch: string;
   readonly headCommit: string;
   readonly workBase: string;
@@ -134,7 +136,9 @@ function canonicalRuns(result: DelegateJobResult): DelegatedRun[] {
 }
 
 function proseRuns(result: DelegateJobResult): DelegatedRun[] {
-  return canonicalRuns(result).filter((run) => !getDelegateResultSpec(run));
+  return canonicalRuns(result).filter(
+    (run) => !getDelegateResultSpec(run) && !run.structuredResult,
+  );
 }
 
 function resolveReport(source: WorkflowInputSource): string {
@@ -171,18 +175,24 @@ function resolveView(source: WorkflowInputSource, view: string): unknown {
     throw new WorkflowInputBlockedError(
       `Structured view "${view}" is unavailable: source has no retained result.`,
     );
+  const matches: unknown[] = [];
   for (const run of canonicalRuns(result)) {
     const spec = getDelegateResultSpec(run);
     const settlement = getSettledDelegateResult(run);
-    const path = spec?.views[view];
-    if (!spec || !settlement?.valid || path === undefined) continue;
-    const selected = selectStructuredPath(settlement.value, path);
+    const viewPath = spec?.views[view];
+    if (!spec || !settlement?.valid || viewPath === undefined) continue;
+    const selected = selectStructuredPath(settlement.value, viewPath);
     if (!selected.present)
       throw new WorkflowInputBlockedError(
         `Structured view "${view}" is unavailable for ${source.attempt.identity}.`,
       );
-    return selected.value;
+    matches.push(selected.value);
   }
+  if (matches.length > 1)
+    throw new WorkflowInputBlockedError(
+      `Structured view "${view}" is ambiguous across multiple runs for ${source.attempt.identity}.`,
+    );
+  if (matches.length === 1) return matches[0];
   throw new WorkflowInputBlockedError(
     `Structured view "${view}" is unavailable or invalid for ${source.attempt.identity}.`,
   );
@@ -226,6 +236,19 @@ function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
   };
 }
 
+const COMMIT_PATTERN = /^[a-f0-9]{7,64}$/;
+
+function safeBranchString(value: string, maxLength: number): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= maxLength &&
+    ![...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
+}
+
 function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
   const candidates = canonicalRuns(source.result ?? { runs: [], handoff: '' })
     .map((run) => run.worktree)
@@ -243,24 +266,40 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
       `Branch source for ${source.attempt.identity} has no recorded head.`,
     );
   const record = loadWorktree(summary.id);
+  const workBase = record?.carryCommit ?? record?.baseHead;
+  const normalizedWorkingDirectory = record
+    ? path.normalize(record.workingDirectory)
+    : '';
   if (
     record?.status !== 'finished' ||
     record.headCommit !== summary.headCommit ||
     record.repositoryRoot !== summary.repositoryRoot ||
     record.worktreePath !== summary.worktreePath ||
-    record.branch !== summary.branch
+    record.branch !== summary.branch ||
+    !COMMIT_PATTERN.test(record.headCommit) ||
+    !COMMIT_PATTERN.test(workBase ?? '') ||
+    !path.isAbsolute(record.repositoryRoot) ||
+    !path.isAbsolute(record.worktreePath) ||
+    !safeBranchString(record.repositoryRoot, 4096) ||
+    !safeBranchString(record.worktreePath, 4096) ||
+    !safeBranchString(record.branch, 512) ||
+    path.isAbsolute(record.workingDirectory) ||
+    normalizedWorkingDirectory === '..' ||
+    normalizedWorkingDirectory.startsWith(`..${path.sep}`) ||
+    !safeBranchString(record.workingDirectory, 4096)
   )
     throw new WorkflowInputBlockedError(
-      `Branch source for ${source.attempt.identity} has a missing or mismatched durable worktree record.`,
+      `Branch source for ${source.attempt.identity} has a missing, mismatched, or unsafe durable worktree record.`,
     );
   return freeze({
     kind: 'branch',
     worktreeId: record.id,
     repositoryRoot: record.repositoryRoot,
     worktreePath: record.worktreePath,
+    workingDirectory: normalizedWorkingDirectory,
     branch: record.branch,
     headCommit: record.headCommit,
-    workBase: record.carryCommit ?? record.baseHead,
+    workBase,
     snapshot: record.snapshot === true,
   });
 }
