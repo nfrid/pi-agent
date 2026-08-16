@@ -4,6 +4,10 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@pi-dashboard/activity-model': path.resolve(
+        __dirname,
+        '../../packages/activity-model/src/index.ts',
+      ),
       '@pi-dashboard/protocol': path.resolve(
         __dirname,
         '../../packages/dashboard-protocol/src/index.ts',

@@ -255,9 +255,7 @@ function mergeLatestTranscript(
   const latestIds = new Set(latest.order);
   const retainedHistory = retained.order.filter(
     (id) =>
-      allHistoryIds.has(id) &&
-      !newestPageIds.has(id) &&
-      !latestIds.has(id),
+      allHistoryIds.has(id) && !newestPageIds.has(id) && !latestIds.has(id),
   );
   const retainedLive = retained.order.filter(
     (id) => !allHistoryIds.has(id) && !latestIds.has(id),

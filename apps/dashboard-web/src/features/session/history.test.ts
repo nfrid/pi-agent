@@ -46,6 +46,112 @@ describe('sessionHistoryWindowKey', () => {
 });
 
 describe('useOlderSessionHistory', () => {
+  it('buffers a continuation chain and publishes it atomically', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const store = new DashboardLiveStore();
+    const metadata = {
+      id: 'session-1',
+      file: '/tmp/session.jsonl',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    const active: AuthoritativeSessionSnapshot['active'] = {
+      pendingInteractions: [],
+      messages: [],
+      tools: [],
+      delegates: [],
+      truncated: false,
+    };
+    const initial = {
+      serverId: 'daemon-1',
+      cursor: 1,
+      metadata,
+      entries: [{ type: 'tool', id: 'tool-new', tool: { name: 'read' } }],
+      history: {
+        version: 1 as const,
+        start: 20,
+        end: 30,
+        hasOlder: true,
+        nextBefore: 'before-20',
+        leadingContinuation: true,
+      },
+      entriesComplete: false,
+      active,
+      completeThroughCursor: false,
+    } as AuthoritativeSessionSnapshot;
+    store.hydrateSession(initial);
+    const pages = [
+      {
+        ...initial,
+        entries: [{ type: 'tool', id: 'tool-middle', tool: { name: 'read' } }],
+        history: {
+          version: 1 as const,
+          start: 10,
+          end: 20,
+          hasOlder: true,
+          nextBefore: 'before-10',
+          leadingContinuation: true,
+        },
+      },
+      {
+        ...initial,
+        entries: [
+          {
+            type: 'message',
+            id: 'owner',
+            message: {
+              role: 'assistant',
+              toolCallIds: ['tool-middle', 'tool-new'],
+              content: 'Inspecting the batch.',
+            },
+          },
+        ],
+        history: {
+          version: 1 as const,
+          start: 0,
+          end: 10,
+          hasOlder: false,
+        },
+      },
+    ];
+    const sessionBefore = vi
+      .spyOn(dashboardHttpClient, 'sessionBefore')
+      .mockImplementation(async () => {
+        const page = pages.shift();
+        if (!page) throw new Error('unexpected request');
+        return page;
+      });
+    const prepend = vi.spyOn(store, 'prependSessionHistoryPages');
+    let controls!: ReturnType<typeof useOlderSessionHistory>;
+    function Probe() {
+      controls = useOlderSessionHistory({
+        id: 'session-1',
+        data: initial,
+        store,
+        sessionMounted: true,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe));
+      });
+      await vi.waitFor(() => expect(sessionBefore).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(prepend).toHaveBeenCalledTimes(1));
+      expect(prepend.mock.calls[0]?.[0]).toHaveLength(2);
+      expect(controls.history?.leadingContinuation).not.toBe(true);
+      expect(
+        store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+      ).toEqual(['owner', 'tool-middle', 'tool-new']);
+    } finally {
+      sessionBefore.mockRestore();
+      prepend.mockRestore();
+      renderer?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('aborts an old page when the authoritative window changes', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const store = new DashboardLiveStore();
@@ -111,7 +217,7 @@ describe('useOlderSessionHistory', () => {
         requestSignal = signal as AbortSignal;
         return pendingPage;
       });
-    const prepend = vi.spyOn(store, 'prependSessionHistory');
+    const prepend = vi.spyOn(store, 'prependSessionHistoryPages');
     let controls!: ReturnType<typeof useOlderSessionHistory>;
     function Probe({ data }: { data: SessionApiResponse }) {
       controls = useOlderSessionHistory({

@@ -2661,6 +2661,118 @@ describe('DashboardLiveStore', () => {
     ).toEqual(['older', 'newer-2']);
   });
 
+  it('fails closed when the newest bounded window advances past its verified bridge', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      runtimeEpoch: 'epoch-1',
+      entries: [
+        {
+          type: 'message',
+          id: 'newest-old',
+          message: { role: 'assistant', content: 'old newest page' },
+        },
+      ],
+      history: {
+        version: 1,
+        start: 10,
+        end: 20,
+        hasOlder: true,
+        nextBefore: 'before-10',
+      },
+    });
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        runtimeEpoch: 'epoch-1',
+        entries: [
+          {
+            type: 'message',
+            id: 'verified-older',
+            message: { role: 'user', content: 'verified older page' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeDefined();
+
+    store.hydrateSession({
+      ...sessionResponse(2),
+      runtimeEpoch: 'epoch-1',
+      entries: [
+        {
+          type: 'message',
+          id: 'newest-shifted',
+          message: { role: 'assistant', content: 'shifted newest page' },
+        },
+      ],
+      history: {
+        version: 1,
+        start: 11,
+        end: 21,
+        hasOlder: true,
+        nextBefore: 'before-11',
+      },
+    });
+
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({ coveredStart: 11, coveredEnd: 21, pageCount: 1 });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['newest-shifted']);
+  });
+
+  it('atomically discards prepended rows when the runtime epoch changes', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      runtimeEpoch: 'epoch-1',
+      entries: [],
+      history: {
+        version: 1,
+        start: 10,
+        end: 20,
+        hasOlder: true,
+        nextBefore: 'before-10',
+      },
+    });
+    store.prependSessionHistory({
+      ...sessionResponse(1),
+      runtimeEpoch: 'epoch-1',
+      entries: [
+        {
+          type: 'message',
+          id: 'stale-older',
+          message: { role: 'user', content: 'stale branch' },
+        },
+      ],
+      history: { version: 1, start: 0, end: 10, hasOlder: false },
+    });
+
+    store.hydrateSession({
+      ...sessionResponse(2),
+      runtimeEpoch: 'epoch-2',
+      entries: [
+        {
+          type: 'message',
+          id: 'new-branch',
+          message: { role: 'assistant', content: 'new branch' },
+        },
+      ],
+      history: { version: 1, start: 5, end: 6, hasOlder: false },
+    });
+
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({ coveredStart: 5, coveredEnd: 6, pageCount: 1 });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['new-branch']);
+  });
+
   it('rejects duplicate and non-contiguous prepends and resets to the newest window', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

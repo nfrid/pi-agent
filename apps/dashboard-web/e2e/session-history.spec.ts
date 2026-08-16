@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import {
   dashboardTrpcInput,
   installDashboardBootstrap,
@@ -24,7 +24,7 @@ const snapshot = {
 
 const metadata = snapshot.sessions[0];
 
-test('loads earlier session history on demand', async ({ page }) => {
+async function verifyEarlierHistoryAnchor(page: Page) {
   await page.addInitScript(() =>
     localStorage.setItem('pi-dashboard-token', 'test-token'),
   );
@@ -157,10 +157,28 @@ test('loads earlier session history on demand', async ({ page }) => {
   await expect.poll(() => beforeRequest).toBe('token-1');
   const beforePrepend = await page
     .locator('.session-transcript-scroll')
-    .evaluate((element) => ({
-      scrollHeight: element.scrollHeight,
-      scrollTop: element.scrollTop,
-    }));
+    .evaluate((element) => {
+      const viewport = element.getBoundingClientRect();
+      const visible = Array.from(
+        element.querySelectorAll<HTMLElement>(
+          '[data-transcript-row], [data-transcript-key]',
+        ),
+      ).find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom >= viewport.top && rect.top <= viewport.bottom;
+      });
+      return {
+        scrollHeight: element.scrollHeight,
+        key:
+          visible?.dataset.transcriptRow ??
+          visible?.dataset.transcriptKey ??
+          '',
+        offset: visible
+          ? visible.getBoundingClientRect().top - viewport.top
+          : Number.NaN,
+      };
+    });
+  expect(beforePrepend.key).not.toBe('');
   releaseOlder();
   await expect
     .poll(() =>
@@ -169,18 +187,25 @@ test('loads earlier session history on demand', async ({ page }) => {
         .evaluate((element) => element.scrollHeight),
     )
     .toBeGreaterThan(beforePrepend.scrollHeight);
-  const afterPrepend = await page
-    .locator('.session-transcript-scroll')
-    .evaluate((element) => ({
-      scrollHeight: element.scrollHeight,
-      scrollTop: element.scrollTop,
-    }));
-  expect(afterPrepend.scrollHeight).toBeGreaterThan(beforePrepend.scrollHeight);
-  expect(afterPrepend.scrollTop).toBeCloseTo(
-    beforePrepend.scrollTop +
-      (afterPrepend.scrollHeight - beforePrepend.scrollHeight),
-    0,
-  );
+  await expect
+    .poll(() =>
+      page.locator('.session-transcript-scroll').evaluate((element, key) => {
+        const target = Array.from(
+          element.querySelectorAll<HTMLElement>(
+            '[data-transcript-row], [data-transcript-key]',
+          ),
+        ).find(
+          (candidate) =>
+            (candidate.dataset.transcriptRow ??
+              candidate.dataset.transcriptKey) === key,
+        );
+        return target
+          ? target.getBoundingClientRect().top -
+              element.getBoundingClientRect().top
+          : Number.NaN;
+      }, beforePrepend.key),
+    )
+    .toBeCloseTo(beforePrepend.offset, 0);
   await page.locator('.session-transcript-scroll').evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     element.scrollTop = 0;
@@ -192,4 +217,16 @@ test('loads earlier session history on demand', async ({ page }) => {
       name: /Load earlier history|Retry earlier history/,
     }),
   ).toHaveCount(0);
+}
+
+test('loads earlier session history with a stable virtual anchor', async ({
+  page,
+}) => {
+  await verifyEarlierHistoryAnchor(page);
+});
+
+test('loads earlier session history with a stable virtual anchor @desktop', async ({
+  page,
+}) => {
+  await verifyEarlierHistoryAnchor(page);
 });
