@@ -844,6 +844,7 @@ const SessionCompactedEventSchema = Type.Object(
     type: Type.Literal('session.compacted'),
     sessionId: IdentifierSchema,
     entry: UnknownSchema,
+    entryId: Type.Optional(IdentifierSchema),
   },
   { additionalProperties: false },
 );

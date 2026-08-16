@@ -744,8 +744,9 @@ export function applyTranscriptEvent(
   if (!state.sessionId && eventSession)
     state = { ...state, sessionId: eventSession };
   if (event.type === 'session.compacted') {
-    if (!isRecord(event.entry)) return { state, accepted: true };
-    const id = persistedEntryId(event.entry);
+    const id =
+      event.entryId ??
+      (isRecord(event.entry) ? persistedEntryId(event.entry) : undefined);
     if (!id) return { state, accepted: true };
     return {
       state: {
@@ -866,6 +867,10 @@ function isSteeringMarkerEntry(entry: Record<string, unknown>): boolean {
   );
 }
 
+export function isPersistedSteeringMarker(value: unknown): boolean {
+  return isSteeringMarkerEntry(isRecord(value) ? value : {});
+}
+
 function steeringMarkerData(
   entry: Record<string, unknown>,
 ): { timestamp: number | string; text: string } | undefined {
@@ -947,6 +952,8 @@ export function hydrateTranscript(
     fallbackEntryIds?: boolean;
     /** Absolute logical entry ordinal used for page-local fallback identities. */
     fallbackEntryOffset?: number;
+    /** A marker at the end of a prior bounded range may prefix this range. */
+    steeringMarkers?: readonly unknown[];
   } = {},
 ): TranscriptProjection {
   let projection = createTranscriptProjection(sessionId);
@@ -954,7 +961,10 @@ export function hydrateTranscript(
   const fallbackEntryId = (index: number) =>
     `entry-${(options.fallbackEntryOffset ?? 0) + index}`;
   const order = [...projection.order];
-  const markedSteeringMarkers = steeringMarkers(entries);
+  const markedSteeringMarkers = steeringMarkers([
+    ...(options.steeringMarkers ?? []),
+    ...entries,
+  ]);
   entries.forEach((raw, index) => {
     if (!isRecord(raw)) {
       const id = fallbackEntryId(index);
@@ -1164,21 +1174,35 @@ export function hydrateTranscript(
 }
 
 /**
- * Convert one durable Pi entry to the same normalized lifecycle vocabulary as
- * the runtime bridge. The projector deliberately hydrates a single entry
- * instead of keeping a second semantic baseline, so IDs, toolResult folding,
- * embedded-tool chronology, and entry-N fallbacks stay aligned with
- * hydrateTranscript.
+ * Convert durable Pi entries to the same normalized lifecycle vocabulary as
+ * the runtime bridge. The projector deliberately hydrates the bounded source
+ * range instead of keeping a second semantic baseline, so IDs, marker parity,
+ * toolResult folding, embedded-tool chronology, and entry-N fallbacks stay
+ * aligned with hydrateTranscript.
  */
 export function persistedEntryToTranscriptEvents(
   raw: unknown,
   sessionId: string,
-  options: { fallbackEntryOffset?: number } = {},
+  options: {
+    fallbackEntryOffset?: number;
+    steeringMarkers?: readonly unknown[];
+  } = {},
 ): BridgeEvent[] {
-  if (isSteeringMarkerEntry(isRecord(raw) ? raw : {})) return [];
-  const projection = hydrateTranscript([raw], sessionId, {
+  return persistedEntriesToTranscriptEvents([raw], sessionId, options);
+}
+
+export function persistedEntriesToTranscriptEvents(
+  entries: readonly unknown[],
+  sessionId: string,
+  options: {
+    fallbackEntryOffset?: number;
+    steeringMarkers?: readonly unknown[];
+  } = {},
+): BridgeEvent[] {
+  const projection = hydrateTranscript(entries, sessionId, {
     fallbackEntryIds: true,
     fallbackEntryOffset: options.fallbackEntryOffset,
+    steeringMarkers: options.steeringMarkers,
   });
   const events: BridgeEvent[] = [];
   for (const id of projection.order) {
@@ -1194,6 +1218,9 @@ export function persistedEntryToTranscriptEvents(
         ...(item.toolCallIds === undefined
           ? {}
           : { toolCallIds: [...item.toolCallIds] }),
+        ...(item.deliveryMode === undefined
+          ? {}
+          : { data: { deliveryMode: item.deliveryMode } }),
         phase: 'finished' as const,
       };
       if (!tryParseNormalizedMessagePayload(message))
@@ -1241,6 +1268,7 @@ export function persistedEntryToTranscriptEvents(
       type: 'session.compacted',
       sessionId,
       entry: item.raw,
+      entryId: item.id,
     } as BridgeEvent);
   }
   return events;

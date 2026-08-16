@@ -8,6 +8,7 @@ import {
   createRuntimeReducerState,
   createTranscriptProjection,
   hydrateTranscript,
+  persistedEntriesToTranscriptEvents,
   persistedEntryToTranscriptEvents,
   projectTranscriptForRender,
   reduceTranscriptEvent,
@@ -131,6 +132,42 @@ describe('dashboard domain reducers', () => {
         (item) => item.kind === 'other',
       ),
     ).toBe(false);
+  });
+
+  it('keeps incremental persisted steering and fallback other identities parity-safe', () => {
+    const entries = [
+      {
+        type: 'custom',
+        customType: STEERING_MESSAGE_MARKER_TYPE,
+        data: { timestamp: 200, text: 'Steer this' },
+      },
+      {
+        type: 'message',
+        message: { role: 'user', content: 'Steer this', timestamp: 200 },
+      },
+      { type: 'unrecognized', value: 'opaque' },
+      'primitive-opaque',
+    ];
+    const events = persistedEntriesToTranscriptEvents(entries, 's', {
+      fallbackEntryOffset: 10,
+    });
+    let reduced = createTranscriptProjection('s');
+    for (const event of events) reduced = reduceTranscriptEvent(reduced, event);
+    expect(projectTranscriptForRender(reduced).items).toMatchObject([
+      { kind: 'message', messageId: 'entry-11', deliveryMode: 'steer' },
+      { kind: 'other', id: 'entry-12', raw: entries[2] },
+      { kind: 'other', id: 'entry-13', raw: entries[3] },
+    ]);
+    expect(reduced.order).toEqual(['entry-11', 'entry-12', 'entry-13']);
+    expect(
+      persistedEntriesToTranscriptEvents([entries[1]], 's', {
+        fallbackEntryOffset: 11,
+        steeringMarkers: [entries[0]],
+      })[0],
+    ).toMatchObject({
+      type: 'message.finished',
+      message: { data: { deliveryMode: 'steer' } },
+    });
   });
 
   it('applies a live steering update to an already rendered user message', () => {

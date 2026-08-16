@@ -5,7 +5,8 @@ import {
   delegateHistoryFromBranch,
   delegateHistoryRunDetailFromBranch,
   isDelegateHistoryEntry,
-  persistedEntryToTranscriptEvents,
+  isPersistedSteeringMarker,
+  persistedEntriesToTranscriptEvents,
   projectDelegateHistoryEntry,
 } from '@pi-dashboard/domain';
 import {
@@ -225,6 +226,8 @@ function sessionEventCoalesceKey(event: BridgeEvent): string | undefined {
 
 interface AuxiliaryFeedState {
   cursor?: AuxiliarySourceCursor;
+  /** A marker at a bounded-range edge is carried into the next range only. */
+  pendingSteeringMarkers: readonly unknown[];
   dirty: boolean;
   workerRunning: boolean;
   gateBusy: boolean;
@@ -935,6 +938,7 @@ export class DashboardServerImpl implements DashboardServer {
         'Auxiliary session feed capacity is reserved for active feeds.',
       );
     const state: AuxiliaryFeedState = {
+      pendingSteeringMarkers: [],
       dirty: false,
       workerRunning: false,
       gateBusy: false,
@@ -999,6 +1003,7 @@ export class DashboardServerImpl implements DashboardServer {
         true,
       );
       state.cursor = internal.sourceCursor;
+      state.pendingSteeringMarkers = [];
       // A watcher that fired while the source cut was being read must remain
       // dirty. The worker will range-read from this exact installed cut.
       state.lastUsedAt = Date.now();
@@ -1106,29 +1111,34 @@ export class DashboardServerImpl implements DashboardServer {
         if (cursor === undefined) return;
         try {
           const range = await this.sessions.readAppendRange(sessionId, cursor);
-          const sourceOrdinal = cursor.ordinal;
-          for (let index = 0; index < range.records.length; index += 1) {
-            const record = range.records[index];
-            const events = persistedEntryToTranscriptEvents(record, sessionId, {
-              fallbackEntryOffset: sourceOrdinal + index,
-            });
-            for (const event of events) {
-              const eventBytes = Buffer.byteLength(
-                JSON.stringify(event),
-                'utf8',
+          const events = persistedEntriesToTranscriptEvents(
+            range.records,
+            sessionId,
+            {
+              fallbackEntryOffset: cursor.ordinal,
+              steeringMarkers: current.pendingSteeringMarkers,
+            },
+          );
+          for (const event of events) {
+            const eventBytes = Buffer.byteLength(JSON.stringify(event), 'utf8');
+            if (eventBytes >= MAX_FRAME_BYTES)
+              throw new AuxiliaryAppendError(
+                'entry-too-large',
+                'Normalized auxiliary event exceeds the protocol budget.',
               );
-              if (eventBytes >= MAX_FRAME_BYTES)
-                throw new AuxiliaryAppendError(
-                  'entry-too-large',
-                  'Normalized auxiliary event exceeds the protocol budget.',
-                );
-              // Source records are not keyed/coalesced. Every persisted event
-              // consumes one feed sequence in source order.
-              feed.publishEvent(event);
-            }
+            // Source records are not keyed/coalesced. Every persisted event
+            // consumes one feed sequence in source order.
+            feed.publishEvent(event);
           }
           // Commit only after every record in this range has been published.
           current.cursor = range.nextCursor;
+          if (range.records.length > 0) {
+            const last = range.records.at(-1);
+            current.pendingSteeringMarkers =
+              last !== undefined && isPersistedSteeringMarker(last)
+                ? [last]
+                : [];
+          }
           if (range.hasMore && range.records.length > 0) current.dirty = true;
         } catch (error) {
           current.cursor = undefined;

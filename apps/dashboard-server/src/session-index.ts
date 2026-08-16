@@ -27,11 +27,19 @@ export interface SessionHistoryPage {
   nextBefore?: string;
 }
 
-interface AuxiliaryCursorCheckpoint {
+interface AuxiliarySourceMetadata {
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
+}
+
+interface AuxiliaryAppendState {
   readonly cursorKey: string;
+  readonly generation: number;
   readonly hash: Hash;
-  readonly probeHash: string;
-  readonly probeBytes: number;
+  readonly source: AuxiliarySourceMetadata;
 }
 
 export interface AuxiliarySourceCursor {
@@ -45,7 +53,6 @@ export interface AuxiliarySourceCursor {
   byteOffset: number;
   /** SHA-256 of the exact bytes in [0, byteOffset). */
   prefixHash: string;
-  readonly checkpoint?: AuxiliaryCursorCheckpoint;
 }
 
 export type AuxiliaryAppendResetReason =
@@ -133,7 +140,6 @@ const AUXILIARY_ENTRY_BYTES = 384 * 1024;
 /** Range reads are deliberately smaller than a history page and repeatable. */
 const AUXILIARY_RANGE_BYTES = 256 * 1024;
 const AUXILIARY_RANGE_RECORDS = 256;
-const AUXILIARY_PROBE_BYTES = 64 * 1024;
 const AUXILIARY_SEED_PARTIAL_BYTES = 24 * 1024 * 1024;
 const EMPTY_PREFIX_HASH = createHash('sha256').digest('hex');
 
@@ -156,17 +162,32 @@ function cursorKey(cursor: AuxiliarySourceCursor): string {
   return `${cursor.version}:${cursor.dev}:${cursor.ino}:${cursor.ordinal}:${cursor.byteOffset}:${cursor.prefixHash}`;
 }
 
-function attachCheckpoint(
-  cursor: AuxiliarySourceCursor,
-  checkpoint: AuxiliaryCursorCheckpoint,
-): AuxiliarySourceCursor {
-  Object.defineProperty(cursor, 'checkpoint', {
-    value: checkpoint,
-    enumerable: false,
-    configurable: true,
-  });
-  return cursor;
+function auxiliarySourceMetadata(
+  stat: import('node:fs').Stats,
+): AuxiliarySourceMetadata {
+  return {
+    dev: stat.dev,
+    ino: stat.ino,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    ctimeMs: stat.ctimeMs,
+  };
 }
+
+function sameAuxiliarySourceMetadata(
+  left: AuxiliarySourceMetadata,
+  right: import('node:fs').Stats,
+): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.ctimeMs === right.ctimeMs
+  );
+}
+
+type AuxiliaryFileHandle = Awaited<ReturnType<typeof fs.open>>;
 
 type SessionFileVersion = {
   dev: number;
@@ -278,10 +299,8 @@ export class SessionIndex {
   private readonly watcherRetries = new Map<string, NodeJS.Timeout>();
   private readonly scheduled = new Map<string, NodeJS.Timeout>();
   private readonly indexing = new Map<string, Promise<void>>();
-  private readonly appendCheckpoints = new Map<
-    string,
-    AuxiliaryCursorCheckpoint
-  >();
+  private readonly appendStates = new Map<string, AuxiliaryAppendState>();
+  private readonly appendGenerations = new Map<string, number>();
   private workspaces: readonly WorkspaceTarget[] = [];
   constructor(
     private readonly sessionDir: string,
@@ -297,7 +316,8 @@ export class SessionIndex {
     this.workspaces = workspaces;
     this.files.clear();
     this.fileIds.clear();
-    this.appendCheckpoints.clear();
+    this.appendStates.clear();
+    this.appendGenerations.clear();
     const paths = (
       await Promise.all(this.sessionRoots().map((root) => this.findJsonl(root)))
     ).flat();
@@ -365,7 +385,6 @@ export class SessionIndex {
   private async auxiliaryFile(id: string): Promise<{
     indexed: IndexedFile;
     file: string;
-    stat: import('node:fs').Stats;
   }> {
     const indexed = this.files.get(id);
     if (
@@ -383,7 +402,7 @@ export class SessionIndex {
         'source-truncated',
         'Auxiliary session disappeared.',
       );
-    return { indexed, file: indexed.file, stat };
+    return { indexed, file: indexed.file };
   }
 
   private async validateAuxiliaryCursor(
@@ -391,6 +410,52 @@ export class SessionIndex {
     stat: import('node:fs').Stats,
     cursor: AuxiliarySourceCursor,
   ): Promise<void> {
+    this.validateAuxiliaryCursorShape(stat, cursor);
+    const generation = this.appendGenerations.get(file) ?? 0;
+    const key = cursorKey(cursor);
+    const cached = this.appendStates.get(file);
+    const handle = await fs.open(file, 'r').catch(() => undefined);
+    if (!handle) throw new AuxiliaryAppendError('source-truncated');
+    try {
+      const before = await handle.stat();
+      this.validateAuxiliaryCursorShape(before, cursor);
+      if (
+        cached?.cursorKey === key &&
+        cached.generation === generation &&
+        sameAuxiliarySourceMetadata(cached.source, before)
+      ) {
+        const after = await handle.stat();
+        if (!sameAuxiliarySourceMetadata(cached.source, after))
+          throw new AuxiliaryAppendError('source-rewrite');
+        return;
+      }
+      const prefix = await this.hashAuxiliaryPrefix(handle, cursor.byteOffset);
+      if (
+        prefix.hash.copy().digest('hex') !== cursor.prefixHash ||
+        prefix.ordinal !== cursor.ordinal
+      )
+        throw new AuxiliaryAppendError(
+          'source-rewrite',
+          'Auxiliary session source prefix changed.',
+        );
+      const after = await handle.stat();
+      if (!sameAuxiliarySourceMetadata(auxiliarySourceMetadata(before), after))
+        throw new AuxiliaryAppendError('source-rewrite');
+      this.appendStates.set(file, {
+        cursorKey: key,
+        generation,
+        hash: prefix.hash.copy(),
+        source: auxiliarySourceMetadata(before),
+      });
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  }
+
+  private validateAuxiliaryCursorShape(
+    stat: import('node:fs').Stats,
+    cursor: AuxiliarySourceCursor,
+  ): void {
     if (
       cursor.version !== 1 ||
       !Number.isSafeInteger(cursor.dev) ||
@@ -415,150 +480,44 @@ export class SessionIndex {
         'source-truncated',
         'Auxiliary session file was truncated.',
       );
-    const key = cursorKey(cursor);
-    const cached = this.appendCheckpoints.get(file);
-    if (cached?.cursorKey === key) {
-      await this.verifyAuxiliaryProbe(file, cached);
-      return;
-    }
-    const prefix = await this.hashAuxiliaryPrefix(file, cursor.byteOffset);
-    if (
-      prefix.hash.copy().digest('hex') !== cursor.prefixHash ||
-      prefix.ordinal !== cursor.ordinal
-    )
-      throw new AuxiliaryAppendError(
-        'source-rewrite',
-        'Auxiliary session source prefix changed.',
-      );
-    this.appendCheckpoints.set(file, {
-      cursorKey: key,
-      hash: prefix.hash.copy(),
-      probeHash: prefix.probeHash,
-      probeBytes: prefix.probeBytes,
-    });
   }
 
   private async hashAuxiliaryPrefix(
-    file: string,
+    handle: AuxiliaryFileHandle,
     byteOffset: number,
-  ): Promise<{
-    hash: Hash;
-    ordinal: number;
-    probeHash: string;
-    probeBytes: number;
-  }> {
+  ): Promise<{ hash: Hash; ordinal: number }> {
     const hash = createHash('sha256');
-    const probe = createHash('sha256');
-    const probeBytes = Math.min(byteOffset, AUXILIARY_PROBE_BYTES);
-    if (byteOffset === 0)
-      return {
-        hash,
-        ordinal: 0,
-        probeHash: probe.digest('hex'),
-        probeBytes: 0,
-      };
-    const handle = await fs.open(file, 'r').catch(() => undefined);
-    if (!handle)
-      throw new AuxiliaryAppendError(
-        'source-truncated',
-        'Auxiliary session file disappeared.',
-      );
+    if (byteOffset === 0) return { hash, ordinal: 0 };
     let position = 0;
     let ordinal = 0;
     let nonEmpty = false;
     const buffer = Buffer.allocUnsafe(64 * 1024);
-    try {
-      while (position < byteOffset) {
-        const length = Math.min(buffer.length, byteOffset - position);
-        const { bytesRead } = await handle.read(buffer, 0, length, position);
-        if (bytesRead === 0)
-          throw new AuxiliaryAppendError(
-            'source-truncated',
-            'Auxiliary session file ended before its cursor.',
-          );
-        const chunk = buffer.subarray(0, bytesRead);
-        hash.update(chunk);
-        if (position < probeBytes)
-          probe.update(
-            chunk.subarray(0, Math.min(bytesRead, probeBytes - position)),
-          );
-        for (const byte of chunk) {
-          if (byte === 0x0a) {
-            if (nonEmpty) ordinal += 1;
-            nonEmpty = false;
-          } else if (!isJsonlWhitespaceByte(byte)) nonEmpty = true;
-        }
-        position += bytesRead;
+    while (position < byteOffset) {
+      const length = Math.min(buffer.length, byteOffset - position);
+      const { bytesRead } = await handle.read(buffer, 0, length, position);
+      if (bytesRead === 0)
+        throw new AuxiliaryAppendError(
+          'source-truncated',
+          'Auxiliary session file ended before its cursor.',
+        );
+      const chunk = buffer.subarray(0, bytesRead);
+      hash.update(chunk);
+      for (const byte of chunk) {
+        if (byte === 0x0a) {
+          if (nonEmpty) ordinal += 1;
+          nonEmpty = false;
+        } else if (!isJsonlWhitespaceByte(byte)) nonEmpty = true;
       }
-    } finally {
-      await handle.close().catch(() => undefined);
+      position += bytesRead;
     }
     if (position !== byteOffset)
       throw new AuxiliaryAppendError('source-truncated');
-    // Cursors always end after a complete line. A partial prefix is invalid.
     if (nonEmpty)
       throw new AuxiliaryAppendError(
         'source-rewrite',
         'Cursor is not line aligned.',
       );
-    return {
-      hash,
-      ordinal,
-      probeHash: probe.digest('hex'),
-      probeBytes,
-    };
-  }
-
-  private async verifyAuxiliaryProbe(
-    file: string,
-    checkpoint: AuxiliaryCursorCheckpoint,
-  ): Promise<void> {
-    if (checkpoint.probeBytes === 0) return;
-    const handle = await fs.open(file, 'r').catch(() => undefined);
-    if (!handle) throw new AuxiliaryAppendError('source-truncated');
-    const hash = createHash('sha256');
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    let position = 0;
-    try {
-      while (position < checkpoint.probeBytes) {
-        const length = Math.min(
-          buffer.length,
-          checkpoint.probeBytes - position,
-        );
-        const { bytesRead } = await handle.read(buffer, 0, length, position);
-        if (bytesRead === 0) throw new AuxiliaryAppendError('source-truncated');
-        hash.update(buffer.subarray(0, bytesRead));
-        position += bytesRead;
-      }
-    } finally {
-      await handle.close().catch(() => undefined);
-    }
-    if (hash.digest('hex') !== checkpoint.probeHash)
-      throw new AuxiliaryAppendError('source-rewrite');
-  }
-
-  private async readAuxiliaryProbe(
-    file: string,
-    bytes: number,
-  ): Promise<string> {
-    if (bytes === 0) return EMPTY_PREFIX_HASH;
-    const handle = await fs.open(file, 'r').catch(() => undefined);
-    if (!handle) throw new AuxiliaryAppendError('source-truncated');
-    const hash = createHash('sha256');
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    let position = 0;
-    try {
-      while (position < bytes) {
-        const length = Math.min(buffer.length, bytes - position);
-        const { bytesRead } = await handle.read(buffer, 0, length, position);
-        if (bytesRead === 0) throw new AuxiliaryAppendError('source-truncated');
-        hash.update(buffer.subarray(0, bytesRead));
-        position += bytesRead;
-      }
-    } finally {
-      await handle.close().catch(() => undefined);
-    }
-    return hash.digest('hex');
+    return { hash, ordinal };
   }
 
   private async scanAuxiliaryAppend(
@@ -570,60 +529,64 @@ export class SessionIndex {
       tolerateMalformed?: boolean;
     },
   ): Promise<AuxiliaryAppendRange> {
-    const { file, stat } = await this.auxiliaryFile(id);
-    const start: AuxiliarySourceCursor =
-      cursor === undefined
-        ? {
-            version: 1,
-            dev: stat.dev,
-            ino: stat.ino,
-            ordinal: 0,
-            byteOffset: 0,
-            prefixHash: EMPTY_PREFIX_HASH,
-          }
-        : cursor;
-    if (cursor !== undefined)
-      await this.validateAuxiliaryCursor(file, stat, cursor);
-
-    const records: unknown[] = [];
+    const { file } = await this.auxiliaryFile(id);
+    const generation = this.appendGenerations.get(file) ?? 0;
     const cached =
       cursor !== undefined &&
-      this.appendCheckpoints.get(file)?.cursorKey === cursorKey(cursor)
-        ? this.appendCheckpoints.get(file)
+      this.appendStates.get(file)?.cursorKey === cursorKey(cursor) &&
+      this.appendStates.get(file)?.generation === generation
+        ? this.appendStates.get(file)
         : undefined;
-    const hash = cached?.hash.copy() ?? createHash('sha256');
-    if (!cached && start.byteOffset > 0) {
-      const prefixHandle = await fs.open(file, 'r');
-      const prefixBuffer = Buffer.allocUnsafe(64 * 1024);
-      let prefixPosition = 0;
-      try {
-        while (prefixPosition < start.byteOffset) {
-          const length = Math.min(
-            prefixBuffer.length,
-            start.byteOffset - prefixPosition,
-          );
-          const { bytesRead } = await prefixHandle.read(
-            prefixBuffer,
-            0,
-            length,
-            prefixPosition,
-          );
-          if (bytesRead === 0)
-            throw new AuxiliaryAppendError('source-truncated');
-          hash.update(prefixBuffer.subarray(0, bytesRead));
-          prefixPosition += bytesRead;
-        }
-      } finally {
-        await prefixHandle.close().catch(() => undefined);
-      }
-    }
-
     const handle = await fs.open(file, 'r').catch(() => undefined);
     if (!handle)
       throw new AuxiliaryAppendError(
         'source-truncated',
         'Auxiliary session file disappeared.',
       );
+    let before: import('node:fs').Stats;
+    let sourceEnd: number;
+    let start: AuxiliarySourceCursor;
+    let hash: Hash;
+    try {
+      before = await handle.stat();
+      start =
+        cursor === undefined
+          ? {
+              version: 1,
+              dev: before.dev,
+              ino: before.ino,
+              ordinal: 0,
+              byteOffset: 0,
+              prefixHash: EMPTY_PREFIX_HASH,
+            }
+          : cursor;
+      if (cursor !== undefined) {
+        this.validateAuxiliaryCursorShape(before, cursor);
+        if (cached && sameAuxiliarySourceMetadata(cached.source, before))
+          hash = cached.hash.copy();
+        else {
+          const prefix = await this.hashAuxiliaryPrefix(
+            handle,
+            cursor.byteOffset,
+          );
+          if (
+            prefix.hash.copy().digest('hex') !== cursor.prefixHash ||
+            prefix.ordinal !== cursor.ordinal
+          )
+            throw new AuxiliaryAppendError(
+              'source-rewrite',
+              'Auxiliary session source prefix changed.',
+            );
+          hash = prefix.hash;
+        }
+      } else hash = createHash('sha256');
+      sourceEnd = before.size;
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    }
+
+    const records: unknown[] = [];
     let position = start.byteOffset;
     let pending = Buffer.alloc(0);
     let ordinal = start.ordinal;
@@ -638,6 +601,7 @@ export class SessionIndex {
       : Number.POSITIVE_INFINITY;
     const buffer = Buffer.allocUnsafe(64 * 1024);
     const decoder = new TextDecoder('utf-8', { fatal: true });
+    let finalStat: import('node:fs').Stats;
     const appendRecord = (rawLine: Buffer, rawWithNewline: Buffer): void => {
       const withoutCr =
         rawLine.length > 0 && rawLine.at(-1) === 0x0d
@@ -688,13 +652,9 @@ export class SessionIndex {
       if (options.collect) records.push(redactImageData(parsed));
     };
     try {
-      while (!stopped) {
-        const { bytesRead } = await handle.read(
-          buffer,
-          0,
-          buffer.length,
-          position,
-        );
+      while (!stopped && position < sourceEnd) {
+        const length = Math.min(buffer.length, sourceEnd - position);
+        const { bytesRead } = await handle.read(buffer, 0, length, position);
         if (bytesRead === 0) break;
         position += bytesRead;
         pending =
@@ -740,20 +700,22 @@ export class SessionIndex {
           'entry-too-large',
           'Auxiliary JSONL partial entry exceeds the append budget.',
         );
+      finalStat = await handle.stat();
     } finally {
       await handle.close().catch(() => undefined);
     }
 
-    const finalStat = await fs.stat(file).catch(() => undefined);
-    if (!finalStat)
-      throw new AuxiliaryAppendError(
-        'source-truncated',
-        'Auxiliary file disappeared.',
-      );
-    if (finalStat.dev !== stat.dev || finalStat.ino !== stat.ino)
+    if (finalStat.dev !== before.dev || finalStat.ino !== before.ino)
       throw new AuxiliaryAppendError(
         'source-replaced',
         'Auxiliary session file identity changed while reading.',
+      );
+    if (
+      !sameAuxiliarySourceMetadata(auxiliarySourceMetadata(before), finalStat)
+    )
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Auxiliary session file changed while reading.',
       );
     if (finalStat.size < nextOffset)
       throw new AuxiliaryAppendError(
@@ -763,26 +725,22 @@ export class SessionIndex {
     const prefixHash = hash.copy().digest('hex');
     const nextCursor: AuxiliarySourceCursor = {
       version: 1,
-      dev: stat.dev,
-      ino: stat.ino,
+      dev: before.dev,
+      ino: before.ino,
       ordinal,
       byteOffset: nextOffset,
       prefixHash,
     };
-    const checkpoint: AuxiliaryCursorCheckpoint = {
+    this.appendStates.set(file, {
       cursorKey: cursorKey(nextCursor),
+      generation,
       hash: hash.copy(),
-      probeHash: await this.readAuxiliaryProbe(
-        file,
-        Math.min(nextOffset, AUXILIARY_PROBE_BYTES),
-      ),
-      probeBytes: Math.min(nextOffset, AUXILIARY_PROBE_BYTES),
-    };
-    this.appendCheckpoints.set(file, checkpoint);
+      source: auxiliarySourceMetadata(before),
+    });
     return {
       records,
-      nextCursor: attachCheckpoint(nextCursor, checkpoint),
-      hasMore: finalStat.size > nextOffset,
+      nextCursor,
+      hasMore: sourceEnd > nextOffset,
     };
   }
 
@@ -1352,7 +1310,8 @@ export class SessionIndex {
     this.watcherRetries.clear();
     for (const timer of this.scheduled.values()) clearTimeout(timer);
     this.scheduled.clear();
-    this.appendCheckpoints.clear();
+    this.appendStates.clear();
+    this.appendGenerations.clear();
   }
 
   private sessionRoots(): string[] {
@@ -1428,6 +1387,15 @@ export class SessionIndex {
     }
   }
 
+  private markAuxiliarySourceDirty(file: string): void {
+    const resolved = path.resolve(file);
+    if (!this.isAuxiliaryFile(resolved)) return;
+    this.appendGenerations.set(
+      resolved,
+      (this.appendGenerations.get(resolved) ?? 0) + 1,
+    );
+  }
+
   private handleWatcherEvent(
     root: string,
     filename: string | Buffer | null | undefined,
@@ -1440,6 +1408,7 @@ export class SessionIndex {
     }
     const file = path.resolve(root, String(filename));
     if (file.endsWith('.jsonl')) {
+      this.markAuxiliarySourceDirty(file);
       this.scheduleIndex(file);
       return;
     }
@@ -1620,7 +1589,8 @@ export class SessionIndex {
     const resolved = path.resolve(file);
     const id = this.fileIds.get(resolved);
     this.fileIds.delete(resolved);
-    this.appendCheckpoints.delete(resolved);
+    this.appendStates.delete(resolved);
+    this.appendGenerations.delete(resolved);
     if (id && this.files.get(id)?.file === resolved) this.files.delete(id);
   }
 }

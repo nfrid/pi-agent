@@ -776,6 +776,7 @@ describe('dashboard protocol', () => {
           id: 'compact-1',
           summary: 'Earlier work.',
         },
+        entryId: 'compact-1',
       }),
     ).toBe(true);
     expect(

@@ -635,6 +635,137 @@ describe('session index', () => {
     expect(page.entries).toEqual([]);
   });
 
+  it('rejects same-inode rewrites beyond the old probe before appending', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-exact-rewrite-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    const entries = [
+      { type: 'session', id: 'exact-rewrite-child', cwd: '/tmp' },
+      ...Array.from({ length: 1_500 }, (_, index) => ({
+        type: 'message',
+        id: `stable-${index}`,
+        message: { role: 'assistant', content: 'x'.repeat(160) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const cursor = await index.readAppendCursor('exact-rewrite-child');
+    expect(cursor.byteOffset).toBeGreaterThan(64 * 1024);
+    const rewritten = Buffer.from(await readFile(file));
+    rewritten[70 * 1024] ^= 1;
+    await writeFile(file, rewritten);
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'after-rewrite', message: { role: 'assistant', content: 'after' } })}\n`,
+    );
+    await expect(
+      index.readAppendRange('exact-rewrite-child', cursor),
+    ).rejects.toMatchObject({ reason: 'source-rewrite' });
+  });
+
+  it('reuses one exact prefix hash across a bounded backlog', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-hash-backlog-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'hash-backlog-child', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const cursor = await index.readAppendCursor('hash-backlog-child');
+    await appendFile(
+      file,
+      `${Array.from({ length: 2_000 }, (_, index) =>
+        JSON.stringify({
+          type: 'message',
+          id: `backlog-${index}`,
+          message: { role: 'assistant', content: 'x'.repeat(1_200) },
+        }),
+      ).join('\n')}\n`,
+    );
+    const internals = index as unknown as {
+      hashAuxiliaryPrefix: (...args: never[]) => Promise<unknown>;
+    };
+    const hashSpy = vi.spyOn(internals, 'hashAuxiliaryPrefix');
+    let next = cursor;
+    for (;;) {
+      const range = await index.readAppendRange('hash-backlog-child', next);
+      next = range.nextCursor;
+      if (!range.hasMore) break;
+    }
+    const hashCalls = hashSpy.mock.calls.length;
+    hashSpy.mockRestore();
+    expect(hashCalls).toBe(1);
+  });
+
+  it('fails closed when the source mutates during exact prefix validation', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-validation-race-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    const entries = [
+      { type: 'session', id: 'validation-race-child', cwd: '/tmp' },
+      ...Array.from({ length: 1_500 }, (_, index) => ({
+        type: 'message',
+        id: `stable-${index}`,
+        message: { role: 'assistant', content: 'x'.repeat(160) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const cursor = await index.readAppendCursor('validation-race-child');
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'race-append', message: { role: 'assistant', content: 'append' } })}\n`,
+    );
+    const internals = index as unknown as {
+      hashAuxiliaryPrefix: (
+        handle: unknown,
+        byteOffset: number,
+      ) => Promise<unknown>;
+    };
+    const originalHash = internals.hashAuxiliaryPrefix;
+    const hashSpy = vi
+      .spyOn(internals, 'hashAuxiliaryPrefix')
+      .mockImplementation(async (handle, byteOffset) => {
+        await appendFile(
+          file,
+          `${JSON.stringify({ type: 'message', id: 'race-during-validation', message: { role: 'assistant', content: 'race' } })}\n`,
+        );
+        return originalHash.call(index, handle, byteOffset);
+      });
+    try {
+      await expect(
+        index.readAppendRange('validation-race-child', cursor),
+      ).rejects.toBeInstanceOf(AuxiliaryAppendError);
+    } finally {
+      hashSpy.mockRestore();
+    }
+  });
+
   it('resets auxiliary append cursors on truncation, rewrite, and malformed lines', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-auxiliary-append-recovery-'),
