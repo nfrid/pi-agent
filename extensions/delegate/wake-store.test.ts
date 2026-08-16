@@ -321,7 +321,9 @@ describe('wake store', () => {
   });
 
   test('enforces the subscription cap after merging restored and live wakes', async () => {
-    const workflow = new DelegateWorkflowCoordinator();
+    const workflow = new DelegateWorkflowCoordinator({
+      maxAttempts: WAKE_MAX_SUBSCRIPTIONS + 2,
+    });
     const gate = workflow.schedule({
       logicalId: 'cap-gate',
       mode: 'single',

@@ -43,7 +43,7 @@ export interface DelegateStructuredResult {
   value?: unknown;
   /** True when no bounded user-visible value could be retained. */
   valueOmitted?: boolean;
-  errors: string[];
+  errors: readonly string[];
 }
 
 export interface UsageStats {
@@ -184,6 +184,87 @@ export interface DelegatedRun extends DelegateRunMetadata {
   queuedAt?: number;
   startedAt?: number;
   finishedAt?: number;
+}
+
+/** A branch descriptor retained for a later verified symbolic branch import. */
+export interface DelegateWorkflowBranchDescriptor {
+  readonly id: string;
+  readonly repositoryRoot: string;
+  readonly worktreePath: string;
+  readonly branch: string;
+  readonly headCommit?: string;
+}
+
+/** Exact text retained by a workflow source, or a non-clipping overflow marker. */
+export interface DelegateWorkflowTextEvidence {
+  readonly text: string;
+  readonly bytes: number;
+  readonly oversized?: true;
+}
+
+/** Private, schema-validated structured evidence retained for named views. */
+export interface DelegateWorkflowStructuredEvidence {
+  readonly valid: boolean;
+  /** The complete validated JSON value, bounded by the result contract. */
+  readonly value?: unknown;
+  readonly valueOmitted?: true;
+  readonly errors: readonly string[];
+  /** Only declared schema views are retained for symbolic forwarding. */
+  readonly views: Readonly<Record<string, unknown>>;
+  /** Published artifact handles for the full value and declared views. */
+  readonly artifacts: Readonly<
+    Record<string, { readonly handle: string; readonly size: number }>
+  >;
+}
+
+/** Minimal terminal run projection used by workflow status and symbolic inputs. */
+export interface DelegateWorkflowRunProjection {
+  readonly runId: string;
+  readonly name: string;
+  readonly task: string;
+  readonly exitCode: number;
+  readonly state: DelegateRunState;
+  readonly model?: string;
+  readonly routing?: DelegateRouteState;
+  /** Bounded identifiers for terminal status, never child session objects. */
+  readonly sessionId?: string;
+  readonly lineageId?: string;
+  readonly context?: DelegateContext;
+  readonly allowWrites?: boolean;
+  readonly isolation?: DelegateIsolation;
+  readonly continuation?: string;
+  readonly worktree?: DelegateWorkflowBranchDescriptor;
+  readonly artifact?: ArtifactMetadata;
+  readonly lifecycle?: DelegateLifecycleProjection;
+  readonly structuredResult?: DelegateStructuredResult;
+  readonly structured?: DelegateWorkflowStructuredEvidence;
+  readonly queuedAt?: number;
+  readonly startedAt?: number;
+  readonly finishedAt?: number;
+  readonly workflowAttempt?: WorkflowAttempt;
+  /** Internal exact report evidence; omitted from public terminal projections. */
+  readonly report?: DelegateWorkflowTextEvidence;
+}
+
+/**
+ * Bounded canonical evidence for one settled workflow attempt. This is not a
+ * child execution result: messages, stderr, activities, sessions, and the
+ * DelegateJobResult envelope never cross this boundary.
+ */
+export interface DelegateWorkflowResultRecord {
+  readonly version: 1;
+  readonly reports: readonly DelegateWorkflowTextEvidence[];
+  readonly handoff: DelegateWorkflowTextEvidence;
+  readonly runs: readonly DelegateWorkflowRunProjection[];
+  readonly continuationToken?: string;
+  readonly continuationAmbiguous: boolean;
+  readonly continuationUnavailable?: true;
+}
+
+/** Public status/result projection returned by the coordinator API. */
+export interface DelegateWorkflowResultProjection {
+  readonly runs: readonly DelegatedRun[];
+  readonly handoff: string;
 }
 
 export interface DelegateDetails {

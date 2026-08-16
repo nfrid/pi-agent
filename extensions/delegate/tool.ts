@@ -547,7 +547,7 @@ export function registerDelegateTool(
             terminal: DelegateWorkflowAttemptSnapshot,
           ) => {
             if (!statusId) return;
-            const run = activeWorkflow.getResult(terminal.identity)?.runs[0];
+            const run = activeWorkflow.getTerminalRun(terminal.identity);
             if (run) activeStatuses.update(statusId, run);
           };
           if (attempt.settledAt !== undefined) updateTerminalStatus(attempt);
