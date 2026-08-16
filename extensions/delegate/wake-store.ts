@@ -30,6 +30,16 @@ function isWakeStoreEntry(value: unknown): value is WakeStoreEntry {
     value.kind === 'snapshot' &&
     isRecord(value.state) &&
     value.state.version === 1 &&
+    typeof value.state.ownerSessionId === 'string' &&
+    value.state.ownerSessionId.length > 0 &&
+    value.state.ownerSessionId.length <= 256 &&
+    ![...value.state.ownerSessionId].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    }) &&
+    typeof value.state.ownerEpoch === 'number' &&
+    Number.isSafeInteger(value.state.ownerEpoch) &&
+    value.state.ownerEpoch >= 0 &&
     Array.isArray(value.state.wakes)
   );
 }

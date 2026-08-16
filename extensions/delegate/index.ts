@@ -139,9 +139,20 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   });
   registerDelegateWakeTool(pi, () => activeWake?.coordinator);
   let scopeId: SessionScopeId = 'default';
+  const sessionManagerGenerations = new WeakMap<object, number>();
+  let runtimeGeneration = 0;
   let deliveryEpoch = 0;
   let runtimeActive = false;
   let widgetDetailed = true;
+  const sessionLeafId = (ctx: ExtensionContext): string | null | undefined => {
+    const manager = ctx.sessionManager as ExtensionContext['sessionManager'] & {
+      getLeafId?: () => string | null;
+    };
+    if (typeof manager.getLeafId === 'function') return manager.getLeafId();
+    const branch = manager.getBranch();
+    const last = branch.at(-1) as { id?: unknown } | undefined;
+    return typeof last?.id === 'string' ? last.id : undefined;
+  };
   const activateJobsTool = () =>
     setDelegateToolActive(pi, 'delegate_jobs', true);
   const activateBranchesTool = () =>
@@ -181,8 +192,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     let branch = existing;
     if (!branch) {
       const persisted = latestWakeState(ctx);
+      // The branch key is part of ownership and therefore of every delivery
+      // acknowledgement. Inherited entries from a fork cannot acknowledge a
+      // wake on the newly selected branch.
+      const ownerSessionId = key;
       const inheritedEpoch =
-        persisted?.ownerSessionId === scopeId
+        persisted?.ownerSessionId === ownerSessionId
           ? persisted.ownerEpoch
           : undefined;
       const ownerEpoch =
@@ -190,10 +205,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       nextWakeEpoch = Math.max(nextWakeEpoch, ownerEpoch + 1);
       const coordinator = new WakeCoordinator({
         workflow: activeWorkflow,
-        ownerSessionId: scopeId,
+        ownerSessionId,
         ownerEpoch,
       });
-      if (persisted?.ownerSessionId === scopeId)
+      if (persisted?.ownerSessionId === ownerSessionId)
         restoreWakeState(coordinator, ctx);
       branch = { key, coordinator };
       wakeBranches.set(key, branch);
@@ -324,27 +339,43 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const syncWidget = () => widget.sync();
 
   pi.on('session_start', async (event, ctx) => {
+    const generation = ++runtimeGeneration;
     const sessionScopeId = getSessionScopeId(ctx);
+    const previousScopeId = scopeId;
+    const closingJobs = jobs;
+    const closingWorkflow = workflow;
+    const closingStatuses = statuses;
+
+    // Invalidate and detach the previous generation immediately, including a
+    // repeated session_start for the same session ID.
+    runtimeActive = false;
+    jobs = undefined;
+    workflow = undefined;
+    statuses = undefined;
+    disposeWakeRuntime();
+    delivery.clearTimer();
+    delivery.clearPending();
+    delivery.resetAutomaticDelivery();
+    widget.detach();
+    await closingWorkflow?.dispose();
+    await closingJobs?.dispose();
+    closingStatuses?.clear();
+    if (previousScopeId !== 'default') {
+      const previousServices = getScopedServices(previousScopeId);
+      if (previousServices.delegateWorkflow === closingWorkflow)
+        previousServices.delegateWorkflow = undefined;
+      clearDelegateSurface(previousScopeId);
+    }
+    if (generation !== runtimeGeneration) return;
+
     const branchEntries = await listBranchEntries({
       scope: 'session',
       sessionId: sessionScopeId,
     }).catch(() => []);
-    if (jobs && scopeId !== 'default' && scopeId !== sessionScopeId) {
-      const closingJobs = jobs;
-      const closingWorkflow = workflow;
-      const closingStatuses = statuses;
-      jobs = undefined;
-      workflow = undefined;
-      statuses = undefined;
-      runtimeActive = false;
-      disposeWakeRuntime();
-      await closingWorkflow?.dispose();
-      await closingJobs.dispose();
-      closingStatuses?.clear();
-    }
-    if (scopeId !== 'default' && scopeId !== sessionScopeId)
-      clearDelegateSurface(scopeId);
+    if (generation !== runtimeGeneration) return;
+
     scopeId = sessionScopeId;
+    sessionManagerGenerations.set(ctx.sessionManager, generation);
     clearDelegateSurface(sessionScopeId);
     const promptConfig = loadDelegateConfig(ctx.cwd);
     promptSnapshot = {
@@ -359,12 +390,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
     deliveryEpoch = 0;
     nextWakeEpoch = 0;
-    wakeBranchKey = `${sessionScopeId}:root`;
-    if (wakeBranches.size > 0) disposeWakeRuntime();
+    wakeBranchKey = `${sessionScopeId}:${sessionLeafId(ctx) ?? 'root'}`;
     widgetDetailed = true;
-    delivery.clearPending();
-    delivery.resetAutomaticDelivery();
-    delivery.clearTimer();
     widget.attach(ui);
     pruneDelegateSessions({
       isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
@@ -429,20 +456,25 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   });
 
   pi.on('session_tree', (event, ctx) => {
+    const eventGeneration = sessionManagerGenerations.get(ctx.sessionManager);
+    if (
+      !runtimeActive ||
+      (eventGeneration === undefined
+        ? getSessionScopeId(ctx) !== scopeId
+        : eventGeneration !== runtimeGeneration)
+    )
+      return;
     deliveryEpoch++;
     delivery.resetAutomaticDelivery();
     const treeEvent = event as { newLeafId?: string | null };
-    // A leaf ID is stable across navigate-away/back. If an older host shim
-    // omits it, the persisted owner epoch still provides a conservative key.
-    const persisted = latestWakeState(ctx);
+    const leafId =
+      treeEvent.newLeafId === undefined
+        ? sessionLeafId(ctx)
+        : treeEvent.newLeafId;
     wakeBranchKey =
-      treeEvent.newLeafId === null
-        ? `${scopeId}:root`
-        : treeEvent.newLeafId
-          ? `${scopeId}:${treeEvent.newLeafId}`
-          : persisted
-            ? `${scopeId}:epoch:${persisted.ownerEpoch}`
-            : `${scopeId}:epoch:${nextWakeEpoch++}`;
+      leafId === undefined
+        ? `${scopeId}:legacy-${nextWakeEpoch++}`
+        : `${scopeId}:${leafId ?? 'root'}`;
     activateWakeBranch(ctx, wakeBranchKey);
   });
   pi.on('context', (event) => {
@@ -485,7 +517,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   });
   pi.on('session_shutdown', async (_event, ctx) => {
     const closingScopeId = getSessionScopeId(ctx);
-    if (scopeId !== closingScopeId) return;
+    const eventGeneration = sessionManagerGenerations.get(ctx.sessionManager);
+    if (
+      eventGeneration === undefined
+        ? scopeId !== closingScopeId
+        : eventGeneration !== runtimeGeneration
+    )
+      return;
+    runtimeGeneration++;
     runtimeActive = false;
     delivery.clearTimer();
     delivery.clearPending();
