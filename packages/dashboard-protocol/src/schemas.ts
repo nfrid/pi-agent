@@ -844,9 +844,30 @@ const SessionCompactedEventSchema = Type.Object(
     type: Type.Literal('session.compacted'),
     sessionId: IdentifierSchema,
     entry: UnknownSchema,
+    entryId: Type.Optional(IdentifierSchema),
   },
   { additionalProperties: false },
 );
+export const SessionTranscriptResetReasonSchema = Type.Union([
+  Type.Literal('source-rewrite'),
+  Type.Literal('source-truncated'),
+  Type.Literal('source-overflow'),
+  Type.Literal('entry-too-large'),
+]);
+export type SessionTranscriptResetReason = Static<
+  typeof SessionTranscriptResetReasonSchema
+>;
+const SessionTranscriptResetEventSchema = Type.Object(
+  {
+    type: Type.Literal('session.transcript.reset'),
+    sessionId: IdentifierSchema,
+    reason: SessionTranscriptResetReasonSchema,
+  },
+  { additionalProperties: false },
+);
+export type SessionTranscriptResetEvent = Static<
+  typeof SessionTranscriptResetEventSchema
+>;
 const MessageEventSchema = Type.Object(
   {
     type: Type.Union([
@@ -936,6 +957,7 @@ export const BridgeEventSchema = Type.Union([
   RuntimeStateEventSchema,
   SessionEventSchema,
   SessionCompactedEventSchema,
+  SessionTranscriptResetEventSchema,
   MessageEventSchema,
   ToolEventSchema,
   DelegateTranscriptUpdatedEventSchema,
@@ -960,6 +982,7 @@ export type BridgeEvent =
       session: SessionSnapshot;
     })
   | Static<typeof SessionCompactedEventSchema>
+  | Static<typeof SessionTranscriptResetEventSchema>
   | Static<typeof MessageEventSchema>
   | Static<typeof ToolEventSchema>
   | Static<typeof DelegateTranscriptUpdatedEventSchema>

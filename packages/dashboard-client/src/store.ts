@@ -1315,6 +1315,7 @@ export class DashboardLiveStore {
     const current = this.state.sessionSyncById[sessionId];
     if (current && current.generation !== generation) return false;
     if (current?.sequenceKnown && sequence <= current.sequence) return false;
+    if (value.event.type === 'session.transcript.reset') return false;
     return this.applyEventEnvelope(
       {
         cursor: sequence,

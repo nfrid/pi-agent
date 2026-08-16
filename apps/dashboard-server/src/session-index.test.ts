@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -11,7 +12,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { SessionIndex } from './session-index.js';
+import { AuxiliaryAppendError, SessionIndex } from './session-index.js';
 
 describe('session index', () => {
   it('refreshes workspace ownership and removes deleted session files', async () => {
@@ -549,6 +550,360 @@ describe('session index', () => {
     );
   });
 
+  it('reads bounded auxiliary append ranges and retries a partial final line', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-append-range-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'append-child', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const seed = await index.readAppendCursor('append-child');
+    const appended = Array.from({ length: 300 }, (_, ordinal) => ({
+      type: 'message',
+      id: `append-${ordinal}`,
+      message: { role: 'assistant', content: 'x'.repeat(1_200) },
+    }));
+    await appendFile(
+      file,
+      `${appended.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const records: unknown[] = [];
+    let cursor = seed;
+    do {
+      const range = await index.readAppendRange('append-child', cursor);
+      records.push(...range.records);
+      cursor = range.nextCursor;
+      if (range.records.length === 0) break;
+      if (!range.hasMore) break;
+    } while (records.length < appended.length);
+    expect(records.map((entry) => (entry as { id?: string }).id)).toEqual(
+      appended.map((entry) => entry.id),
+    );
+    const partial = JSON.stringify({
+      type: 'message',
+      id: 'partial',
+      message: { role: 'user', content: 'later' },
+    });
+    await appendFile(file, partial, 'utf8');
+    const waiting = await index.readAppendRange('append-child', cursor);
+    expect(waiting.records).toEqual([]);
+    expect(waiting.nextCursor).toEqual(cursor);
+    await appendFile(file, '\n', 'utf8');
+    const completed = await index.readAppendRange('append-child', cursor);
+    expect(completed.records).toEqual([
+      expect.objectContaining({ id: 'partial' }),
+    ]);
+  });
+
+  it('uses an exact empty source cut and tolerates malformed historical lines during seeding', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-seed-policy-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'seed-child', cwd: '/tmp' })}\n{malformed}\n${JSON.stringify({ type: 'message', id: 'seed-message', message: { role: 'assistant', content: 'seed' } })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    await expect(index.readAppendCursor('seed-child')).resolves.toMatchObject({
+      ordinal: 3,
+    });
+    const stat = await fs.stat(file);
+    const page = await index.readEntries('seed-child', undefined, undefined, {
+      sourceCursor: {
+        version: 1,
+        dev: stat.dev,
+        ino: stat.ino,
+        ordinal: 0,
+        byteOffset: 0,
+        prefixHash:
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      },
+    });
+    expect(page.entries).toEqual([]);
+  });
+
+  it('keeps an exact-cut snapshot on its validated descriptor after pathname replacement', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-exact-cut-replacement-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    const header = { type: 'session', id: 'exact-cut-child', cwd: '/tmp' };
+    await writeFile(
+      file,
+      `${JSON.stringify(header)}\n${JSON.stringify({ type: 'message', id: 'original', message: { role: 'assistant', content: 'original' } })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const sourceCursor = await index.readAppendCursor('exact-cut-child');
+    const internals = index as unknown as {
+      validateAuxiliaryCursor: (...args: never[]) => Promise<unknown>;
+    };
+    const originalValidate = internals.validateAuxiliaryCursor;
+    const replacement = `${file}.old`;
+    const validateSpy = vi
+      .spyOn(internals, 'validateAuxiliaryCursor')
+      .mockImplementation(async (...args) => {
+        const result = await originalValidate.apply(index, args);
+        await rename(file, replacement);
+        await writeFile(
+          file,
+          `${JSON.stringify(header)}\n${JSON.stringify({ type: 'message', id: 'replacement', message: { role: 'assistant', content: 'replacement' } })}\n`,
+        );
+        return result;
+      });
+    try {
+      const snapshot = await index.readEntries(
+        'exact-cut-child',
+        undefined,
+        undefined,
+        { sourceCursor },
+      );
+      expect(snapshot.entries).toEqual([
+        header,
+        expect.objectContaining({ id: 'original' }),
+      ]);
+    } finally {
+      validateSpy.mockRestore();
+    }
+  });
+
+  it('rejects same-inode rewrites beyond the old probe before appending', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-exact-rewrite-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    const entries = [
+      { type: 'session', id: 'exact-rewrite-child', cwd: '/tmp' },
+      ...Array.from({ length: 1_500 }, (_, index) => ({
+        type: 'message',
+        id: `stable-${index}`,
+        message: { role: 'assistant', content: 'x'.repeat(160) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const cursor = await index.readAppendCursor('exact-rewrite-child');
+    expect(cursor.byteOffset).toBeGreaterThan(64 * 1024);
+    const rewritten = Buffer.from(await readFile(file));
+    rewritten[70 * 1024] ^= 1;
+    await writeFile(file, rewritten);
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'after-rewrite', message: { role: 'assistant', content: 'after' } })}\n`,
+    );
+    await expect(
+      index.readAppendRange('exact-rewrite-child', cursor),
+    ).rejects.toMatchObject({ reason: 'source-rewrite' });
+  });
+
+  it('reuses one exact prefix hash across a bounded backlog', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-hash-backlog-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'hash-backlog-child', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const cursor = await index.readAppendCursor('hash-backlog-child');
+    await appendFile(
+      file,
+      `${Array.from({ length: 2_000 }, (_, index) =>
+        JSON.stringify({
+          type: 'message',
+          id: `backlog-${index}`,
+          message: { role: 'assistant', content: 'x'.repeat(1_200) },
+        }),
+      ).join('\n')}\n`,
+    );
+    const internals = index as unknown as {
+      hashAuxiliaryPrefix: (...args: never[]) => Promise<unknown>;
+    };
+    const hashSpy = vi.spyOn(internals, 'hashAuxiliaryPrefix');
+    let next = cursor;
+    for (;;) {
+      const range = await index.readAppendRange('hash-backlog-child', next);
+      next = range.nextCursor;
+      if (!range.hasMore) break;
+    }
+    const hashCalls = hashSpy.mock.calls.length;
+    hashSpy.mockRestore();
+    expect(hashCalls).toBe(1);
+  });
+
+  it('fails closed when a watcher generation changes during a cached continuation', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-generation-race-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'generation-race-child', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const seed = await index.readAppendCursor('generation-race-child');
+    await appendFile(
+      file,
+      `${Array.from({ length: 700 }, (_, ordinal) =>
+        JSON.stringify({
+          type: 'message',
+          id: `generation-${ordinal}`,
+          message: { role: 'assistant', content: 'x'.repeat(1_200) },
+        }),
+      ).join('\n')}\n`,
+    );
+    const first = await index.readAppendRange('generation-race-child', seed);
+    expect(first.hasMore).toBe(true);
+    const internals = index as unknown as {
+      markAuxiliarySourceDirty: (file: string) => void;
+    };
+    const originalOpen = fs.open.bind(fs);
+    const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const handle = await originalOpen(...args);
+      if (String(args[0]) !== file) return handle;
+      const originalStat = handle.stat.bind(handle);
+      let calls = 0;
+      vi.spyOn(handle, 'stat').mockImplementation(async (...statArgs) => {
+        const result = await originalStat(...statArgs);
+        calls += 1;
+        if (calls === 2) internals.markAuxiliarySourceDirty(file);
+        return result;
+      });
+      return handle;
+    });
+    try {
+      await expect(
+        index.readAppendRange('generation-race-child', first.nextCursor),
+      ).rejects.toMatchObject({ reason: 'source-rewrite' });
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it('fails closed when the source mutates during exact prefix validation', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-validation-race-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    const entries = [
+      { type: 'session', id: 'validation-race-child', cwd: '/tmp' },
+      ...Array.from({ length: 1_500 }, (_, index) => ({
+        type: 'message',
+        id: `stable-${index}`,
+        message: { role: 'assistant', content: 'x'.repeat(160) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const cursor = await index.readAppendCursor('validation-race-child');
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'race-append', message: { role: 'assistant', content: 'append' } })}\n`,
+    );
+    const internals = index as unknown as {
+      hashAuxiliaryPrefix: (
+        handle: unknown,
+        byteOffset: number,
+      ) => Promise<unknown>;
+    };
+    const originalHash = internals.hashAuxiliaryPrefix;
+    const hashSpy = vi
+      .spyOn(internals, 'hashAuxiliaryPrefix')
+      .mockImplementation(async (handle, byteOffset) => {
+        await appendFile(
+          file,
+          `${JSON.stringify({ type: 'message', id: 'race-during-validation', message: { role: 'assistant', content: 'race' } })}\n`,
+        );
+        return originalHash.call(index, handle, byteOffset);
+      });
+    try {
+      await expect(
+        index.readAppendRange('validation-race-child', cursor),
+      ).rejects.toBeInstanceOf(AuxiliaryAppendError);
+    } finally {
+      hashSpy.mockRestore();
+    }
+  });
+
+  it('resets auxiliary append cursors on truncation, rewrite, and malformed lines', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-append-recovery-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'recovery-child', cwd: '/tmp' })}\n${JSON.stringify({ type: 'message', id: 'stable', message: { role: 'user', content: 'stable' } })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const seed = await index.readAppendCursor('recovery-child');
+    await writeFile(file, 'rewritten\n', 'utf8');
+    await expect(
+      index.readAppendRange('recovery-child', seed),
+    ).rejects.toBeInstanceOf(AuxiliaryAppendError);
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'recovery-child', cwd: '/tmp' })}\n${JSON.stringify({ type: 'message', id: 'stable', message: { role: 'user', content: 'stable' } })}\n`,
+    );
+    await index.refresh();
+    const current = await index.readAppendCursor('recovery-child');
+    await appendFile(file, '{malformed}\n', 'utf8');
+    await expect(
+      index.readAppendRange('recovery-child', current),
+    ).rejects.toMatchObject({
+      reason: 'source-malformed',
+    });
+  });
+
   it('rejects auxiliary session symlinks that escape the configured root', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-auxiliary-symlink-'),
@@ -606,6 +961,62 @@ describe('session index', () => {
     } finally {
       scheduleIndex.mockRestore();
       rebuild.mockRestore();
+    }
+  });
+
+  it('publishes auxiliary watcher changes only after marking the source generation', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-watcher-order-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'watcher-order-child', cwd: '/tmp' })}\n`,
+    );
+    let resolveChange!: () => void;
+    const changed = new Promise<void>((resolve) => {
+      resolveChange = resolve;
+    });
+    const index = new SessionIndex(
+      sessions,
+      undefined,
+      () => resolveChange(),
+      delegates,
+    );
+    await index.start();
+    const hashSpy = vi.spyOn(
+      index as unknown as {
+        hashAuxiliaryPrefix: (...args: never[]) => Promise<unknown>;
+      },
+      'hashAuxiliaryPrefix',
+    );
+    try {
+      const cursor = await index.readAppendCursor('watcher-order-child');
+      await appendFile(
+        file,
+        `${JSON.stringify({ type: 'message', id: 'watcher-entry', message: { role: 'assistant', content: 'watcher' } })}\n`,
+      );
+      await Promise.race([
+        changed,
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(
+            () => reject(new Error('Auxiliary watcher did not publish.')),
+            2_000,
+          ),
+        ),
+      ]);
+      const range = await index.readAppendRange('watcher-order-child', cursor);
+      expect(range.records).toEqual([
+        expect.objectContaining({ id: 'watcher-entry' }),
+      ]);
+      expect(hashSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      hashSpy.mockRestore();
+      index.close();
     }
   });
 

@@ -640,22 +640,35 @@ function mergeTool(
   const previous = items[payload.toolCallId];
   // Finished and errored entities are terminal. In particular, a duplicate
   // finished event must not replace an earlier result or error.
-  if (previous && isFinished(previous)) return projection;
+  if (
+    previous &&
+    isFinished(previous) &&
+    !(
+      previous.kind === 'tool' &&
+      previous.result === undefined &&
+      payload.result !== undefined
+    )
+  )
+    return projection;
   const previousTool = previous?.kind === 'tool' ? previous : undefined;
   const status: TranscriptEntityStatus =
     payload.isError === true ||
     payload.status === 'error' ||
     payload.status === 'failed'
       ? 'error'
-      : phase === 'finished' ||
-          payload.status === 'complete' ||
-          payload.status === 'completed' ||
-          payload.status === 'finished' ||
-          payload.status === 'success'
-        ? 'finished'
-        : phase === 'started'
-          ? 'pending'
-          : 'running';
+      : payload.status === 'pending'
+        ? 'pending'
+        : payload.status === 'running'
+          ? 'running'
+          : phase === 'finished' ||
+              payload.status === 'complete' ||
+              payload.status === 'completed' ||
+              payload.status === 'finished' ||
+              payload.status === 'success'
+            ? 'finished'
+            : phase === 'started'
+              ? 'pending'
+              : 'running';
   const owner = findToolOwner(projection, items, payload);
   const timestamp =
     payload.timestamp ?? previousTool?.timestamp ?? owner?.item.timestamp;
@@ -731,8 +744,9 @@ export function applyTranscriptEvent(
   if (!state.sessionId && eventSession)
     state = { ...state, sessionId: eventSession };
   if (event.type === 'session.compacted') {
-    if (!isRecord(event.entry)) return { state, accepted: true };
-    const id = persistedEntryId(event.entry);
+    const id =
+      event.entryId ??
+      (isRecord(event.entry) ? persistedEntryId(event.entry) : undefined);
     if (!id) return { state, accepted: true };
     return {
       state: {
@@ -853,6 +867,10 @@ function isSteeringMarkerEntry(entry: Record<string, unknown>): boolean {
   );
 }
 
+export function isPersistedSteeringMarker(value: unknown): boolean {
+  return isSteeringMarkerEntry(isRecord(value) ? value : {});
+}
+
 function steeringMarkerData(
   entry: Record<string, unknown>,
 ): { timestamp: number | string; text: string } | undefined {
@@ -934,6 +952,8 @@ export function hydrateTranscript(
     fallbackEntryIds?: boolean;
     /** Absolute logical entry ordinal used for page-local fallback identities. */
     fallbackEntryOffset?: number;
+    /** A marker at the end of a prior bounded range may prefix this range. */
+    steeringMarkers?: readonly unknown[];
   } = {},
 ): TranscriptProjection {
   let projection = createTranscriptProjection(sessionId);
@@ -941,7 +961,10 @@ export function hydrateTranscript(
   const fallbackEntryId = (index: number) =>
     `entry-${(options.fallbackEntryOffset ?? 0) + index}`;
   const order = [...projection.order];
-  const markedSteeringMarkers = steeringMarkers(entries);
+  const markedSteeringMarkers = steeringMarkers([
+    ...(options.steeringMarkers ?? []),
+    ...entries,
+  ]);
   entries.forEach((raw, index) => {
     if (!isRecord(raw)) {
       const id = fallbackEntryId(index);
@@ -1149,6 +1172,108 @@ export function hydrateTranscript(
   };
   return projection;
 }
+
+/**
+ * Convert durable Pi entries to the same normalized lifecycle vocabulary as
+ * the runtime bridge. The projector deliberately hydrates the bounded source
+ * range instead of keeping a second semantic baseline, so IDs, marker parity,
+ * toolResult folding, embedded-tool chronology, and entry-N fallbacks stay
+ * aligned with hydrateTranscript.
+ */
+export function persistedEntryToTranscriptEvents(
+  raw: unknown,
+  sessionId: string,
+  options: {
+    fallbackEntryOffset?: number;
+    steeringMarkers?: readonly unknown[];
+  } = {},
+): BridgeEvent[] {
+  return persistedEntriesToTranscriptEvents([raw], sessionId, options);
+}
+
+export function persistedEntriesToTranscriptEvents(
+  entries: readonly unknown[],
+  sessionId: string,
+  options: {
+    fallbackEntryOffset?: number;
+    steeringMarkers?: readonly unknown[];
+  } = {},
+): BridgeEvent[] {
+  const projection = hydrateTranscript(entries, sessionId, {
+    fallbackEntryIds: true,
+    fallbackEntryOffset: options.fallbackEntryOffset,
+    steeringMarkers: options.steeringMarkers,
+  });
+  const events: BridgeEvent[] = [];
+  for (const id of projection.order) {
+    const item = projection.items[id];
+    if (!item) continue;
+    if (item.kind === 'message') {
+      const message = {
+        messageId: item.messageId,
+        role: item.role,
+        content: item.content,
+        ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
+        ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        ...(item.toolCallIds === undefined
+          ? {}
+          : { toolCallIds: [...item.toolCallIds] }),
+        ...(item.deliveryMode === undefined
+          ? {}
+          : { data: { deliveryMode: item.deliveryMode } }),
+        phase: 'finished' as const,
+      };
+      if (!tryParseNormalizedMessagePayload(message))
+        throw new Error(
+          'Persisted message cannot be represented as a live event.',
+        );
+      events.push({
+        type: 'message.finished',
+        sessionId,
+        message,
+      } as BridgeEvent);
+      continue;
+    }
+    if (item.kind === 'tool') {
+      const status =
+        item.status === 'streaming'
+          ? 'running'
+          : item.status === 'finished'
+            ? 'finished'
+            : item.status;
+      const tool = {
+        toolCallId: item.toolCallId,
+        name: item.name || 'tool',
+        ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
+        ...(item.result === undefined ? {} : { result: item.result }),
+        ...(item.isError === undefined ? {} : { isError: item.isError }),
+        ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
+        status,
+        ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        ...(item.data === undefined ? {} : { data: item.data }),
+        phase: 'finished' as const,
+      };
+      if (!tryParseNormalizedToolPayload(tool))
+        throw new Error(
+          'Persisted tool cannot be represented as a live event.',
+        );
+      events.push({
+        type: 'tool.finished',
+        sessionId,
+        tool,
+      } as BridgeEvent);
+      continue;
+    }
+    events.push({
+      type: 'session.compacted',
+      sessionId,
+      entry: item.raw,
+      entryId: item.id,
+    } as BridgeEvent);
+  }
+  return events;
+}
+
 export const hydrateTranscriptProjection = hydrateTranscript;
 
 const NON_RENDERED_PI_ENTRY_TYPES = new Set([
