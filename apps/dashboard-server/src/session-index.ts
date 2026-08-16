@@ -409,16 +409,23 @@ export class SessionIndex {
     file: string,
     stat: import('node:fs').Stats,
     cursor: AuxiliarySourceCursor,
-  ): Promise<void> {
+    providedHandle?: AuxiliaryFileHandle,
+  ): Promise<AuxiliarySourceMetadata> {
     this.validateAuxiliaryCursorShape(stat, cursor);
     const generation = this.appendGenerations.get(file) ?? 0;
     const key = cursorKey(cursor);
     const cached = this.appendStates.get(file);
-    const handle = await fs.open(file, 'r').catch(() => undefined);
-    if (!handle) throw new AuxiliaryAppendError('source-truncated');
+    let handle = providedHandle;
+    let ownsHandle = false;
+    if (!handle) {
+      handle = await fs.open(file, 'r').catch(() => undefined);
+      if (!handle) throw new AuxiliaryAppendError('source-truncated');
+      ownsHandle = true;
+    }
     try {
       const before = await handle.stat();
       this.validateAuxiliaryCursorShape(before, cursor);
+      const beforeMetadata = auxiliarySourceMetadata(before);
       if (
         cached?.cursorKey === key &&
         cached.generation === generation &&
@@ -427,7 +434,12 @@ export class SessionIndex {
         const after = await handle.stat();
         if (!sameAuxiliarySourceMetadata(cached.source, after))
           throw new AuxiliaryAppendError('source-rewrite');
-        return;
+        if ((this.appendGenerations.get(file) ?? 0) !== generation)
+          throw new AuxiliaryAppendError(
+            'source-rewrite',
+            'Auxiliary source changed while validating its cursor.',
+          );
+        return cached.source;
       }
       const prefix = await this.hashAuxiliaryPrefix(handle, cursor.byteOffset);
       if (
@@ -439,17 +451,60 @@ export class SessionIndex {
           'Auxiliary session source prefix changed.',
         );
       const after = await handle.stat();
-      if (!sameAuxiliarySourceMetadata(auxiliarySourceMetadata(before), after))
+      if (!sameAuxiliarySourceMetadata(beforeMetadata, after))
         throw new AuxiliaryAppendError('source-rewrite');
+      if ((this.appendGenerations.get(file) ?? 0) !== generation)
+        throw new AuxiliaryAppendError(
+          'source-rewrite',
+          'Auxiliary source changed while validating its cursor.',
+        );
       this.appendStates.set(file, {
         cursorKey: key,
         generation,
         hash: prefix.hash.copy(),
-        source: auxiliarySourceMetadata(before),
+        source: beforeMetadata,
       });
+      return beforeMetadata;
     } finally {
-      await handle.close().catch(() => undefined);
+      if (ownsHandle) await handle.close().catch(() => undefined);
     }
+  }
+
+  private async verifyAuxiliaryHandleStable(
+    file: string,
+    handle: AuxiliaryFileHandle,
+    expected: AuxiliarySourceMetadata,
+  ): Promise<void> {
+    const current = await handle.stat();
+    if (current.dev !== expected.dev || current.ino !== expected.ino)
+      throw new AuxiliaryAppendError(
+        'source-replaced',
+        'Auxiliary session file identity changed while reading.',
+      );
+    if (current.size < expected.size)
+      throw new AuxiliaryAppendError(
+        'source-truncated',
+        'Auxiliary session file was truncated while reading.',
+      );
+    const pathStat = await fs.stat(file).catch(() => undefined);
+    const pathWasReplaced =
+      pathStat === undefined ||
+      pathStat.dev !== expected.dev ||
+      pathStat.ino !== expected.ino;
+    // An atomic rename changes ctime on the old inode, but the descriptor still
+    // points at the validated bytes. Permit that known pathname replacement
+    // only when size and mtime remain stable; in-place writes still fail closed.
+    if (
+      pathWasReplaced &&
+      current.size === expected.size &&
+      current.mtimeMs === expected.mtimeMs
+    )
+      return;
+    if (!sameAuxiliarySourceMetadata(expected, current))
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Auxiliary session file changed while reading.',
+      );
   }
 
   private validateAuxiliaryCursorShape(
@@ -722,6 +777,11 @@ export class SessionIndex {
         'source-truncated',
         'Auxiliary session file was truncated while reading.',
       );
+    if ((this.appendGenerations.get(file) ?? 0) !== generation)
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Auxiliary source changed while reading its append range.',
+      );
     const prefixHash = hash.copy().digest('hex');
     const nextCursor: AuxiliarySourceCursor = {
       version: 1,
@@ -737,6 +797,13 @@ export class SessionIndex {
       hash: hash.copy(),
       source: auxiliarySourceMetadata(before),
     });
+    if ((this.appendGenerations.get(file) ?? 0) !== generation) {
+      this.appendStates.delete(file);
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Auxiliary source changed while accepting its append range.',
+      );
+    }
     return {
       records,
       nextCursor,
@@ -744,11 +811,34 @@ export class SessionIndex {
     };
   }
 
+  private async *readHandleChunks(
+    handle: AuxiliaryFileHandle,
+    end: number,
+  ): AsyncGenerator<Buffer> {
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    while (position < end) {
+      const length = Math.min(buffer.length, end - position);
+      const { bytesRead } = await handle.read(buffer, 0, length, position);
+      if (bytesRead === 0) return;
+      yield Buffer.from(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+  }
+
   private sourceReadStream(
     file: string,
     sourceCursor: AuxiliarySourceCursor | undefined,
+    sourceHandle?: AuxiliaryFileHandle,
   ): import('node:stream').Readable {
     if (sourceCursor?.byteOffset === 0) return Readable.from([]);
+    if (sourceHandle && sourceCursor) {
+      const input = Readable.from(
+        this.readHandleChunks(sourceHandle, sourceCursor.byteOffset),
+      );
+      input.setEncoding('utf8');
+      return input;
+    }
     return createReadStream(file, {
       encoding: 'utf8',
       ...(sourceCursor === undefined
@@ -775,200 +865,243 @@ export class SessionIndex {
     const indexed = this.files.get(id);
     if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
       throw new Error('Unknown session.');
-    const stat = await fs.stat(indexed.file).catch(() => undefined);
-    if (!stat) throw new Error('Unknown session.');
     const sourceCursor = options.sourceCursor;
-    if (sourceCursor !== undefined)
-      await this.validateAuxiliaryCursor(indexed.file, stat, sourceCursor);
-    const readStat =
-      sourceCursor === undefined
-        ? stat
-        : Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
-            size: sourceCursor.byteOffset,
-          });
-    const cursor =
-      before === undefined ? undefined : decodeHistoryCursor(before);
-    const requestedLeafId = leafId ?? cursor?.leafId;
-    if (
-      cursor &&
-      (cursor.sessionId !== id ||
-        cursor.file !== indexed.file ||
-        cursor.dev !== stat.dev ||
-        cursor.ino !== stat.ino ||
-        stat.size < cursor.size ||
-        cursor.leafId !== requestedLeafId)
-    )
-      throw new Error('Stale history cursor.');
-    const upperBound = cursor?.before;
-    const metadata = this.publicEntry(indexed);
-    if (requestedLeafId !== undefined || options.resolveLatestLeaf) {
-      const resolveLatestLeaf =
-        options.resolveLatestLeaf === true && requestedLeafId === undefined;
-      const publicBranchResult = (
-        result: Awaited<ReturnType<SessionIndex['readBranchEntries']>>,
-      ) => {
-        const {
-          leafId: _leafId,
-          entriesTruncated: _entriesTruncated,
-          ...response
-        } = result;
-        return response;
-      };
-      if (!resolveLatestLeaf)
-        return publicBranchResult(
-          await this.readBranchEntries(
-            id,
-            indexed.file,
-            readStat,
-            metadata,
-            requestedLeafId,
-            cursor,
-            false,
-            undefined,
-            undefined,
-            sourceCursor,
-          ),
+    let sourceHandle: AuxiliaryFileHandle | undefined;
+    let sourceMetadata: AuxiliarySourceMetadata | undefined;
+    let stat: import('node:fs').Stats;
+    try {
+      if (sourceCursor !== undefined) {
+        sourceHandle = await fs.open(indexed.file, 'r').catch(() => undefined);
+        if (!sourceHandle) throw new Error('Unknown session.');
+        stat = await sourceHandle.stat();
+        sourceMetadata = await this.validateAuxiliaryCursor(
+          indexed.file,
+          stat,
+          sourceCursor,
+          sourceHandle,
         );
-      let latestStat = stat;
-      for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
-        try {
+      } else {
+        const diskStat = await fs.stat(indexed.file).catch(() => undefined);
+        if (!diskStat) throw new Error('Unknown session.');
+        stat = diskStat;
+      }
+      const readStat =
+        sourceCursor === undefined
+          ? stat
+          : Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+              size: sourceCursor.byteOffset,
+            });
+      const cursor =
+        before === undefined ? undefined : decodeHistoryCursor(before);
+      const requestedLeafId = leafId ?? cursor?.leafId;
+      if (
+        cursor &&
+        (cursor.sessionId !== id ||
+          cursor.file !== indexed.file ||
+          cursor.dev !== stat.dev ||
+          cursor.ino !== stat.ino ||
+          stat.size < cursor.size ||
+          cursor.leafId !== requestedLeafId)
+      )
+        throw new Error('Stale history cursor.');
+      const upperBound = cursor?.before;
+      const metadata = this.publicEntry(indexed);
+      if (requestedLeafId !== undefined || options.resolveLatestLeaf) {
+        const resolveLatestLeaf =
+          options.resolveLatestLeaf === true && requestedLeafId === undefined;
+        const publicBranchResult = (
+          result: Awaited<ReturnType<SessionIndex['readBranchEntries']>>,
+        ) => {
+          const {
+            leafId: _leafId,
+            entriesTruncated: _entriesTruncated,
+            ...response
+          } = result;
+          return response;
+        };
+        if (!resolveLatestLeaf)
           return publicBranchResult(
             await this.readBranchEntries(
               id,
               indexed.file,
-              sourceCursor === undefined ? latestStat : readStat,
+              readStat,
               metadata,
-              undefined,
+              requestedLeafId,
               cursor,
-              true,
+              false,
               undefined,
               undefined,
               sourceCursor,
+              sourceHandle,
+              sourceMetadata,
             ),
           );
-        } catch (error) {
-          if (
-            !(error instanceof SessionFileChangedError) ||
-            attempt === LATEST_LEAF_READ_ATTEMPTS - 1
-          )
-            throw error;
-          const refreshed = await fs.stat(indexed.file).catch(() => undefined);
-          if (!refreshed) throw new Error('Unknown session.');
-          latestStat = refreshed;
-        }
-      }
-      throw new Error('Unable to resolve the latest session branch.');
-    }
-    type PageEntry = {
-      ordinal: number;
-      entry: unknown;
-      prefixHash: string;
-      bytes: number;
-    };
-    const page: PageEntry[] = [];
-    let pageBytes = 0;
-    let ordinal = 0;
-    // The seen hash validates a cursor before its page has necessarily filled
-    // the budget. Each retained entry snapshots the hash before its ordinal,
-    // so nextBefore needs no retained original serialization.
-    const seenHasher = createHash('sha256');
-    let reachedUpperBound = false;
-    const input = this.sourceReadStream(indexed.file, sourceCursor);
-    const lines = readline.createInterface({
-      input,
-      crlfDelay: Number.POSITIVE_INFINITY,
-    });
-    try {
-      for await (const line of lines) {
-        if (!line.trim()) continue;
-        if (upperBound !== undefined && ordinal === upperBound) {
-          reachedUpperBound = true;
-          break;
-        }
-        if (Buffer.byteLength(line) > 24 * 1024 * 1024)
-          throw new Error('A session entry is too large to open remotely.');
-        try {
-          const entry = redactImageData(JSON.parse(line) as unknown);
-          const serialized = JSON.stringify(entry);
-          const originalBytes = Buffer.byteLength(serialized);
-          const outputEntry =
-            originalBytes > HISTORY_PAGE_BYTES
-              ? {
-                  type: 'history_omission',
-                  ...(isRecord(entry) && typeof entry.id === 'string'
-                    ? { id: entry.id }
-                    : {}),
-                  ...(isRecord(entry) && typeof entry.type === 'string'
-                    ? { originalType: entry.type }
-                    : {}),
-                  reason: 'entry-exceeds-page-budget',
-                  originalBytes,
-                }
-              : entry;
-          const prefixHash = seenHasher.copy().digest('hex');
-          updateHistoryHash(seenHasher, serialized);
-          // Omission markers are tiny, but their source entry still consumes a
-          // page slot so a multi-megabyte history remains pageable.
-          const budgetBytes = Math.min(originalBytes, HISTORY_PAGE_BYTES);
-          page.push({
-            ordinal,
-            entry: outputEntry,
-            prefixHash,
-            bytes: budgetBytes,
-          });
-          pageBytes += budgetBytes;
-          while (pageBytes > HISTORY_PAGE_BYTES && page.length > 1) {
-            const shifted = page.shift();
-            if (!shifted) break;
-            pageBytes -= shifted.bytes;
+        let latestStat = stat;
+        for (
+          let attempt = 0;
+          attempt < LATEST_LEAF_READ_ATTEMPTS;
+          attempt += 1
+        ) {
+          try {
+            return publicBranchResult(
+              await this.readBranchEntries(
+                id,
+                indexed.file,
+                sourceCursor === undefined ? latestStat : readStat,
+                metadata,
+                undefined,
+                cursor,
+                true,
+                undefined,
+                undefined,
+                sourceCursor,
+                sourceHandle,
+                sourceMetadata,
+              ),
+            );
+          } catch (error) {
+            if (
+              !(error instanceof SessionFileChangedError) ||
+              attempt === LATEST_LEAF_READ_ATTEMPTS - 1
+            )
+              throw error;
+            const refreshed = await fs
+              .stat(indexed.file)
+              .catch(() => undefined);
+            if (!refreshed) throw new Error('Unknown session.');
+            latestStat = refreshed;
           }
-          ordinal += 1;
-        } catch (error) {
-          if (error instanceof SyntaxError) continue;
-          throw error;
+        }
+        throw new Error('Unable to resolve the latest session branch.');
+      }
+      type PageEntry = {
+        ordinal: number;
+        entry: unknown;
+        prefixHash: string;
+        bytes: number;
+      };
+      const page: PageEntry[] = [];
+      let pageBytes = 0;
+      let ordinal = 0;
+      // The seen hash validates a cursor before its page has necessarily filled
+      // the budget. Each retained entry snapshots the hash before its ordinal,
+      // so nextBefore needs no retained original serialization.
+      const seenHasher = createHash('sha256');
+      let reachedUpperBound = false;
+      const input = this.sourceReadStream(
+        indexed.file,
+        sourceCursor,
+        sourceHandle,
+      );
+      const lines = readline.createInterface({
+        input,
+        crlfDelay: Number.POSITIVE_INFINITY,
+      });
+      try {
+        for await (const line of lines) {
+          if (!line.trim()) continue;
+          if (upperBound !== undefined && ordinal === upperBound) {
+            reachedUpperBound = true;
+            break;
+          }
+          if (Buffer.byteLength(line) > 24 * 1024 * 1024)
+            throw new Error('A session entry is too large to open remotely.');
+          try {
+            const entry = redactImageData(JSON.parse(line) as unknown);
+            const serialized = JSON.stringify(entry);
+            const originalBytes = Buffer.byteLength(serialized);
+            const outputEntry =
+              originalBytes > HISTORY_PAGE_BYTES
+                ? {
+                    type: 'history_omission',
+                    ...(isRecord(entry) && typeof entry.id === 'string'
+                      ? { id: entry.id }
+                      : {}),
+                    ...(isRecord(entry) && typeof entry.type === 'string'
+                      ? { originalType: entry.type }
+                      : {}),
+                    reason: 'entry-exceeds-page-budget',
+                    originalBytes,
+                  }
+                : entry;
+            const prefixHash = seenHasher.copy().digest('hex');
+            updateHistoryHash(seenHasher, serialized);
+            // Omission markers are tiny, but their source entry still consumes a
+            // page slot so a multi-megabyte history remains pageable.
+            const budgetBytes = Math.min(originalBytes, HISTORY_PAGE_BYTES);
+            page.push({
+              ordinal,
+              entry: outputEntry,
+              prefixHash,
+              bytes: budgetBytes,
+            });
+            pageBytes += budgetBytes;
+            while (pageBytes > HISTORY_PAGE_BYTES && page.length > 1) {
+              const shifted = page.shift();
+              if (!shifted) break;
+              pageBytes -= shifted.bytes;
+            }
+            ordinal += 1;
+          } catch (error) {
+            if (error instanceof SyntaxError) continue;
+            throw error;
+          }
+        }
+      } finally {
+        lines.close();
+        input.destroy();
+      }
+      if (upperBound !== undefined && ordinal === upperBound)
+        reachedUpperBound = true;
+      if (
+        upperBound !== undefined &&
+        (!reachedUpperBound ||
+          seenHasher.copy().digest('hex') !== cursor?.prefixHash)
+      )
+        throw new Error('Stale history cursor.');
+      const end = upperBound ?? ordinal;
+      const start = page[0]?.ordinal ?? end;
+      const hasOlder = start > 0;
+      const nextBefore = hasOlder
+        ? encodeHistoryCursor({
+            version: 1,
+            sessionId: id,
+            file: indexed.file,
+            dev: stat.dev,
+            ino: stat.ino,
+            size: readStat.size,
+            prefixHash: page[0]?.prefixHash ?? seenHasher.copy().digest('hex'),
+            before: start,
+          })
+        : undefined;
+      const entriesComplete = before === undefined && start === 0;
+      return {
+        metadata,
+        entries: page.map((item) => item.entry),
+        entriesComplete,
+        history: {
+          version: 1,
+          start,
+          end,
+          hasOlder,
+          ...(nextBefore === undefined ? {} : { nextBefore }),
+        },
+        ...(sourceCursor === undefined ? {} : { sourceCursor }),
+      };
+    } finally {
+      if (sourceHandle) {
+        try {
+          if (sourceMetadata)
+            await this.verifyAuxiliaryHandleStable(
+              indexed.file,
+              sourceHandle,
+              sourceMetadata,
+            );
+        } finally {
+          await sourceHandle.close().catch(() => undefined);
         }
       }
-    } finally {
-      lines.close();
-      input.destroy();
     }
-    if (upperBound !== undefined && ordinal === upperBound)
-      reachedUpperBound = true;
-    if (
-      upperBound !== undefined &&
-      (!reachedUpperBound ||
-        seenHasher.copy().digest('hex') !== cursor?.prefixHash)
-    )
-      throw new Error('Stale history cursor.');
-    const end = upperBound ?? ordinal;
-    const start = page[0]?.ordinal ?? end;
-    const hasOlder = start > 0;
-    const nextBefore = hasOlder
-      ? encodeHistoryCursor({
-          version: 1,
-          sessionId: id,
-          file: indexed.file,
-          dev: stat.dev,
-          ino: stat.ino,
-          size: readStat.size,
-          prefixHash: page[0]?.prefixHash ?? seenHasher.copy().digest('hex'),
-          before: start,
-        })
-      : undefined;
-    const entriesComplete = before === undefined && start === 0;
-    return {
-      metadata,
-      entries: page.map((item) => item.entry),
-      entriesComplete,
-      history: {
-        version: 1,
-        start,
-        end,
-        hasOlder,
-        ...(nextBefore === undefined ? {} : { nextBefore }),
-      },
-      ...(sourceCursor === undefined ? {} : { sourceCursor }),
-    };
   }
 
   /**
@@ -985,41 +1118,76 @@ export class SessionIndex {
     const indexed = this.files.get(id);
     if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
       throw new Error('Unknown session.');
-    const stat = await fs.stat(indexed.file).catch(() => undefined);
-    if (!stat) throw new Error('Unknown session.');
-    const metadata = this.publicEntry(indexed);
-    let latestStat = stat;
-    for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
-      try {
-        const result = await this.readBranchEntries(
-          id,
+    const sourceCursor = options.sourceCursor;
+    let sourceHandle: AuxiliaryFileHandle | undefined;
+    let sourceMetadata: AuxiliarySourceMetadata | undefined;
+    let stat: import('node:fs').Stats;
+    try {
+      if (sourceCursor !== undefined) {
+        sourceHandle = await fs.open(indexed.file, 'r').catch(() => undefined);
+        if (!sourceHandle) throw new Error('Unknown session.');
+        stat = await sourceHandle.stat();
+        sourceMetadata = await this.validateAuxiliaryCursor(
           indexed.file,
-          latestStat,
-          metadata,
-          leafId,
-          undefined,
-          options.resolveLatestLeaf === true && leafId === undefined,
-          selector,
-          options.projectEntry,
+          stat,
+          sourceCursor,
+          sourceHandle,
         );
-        return {
-          metadata: result.metadata,
-          entries: result.entries,
-          ...(result.leafId === undefined ? {} : { leafId: result.leafId }),
-          entriesTruncated: result.entriesTruncated,
-        };
-      } catch (error) {
-        if (
-          !(error instanceof SessionFileChangedError) ||
-          attempt === LATEST_LEAF_READ_ATTEMPTS - 1
-        )
-          throw error;
-        const refreshed = await fs.stat(indexed.file).catch(() => undefined);
-        if (!refreshed) throw new Error('Unknown session.');
-        latestStat = refreshed;
+      } else {
+        const diskStat = await fs.stat(indexed.file).catch(() => undefined);
+        if (!diskStat) throw new Error('Unknown session.');
+        stat = diskStat;
+      }
+      const metadata = this.publicEntry(indexed);
+      let latestStat = stat;
+      for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
+        try {
+          const result = await this.readBranchEntries(
+            id,
+            indexed.file,
+            latestStat,
+            metadata,
+            leafId,
+            undefined,
+            options.resolveLatestLeaf === true && leafId === undefined,
+            selector,
+            options.projectEntry,
+            sourceCursor,
+            sourceHandle,
+            sourceMetadata,
+          );
+          return {
+            metadata: result.metadata,
+            entries: result.entries,
+            ...(result.leafId === undefined ? {} : { leafId: result.leafId }),
+            entriesTruncated: result.entriesTruncated,
+          };
+        } catch (error) {
+          if (
+            !(error instanceof SessionFileChangedError) ||
+            attempt === LATEST_LEAF_READ_ATTEMPTS - 1
+          )
+            throw error;
+          const refreshed = await fs.stat(indexed.file).catch(() => undefined);
+          if (!refreshed) throw new Error('Unknown session.');
+          latestStat = refreshed;
+        }
+      }
+      throw new Error('Unable to resolve the latest session branch.');
+    } finally {
+      if (sourceHandle) {
+        try {
+          if (sourceMetadata)
+            await this.verifyAuxiliaryHandleStable(
+              indexed.file,
+              sourceHandle,
+              sourceMetadata,
+            );
+        } finally {
+          await sourceHandle.close().catch(() => undefined);
+        }
       }
     }
-    throw new Error('Unable to resolve the latest session branch.');
   }
 
   /**
@@ -1038,6 +1206,8 @@ export class SessionIndex {
     selector?: SelectedBranchEntrySelector,
     projectEntry?: SelectedBranchEntryProjector,
     sourceCursor?: AuxiliarySourceCursor,
+    sourceHandle?: AuxiliaryFileHandle,
+    sourceMetadata?: AuxiliarySourceMetadata,
   ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
@@ -1051,7 +1221,23 @@ export class SessionIndex {
     let headerSeen = false;
     let latestEntryId: string | undefined;
     let sourceOrdinal = 0;
-    const firstPassInput = this.sourceReadStream(file, sourceCursor);
+    const verifyPassStability = async (): Promise<void> => {
+      if (sourceHandle && sourceMetadata) {
+        await this.verifyAuxiliaryHandleStable(
+          file,
+          sourceHandle,
+          sourceMetadata,
+        );
+        return;
+      }
+      if (resolveLatestLeaf)
+        await verifySessionFileVersion(file, stat, sourceCursor !== undefined);
+    };
+    const firstPassInput = this.sourceReadStream(
+      file,
+      sourceCursor,
+      sourceHandle,
+    );
     const firstPassLines = readline.createInterface({
       input: firstPassInput,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -1088,8 +1274,7 @@ export class SessionIndex {
     // The first pass chooses the leaf and the second pass materializes its
     // ancestry. A concurrent append between them must force a fresh leaf
     // resolution rather than returning a page for the old file version.
-    if (resolveLatestLeaf)
-      await verifySessionFileVersion(file, stat, sourceCursor !== undefined);
+    await verifyPassStability();
     const resolvedLeafId = resolveLatestLeaf ? latestEntryId : leafId;
     if (!headerSeen) throw new Error('Invalid session branch.');
 
@@ -1137,7 +1322,11 @@ export class SessionIndex {
     let reachedUpperBound = false;
     const seenHasher = createHash('sha256');
     const upperBound = cursor?.before;
-    const secondPassInput = this.sourceReadStream(file, sourceCursor);
+    const secondPassInput = this.sourceReadStream(
+      file,
+      sourceCursor,
+      sourceHandle,
+    );
     const secondPassLines = readline.createInterface({
       input: secondPassInput,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -1236,8 +1425,7 @@ export class SessionIndex {
       secondPassLines.close();
       secondPassInput.destroy();
     }
-    if (resolveLatestLeaf)
-      await verifySessionFileVersion(file, stat, sourceCursor !== undefined);
+    await verifyPassStability();
     if (upperBound !== undefined && branchOrdinal === upperBound)
       reachedUpperBound = true;
     if (

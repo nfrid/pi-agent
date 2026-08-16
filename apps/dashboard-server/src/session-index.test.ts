@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -635,6 +636,55 @@ describe('session index', () => {
     expect(page.entries).toEqual([]);
   });
 
+  it('keeps an exact-cut snapshot on its validated descriptor after pathname replacement', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-exact-cut-replacement-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    const header = { type: 'session', id: 'exact-cut-child', cwd: '/tmp' };
+    await writeFile(
+      file,
+      `${JSON.stringify(header)}\n${JSON.stringify({ type: 'message', id: 'original', message: { role: 'assistant', content: 'original' } })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const sourceCursor = await index.readAppendCursor('exact-cut-child');
+    const internals = index as unknown as {
+      validateAuxiliaryCursor: (...args: never[]) => Promise<unknown>;
+    };
+    const originalValidate = internals.validateAuxiliaryCursor;
+    const replacement = `${file}.old`;
+    const validateSpy = vi
+      .spyOn(internals, 'validateAuxiliaryCursor')
+      .mockImplementation(async (...args) => {
+        const result = await originalValidate.apply(index, args);
+        await rename(file, replacement);
+        await writeFile(
+          file,
+          `${JSON.stringify(header)}\n${JSON.stringify({ type: 'message', id: 'replacement', message: { role: 'assistant', content: 'replacement' } })}\n`,
+        );
+        return result;
+      });
+    try {
+      const snapshot = await index.readEntries(
+        'exact-cut-child',
+        undefined,
+        undefined,
+        { sourceCursor },
+      );
+      expect(snapshot.entries).toEqual([
+        header,
+        expect.objectContaining({ id: 'original' }),
+      ]);
+    } finally {
+      validateSpy.mockRestore();
+    }
+  });
+
   it('rejects same-inode rewrites beyond the old probe before appending', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-auxiliary-exact-rewrite-'),
@@ -711,6 +761,60 @@ describe('session index', () => {
     const hashCalls = hashSpy.mock.calls.length;
     hashSpy.mockRestore();
     expect(hashCalls).toBe(1);
+  });
+
+  it('fails closed when a watcher generation changes during a cached continuation', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-generation-race-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'generation-race-child', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const seed = await index.readAppendCursor('generation-race-child');
+    await appendFile(
+      file,
+      `${Array.from({ length: 700 }, (_, ordinal) =>
+        JSON.stringify({
+          type: 'message',
+          id: `generation-${ordinal}`,
+          message: { role: 'assistant', content: 'x'.repeat(1_200) },
+        }),
+      ).join('\n')}\n`,
+    );
+    const first = await index.readAppendRange('generation-race-child', seed);
+    expect(first.hasMore).toBe(true);
+    const internals = index as unknown as {
+      markAuxiliarySourceDirty: (file: string) => void;
+    };
+    const originalOpen = fs.open.bind(fs);
+    const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const handle = await originalOpen(...args);
+      if (String(args[0]) !== file) return handle;
+      const originalStat = handle.stat.bind(handle);
+      let calls = 0;
+      vi.spyOn(handle, 'stat').mockImplementation(async (...statArgs) => {
+        const result = await originalStat(...statArgs);
+        calls += 1;
+        if (calls === 2) internals.markAuxiliarySourceDirty(file);
+        return result;
+      });
+      return handle;
+    });
+    try {
+      await expect(
+        index.readAppendRange('generation-race-child', first.nextCursor),
+      ).rejects.toMatchObject({ reason: 'source-rewrite' });
+    } finally {
+      openSpy.mockRestore();
+    }
   });
 
   it('fails closed when the source mutates during exact prefix validation', async () => {
@@ -857,6 +961,62 @@ describe('session index', () => {
     } finally {
       scheduleIndex.mockRestore();
       rebuild.mockRestore();
+    }
+  });
+
+  it('publishes auxiliary watcher changes only after marking the source generation', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-watcher-order-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'watcher-order-child', cwd: '/tmp' })}\n`,
+    );
+    let resolveChange!: () => void;
+    const changed = new Promise<void>((resolve) => {
+      resolveChange = resolve;
+    });
+    const index = new SessionIndex(
+      sessions,
+      undefined,
+      () => resolveChange(),
+      delegates,
+    );
+    await index.start();
+    const hashSpy = vi.spyOn(
+      index as unknown as {
+        hashAuxiliaryPrefix: (...args: never[]) => Promise<unknown>;
+      },
+      'hashAuxiliaryPrefix',
+    );
+    try {
+      const cursor = await index.readAppendCursor('watcher-order-child');
+      await appendFile(
+        file,
+        `${JSON.stringify({ type: 'message', id: 'watcher-entry', message: { role: 'assistant', content: 'watcher' } })}\n`,
+      );
+      await Promise.race([
+        changed,
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(
+            () => reject(new Error('Auxiliary watcher did not publish.')),
+            2_000,
+          ),
+        ),
+      ]);
+      const range = await index.readAppendRange('watcher-order-child', cursor);
+      expect(range.records).toEqual([
+        expect.objectContaining({ id: 'watcher-entry' }),
+      ]);
+      expect(hashSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      hashSpy.mockRestore();
+      index.close();
     }
   });
 

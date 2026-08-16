@@ -1133,11 +1133,13 @@ export class DashboardServerImpl implements DashboardServer {
           // Commit only after every record in this range has been published.
           current.cursor = range.nextCursor;
           if (range.records.length > 0) {
-            const last = range.records.at(-1);
-            current.pendingSteeringMarkers =
-              last !== undefined && isPersistedSteeringMarker(last)
-                ? [last]
-                : [];
+            let suffixStart = range.records.length;
+            while (
+              suffixStart > 0 &&
+              isPersistedSteeringMarker(range.records[suffixStart - 1])
+            )
+              suffixStart -= 1;
+            current.pendingSteeringMarkers = range.records.slice(suffixStart);
           }
           if (range.hasMore && range.records.length > 0) current.dirty = true;
         } catch (error) {
