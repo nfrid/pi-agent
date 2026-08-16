@@ -657,19 +657,66 @@ describe('remote event normalization', () => {
     ).toEqual([{ type: 'text', text: 'authoritative' }]);
   });
 
-  it('does not append provider thinking deltas to visible assistant text', () => {
+  it('publishes completed thinking lines while retaining the partial tail', () => {
     const normalizer = new LiveEventNormalizer('runtime-thinking');
     normalizer.normalizeMessage('started', {
-      message: { role: 'assistant', content: '' },
+      message: { role: 'assistant', content: [] },
     });
+    normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'thinking_start',
+        contentIndex: 0,
+      },
+    });
+
     expect(
       normalizer.normalizeMessage('updated', {
         assistantMessageEvent: {
           type: 'thinking_delta',
-          delta: 'private reasoning',
+          contentIndex: 0,
+          delta: '**Inspect',
         },
       }).content,
-    ).toBe('');
+    ).toEqual([]);
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: 'ing the runtime**\n**Checking',
+        },
+      }).content,
+    ).toEqual([{ type: 'thinking', thinking: '**Inspecting the runtime**\n' }]);
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: ' tests**\nUnfinished',
+        },
+      }).content,
+    ).toEqual([
+      {
+        type: 'thinking',
+        thinking: '**Inspecting the runtime**\n**Checking tests**\n',
+      },
+    ]);
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'thinking_end',
+          contentIndex: 0,
+          content:
+            '**Inspecting the runtime**\n**Checking tests**\nUnfinished title',
+        },
+      }).content,
+    ).toEqual([
+      {
+        type: 'thinking',
+        thinking:
+          '**Inspecting the runtime**\n**Checking tests**\nUnfinished title',
+      },
+    ]);
   });
 
   it('uses Pi toolCallId and preserves direct tool execution fields', () => {

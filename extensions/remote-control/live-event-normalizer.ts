@@ -168,14 +168,34 @@ function textEventContent(
   );
 }
 
+function thinkingBlockAt(content: unknown, contentIndex: number): string {
+  const block = textBlockAt(content, contentIndex);
+  if (!block || typeof block !== 'object' || Array.isArray(block)) return '';
+  const thinking = (block as Record<string, unknown>).thinking;
+  return typeof thinking === 'string' ? thinking : '';
+}
+
+function setThinkingBlock(
+  content: unknown,
+  contentIndex: number,
+  thinking: string,
+): unknown {
+  const next = Array.isArray(content) ? [...content] : [];
+  next[contentIndex] = { type: 'thinking', thinking };
+  return next;
+}
+
 /**
- * Apply only the visible-text cases from Pi's AssistantMessageEvent union.
- * Thinking and tool-call streams are deliberately not transcript text; the
+ * Apply visible text immediately, but expose thinking only through its latest
+ * completed newline. GPT-family models use these lines as public activity
+ * titles; retaining the trailing fragment avoids streaming partial titles.
+ * Tool-call streams remain separate from assistant transcript content, and the
  * message_end wrapper remains the authoritative final assistant message.
  */
 function applyAssistantMessageEvent(
   previous: unknown,
   event: AssistantMessageEvent,
+  pendingThinking: Map<number, string>,
 ): unknown {
   switch (event.type) {
     case 'text_start':
@@ -195,8 +215,25 @@ function applyAssistantMessageEvent(
         'end',
       );
     case 'thinking_start':
-    case 'thinking_delta':
+      pendingThinking.set(event.contentIndex, '');
+      return previous;
+    case 'thinking_delta': {
+      const buffered = `${pendingThinking.get(event.contentIndex) ?? ''}${event.delta}`;
+      const boundary = buffered.lastIndexOf('\n');
+      if (boundary < 0) {
+        pendingThinking.set(event.contentIndex, buffered);
+        return previous;
+      }
+      pendingThinking.set(event.contentIndex, buffered.slice(boundary + 1));
+      return setThinkingBlock(
+        previous,
+        event.contentIndex,
+        `${thinkingBlockAt(previous, event.contentIndex)}${buffered.slice(0, boundary + 1)}`,
+      );
+    }
     case 'thinking_end':
+      pendingThinking.delete(event.contentIndex);
+      return setThinkingBlock(previous, event.contentIndex, event.content);
     case 'toolcall_start':
     case 'toolcall_delta':
     case 'toolcall_end':
@@ -215,7 +252,12 @@ function applyAssistantMessageEvent(
 export class LiveEventNormalizer {
   private identitySequence = 0;
   private activeMessage:
-    | { messageId: string; identityKey?: string; content?: unknown }
+    | {
+        messageId: string;
+        identityKey?: string;
+        content?: unknown;
+        pendingThinking: Map<number, string>;
+      }
     | undefined;
   private readonly activeToolNames = new Map<string, string>();
 
@@ -253,7 +295,11 @@ export class LiveEventNormalizer {
       messageId = identityKey
         ? identityKey
         : `${this.runtimeEpoch}:${++this.identitySequence}`;
-      this.activeMessage = { messageId, identityKey };
+      this.activeMessage = {
+        messageId,
+        identityKey,
+        pendingThinking: new Map(),
+      };
     } else if (this.activeMessage) {
       // A responseId is often only present on the final message wrapper. The
       // live ID established by start remains authoritative for this stream.
@@ -285,6 +331,7 @@ export class LiveEventNormalizer {
       rawContent = applyAssistantMessageEvent(
         rawContent,
         assistantEventValue as AssistantMessageEvent,
+        this.activeMessage?.pendingThinking ?? new Map(),
       );
     }
     const safeContent = jsonSafe(rawContent, MAX_FRAME_BYTES);
