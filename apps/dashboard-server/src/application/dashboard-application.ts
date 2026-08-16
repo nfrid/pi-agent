@@ -568,6 +568,11 @@ function delegateJobIds(value: unknown): readonly string[] | undefined {
   return ids.length > 0 ? [...new Set(ids)].sort() : undefined;
 }
 
+function backgroundTerminalId(value: unknown): string | undefined {
+  const id = record(value)?.id;
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
 function persistedCustomMessage(
   item: TranscriptItem,
 ): Record<string, unknown> | undefined {
@@ -598,6 +603,11 @@ function samePersistedCustomMessage(
     String(activeTimestamp) === String(persistedTimestamp)
   )
     return true;
+  if (persisted.customType === 'background-terminal-result') {
+    const activeId = backgroundTerminalId(record(data?.details));
+    const persistedId = backgroundTerminalId(persisted.details);
+    return activeId !== undefined && activeId === persistedId;
+  }
   if (persisted.customType !== 'delegate-job-result') return false;
   const activeJobIds = delegateJobIds(record(data?.details));
   const persistedJobIds = delegateJobIds(record(persisted.details));
