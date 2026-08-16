@@ -303,6 +303,41 @@ describe('registerTodoContext', () => {
     }
   });
 
+  it('persists a replacement reset when inactive state changes', () => {
+    store = createTaskStore();
+    mutate(store, 'add', { action: 'add', id: 'T1', text: 'finish me' });
+    const handlers = registeredContext();
+    const activeStart = handlers.get('before_agent_start')?.() as {
+      message: { content: string };
+    };
+    let history: TodoContextMessages = [
+      snapshot(activeStart.message.content, 1),
+    ];
+
+    mutate(store, 'done', { action: 'done', id: 'T1' });
+    const completedReset = handlers.get('before_agent_start')?.() as {
+      message: { content: string };
+    };
+    history = [...history, snapshot(completedReset.message.content, 2)];
+    handlers.get('context')?.({ messages: history });
+
+    mutate(store, 'remove', { action: 'remove', id: 'T1' });
+    const emptyReset = handlers.get('before_agent_start')?.() as {
+      message: { content: string };
+    };
+    expect(emptyReset.message.content).not.toBe(completedReset.message.content);
+    history = [...history, snapshot(emptyReset.message.content, 3)];
+    const replaced = handlers.get('context')?.({ messages: history }) as {
+      messages: TodoContextMessages;
+    };
+    expect(replaced.messages.filter(isSnapshot)).toHaveLength(1);
+    expect(handlers.get('before_agent_start')?.()).toBeUndefined();
+    const unchanged = handlers.get('context')?.({ messages: history }) as {
+      messages: TodoContextMessages;
+    };
+    expect(unchanged.messages.filter(isSnapshot)).toHaveLength(1);
+  });
+
   it('recovers active state after compaction/tree recovery', () => {
     store = createTaskStore();
     mutate(store, 'add', { action: 'add', text: 'recover me' });

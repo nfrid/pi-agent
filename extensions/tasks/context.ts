@@ -112,14 +112,14 @@ export function transformTodoContext(
 export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
   let needsRecovery = false;
   let hasTodoHistory = false;
-  let emptyResetPersisted = false;
+  let persistedEmptySnapshot: string | undefined;
 
   const hasActiveTasks = () => store.state.tasks.some(unfinished);
 
   pi.on('session_start', () => {
     needsRecovery = false;
     hasTodoHistory = store.state.tasks.length > 0;
-    emptyResetPersisted = false;
+    persistedEmptySnapshot = undefined;
   });
   pi.on('session_compact', () => {
     needsRecovery = true;
@@ -129,19 +129,20 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
   });
   pi.on('before_agent_start', () => {
     const active = hasActiveTasks();
+    const snapshot = turnSnapshotText(store);
     if (active) {
       hasTodoHistory = true;
-      emptyResetPersisted = false;
+      persistedEmptySnapshot = undefined;
       needsRecovery = false;
     } else if (!hasTodoHistory) {
       needsRecovery = false;
       return undefined;
-    } else if (!emptyResetPersisted) {
-      // Persist one reset after the state transitions from used to empty.
-      emptyResetPersisted = true;
+    } else if (persistedEmptySnapshot !== snapshot) {
+      // Persist one reset for each distinct inactive state, then reuse it.
+      persistedEmptySnapshot = snapshot;
       needsRecovery = false;
     } else {
-      // A persisted reset is already in history. Let context handle recovery
+      // A matching reset is already in history. Let context handle recovery
       // if compaction/tree restoration requested it, but do not emit a new
       // byte-identical before-agent snapshot.
       return undefined;
@@ -149,7 +150,7 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
     return {
       message: {
         customType: TODO_SNAPSHOT_TYPE,
-        content: turnSnapshotText(store),
+        content: snapshot,
         display: false,
       },
     };
@@ -158,7 +159,7 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
     const active = hasActiveTasks();
     if (active) {
       hasTodoHistory = true;
-      emptyResetPersisted = false;
+      persistedEmptySnapshot = undefined;
     }
     if (
       event.messages.some(
@@ -186,6 +187,12 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
       if (!active && message.role === 'custom' && message.content === snapshot)
         newestEmptySnapshotIndex = index;
     }
+    if (
+      !active &&
+      newestEmptySnapshotIndex === newestSnapshotIndex &&
+      newestEmptySnapshotIndex >= 0
+    )
+      persistedEmptySnapshot = snapshot;
     const input = active
       ? event.messages
       : event.messages.filter(
