@@ -1516,6 +1516,8 @@ export const SessionHistorySchema = Type.Object(
     end: Type.Integer({ minimum: 0 }),
     hasOlder: Type.Boolean(),
     nextBefore: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+    /** The first returned entry continues an activity group on an older page. */
+    leadingContinuation: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

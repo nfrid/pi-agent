@@ -1,6 +1,7 @@
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import {
   type TranscriptEntry as ActivityTranscriptEntry,
+  activityEntryFromRaw,
   describeTools,
   headersOf,
   isNarration,
@@ -691,7 +692,13 @@ export function toTranscriptEntries(
       ...(item.preparing ? { preparing: true } : {}),
     });
   }
-  return result;
+  // Grouping boundaries are owned by activity-model for both persisted raw
+  // entries and the domain projection. Keep all presentation fields above,
+  // but replace the boundary payload with the canonical raw mapping.
+  return result.map((item) => ({
+    ...item,
+    entry: activityEntryFromRaw(item.raw),
+  }));
 }
 
 /** Compatibility helper retained for consumers with raw tool entries. */

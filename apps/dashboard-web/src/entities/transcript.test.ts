@@ -964,6 +964,8 @@ Note: Earlier attempt completed after recovery.`,
     expect(assistant?.entry).toMatchObject({
       title: 'Inspecting the workspace',
       titleKind: 'preamble',
+      streaming: true,
+      speaks: false,
     });
     expect(assistant?.preparing).toBeUndefined();
     expect(
@@ -978,7 +980,7 @@ Note: Earlier attempt completed after recovery.`,
     ).toBe(true);
     expect(
       projectActivityGroups(items.map(({ entry }) => entry))[0]?.status,
-    ).toBe('live');
+    ).toBe('preparing');
   });
 
   it('normalizes historical Pi toolResult messages out of order', () => {

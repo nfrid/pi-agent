@@ -308,6 +308,7 @@ describe('dashboard protocol', () => {
         end: 20,
         hasOlder: true,
         nextBefore: 'opaque-token',
+        leadingContinuation: true,
       },
     };
     expect(parseSessionApiResponse(response).history).toEqual(response.history);

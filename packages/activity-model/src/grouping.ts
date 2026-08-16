@@ -225,6 +225,27 @@ export interface ActivityGroup {
   end: number;
 }
 
+/** The canonical boundary around an entry at a page edge. */
+export interface ActivityGroupBoundary {
+  /** Index of the owning assistant preamble, when one is present. */
+  start: number;
+  /** Index of the group's last entry. */
+  end: number;
+}
+
+/**
+ * Find the group owning an entry. This is intentionally derived from
+ * `groupTranscript`, rather than a pagination-specific heuristic.
+ */
+export function owningActivityGroupBoundary(
+  entries: readonly TranscriptEntry[],
+  index: number,
+): ActivityGroupBoundary | undefined {
+  return groupTranscript(entries).find(
+    (group) => group.start <= index && group.end >= index,
+  );
+}
+
 /**
  * Break a transcript into activity groups.
  *

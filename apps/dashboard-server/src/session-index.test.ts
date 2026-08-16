@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, writeFileSync } from 'node:fs';
 import {
   appendFile,
   mkdir,
@@ -12,7 +12,14 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { AuxiliaryAppendError, SessionIndex } from './session-index.js';
+import {
+  AuxiliaryAppendError,
+  HISTORY_OVERSCAN_BYTES,
+  HISTORY_OVERSCAN_ENTRIES,
+  HISTORY_PAGE_BYTES,
+  HISTORY_PAGE_ENTRIES,
+  SessionIndex,
+} from './session-index.js';
 
 describe('session index', () => {
   it('refreshes workspace ownership and removes deleted session files', async () => {
@@ -1021,6 +1028,338 @@ describe('session index', () => {
       hashSpy.mockRestore();
       index.close();
     }
+  });
+
+  it('bounds group overscan by bytes and entries when the owner is distant', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-overscan-'),
+    );
+    const file = path.join(root, 'overscan.jsonl');
+    const entries: Record<string, unknown>[] = [
+      { type: 'session', id: 'overscan-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'preamble',
+        parentId: null,
+        message: {
+          role: 'assistant',
+          toolCallIds: ['tool-0'],
+          content: [{ type: 'text', text: 'Inspecting the large batch.' }],
+        },
+      },
+      ...Array.from({ length: 300 }, (_, index) => ({
+        type: 'tool',
+        id: `tool-${index}`,
+        parentId: index === 0 ? 'preamble' : `tool-${index - 1}`,
+        tool: { name: 'read', arguments: { path: 'x'.repeat(2_800) } },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    const page = await index.readEntries('overscan-id', undefined, 'tool-299');
+    expect(page.history.leadingContinuation).toBe(true);
+    expect(page.history.start).toBeGreaterThan(1);
+    expect(page.entries.length).toBeLessThanOrEqual(
+      HISTORY_PAGE_ENTRIES + HISTORY_OVERSCAN_ENTRIES,
+    );
+    expect(JSON.stringify(page.entries).length).toBeLessThanOrEqual(
+      HISTORY_PAGE_BYTES + HISTORY_OVERSCAN_BYTES + 10_000,
+    );
+  });
+
+  it('pages sparse pinned branches once and ignores off-branch appends', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sparse-branch-'),
+    );
+    const file = path.join(root, 'sparse.jsonl');
+    const entries: Record<string, unknown>[] = [
+      { type: 'session', id: 'sparse-id', cwd: '/tmp' },
+    ];
+    let parentId: string | null = null;
+    const selectedIds: string[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      const selectedId = `selected-${index}`;
+      selectedIds.push(selectedId);
+      entries.push({
+        type: 'message',
+        id: selectedId,
+        parentId,
+        message: { role: 'user', content: 's'.repeat(100_000) },
+      });
+      entries.push({
+        type: 'message',
+        id: `off-${index}`,
+        parentId: null,
+        message: { role: 'user', content: 'o'.repeat(100_000) },
+      });
+      parentId = selectedId;
+    }
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    const first = await index.readEntries('sparse-id', undefined, 'selected-9');
+    const pages = [first.entries];
+    let page = first;
+    while (page.history.hasOlder) {
+      page = await index.readEntries('sparse-id', page.history.nextBefore);
+      pages.unshift(page.entries);
+    }
+    expect(
+      pages
+        .flat()
+        .map((entry) => (entry as { id?: string }).id)
+        .filter((id): id is string => id !== undefined),
+    ).toEqual(['sparse-id', ...selectedIds]);
+    expect(
+      pages
+        .flat()
+        .some((entry) =>
+          String((entry as { id?: string }).id).startsWith('off-'),
+        ),
+    ).toBe(false);
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'off-after', parentId: null, message: { role: 'user', content: 'off' } })}\n`,
+    );
+    const after = await index.readEntries(
+      'sparse-id',
+      first.history.nextBefore,
+    );
+    expect(
+      after.entries.some((entry) =>
+        (entry as { id?: string }).id?.startsWith('off-'),
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps ordinary and pinned-branch cursors valid across an EOF newline append', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-eof-cursor-'),
+    );
+    const file = path.join(root, 'eof.jsonl');
+    const entries: Record<string, unknown>[] = [
+      { type: 'session', id: 'eof-id', cwd: '/tmp' },
+    ];
+    let parentId: string | null = null;
+    for (let index = 0; index < 12; index += 1) {
+      const id = `eof-entry-${index}`;
+      entries.push({
+        type: 'message',
+        id,
+        parentId,
+        message: { role: 'user', content: 'x'.repeat(100_000) },
+      });
+      parentId = id;
+    }
+    await writeFile(
+      file,
+      entries.map((entry) => JSON.stringify(entry)).join('\n'),
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    const ordinary = await index.readEntries('eof-id');
+    const branch = await index.readEntries('eof-id', undefined, 'eof-entry-11');
+    expect(ordinary.history.nextBefore).toBeTruthy();
+    expect(branch.history.nextBefore).toBeTruthy();
+    const ordinaryBefore = await index.readEntries(
+      'eof-id',
+      ordinary.history.nextBefore,
+    );
+    const branchBefore = await index.readEntries(
+      'eof-id',
+      branch.history.nextBefore,
+    );
+    await appendFile(
+      file,
+      `\n${JSON.stringify({
+        type: 'message',
+        id: 'off-branch-after-eof',
+        parentId: null,
+        message: { role: 'user', content: 'off branch' },
+      })}\n`,
+    );
+    const ordinaryAfter = await index.readEntries(
+      'eof-id',
+      ordinary.history.nextBefore,
+    );
+    const branchAfter = await index.readEntries(
+      'eof-id',
+      branch.history.nextBefore,
+    );
+    expect(ordinaryAfter.entries).toEqual(ordinaryBefore.entries);
+    expect(branchAfter.entries).toEqual(branchBefore.entries);
+  });
+
+  it('builds indexes with bounded source chunks rather than whole-file reads', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-index-chunks-'),
+    );
+    const file = path.join(root, 'chunks.jsonl');
+    await writeFile(
+      file,
+      `${[
+        { type: 'session', id: 'chunks-id', cwd: '/tmp' },
+        ...Array.from({ length: 12 }, (_, index) => ({
+          type: 'message',
+          id: `chunk-${index}`,
+          message: { role: 'user', content: 'x'.repeat(40_000) },
+        })),
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    let maxPending = 0;
+    const readFileSpy = vi.spyOn(fs, 'readFile');
+    const index = new SessionIndex(
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (bytes) => {
+        maxPending = Math.max(maxPending, bytes);
+      },
+    );
+    try {
+      await index.rebuild();
+      expect(readFileSpy).not.toHaveBeenCalled();
+      expect(maxPending).toBeLessThanOrEqual(32 * 1024 * 1024 + 64 * 1024);
+      expect(index.get('chunks-id')).toBeDefined();
+    } finally {
+      readFileSpy.mockRestore();
+    }
+  });
+
+  it('reconstructs reverse pages from bounded descriptor reads and strict v2 cursors', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-indexed-pages-'),
+    );
+    const file = path.join(root, 'indexed.jsonl');
+    const entries = [
+      { type: 'session', id: 'indexed-id', cwd: '/tmp' },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        type: 'message',
+        id: `entry-${index}`,
+        message: { role: 'user', content: 'x'.repeat(150_000) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    let page = await index.readEntries('indexed-id');
+    const pages = [page.entries.map((entry) => (entry as { id?: string }).id)];
+    const firstCursor = page.history.nextBefore;
+    expect(firstCursor).toBeTruthy();
+    while (page.history.hasOlder) {
+      index.resetHistoryReadBytes();
+      page = await index.readEntries('indexed-id', page.history.nextBefore);
+      expect(index.historyReadBytes).toBeLessThan(500_000);
+      pages.unshift(page.entries.map((entry) => (entry as { id?: string }).id));
+    }
+    expect(pages.flat()).toEqual(entries.map((entry) => entry.id));
+    if (!firstCursor) throw new Error('cursor missing');
+    const decoded = JSON.parse(
+      Buffer.from(firstCursor, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    const malformed = Buffer.from(
+      JSON.stringify({ ...decoded, extra: true }),
+      'utf8',
+    ).toString('base64url');
+    await expect(index.readEntries('indexed-id', malformed)).rejects.toThrow(
+      'Invalid history cursor',
+    );
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'new-entry', message: { role: 'user', content: 'new' } })}\n`,
+    );
+    const olderAfterAppend = await index.readEntries('indexed-id', firstCursor);
+    expect(
+      olderAfterAppend.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(pages.at(-2));
+    const rewritten = entries.map((entry, index) =>
+      index === 1
+        ? {
+            ...entry,
+            message: { role: 'user', content: 'y'.repeat(150_000) },
+          }
+        : entry,
+    );
+    writeFileSync(
+      file,
+      `${rewritten.map((entry) => JSON.stringify(entry)).join('\n')}\n${JSON.stringify({ type: 'message', id: 'new-entry', message: { role: 'user', content: 'new' } })}\n`,
+    );
+    await expect(index.readEntries('indexed-id', firstCursor)).rejects.toThrow(
+      'Stale history cursor',
+    );
+    const replacement = `${file}.replacement`;
+    await rename(file, replacement);
+    writeFileSync(
+      file,
+      `${rewritten.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    await expect(index.readEntries('indexed-id', firstCursor)).rejects.toThrow(
+      'Stale history cursor',
+    );
+  });
+
+  it('rejects a pinned cursor when rewrite and append race descriptor reads', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-read-race-'),
+    );
+    const file = path.join(root, 'race.jsonl');
+    const entries = [
+      { type: 'session', id: 'race-indexed-id', cwd: '/tmp' },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        type: 'message',
+        id: `race-entry-${index}`,
+        message: { role: 'user', content: 'x'.repeat(120_000) },
+      })),
+    ];
+    const source = () =>
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`;
+    await writeFile(file, source());
+    let mutate = false;
+    let mutated = false;
+    const index = new SessionIndex(
+      root,
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        if (!mutate || mutated) return;
+        mutated = true;
+        const rewritten = entries.map((entry, index) =>
+          index === 1
+            ? {
+                ...entry,
+                message: { role: 'user', content: 'y'.repeat(120_000) },
+              }
+            : entry,
+        );
+        writeFileSync(
+          file,
+          `${rewritten.map((entry) => JSON.stringify(entry)).join('\n')}\n${JSON.stringify({ type: 'message', id: 'race-appended', message: { role: 'user', content: 'append' } })}\n`,
+        );
+      },
+    );
+    await index.rebuild();
+    const recent = await index.readEntries('race-indexed-id');
+    expect(recent.history.nextBefore).toBeTruthy();
+    mutate = true;
+    await expect(
+      index.readEntries('race-indexed-id', recent.history.nextBefore),
+    ).rejects.toThrow('Stale history cursor');
+    expect(mutated).toBe(true);
   });
 
   it('fans file-watcher changes out to live snapshot observers', async () => {
