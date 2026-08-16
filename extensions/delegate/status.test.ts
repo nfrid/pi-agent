@@ -230,6 +230,50 @@ describe('delegate status store', () => {
     });
   });
 
+  test('publishes logical workflow attempts and metadata-only wake state', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('scheduled review');
+    const [id] = store.start([run], 'background');
+    store.setWorkflow(id, {
+      attempt: { logicalId: 'review', ordinal: 1, identity: 'review@1' },
+      logicalId: 'review',
+      ordinal: 1,
+      identity: 'review@1',
+      dependencies: ['impl@1'],
+      state: 'scheduled',
+      createdAt: 1,
+      scheduledAt: 1,
+      reason: 'waiting for impl@1',
+    } as never);
+    store.setWakes([
+      {
+        id: 'review-ready',
+        state: 'pending',
+        references: ['review@1'],
+        createdAt: 2,
+      } as never,
+    ]);
+
+    expect(store.list()[0]?.workflow).toMatchObject({
+      identity: 'review@1',
+      state: 'scheduled',
+      dependencies: ['impl@1'],
+      reason: 'waiting for impl@1',
+    });
+    expect(store.getWakes()).toEqual([
+      {
+        id: 'review-ready',
+        state: 'pending',
+        references: ['review@1'],
+        waitingFor: ['review@1'],
+        createdAt: 2,
+      },
+    ]);
+    expect(JSON.stringify(store.getWakes())).not.toMatch(
+      /handoff|report|payload|artifact|diagnostic|transcript/i,
+    );
+  });
+
   test('keeps the last activity that had content while the next one warms up', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');

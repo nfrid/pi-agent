@@ -33,10 +33,15 @@ function short(value: string, max = 180): string {
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
 }
 
+function workflowState(row: DelegateStatus): string {
+  return row.workflow?.state ?? row.state;
+}
+
 function stateLabel(value: string): string {
   const state = value.toLowerCase();
   if (state === 'running' || state === 'doing') return 'running';
-  if (state === 'queued' || state === 'todo') return 'queued';
+  if (state === 'queued' || state === 'todo' || state === 'scheduled')
+    return 'queued';
   if (state === 'success' || state === 'done' || state === 'completed')
     return 'done';
   if (state === 'aborted') return 'aborted';
@@ -97,13 +102,18 @@ function delegateRows(
 
 function delegateStats(rows: readonly DelegateStatus[]) {
   return {
-    running: rows.filter((row) => stateLabel(row.state) === 'running').length,
-    queued: rows.filter((row) => stateLabel(row.state) === 'queued').length,
-    done: rows.filter((row) => stateLabel(row.state) === 'done').length,
-    failed: rows.filter((row) =>
-      ['failed', 'blocked'].includes(stateLabel(row.state)),
+    running: rows.filter((row) => stateLabel(workflowState(row)) === 'running')
+      .length,
+    queued: rows.filter((row) =>
+      ['queued', 'scheduled'].includes(stateLabel(workflowState(row))),
     ).length,
-    aborted: rows.filter((row) => stateLabel(row.state) === 'aborted').length,
+    done: rows.filter((row) => stateLabel(workflowState(row)) === 'done')
+      .length,
+    failed: rows.filter((row) =>
+      ['failed', 'blocked'].includes(stateLabel(workflowState(row))),
+    ).length,
+    aborted: rows.filter((row) => stateLabel(workflowState(row)) === 'aborted')
+      .length,
   };
 }
 
@@ -125,6 +135,7 @@ function WorkSurface({
   title,
   label,
   summary,
+  summaryDetail,
   count,
   visibleCount,
   drawerClassName = 'surface-drawer work-surface-drawer',
@@ -135,6 +146,7 @@ function WorkSurface({
   title: string;
   label: string;
   summary: string;
+  summaryDetail?: ReactNode;
   count: ReactNode;
   visibleCount: number;
   drawerClassName?: string;
@@ -178,6 +190,7 @@ function WorkSurface({
               <span className="surface-count">{count}</span>
             </span>
             <strong>{summary}</strong>
+            {summaryDetail}
           </span>
           <span className="surface-chevron" aria-hidden="true">
             ›
@@ -213,6 +226,10 @@ export function delegateActivityLabel(
 ): string {
   if (pauseState === 'paused') return 'Paused at a safe boundary';
   if (pauseState === 'pausing') return 'Pausing at a safe boundary';
+  if (row.workflow?.waitingFor?.length)
+    return `waiting for ${row.workflow.waitingFor.join(', ')}`;
+  if (row.workflow?.state === 'blocked' && row.workflow.reason)
+    return `blocked: ${row.workflow.reason}`;
   if (row.activity?.latestText || row.activity?.label)
     return row.activity.latestText || row.activity.label;
   if (runState === 'queued') return 'waiting for a slot';
@@ -300,7 +317,7 @@ export function DelegateSurface({
   const active = rows.find(
     (row) =>
       row.pauseState !== undefined ||
-      ['running', 'queued'].includes(stateLabel(row.state)),
+      ['running', 'queued'].includes(stateLabel(workflowState(row))),
   );
   const summary = historyLoading
     ? 'Loading delegate history…'
@@ -318,7 +335,7 @@ export function DelegateSurface({
   const activeCount = rows.filter(
     (row) =>
       row.pauseState !== undefined ||
-      ['running', 'queued'].includes(stateLabel(row.state)),
+      ['running', 'queued'].includes(stateLabel(workflowState(row))),
   ).length;
   const finishedCount = rows.length - activeCount;
   const statsView = (
@@ -355,6 +372,17 @@ export function DelegateSurface({
         title={title}
         label="Delegates"
         summary={summary}
+        summaryDetail={
+          active?.workflow ? (
+            <small className="surface-summary-detail">
+              {active.workflow.identity} · {active.workflow.state}
+              {active.workflow.reason ? ` · ${active.workflow.reason}` : ''}
+              {model.wakes?.length
+                ? ` · wake ${model.wakes.map((wake) => `${wake.id} (${wake.state})`).join(', ')}`
+                : ''}
+            </small>
+          ) : undefined
+        }
         count={`${activeCount} active · ${finishedCount} finished`}
         visibleCount={
           rows.length +
@@ -377,6 +405,22 @@ export function DelegateSurface({
               available.
             </p>
           )}
+          {model.wakes && model.wakes.length > 0 && (
+            <section className="delegate-wakes" aria-label="Wake rules">
+              <h3 className="delegate-section-title">Wake rules</h3>
+              {model.wakes.map((wake) => (
+                <div className="delegate-wake-row" key={wake.id}>
+                  <strong>{wake.id}</strong>
+                  <span>{wake.state}</span>
+                  <small>
+                    {wake.waitingFor?.length
+                      ? `waiting for ${wake.waitingFor.join(', ')}`
+                      : wake.references.join(', ')}
+                  </small>
+                </div>
+              ))}
+            </section>
+          )}
           <div className="delegate-rows">
             {delegateSections.map(
               (section) =>
@@ -393,7 +437,8 @@ export function DelegateSurface({
                     )}
                     {section.groups.map((group: DelegateCompositeGroup) => {
                       const row = group.row;
-                      const runState = stateLabel(row.state);
+                      const rawState = workflowState(row);
+                      const runState = stateLabel(rawState);
                       const pauseState = row.pauseState;
                       const state = pauseState ?? runState;
                       const activityLabel = short(
@@ -406,8 +451,10 @@ export function DelegateSurface({
                       const access =
                         row.allowWrites === true ? 'read/write' : 'read-only';
                       const elapsedText = elapsed(
-                        row.startedAt ?? row.createdAt,
-                        row.finishedAt,
+                        row.workflow?.startedAt ??
+                          row.startedAt ??
+                          row.createdAt,
+                        row.workflow?.settledAt ?? row.finishedAt,
                         row.pausedAt ?? now,
                       );
                       return (
@@ -439,11 +486,14 @@ export function DelegateSurface({
                             </span>
                             <span className="delegate-row-main">
                               <strong>{name}</strong>
+                              {row.workflow?.identity && (
+                                <small>{row.workflow.identity}</small>
+                              )}
                               <small>{activityLabel}</small>
                             </span>
                             <span className="delegate-row-meta">
                               <span className="delegate-row-status">
-                                {state}
+                                {rawState}
                                 {elapsedText ? ` · ${elapsedText}` : ''}
                               </span>
                               <span className="delegate-row-properties">

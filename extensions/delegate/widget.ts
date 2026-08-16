@@ -39,6 +39,10 @@ export function formatElapsed(startedAt: number, now = Date.now()): string {
   return formatDuration(now - startedAt);
 }
 
+function effectiveState(status: DelegateStatusSnapshot): string {
+  return status.workflow?.state ?? status.state;
+}
+
 function elapsedTime(status: DelegateStatusSnapshot, now: number): string {
   const effectiveNow = status.pausedAt ?? now;
   if (status.runs)
@@ -55,7 +59,9 @@ function elapsedTime(status: DelegateStatusSnapshot, now: number): string {
   if (status.startedAt === undefined)
     return formatElapsed(effectiveNow, effectiveNow);
   const finished =
-    status.state === 'queued' || status.state === 'running'
+    effectiveState(status) === 'scheduled' ||
+    effectiveState(status) === 'queued' ||
+    effectiveState(status) === 'running'
       ? effectiveNow
       : (status.finishedAt ?? status.startedAt);
   return formatElapsed(status.startedAt, finished);
@@ -70,7 +76,15 @@ function stateStyle(status: DelegateStatusSnapshot): {
     return { icon: '||', detail: 'paused', color: 'warning' };
   if (status.pauseState === 'pausing')
     return { icon: '..', detail: 'pausing', color: 'warning' };
-  switch (status.state) {
+  switch (effectiveState(status)) {
+    case 'scheduled':
+      return {
+        icon: '○',
+        detail: status.workflow?.waitingFor?.length
+          ? `waiting for ${status.workflow.waitingFor.join(', ')}`
+          : 'scheduled',
+        color: 'muted',
+      };
     case 'queued':
       return { icon: '○', detail: 'queued', color: 'muted' };
     case 'running':
@@ -83,6 +97,18 @@ function stateStyle(status: DelegateStatusSnapshot): {
       return { icon: '◷', detail: 'timed out', color: 'warning' };
     case 'aborted':
       return { icon: '■', detail: 'aborted', color: 'muted' };
+    case 'cancelled':
+      return { icon: '−', detail: 'cancelled', color: 'muted' };
+    case 'blocked':
+      return {
+        icon: '!',
+        detail: status.workflow?.reason
+          ? `blocked: ${compact(status.workflow.reason)}`
+          : 'blocked',
+        color: 'error',
+      };
+    default:
+      return { icon: '○', detail: effectiveState(status), color: 'muted' };
   }
 }
 
@@ -113,6 +139,9 @@ function modeIndicator(
   theme: DelegateWidgetTheme,
 ): string {
   const parts = [
+    status.workflow?.identity
+      ? theme.fg('accent', compact(status.workflow.identity))
+      : '',
     status.route
       ? theme.fg(
           'toolTitle',
@@ -188,8 +217,13 @@ function actionContent(status: DelegateStatusSnapshot): string {
   if (status.pauseState === 'paused') return 'Paused at a safe boundary';
   if (status.pauseState === 'pausing') return 'Pausing at a safe boundary';
   const activity = status.activity;
+  if (status.workflow?.waitingFor?.length)
+    return `waiting for ${status.workflow.waitingFor.join(', ')}`;
   if (!activity)
-    return status.state === 'queued' ? 'waiting for a slot' : 'starting';
+    return effectiveState(status) === 'queued' ||
+      effectiveState(status) === 'scheduled'
+      ? 'waiting for a slot'
+      : 'starting';
   // A thinking block with no text yet is the very first activity of a run;
   // later ones fall back to the previous activity before reaching here.
   if (activity.type === 'thinking')
@@ -296,24 +330,31 @@ function placeBlock(lines: string[], width: number): string[] {
 }
 
 /** Rank for display: active work, failures, then successful history. */
-const STATE_RANK: Record<DelegateStatusSnapshot['state'], number> = {
+const STATE_RANK: Record<string, number> = {
   running: 0,
+  scheduled: 1,
   queued: 1,
   error: 2,
   'timed-out': 2,
   aborted: 2,
+  cancelled: 2,
+  blocked: 2,
   success: 3,
 };
 
 function isActive(status: DelegateStatusSnapshot): boolean {
-  return status.state === 'queued' || status.state === 'running';
+  const state = effectiveState(status);
+  return state === 'scheduled' || state === 'queued' || state === 'running';
 }
 
 function isFailure(status: DelegateStatusSnapshot): boolean {
+  const state = effectiveState(status);
   return (
-    status.state === 'error' ||
-    status.state === 'timed-out' ||
-    status.state === 'aborted'
+    state === 'error' ||
+    state === 'timed-out' ||
+    state === 'aborted' ||
+    state === 'cancelled' ||
+    state === 'blocked'
   );
 }
 
@@ -328,13 +369,13 @@ interface DisplayRows {
  */
 function forDisplay(statuses: readonly DelegateStatusSnapshot[]): DisplayRows {
   const ordered = [...statuses].sort(
-    (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state],
+    (a, b) => STATE_RANK[effectiveState(a)] - STATE_RANK[effectiveState(b)],
   );
   const active = ordered.filter(isActive);
   const terminal = statuses.filter((status) => !isActive(status));
   const successes = terminal
     .map((status, index) => ({ status, index }))
-    .filter(({ status }) => status.state === 'success');
+    .filter(({ status }) => effectiveState(status) === 'success');
   const newestSuccesses = [...successes]
     .sort(
       (a, b) =>
@@ -357,13 +398,13 @@ function forDisplay(statuses: readonly DelegateStatusSnapshot[]): DisplayRows {
 }
 
 function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
-  const count = (state: DelegateStatusSnapshot['state']) =>
-    statuses.filter((status) => status.state === state).length;
+  const count = (state: string) =>
+    statuses.filter((status) => effectiveState(status) === state).length;
   const running = count('running');
   const queued = count('queued');
   const failed = statuses.filter((status) => isFailure(status)).length;
   const completed = statuses.filter(
-    (status) => status.state === 'success',
+    (status) => effectiveState(status) === 'success',
   ).length;
   const parts = [
     running > 0 ? `${running} running` : '',

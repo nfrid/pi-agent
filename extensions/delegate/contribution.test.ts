@@ -49,10 +49,84 @@ describe('delegate live contribution', () => {
               status: 'valid',
               value: { outcome: 'done', details: ['complete'] },
             },
+            workflow: {
+              logicalId: 'review',
+              attempt: 1,
+              identity: 'review@1',
+              state: 'scheduled',
+              dependencies: ['impl@1'],
+              waitingFor: ['impl@1'],
+              reason: 'waiting for impl@1',
+              createdAt: 1,
+              scheduledAt: 1,
+            },
+          },
+        ],
+        wakes: [
+          {
+            id: 'review-ready',
+            state: 'pending',
+            references: ['review@1'],
+            waitingFor: ['review@1'],
+            createdAt: 1,
           },
         ],
       }),
     ).toBe(true);
+    expect(
+      Value.Check(DelegateStatusViewModelSchema, {
+        version: 1,
+        statuses: [
+          {
+            id: 'ds-1',
+            runId: 'run-1',
+            lineageId: 'lineage-1',
+            name: 'Review',
+            kind: 'foreground',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            workflow: {
+              logicalId: 'review',
+              attempt: 1,
+              identity: 'review@1',
+              state: 'blocked',
+              dependencies: [],
+              reason: 'missing input',
+              createdAt: 1,
+              scheduledAt: 1,
+            },
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(DelegateStatusViewModelSchema, {
+        version: 1,
+        statuses: [
+          {
+            id: 'ds-2',
+            runId: 'run-2',
+            lineageId: 'lineage-2',
+            name: 'Invalid workflow',
+            kind: 'background',
+            state: 'queued',
+            createdAt: 1,
+            allowWrites: false,
+            workflow: {
+              logicalId: 'review',
+              attempt: 1,
+              identity: 'review@1',
+              state: 'running',
+              dependencies: [],
+              report: 'must not be accepted',
+              createdAt: 1,
+              scheduledAt: 1,
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
     expect(
       Value.Check(DelegateStatusViewModelSchema, {
         version: 1,

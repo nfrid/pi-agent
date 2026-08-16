@@ -60,6 +60,14 @@ const lifecycleReasons: readonly DelegateLifecycleReason[] = [
   'unknown',
 ];
 
+function legacyHistoryState(
+  state: DelegateHistoryInvocation['state'],
+): DelegateStatus['state'] {
+  if (state === 'scheduled') return 'queued';
+  if (state === 'cancelled' || state === 'blocked') return 'error';
+  return state;
+}
+
 function lifecycleReason(value: string): DelegateLifecycleReason {
   return lifecycleReasons.includes(value as DelegateLifecycleReason)
     ? (value as DelegateLifecycleReason)
@@ -180,7 +188,7 @@ export function delegateHistoryInvocationToStatus(
     lineageId: run.lineageId,
     name: run.name,
     kind: run.kind,
-    state: run.state,
+    state: legacyHistoryState(run.state),
     createdAt: run.createdAt,
     ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
     ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
@@ -188,11 +196,22 @@ export function delegateHistoryInvocationToStatus(
     ...(run.route === undefined ? {} : { route: run.route }),
     ...(run.context === undefined ? {} : { context: run.context }),
     allowWrites: run.allowWrites,
+    ...(run.workflow
+      ? {
+          workflow: {
+            ...run.workflow,
+            dependencies: [...run.workflow.dependencies],
+            ...(run.workflow.waitingFor
+              ? { waitingFor: [...run.workflow.waitingFor] }
+              : {}),
+          },
+        }
+      : {}),
     activity: activitySummary(details),
     runCount: 1,
     runs: [
       {
-        state: run.state,
+        state: legacyHistoryState(run.state),
         ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
         ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
       },

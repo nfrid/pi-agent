@@ -131,6 +131,11 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   };
   const wakeBranches = new Map<string, WakeBranch>();
   let activeWake: WakeBranch | undefined;
+  const syncWorkflowSurface = () => {
+    if (!statuses) return;
+    if (workflow) statuses.updateWorkflow(workflow.list());
+    if (activeWake) statuses.setWakes(activeWake.coordinator.snapshot().wakes);
+  };
   let wakeBranchKey = 'root';
   let nextWakeEpoch = 0;
   const wakeDelivery = createWakeDelivery({
@@ -231,6 +236,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         workflow: activeWorkflow,
         ownerSessionId,
         ownerEpoch,
+        onChange: syncWorkflowSurface,
       });
       if (persisted?.ownerSessionId === ownerSessionId)
         restoreWakeState(coordinator, ctx);
@@ -240,6 +246,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     activeWake = branch;
     branch.detachStore = attachWakeStore(branch.coordinator, pi);
     branch.coordinator.setDispatchHandler(wakeDelivery.dispatch);
+    syncWorkflowSurface();
   };
 
   const delivery = createCompletionDelivery({
@@ -435,7 +442,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         if (!job.attemptIdentity) delivery.queueCompletion(job);
       },
     });
-    workflow = createDelegateWorkflowCoordinator({ jobs });
+    workflow = createDelegateWorkflowCoordinator({
+      jobs,
+      onChange: syncWorkflowSurface,
+    });
     scopedServices.delegateWorkflow = workflow;
     registerDelegateTool(
       pi,
