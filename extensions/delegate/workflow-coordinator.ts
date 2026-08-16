@@ -8,6 +8,7 @@ import { buildParentHandoff } from './output';
 import {
   type BoundWorkflowSelector,
   type ResolvedWorkflowInput,
+  type ResolvedWorkflowInputs,
   resolveWorkflowInputs,
   type SymbolicWorkflowSelector,
   WorkflowInputBlockedError,
@@ -85,6 +86,10 @@ export interface DelegateWorkflowAttemptSnapshot {
 export interface DelegateWorkflowSnapshot {
   readonly attempts: readonly DelegateWorkflowAttemptSnapshot[];
 }
+
+export type DelegateWorkflowTerminalListener = (
+  attempt: DelegateWorkflowAttemptSnapshot,
+) => void;
 
 export interface DelegateWorkflowCoordinatorOptions {
   /** Existing execution adapter. */
@@ -206,6 +211,8 @@ export class DelegateWorkflowCoordinator {
   private readonly ownsJobs: boolean;
   private readonly now: () => number;
   private readonly onChange?: () => void;
+  private readonly terminalListeners =
+    new Set<DelegateWorkflowTerminalListener>();
   private readonly records = new Map<AttemptIdentity, WorkflowRecord>();
   private readonly results = new Map<AttemptIdentity, DelegateJobResult>();
   private disposed = false;
@@ -279,6 +286,12 @@ export class DelegateWorkflowCoordinator {
     return this.snapshotRecord(record);
   }
 
+  /** Subscribe to terminal settlement without exposing execution adapter events. */
+  subscribeTerminal(listener: DelegateWorkflowTerminalListener): () => void {
+    this.terminalListeners.add(listener);
+    return () => this.terminalListeners.delete(listener);
+  }
+
   /** Resolve a latest/exact reference to a detached workflow snapshot. */
   get(reference: string): DelegateWorkflowAttemptSnapshot | undefined {
     try {
@@ -317,6 +330,19 @@ export class DelegateWorkflowCoordinator {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Resolve already-bound symbolic sources for another coordinator. Callers
+   * should use only the explicit selectors appropriate for their surface; the
+   * returned values are bounded by workflow-inputs and are never snapshots.
+   */
+  resolveBoundWorkflowInputs(
+    selectors: readonly BoundWorkflowSelector[],
+  ): ResolvedWorkflowInputs {
+    return resolveWorkflowInputs(selectors, (identity) =>
+      this.sourceFor(identity),
+    );
   }
 
   /** Cancel scheduled attempts locally, or delegate active cancellation to jobs. */
@@ -734,6 +760,14 @@ export class DelegateWorkflowCoordinator {
       this.results.set(record.attempt.identity, result);
     }
     this.changed();
+    const settledSnapshot = this.snapshotRecord(record);
+    for (const listener of this.terminalListeners) {
+      try {
+        listener(settledSnapshot);
+      } catch {
+        // Observers must not be able to prevent dependent workflows releasing.
+      }
+    }
     for (const dependent of this.records.values()) {
       if (
         dependent.state === 'scheduled' &&
