@@ -274,6 +274,34 @@ describe('delegate status store', () => {
     );
   });
 
+  test('marks wake sources delivered and clears entered terminal lineages', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('completed review');
+    run.state = 'success';
+    run.exitCode = 0;
+    run.finishedAt = 3;
+    const [id] = store.start([run], 'background');
+    store.setWorkflow(id, {
+      attempt: { logicalId: 'review', ordinal: 1, identity: 'review@1' },
+      logicalId: 'review',
+      ordinal: 1,
+      identity: 'review@1',
+      dependencies: [],
+      waitingFor: [],
+      inputs: [],
+      state: 'success',
+      createdAt: 1,
+      scheduledAt: 1,
+      settledAt: 3,
+    });
+
+    store.markWorkflowDelivered(['review@1']);
+    expect(store.list()[0]?.workflow?.deliveredToParent).toBe(true);
+    store.parentSettled();
+    store.parentUserMessage();
+    expect(store.list()).toEqual([]);
+  });
+
   test('keeps the last activity that had content while the next one warms up', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');

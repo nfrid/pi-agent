@@ -779,6 +779,7 @@ export const DelegateWorkflowMetadataSchema = Type.Object(
     settledAt: Type.Optional(FiniteNumberSchema),
     branchAvailable: Type.Optional(Type.Boolean()),
     snapshotAvailable: Type.Optional(Type.Boolean()),
+    deliveredToParent: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

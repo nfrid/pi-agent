@@ -142,6 +142,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     pi,
     getRuntimeActive: () => runtimeActive,
     getActiveCoordinator: () => activeWake?.coordinator,
+    onEntered: (sources) => statuses?.markWorkflowDelivered(sources),
   });
   registerDelegateWakeTool(pi, () => activeWake?.coordinator);
   let scopeId: SessionScopeId = 'default';
@@ -513,7 +514,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     // Keep the automatic-delivery marker through context entry so a later
     // peek does not replay the same settled completion.
     delivery.markAutomaticDeliveriesEntered(event.messages);
-    wakeDelivery.markContextEntered(event.messages);
+    return { messages: wakeDelivery.filterContext(event.messages) };
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component

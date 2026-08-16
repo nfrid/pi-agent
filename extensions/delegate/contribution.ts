@@ -173,6 +173,7 @@ const DelegateWorkflowStatusSchema = Type.Object(
     settledAt: Type.Optional(Type.Number()),
     branchAvailable: Type.Optional(Type.Boolean()),
     snapshotAvailable: Type.Optional(Type.Boolean()),
+    deliveredToParent: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

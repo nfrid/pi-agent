@@ -55,6 +55,7 @@ describe('delegate live surface', () => {
       ordinal: 1,
       identity: 'review@1',
       dependencies: ['impl@1'],
+      waitingFor: ['impl@1'],
       state: 'scheduled',
       createdAt: 1,
       scheduledAt: 1,

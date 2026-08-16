@@ -165,6 +165,7 @@ describe('delegate', () => {
     expect(serialized).not.toContain('"background"');
     expect(serialized).not.toContain('"tasks"');
     expect(serialized).not.toContain('"continuation"');
+    expect(serialized).not.toContain('"handoffFrom"');
     const schema = parameters as Parameters<typeof Value.Check>[0];
     expect(Value.Check(schema, { id: 'impl', task: 'implement' })).toBe(true);
     expect(Value.Check(schema, { continue: 'impl', task: 'fix' })).toBe(true);

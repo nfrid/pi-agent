@@ -5,6 +5,7 @@ import type {
   WakeCoordinator,
   WakeDispatch,
   WakeDispatchHandler,
+  WakeSnapshot,
 } from './wake-coordinator';
 
 export const DELEGATE_WAKE_MESSAGE_TYPE = 'delegate-wake-result';
@@ -62,6 +63,7 @@ function deliveryDetails(dispatch: WakeDispatch): WakeDeliveryDetails {
 
 export interface WakeDeliveryController {
   readonly dispatch: WakeDispatchHandler;
+  readonly filterContext: <T>(messages: readonly T[]) => T[];
   readonly markContextEntered: (messages: readonly unknown[]) => void;
 }
 
@@ -74,6 +76,7 @@ export function createWakeDelivery(options: {
   pi: ExtensionAPI;
   getActiveCoordinator: () => WakeCoordinator | undefined;
   getRuntimeActive: () => boolean;
+  onEntered?: (sources: readonly string[], wake: WakeSnapshot) => void;
 }): WakeDeliveryController {
   const dispatch: WakeDispatchHandler = (value) => {
     const active = options.getActiveCoordinator();
@@ -95,41 +98,62 @@ export function createWakeDelivery(options: {
     );
   };
 
-  const markContextEntered = (messages: readonly unknown[]) => {
+  const filterContext = <T>(messages: readonly T[]): T[] => {
     const active = options.getActiveCoordinator();
-    if (!active || !options.getRuntimeActive()) return;
+    const usable = Boolean(active && options.getRuntimeActive());
+    const accepted = new Set<string>();
+    const filtered: T[] = [];
     for (const message of messages) {
-      if (!message || typeof message !== 'object') continue;
+      if (!message || typeof message !== 'object') {
+        filtered.push(message);
+        continue;
+      }
       const candidate = message as {
         customType?: unknown;
         details?: Partial<WakeDeliveryDetails>;
       };
-      if (candidate.customType !== DELEGATE_WAKE_MESSAGE_TYPE) continue;
+      if (candidate.customType !== DELEGATE_WAKE_MESSAGE_TYPE) {
+        filtered.push(message);
+        continue;
+      }
       const details = candidate.details;
       if (
+        !usable ||
+        !active ||
         !details ||
         typeof details.deliveryKey !== 'string' ||
         typeof details.wakeId !== 'string' ||
+        !Array.isArray(details.sources) ||
         !details.acknowledgement ||
         details.deliveryKey !==
           `${active.ownerSessionId}:${active.ownerEpoch}:${details.wakeId}` ||
-        details.acknowledgement.deliveryKey !== details.deliveryKey
+        details.acknowledgement.deliveryKey !== details.deliveryKey ||
+        accepted.has(details.deliveryKey)
       )
         continue;
       const wake = active.get(details.wakeId);
-      if (wake?.deliveryKey !== details.deliveryKey || wake.state !== 'queued')
-        continue;
-      // The acknowledgement token rejects delayed context from an earlier
-      // recovery attempt while remaining idempotent for the same message.
+      if (wake?.deliveryKey !== details.deliveryKey) continue;
       try {
-        active.markEntered(details.wakeId, details.acknowledgement);
+        const entered = active.markEntered(
+          details.wakeId,
+          details.acknowledgement,
+        );
+        accepted.add(details.deliveryKey);
+        filtered.push(message);
+        options.onEntered?.(details.sources, entered);
       } catch {
-        // Stale or malformed context cannot acknowledge the active delivery.
+        // A delayed recovery attempt or foreign-branch message is removed
+        // before provider context rather than merely ignored for state.
       }
     }
+    return filtered;
   };
 
-  return { dispatch, markContextEntered };
+  const markContextEntered = (messages: readonly unknown[]) => {
+    filterContext(messages);
+  };
+
+  return { dispatch, filterContext, markContextEntered };
 }
 
 export function registerWakeMessageRenderer(pi: ExtensionAPI): void {

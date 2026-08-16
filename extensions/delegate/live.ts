@@ -239,6 +239,9 @@ function statusSnapshot(
                   snapshotAvailable: status.lifecycle.readOnlySnapshotRetained,
                 }
               : {}),
+            ...(status.workflow.deliveredToParent
+              ? { deliveredToParent: true }
+              : {}),
           },
         }
       : {}),

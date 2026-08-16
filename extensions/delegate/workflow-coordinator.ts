@@ -85,6 +85,8 @@ export interface DelegateWorkflowAttemptSnapshot {
   readonly ordinal: number;
   readonly identity: AttemptIdentity;
   readonly dependencies: readonly AttemptIdentity[];
+  /** Dependency attempts that have not yet reached any terminal state. */
+  readonly waitingFor?: readonly AttemptIdentity[];
   readonly inputs: readonly BoundWorkflowSelector[];
   readonly state: WorkflowAttemptState;
   readonly createdAt: number;
@@ -93,6 +95,7 @@ export interface DelegateWorkflowAttemptSnapshot {
   readonly startedAt?: number;
   readonly settledAt?: number;
   readonly route?: string;
+  readonly allowWrites?: boolean;
   /** Internal adapter job identity, once the attempt has launched. */
   readonly jobId?: string;
   /** Concise actionable setup, launch, or settlement reason. */
@@ -128,6 +131,7 @@ interface WorkflowRecord {
   settledAt?: number;
   route?: string;
   routing?: DelegateRouteState;
+  allowWrites?: boolean;
   jobId?: string;
   reason?: string;
   launched: boolean;
@@ -320,6 +324,7 @@ export class DelegateWorkflowCoordinator {
       scheduledAt: timestamp,
       route: options.routing?.route ?? options.route,
       routing: copyRouting(options.routing),
+      allowWrites: options.allowWrites,
       launched: false,
       cancellationRequested: false,
       cancellationWaiters: [],
@@ -908,6 +913,14 @@ export class DelegateWorkflowCoordinator {
       ordinal: attempt.ordinal,
       identity: attempt.identity,
       dependencies: Object.freeze([...record.dependencies]),
+      waitingFor: Object.freeze(
+        record.dependencies.filter((identity) => {
+          const dependency = this.records.get(identity);
+          return (
+            !dependency || !isTerminalWorkflowAttemptState(dependency.state)
+          );
+        }),
+      ),
       inputs: Object.freeze(
         record.selectors.map((selector) =>
           Object.freeze({
@@ -928,6 +941,7 @@ export class DelegateWorkflowCoordinator {
       startedAt: record.startedAt,
       settledAt: record.settledAt,
       route: record.route,
+      allowWrites: record.allowWrites,
       jobId: record.jobId,
       reason: record.reason,
     });

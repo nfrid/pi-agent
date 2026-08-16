@@ -55,6 +55,7 @@ export interface DelegateWorkflowStatus {
   queuedAt?: number;
   startedAt?: number;
   settledAt?: number;
+  deliveredToParent?: boolean;
 }
 
 export interface DelegateWakeStatus {
@@ -245,8 +246,8 @@ function workflowStatusFromAttempt(
     identity: attempt.identity,
     state: attempt.state,
     dependencies: [...attempt.dependencies],
-    ...(attempt.state === 'scheduled' && attempt.dependencies.length > 0
-      ? { waitingFor: [...attempt.dependencies] }
+    ...(attempt.waitingFor?.length
+      ? { waitingFor: [...attempt.waitingFor] }
       : {}),
     ...(attempt.reason ? { reason: attempt.reason } : {}),
     ...(attempt.route ? { route: attempt.route } : {}),
@@ -260,6 +261,7 @@ function workflowStatusFromAttempt(
       ? {}
       : { settledAt: attempt.settledAt }),
     ...(previous?.route && !attempt.route ? { route: previous.route } : {}),
+    ...(previous?.deliveredToParent ? { deliveredToParent: true } : {}),
   };
 }
 
@@ -297,6 +299,7 @@ function workflowStatusFromRun(
         ? {}
         : { settledAt: previous.settledAt }
       : { settledAt: run.finishedAt }),
+    ...(previous?.deliveredToParent ? { deliveredToParent: true } : {}),
   };
 }
 
@@ -450,6 +453,25 @@ export class DelegateStatusStore {
       if (!attempt) continue;
       record.workflow = workflowStatusFromAttempt(attempt, record.workflow);
       changed = true;
+    }
+    if (changed) this.onChange();
+  }
+
+  /** Mark exact attempts whose selected wake evidence entered parent context. */
+  markWorkflowDelivered(identities: readonly string[]): void {
+    const delivered = new Set(identities);
+    let changed = false;
+    for (const record of this.records.values()) {
+      if (!record.workflow || !delivered.has(record.workflow.identity))
+        continue;
+      if (!record.workflow.deliveredToParent) {
+        record.workflow = { ...record.workflow, deliveredToParent: true };
+        changed = true;
+      }
+      if (!record.resultEntered) {
+        record.resultEntered = true;
+        changed = true;
+      }
     }
     if (changed) this.onChange();
   }

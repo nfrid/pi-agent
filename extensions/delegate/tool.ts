@@ -245,7 +245,6 @@ const DelegateCommonParamProperties = {
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
   worktreePath: Type.Optional(WorktreePathSchema),
-  handoffFrom: Type.Optional(HandoffFromSchema),
   result: Type.Optional(ResultSpecSchema),
 };
 
@@ -253,7 +252,7 @@ type DelegateCommonParams = Omit<Static<typeof TaskItem>, 'continuation'> & {
   after?: Static<typeof AfterSchema>;
   inputs?: Array<Static<typeof WorkflowInputSchema>>;
 };
-type ModelDelegateParams = DelegateCommonParams &
+type ModelDelegateParams = Omit<DelegateCommonParams, 'handoffFrom'> &
   ({ id: string; continue?: never } | { continue: string; id?: never });
 
 const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
@@ -467,6 +466,8 @@ export function registerDelegateTool(
             ownerSessionId: launchSessionId,
             route: routing.route,
             routing,
+            allowWrites: params.allowWrites,
+
             prepare: async (workflowContext) => {
               let plan = initialPlan;
               if (!plan) {

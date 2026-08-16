@@ -377,6 +377,7 @@ export function DelegateSurface({
             <small className="surface-summary-detail">
               {active.workflow.identity} · {active.workflow.state}
               {active.workflow.reason ? ` · ${active.workflow.reason}` : ''}
+              {active.workflow.deliveredToParent ? ' · delivered' : ''}
               {model.wakes?.length
                 ? ` · wake ${model.wakes.map((wake) => `${wake.id} (${wake.state})`).join(', ')}`
                 : ''}

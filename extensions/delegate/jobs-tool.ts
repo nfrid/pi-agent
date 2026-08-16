@@ -50,9 +50,27 @@ function summary(
   return `${job.id} ${job.state} — ${job.name}`;
 }
 
-function attemptSummary(attempt: DelegateWorkflowAttemptSnapshot): string {
-  const waiting = attempt.dependencies.length
-    ? `, waiting for ${attempt.dependencies.join(', ')}`
+type DelegateAttemptMetadata = Pick<
+  DelegateWorkflowAttemptSnapshot,
+  | 'logicalId'
+  | 'ordinal'
+  | 'identity'
+  | 'state'
+  | 'dependencies'
+  | 'waitingFor'
+  | 'createdAt'
+  | 'scheduledAt'
+  | 'queuedAt'
+  | 'startedAt'
+  | 'settledAt'
+  | 'route'
+  | 'allowWrites'
+  | 'reason'
+>;
+
+function attemptSummary(attempt: DelegateAttemptMetadata): string {
+  const waiting = attempt.waitingFor?.length
+    ? `, waiting for ${attempt.waitingFor.join(', ')}`
     : '';
   const reason = attempt.reason ? ` — ${attempt.reason}` : '';
   return `${attempt.identity} ${attempt.state}${waiting}${reason}`;
@@ -60,8 +78,23 @@ function attemptSummary(attempt: DelegateWorkflowAttemptSnapshot): string {
 
 function compactAttempt(
   attempt: DelegateWorkflowAttemptSnapshot,
-): DelegateWorkflowAttemptSnapshot {
-  return attempt;
+): DelegateAttemptMetadata {
+  return {
+    logicalId: attempt.logicalId,
+    ordinal: attempt.ordinal,
+    identity: attempt.identity,
+    state: attempt.state,
+    dependencies: attempt.dependencies,
+    waitingFor: attempt.waitingFor,
+    createdAt: attempt.createdAt,
+    scheduledAt: attempt.scheduledAt,
+    queuedAt: attempt.queuedAt,
+    startedAt: attempt.startedAt,
+    settledAt: attempt.settledAt,
+    route: attempt.route,
+    allowWrites: attempt.allowWrites,
+    reason: attempt.reason,
+  };
 }
 
 function feedbackText(
@@ -159,8 +192,8 @@ export function registerDelegateJobsTool(
       action: 'list' | 'status' | 'feedback' | 'cancel' | 'peek';
       job?: DelegateJobSnapshot | DelegateJobMetadata;
       jobs?: Array<DelegateJobSnapshot | DelegateJobMetadata>;
-      attempt?: DelegateWorkflowAttemptSnapshot;
-      attempts?: DelegateWorkflowAttemptSnapshot[];
+      attempt?: DelegateAttemptMetadata;
+      attempts?: DelegateAttemptMetadata[];
       delivery?:
         | 'queued'
         | 'settled'

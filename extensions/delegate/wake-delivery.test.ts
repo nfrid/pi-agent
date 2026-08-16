@@ -57,6 +57,56 @@ describe('wake delivery', () => {
     await workflow.dispose();
   });
 
+  test('filters stale recovery attempts before provider context', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const attempt = workflow.schedule({
+      logicalId: 'source',
+      mode: 'single',
+      tasks: ['source'],
+      execute: async () => result(),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require(attempt.identity).settledAt).toBeDefined(),
+    );
+    const sendMessage = vi.fn();
+    const entered = vi.fn();
+    let active: WakeCoordinator | undefined;
+    const delivery = createWakeDelivery({
+      pi: { sendMessage } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getActiveCoordinator: () => active,
+      onEntered: entered,
+    });
+    active = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'session',
+      ownerEpoch: 4,
+      dispatch: delivery.dispatch,
+    });
+    active.register({
+      id: 'recoverable',
+      condition: { node: attempt.identity },
+    });
+    const first = sendMessage.mock.calls[0]?.[0];
+    active.recover('recoverable');
+    const second = sendMessage.mock.calls[1]?.[0];
+    const foreign = {
+      customType: DELEGATE_WAKE_MESSAGE_TYPE,
+      details: { deliveryKey: 'foreign:1:wake' },
+    };
+
+    expect(delivery.filterContext([foreign, first, second, second])).toEqual([
+      second,
+    ]);
+    expect(active.require('recoverable').state).toBe('entered');
+    expect(entered).toHaveBeenCalledOnce();
+    expect(entered).toHaveBeenCalledWith(
+      [attempt.identity],
+      expect.objectContaining({ id: 'recoverable', state: 'entered' }),
+    );
+    await workflow.dispose();
+  });
+
   test('leaves a failed dispatch recoverable', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const attempt = workflow.schedule({
