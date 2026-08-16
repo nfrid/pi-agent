@@ -85,8 +85,8 @@ export interface DelegateWorkflowAttemptSnapshot {
   readonly ordinal: number;
   readonly identity: AttemptIdentity;
   readonly dependencies: readonly AttemptIdentity[];
-  /** Dependency attempts that have not yet reached any terminal state. */
-  readonly waitingFor?: readonly AttemptIdentity[];
+  /** Dependencies that have not settled yet; derived, never persisted with inputs. */
+  readonly waitingFor: readonly AttemptIdentity[];
   readonly inputs: readonly BoundWorkflowSelector[];
   readonly state: WorkflowAttemptState;
   readonly createdAt: number;
@@ -104,6 +104,29 @@ export interface DelegateWorkflowAttemptSnapshot {
 
 export interface DelegateWorkflowSnapshot {
   readonly attempts: readonly DelegateWorkflowAttemptSnapshot[];
+}
+
+/** Metadata-only projection suitable for durable session history. */
+export interface DelegateWorkflowMetadataSnapshot {
+  readonly logicalId: string;
+  readonly attempt: number;
+  readonly identity: AttemptIdentity;
+  readonly state: WorkflowAttemptState;
+  readonly dependencies: readonly AttemptIdentity[];
+  readonly waitingFor: readonly AttemptIdentity[];
+  readonly createdAt: number;
+  readonly scheduledAt: number;
+  readonly queuedAt?: number;
+  readonly startedAt?: number;
+  readonly settledAt?: number;
+  readonly route?: string;
+  readonly allowWrites?: boolean;
+  readonly reason?: string;
+}
+
+export interface DelegateWorkflowMetadataHistory {
+  readonly version: 1;
+  readonly attempts: readonly DelegateWorkflowMetadataSnapshot[];
 }
 
 export type DelegateWorkflowTerminalListener = (
@@ -277,6 +300,7 @@ export class DelegateWorkflowCoordinator {
   private readonly onChange?: () => void;
   private readonly terminalListeners =
     new Set<DelegateWorkflowTerminalListener>();
+  private readonly changeListeners = new Set<() => void>();
   private readonly records = new Map<AttemptIdentity, WorkflowRecord>();
   private readonly results = new Map<AttemptIdentity, DelegateJobResult>();
   private disposed = false;
@@ -361,6 +385,54 @@ export class DelegateWorkflowCoordinator {
   subscribeTerminal(listener: DelegateWorkflowTerminalListener): () => void {
     this.terminalListeners.add(listener);
     return () => this.terminalListeners.delete(listener);
+  }
+
+  /** Subscribe to lifecycle changes for append-only metadata stores. */
+  subscribeChanges(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  }
+
+  /** Return bounded coordinator metadata without selectors, inputs, or results. */
+  metadataSnapshot(): DelegateWorkflowMetadataHistory {
+    return Object.freeze({
+      version: 1,
+      attempts: Object.freeze(
+        this.list().map((record) => {
+          const waitingFor = record.dependencies.filter((identity) => {
+            const dependency = this.records.get(identity);
+            return (
+              dependency !== undefined &&
+              !isTerminalWorkflowAttemptState(dependency.state)
+            );
+          });
+          return Object.freeze({
+            logicalId: record.attempt.logicalId,
+            attempt: record.attempt.ordinal,
+            identity: record.attempt.identity,
+            state: record.state,
+            dependencies: Object.freeze([...record.dependencies]),
+            waitingFor: Object.freeze(waitingFor),
+            createdAt: record.createdAt,
+            scheduledAt: record.scheduledAt,
+            ...(record.queuedAt === undefined
+              ? {}
+              : { queuedAt: record.queuedAt }),
+            ...(record.startedAt === undefined
+              ? {}
+              : { startedAt: record.startedAt }),
+            ...(record.settledAt === undefined
+              ? {}
+              : { settledAt: record.settledAt }),
+            ...(record.route === undefined ? {} : { route: record.route }),
+            ...(record.allowWrites === undefined
+              ? {}
+              : { allowWrites: record.allowWrites }),
+            ...(record.reason === undefined ? {} : { reason: record.reason }),
+          });
+        }),
+      ),
+    });
   }
 
   /** Resolve a latest/exact reference to a detached workflow snapshot. */
@@ -949,6 +1021,7 @@ export class DelegateWorkflowCoordinator {
 
   private changed(): void {
     this.onChange?.();
+    for (const listener of this.changeListeners) listener();
   }
 }
 

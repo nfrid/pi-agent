@@ -70,6 +70,7 @@ import {
   renderDelegateWidget,
 } from './widget';
 import { createDelegateWorkflowCoordinator } from './workflow-coordinator';
+import { attachWorkflowStore } from './workflow-store';
 import { loadWorktree } from './worktree';
 import { registerDelegateWorktreesCommand } from './worktrees-command';
 
@@ -123,6 +124,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     | ReturnType<typeof createDelegateWorkflowCoordinator>
     | undefined;
   let statuses: DelegateStatusStore | undefined;
+  let detachWorkflowStore: (() => void) | undefined;
   let ui: ExtensionUIContext | undefined;
   type WakeBranch = {
     readonly key: string;
@@ -377,6 +379,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const closingJobs = jobs;
     const closingWorkflow = workflow;
     const closingStatuses = statuses;
+    const closingWorkflowStore = detachWorkflowStore;
 
     // Invalidate and detach the previous generation immediately, including a
     // repeated session_start for the same session ID.
@@ -384,6 +387,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = undefined;
     workflow = undefined;
     statuses = undefined;
+    detachWorkflowStore = undefined;
+    closingWorkflowStore?.();
     disposeWakeRuntime();
     delivery.clearTimer();
     delivery.clearPending();
@@ -447,6 +452,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       jobs,
       onChange: syncWorkflowSurface,
     });
+    detachWorkflowStore = attachWorkflowStore(workflow, pi);
     scopedServices.delegateWorkflow = workflow;
     registerDelegateTool(
       pi,
@@ -566,9 +572,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const closing = jobs;
     const closingWorkflow = workflow;
     const closingStatuses = statuses;
+    const closingWorkflowStore = detachWorkflowStore;
     jobs = undefined;
     workflow = undefined;
     statuses = undefined;
+    detachWorkflowStore = undefined;
+    closingWorkflowStore?.();
     disposeWakeRuntime();
     await closingWorkflow?.dispose();
     // Workflow coordinators use this shared manager but do not own it.

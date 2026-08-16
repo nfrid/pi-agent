@@ -772,6 +772,7 @@ export const DelegateWorkflowMetadataSchema = Type.Object(
     ),
     reason: Type.Optional(Type.String({ maxLength: 256 })),
     route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    allowWrites: Type.Optional(Type.Boolean()),
     createdAt: FiniteNumberSchema,
     scheduledAt: FiniteNumberSchema,
     queuedAt: Type.Optional(FiniteNumberSchema),
@@ -786,6 +787,37 @@ export const DelegateWorkflowMetadataSchema = Type.Object(
 export type DelegateWorkflowMetadata = Static<
   typeof DelegateWorkflowMetadataSchema
 >;
+
+/** Payload-free lifecycle metadata projected from delegate-wake:v1 entries. */
+export const DelegateWakeMetadataSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    state: Type.Union([
+      Type.Literal('pending'),
+      Type.Literal('ready'),
+      Type.Literal('queued'),
+      Type.Literal('entered'),
+      Type.Literal('cancelled'),
+      Type.Literal('blocked'),
+    ]),
+    references: Type.Readonly(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+        maxItems: 32,
+      }),
+    ),
+    createdAt: FiniteNumberSchema,
+    readyAt: Type.Optional(FiniteNumberSchema),
+    queuedAt: Type.Optional(FiniteNumberSchema),
+    enteredAt: Type.Optional(FiniteNumberSchema),
+    cancelledAt: Type.Optional(FiniteNumberSchema),
+    blockedAt: Type.Optional(FiniteNumberSchema),
+    revision: Type.Integer({ minimum: 0 }),
+    dispatchAttempts: Type.Integer({ minimum: 0 }),
+    reason: Type.Optional(Type.String({ maxLength: 256 })),
+  },
+  { additionalProperties: false },
+);
+export type DelegateWakeMetadata = Static<typeof DelegateWakeMetadataSchema>;
 
 const DelegateLiveRunSchema = Type.Object(
   {
@@ -1804,6 +1836,7 @@ const DelegateHistoryInvocationSchema = Type.Object(
     ),
     allowWrites: Type.Boolean(),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
+    wake: Type.Optional(DelegateWakeMetadataSchema),
   },
   { additionalProperties: false },
 );
@@ -1837,6 +1870,7 @@ export const DelegateHistoryRunDetailSchema = Type.Object(
     ),
     allowWrites: Type.Boolean(),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
+    wake: Type.Optional(DelegateWakeMetadataSchema),
     details: DelegateHistoryDetailsSchema,
   },
   { additionalProperties: false },
@@ -1870,6 +1904,7 @@ const DelegateHistoryGroupSchema = Type.Object(
     ),
     allowWrites: Type.Boolean(),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
+    wake: Type.Optional(DelegateWakeMetadataSchema),
     runCount: Type.Integer({
       minimum: 1,
       maximum: MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
