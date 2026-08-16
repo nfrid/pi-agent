@@ -311,6 +311,7 @@ export {
   DelegateHistoryRunDetailSchema,
   DelegateHistoryRunQuerySchema,
   DelegateTranscriptEntryIdSchema,
+  DelegateWorkflowMetadataSchema,
   EventEnvelopeSchema,
   FeedCaughtUpSchema,
   FeedCursorSchema,

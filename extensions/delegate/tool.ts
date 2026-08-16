@@ -522,6 +522,8 @@ export function registerDelegateTool(
             },
           });
           const statusId = statusIds[0];
+          if (statusId)
+            backgroundRuntime.statuses.setWorkflow(statusId, attempt);
           if (statusId && attempt.jobId)
             backgroundRuntime.statuses.setJobId(statusId, attempt.jobId);
           const updateTerminalStatus = (

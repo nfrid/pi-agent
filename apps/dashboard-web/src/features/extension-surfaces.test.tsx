@@ -1120,6 +1120,59 @@ describe('live extension surface fixtures', () => {
     expect(markup).not.toContain('payload-preview');
   });
 
+  it('renders logical workflow identity, dependency waits, and wake metadata', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateSurface
+        surface={{
+          id: 'delegate-workflow',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'ds-review',
+                runId: 'run-review',
+                lineageId: 'lineage-review',
+                name: 'Review implementation',
+                kind: 'background',
+                state: 'queued',
+                createdAt: 1,
+                allowWrites: false,
+                workflow: {
+                  logicalId: 'review',
+                  attempt: 1,
+                  identity: 'review@1',
+                  state: 'scheduled',
+                  dependencies: ['impl@1'],
+                  waitingFor: ['impl@1'],
+                  reason: 'waiting for impl@1',
+                  createdAt: 1,
+                  scheduledAt: 1,
+                },
+              },
+            ],
+            wakes: [
+              {
+                id: 'review-ready',
+                state: 'pending',
+                references: ['review@1'],
+                waitingFor: ['review@1'],
+                createdAt: 1,
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('review@1');
+    expect(markup).toContain('scheduled');
+    expect(markup).toContain('waiting for impl@1');
+    expect(markup).toContain('review-ready');
+    expect(markup).toContain('pending');
+    expect(markup).not.toContain('handoff');
+    expect(markup).not.toContain('payload');
+  });
+
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {
     const unknown = renderLiveExtensionSurface({
       id: 'delegate-1',

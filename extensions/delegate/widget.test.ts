@@ -506,6 +506,51 @@ describe('delegate widget', () => {
     expect(lines.join('\\n')).toContain('Failed');
   });
 
+  test('shows logical workflow states and dependency waits', () => {
+    const lines = renderDelegateWidget(
+      [
+        status({
+          name: 'Review',
+          state: 'queued',
+          workflow: {
+            logicalId: 'review',
+            attempt: 1,
+            identity: 'review@1',
+            state: 'scheduled',
+            dependencies: ['impl@1'],
+            waitingFor: ['impl@1'],
+            reason: 'waiting for impl@1',
+            createdAt: 1_000,
+            scheduledAt: 1_000,
+          },
+        }),
+        status({
+          name: 'Blocked',
+          state: 'queued',
+          workflow: {
+            logicalId: 'blocked',
+            attempt: 1,
+            identity: 'blocked@1',
+            state: 'blocked',
+            dependencies: ['missing@1'],
+            reason: 'missing input',
+            createdAt: 1_000,
+            scheduledAt: 1_000,
+            settledAt: 2_000,
+          },
+        }),
+      ],
+      true,
+      100,
+      theme as never,
+      5_000,
+    );
+    expect(lines.join('\n')).toContain('review@1');
+    expect(lines.join('\n')).toContain('waiting for impl@1');
+    expect(lines.join('\n')).toContain('blocked@1');
+    expect(lines.join('\n')).toContain('blocked: missing input');
+  });
+
   test('breaks the compact line down by state', () => {
     const [line] = renderDelegateWidget(
       [

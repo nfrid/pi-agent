@@ -12,6 +12,9 @@ import type {
   DelegateRunState,
 } from './types';
 import { getRunState } from './types';
+import type { WakeSnapshot } from './wake-coordinator';
+import type { DelegateWorkflowAttemptSnapshot } from './workflow-coordinator';
+import type { WorkflowAttemptState } from './workflow-model';
 
 export type DelegateStatusKind = 'foreground' | 'background';
 export type DelegatePauseState = 'pausing' | 'paused';
@@ -36,6 +39,36 @@ export interface DelegateTranscriptEntry {
   status?: 'running' | 'completed' | 'error';
   at?: number;
   run?: number;
+}
+
+export interface DelegateWorkflowStatus {
+  logicalId: string;
+  attempt: number;
+  identity: string;
+  state: WorkflowAttemptState;
+  dependencies: string[];
+  waitingFor?: string[];
+  reason?: string;
+  route?: string;
+  createdAt: number;
+  scheduledAt: number;
+  queuedAt?: number;
+  startedAt?: number;
+  settledAt?: number;
+}
+
+export interface DelegateWakeStatus {
+  id: string;
+  state: WakeSnapshot['state'];
+  references: string[];
+  waitingFor?: string[];
+  createdAt: number;
+  readyAt?: number;
+  queuedAt?: number;
+  enteredAt?: number;
+  cancelledAt?: number;
+  blockedAt?: number;
+  reason?: string;
 }
 
 export interface DelegateStatusSnapshot {
@@ -67,6 +100,8 @@ export interface DelegateStatusSnapshot {
   result?: DelegateResult;
   /** Harness-authored terminal projection retained in status snapshots. */
   lifecycle?: DelegateLifecycleProjection;
+  /** Compact workflow identity/lifecycle metadata; never a result payload. */
+  workflow?: DelegateWorkflowStatus;
   pauseState?: DelegatePauseState;
   pausedAt?: number;
 }
@@ -167,6 +202,17 @@ function isSettled(state: DelegateRunState): boolean {
   return state !== 'queued' && state !== 'running';
 }
 
+function isWorkflowTerminal(state: WorkflowAttemptState): boolean {
+  return (
+    state === 'success' ||
+    state === 'error' ||
+    state === 'timed-out' ||
+    state === 'aborted' ||
+    state === 'cancelled' ||
+    state === 'blocked'
+  );
+}
+
 function resultProjection(run: DelegatedRun): DelegateResult | undefined {
   const captured = serializeDelegateRunForPublic(run).structuredResult;
   if (!getDelegateResultSpec(run) && !captured) return undefined;
@@ -186,6 +232,71 @@ function resultProjection(run: DelegatedRun): DelegateResult | undefined {
       : {}),
     ...(captured.valid && captured.valueOmitted ? { valueOmitted: true } : {}),
     ...(captured.errors.length ? { errors: [...captured.errors] } : {}),
+  };
+}
+
+function workflowStatusFromAttempt(
+  attempt: DelegateWorkflowAttemptSnapshot,
+  previous?: DelegateWorkflowStatus,
+): DelegateWorkflowStatus {
+  return {
+    logicalId: attempt.logicalId,
+    attempt: attempt.ordinal,
+    identity: attempt.identity,
+    state: attempt.state,
+    dependencies: [...attempt.dependencies],
+    ...(attempt.state === 'scheduled' && attempt.dependencies.length > 0
+      ? { waitingFor: [...attempt.dependencies] }
+      : {}),
+    ...(attempt.reason ? { reason: attempt.reason } : {}),
+    ...(attempt.route ? { route: attempt.route } : {}),
+    createdAt: attempt.createdAt,
+    scheduledAt: attempt.scheduledAt,
+    ...(attempt.queuedAt === undefined ? {} : { queuedAt: attempt.queuedAt }),
+    ...(attempt.startedAt === undefined
+      ? {}
+      : { startedAt: attempt.startedAt }),
+    ...(attempt.settledAt === undefined
+      ? {}
+      : { settledAt: attempt.settledAt }),
+    ...(previous?.route && !attempt.route ? { route: previous.route } : {}),
+  };
+}
+
+function workflowStatusFromRun(
+  attempt: NonNullable<DelegatedRun['workflowAttempt']>,
+  state: DelegateRunState,
+  run: DelegatedRun,
+  previous?: DelegateWorkflowStatus,
+): DelegateWorkflowStatus {
+  return {
+    logicalId: attempt.logicalId,
+    attempt: attempt.ordinal,
+    identity: attempt.identity,
+    state,
+    dependencies: previous?.dependencies ?? [],
+    ...(previous?.waitingFor ? { waitingFor: [...previous.waitingFor] } : {}),
+    ...(previous?.reason ? { reason: previous.reason } : {}),
+    ...(run.routing?.route || previous?.route
+      ? { route: run.routing?.route ?? previous?.route }
+      : {}),
+    createdAt: previous?.createdAt ?? run.queuedAt ?? Date.now(),
+    scheduledAt: previous?.scheduledAt ?? run.queuedAt ?? Date.now(),
+    ...(run.queuedAt === undefined
+      ? previous?.queuedAt === undefined
+        ? {}
+        : { queuedAt: previous.queuedAt }
+      : { queuedAt: run.queuedAt }),
+    ...(run.startedAt === undefined
+      ? previous?.startedAt === undefined
+        ? {}
+        : { startedAt: previous.startedAt }
+      : { startedAt: run.startedAt }),
+    ...(run.finishedAt === undefined
+      ? previous?.settledAt === undefined
+        ? {}
+        : { settledAt: previous.settledAt }
+      : { settledAt: run.finishedAt }),
   };
 }
 
@@ -215,6 +326,7 @@ function displayActivity(
 export class DelegateStatusStore {
   private readonly records = new Map<string, DelegateStatusRecord>();
   private counter = 0;
+  private wakes: DelegateWakeStatus[] = [];
 
   constructor(private readonly onChange: () => void = () => {}) {}
 
@@ -240,6 +352,15 @@ export class DelegateStatusStore {
         transcript: transcript(run, inputRun.activities),
         result: resultProjection(inputRun),
         lifecycle: cloneDelegateLifecycle(run.lifecycle),
+        ...(run.workflowAttempt
+          ? {
+              workflow: workflowStatusFromRun(
+                run.workflowAttempt,
+                getRunState(run),
+                run,
+              ),
+            }
+          : {}),
         resultEntered: false,
         clearOnNextUserMessage: false,
       });
@@ -266,6 +387,13 @@ export class DelegateStatusStore {
     record.transcript = transcript(run, inputRun.activities);
     record.result = resultProjection(inputRun);
     record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
+    if (run.workflowAttempt)
+      record.workflow = workflowStatusFromRun(
+        run.workflowAttempt,
+        getRunState(run),
+        run,
+        record.workflow,
+      );
     this.onChange();
   }
 
@@ -289,9 +417,80 @@ export class DelegateStatusStore {
       record.transcript = transcript(run, inputRun.activities);
       record.result = resultProjection(inputRun);
       record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
+      if (run.workflowAttempt)
+        record.workflow = workflowStatusFromRun(
+          run.workflowAttempt,
+          getRunState(run),
+          run,
+          record.workflow,
+        );
       changed = true;
     }
     if (changed) this.onChange();
+  }
+
+  /** Attach the immutable logical attempt returned by the workflow coordinator. */
+  setWorkflow(id: string, attempt: DelegateWorkflowAttemptSnapshot): void {
+    const record = this.records.get(id);
+    if (!record) return;
+    record.workflow = workflowStatusFromAttempt(attempt, record.workflow);
+    this.onChange();
+  }
+
+  /** Reconcile coordinator lifecycle state without importing result content. */
+  updateWorkflow(attempts: readonly DelegateWorkflowAttemptSnapshot[]): void {
+    const byIdentity = new Map(
+      attempts.map((attempt) => [attempt.identity, attempt]),
+    );
+    let changed = false;
+    for (const record of this.records.values()) {
+      const identity = record.workflow?.identity;
+      if (!identity) continue;
+      const attempt = byIdentity.get(identity);
+      if (!attempt) continue;
+      record.workflow = workflowStatusFromAttempt(attempt, record.workflow);
+      changed = true;
+    }
+    if (changed) this.onChange();
+  }
+
+  /** Replace the active branch's wake metadata with a compact projection. */
+  setWakes(wakes: readonly WakeSnapshot[]): void {
+    const next = wakes.map((wake) => ({
+      id: wake.id,
+      state: wake.state,
+      references: [...wake.references],
+      ...(wake.state === 'pending'
+        ? {
+            waitingFor: [...wake.references].filter((identity) => {
+              const workflow = [...this.records.values()].find(
+                (record) => record.workflow?.identity === identity,
+              )?.workflow;
+              return !workflow || !isWorkflowTerminal(workflow.state);
+            }),
+          }
+        : {}),
+      createdAt: wake.createdAt,
+      ...(wake.readyAt === undefined ? {} : { readyAt: wake.readyAt }),
+      ...(wake.queuedAt === undefined ? {} : { queuedAt: wake.queuedAt }),
+      ...(wake.enteredAt === undefined ? {} : { enteredAt: wake.enteredAt }),
+      ...(wake.cancelledAt === undefined
+        ? {}
+        : { cancelledAt: wake.cancelledAt }),
+      ...(wake.blockedAt === undefined ? {} : { blockedAt: wake.blockedAt }),
+      ...(wake.reason ? { reason: wake.reason } : {}),
+    }));
+    if (JSON.stringify(next) === JSON.stringify(this.wakes)) return;
+    this.wakes = next;
+    this.onChange();
+  }
+
+  getWakes(): DelegateWakeStatus[] {
+    return this.wakes.map((wake) => ({
+      ...wake,
+      references: [...wake.references],
+      ...(wake.waitingFor ? { waitingFor: [...wake.waitingFor] } : {}),
+    }));
   }
 
   setJobId(id: string, jobId: string): void {
@@ -471,8 +670,9 @@ export class DelegateStatusStore {
   }
 
   clear(): void {
-    if (this.records.size === 0) return;
+    if (this.records.size === 0 && this.wakes.length === 0) return;
     this.records.clear();
+    this.wakes = [];
     this.onChange();
   }
 }
