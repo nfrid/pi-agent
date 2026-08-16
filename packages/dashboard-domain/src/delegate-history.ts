@@ -426,8 +426,9 @@ function projectWorkflow(
 ): RecordValue | undefined {
   const source = isRecord(run.workflow) ? run.workflow : run.workflowAttempt;
   if (!isRecord(source)) return undefined;
-  const logicalId = stringValue(source.logicalId, 64);
-  const identity = stringValue(source.identity, 80);
+  const ownerBranchId = validWorkflowText(source.ownerBranchId, 256);
+  const logicalId = validWorkflowText(source.logicalId, 64);
+  const identity = validWorkflowText(source.identity, 80);
   const ordinal = source.ordinal;
   if (
     logicalId === undefined ||
@@ -451,6 +452,7 @@ function projectWorkflow(
     : undefined;
   const reason = stringValue(source.reason, 256);
   return {
+    ...(ownerBranchId ? { ownerBranchId } : {}),
     logicalId,
     attempt: ordinal,
     identity,
@@ -558,13 +560,31 @@ const WORKFLOW_STATES = new Set([
   'blocked',
 ]);
 
+function validWorkflowText(value: unknown, max: number): string | undefined {
+  const text = stringValue(value, max);
+  if (
+    text === undefined ||
+    [...text].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    return undefined;
+  return text;
+}
+
 function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
   if (!isRecord(value)) return undefined;
-  const logicalId = stringValue(value.logicalId, 64);
-  const identity = stringValue(value.identity, 80);
+  const ownerBranchId =
+    value.ownerBranchId === undefined
+      ? undefined
+      : validWorkflowText(value.ownerBranchId, 256);
+  const logicalId = validWorkflowText(value.logicalId, 64);
+  const identity = validWorkflowText(value.identity, 80);
   const attempt = value.attempt;
   const state = stringValue(value.state, 32);
   if (
+    (value.ownerBranchId !== undefined && ownerBranchId === undefined) ||
     !logicalId ||
     !identity ||
     typeof attempt !== 'number' ||
@@ -574,27 +594,47 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
     !state ||
     !WORKFLOW_STATES.has(state) ||
     !Array.isArray(value.dependencies) ||
-    !Array.isArray(value.waitingFor)
+    value.dependencies.length > 32 ||
+    value.dependencies.some(
+      (dependency) => validWorkflowText(dependency, 80) === undefined,
+    ) ||
+    !Array.isArray(value.waitingFor) ||
+    value.waitingFor.length > 32 ||
+    value.waitingFor.some(
+      (dependency) => validWorkflowText(dependency, 80) === undefined,
+    )
   )
     return undefined;
-  const dependencies = value.dependencies.slice(0, 32).flatMap((item) => {
-    const dependency = stringValue(item, 80);
-    return dependency ? [dependency] : [];
-  });
-  const waitingFor = value.waitingFor.slice(0, 32).flatMap((item) => {
-    const dependency = stringValue(item, 80);
-    return dependency ? [dependency] : [];
-  });
+  const dependencies = value.dependencies.map((item) =>
+    validWorkflowText(item, 80),
+  ) as string[];
+  const waitingFor = value.waitingFor.map((item) =>
+    validWorkflowText(item, 80),
+  ) as string[];
   const createdAt = finiteNumber(value.createdAt);
   const scheduledAt = finiteNumber(value.scheduledAt);
   if (createdAt === undefined || scheduledAt === undefined) return undefined;
+  for (const key of ['queuedAt', 'startedAt', 'settledAt'] as const)
+    if (value[key] !== undefined && finiteNumber(value[key]) === undefined)
+      return undefined;
+  const route =
+    value.route === undefined ? undefined : validWorkflowText(value.route, 512);
+  const reason =
+    value.reason === undefined
+      ? undefined
+      : validWorkflowText(value.reason, 256);
+  if (value.route !== undefined && route === undefined) return undefined;
+  if (value.reason !== undefined && reason === undefined) return undefined;
+  if (value.allowWrites !== undefined && typeof value.allowWrites !== 'boolean')
+    return undefined;
   const result: RecordValue = {
+    ...(ownerBranchId ? { ownerBranchId } : {}),
     logicalId,
     attempt,
     identity,
     state,
     dependencies,
-    ...(waitingFor.length ? { waitingFor } : {}),
+    waitingFor,
     createdAt,
     scheduledAt,
   };
@@ -602,13 +642,80 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
     const timestamp = finiteNumber(value[key]);
     if (timestamp !== undefined) result[key] = timestamp;
   }
-  const route = stringValue(value.route, 512);
-  const reason = stringValue(value.reason, 256);
   if (route) result.route = route;
   if (typeof value.allowWrites === 'boolean')
     result.allowWrites = value.allowWrites;
   if (reason) result.reason = reason;
   return result;
+}
+
+type WorkflowStoreOperation = {
+  kind: 'snapshot' | 'delta';
+  attempts: RecordValue[];
+};
+
+/** null means this is not a workflow entry; undefined means malformed. */
+function workflowStoreOperation(
+  entry: RecordValue,
+): WorkflowStoreOperation | null | undefined {
+  if (entry.customType !== WORKFLOW_STORE_ENTRY_TYPE) return null;
+  const data = isRecord(entry.data) ? entry.data : undefined;
+  const state = data && isRecord(data.state) ? data.state : undefined;
+  const kind = data?.kind;
+  const max = kind === 'snapshot' ? 256 : 32;
+  if (
+    data?.version !== 1 ||
+    (kind !== 'snapshot' && kind !== 'delta') ||
+    !state ||
+    state.version !== 1 ||
+    !Array.isArray(state.attempts) ||
+    state.attempts.length > max
+  )
+    return undefined;
+  const attempts: RecordValue[] = [];
+  const keys = new Set<string>();
+  for (const source of state.attempts) {
+    const attempt = projectWorkflowStoreAttempt(source);
+    if (!attempt) return undefined;
+    const key = `${String(attempt.ownerBranchId ?? '')}\u0000${String(attempt.identity)}`;
+    if (keys.has(key)) return undefined;
+    keys.add(key);
+    attempts.push(attempt);
+  }
+  return { kind, attempts };
+}
+
+function workflowStoreAttemptRun(metadata: RecordValue): RecordValue {
+  const ownerBranchId = validWorkflowText(metadata.ownerBranchId, 256);
+  const identity = String(metadata.identity);
+  const logicalId = String(metadata.logicalId);
+  const runId = ownerBranchId
+    ? `workflow:${stableHash(`owner:${ownerBranchId}\u0000${identity}`)}`
+    : identity;
+  const lineageId = ownerBranchId
+    ? `workflow:${stableHash(`owner:${ownerBranchId}\u0000${logicalId}`)}`
+    : logicalId;
+  return {
+    runId,
+    lineageId,
+    name: logicalId,
+    state: metadata.state,
+    createdAt: metadata.createdAt,
+    ...(metadata.queuedAt === undefined ? {} : { queuedAt: metadata.queuedAt }),
+    ...(metadata.startedAt === undefined
+      ? {}
+      : { startedAt: metadata.startedAt }),
+    ...(metadata.settledAt === undefined
+      ? {}
+      : { finishedAt: metadata.settledAt }),
+    allowWrites: metadata.allowWrites === true,
+    workflow: metadata,
+  };
+}
+
+function workflowStoreAttempts(entry: RecordValue): RecordValue[] {
+  const operation = workflowStoreOperation(entry);
+  return operation?.attempts.map(workflowStoreAttemptRun) ?? [];
 }
 
 function projectWakeStoreSnapshot(value: unknown): RecordValue | undefined {
@@ -709,53 +816,21 @@ function projectWakeStoreEntry(entry: RecordValue): RecordValue | undefined {
   };
 }
 
-function workflowStoreAttempts(entry: RecordValue): RecordValue[] {
-  if (entry.customType !== WORKFLOW_STORE_ENTRY_TYPE) return [];
-  const data = isRecord(entry.data) ? entry.data : undefined;
-  const state = data && isRecord(data.state) ? data.state : undefined;
-  if (data?.version !== 1 || data.kind !== 'snapshot' || !state) return [];
-  if (state.version !== 1 || !Array.isArray(state.attempts)) return [];
-  return state.attempts.slice(-256).flatMap((attempt) => {
-    const metadata = projectWorkflowStoreAttempt(attempt);
-    if (!metadata) return [];
-    return [
-      {
-        runId: metadata.identity,
-        lineageId: metadata.logicalId,
-        name: metadata.logicalId,
-        state: metadata.state,
-        createdAt: metadata.createdAt,
-        ...(metadata.queuedAt === undefined
-          ? {}
-          : { queuedAt: metadata.queuedAt }),
-        ...(metadata.startedAt === undefined
-          ? {}
-          : { startedAt: metadata.startedAt }),
-        ...(metadata.settledAt === undefined
-          ? {}
-          : { finishedAt: metadata.settledAt }),
-        allowWrites: metadata.allowWrites === true,
-        workflow: metadata,
-      },
-    ];
-  });
-}
-
 function projectWorkflowStoreEntry(
   entry: RecordValue,
 ): RecordValue | undefined {
-  const attempts = workflowStoreAttempts(entry);
-  if (attempts.length === 0) return undefined;
+  const operation = workflowStoreOperation(entry);
+  if (!operation) return undefined;
   return {
     ...projectedEntryMetadata(entry),
     type: 'custom',
     customType: WORKFLOW_STORE_ENTRY_TYPE,
     data: {
       version: 1,
-      kind: 'snapshot',
+      kind: operation.kind,
       state: {
         version: 1,
-        attempts: attempts.map((attempt) => attempt.workflow),
+        attempts: operation.attempts,
       },
     },
   };
@@ -981,32 +1056,61 @@ export function isDelegateHistoryEntry(value: unknown): boolean {
   );
 }
 
+function workflowJournal(
+  branch: readonly unknown[],
+): DelegateOccurrence[] | undefined {
+  const latest = new Map<string, DelegateOccurrence>();
+  for (const [entryIndex, value] of branch.entries()) {
+    if (!isRecord(value)) continue;
+    const operation = workflowStoreOperation(value);
+    // A malformed workflow record invalidates the complete metadata journal;
+    // never render a valid prefix or an incomplete delta as current state.
+    if (operation === undefined) return undefined;
+    if (operation === null) continue;
+    if (operation.kind === 'snapshot') latest.clear();
+    for (const metadata of operation.attempts) {
+      const owner = validWorkflowText(metadata.ownerBranchId, 256) ?? '';
+      const identity = String(metadata.identity);
+      const key = `workflow:${owner}\u0000${identity}`;
+      latest.delete(key);
+      latest.set(key, {
+        run: workflowStoreAttemptRun(metadata),
+        kind: 'background',
+        entryIndex,
+        runIndex: identity,
+        entryIdentity: stringValue(value.id),
+        entryTimestamp: entryTimestamp(value),
+      });
+    }
+  }
+  return [...latest.values()];
+}
+
 function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
   const ordinary: DelegateOccurrence[] = [];
   const latestMetadata = new Map<string, DelegateOccurrence>();
+  const workflow = workflowJournal(branch) ?? [];
   for (const [entryIndex, value] of branch.entries()) {
     if (!isRecord(value)) continue;
-    for (const occurrence of workflowDetails(value, entryIndex)) {
-      const workflow = isRecord(occurrence.run.workflow)
-        ? stringValue(occurrence.run.workflow.identity, 80)
-        : undefined;
+    for (const occurrence of wakeStoreEntries(value).map((run, runIndex) => ({
+      run,
+      kind: 'background' as const,
+      entryIndex,
+      runIndex: String(runIndex),
+      entryIdentity: stringValue(value.id),
+      entryTimestamp: entryTimestamp(value),
+    }))) {
       const wake = isRecord(occurrence.run.wake)
         ? stringValue(occurrence.run.wake.id, 256)
         : undefined;
-      const key = workflow
-        ? `workflow:${workflow}`
-        : wake
-          ? `wake:${wake}`
-          : undefined;
-      if (key) latestMetadata.set(key, occurrence);
-      else ordinary.push(occurrence);
+      if (wake) latestMetadata.set(`wake:${wake}`, occurrence);
     }
     ordinary.push(
       ...foregroundDetails(value, entryIndex),
       ...backgroundDetails(value, entryIndex),
     );
   }
-  return [...ordinary, ...latestMetadata.values()].sort(
+  return [...ordinary, ...workflow, ...latestMetadata.values()].sort(
     (left, right) => left.entryIndex - right.entryIndex,
   );
 }
@@ -1148,6 +1252,10 @@ function invocation(
   const workflowSource = isRecord(occurrence.run.workflow)
     ? occurrence.run.workflow
     : undefined;
+  const workflowOwnerBranchId = validWorkflowText(
+    workflowSource?.ownerBranchId,
+    256,
+  );
   const workflowLogicalId = stringValue(workflowSource?.logicalId, 64);
   const workflowIdentity = stringValue(workflowSource?.identity, 80);
   const workflowAttempt = workflowSource?.attempt;
@@ -1159,6 +1267,9 @@ function invocation(
     Number.isSafeInteger(workflowAttempt) &&
     workflowAttempt >= 1
       ? {
+          ...(workflowOwnerBranchId
+            ? { ownerBranchId: workflowOwnerBranchId }
+            : {}),
           logicalId: workflowLogicalId,
           attempt: workflowAttempt,
           identity: workflowIdentity,
