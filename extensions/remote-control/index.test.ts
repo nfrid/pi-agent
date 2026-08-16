@@ -679,11 +679,13 @@ describe('remote event normalization', () => {
         toolCallId: 'read-1',
         toolName: 'read',
         args: { path: '/tmp/file' },
+        timestamp: 100,
       }),
     ).toMatchObject({
       toolCallId: 'read-1',
       name: 'read',
       arguments: { path: '/tmp/file' },
+      timestamp: 100,
       phase: 'started',
       status: 'running',
     });

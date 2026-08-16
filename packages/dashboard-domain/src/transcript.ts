@@ -42,6 +42,8 @@ export interface TranscriptToolItem {
   arguments?: unknown;
   result?: unknown;
   isError?: boolean;
+  /** Comparable chronology inherited from the owning assistant message. */
+  timestamp?: number | string;
   status: TranscriptEntityStatus;
   turnId?: string;
   data?: unknown;
@@ -104,6 +106,8 @@ export interface TranscriptRenderToolItem {
   arguments?: unknown;
   result?: unknown;
   isError?: boolean;
+  /** Comparable chronology inherited from the owning assistant message. */
+  timestamp?: number | string;
   status: TranscriptActivityToolStatus;
   turnId?: string;
   data?: unknown;
@@ -361,6 +365,10 @@ function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
   if (!toolCallId) return undefined;
   const status = normalizedToolStatus(tool.status);
   const turnId = directString(tool, 'turnId');
+  const timestamp =
+    typeof tool.timestamp === 'number' || typeof tool.timestamp === 'string'
+      ? tool.timestamp
+      : undefined;
   return {
     toolCallId,
     name:
@@ -370,6 +378,7 @@ function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
     ...(tool.result === undefined ? {} : { result: tool.result }),
     ...(typeof tool.isError === 'boolean' ? { isError: tool.isError } : {}),
     ...(status === undefined ? {} : { status }),
+    ...(timestamp === undefined ? {} : { timestamp }),
     ...(turnId === undefined ? {} : { turnId }),
   };
 }
@@ -455,53 +464,92 @@ function insertMessageOrder(
       ];
 }
 
-/** Place a new tool with its canonical message owner when one is known. */
-function insertToolOrder(
+function findToolOwner(
   projection: TranscriptProjection,
   items: Readonly<Record<string, TranscriptItem>>,
   payload: NormalizedToolPayload,
-): readonly string[] {
-  let ownerIndex = -1;
-  let ownerToolCallIds: readonly string[] = [];
+):
+  | {
+      index: number;
+      item: TranscriptMessageItem;
+      exact: boolean;
+    }
+  | undefined {
   for (let index = 0; index < projection.order.length; index += 1) {
     const item = items[projection.order[index] ?? ''];
     if (
       item?.kind === 'message' &&
       item.toolCallIds?.includes(payload.toolCallId)
-    ) {
-      ownerIndex = index;
-      ownerToolCallIds = item.toolCallIds;
-      break;
-    }
+    )
+      return { index, item, exact: true };
   }
-  const hasTurnId = payload.turnId !== undefined && payload.turnId.length > 0;
-  if (ownerIndex < 0 && hasTurnId) {
-    // Prefer the latest same-turn message when an explicit tool owner is not
-    // available; this keeps a tool beside the active turn's final message.
-    for (let index = 0; index < projection.order.length; index += 1) {
-      const item = items[projection.order[index] ?? ''];
-      if (item?.kind === 'message' && item.turnId === payload.turnId)
-        ownerIndex = index;
-    }
+  if (payload.turnId === undefined || payload.turnId.length === 0)
+    return undefined;
+  // Prefer the latest same-turn message when an explicit tool owner is not
+  // available; this keeps a tool beside the active turn's final message.
+  let owner:
+    | { index: number; item: TranscriptMessageItem; exact: boolean }
+    | undefined;
+  for (let index = 0; index < projection.order.length; index += 1) {
+    const item = items[projection.order[index] ?? ''];
+    if (item?.kind === 'message' && item.turnId === payload.turnId)
+      owner = { index, item, exact: false };
   }
-  if (ownerIndex < 0) return [...projection.order, payload.toolCallId];
+  return owner;
+}
 
-  let insertionIndex = ownerIndex + 1;
-  while (insertionIndex < projection.order.length) {
-    const existing = items[projection.order[insertionIndex] ?? ''];
-    if (existing?.kind !== 'tool') break;
-    const associated =
-      ownerToolCallIds.length > 0
+/**
+ * Place a new tool with its owner or turn first. When both are absent, use
+ * its inherited chronology anchor, retaining arrival order for equal anchors.
+ */
+function insertToolOrder(
+  projection: TranscriptProjection,
+  items: Readonly<Record<string, TranscriptItem>>,
+  payload: NormalizedToolPayload,
+): readonly string[] {
+  const owner = findToolOwner(projection, items, payload);
+  if (owner) {
+    const ownerToolCallIds = owner.item.toolCallIds ?? [];
+    let insertionIndex = owner.index + 1;
+    while (insertionIndex < projection.order.length) {
+      const existing = items[projection.order[insertionIndex] ?? ''];
+      if (existing?.kind !== 'tool') break;
+      const associated = owner.exact
         ? ownerToolCallIds.includes(existing.toolCallId)
-        : hasTurnId && existing.turnId === payload.turnId;
-    if (!associated) break;
-    insertionIndex += 1;
+        : payload.turnId !== undefined && existing.turnId === payload.turnId;
+      if (!associated) break;
+      insertionIndex += 1;
+    }
+    return [
+      ...projection.order.slice(0, insertionIndex),
+      payload.toolCallId,
+      ...projection.order.slice(insertionIndex),
+    ];
   }
-  return [
-    ...projection.order.slice(0, insertionIndex),
-    payload.toolCallId,
-    ...projection.order.slice(insertionIndex),
-  ];
+
+  const normalized = comparableTranscriptTimestamp(payload.timestamp);
+  if (normalized === undefined)
+    return [...projection.order, payload.toolCallId];
+  let insertionIndex = -1;
+  for (let index = 0; index < projection.order.length; index += 1) {
+    const existing = items[projection.order[index] ?? ''];
+    if (existing?.kind !== 'message' && existing?.kind !== 'tool') continue;
+    const existingTimestamp = comparableTranscriptTimestamp(existing.timestamp);
+    if (
+      insertionIndex < 0 &&
+      existingTimestamp !== undefined &&
+      existingTimestamp.domain === normalized.domain &&
+      existingTimestamp.value > normalized.value
+    )
+      insertionIndex = index;
+  }
+  return insertionIndex < 0
+    ? [...projection.order, payload.toolCallId]
+    : [
+        ...projection.order.slice(0, insertionIndex),
+        payload.toolCallId,
+        ...projection.order.slice(insertionIndex),
+      ];
 }
 
 function isFinished(item: TranscriptItem | undefined): boolean {
@@ -608,6 +656,9 @@ function mergeTool(
         : phase === 'started'
           ? 'pending'
           : 'running';
+  const owner = findToolOwner(projection, items, payload);
+  const timestamp =
+    payload.timestamp ?? previousTool?.timestamp ?? owner?.item.timestamp;
   const item: TranscriptToolItem = {
     kind: 'tool',
     toolCallId: payload.toolCallId,
@@ -627,6 +678,7 @@ function mergeTool(
         ? {}
         : { isError: previousTool.isError }
       : { isError: payload.isError }),
+    ...(timestamp === undefined ? {} : { timestamp }),
     status,
     ...(payload.turnId === undefined
       ? previousTool?.turnId === undefined
@@ -640,11 +692,13 @@ function mergeTool(
       : { data: payload.data }),
   };
   items[payload.toolCallId] = item;
+  const orderingPayload =
+    timestamp === payload.timestamp ? payload : { ...payload, timestamp };
   return {
     ...projection,
     order: previous
       ? projection.order
-      : insertToolOrder(projection, items, payload),
+      : insertToolOrder(projection, items, orderingPayload),
     items,
   };
 }
@@ -935,6 +989,7 @@ export function hydrateTranscript(
                 ? { isError: message.isError }
                 : {}),
               status: message.isError === true ? 'error' : 'finished',
+              ...(timestamp === undefined ? {} : { timestamp }),
               ...(directString(message, 'turnId') === undefined
                 ? {}
                 : { turnId: directString(message, 'turnId') }),
@@ -989,6 +1044,10 @@ export function hydrateTranscript(
               ? (items[toolCallId] as TranscriptToolItem)
               : undefined;
           const turnId = directString(part, 'turnId');
+          const toolTimestamp =
+            persistedTimestamp({}, part) ??
+            existingTool?.timestamp ??
+            timestamp;
           items[toolCallId] = {
             kind: 'tool',
             toolCallId,
@@ -1018,6 +1077,9 @@ export function hydrateTranscript(
                 ? { isError: part.isError }
                 : {}),
             status: existingTool?.status ?? persistedToolStatus(part),
+            ...(toolTimestamp === undefined
+              ? {}
+              : { timestamp: toolTimestamp }),
             ...(turnId === undefined
               ? existingTool?.turnId === undefined
                 ? {}
@@ -1042,6 +1104,7 @@ export function hydrateTranscript(
         directString(tool, 'toolCallId') ?? directString(tool, 'id');
       if (toolCallId) {
         const turnId = directString(tool, 'turnId');
+        const timestamp = persistedTimestamp(raw, tool);
         items[toolCallId] = {
           kind: 'tool',
           toolCallId,
@@ -1060,6 +1123,7 @@ export function hydrateTranscript(
           ...(typeof tool.isError === 'boolean'
             ? { isError: tool.isError }
             : {}),
+          ...(timestamp === undefined ? {} : { timestamp }),
           ...(turnId === undefined ? {} : { turnId }),
           ...(tool.data === undefined ? {} : { data: tool.data }),
         };
@@ -1259,6 +1323,9 @@ export function projectTranscriptForRender(
           ...(typeof part.isError === 'boolean'
             ? { isError: part.isError }
             : {}),
+          ...(item.timestamp === undefined
+            ? {}
+            : { timestamp: item.timestamp }),
           status: renderToolStatus(persistedToolStatus(part)),
         });
       }
@@ -1272,6 +1339,7 @@ export function projectTranscriptForRender(
       ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
       ...(item.result === undefined ? {} : { result: item.result }),
       ...(item.isError === undefined ? {} : { isError: item.isError }),
+      ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
       status: renderToolStatus(item.status),
       ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
       ...(item.data === undefined ? {} : { data: item.data }),
@@ -1329,6 +1397,7 @@ export function selectLegacyTranscriptEntries(
         ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
         ...(item.result === undefined ? {} : { result: item.result }),
         ...(item.isError === undefined ? {} : { isError: item.isError }),
+        ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
         status:
           item.status === 'success'
             ? 'finished'

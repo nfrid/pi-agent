@@ -355,6 +355,7 @@ export class LiveEventNormalizer {
     if (phase !== 'finished') this.activeToolNames.set(toolCallId, name);
     else this.activeToolNames.delete(toolCallId);
     const suppliedStatus = directString(event, 'status');
+    const timestamp = directIdentifier(event, 'timestamp');
     const status =
       suppliedStatus === 'pending' ||
       suppliedStatus === 'running' ||
@@ -382,6 +383,7 @@ export class LiveEventNormalizer {
         ? { isError: directValue(event, 'isError') as boolean }
         : {}),
       status,
+      ...(timestamp === undefined ? {} : { timestamp }),
       ...(directIdentifier(event, 'turnId') !== undefined
         ? { turnId: String(directIdentifier(event, 'turnId')) }
         : {}),

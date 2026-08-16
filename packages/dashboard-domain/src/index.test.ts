@@ -491,6 +491,85 @@ describe('dashboard domain reducers', () => {
     });
   });
 
+  it('inherits tool chronology and preserves ownerless equal-anchor order', () => {
+    let ownerProjection = hydrateTranscript([], 's');
+    ownerProjection = reduceTranscriptEvent(ownerProjection, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'retired-owner',
+        role: 'assistant',
+        content: 'older response',
+        timestamp: 100,
+        toolCallIds: ['delayed-a', 'delayed-b'],
+      },
+    });
+    ownerProjection = reduceTranscriptEvent(ownerProjection, {
+      type: 'tool.updated',
+      sessionId: 's',
+      tool: { toolCallId: 'delayed-a', name: 'read', status: 'running' },
+    });
+    ownerProjection = reduceTranscriptEvent(ownerProjection, {
+      type: 'tool.updated',
+      sessionId: 's',
+      tool: { toolCallId: 'delayed-b', name: 'grep', status: 'running' },
+    });
+    expect(ownerProjection.items['delayed-a']).toMatchObject({
+      timestamp: 100,
+    });
+    expect(ownerProjection.items['delayed-b']).toMatchObject({
+      timestamp: 100,
+    });
+
+    let state = hydrateTranscript(
+      [
+        {
+          type: 'message',
+          id: 'persisted-assistant-newer',
+          message: { role: 'assistant', content: 'newer', timestamp: 200 },
+        },
+        {
+          type: 'message',
+          id: 'persisted-user-newer',
+          message: { role: 'user', content: 'follow-up', timestamp: 220 },
+        },
+      ],
+      's',
+    );
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'active-message',
+        role: 'assistant',
+        content: 'current response',
+        timestamp: 150,
+      },
+    });
+    for (const toolCallId of ['delayed-a', 'delayed-b']) {
+      const tool = ownerProjection.items[toolCallId];
+      if (tool?.kind !== 'tool') throw new Error('missing inherited tool');
+      state = reduceTranscriptEvent(state, {
+        type: 'tool.updated',
+        sessionId: 's',
+        tool: {
+          toolCallId,
+          name: tool.name,
+          status: 'finished',
+          timestamp: tool.timestamp,
+        },
+      });
+    }
+
+    expect(state.order).toEqual([
+      'delayed-a',
+      'delayed-b',
+      'active-message',
+      'persisted-assistant-newer',
+      'persisted-user-newer',
+    ]);
+  });
+
   it('fails closed for missing, invalid, and equal timestamps', () => {
     const initial = hydrateTranscript(
       [
