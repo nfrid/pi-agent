@@ -17,6 +17,25 @@ const DelegateRunStateSchema = Type.Union([
   Type.Literal('aborted'),
   Type.Literal('timed-out'),
 ]);
+const DelegateWorkflowStateSchema = Type.Union([
+  Type.Literal('scheduled'),
+  Type.Literal('queued'),
+  Type.Literal('running'),
+  Type.Literal('success'),
+  Type.Literal('error'),
+  Type.Literal('timed-out'),
+  Type.Literal('aborted'),
+  Type.Literal('cancelled'),
+  Type.Literal('blocked'),
+]);
+const DelegateWakeStateSchema = Type.Union([
+  Type.Literal('pending'),
+  Type.Literal('ready'),
+  Type.Literal('queued'),
+  Type.Literal('entered'),
+  Type.Literal('cancelled'),
+  Type.Literal('blocked'),
+]);
 const DelegateLifecycleReasonSchema = Type.Union([
   Type.Literal('user-cancellation'),
   Type.Literal('queued-cancellation'),
@@ -127,6 +146,64 @@ const DelegateResultSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const DelegateWorkflowStatusSchema = Type.Object(
+  {
+    logicalId: Type.String({ minLength: 1, maxLength: 64 }),
+    attempt: Type.Integer({ minimum: 1 }),
+    identity: Type.String({ minLength: 1, maxLength: 80 }),
+    state: DelegateWorkflowStateSchema,
+    dependencies: Type.Readonly(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+        maxItems: 32,
+      }),
+    ),
+    waitingFor: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+          maxItems: 32,
+        }),
+      ),
+    ),
+    reason: Type.Optional(Type.String({ maxLength: 256 })),
+    route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    createdAt: Type.Number(),
+    scheduledAt: Type.Number(),
+    queuedAt: Type.Optional(Type.Number()),
+    startedAt: Type.Optional(Type.Number()),
+    settledAt: Type.Optional(Type.Number()),
+    branchAvailable: Type.Optional(Type.Boolean()),
+    snapshotAvailable: Type.Optional(Type.Boolean()),
+    deliveredToParent: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+const DelegateWakeStatusSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 64 }),
+    state: DelegateWakeStateSchema,
+    references: Type.Readonly(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+        maxItems: 32,
+      }),
+    ),
+    waitingFor: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+          maxItems: 32,
+        }),
+      ),
+    ),
+    createdAt: Type.Number(),
+    readyAt: Type.Optional(Type.Number()),
+    queuedAt: Type.Optional(Type.Number()),
+    enteredAt: Type.Optional(Type.Number()),
+    cancelledAt: Type.Optional(Type.Number()),
+    blockedAt: Type.Optional(Type.Number()),
+    reason: Type.Optional(Type.String({ maxLength: 256 })),
+  },
+  { additionalProperties: false },
+);
+
 const DelegateTranscriptEntrySchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 512 }),
@@ -199,6 +276,7 @@ export const DelegateStatusSchema = Type.Object(
     transcriptTruncated: Type.Optional(Type.Boolean()),
     result: Type.Optional(DelegateResultSchema),
     lifecycle: Type.Optional(DelegateLifecycleSchema),
+    workflow: Type.Optional(DelegateWorkflowStatusSchema),
   },
   { additionalProperties: false },
 );
@@ -207,6 +285,10 @@ export const DelegateStatusViewModelSchema = Type.Object(
   {
     version: Type.Literal(1),
     statuses: Type.Readonly(Type.Array(DelegateStatusSchema, { maxItems: 64 })),
+    /** Active branch wake metadata only; payloads and handoffs are excluded. */
+    wakes: Type.Optional(
+      Type.Readonly(Type.Array(DelegateWakeStatusSchema, { maxItems: 256 })),
+    ),
   },
   { additionalProperties: false },
 );
@@ -216,6 +298,10 @@ export type DelegateTranscriptEntry = Static<
 >;
 export type DelegateResult = Static<typeof DelegateResultSchema>;
 export type DelegateStatus = Static<typeof DelegateStatusSchema>;
+export type DelegateWorkflowStatus = Static<
+  typeof DelegateWorkflowStatusSchema
+>;
+export type DelegateWakeStatus = Static<typeof DelegateWakeStatusSchema>;
 export type DelegateStatusViewModel = Static<
   typeof DelegateStatusViewModelSchema
 >;

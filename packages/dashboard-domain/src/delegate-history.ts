@@ -132,7 +132,10 @@ function normalizedState(
     state === 'success' ||
     state === 'error' ||
     state === 'aborted' ||
-    state === 'timed-out'
+    state === 'timed-out' ||
+    state === 'scheduled' ||
+    state === 'cancelled' ||
+    state === 'blocked'
   )
     return state;
   if (
@@ -141,7 +144,10 @@ function normalizedState(
     fallback === 'success' ||
     fallback === 'error' ||
     fallback === 'aborted' ||
-    fallback === 'timed-out'
+    fallback === 'timed-out' ||
+    fallback === 'scheduled' ||
+    fallback === 'cancelled' ||
+    fallback === 'blocked'
   )
     return fallback;
   if (run.exitCode === -1) return 'running';
@@ -412,6 +418,61 @@ function projectedEntryMetadata(entry: RecordValue): RecordValue {
   return result;
 }
 
+function projectWorkflow(
+  run: RecordValue,
+  state: DelegateHistoryInvocation['state'],
+  createdAt: number,
+  route?: string,
+): RecordValue | undefined {
+  const source = isRecord(run.workflow) ? run.workflow : run.workflowAttempt;
+  if (!isRecord(source)) return undefined;
+  const logicalId = stringValue(source.logicalId, 64);
+  const identity = stringValue(source.identity, 80);
+  const ordinal = source.ordinal;
+  if (
+    logicalId === undefined ||
+    identity === undefined ||
+    typeof ordinal !== 'number' ||
+    !Number.isSafeInteger(ordinal) ||
+    ordinal < 1
+  )
+    return undefined;
+  const dependencies = Array.isArray(source.dependencies)
+    ? source.dependencies.flatMap((value) => {
+        const identity = stringValue(value, 80);
+        return identity ? [identity] : [];
+      })
+    : [];
+  const waitingFor = Array.isArray(source.waitingFor)
+    ? source.waitingFor.flatMap((value) => {
+        const identity = stringValue(value, 80);
+        return identity ? [identity] : [];
+      })
+    : undefined;
+  const reason = stringValue(source.reason, 256);
+  return {
+    logicalId,
+    attempt: ordinal,
+    identity,
+    state,
+    dependencies,
+    ...(waitingFor?.length ? { waitingFor } : {}),
+    ...(reason ? { reason } : {}),
+    ...(route ? { route } : {}),
+    createdAt,
+    scheduledAt: finiteNumber(source.scheduledAt) ?? createdAt,
+    ...(finiteNumber(source.queuedAt) === undefined
+      ? {}
+      : { queuedAt: source.queuedAt }),
+    ...(finiteNumber(source.startedAt) === undefined
+      ? {}
+      : { startedAt: source.startedAt }),
+    ...(finiteNumber(source.settledAt) === undefined
+      ? {}
+      : { settledAt: source.settledAt }),
+  };
+}
+
 function projectRun(
   run: RecordValue,
   entryIdentity: string | undefined,
@@ -438,7 +499,21 @@ function projectRun(
   const task = stringValue(run.task, MAX_DELEGATE_HISTORY_TASK);
   if (name) projected.name = name;
   if (task) projected.task = task;
-  projected.state = normalizedState(run, fallbackState);
+  const projectedState = normalizedState(run, fallbackState);
+  projected.state = projectedState;
+  const projectedQueuedAt = finiteNumber(run.queuedAt);
+  const projectedCreatedAt =
+    projectedQueuedAt ?? finiteNumber(run.startedAt) ?? Date.now();
+  const projectedRoute = isRecord(run.routing)
+    ? stringValue(run.routing.route, 512)
+    : undefined;
+  const workflow = projectWorkflow(
+    run,
+    projectedState,
+    projectedCreatedAt,
+    projectedRoute,
+  );
+  if (workflow) projected.workflow = workflow;
   for (const key of ['queuedAt', 'startedAt', 'finishedAt'] as const) {
     const value = finiteNumber(run[key]);
     if (value !== undefined) projected[key] = value;
@@ -470,6 +545,222 @@ function projectRun(
   return { run: projected, matches };
 }
 
+const WORKFLOW_STORE_ENTRY_TYPE = 'delegate-workflow:v1';
+const WORKFLOW_STATES = new Set([
+  'scheduled',
+  'queued',
+  'running',
+  'success',
+  'error',
+  'timed-out',
+  'aborted',
+  'cancelled',
+  'blocked',
+]);
+
+function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
+  if (!isRecord(value)) return undefined;
+  const logicalId = stringValue(value.logicalId, 64);
+  const identity = stringValue(value.identity, 80);
+  const attempt = value.attempt;
+  const state = stringValue(value.state, 32);
+  if (
+    !logicalId ||
+    !identity ||
+    typeof attempt !== 'number' ||
+    !Number.isSafeInteger(attempt) ||
+    attempt < 1 ||
+    identity !== `${logicalId}@${attempt}` ||
+    !state ||
+    !WORKFLOW_STATES.has(state) ||
+    !Array.isArray(value.dependencies) ||
+    !Array.isArray(value.waitingFor)
+  )
+    return undefined;
+  const dependencies = value.dependencies.slice(0, 32).flatMap((item) => {
+    const dependency = stringValue(item, 80);
+    return dependency ? [dependency] : [];
+  });
+  const waitingFor = value.waitingFor.slice(0, 32).flatMap((item) => {
+    const dependency = stringValue(item, 80);
+    return dependency ? [dependency] : [];
+  });
+  const createdAt = finiteNumber(value.createdAt);
+  const scheduledAt = finiteNumber(value.scheduledAt);
+  if (createdAt === undefined || scheduledAt === undefined) return undefined;
+  const result: RecordValue = {
+    logicalId,
+    attempt,
+    identity,
+    state,
+    dependencies,
+    ...(waitingFor.length ? { waitingFor } : {}),
+    createdAt,
+    scheduledAt,
+  };
+  for (const key of ['queuedAt', 'startedAt', 'settledAt'] as const) {
+    const timestamp = finiteNumber(value[key]);
+    if (timestamp !== undefined) result[key] = timestamp;
+  }
+  const route = stringValue(value.route, 512);
+  const reason = stringValue(value.reason, 256);
+  if (route) result.route = route;
+  if (typeof value.allowWrites === 'boolean')
+    result.allowWrites = value.allowWrites;
+  if (reason) result.reason = reason;
+  return result;
+}
+
+function projectWakeStoreSnapshot(value: unknown): RecordValue | undefined {
+  if (!isRecord(value)) return undefined;
+  const id = stringValue(value.id, 256);
+  const state = stringValue(value.state, 32);
+  if (
+    !id ||
+    !state ||
+    !['pending', 'ready', 'queued', 'entered', 'cancelled', 'blocked'].includes(
+      state,
+    ) ||
+    !Array.isArray(value.references) ||
+    typeof value.revision !== 'number' ||
+    !Number.isSafeInteger(value.revision) ||
+    value.revision < 0 ||
+    typeof value.dispatchAttempts !== 'number' ||
+    !Number.isSafeInteger(value.dispatchAttempts) ||
+    value.dispatchAttempts < 0
+  )
+    return undefined;
+  const createdAt = finiteNumber(value.createdAt);
+  if (createdAt === undefined) return undefined;
+  const references = value.references.slice(0, 32).flatMap((reference) => {
+    const result = stringValue(reference, 80);
+    return result ? [result] : [];
+  });
+  const result: RecordValue = {
+    id,
+    state,
+    references,
+    createdAt,
+    revision: value.revision,
+    dispatchAttempts: value.dispatchAttempts,
+  };
+  for (const key of [
+    'readyAt',
+    'queuedAt',
+    'enteredAt',
+    'cancelledAt',
+    'blockedAt',
+  ] as const) {
+    const timestamp = finiteNumber(value[key]);
+    if (timestamp !== undefined) result[key] = timestamp;
+  }
+  const reason = stringValue(value.reason, 256);
+  if (reason) result.reason = reason;
+  return result;
+}
+
+function wakeStoreEntries(entry: RecordValue): RecordValue[] {
+  if (entry.customType !== 'delegate-wake:v1') return [];
+  const data = isRecord(entry.data) ? entry.data : undefined;
+  const state = data && isRecord(data.state) ? data.state : undefined;
+  if (data?.version !== 1 || data.kind !== 'snapshot' || !state) return [];
+  if (state.version !== 1 || !Array.isArray(state.wakes)) return [];
+  return state.wakes.slice(-256).flatMap((wake) => {
+    const metadata = projectWakeStoreSnapshot(wake);
+    if (!metadata) return [];
+    const lifecycleState =
+      metadata.state === 'entered'
+        ? 'success'
+        : metadata.state === 'cancelled' || metadata.state === 'blocked'
+          ? 'error'
+          : 'running';
+    return [
+      {
+        runId: `wake:${metadata.id}`,
+        lineageId: `wake:${metadata.id}`,
+        name: `Wake ${metadata.id}`,
+        state: lifecycleState,
+        createdAt: metadata.createdAt,
+        ...(metadata.queuedAt === undefined
+          ? {}
+          : { queuedAt: metadata.queuedAt }),
+        ...(metadata.enteredAt === undefined
+          ? {}
+          : { finishedAt: metadata.enteredAt }),
+        allowWrites: false,
+        wake: metadata,
+      },
+    ];
+  });
+}
+
+function projectWakeStoreEntry(entry: RecordValue): RecordValue | undefined {
+  const wakes = wakeStoreEntries(entry);
+  if (wakes.length === 0) return undefined;
+  return {
+    ...projectedEntryMetadata(entry),
+    type: 'custom',
+    customType: 'delegate-wake:v1',
+    data: {
+      version: 1,
+      kind: 'snapshot',
+      state: { version: 1, wakes: wakes.map((wake) => wake.wake) },
+    },
+  };
+}
+
+function workflowStoreAttempts(entry: RecordValue): RecordValue[] {
+  if (entry.customType !== WORKFLOW_STORE_ENTRY_TYPE) return [];
+  const data = isRecord(entry.data) ? entry.data : undefined;
+  const state = data && isRecord(data.state) ? data.state : undefined;
+  if (data?.version !== 1 || data.kind !== 'snapshot' || !state) return [];
+  if (state.version !== 1 || !Array.isArray(state.attempts)) return [];
+  return state.attempts.slice(-256).flatMap((attempt) => {
+    const metadata = projectWorkflowStoreAttempt(attempt);
+    if (!metadata) return [];
+    return [
+      {
+        runId: metadata.identity,
+        lineageId: metadata.logicalId,
+        name: metadata.logicalId,
+        state: metadata.state,
+        createdAt: metadata.createdAt,
+        ...(metadata.queuedAt === undefined
+          ? {}
+          : { queuedAt: metadata.queuedAt }),
+        ...(metadata.startedAt === undefined
+          ? {}
+          : { startedAt: metadata.startedAt }),
+        ...(metadata.settledAt === undefined
+          ? {}
+          : { finishedAt: metadata.settledAt }),
+        allowWrites: metadata.allowWrites === true,
+        workflow: metadata,
+      },
+    ];
+  });
+}
+
+function projectWorkflowStoreEntry(
+  entry: RecordValue,
+): RecordValue | undefined {
+  const attempts = workflowStoreAttempts(entry);
+  if (attempts.length === 0) return undefined;
+  return {
+    ...projectedEntryMetadata(entry),
+    type: 'custom',
+    customType: WORKFLOW_STORE_ENTRY_TYPE,
+    data: {
+      version: 1,
+      kind: 'snapshot',
+      state: {
+        version: 1,
+        attempts: attempts.map((attempt) => attempt.workflow),
+      },
+    },
+  };
+}
+
 function projectJobMetadata(job: RecordValue): RecordValue {
   const result: RecordValue = {};
   for (const [key, max] of [
@@ -499,6 +790,10 @@ export function projectDelegateHistoryEntry(
 ): DelegateHistoryEntryProjection {
   if (!isRecord(value)) return { entry: value };
   const result = projectedEntryMetadata(value);
+  const workflowEntry = projectWorkflowStoreEntry(value);
+  if (workflowEntry) return { entry: workflowEntry };
+  const wakeEntry = projectWakeStoreEntry(value);
+  if (wakeEntry) return { entry: wakeEntry };
   const entryIdentity = stringValue(value.id, 256);
   const sourceMessage = isRecord(value.message) ? value.message : value;
   if (
@@ -597,6 +892,22 @@ export function projectDelegateHistoryEntry(
   return { entry: result };
 }
 
+function workflowDetails(
+  entry: RecordValue,
+  entryIndex: number,
+): DelegateOccurrence[] {
+  return [...workflowStoreAttempts(entry), ...wakeStoreEntries(entry)].map(
+    (run, runIndex) => ({
+      run,
+      kind: 'background' as const,
+      entryIndex,
+      runIndex: String(runIndex),
+      entryIdentity: stringValue(entry.id),
+      entryTimestamp: entryTimestamp(entry),
+    }),
+  );
+}
+
 function foregroundDetails(
   entry: RecordValue,
   entryIndex: number,
@@ -664,19 +975,40 @@ function backgroundDetails(
 export function isDelegateHistoryEntry(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
+    workflowDetails(value, 0).length > 0 ||
     foregroundDetails(value, 0).length > 0 ||
     backgroundDetails(value, 0).length > 0
   );
 }
 
 function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
-  return branch.flatMap((value, entryIndex) => {
-    if (!isRecord(value)) return [];
-    return [
+  const ordinary: DelegateOccurrence[] = [];
+  const latestMetadata = new Map<string, DelegateOccurrence>();
+  for (const [entryIndex, value] of branch.entries()) {
+    if (!isRecord(value)) continue;
+    for (const occurrence of workflowDetails(value, entryIndex)) {
+      const workflow = isRecord(occurrence.run.workflow)
+        ? stringValue(occurrence.run.workflow.identity, 80)
+        : undefined;
+      const wake = isRecord(occurrence.run.wake)
+        ? stringValue(occurrence.run.wake.id, 256)
+        : undefined;
+      const key = workflow
+        ? `workflow:${workflow}`
+        : wake
+          ? `wake:${wake}`
+          : undefined;
+      if (key) latestMetadata.set(key, occurrence);
+      else ordinary.push(occurrence);
+    }
+    ordinary.push(
       ...foregroundDetails(value, entryIndex),
       ...backgroundDetails(value, entryIndex),
-    ];
-  });
+    );
+  }
+  return [...ordinary, ...latestMetadata.values()].sort(
+    (left, right) => left.entryIndex - right.entryIndex,
+  );
 }
 
 /**
@@ -810,6 +1142,60 @@ function invocation(
   const task = stringValue(occurrence.run.task, MAX_DELEGATE_HISTORY_TASK);
   const allowWrites =
     occurrence.run.allowWrites === true || occurrence.job?.allowWrites === true;
+  const wakeSource = isRecord(occurrence.run.wake)
+    ? occurrence.run.wake
+    : undefined;
+  const workflowSource = isRecord(occurrence.run.workflow)
+    ? occurrence.run.workflow
+    : undefined;
+  const workflowLogicalId = stringValue(workflowSource?.logicalId, 64);
+  const workflowIdentity = stringValue(workflowSource?.identity, 80);
+  const workflowAttempt = workflowSource?.attempt;
+  const workflow =
+    workflowSource &&
+    workflowLogicalId &&
+    workflowIdentity &&
+    typeof workflowAttempt === 'number' &&
+    Number.isSafeInteger(workflowAttempt) &&
+    workflowAttempt >= 1
+      ? {
+          logicalId: workflowLogicalId,
+          attempt: workflowAttempt,
+          identity: workflowIdentity,
+          dependencies: Array.isArray(workflowSource.dependencies)
+            ? workflowSource.dependencies.flatMap((value) =>
+                typeof value === 'string' ? [value] : [],
+              )
+            : [],
+          ...(Array.isArray(workflowSource.waitingFor) &&
+          workflowSource.waitingFor.length > 0
+            ? {
+                waitingFor: workflowSource.waitingFor.filter(
+                  (value): value is string => typeof value === 'string',
+                ),
+              }
+            : {}),
+          state,
+          createdAt,
+          scheduledAt: finiteNumber(workflowSource.scheduledAt) ?? createdAt,
+          ...(finiteNumber(workflowSource.queuedAt) === undefined
+            ? {}
+            : { queuedAt: workflowSource.queuedAt }),
+          ...(finiteNumber(workflowSource.startedAt) === undefined
+            ? {}
+            : { startedAt: workflowSource.startedAt }),
+          ...(finiteNumber(workflowSource.settledAt) === undefined
+            ? {}
+            : { settledAt: workflowSource.settledAt }),
+          ...(typeof workflowSource.reason === 'string'
+            ? { reason: workflowSource.reason.slice(0, 256) }
+            : {}),
+          ...(typeof workflowSource.allowWrites === 'boolean'
+            ? { allowWrites: workflowSource.allowWrites }
+            : {}),
+          ...(route === undefined ? {} : { route }),
+        }
+      : undefined;
   return {
     runId,
     ...(childSessionId === undefined ? {} : { sessionId: childSessionId }),
@@ -826,6 +1212,12 @@ function invocation(
     ...(route === undefined ? {} : { route }),
     ...(context === undefined ? {} : { context }),
     allowWrites,
+    ...(workflow
+      ? { workflow: workflow as DelegateHistoryInvocation['workflow'] }
+      : {}),
+    ...(wakeSource
+      ? { wake: wakeSource as DelegateHistoryInvocation['wake'] }
+      : {}),
   };
 }
 
@@ -868,6 +1260,8 @@ function aggregateHistoryGroup(
     ...(current.route === undefined ? {} : { route: current.route }),
     ...(current.context === undefined ? {} : { context: current.context }),
     allowWrites: current.allowWrites,
+    ...(current.workflow ? { workflow: current.workflow } : {}),
+    ...(current.wake ? { wake: current.wake } : {}),
     runCount: runs.length,
     runs: [...runs],
     ...(truncated ? { truncated: true } : {}),

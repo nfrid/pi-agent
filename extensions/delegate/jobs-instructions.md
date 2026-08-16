@@ -1,2 +1,4 @@
-- Use delegate_jobs feedback only when concrete corrective guidance is needed for a background child.
-- Use peek for deliberate inspection or once when a bounded timeout will change the next action; never repeat it to poll.
+- Use `delegate_jobs` only for compact metadata status, bounded feedback, or cancellation when work is no longer needed; status never includes reports or payloads.
+- Do not poll, wait, or consume results with `delegate_jobs`; register `delegate_wake` for selected completion evidence and settle while work continues.
+- Normal scheduling is always asynchronous: use a logical `id` for a fresh node, `continue` for another attempt, `after` for exact dependencies, and symbolic `inputs` for evidence/branches.
+- A continuation inherits its persisted exact route unless an explicit valid route replaces it; a fresh node must choose an exact route.

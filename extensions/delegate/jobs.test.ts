@@ -223,13 +223,114 @@ describe('DelegateJobManager', () => {
     await manager.dispose();
   });
 
+  test('retains optional workflow identity separately from opaque job IDs', async () => {
+    const manager = new DelegateJobManager();
+    const started = manager.start({
+      mode: 'single',
+      tasks: ['inspect'],
+      workflowAttempt: {
+        logicalId: 'impl',
+        ordinal: 1,
+        identity: 'impl@1',
+      },
+      execute: async () => successfulResult(),
+    });
+
+    expect(started).toMatchObject({
+      id: 'dj-1',
+      logicalId: 'impl',
+      attemptIdentity: 'impl@1',
+    });
+    await vi.waitFor(() => expect(manager.runningCount).toBe(0));
+    expect(manager.get(started.id)).toMatchObject({
+      id: 'dj-1',
+      logicalId: 'impl',
+      attemptIdentity: 'impl@1',
+    });
+    await manager.dispose();
+  });
+
+  test('rejects malformed workflow identity before entering job snapshots', () => {
+    const manager = new DelegateJobManager();
+    const execute = async () => successfulResult();
+    expect(() =>
+      manager.start({
+        mode: 'single',
+        tasks: ['inspect'],
+        workflowAttempt: {
+          logicalId: 'impl',
+          ordinal: 1,
+          identity: 'wrong@1',
+        },
+        execute,
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
+    expect(() =>
+      manager.start({
+        mode: 'single',
+        tasks: ['inspect'],
+        workflowAttempt: {
+          logicalId: 'Impl',
+          ordinal: 1,
+          identity: 'Impl@1',
+        },
+        execute,
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
+    expect(manager.list()).toEqual([]);
+    expect(() =>
+      createRun('inspect', undefined, {
+        workflowAttempt: {
+          logicalId: 'impl',
+          ordinal: 1,
+          identity: 'impl@2',
+        },
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
+  });
+
+  test('retains workflow identity when execution throws', async () => {
+    const manager = new DelegateJobManager();
+    const started = manager.start({
+      mode: 'single',
+      tasks: ['inspect'],
+      workflowAttempt: {
+        logicalId: 'impl',
+        ordinal: 1,
+        identity: 'impl@1',
+      },
+      execute: async () => {
+        throw new Error('launch failed');
+      },
+    });
+
+    const settled = await manager.peek(started.id, 1_000);
+    expect(settled).toMatchObject({
+      state: 'error',
+      logicalId: 'impl',
+      attemptIdentity: 'impl@1',
+      runs: [
+        {
+          workflowAttempt: {
+            logicalId: 'impl',
+            ordinal: 1,
+            identity: 'impl@1',
+          },
+        },
+      ],
+    });
+    await manager.dispose();
+  });
+
   test('does not auto-deliver a result returned by a waiting peek', async () => {
     let finish!: (result: DelegateJobResult) => void;
     const onSettled = vi.fn();
+    const onTerminal = vi.fn();
     const manager = new DelegateJobManager({ onSettled });
     const started = manager.start({
       mode: 'single',
       tasks: ['inspect'],
+      onTerminal,
       execute: () =>
         new Promise<DelegateJobResult>((resolve) => {
           finish = resolve;
@@ -240,6 +341,10 @@ describe('DelegateJobManager', () => {
     finish(successfulResult());
     await expect(waiting).resolves.toMatchObject({ state: 'success' });
     expect(onSettled).not.toHaveBeenCalled();
+    expect(onTerminal).toHaveBeenCalledOnce();
+    expect(onTerminal.mock.calls[0]?.[0]).toMatchObject({
+      handoff: expect.stringContaining('succeeded'),
+    });
     await manager.dispose();
   });
 

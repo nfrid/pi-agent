@@ -3,6 +3,7 @@ import {
   ActiveDelegateTranscriptBaselineSchema,
   ComposerCommandCatalogueSchema,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
+  DelegateWorkflowMetadataSchema,
   deriveSessionTitle,
   ExtensionSurfaceSchema,
   firstUserMessageText,
@@ -213,6 +214,17 @@ describe('dashboard protocol', () => {
             createdAt: 1,
             allowWrites: false,
             transcript: [entry],
+            workflow: {
+              logicalId: 'review',
+              attempt: 1,
+              identity: 'review@1',
+              state: 'scheduled',
+              dependencies: ['impl@1'],
+              waitingFor: ['impl@1'],
+              reason: 'waiting for impl@1',
+              createdAt: 1,
+              scheduledAt: 1,
+            },
           },
         ],
       }),
@@ -227,6 +239,7 @@ describe('dashboard protocol', () => {
       }),
     ).toMatchObject({ type: 'delegate.transcript.updated', entry });
     expect(ActiveDelegateTranscriptBaselineSchema).toBeDefined();
+    expect(DelegateWorkflowMetadataSchema).toBeDefined();
   });
 
   it('strictly separates summary history from one selected run detail', () => {
@@ -244,6 +257,24 @@ describe('dashboard protocol', () => {
           state: 'success',
           createdAt: 1,
           allowWrites: false,
+          workflow: {
+            logicalId: 'review',
+            attempt: 1,
+            identity: 'review@1',
+            state: 'success',
+            dependencies: [],
+            createdAt: 1,
+            scheduledAt: 1,
+          },
+          wake: {
+            id: 'review-wake',
+            state: 'entered',
+            references: ['review@1'],
+            createdAt: 1,
+            enteredAt: 2,
+            revision: 1,
+            dispatchAttempts: 1,
+          },
           runCount: 1,
           runs: [
             {
@@ -255,6 +286,24 @@ describe('dashboard protocol', () => {
               state: 'success',
               createdAt: 1,
               allowWrites: false,
+              workflow: {
+                logicalId: 'review',
+                attempt: 1,
+                identity: 'review@1',
+                state: 'success',
+                dependencies: [],
+                createdAt: 1,
+                scheduledAt: 1,
+              },
+              wake: {
+                id: 'review-wake',
+                state: 'entered',
+                references: ['review@1'],
+                createdAt: 1,
+                enteredAt: 2,
+                revision: 1,
+                dispatchAttempts: 1,
+              },
             },
           ],
         },

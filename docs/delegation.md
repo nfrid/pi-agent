@@ -2,13 +2,29 @@
 
 The delegate extension runs focused child agents using user-owned model routes. Parent-agent shell and repository access are unaffected by delegation settings.
 
+## Always-async workflow scheduling
+
+Normal model-facing delegation always schedules work and returns immediately. A fresh node supplies one stable logical `id` and an exact `route`; a continuation supplies `continue` and creates the next immutable attempt (`impl@1`, `impl@2`, …). Use `after` to bind exact dependency attempts and `inputs` to pipe symbolic reports, metadata, named views, or branch/snapshot references without copying them through the parent. A missing or invalid required input becomes a terminal `blocked` attempt with a bounded reason.
+
+Register `delegate_wake` as a one-shot subscription before settling when work gates the next decision. It binds exact attempts and returns immediately. Select only the compact evidence the parent needs; the runtime queues delivery while the parent is busy and wakes an idle parent once. Send one concise waiting status and settle—do not poll with `delegate_jobs`. `delegate_jobs` is metadata-only status plus bounded feedback and cancellation; it never waits, consumes a report, or replaces a wake rule.
+
+A fresh node must choose an exact configured route. A continuation inherits the persisted route, scope, worktree, and access mode when no route is supplied; an explicit replacement must be another valid exact route. Dependencies and wake rules never choose or escalate routes. Branch review and integration remain parent-owned.
+
+### Compact recipes
+
+- **Fan-out/fan-in:** schedule `scan-a`, `scan-b`, and `scan-c`; schedule `synthesis` with `after: ["scan-a", "scan-b", "scan-c"]` and symbolic report `inputs`; wake only on `synthesis`.
+- **Implementation → review:** schedule writable `impl`; schedule `review` after `impl` with `inputs: [{"node":"impl","include":["report","branch"]}]`, referring to the exact symbolic branch; wake on review and branch availability.
+- **Hidden exploration:** schedule broad `explore`, pipe its symbolic report into focused `plan`/`impl`, and deliver only that conclusion to the parent—never dump the exploration into parent context.
+- **Continuation:** after review feedback, `continue: "impl"`, pipe the reviewer report, and let the runtime preserve the original route and worktree.
+- **Do not delegate:** keep short edits, obvious check loops, and tasks needing repeated parent judgement in the parent.
+
 ## Route selection
 
 Every fresh delegated task supplies one exact `route` key from `delegate.modelCatalog`. A continuation reuses its persisted route when omitted and may switch only by supplying another complete route key. Parallel tasks may share a top-level route or select routes independently.
 
 Each route binds one provider, model, and thinking level. Selection is prose-driven: the orchestrator matches the task against each route's `useFor` and `avoid`, both required. `relativeCost` is the only number. It is a usage-drain prior rather than a quality score, and it orders the displayed catalog cheapest-first; it is not a global escalation ladder. Unknown routes fail rather than silently substituting.
 
-Choose a service class before an effort level. The configured catalog uses Luna for value/background work, Terra for interactive work with an explicit wall-clock objective, and Sol for maintainer judgement. Escalate effort within that class. Crossing from Luna to Terra is a latency decision, not the automatic next step after a difficult Luna task; crossing to Sol means the task needs judgement about what good work is, not merely more compute.
+Choose a service class before an effort level. The configured catalog uses Luna for bounded value work, Terra for interactive work with an explicit wall-clock objective, and Sol for maintainer judgement. Escalate effort within that class. Crossing from Luna to Terra is a latency decision, not the automatic next step after a difficult Luna task; crossing to Sol means the task needs judgement about what good work is, not merely more compute.
 
 Configured relative costs are workload-shaped priors, not universal constants. Replace them with comparable local usage or credit measurements when enough routed tasks have accumulated; provider-reported actual cost remains the authoritative session metric.
 
@@ -23,8 +39,8 @@ There is deliberately no quality metric. One scalar cannot separate competences 
         "model": "gpt-5.6-luna",
         "thinking": "medium",
         "relativeCost": 3,
-        "useFor": "Value/background work: verify one named invariant over at most three named files, or implement a localized change against a failing test with the check command given.",
-        "avoid": "Open-ended review, an explicit foreground deadline, deciding what to look for, or work spanning subsystems."
+        "useFor": "Bounded value work: verify one named invariant over at most three named files, or implement a localized change against a failing test with the check command given.",
+        "avoid": "Open-ended review, deciding what to look for, or work spanning subsystems."
       }
     }
   }
@@ -57,7 +73,7 @@ For broad work, a child should stop early and return partial findings rather tha
 
 A child that cannot settle something itself — the task contradicts what it found, or the call is the parent's to make — stops and ends its report with a `Blocked:` line holding one question. The parent answers by continuing that child, whose session, worktree, route, and scope are all intact.
 
-Foreground delegation still has no live channel: while a foreground child runs, the parent is suspended inside its own tool call, so the parent's model cannot answer anything until that call returns. Background delegation is different: `delegate_jobs feedback` queues one bounded parent message for a queued or running job and presents it to the child at the next safe Pi checkpoint (before a model turn or after a tool completes). If the job settles first, the operation reports that state and a normal continuation remains the recovery path. Feedback does not interrupt an in-flight tool call, change the child's route or isolation, or bypass the existing worktree boundary.
+For normal workflow calls, the parent remains available while children run. `delegate_jobs feedback` still queues one bounded message for a queued or running child at its next safe checkpoint; it does not interrupt an in-flight tool call, change the route or isolation, or bypass the worktree boundary. If a child settles first, use its explicit wake or a continuation for recovery.
 
 `Blocked:` is extracted into the handoff envelope rather than left in the body, so it sits next to the continuation token and survives truncation — a question that reaches the parent without its answer route is no use. Everything a default and a stated assumption can cover stays a default and a stated assumption.
 
@@ -185,7 +201,7 @@ reported as retained; a resumed setup failure may truthfully report the
 worktree still retained by its continuation session. A read-only diagnostic
 checkout and a retired read-only snapshot both count as read-only recovery
 resources until removed. The same projection is rendered for single and
-parallel foreground results and for background/job completion and inspection;
+parallel results and for legacy job completion and inspection;
 missing or invalid structured child results receive the same contract. Invalid
 structured runs expose bounded harness validation/lifecycle diagnostics only;
 when the one missing-channel repair also ends without a result, that diagnostic
@@ -271,13 +287,11 @@ branch and tip, and owned by the same repository. If the caller changes or
 removes it, setup fails with a continuation rather than touching another
 checkout.
 
-## Background supervision and waiting
+## Legacy and human compatibility controls
 
-Background jobs are first-class supervision targets. Use `delegate_jobs list` or a deliberate `peek` to inspect, and `delegate_jobs feedback` for concrete corrective steering; feedback is bounded to 4 KiB and queued in a private per-child control inbox. A pre-timeout request reserves a bounded final window (up to 30 seconds, scaled down for short limits) and asks the child to stop starting work, preserve a coherent partial state, and report what remains. The hard timeout is unchanged: an unresponsive child is still terminated, and timeout handoff explicitly distinguishes an acknowledged checkpoint from an unacknowledged retained partial state. Retained writable work remains reviewable and is never auto-validated or presented as complete.
+The normal model surface has no foreground/background choice, no `peek`, and no automatic completion injection. Older persisted rows and human/operator controls may still use those terms while compatibility is retained: `delegate_jobs` can inspect bounded metadata, send feedback, request a checkpoint, or cancel; the dashboard and `/delegates` remain the full historical inspection surfaces. These controls do not consume wake payloads.
 
-A background completion automatically steers the parent’s next turn. `/continue` manually resumes an interrupted parent turn. Neither behavior replaces deliberate `peek` or continuation recovery.
-
-`/pause` pauses the parent and every active delegate at provider-safe boundaries. In-flight provider responses and tool calls finish first; no new provider request starts after a participant reaches the pause gate. The footer and dashboard show `Paused` for the parent alone or `Paused (with N delegates)` after all enrolled delegates acknowledge the gate. While pausing or paused, delegate completions are retained rather than steering the parent. `/continue` releases the parent and delegates, then delivers retained completions. New delegate calls are rejected until the runtime resumes.
+`/pause` pauses the parent and every active delegate at provider-safe boundaries. In-flight provider responses and tool calls finish first; no new provider request starts after a participant reaches the pause gate. The footer and dashboard show `Paused` for the parent alone or `Paused (with N delegates)` after all enrolled delegates acknowledge the gate. While pausing or paused, wake delivery is retained rather than steering the parent. `/continue` releases the parent and delegates, then delivers retained wake entries. New delegate calls are rejected until the runtime resumes.
 
 ## TUI inspection bounds
 

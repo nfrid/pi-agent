@@ -230,6 +230,102 @@ describe('delegate status store', () => {
     });
   });
 
+  test('publishes logical workflow attempts and metadata-only wake state', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('scheduled review');
+    const [id] = store.start([run], 'background');
+    store.setWorkflow(id, {
+      attempt: { logicalId: 'review', ordinal: 1, identity: 'review@1' },
+      logicalId: 'review',
+      ordinal: 1,
+      identity: 'review@1',
+      dependencies: ['impl@1'],
+      state: 'scheduled',
+      createdAt: 1,
+      scheduledAt: 1,
+      reason: 'waiting for impl@1',
+    } as never);
+    store.setWakes([
+      {
+        id: 'review-ready',
+        state: 'pending',
+        references: ['review@1'],
+        createdAt: 2,
+      } as never,
+    ]);
+
+    expect(store.list()[0]?.workflow).toMatchObject({
+      identity: 'review@1',
+      state: 'scheduled',
+      dependencies: ['impl@1'],
+      reason: 'waiting for impl@1',
+    });
+    expect(store.getWakes()).toEqual([
+      {
+        id: 'review-ready',
+        state: 'pending',
+        references: ['review@1'],
+        waitingFor: ['review@1'],
+        createdAt: 2,
+      },
+    ]);
+    expect(JSON.stringify(store.getWakes())).not.toMatch(
+      /handoff|report|payload|artifact|diagnostic|transcript/i,
+    );
+  });
+
+  test('clears a lineage when only its latest async attempt is delivered', () => {
+    const store = new DelegateStatusStore();
+    const first = createRun('initial implementation', undefined, {
+      lineageId: 'lineage-impl',
+    });
+    first.state = 'success';
+    first.exitCode = 0;
+    first.finishedAt = 2;
+    const second = createRun('corrected implementation', undefined, {
+      lineageId: 'lineage-impl',
+    });
+    second.state = 'success';
+    second.exitCode = 0;
+    second.finishedAt = 4;
+    const [firstId, secondId] = store.start([first, second], 'background');
+    store.setWorkflow(firstId, {
+      attempt: { logicalId: 'impl', ordinal: 1, identity: 'impl@1' },
+      logicalId: 'impl',
+      ordinal: 1,
+      identity: 'impl@1',
+      dependencies: [],
+      waitingFor: [],
+      inputs: [],
+      state: 'success',
+      createdAt: 1,
+      scheduledAt: 1,
+      settledAt: 2,
+    });
+    store.setWorkflow(secondId, {
+      attempt: { logicalId: 'impl', ordinal: 2, identity: 'impl@2' },
+      logicalId: 'impl',
+      ordinal: 2,
+      identity: 'impl@2',
+      dependencies: ['impl@1'],
+      waitingFor: [],
+      inputs: [],
+      state: 'success',
+      createdAt: 3,
+      scheduledAt: 3,
+      settledAt: 4,
+    });
+
+    store.markWorkflowDelivered(['impl@2']);
+    expect(store.list()[0]?.workflow).toMatchObject({
+      identity: 'impl@2',
+      deliveredToParent: true,
+    });
+    store.parentSettled();
+    store.parentUserMessage();
+    expect(store.list()).toEqual([]);
+  });
+
   test('keeps the last activity that had content while the next one warms up', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');

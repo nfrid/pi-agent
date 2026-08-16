@@ -996,16 +996,13 @@ describe('async delegate extension', () => {
       );
     const ownerListedJob = (
       ownerList?.details as {
-        jobs?: Array<{
-          runs?: Array<{ artifact?: { handle?: string } }>;
-          handoff?: string;
-        }>;
+        jobs?: Array<Record<string, unknown>>;
       }
     ).jobs?.[0];
-    expect(ownerListedJob?.runs?.[0]?.artifact?.handle).toBe(handle);
-    expect(ownerListedJob?.handoff).not.toContain(
-      'Delegated results: 1 run(s)',
-    );
+    expect(ownerListedJob).not.toHaveProperty('runs');
+    expect(ownerListedJob).not.toHaveProperty('handoff');
+    expect(ownerListedJob).not.toHaveProperty('tasks');
+    expect(JSON.stringify(ownerList?.details)).not.toContain(handle);
 
     rmSync(artifactRoot, { recursive: true, force: true });
     expect(

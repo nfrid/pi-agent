@@ -1,3 +1,4 @@
+import type { DelegateWorkflowCoordinator } from '../../delegate/workflow-coordinator';
 import {
   CapabilityRegistry,
   seedCapabilityRegistry,
@@ -48,6 +49,8 @@ export interface ScopedServices {
   readonly liveSurfaceHub: LiveSurfaceHub;
   readonly pendingProcesses: PendingProcessAccounting;
   readonly capabilities: CapabilityRegistry;
+  /** Session-owned delegate workflow identity for extension integrations. */
+  delegateWorkflow?: DelegateWorkflowCoordinator;
 }
 
 const scopedServicesKey = Symbol.for('pi.dashboard.scoped-runtime-services');

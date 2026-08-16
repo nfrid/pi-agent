@@ -1,6 +1,13 @@
 - Delegate when parallelism, specialization, latency hiding, or context isolation is worth the briefing and integration cost.
 - Give each child one bounded objective and a small ranked finish checklist; a stronger route must not substitute for decomposition.
 - For consequential work, include the canonical repo/cwd, baseline, must-touch and leave-alone paths, expected commit state, and finish check; keep tiny calls free of ceremony.
-- Parallelize only independent tasks; use background when useful parent work can continue.
-- Continue the same child for follow-up or a blocker; use a fresh child when independent evidence matters.
+- Parallelize independent work by making separate delegate calls with stable `id` values; every delegate call is asynchronous.
+- Use `after` and symbolic `inputs` to compose downstream work without copying evidence; use `continue` for follow-up on the same child.
+- Register `delegate_wake` before settling when outstanding work gates the next decision, emit one concise waiting status, and never poll.
 - Keep task decomposition, decisions, branch integration, final verification, and user-facing synthesis with the parent.
+- Compact recipes (choose the shape; do not build a declarative workflow graph):
+- **Fan-out/fan-in:** schedule `scan-a`, `scan-b`, and `scan-c` with exact routes; schedule `synthesis` with `after: ["scan-a", "scan-b", "scan-c"]` and symbolic `inputs` for their reports; register one wake for `synthesis` and settle.
+- **Implementation → review:** schedule writable `impl`; schedule `review` after `impl` with `inputs: [{ "node": "impl", "include": ["report", "branch"] }]` and the exact symbolic branch reference; wake on `review` and the branch decision.
+- **Hidden exploration:** schedule broad `explore`; pipe its symbolic report to a focused `plan` or `impl`; wake only on the focused conclusion. Do not dump exploration into the parent context.
+- **Continuation:** use `continue: "impl"` after review feedback, pipe the reviewer report with `inputs`, and let the runtime preserve the original route, scope, worktree, and write access.
+- **Do not delegate:** keep short edits, obvious check loops, and tasks requiring repeated parent judgement in the parent.

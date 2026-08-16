@@ -7,7 +7,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { StructuredDelegateResults } from '../entities/transcript/entries';
-import { delegateHistorySettledRunIds } from './delegate-history';
+import {
+  delegateHistoryInvocationToStatus,
+  delegateHistorySettledRunIds,
+} from './delegate-history';
 import {
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
@@ -515,6 +518,40 @@ describe('live extension surface fixtures', () => {
       />,
     );
     expect(markup).toContain('History incomplete');
+  });
+
+  it('preserves and labels durable wake history metadata', () => {
+    const wakeStatus = (state: 'pending' | 'entered') =>
+      delegateHistoryInvocationToStatus({
+        runId: `wake-${state}`,
+        lineageId: 'wake:review-ready',
+        name: 'Wake review-ready',
+        kind: 'background',
+        state: state === 'entered' ? 'success' : 'running',
+        createdAt: 1,
+        allowWrites: false,
+        wake: {
+          id: 'review-ready',
+          state,
+          references: ['review@1'],
+          createdAt: 1,
+          ...(state === 'entered' ? { enteredAt: 2 } : {}),
+          revision: 1,
+          dispatchAttempts: state === 'entered' ? 1 : 0,
+        },
+      });
+    const pending = wakeStatus('pending');
+    const entered = wakeStatus('entered');
+    expect(pending.wake).toMatchObject({
+      id: 'review-ready',
+      references: ['review@1'],
+    });
+    expect(delegateActivityLabel(pending, 'queued')).toBe(
+      'waiting for review@1',
+    );
+    expect(delegateActivityLabel(entered, 'done')).toBe(
+      'delivered for review@1',
+    );
   });
 
   it('uses a truthful fallback for settled historical rows without activity', () => {
@@ -1118,6 +1155,59 @@ describe('live extension surface fixtures', () => {
     expect(markup.match(/\/outcome: expected string/g)).toHaveLength(2);
     expect(markup).not.toContain('malformed attempt value');
     expect(markup).not.toContain('payload-preview');
+  });
+
+  it('renders logical workflow identity, dependency waits, and wake metadata', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateSurface
+        surface={{
+          id: 'delegate-workflow',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'ds-review',
+                runId: 'run-review',
+                lineageId: 'lineage-review',
+                name: 'Review implementation',
+                kind: 'background',
+                state: 'queued',
+                createdAt: 1,
+                allowWrites: false,
+                workflow: {
+                  logicalId: 'review',
+                  attempt: 1,
+                  identity: 'review@1',
+                  state: 'scheduled',
+                  dependencies: ['impl@1'],
+                  waitingFor: ['impl@1'],
+                  reason: 'waiting for impl@1',
+                  createdAt: 1,
+                  scheduledAt: 1,
+                },
+              },
+            ],
+            wakes: [
+              {
+                id: 'review-ready',
+                state: 'pending',
+                references: ['review@1'],
+                waitingFor: ['review@1'],
+                createdAt: 1,
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('review@1');
+    expect(markup).toContain('scheduled');
+    expect(markup).toContain('waiting for impl@1');
+    expect(markup).toContain('review-ready');
+    expect(markup).toContain('pending');
+    expect(markup).not.toContain('handoff');
+    expect(markup).not.toContain('payload');
   });
 
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {

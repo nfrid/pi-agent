@@ -2,15 +2,21 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
 import { loadGuidelines } from '../shared/instructions';
-import { type DelegateConfig, loadDelegateConfig } from './config';
+import {
+  type DelegateConfig,
+  loadDelegateConfig,
+  resolveDelegateRoute,
+} from './config';
 import { createDelegateControlChannel } from './control';
 import type { DelegateJobManager } from './jobs';
 import {
   pendingRuns,
   prepareDelegateExecution,
+  prepareDelegateWorkflowLaunch,
   runPreparedDelegateExecution,
 } from './orchestration';
 import { invalidParams } from './param-errors';
+import { buildDelegatePlans } from './plans';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { formatDelegateRoutingPrompt } from './routing';
 import { buildSessionSnapshotJsonl } from './session';
@@ -22,9 +28,15 @@ import {
   delegateToolResult,
   makeDetails,
 } from './tool-result';
+import { createRun } from './types';
+import type {
+  DelegateWorkflowAttemptSnapshot,
+  DelegateWorkflowCoordinator,
+} from './workflow-coordinator';
+import { parseWorkflowReference } from './workflow-model';
 
 const DELEGATE_TOOL_DESCRIPTION =
-  'Run focused child agents with separate context. Choose a route, workspace mode, and either a prose or structured result contract; background completion is delivered automatically.';
+  'Schedule one focused child agent asynchronously. Choose a route, workspace mode, and either a prose or structured result contract; use after and inputs to compose work and delegate_wake to receive selected results.';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -142,9 +154,40 @@ export type DelegateHandoffFrom = Static<typeof HandoffArtifactSchema>;
 export type DelegateHandoffInput = Static<typeof HandoffFromSchema>;
 export type DelegateResultSpec = Static<typeof ResultSpecSchema>;
 
-const BackgroundSchema = Type.Boolean({
-  description:
-    'Run asynchronously and return a job ID immediately; completion is delivered automatically.',
+const LogicalIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$',
+  description: 'Stable logical node ID; fresh calls require one.',
+});
+const AfterSchema = Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
+  maxItems: 32,
+  description: 'Exact or bare logical attempts that must settle first.',
+});
+const WorkflowInputSchema = Type.Object(
+  {
+    node: Type.String({ minLength: 1, maxLength: 512 }),
+    include: Type.Optional(
+      Type.Array(
+        StringEnum(['report', 'handoff', 'branch', 'metadata'] as const),
+        { minItems: 1, maxItems: 4 },
+      ),
+    ),
+    view: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 64,
+        pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$',
+      }),
+    ),
+    label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+  },
+  { additionalProperties: false },
+);
+const ContinueSchema = Type.String({
+  minLength: 1,
+  maxLength: 512,
+  description: 'Logical node or exact attempt to continue after settlement.',
 });
 
 const NameSchema = Type.String({
@@ -187,27 +230,54 @@ const TaskItem = Type.Object({
   result: Type.Optional(ResultSpecSchema),
 });
 
-const DelegateParamsSchema = Type.Object({
+const DelegateCommonParamProperties = {
+  after: Type.Optional(AfterSchema),
+  inputs: Type.Optional(Type.Array(WorkflowInputSchema, { maxItems: 4 })),
   name: Type.Optional(NameSchema),
-  task: Type.Optional(TaskSchema),
-  tasks: Type.Optional(Type.Array(TaskItem, { maxItems: 20 })),
+  task: TaskSchema,
   cwd: Type.Optional(CwdSchema),
   route: Type.Optional(RouteSchema),
   context: Type.Optional(ContextSchema),
   contextNote: Type.Optional(ContextNoteSchema),
   scope: Type.Optional(ScopeSchema),
-  continuation: Type.Optional(ContinuationSchema),
   allowWrites: Type.Optional(AllowWritesSchema),
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
   worktreePath: Type.Optional(WorktreePathSchema),
-  handoffFrom: Type.Optional(HandoffFromSchema),
   result: Type.Optional(ResultSpecSchema),
-  background: Type.Optional(BackgroundSchema),
+};
+
+type DelegateCommonParams = Omit<Static<typeof TaskItem>, 'continuation'> & {
+  after?: Static<typeof AfterSchema>;
+  inputs?: Array<Static<typeof WorkflowInputSchema>>;
+};
+type ModelDelegateParams = Omit<DelegateCommonParams, 'handoffFrom'> &
+  ({ id: string; continue?: never } | { continue: string; id?: never });
+
+const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
+  type: 'object',
+  properties: {
+    id: LogicalIdSchema,
+    continue: ContinueSchema,
+    ...DelegateCommonParamProperties,
+  },
+  required: ['task'],
+  additionalProperties: false,
+  oneOf: [
+    { required: ['id'], not: { required: ['continue'] } },
+    { required: ['continue'], not: { required: ['id'] } },
+  ],
 });
 
-export type DelegateParams = Static<typeof DelegateParamsSchema>;
+/** Internal compatibility shape used below the closed model-facing schema. */
+export type DelegateParams = Partial<DelegateCommonParams> & {
+  id?: string;
+  continue?: string;
+  tasks?: Array<Static<typeof TaskItem>>;
+  continuation?: string;
+  background?: boolean;
+};
 
 export function delegatePromptGuidelines(
   cwd: string,
@@ -221,7 +291,47 @@ export function delegatePromptGuidelines(
   ];
 }
 
+function workflowReceipt(attempt: DelegateWorkflowAttemptSnapshot): {
+  content: [{ type: 'text'; text: string }];
+  details: Record<string, unknown>;
+} {
+  const job = attempt.jobId ? `; adapter=${attempt.jobId}` : '';
+  const waiting = attempt.dependencies.length
+    ? ` after ${attempt.dependencies.join(', ')}`
+    : '';
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `Scheduled ${attempt.identity}${waiting}; state=${attempt.state}${job}. Register delegate_wake before settling if this work gates the next decision.`,
+      },
+    ],
+    details: {
+      workflow: {
+        identity: attempt.identity,
+        logicalId: attempt.logicalId,
+        ordinal: attempt.ordinal,
+        state: attempt.state,
+        dependencies: [...attempt.dependencies],
+        inputs: attempt.inputs.map((input) => ({
+          identity: input.identity,
+          selector: {
+            ...input.selector,
+            ...(input.selector.include
+              ? { include: [...input.selector.include] }
+              : {}),
+          },
+        })),
+        ...(attempt.route ? { route: attempt.route } : {}),
+        ...(attempt.jobId ? { jobId: attempt.jobId } : {}),
+      },
+    },
+  };
+}
+
 export interface DelegateBackgroundRuntime {
+  /** Session-scoped logical workflow coordinator. */
+  workflow?: DelegateWorkflowCoordinator;
   manager: DelegateJobManager;
   statuses: DelegateStatusStore;
   getDeliveryEpoch: () => number;
@@ -240,13 +350,14 @@ export function registerDelegateTool(
     label: 'Delegate',
     description: DELEGATE_TOOL_DESCRIPTION,
     promptSnippet:
-      'Hand off focused implementation, review, validation, or independent work when a child saves your context.',
+      'Schedule one focused async delegate with a stable id; compose with after/inputs, register delegate_wake for required results, then continue or settle without polling.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
     parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,
     renderResult: renderDelegateResult,
 
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
+    async execute(toolCallId, rawParams, signal, onUpdate, ctx) {
+      const params = rawParams as DelegateParams;
       const config = loadDelegateConfig(ctx.cwd);
       const snapshots = new Map<string, string | null>();
       const getSnapshot = (targetCwd: string) => {
@@ -259,15 +370,6 @@ export function registerDelegateTool(
         return snapshot;
       };
 
-      const hasSingle =
-        typeof params.task === 'string' && params.task.trim().length > 0;
-      const hasParallel =
-        Array.isArray(params.tasks) && params.tasks.length > 0;
-      if (hasSingle === hasParallel)
-        return invalidParams(
-          'Provide exactly one delegation mode: task or tasks.',
-        );
-
       const launchSessionId = ctx.sessionManager.getSessionId();
       const runCtx = {
         pi,
@@ -277,6 +379,199 @@ export function registerDelegateTool(
         getSnapshot,
         launchSessionId,
       };
+      // Legacy batch payloads and calls without a logical id stay behind this
+      // boundary. A new id/continue call treats background as a no-op and
+      // always uses the coordinator.
+      const legacySurface =
+        Array.isArray((rawParams as { tasks?: unknown }).tasks) ||
+        (params.id === undefined && params.continue === undefined);
+
+      if (backgroundRuntime?.workflow && !legacySurface) {
+        if (Array.isArray(params.tasks))
+          throw new Error(
+            'A delegate call schedules one logical node at a time.',
+          );
+        const task = params.task?.trim();
+        if (!task) throw new Error('Delegate task is required.');
+        const continuationReference = params.continue?.trim();
+        if (continuationReference && params.id !== undefined)
+          throw new Error(
+            'Use either id for a fresh node or continue, not both.',
+          );
+        const logicalId = continuationReference
+          ? parseWorkflowReference(continuationReference).logicalId
+          : params.id?.trim();
+        if (!logicalId)
+          throw new Error('Fresh delegate calls require a stable id.');
+        if (continuationReference)
+          backgroundRuntime.workflow.require(continuationReference);
+        const requestedRoute = params.route?.trim();
+        const inheritedRouting = continuationReference
+          ? backgroundRuntime.workflow.getRouting(continuationReference)
+          : undefined;
+        const routeResult =
+          requestedRoute || !continuationReference
+            ? resolveDelegateRoute(requestedRoute, config)
+            : { routing: inheritedRouting };
+        if (routeResult.error || !routeResult.routing)
+          throw new Error(
+            routeResult.error ??
+              'The predecessor has no persisted route; provide route explicitly.',
+          );
+        const routing = routeResult.routing;
+        let initialPlan:
+          | import('./task-lifecycle').DelegateTaskPlan
+          | undefined;
+        if (!continuationReference) {
+          const built = buildDelegatePlans(
+            {
+              ...params,
+              id: undefined,
+              name: params.name?.trim() || logicalId,
+              task,
+            },
+            ctx,
+            config,
+            getSnapshot,
+          );
+          if (built.parallel || built.tasks.length !== 1)
+            throw new Error(
+              'A delegate call schedules one logical node at a time.',
+            );
+          initialPlan = built.tasks[0]?.plan;
+          if (!initialPlan) throw new Error('Delegate plan was not created.');
+        }
+        const pending = createRun(task, routing, {
+          name: params.name?.trim() || logicalId,
+          context: continuationReference
+            ? 'continuation'
+            : (params.context ?? 'fresh'),
+          allowWrites: params.allowWrites,
+          writeRequested: params.allowWrites,
+          isolation: params.isolation,
+        });
+        const statusIds = backgroundRuntime.statuses.start(
+          [pending],
+          'background',
+        );
+        try {
+          const attempt = backgroundRuntime.workflow.schedule({
+            logicalId,
+            continuation: continuationReference,
+            after: params.after,
+            inputs: params.inputs as
+              | import('./workflow-inputs').SymbolicWorkflowSelector[]
+              | undefined,
+            name: params.name?.trim() || logicalId,
+            ownerSessionId: launchSessionId,
+            route: routing.route,
+            routing,
+            allowWrites: params.allowWrites,
+
+            prepare: async (workflowContext) => {
+              let plan = initialPlan;
+              if (!plan) {
+                const token = workflowContext.continuationToken;
+                if (!token)
+                  throw new Error(
+                    'The predecessor has no usable continuation token.',
+                  );
+                const built = buildDelegatePlans(
+                  {
+                    ...params,
+                    id: undefined,
+                    continue: undefined,
+                    continuation: token,
+                    name: params.name?.trim() || logicalId,
+                    route: requestedRoute,
+                    task,
+                  },
+                  ctx,
+                  config,
+                  getSnapshot,
+                );
+                if (built.parallel || built.tasks.length !== 1)
+                  throw new Error('A continuation must contain one task.');
+                plan = built.tasks[0]?.plan;
+              }
+              if (!plan)
+                throw new Error('Delegate continuation plan was not created.');
+              if (
+                !plan.routing ||
+                plan.routing.route !== routing.route ||
+                plan.routing.provider !== routing.provider ||
+                plan.routing.model !== routing.model ||
+                plan.routing.thinking !== routing.thinking ||
+                plan.routing.relativeCost !== routing.relativeCost
+              )
+                throw new Error(
+                  'Delegate route changed while preparing the attempt.',
+                );
+              return prepareDelegateWorkflowLaunch(
+                runCtx,
+                plan,
+                workflowContext,
+                {
+                  onRunUpdate: (run) => {
+                    const statusId = statusIds[0];
+                    if (statusId)
+                      backgroundRuntime.statuses.update(statusId, run);
+                    if (run.worktree) backgroundRuntime.activateBranches?.();
+                  },
+                },
+              );
+            },
+          });
+          const statusId = statusIds[0];
+          if (statusId)
+            backgroundRuntime.statuses.setWorkflow(statusId, attempt);
+          if (statusId && attempt.jobId)
+            backgroundRuntime.statuses.setJobId(statusId, attempt.jobId);
+          const updateTerminalStatus = (
+            terminal: DelegateWorkflowAttemptSnapshot,
+          ) => {
+            if (!statusId) return;
+            const run = backgroundRuntime.workflow?.getResult(terminal.identity)
+              ?.runs[0];
+            if (run) backgroundRuntime.statuses.update(statusId, run);
+          };
+          if (attempt.settledAt !== undefined) updateTerminalStatus(attempt);
+          else {
+            let unsubscribe: (() => void) | undefined;
+            unsubscribe = backgroundRuntime.workflow.subscribeTerminal(
+              (terminal) => {
+                if (terminal.identity !== attempt.identity) return;
+                updateTerminalStatus(terminal);
+                unsubscribe?.();
+              },
+            );
+          }
+          backgroundRuntime.activateJobs?.();
+          if (attempt.state === 'running' && statusId)
+            backgroundRuntime.statuses.update(statusId, {
+              ...pending,
+              state: 'running',
+              startedAt: attempt.startedAt,
+            });
+          return workflowReceipt(attempt) as unknown as {
+            content: Array<{ type: 'text'; text: string }>;
+            details: import('./types').LegacyDelegateDetails;
+          };
+        } catch (error) {
+          backgroundRuntime.statuses.finish(statusIds);
+          throw error;
+        }
+      }
+
+      const hasSingle =
+        typeof params.task === 'string' && params.task.trim().length > 0;
+      const hasParallel =
+        Array.isArray(params.tasks) && params.tasks.length > 0;
+      if (hasSingle === hasParallel)
+        return invalidParams(
+          'Provide exactly one delegation mode: task or tasks.',
+        );
+
       if (params.background && !backgroundRuntime)
         throw new Error('Background delegate runtime is unavailable.');
       const execution = await prepareDelegateExecution(runCtx, params);

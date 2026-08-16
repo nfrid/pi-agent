@@ -3,6 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import type { DelegateConfig } from './config';
+import { createDelegateControlChannel } from './control';
 import { createOpaqueId } from './identity';
 import { ensureDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
 import {
@@ -18,13 +19,22 @@ import {
 import {
   cleanupFreshPreparedTask,
   type PreparedDelegateTask,
+  preflightDelegateContinuation,
   prepareDelegateTask,
   rollbackPreparedDelegateTasks,
   runPreparedDelegateTask,
 } from './task-lifecycle';
 import type { DelegateParams } from './tool';
-import { delegateToolResult, makeDetails } from './tool-result';
+import {
+  buildSessionBoundArtifactBackedHandoff,
+  delegateToolResult,
+  makeDetails,
+} from './tool-result';
 import { createRun, type DelegatedRun } from './types';
+import {
+  WORKFLOW_INPUT_CAPS,
+  workflowEvidencePromptBytes,
+} from './workflow-inputs';
 import {
   loadWorktree,
   type PreparedWorktree,
@@ -414,3 +424,136 @@ async function executeDelegate(
 
 export const executeSingleDelegate = executeDelegate;
 export const executeParallelDelegate = executeDelegate;
+
+export interface AsyncDelegateLaunchHooks {
+  onRunUpdate?: (run: DelegatedRun) => void;
+}
+
+/**
+ * Prepare exactly one coordinator-owned delegate only after its dependency
+ * barrier has opened. The returned discard callback owns every resource made
+ * before the adapter receives the launch.
+ */
+export async function prepareDelegateWorkflowLaunch(
+  runCtx: DelegateRunContext,
+  plan: import('./task-lifecycle').DelegateTaskPlan,
+  workflow: import('./workflow-coordinator').DelegateWorkflowLaunchContext,
+  hooks: AsyncDelegateLaunchHooks = {},
+): Promise<import('./workflow-coordinator').DelegateWorkflowPreparedLaunch> {
+  let launchPlan = plan;
+  const branch = workflow.inputs.find(
+    (input) => input.kind === 'branch',
+  )?.branch;
+  if (branch) {
+    if (
+      plan.resumed ||
+      plan.cwdExplicit ||
+      (plan.isolationExplicit && plan.isolation !== 'worktree') ||
+      plan.base !== undefined ||
+      plan.worktreePath !== undefined ||
+      plan.baseRef !== undefined
+    )
+      throw new Error(
+        'A symbolic branch input requires a fresh worktree delegate without from or worktreePath.',
+      );
+    launchPlan = {
+      ...plan,
+      requestedCwd: branch.repositoryRoot,
+      isolation: 'worktree',
+      base: undefined,
+      baseRef: branch.headCommit,
+      workingDirectory: branch.workingDirectory,
+    };
+  }
+
+  const built: BuiltDelegateTask = {
+    plan: launchPlan,
+    preflight: preflightDelegateContinuation(launchPlan),
+  };
+  const resolved = await resolveDelegateHandoffs(runCtx.ctx, [built]);
+  const resolvedTask = resolved[0];
+  if (!resolvedTask) throw new Error('Delegate setup produced no task.');
+  const handoffParts = [
+    resolvedTask.plan.handoffText,
+    workflow.handoffText,
+  ].filter((text): text is string => Boolean(text?.trim()));
+  if (
+    handoffParts.length > 1 &&
+    workflowEvidencePromptBytes(handoffParts) >
+      WORKFLOW_INPUT_CAPS.aggregateMaxBytes
+  )
+    throw new Error(
+      'Combined delegate handoff evidence exceeds the workflow input limit.',
+    );
+  const finalPlan = {
+    ...resolvedTask.plan,
+    ...(handoffParts.length ? { handoffText: handoffParts.join('\n\n') } : {}),
+  };
+  const prepared = await prepareDelegateTask(
+    finalPlan,
+    preflightDelegateContinuation(finalPlan),
+    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId(),
+  );
+  const pending = pendingRuns({ mode: 'single', tasks: [prepared] })[0];
+  if (pending) hooks.onRunUpdate?.(pending);
+  const ownerSessionId =
+    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
+  let control: ReturnType<typeof createDelegateControlChannel>;
+  try {
+    control = createDelegateControlChannel(
+      prepared.session.filePath,
+      ownerSessionId,
+      'background',
+    );
+  } catch (error) {
+    await rollbackPreparedDelegateTasks([prepared]);
+    throw error;
+  }
+  let discarded = false;
+  const discard = async () => {
+    if (discarded) return;
+    discarded = true;
+    control.close();
+    await rollbackPreparedDelegateTasks([prepared]);
+  };
+  const materialize = async (ctx: ExtensionContext, runs: DelegatedRun[]) => {
+    const handoff = await buildSessionBoundArtifactBackedHandoff(
+      runCtx.pi,
+      ctx,
+      ownerSessionId,
+      runs,
+    );
+    return { runs, retainedRuns: runs, handoff };
+  };
+  return {
+    discard,
+    launch: {
+      name: finalPlan.name,
+      ownerSessionId,
+      mode: 'single',
+      tasks: [finalPlan.task],
+      route: finalPlan.routing?.route,
+      allowWrites: prepared.allowWrites,
+      feedback: (message) => control.enqueue('feedback', message),
+      execute: async (signal) => {
+        try {
+          const runs = await runPreparedDelegateExecution(
+            { ...runCtx, signal },
+            { mode: 'single', tasks: [prepared] },
+            {
+              control,
+              onRunUpdate: (run) => hooks.onRunUpdate?.(run),
+            },
+          );
+          const finalRun = runs[0];
+          if (finalRun) hooks.onRunUpdate?.(finalRun);
+          control.close();
+          return await materialize(runCtx.ctx, runs);
+        } finally {
+          control.close();
+        }
+      },
+      materialize,
+    },
+  };
+}

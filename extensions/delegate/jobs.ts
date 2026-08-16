@@ -13,6 +13,10 @@ import {
 } from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
+import {
+  normalizeWorkflowAttempt,
+  type WorkflowAttempt,
+} from './workflow-model';
 import { failedLifecycleRun } from './worktree-lifecycle';
 
 export const MAX_DELEGATE_JOBS = 20;
@@ -60,6 +64,9 @@ export interface DelegateJobSnapshot {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  /** Optional workflow identity projected from the session-scoped model. */
+  logicalId?: string;
+  attemptIdentity?: string;
 }
 
 interface DelegateJobRecord extends JobRecord<DelegateJobState> {
@@ -76,12 +83,17 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  workflowAttempt?: WorkflowAttempt;
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
   controller: AbortController;
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
   materialize?: DelegateJobMaterializer;
+  onTerminal?: (
+    result: DelegateJobResult,
+    snapshot: DelegateJobSnapshot,
+  ) => void;
   materializing?: Promise<void>;
 }
 
@@ -100,9 +112,15 @@ export interface DelegateJobStartOptions {
   tasks: string[];
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
   materialize?: DelegateJobMaterializer;
+  /** Unconditional terminal notification, including settlement observed by peek. */
+  onTerminal?: (
+    result: DelegateJobResult,
+    snapshot: DelegateJobSnapshot,
+  ) => void;
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  workflowAttempt?: WorkflowAttempt;
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
@@ -158,8 +176,15 @@ export class DelegateJobManager {
 
   startMany(options: DelegateJobStartOptions[]): DelegateJobSnapshot[] {
     this.registry.assertAccepting(options.length);
-    const records = options.map(
-      (item): DelegateJobRecord => ({
+    const validated = options.map((item) => ({
+      item,
+      workflowAttempt:
+        item.workflowAttempt === undefined
+          ? undefined
+          : normalizeWorkflowAttempt(item.workflowAttempt),
+    }));
+    const records = validated.map(
+      ({ item, workflowAttempt }): DelegateJobRecord => ({
         ...this.registry.newRecord('queued'),
         name: item.name?.trim() || 'Subagent',
         ownerSessionId: item.ownerSessionId,
@@ -168,10 +193,12 @@ export class DelegateJobManager {
         deliveryEpoch: item.deliveryEpoch,
         route: item.route,
         allowWrites: item.allowWrites,
+        workflowAttempt,
         feedback: item.feedback,
         controller: new AbortController(),
         execute: item.execute,
         materialize: item.materialize,
+        onTerminal: item.onTerminal,
       }),
     );
     for (const record of records) this.registry.add(record);
@@ -283,6 +310,11 @@ export class DelegateJobManager {
     await this.registry.dispose();
   }
 
+  /** Preflight capacity and disposal checks before a coordinator commits identity. */
+  assertAccepting(additional = 1): void {
+    this.registry.assertAccepting(additional);
+  }
+
   get runningCount(): number {
     return this.registry.activeCount;
   }
@@ -318,8 +350,9 @@ export class DelegateJobManager {
     record.startedAt = Date.now();
     this.registry.changed();
     let state: DelegateJobState;
+    let result: DelegateJobResult;
     try {
-      const result = await record.execute(record.controller.signal);
+      result = await record.execute(record.controller.signal);
       record.runs = result.retainedRuns ?? result.runs;
       record.snapshotRuns =
         result.retainedRuns && result.retainedRuns !== result.runs
@@ -337,6 +370,7 @@ export class DelegateJobManager {
             {
               name: record.name,
               backgroundJobId: record.id,
+              workflowAttempt: record.workflowAttempt,
               warnings: [],
             },
             error,
@@ -350,8 +384,12 @@ export class DelegateJobManager {
       record.runs = runs;
       record.handoff = buildParentHandoff(runs);
       record.error = error instanceof Error ? error.message : String(error);
+      result = { runs, handoff: record.handoff };
     }
-    this.registry.settle(record, state);
+    const settled = this.registry.settle(record, state);
+    // Unlike registry.onSettled, this is per-job and deliberately ignores
+    // observer count so a waiting peek cannot suppress workflow readiness.
+    record.onTerminal?.(result, settled);
   }
 }
 
@@ -384,5 +422,11 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     deliveryEpoch: record.deliveryEpoch,
     route: record.route,
     allowWrites: record.allowWrites,
+    ...(record.workflowAttempt
+      ? {
+          logicalId: record.workflowAttempt.logicalId,
+          attemptIdentity: record.workflowAttempt.identity,
+        }
+      : {}),
   };
 }

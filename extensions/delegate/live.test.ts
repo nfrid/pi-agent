@@ -45,6 +45,48 @@ describe('delegate live surface', () => {
     });
   });
 
+  it('projects logical workflow and wake metadata without workflow payloads', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('review');
+    const [id] = store.start([run], 'background');
+    store.setWorkflow(id, {
+      attempt: { logicalId: 'review', ordinal: 1, identity: 'review@1' },
+      logicalId: 'review',
+      ordinal: 1,
+      identity: 'review@1',
+      dependencies: ['impl@1'],
+      waitingFor: ['impl@1'],
+      state: 'scheduled',
+      createdAt: 1,
+      scheduledAt: 1,
+      reason: 'waiting for impl@1',
+    } as never);
+    store.setWakes([
+      {
+        id: 'review-ready',
+        state: 'pending',
+        references: ['review@1'],
+        createdAt: 2,
+      } as never,
+    ]);
+
+    const model = delegateSurface(store).viewModel as {
+      statuses: Array<{ workflow?: unknown }>;
+      wakes?: unknown[];
+    };
+    expect(model.statuses[0]?.workflow).toMatchObject({
+      identity: 'review@1',
+      state: 'scheduled',
+      waitingFor: ['impl@1'],
+    });
+    expect(model.wakes).toMatchObject([
+      { id: 'review-ready', state: 'pending', waitingFor: ['review@1'] },
+    ]);
+    expect(JSON.stringify(model.statuses[0]?.workflow)).not.toMatch(
+      /handoff|report|payload|artifact|diagnostic|transcript/i,
+    );
+  });
+
   it('projects distinct bounded tool input and output to the dashboard', () => {
     const store = new DelegateStatusStore();
     const run = createRun('inspect');

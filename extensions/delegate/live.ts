@@ -199,6 +199,52 @@ function statusSnapshot(
         }
       : {}),
     ...(result ? { result } : {}),
+    ...(status.workflow
+      ? {
+          workflow: {
+            logicalId: text(status.workflow.logicalId, 64),
+            attempt: status.workflow.attempt,
+            identity: text(status.workflow.identity, 80),
+            state: status.workflow.state,
+            dependencies: status.workflow.dependencies
+              .slice(0, 32)
+              .map((identity) => text(identity, 80)),
+            ...(status.workflow.waitingFor
+              ? {
+                  waitingFor: status.workflow.waitingFor
+                    .slice(0, 32)
+                    .map((identity) => text(identity, 80)),
+                }
+              : {}),
+            ...(status.workflow.reason
+              ? { reason: text(status.workflow.reason, 256) }
+              : {}),
+            ...(status.workflow.route
+              ? { route: text(status.workflow.route, 512) }
+              : {}),
+            createdAt: status.workflow.createdAt,
+            scheduledAt: status.workflow.scheduledAt,
+            ...(status.workflow.queuedAt === undefined
+              ? {}
+              : { queuedAt: status.workflow.queuedAt }),
+            ...(status.workflow.startedAt === undefined
+              ? {}
+              : { startedAt: status.workflow.startedAt }),
+            ...(status.workflow.settledAt === undefined
+              ? {}
+              : { settledAt: status.workflow.settledAt }),
+            ...(status.lifecycle
+              ? {
+                  branchAvailable: status.lifecycle.writableBranchRetained,
+                  snapshotAvailable: status.lifecycle.readOnlySnapshotRetained,
+                }
+              : {}),
+            ...(status.workflow.deliveredToParent
+              ? { deliveredToParent: true }
+              : {}),
+          },
+        }
+      : {}),
     ...(status.lifecycle
       ? {
           lifecycle: {
@@ -259,6 +305,36 @@ const publisher = createLiveSurfacePublisher<DelegateStatusStore>({
     return {
       version: 1 as const,
       statuses: statuses.map((status) => statusSnapshot(status, surfaceBudget)),
+      wakes: store
+        .getWakes()
+        .slice(0, 256)
+        .map((wake) => ({
+          id: text(wake.id, 64),
+          state: wake.state,
+          references: wake.references
+            .slice(0, 32)
+            .map((identity) => text(identity, 80)),
+          ...(wake.waitingFor
+            ? {
+                waitingFor: wake.waitingFor
+                  .slice(0, 32)
+                  .map((identity) => text(identity, 80)),
+              }
+            : {}),
+          createdAt: wake.createdAt,
+          ...(wake.readyAt === undefined ? {} : { readyAt: wake.readyAt }),
+          ...(wake.queuedAt === undefined ? {} : { queuedAt: wake.queuedAt }),
+          ...(wake.enteredAt === undefined
+            ? {}
+            : { enteredAt: wake.enteredAt }),
+          ...(wake.cancelledAt === undefined
+            ? {}
+            : { cancelledAt: wake.cancelledAt }),
+          ...(wake.blockedAt === undefined
+            ? {}
+            : { blockedAt: wake.blockedAt }),
+          ...(wake.reason ? { reason: text(wake.reason, 256) } : {}),
+        })),
     };
   },
 });

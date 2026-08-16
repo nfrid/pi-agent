@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { DelegateJobManager } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { createRun } from './types';
+import { DelegateWorkflowCoordinator } from './workflow-coordinator';
 
 interface Renderable {
   render: (width: number) => string[];
@@ -24,7 +25,7 @@ interface RegisteredTool {
   execute: (
     id: string,
     params: {
-      action: 'list' | 'peek' | 'feedback' | 'cancel';
+      action: 'list' | 'status' | 'peek' | 'feedback' | 'cancel';
       id?: string;
       message?: string;
     },
@@ -65,19 +66,59 @@ describe('delegate_jobs rendering', () => {
     registerDelegateJobsTool(pi, manager);
 
     expect(tool?.description).toContain(
-      'Completions are delivered automatically',
+      'only by an explicitly registered delegate_wake',
     );
     expect(tool?.description).toContain(
       'Use feedback with one bounded message to steer a running child',
     );
     const actionDescription = tool?.parameters.properties?.action?.description;
     expect(actionDescription).toContain('list shows tracked jobs');
-    expect(actionDescription).toContain('peek inspects one job');
+    expect(actionDescription).toContain('status shows bounded metadata');
+    expect(actionDescription).not.toContain('peek');
     expect(actionDescription).toContain('feedback sends corrective guidance');
     expect(actionDescription).toContain('cancel stops one or more jobs');
     expect(tool?.description).not.toContain('Actions:');
     expect(tool?.promptGuidelines).toBeUndefined();
-    expect(tool?.description).toContain('Use peek for deliberate inspection');
+    expect(tool?.description).not.toContain('peek');
+    await manager.dispose();
+  });
+
+  test('returns bounded workflow failure reasons without result bodies', async () => {
+    const manager = new DelegateJobManager();
+    const workflow = new DelegateWorkflowCoordinator({ jobs: manager });
+    let tool: RegisteredTool | undefined;
+    const pi = {
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+    } as unknown as ExtensionAPI;
+    registerDelegateJobsTool(pi, manager, undefined, undefined, workflow);
+
+    const settled = new Promise<void>((resolve) => {
+      workflow.subscribeTerminal(() => resolve());
+    });
+    workflow.schedule({
+      logicalId: 'child',
+      prepare: async () => {
+        throw new Error('Required symbolic report is unavailable.');
+      },
+    });
+    await settled;
+
+    const status = await tool?.execute('call-status', {
+      action: 'status',
+      id: 'child',
+    });
+    expect(status?.content[0]?.text).toContain(
+      'Required symbolic report is unavailable.',
+    );
+    expect(status?.details).toMatchObject({
+      attempt: {
+        identity: 'child@1',
+        state: 'error',
+        reason: 'Required symbolic report is unavailable.',
+      },
+    });
     await manager.dispose();
   });
 

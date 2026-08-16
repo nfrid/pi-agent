@@ -7,14 +7,20 @@ import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import type { AutomaticDeliveryState } from './completion-delivery';
 import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
+import type {
+  DelegateWorkflowAttemptSnapshot,
+  DelegateWorkflowCoordinator,
+} from './workflow-coordinator';
 
 const Parameters = Type.Object({
-  action: StringEnum(['list', 'peek', 'feedback', 'cancel'] as const, {
+  action: StringEnum(['list', 'status', 'feedback', 'cancel'] as const, {
     description:
-      'list shows tracked jobs; peek inspects one job and can wait briefly; feedback sends corrective guidance to a queued or running job; cancel stops one or more jobs.',
+      'list shows tracked jobs; status shows bounded metadata; feedback sends corrective guidance to a queued or running job; cancel stops one or more jobs. Results are delivered only through delegate_wake; use status rather than polling.',
   }),
   id: Type.Optional(
-    Type.String({ description: 'Job ID for peek or feedback' }),
+    Type.String({
+      description: 'Logical attempt or adapter ID for status/feedback',
+    }),
   ),
   message: Type.Optional(
     Type.String({
@@ -26,17 +32,11 @@ const Parameters = Type.Object({
   ids: Type.Optional(
     Type.Array(Type.String(), { description: 'Job IDs for cancel' }),
   ),
-  wait_seconds: Type.Optional(
-    Type.Integer({
-      minimum: 0,
-      maximum: 120,
-      description: 'For peek, wait up to this long for settlement',
-    }),
-  ),
+  // Legacy wait_seconds is accepted by old callers but omitted from schema.
 });
 
 const DELEGATE_JOBS_DESCRIPTION =
-  'Inspect, steer, and cancel asynchronous delegate jobs. Completions are delivered automatically. Use feedback with one bounded message to steer a running child at its next safe checkpoint; a settled job reports that feedback was not delivered. Use peek for deliberate inspection, not polling.';
+  'Inspect bounded metadata, steer, and cancel asynchronous delegate workflow attempts. Selected results are delivered only by an explicitly registered delegate_wake. Use feedback with one bounded message to steer a running child; this tool never polls or consumes result bodies.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -44,8 +44,68 @@ function requireText(value: string | undefined, name: string): string {
   return text;
 }
 
-function summary(job: DelegateJobSnapshot): string {
+function summary(
+  job: Pick<DelegateJobSnapshot, 'id' | 'state' | 'name'>,
+): string {
   return `${job.id} ${job.state} — ${job.name}`;
+}
+
+type DelegateAttemptMetadata = Pick<
+  DelegateWorkflowAttemptSnapshot,
+  | 'logicalId'
+  | 'ordinal'
+  | 'identity'
+  | 'state'
+  | 'dependencies'
+  | 'waitingFor'
+  | 'createdAt'
+  | 'scheduledAt'
+  | 'queuedAt'
+  | 'startedAt'
+  | 'settledAt'
+  | 'route'
+  | 'allowWrites'
+  | 'reason'
+>;
+
+function attemptSummary(attempt: DelegateAttemptMetadata): string {
+  const waiting = attempt.waitingFor?.length
+    ? `, waiting for ${attempt.waitingFor.join(', ')}`
+    : '';
+  const reason = attempt.reason ? ` — ${attempt.reason}` : '';
+  return `${attempt.identity} ${attempt.state}${waiting}${reason}`;
+}
+
+function compactAttempt(
+  attempt: DelegateWorkflowAttemptSnapshot,
+): DelegateAttemptMetadata {
+  return {
+    logicalId: attempt.logicalId,
+    ordinal: attempt.ordinal,
+    identity: attempt.identity,
+    state: attempt.state,
+    dependencies: attempt.dependencies,
+    waitingFor: attempt.waitingFor,
+    createdAt: attempt.createdAt,
+    scheduledAt: attempt.scheduledAt,
+    queuedAt: attempt.queuedAt,
+    startedAt: attempt.startedAt,
+    settledAt: attempt.settledAt,
+    route: attempt.route,
+    allowWrites: attempt.allowWrites,
+    reason: attempt.reason,
+  };
+}
+
+function feedbackText(
+  id: string,
+  delivery: 'queued' | 'settled' | 'unavailable',
+): string {
+  return delivery === 'queued'
+    ? `Feedback queued for ${id}.`
+    : delivery === 'settled'
+      ? `Feedback was not delivered because ${id} is already settled.`
+      : `Feedback could not be queued for ${id}.`;
 }
 
 function resultText(
@@ -84,20 +144,36 @@ function automaticDeliveryStatus(
     : `Automatic result for ${job.id} was already delivered; no duplicate completion is returned.`;
 }
 
-function compactJob(job: DelegateJobSnapshot): DelegateJobSnapshot {
+type DelegateJobMetadata = Pick<
+  DelegateJobSnapshot,
+  | 'id'
+  | 'name'
+  | 'mode'
+  | 'state'
+  | 'createdAt'
+  | 'startedAt'
+  | 'settledAt'
+  | 'deliveryEpoch'
+  | 'route'
+  | 'allowWrites'
+  | 'logicalId'
+  | 'attemptIdentity'
+>;
+
+function compactJob(job: DelegateJobSnapshot): DelegateJobMetadata {
   return {
     id: job.id,
     name: job.name,
     mode: job.mode,
     state: job.state,
-    // The already-delivered response is a status, not another task replay.
-    tasks: [],
     createdAt: job.createdAt,
     startedAt: job.startedAt,
     settledAt: job.settledAt,
     deliveryEpoch: job.deliveryEpoch,
     route: job.route,
     allowWrites: job.allowWrites,
+    logicalId: job.logicalId,
+    attemptIdentity: job.attemptIdentity,
   };
 }
 
@@ -108,13 +184,16 @@ export function registerDelegateJobsTool(
   getAutomaticDeliveryState: (
     job: DelegateJobSnapshot,
   ) => AutomaticDeliveryState | undefined = () => undefined,
+  workflow?: DelegateWorkflowCoordinator,
 ): void {
   pi.registerTool<
     typeof Parameters,
     {
-      action: 'list' | 'peek' | 'feedback' | 'cancel';
-      job?: DelegateJobSnapshot;
-      jobs?: DelegateJobSnapshot[];
+      action: 'list' | 'status' | 'feedback' | 'cancel' | 'peek';
+      job?: DelegateJobSnapshot | DelegateJobMetadata;
+      jobs?: Array<DelegateJobSnapshot | DelegateJobMetadata>;
+      attempt?: DelegateAttemptMetadata;
+      attempts?: DelegateAttemptMetadata[];
       delivery?:
         | 'queued'
         | 'settled'
@@ -134,26 +213,48 @@ export function registerDelegateJobsTool(
       _onUpdate,
       ctx: ExtensionContext,
     ) {
-      switch (params.action) {
+      const request = params as typeof params & { wait_seconds?: number };
+      const action = (params as { action: string }).action;
+      switch (action) {
         case 'list': {
-          const jobs = manager.list(ctx);
+          const jobs = manager
+            .list(ctx)
+            .filter((job) => !job.attemptIdentity)
+            .map(compactJob);
+          const attempts = workflow?.list().map(compactAttempt) ?? [];
           return {
             content: [
               {
                 type: 'text',
                 text:
-                  jobs.length > 0
-                    ? jobs.map(summary).join('\n')
-                    : 'No background delegate jobs.',
+                  [...attempts.map(attemptSummary), ...jobs.map(summary)].join(
+                    '\n',
+                  ) || 'No delegate workflow attempts.',
               },
             ],
-            details: { action: 'list', jobs },
+            details: { action: 'list', jobs, attempts },
+          };
+        }
+        case 'status': {
+          const id = requireText(params.id, 'id');
+          const attempt = workflow?.get(id);
+          if (attempt) {
+            return {
+              content: [{ type: 'text', text: attemptSummary(attempt) }],
+              details: { action: 'status', attempt: compactAttempt(attempt) },
+            };
+          }
+          const job = manager.get(id, ctx);
+          if (!job) throw new Error(`Unknown delegate attempt or job "${id}".`);
+          return {
+            content: [{ type: 'text', text: summary(job) }],
+            details: { action: 'status', job: compactJob(job) },
           };
         }
         case 'peek': {
           let job = await manager.peek(
             requireText(params.id, 'id'),
-            (params.wait_seconds ?? 0) * 1000,
+            (request.wait_seconds ?? 0) * 1000,
             signal,
             ctx,
           );
@@ -185,8 +286,45 @@ export function registerDelegateJobsTool(
           };
         }
         case 'feedback': {
+          const id = requireText(params.id, 'id');
+          const attempt = workflow?.get(id);
+          if (attempt) {
+            if (!attempt.jobId)
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: `Feedback could not be queued for ${attempt.identity}; it is ${attempt.state}.`,
+                  },
+                ],
+                details: {
+                  action: 'feedback',
+                  attempt: compactAttempt(attempt),
+                  delivery: 'unavailable',
+                },
+              };
+            const feedback = manager.sendFeedback(
+              attempt.jobId,
+              requireText(params.message, 'message'),
+              ctx,
+            );
+            const current = workflow?.get(attempt.identity);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: feedbackText(attempt.identity, feedback.delivery),
+                },
+              ],
+              details: {
+                action: 'feedback',
+                attempt: current ? compactAttempt(current) : undefined,
+                delivery: feedback.delivery,
+              },
+            };
+          }
           const feedback = manager.sendFeedback(
-            requireText(params.id, 'id'),
+            id,
             requireText(params.message, 'message'),
             ctx,
           );
@@ -208,7 +346,14 @@ export function registerDelegateJobsTool(
         case 'cancel': {
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
-          const jobs = await manager.cancel(ids, signal, ctx);
+          const logicalIds = ids.filter((id) => workflow?.get(id));
+          const adapterIds = ids.filter((id) => !logicalIds.includes(id));
+          const logicalAttempts = workflow
+            ? await workflow.cancel(logicalIds)
+            : [];
+          const jobs = adapterIds.length
+            ? await manager.cancel(adapterIds, signal, ctx)
+            : [];
           const automaticJobs = jobs
             .map((job) => ({ job, state: getAutomaticDeliveryState(job) }))
             .filter(
@@ -226,28 +371,25 @@ export function registerDelegateJobsTool(
           const deliveredIds = automaticJobs
             .filter(({ state }) => state === 'entered')
             .map(({ job }) => job.id);
+
           onResultEntered(jobs.filter((job) => !automaticIds.has(job.id)));
+          const cancelled = [
+            ...logicalAttempts.map(attemptSummary),
+            ...jobs.map((job) => {
+              const automatic = automaticJobs.find(
+                (item) => item.job.id === job.id,
+              );
+              return automatic
+                ? automaticDeliveryStatus(job, automatic.state)
+                : `${job.id} ${job.state}`;
+            }),
+          ];
           return {
-            content: [
-              {
-                type: 'text',
-                text: jobs
-                  .map((job) => {
-                    const automatic = automaticJobs.find(
-                      (item) => item.job.id === job.id,
-                    );
-                    return automatic
-                      ? automaticDeliveryStatus(job, automatic.state)
-                      : result(job);
-                  })
-                  .join('\n\n'),
-              },
-            ],
+            content: [{ type: 'text', text: cancelled.join('\n') }],
             details: {
               action: 'cancel',
-              jobs: jobs.map((job) =>
-                automaticIds.has(job.id) ? compactJob(job) : job,
-              ),
+              attempts: logicalAttempts.map(compactAttempt),
+              jobs: jobs.map(compactJob),
               ...(automaticIds.size > 0
                 ? {
                     delivery:
@@ -265,16 +407,19 @@ export function registerDelegateJobsTool(
             },
           };
         }
+        default:
+          throw new Error(`Unknown delegate_jobs action "${action}".`);
       }
     },
     renderCall(args, theme, context) {
-      const action = args.action ?? '';
+      const action = String(args.action ?? '');
       const title =
         theme.fg('toolTitle', theme.bold('delegate_jobs')) +
         (action ? ` ${theme.fg('muted', action)}` : '');
       if (action === 'peek') {
-        const wait = args.wait_seconds
-          ? theme.fg('dim', ` · wait ${args.wait_seconds}s`)
+        const waitSeconds = (args as { wait_seconds?: number }).wait_seconds;
+        const wait = waitSeconds
+          ? theme.fg('dim', ` · wait ${waitSeconds}s`)
           : '';
         return new Text(
           `${title} ${theme.fg('accent', args.id ?? '?')}${wait}`,
@@ -326,6 +471,45 @@ export function registerDelegateJobsTool(
         );
       }
 
+      if (details.action === 'status' && details.attempt) {
+        return new Text(
+          theme.fg(
+            details.attempt.state === 'error' ||
+              details.attempt.state === 'blocked'
+              ? 'error'
+              : details.attempt.state === 'success'
+                ? 'success'
+                : 'warning',
+            `${details.attempt.identity} ${details.attempt.state}`,
+          ),
+          0,
+          0,
+        );
+      }
+
+      if (details.action === 'status' && details.job) {
+        const display = stateDisplay(details.job.state);
+        return new Text(
+          theme.fg(
+            display.color,
+            `${display.icon} ${details.job.id} ${details.job.state}`,
+          ),
+          0,
+          0,
+        );
+      }
+
+      if (details.action === 'feedback' && details.attempt) {
+        return new Text(
+          theme.fg(
+            'muted',
+            `${details.attempt.identity} ${details.delivery ?? 'unavailable'}`,
+          ),
+          0,
+          0,
+        );
+      }
+
       if (details.action === 'feedback' && details.job) {
         const display = stateDisplay(details.job.state);
         const delivery = details.delivery ?? 'unavailable';
@@ -337,7 +521,7 @@ export function registerDelegateJobsTool(
       }
 
       if (details.action === 'peek' && details.job) {
-        const job = details.job;
+        const job = details.job as DelegateJobSnapshot;
         const display = stateDisplay(job.state);
         const preview =
           job.handoff ?? job.error ?? job.tasks[0] ?? 'Waiting for subagent';

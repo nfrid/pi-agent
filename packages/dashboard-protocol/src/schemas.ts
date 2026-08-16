@@ -741,6 +741,84 @@ const DelegateLiveRunStateSchema = Type.Union([
   Type.Literal('aborted'),
   Type.Literal('timed-out'),
 ]);
+const DelegateWorkflowStateSchema = Type.Union([
+  Type.Literal('scheduled'),
+  Type.Literal('queued'),
+  Type.Literal('running'),
+  Type.Literal('success'),
+  Type.Literal('error'),
+  Type.Literal('timed-out'),
+  Type.Literal('aborted'),
+  Type.Literal('cancelled'),
+  Type.Literal('blocked'),
+]);
+export const DelegateWorkflowMetadataSchema = Type.Object(
+  {
+    logicalId: Type.String({ minLength: 1, maxLength: 64 }),
+    attempt: Type.Integer({ minimum: 1 }),
+    identity: Type.String({ minLength: 1, maxLength: 80 }),
+    state: DelegateWorkflowStateSchema,
+    dependencies: Type.Readonly(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+        maxItems: 32,
+      }),
+    ),
+    waitingFor: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+          maxItems: 32,
+        }),
+      ),
+    ),
+    reason: Type.Optional(Type.String({ maxLength: 256 })),
+    route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    allowWrites: Type.Optional(Type.Boolean()),
+    createdAt: FiniteNumberSchema,
+    scheduledAt: FiniteNumberSchema,
+    queuedAt: Type.Optional(FiniteNumberSchema),
+    startedAt: Type.Optional(FiniteNumberSchema),
+    settledAt: Type.Optional(FiniteNumberSchema),
+    branchAvailable: Type.Optional(Type.Boolean()),
+    snapshotAvailable: Type.Optional(Type.Boolean()),
+    deliveredToParent: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type DelegateWorkflowMetadata = Static<
+  typeof DelegateWorkflowMetadataSchema
+>;
+
+/** Payload-free lifecycle metadata projected from delegate-wake:v1 entries. */
+export const DelegateWakeMetadataSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    state: Type.Union([
+      Type.Literal('pending'),
+      Type.Literal('ready'),
+      Type.Literal('queued'),
+      Type.Literal('entered'),
+      Type.Literal('cancelled'),
+      Type.Literal('blocked'),
+    ]),
+    references: Type.Readonly(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+        maxItems: 32,
+      }),
+    ),
+    createdAt: FiniteNumberSchema,
+    readyAt: Type.Optional(FiniteNumberSchema),
+    queuedAt: Type.Optional(FiniteNumberSchema),
+    enteredAt: Type.Optional(FiniteNumberSchema),
+    cancelledAt: Type.Optional(FiniteNumberSchema),
+    blockedAt: Type.Optional(FiniteNumberSchema),
+    revision: Type.Integer({ minimum: 0 }),
+    dispatchAttempts: Type.Integer({ minimum: 0 }),
+    reason: Type.Optional(Type.String({ maxLength: 256 })),
+  },
+  { additionalProperties: false },
+);
+export type DelegateWakeMetadata = Static<typeof DelegateWakeMetadataSchema>;
+
 const DelegateLiveRunSchema = Type.Object(
   {
     runId: IdentifierSchema,
@@ -771,6 +849,8 @@ const DelegateLiveRunSchema = Type.Object(
       Type.Array(DelegateTranscriptEntrySchema, { maxItems: 128 }),
     ),
     transcriptTruncated: Type.Optional(Type.Boolean()),
+    /** Compact logical workflow metadata; never contains payloads or reports. */
+    workflow: Type.Optional(DelegateWorkflowMetadataSchema),
   },
   { additionalProperties: false },
 );
@@ -1627,6 +1707,9 @@ const DelegateHistoryStateSchema = Type.Union([
   Type.Literal('error'),
   Type.Literal('aborted'),
   Type.Literal('timed-out'),
+  Type.Literal('scheduled'),
+  Type.Literal('cancelled'),
+  Type.Literal('blocked'),
 ]);
 export type DelegateHistoryState = Static<typeof DelegateHistoryStateSchema>;
 const DelegateHistoryKindSchema = Type.Union([
@@ -1752,6 +1835,8 @@ const DelegateHistoryInvocationSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    workflow: Type.Optional(DelegateWorkflowMetadataSchema),
+    wake: Type.Optional(DelegateWakeMetadataSchema),
   },
   { additionalProperties: false },
 );
@@ -1784,6 +1869,8 @@ export const DelegateHistoryRunDetailSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    workflow: Type.Optional(DelegateWorkflowMetadataSchema),
+    wake: Type.Optional(DelegateWakeMetadataSchema),
     details: DelegateHistoryDetailsSchema,
   },
   { additionalProperties: false },
@@ -1816,6 +1903,8 @@ const DelegateHistoryGroupSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    workflow: Type.Optional(DelegateWorkflowMetadataSchema),
+    wake: Type.Optional(DelegateWakeMetadataSchema),
     runCount: Type.Integer({
       minimum: 1,
       maximum: MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
