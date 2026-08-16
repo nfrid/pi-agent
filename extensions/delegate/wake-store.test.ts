@@ -45,6 +45,20 @@ describe('wake store', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ customType: WAKE_ENTRY_TYPE });
     expect(JSON.stringify(entries)).not.toContain('exact report prose');
+    const persistedWake = (
+      entries[0] as { data: { state: { wakes: Array<{ payload: unknown }> } } }
+    ).data.state.wakes[0];
+    expect(persistedWake?.payload).toEqual([
+      { kind: 'handoff' },
+      { kind: 'metadata' },
+    ]);
+    workflow.schedule({
+      logicalId: 'build',
+      continuation: true,
+      mode: 'single',
+      tasks: ['build-again'],
+      execute: async () => ({ runs: [], handoff: 'later' }),
+    });
 
     const restored = new WakeCoordinator({ workflow });
     restoreWakeState(restored, branch(entries));

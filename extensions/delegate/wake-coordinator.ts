@@ -66,13 +66,18 @@ export type WakeState =
   | 'cancelled'
   | 'blocked';
 
-export interface WakePayload {
+export interface WakePayloadSource {
   /** Bounded parent handoff, never the child's exact final report. */
   readonly handoff?: string;
   /** Compact lifecycle metadata, without messages or prose. */
   readonly metadata?: Record<string, unknown>;
   /** Selected named structured views only. */
   readonly views?: Readonly<Record<string, unknown>>;
+}
+
+export interface WakePayload extends WakePayloadSource {
+  /** Canonical payload grouping; keys are exact attempt identities. */
+  readonly sources: Readonly<Record<AttemptIdentity, WakePayloadSource>>;
 }
 
 export interface WakeSubscriptionOptions {
@@ -93,6 +98,8 @@ export interface WakeSnapshot {
   readonly state: WakeState;
   readonly createdAt: number;
   readonly readyAt?: number;
+  /** Exact sources selected at the readiness transition, for recovery. */
+  readonly readyReferences?: readonly AttemptIdentity[];
   readonly queuedAt?: number;
   readonly enteredAt?: number;
   readonly cancelledAt?: number;
@@ -131,6 +138,7 @@ interface WakeRecord {
   readonly createdAt: number;
   state: WakeState;
   readyAt?: number;
+  readyReferences?: readonly AttemptIdentity[];
   queuedAt?: number;
   enteredAt?: number;
   cancelledAt?: number;
@@ -139,6 +147,13 @@ interface WakeRecord {
   reason?: string;
   payload?: WakePayload;
   dispatchGeneration: number;
+}
+
+class WakePayloadPendingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WakePayloadPendingError';
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -283,6 +298,10 @@ function copySnapshot(record: WakeRecord): WakeSnapshot {
     state: record.state,
     createdAt: record.createdAt,
     readyAt: record.readyAt,
+    readyReferences:
+      record.readyReferences === undefined
+        ? undefined
+        : Object.freeze([...record.readyReferences]),
     queuedAt: record.queuedAt,
     enteredAt: record.enteredAt,
     cancelledAt: record.cancelledAt,
@@ -484,16 +503,29 @@ export class WakeCoordinator {
     references: readonly AttemptIdentity[],
   ): readonly CanonicalWakePayloadSelector[] {
     const bound = selectors.map((selector) => {
-      const source = selector.node ?? references[0];
-      if (!source) throw new Error('Wake payload has no source attempt.');
-      const attempt = this.workflow.require(source);
+      if (selector.node === undefined) return selector;
+      const attempt = this.workflow.require(selector.node);
+      if (!references.includes(attempt.identity))
+        throw new Error(
+          `Wake payload source "${attempt.identity}" is not a condition reference.`,
+        );
       return Object.freeze({ ...selector, node: attempt.identity });
     });
-    const keys = bound.map(
-      (selector) => `${selector.node}:${selector.kind}:${selector.name ?? ''}`,
-    );
-    if (new Set(keys).size !== keys.length)
-      throw new Error('Duplicate wake payload selectors are not allowed.');
+    for (let left = 0; left < bound.length; left++)
+      for (let right = left + 1; right < bound.length; right++) {
+        const first = bound[left];
+        const second = bound[right];
+        if (!first || !second) continue;
+        if (
+          first.kind !== second.kind ||
+          first.name !== second.name ||
+          (first.node !== undefined &&
+            second.node !== undefined &&
+            first.node !== second.node)
+        )
+          continue;
+        throw new Error('Duplicate wake payload selectors are not allowed.');
+      }
     return copyPayloadSelectors(bound);
   }
 
@@ -521,8 +553,17 @@ export class WakeCoordinator {
   private reevaluate(record: WakeRecord): void {
     if (record.state === 'ready' && !record.payload) {
       try {
-        record.payload = this.resolvePayload(record);
+        record.payload = this.resolvePayload(
+          record,
+          record.readyReferences ?? this.terminalReferences(record),
+        );
       } catch (error) {
+        if (error instanceof WakePayloadPendingError) {
+          record.state = 'pending';
+          record.readyReferences = undefined;
+          this.emit(record);
+          return;
+        }
         record.state = 'blocked';
         record.reason = boundedReason(error);
         this.emit(record);
@@ -532,107 +573,149 @@ export class WakeCoordinator {
       return;
     }
     if (record.state !== 'pending') return;
-    const terminal = record.references.map((identity) => {
-      const attempt = this.workflow.get(identity);
-      return attempt !== undefined && this.isTerminalAttempt(attempt);
-    });
+    const terminal = this.terminalReferences(record);
     const satisfied =
       'node' in record.condition
-        ? terminal[0] === true
+        ? terminal[0] === record.references[0]
         : 'all' in record.condition
-          ? terminal.every(Boolean)
-          : terminal.some(Boolean);
+          ? terminal.length === record.references.length
+          : terminal.length > 0;
     if (!satisfied) return;
     try {
-      record.payload = this.resolvePayload(record);
+      record.payload = this.resolvePayload(record, terminal);
     } catch (error) {
+      if (error instanceof WakePayloadPendingError) return;
       record.state = 'blocked';
       record.reason = boundedReason(error);
       this.emit(record);
       return;
     }
+    record.readyReferences = Object.freeze([...terminal]);
     record.state = 'ready';
     record.readyAt = this.now();
     this.emit(record);
     if (this.dispatchHandler) this.queue(record);
   }
 
+  private terminalReferences(record: WakeRecord): AttemptIdentity[] {
+    return record.references.filter((identity) => {
+      const attempt = this.workflow.get(identity);
+      return attempt !== undefined && this.isTerminalAttempt(attempt);
+    });
+  }
+
   private isTerminalAttempt(attempt: DelegateWorkflowAttemptSnapshot): boolean {
     return isTerminalWorkflowAttemptState(attempt.state);
   }
 
-  private resolvePayload(record: WakeRecord): WakePayload {
-    const result: {
-      handoff?: string;
-      metadata?: Record<string, unknown>;
-      views?: Record<string, unknown>;
-    } = {};
+  private resolvePayload(
+    record: WakeRecord,
+    readyReferences: readonly AttemptIdentity[],
+  ): WakePayload {
+    const sourceValues = new Map<AttemptIdentity, WakePayloadSource>();
+    const used = new Set<string>();
     for (const selector of record.payloadSelectors) {
-      const symbolic: SymbolicWorkflowSelector = {
-        node: selector.node ?? record.references[0] ?? '',
-        ...(selector.kind === 'handoff'
-          ? { include: ['handoff'] as const }
-          : selector.kind === 'metadata'
-            ? { include: ['metadata'] as const }
-            : {
-                include: ['metadata'] as const,
-                view: selector.name,
-              }),
-      };
-      const bound: BoundWorkflowSelector = Object.freeze({
-        selector: Object.freeze(symbolic),
-        identity: selector.node ?? record.references[0] ?? '',
-      });
-      const resolved = this.workflow.resolveBoundWorkflowInputs([bound]);
-      const input = resolved.inputs.find(
-        (candidate: ResolvedWorkflowInput) =>
-          candidate.kind === selector.kind &&
-          (selector.kind !== 'view' || candidate.label.endsWith(`view`)),
-      );
-      // A selector with a named view always has one view result. Match by kind
-      // rather than carrying arbitrary result values through the snapshot.
-      const selected =
-        input ??
-        resolved.inputs.find(
+      const sources =
+        selector.node === undefined ? readyReferences : [selector.node];
+      if (sources.length === 0)
+        throw new WakePayloadPendingError('Wake payload has no ready source.');
+      if (
+        selector.node !== undefined &&
+        !readyReferences.includes(selector.node)
+      )
+        throw new WakePayloadPendingError(
+          `Wake payload source "${selector.node}" is not terminal yet.`,
+        );
+      for (const identity of sources) {
+        const key = `${identity}:${selector.kind}:${selector.name ?? ''}`;
+        if (used.has(key))
+          throw new Error('Duplicate wake payload selectors are not allowed.');
+        used.add(key);
+        const attempt = this.workflow.get(identity);
+        if (!attempt || !this.isTerminalAttempt(attempt))
+          throw new WakePayloadPendingError(
+            `Wake payload source "${identity}" is not terminal yet.`,
+          );
+        const symbolic: SymbolicWorkflowSelector = {
+          node: identity,
+          ...(selector.kind === 'handoff'
+            ? { include: ['handoff'] as const }
+            : selector.kind === 'metadata'
+              ? { include: ['metadata'] as const }
+              : {
+                  include: ['metadata'] as const,
+                  view: selector.name,
+                }),
+        };
+        const bound: BoundWorkflowSelector = Object.freeze({
+          selector: Object.freeze(symbolic),
+          identity,
+        });
+        const resolved = this.workflow.resolveBoundWorkflowInputs([bound]);
+        const selected = resolved.inputs.find(
           (candidate: ResolvedWorkflowInput) =>
             candidate.kind === selector.kind,
         );
-      if (!selected)
-        throw new Error(`Wake payload ${selector.kind} is unavailable.`);
-      if (selector.kind === 'handoff') {
-        if (typeof selected.value !== 'string')
-          throw new Error('Wake handoff payload is unavailable.');
-        if (
-          Buffer.byteLength(selected.value, 'utf8') >
-          WAKE_PAYLOAD_CAPS.handoffBytes
-        )
-          throw new Error('Wake handoff payload exceeds its bounded limit.');
-        result.handoff = selected.value;
-      } else if (selector.kind === 'metadata') {
-        if (
-          selected.value === undefined ||
-          jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.metadataBytes
-        )
-          throw new Error('Wake metadata payload exceeds its bounded limit.');
-        result.metadata = selected.value as Record<string, unknown>;
-      } else {
-        if (
-          selected.value === undefined ||
-          jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.viewBytes
-        )
-          throw new Error(
-            `Wake view "${selector.name}" exceeds its bounded limit.`,
-          );
-        result.views ??= {};
-        result.views[selector.name ?? ''] = selected.value;
+        if (!selected)
+          throw new Error(`Wake payload ${selector.kind} is unavailable.`);
+        const current = sourceValues.get(identity) ?? {};
+        let next: WakePayloadSource;
+        if (selector.kind === 'handoff') {
+          if (typeof selected.value !== 'string')
+            throw new Error('Wake handoff payload is unavailable.');
+          if (
+            Buffer.byteLength(selected.value, 'utf8') >
+            WAKE_PAYLOAD_CAPS.handoffBytes
+          )
+            throw new Error('Wake handoff payload exceeds its bounded limit.');
+          next = { ...current, handoff: selected.value };
+        } else if (selector.kind === 'metadata') {
+          if (
+            selected.value === undefined ||
+            jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.metadataBytes
+          )
+            throw new Error('Wake metadata payload exceeds its bounded limit.');
+          next = {
+            ...current,
+            metadata: selected.value as Record<string, unknown>,
+          };
+        } else {
+          if (
+            selected.value === undefined ||
+            jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.viewBytes
+          )
+            throw new Error(
+              `Wake view "${selector.name}" exceeds its bounded limit.`,
+            );
+          next = {
+            ...current,
+            views: {
+              ...(current.views ?? {}),
+              [selector.name ?? '']: selected.value,
+            },
+          };
+        }
+        sourceValues.set(identity, next);
       }
     }
-    if (jsonBytes(result) > WAKE_PAYLOAD_CAPS.aggregateBytes)
+    const sources = Object.fromEntries(
+      [...sourceValues.entries()].map(([identity, source]) => [
+        identity,
+        Object.freeze(source),
+      ]),
+    ) as Record<AttemptIdentity, WakePayloadSource>;
+    if (jsonBytes(sources) > WAKE_PAYLOAD_CAPS.aggregateBytes)
       throw new Error('Wake payload exceeds its bounded aggregate limit.');
+    const frozenSources = Object.freeze(sources);
+    const sourceKeys = Object.keys(sources);
+    if (sourceKeys.length !== 1)
+      return Object.freeze({ sources: frozenSources });
+    const only = sources[sourceKeys[0] ?? ''];
     return Object.freeze({
-      ...(result.handoff !== undefined ? { handoff: result.handoff } : {}),
-      ...(result.metadata !== undefined ? { metadata: result.metadata } : {}),
-      ...(result.views !== undefined ? { views: result.views } : {}),
+      sources: frozenSources,
+      ...(only?.handoff !== undefined ? { handoff: only.handoff } : {}),
+      ...(only?.metadata !== undefined ? { metadata: only.metadata } : {}),
+      ...(only?.views !== undefined ? { views: only.views } : {}),
     });
   }
 
@@ -640,8 +723,17 @@ export class WakeCoordinator {
     if (record.state !== 'ready' || !this.dispatchHandler) return;
     if (!record.payload) {
       try {
-        record.payload = this.resolvePayload(record);
+        record.payload = this.resolvePayload(
+          record,
+          record.readyReferences ?? this.terminalReferences(record),
+        );
       } catch (error) {
+        if (error instanceof WakePayloadPendingError) {
+          record.state = 'pending';
+          record.readyReferences = undefined;
+          this.emit(record);
+          return;
+        }
         record.state = 'blocked';
         record.reason = boundedReason(error);
         this.emit(record);
@@ -739,6 +831,42 @@ export class WakeCoordinator {
     const state = value.state;
     if (typeof state !== 'string' || !WAKE_STATES.has(state as WakeState))
       return undefined;
+    let readyReferences: readonly AttemptIdentity[] | undefined;
+    try {
+      if (state === 'ready' || state === 'queued') {
+        if (value.readyReferences !== undefined) {
+          if (
+            !Array.isArray(value.readyReferences) ||
+            value.readyReferences.length === 0
+          )
+            return undefined;
+          const restored = value.readyReferences.map((reference) => {
+            if (typeof reference !== 'string')
+              throw new Error('invalid ready source');
+            const attempt = this.workflow.require(reference);
+            if (
+              attempt.identity !== reference ||
+              !normalized.references.includes(attempt.identity)
+            )
+              throw new Error('invalid ready source');
+            return attempt.identity;
+          });
+          if (new Set(restored).size !== restored.length) return undefined;
+          readyReferences = Object.freeze(restored);
+        } else {
+          // Older entries may not have captured readiness sources. Recompute
+          // only from the already-exact condition refs; never bind a bare alias.
+          readyReferences = Object.freeze(
+            normalized.references.filter((reference) => {
+              const attempt = this.workflow.get(reference);
+              return attempt !== undefined && this.isTerminalAttempt(attempt);
+            }),
+          );
+        }
+      }
+    } catch {
+      return undefined;
+    }
     const record: WakeRecord = {
       id,
       condition: normalized.condition,
@@ -747,6 +875,7 @@ export class WakeCoordinator {
       createdAt: value.createdAt,
       state: state === 'queued' ? 'ready' : (state as WakeState),
       readyAt: validTimestamp(value.readyAt) ? value.readyAt : undefined,
+      readyReferences,
       queuedAt: validTimestamp(value.queuedAt) ? value.queuedAt : undefined,
       enteredAt: validTimestamp(value.enteredAt) ? value.enteredAt : undefined,
       cancelledAt: validTimestamp(value.cancelledAt)

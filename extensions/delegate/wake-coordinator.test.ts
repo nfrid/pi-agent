@@ -33,6 +33,24 @@ function options(logicalId: string, execute: () => Promise<DelegateJobResult>) {
   };
 }
 
+function structuredResult(task: string, summary: string): DelegateJobResult {
+  const run = createRun(task);
+  run.state = 'success';
+  run.exitCode = 0;
+  const spec = normalizeInternalDelegateResultSpec({
+    schema: {
+      type: 'object',
+      properties: { summary: { type: 'string' } },
+      required: ['summary'],
+    },
+    views: { summary: '/summary' },
+  });
+  setDelegateResultSpec(run, spec);
+  captureDelegateResultEvent(run, { details: { summary } }, false);
+  settleDelegateResult(run);
+  return { runs: [run], handoff: `Status: success\\nOutcome: ${task}` };
+}
+
 async function settled(
   workflow: DelegateWorkflowCoordinator,
   identity: string,
@@ -290,6 +308,149 @@ describe('WakeCoordinator', () => {
     expect(payloads[0]?.payload.views).toEqual({ summary: 'selected' });
     expect(JSON.stringify(payloads[0]?.payload)).not.toContain(
       'must stay private',
+    );
+    await workflow.dispose();
+  });
+
+  test('any readiness uses the ref that settles first, not references[0]', async () => {
+    let finishA!: (value: DelegateJobResult) => void;
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule({
+      ...options(
+        'a',
+        () => new Promise<DelegateJobResult>((resolve) => (finishA = resolve)),
+      ),
+    });
+    const b = workflow.schedule(options('b', async () => result('b')));
+    await settled(workflow, b.identity);
+    const payloads: WakeDispatch[] = [];
+    const wake = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        payloads.push(dispatch);
+      },
+    });
+    const registered = wake.register({
+      id: 'first-any',
+      condition: { any: [a.identity, b.identity] },
+    });
+    expect(registered.state).toBe('queued');
+    expect(Object.keys(payloads[0]?.payload.sources ?? {})).toEqual(['b@1']);
+    expect(wake.require('first-any').state).toBe('queued');
+    finishA(result('a'));
+    await workflow.dispose();
+  });
+
+  test('all readiness groups both sources by exact identity', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule(options('a', async () => result('a')));
+    const b = workflow.schedule(options('b', async () => result('b')));
+    await settled(workflow, a.identity);
+    await settled(workflow, b.identity);
+    let payload!: WakeDispatch['payload'];
+    const wake = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        payload = dispatch.payload;
+      },
+    });
+    wake.register({ id: 'both', condition: { all: [a.identity, b.identity] } });
+    expect(Object.keys(payload.sources)).toEqual(['a@1', 'b@1']);
+    expect(payload.sources['a@1']?.handoff).toContain('a complete');
+    expect(payload.sources['b@1']?.handoff).toContain('b complete');
+    expect(payload.handoff).toBeUndefined();
+    let explicitPayload!: WakeDispatch['payload'];
+    const explicitWake = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        explicitPayload = dispatch.payload;
+      },
+    });
+    explicitWake.register({
+      id: 'explicit-both',
+      condition: { all: [a.identity, b.identity] },
+      payload: [
+        { kind: 'handoff', node: a.identity },
+        { kind: 'metadata', node: b.identity },
+      ],
+    });
+    expect(explicitPayload.sources['a@1']?.handoff).toContain('a complete');
+    expect(explicitPayload.sources['b@1']?.metadata?.identity).toBe('b@1');
+    await workflow.dispose();
+  });
+
+  test('duplicate named views remain separate across sources', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule({
+      logicalId: 'a',
+      mode: 'single',
+      tasks: ['a'],
+      execute: async () => structuredResult('a', 'from-a'),
+    });
+    const b = workflow.schedule({
+      logicalId: 'b',
+      mode: 'single',
+      tasks: ['b'],
+      execute: async () => structuredResult('b', 'from-b'),
+    });
+    await settled(workflow, a.identity);
+    await settled(workflow, b.identity);
+    let payload!: WakeDispatch['payload'];
+    const wake = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        payload = dispatch.payload;
+      },
+    });
+    wake.register({
+      id: 'both-views',
+      condition: { all: [a.identity, b.identity] },
+      payload: [{ view: 'summary' }],
+    });
+    expect(payload.sources['a@1']?.views).toEqual({ summary: 'from-a' });
+    expect(payload.sources['b@1']?.views).toEqual({ summary: 'from-b' });
+    expect(payload.sources['a@1']?.views).not.toBe(
+      payload.sources['b@1']?.views,
+    );
+    await workflow.dispose();
+  });
+
+  test('rejects an explicit payload source outside condition references', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule(options('a', async () => result('a')));
+    workflow.schedule(options('unrelated', async () => result('unrelated')));
+    const wake = new WakeCoordinator({ workflow });
+    expect(() =>
+      wake.register({
+        id: 'unrelated-payload',
+        condition: { node: a.identity },
+        payload: [{ kind: 'handoff', node: 'unrelated' }],
+      }),
+    ).toThrow(/not a condition reference/);
+    await workflow.dispose();
+  });
+
+  test('keeps any pending when an explicit payload source is not terminal', async () => {
+    let finishA!: (value: DelegateJobResult) => void;
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule({
+      ...options(
+        'a',
+        () => new Promise<DelegateJobResult>((resolve) => (finishA = resolve)),
+      ),
+    });
+    const b = workflow.schedule(options('b', async () => result('b')));
+    await settled(workflow, b.identity);
+    const wake = new WakeCoordinator({ workflow });
+    const pending = wake.register({
+      id: 'wait-explicit',
+      condition: { any: [a.identity, b.identity] },
+      payload: [{ kind: 'handoff', node: a.identity }],
+    });
+    expect(pending.state).toBe('pending');
+    finishA(result('a'));
+    await vi.waitFor(() =>
+      expect(wake.require('wait-explicit').state).toBe('ready'),
     );
     await workflow.dispose();
   });
