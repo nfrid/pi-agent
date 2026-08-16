@@ -16,6 +16,7 @@ import { createRun } from './types';
 import {
   type DelegateWorkflowAttemptSnapshot,
   DelegateWorkflowCoordinator,
+  WORKFLOW_RELOAD_ORPHAN_REASON,
 } from './workflow-coordinator';
 import {
   type SymbolicWorkflowSelector,
@@ -557,6 +558,67 @@ describe('DelegateWorkflowCoordinator', () => {
     await manager.dispose();
   });
 
+  test('restores live metadata as terminal reload orphans with evidence', () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      now: () => 200,
+    });
+    coordinator.restoreMetadata(
+      {
+        version: 1,
+        attempts: [
+          {
+            ownerBranchId: 'branch-restored',
+            logicalId: 'upstream',
+            attempt: 1,
+            identity: 'upstream@1',
+            state: 'running',
+            dependencies: [],
+            waitingFor: [],
+            createdAt: 10,
+            scheduledAt: 20,
+            queuedAt: 30,
+            startedAt: 40,
+          },
+          {
+            ownerBranchId: 'branch-restored',
+            logicalId: 'dependent',
+            attempt: 1,
+            identity: 'dependent@1',
+            state: 'scheduled',
+            dependencies: ['upstream@1'],
+            waitingFor: ['upstream@1'],
+            createdAt: 11,
+            scheduledAt: 21,
+          },
+        ],
+      },
+      'branch-restored',
+    );
+
+    expect(coordinator.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          identity: 'upstream@1',
+          state: 'blocked',
+          reason: WORKFLOW_RELOAD_ORPHAN_REASON,
+          createdAt: 10,
+          scheduledAt: 20,
+          queuedAt: 30,
+          startedAt: 40,
+          settledAt: 200,
+        }),
+        expect.objectContaining({
+          identity: 'dependent@1',
+          state: 'blocked',
+          reason: WORKFLOW_RELOAD_ORPHAN_REASON,
+          settledAt: 200,
+        }),
+      ]),
+    );
+    expect(coordinator.getResult('upstream@1')).toBeDefined();
+    expect(coordinator.getResult('dependent@1')).toBeDefined();
+  });
+
   test('cancelling during async symbolic preparation prevents job launch', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
@@ -624,6 +686,51 @@ describe('DelegateWorkflowCoordinator', () => {
     await vi.waitFor(() => expect(discard).toHaveBeenCalledOnce());
     expect(execute).not.toHaveBeenCalled();
     await coordinator.dispose();
+  });
+
+  test('disposal waits for abort-aware preparation discard before clearing records', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      preparationGraceMs: 100,
+    });
+    let preparationSignal!: AbortSignal;
+    let resourceCreated = false;
+    const discard = vi.fn(() => {
+      resourceCreated = false;
+    });
+    const execute = vi.fn(async () => result('must not run'));
+    const child = coordinator.schedule({
+      logicalId: 'dispose-resource',
+      prepare: ({ signal }) =>
+        new Promise<{ launch: DelegateJobStartOptions; discard: () => void }>(
+          (resolve) => {
+            preparationSignal = signal;
+            resourceCreated = true;
+            signal.addEventListener(
+              'abort',
+              () =>
+                resolve({
+                  launch: {
+                    mode: 'single',
+                    tasks: ['dispose-resource'],
+                    execute,
+                  },
+                  discard,
+                }),
+              { once: true },
+            );
+          },
+        ),
+    });
+    await vi.waitFor(() => expect(resourceCreated).toBe(true));
+
+    await coordinator.dispose();
+
+    expect(preparationSignal.aborted).toBe(true);
+    expect(discard).toHaveBeenCalledOnce();
+    expect(resourceCreated).toBe(false);
+    expect(coordinator.list()).toEqual([]);
+    expect(child.identity).toBe('dispose-resource@1');
+    expect(execute).not.toHaveBeenCalled();
   });
 
   test('disposal cancels unresolved preparation without recreating a job', async () => {

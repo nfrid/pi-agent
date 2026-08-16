@@ -10,7 +10,10 @@ import {
   restoreWakeState,
   WAKE_ENTRY_TYPE,
 } from './wake-store';
-import { DelegateWorkflowCoordinator } from './workflow-coordinator';
+import {
+  DelegateWorkflowCoordinator,
+  WORKFLOW_RELOAD_ORPHAN_REASON,
+} from './workflow-coordinator';
 
 function branch(entries: unknown[]) {
   return {
@@ -278,6 +281,104 @@ describe('wake store', () => {
     await pendingWorkflow.dispose();
     await readyWorkflow.dispose();
     await restored.workflow.dispose();
+  });
+
+  test('blocks restored orphan wakes while preserving queued acknowledgement entry', async () => {
+    const restoredWorkflow = new DelegateWorkflowCoordinator({
+      now: () => 200,
+    });
+    restoredWorkflow.restoreMetadata(
+      {
+        version: 1,
+        attempts: [
+          {
+            ownerBranchId: 'branch-reloaded',
+            logicalId: 'orphan',
+            attempt: 1,
+            identity: 'orphan@1',
+            state: 'running',
+            dependencies: [],
+            waitingFor: [],
+            createdAt: 10,
+            scheduledAt: 20,
+            queuedAt: 30,
+            startedAt: 40,
+          },
+        ],
+      },
+      'branch-reloaded',
+    );
+    const pending = new WakeCoordinator({
+      workflow: restoredWorkflow,
+      ownerSessionId: 'reload-wake',
+      ownerEpoch: 3,
+    });
+    expect(
+      pending.register({ id: 'pending-orphan', condition: { node: 'orphan' } }),
+    ).toMatchObject({
+      state: 'blocked',
+      reason: WAKE_RELOAD_ORPHAN_REASON,
+    });
+
+    const readyWorkflow = new DelegateWorkflowCoordinator();
+    readyWorkflow.schedule({
+      logicalId: 'orphan',
+      mode: 'single',
+      tasks: ['orphan'],
+      execute: async () => ({ runs: [], handoff: 'not used' }),
+    });
+    await vi.waitFor(() =>
+      expect(readyWorkflow.require('orphan@1').settledAt).toBeDefined(),
+    );
+    const readySource = new WakeCoordinator({
+      workflow: readyWorkflow,
+      ownerSessionId: 'reload-wake',
+      ownerEpoch: 3,
+    });
+    readySource.register({
+      id: 'ready-orphan',
+      condition: { node: 'orphan' },
+    });
+    const restored = new WakeCoordinator({
+      workflow: restoredWorkflow,
+      ownerSessionId: 'reload-wake',
+      ownerEpoch: 3,
+    });
+    restored.restore(readySource.snapshot());
+    expect(restored.require('ready-orphan')).toMatchObject({
+      state: 'blocked',
+      reason: WAKE_RELOAD_ORPHAN_REASON,
+    });
+
+    const queuedSource = new WakeCoordinator({
+      workflow: readyWorkflow,
+      ownerSessionId: 'reload-wake',
+      ownerEpoch: 3,
+      dispatch: () => {},
+    });
+    queuedSource.register({
+      id: 'queued-orphan',
+      condition: { node: 'orphan' },
+    });
+    restored.restore(queuedSource.snapshot());
+    const queued = restored.require('queued-orphan');
+    expect(queued.state).toBe('queued');
+    const acknowledgement = {
+      deliveryKey: queued.deliveryKey,
+      dispatchGeneration: queued.dispatchGeneration,
+      dispatchAttempt: queued.dispatchAttempts,
+    };
+    expect(restored.markEntered('queued-orphan', acknowledgement).state).toBe(
+      'entered',
+    );
+    expect(restored.markEntered('queued-orphan', acknowledgement).state).toBe(
+      'entered',
+    );
+    expect(restoredWorkflow.require('orphan@1').reason).toBe(
+      WORKFLOW_RELOAD_ORPHAN_REASON,
+    );
+    await readyWorkflow.dispose();
+    await restoredWorkflow.dispose();
   });
 
   test('rejects ownership-mismatched snapshots without changing live state', async () => {

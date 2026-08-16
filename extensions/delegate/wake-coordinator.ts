@@ -1,6 +1,7 @@
-import type {
-  DelegateWorkflowAttemptSnapshot,
-  DelegateWorkflowCoordinator,
+import {
+  type DelegateWorkflowAttemptSnapshot,
+  type DelegateWorkflowCoordinator,
+  WORKFLOW_RELOAD_ORPHAN_REASON,
 } from './workflow-coordinator';
 import type {
   BoundWorkflowSelector,
@@ -742,12 +743,19 @@ export class WakeCoordinator {
     }
   }
 
-  private blockReloadOrphan(record: WakeRecord): void {
+  private blockReloadOrphan(record: WakeRecord): boolean {
     if (
       (record.state !== 'pending' && record.state !== 'ready') ||
-      !record.references.some((reference) => !this.workflow.get(reference))
+      !record.references.some((reference) => {
+        const attempt = this.workflow.get(reference);
+        return (
+          attempt === undefined ||
+          (attempt.state === 'blocked' &&
+            attempt.reason === WORKFLOW_RELOAD_ORPHAN_REASON)
+        );
+      })
     )
-      return;
+      return false;
     record.state = 'blocked';
     record.blockedAt = Math.max(
       this.now(),
@@ -757,13 +765,18 @@ export class WakeCoordinator {
     );
     record.reason = WAKE_RELOAD_ORPHAN_REASON;
     record.payload = undefined;
+    return true;
   }
 
   setDispatchHandler(handler: WakeDispatchHandler | undefined): void {
     this.dispatchHandler = handler;
     if (handler) {
-      for (const record of this.records.values())
-        if (record.state === 'ready') this.queue(record);
+      for (const record of this.records.values()) {
+        if (record.state !== 'ready') continue;
+        const orphaned = this.blockReloadOrphan(record);
+        if (orphaned) this.emit(record);
+        else this.queue(record);
+      }
     }
   }
 
@@ -771,7 +784,9 @@ export class WakeCoordinator {
     const record = this.requireRecord(id);
     if (record.state !== 'ready')
       throw new Error(`Wake "${id}" is not ready for dispatch retry.`);
-    this.queue(record);
+    const orphaned = this.blockReloadOrphan(record);
+    if (orphaned) this.emit(record);
+    else this.queue(record);
     return copySnapshot(record);
   }
 
@@ -989,6 +1004,10 @@ export class WakeCoordinator {
   }
 
   private reevaluate(record: WakeRecord): void {
+    if (this.blockReloadOrphan(record)) {
+      this.emit(record);
+      return;
+    }
     if (record.state === 'ready' && !record.payload) {
       try {
         record.payload = this.resolvePayload(
