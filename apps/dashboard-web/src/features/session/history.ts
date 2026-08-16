@@ -11,12 +11,7 @@ import type {
   SessionHistory,
 } from '@pi-dashboard/protocol';
 import type { RefObject } from 'react';
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function sessionHistoryWindowKey(
   cursor: number | undefined,
@@ -328,27 +323,28 @@ export function useOlderSessionHistory({
           request.controller.signal,
         );
         if (!isCurrent()) return;
+        const pageHistory =
+          page.history ??
+          failClosed('Dashboard returned missing history metadata.');
         if (
           !isContiguousOlderHistory(
             id,
             page.metadata.id,
-            page.history,
+            pageHistory,
             expected,
             before,
-          ) ||
-          !page.history
-        )
+          )
+        ) {
           failClosed('Dashboard returned non-contiguous older history.');
-        const rangeKey = `${page.history.start}:${page.history.end}`;
+        }
+        const rangeKey = `${pageHistory.start}:${pageHistory.end}`;
         if (seenRanges.has(rangeKey)) failClosed('History range cycle.');
         seenRanges.add(rangeKey);
         fetchedEntries += page.entries.length;
         fetchedBytes += jsonByteLength(page.entries);
         const pageCount = (existingCoverage?.pageCount ?? 0) + pages.length + 1;
-        const entryCount =
-          (existingCoverage?.entryCount ?? 0) + fetchedEntries;
-        const byteCount =
-          (existingCoverage?.byteCount ?? 0) + fetchedBytes;
+        const entryCount = (existingCoverage?.entryCount ?? 0) + fetchedEntries;
+        const byteCount = (existingCoverage?.byteCount ?? 0) + fetchedBytes;
         if (
           pageCount > SESSION_HISTORY_BUDGET.maxPages ||
           entryCount > SESSION_HISTORY_BUDGET.maxEntries ||
@@ -356,9 +352,9 @@ export function useOlderSessionHistory({
         )
           failClosed('Older history exceeds the bounded page budget.');
         pages.push(page);
-        expected = page.history;
-        if (page.history.nextBefore) {
-          if (seenBefore.has(page.history.nextBefore))
+        expected = pageHistory;
+        if (pageHistory.nextBefore) {
+          if (seenBefore.has(pageHistory.nextBefore))
             failClosed('History cursor cycle.');
         }
         // A leading continuation must be resolved to its owner or origin

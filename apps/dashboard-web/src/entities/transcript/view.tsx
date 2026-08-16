@@ -113,11 +113,7 @@ export function Transcript({
       target.getBoundingClientRect().top - element.getBoundingClientRect().top;
     element.scrollTop += offset - prependAnchor.offset;
     restoredRevisionRef.current = prependAnchor.revision;
-  }, [
-    isVirtualizedTranscript,
-    prependAnchor,
-    transcriptScrollElementRef,
-  ]);
+  }, [isVirtualizedTranscript, prependAnchor, transcriptScrollElementRef]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
@@ -149,7 +145,7 @@ export function Transcript({
     () => buildTranscriptGroupCoverage(items.length, groups),
     [groups, items.length],
   );
-  if (isVirtualizedTranscript)
+  if (isVirtualizedTranscript && transcriptScrollElementRef)
     return (
       <VirtualizedTranscript
         items={items}
