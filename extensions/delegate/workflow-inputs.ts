@@ -236,8 +236,7 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
     );
   const record = loadWorktree(summary.id);
   if (
-    !record ||
-    record.status === 'removed' ||
+    record?.status !== 'finished' ||
     record.headCommit !== summary.headCommit ||
     record.repositoryRoot !== summary.repositoryRoot ||
     record.worktreePath !== summary.worktreePath ||
