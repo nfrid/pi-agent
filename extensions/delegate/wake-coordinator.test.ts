@@ -306,6 +306,7 @@ describe('WakeCoordinator', () => {
       payload: [{ view: 'summary' }],
     });
     expect(payloads[0]?.payload.views).toEqual({ summary: 'selected' });
+    expect(Object.isFrozen(payloads[0]?.payload.views)).toBe(true);
     expect(JSON.stringify(payloads[0]?.payload)).not.toContain(
       'must stay private',
     );

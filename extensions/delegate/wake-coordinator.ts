@@ -909,10 +909,10 @@ export class WakeCoordinator {
             );
           next = {
             ...current,
-            views: {
+            views: Object.freeze({
               ...(current.views ?? {}),
               [selector.name ?? '']: cloneAndFreezeJson(selected.value),
-            },
+            }),
           };
         }
         sourceValues.set(identity, next);
@@ -1129,6 +1129,15 @@ export class WakeCoordinator {
     }
     const warnings = this.parseWarnings(value.warnings, id);
     if (warnings === null) return undefined;
+    for (const timestamp of [
+      value.readyAt,
+      value.queuedAt,
+      value.enteredAt,
+      value.cancelledAt,
+      value.blockedAt,
+    ])
+      if (timestamp !== undefined && !validTimestamp(timestamp))
+        return undefined;
     if (
       typeof value.dispatchAttempts !== 'number' ||
       !Number.isSafeInteger(value.dispatchAttempts) ||
