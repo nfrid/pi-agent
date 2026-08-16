@@ -110,7 +110,131 @@ describe('wake store', () => {
     await workflow.dispose();
   });
 
-  test('malformed and untrusted records fail closed', async () => {
+  test('does not redeliver restored queued entries until explicit reconciliation', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    workflow.schedule({
+      logicalId: 'queued',
+      mode: 'single',
+      tasks: ['queued'],
+      execute: async () => ({ runs: [], handoff: 'queued' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require('queued@1').settledAt).toBeDefined(),
+    );
+    const entries: unknown[] = [];
+    const original = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'session-q',
+      ownerEpoch: 2,
+      dispatch: () => {
+        // Simulate a process crash after queueing and before entry.
+      },
+    });
+    original.register({ id: 'queued-wake', condition: { node: 'queued' } });
+    persistWakeState(original, {
+      appendEntry(_type: string, data: unknown) {
+        entries.push({
+          type: 'custom',
+          customType: WAKE_ENTRY_TYPE,
+          data,
+        });
+      },
+    });
+    let dispatches = 0;
+    const restored = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'session-q',
+      ownerEpoch: 2,
+      dispatch: () => {
+        dispatches++;
+      },
+    });
+    restoreWakeState(restored, branch(entries));
+    expect(restored.require('queued-wake').state).toBe('queued');
+    expect(dispatches).toBe(0);
+    expect(restored.retryDispatch('queued-wake').state).toBe('queued');
+    expect(dispatches).toBe(1);
+    expect(restored.markEntered('queued-wake').state).toBe('entered');
+    expect(restored.markEntered('queued-wake').state).toBe('entered');
+    await workflow.dispose();
+  });
+
+  test('rejects ownership-mismatched snapshots without changing live state', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    workflow.schedule({
+      logicalId: 'owned',
+      mode: 'single',
+      tasks: ['owned'],
+      execute: async () => ({ runs: [], handoff: 'owned' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require('owned@1').settledAt).toBeDefined(),
+    );
+    const source = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'source',
+      ownerEpoch: 1,
+    });
+    source.register({ id: 'owned-wake', condition: { node: 'owned' } });
+    const target = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'target',
+      ownerEpoch: 1,
+    });
+    restoreWakeState(
+      target,
+      branch([
+        {
+          type: 'custom',
+          customType: WAKE_ENTRY_TYPE,
+          data: {
+            version: 1,
+            kind: 'snapshot',
+            state: source.snapshot(),
+          },
+        },
+      ]),
+    );
+    expect(target.list()).toEqual([]);
+    await workflow.dispose();
+  });
+
+  test('invalid records leave existing wakes unchanged as one transaction', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    workflow.schedule({
+      logicalId: 'live',
+      mode: 'single',
+      tasks: ['live'],
+      execute: async () => ({ runs: [], handoff: 'live' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require('live@1').settledAt).toBeDefined(),
+    );
+    const wake = new WakeCoordinator({ workflow });
+    wake.register({ id: 'live-wake', condition: { node: 'live' } });
+    const snapshot = wake.snapshot();
+    wake.restore({
+      ...snapshot,
+      wakes: [
+        ...snapshot.wakes,
+        {
+          id: 'bad id',
+          condition: { node: 'live@1' },
+          references: ['live@1'],
+          payload: [{ kind: 'handoff' }],
+          state: 'pending',
+          createdAt: 1,
+          revision: 1,
+          dispatchAttempts: 0,
+        },
+      ],
+    });
+    expect(wake.require('live-wake').state).toBe('ready');
+    expect(wake.list()).toHaveLength(1);
+    await workflow.dispose();
+  });
+
+  test('malformed and untrusted records fail closed transactionally', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const wake = new WakeCoordinator({ workflow });
     restoreWakeState(
@@ -124,6 +248,8 @@ describe('wake store', () => {
             kind: 'snapshot',
             state: {
               version: 1,
+              ownerSessionId: 'default',
+              ownerEpoch: 0,
               wakes: [
                 {
                   id: 'bad id',

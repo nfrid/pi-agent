@@ -358,6 +358,7 @@ describe('WakeCoordinator', () => {
     expect(Object.keys(payload.sources)).toEqual(['a@1', 'b@1']);
     expect(payload.sources['a@1']?.handoff).toContain('a complete');
     expect(payload.sources['b@1']?.handoff).toContain('b complete');
+    expect(Object.isFrozen(payload.sources['a@1']?.metadata)).toBe(true);
     expect(payload.handoff).toBeUndefined();
     let explicitPayload!: WakeDispatch['payload'];
     const explicitWake = new WakeCoordinator({
@@ -455,6 +456,47 @@ describe('WakeCoordinator', () => {
     await workflow.dispose();
   });
 
+  test('persists ownership metadata and reports overlapping wakes', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const attempt = workflow.schedule(
+      options('owned', async () => result('owned')),
+    );
+    await settled(workflow, attempt.identity);
+    const warnings: string[] = [];
+    const dispatches: WakeDispatch[] = [];
+    const wake = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'session-a',
+      ownerEpoch: 4,
+      dispatch: (dispatch) => {
+        dispatches.push(dispatch);
+      },
+      onWarning: ({ message }) => warnings.push(message),
+    });
+    wake.register({ id: 'first', condition: { node: attempt.identity } });
+    const second = wake.register({
+      id: 'second',
+      condition: { node: attempt.identity },
+    });
+    expect(second).toMatchObject({
+      ownerSessionId: 'session-a',
+      ownerEpoch: 4,
+      deliveryKey: 'session-a:4:second',
+    });
+    expect(second.warnings?.length).toBe(1);
+    expect(warnings).toHaveLength(1);
+    expect(dispatches[1]).toMatchObject({
+      ownerSessionId: 'session-a',
+      ownerEpoch: 4,
+      deliveryKey: 'session-a:4:second',
+    });
+    expect(wake.snapshot()).toMatchObject({
+      ownerSessionId: 'session-a',
+      ownerEpoch: 4,
+    });
+    await workflow.dispose();
+  });
+
   test('validates stable IDs, empty/duplicate references, and duplicate subscriptions', () => {
     const workflow = new DelegateWorkflowCoordinator();
     workflow.schedule(options('build', async () => result('build')));
@@ -465,6 +507,14 @@ describe('WakeCoordinator', () => {
     expect(() =>
       wake.register({ id: 'empty', condition: { all: [] } }),
     ).toThrow(/cannot be empty/);
+    expect(() =>
+      wake.register({
+        id: 'too-many',
+        condition: {
+          all: Array.from({ length: 33 }, (_, index) => `node-${index}`),
+        },
+      }),
+    ).toThrow(/exceeds 32 references/);
     expect(() =>
       wake.register({
         id: 'duplicate',

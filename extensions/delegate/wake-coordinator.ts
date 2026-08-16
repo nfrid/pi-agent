@@ -15,6 +15,7 @@ import {
 export const WAKE_COORDINATOR_VERSION = 1 as const;
 export const WAKE_ID_MAX_LENGTH = 64;
 export const WAKE_MAX_SUBSCRIPTIONS = 256;
+export const WAKE_MAX_CONDITION_REFERENCES = 32;
 export const WAKE_MAX_PAYLOAD_SELECTORS = 8;
 export const WAKE_PAYLOAD_CAPS = {
   handoffBytes: 12 * 1024,
@@ -25,6 +26,9 @@ export const WAKE_PAYLOAD_CAPS = {
 
 const WAKE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const VIEW_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const DEFAULT_OWNER_SESSION_ID = 'default';
+const DEFAULT_OWNER_EPOCH = 0;
+const MAX_OWNER_SESSION_ID_LENGTH = 256;
 const WAKE_STATES = new Set<WakeState>([
   'pending',
   'ready',
@@ -89,8 +93,16 @@ export interface WakeSubscriptionOptions {
   readonly selectors?: readonly WakePayloadSelector[];
 }
 
+export interface WakeWarning {
+  readonly wakeId: string;
+  readonly message: string;
+}
+
 export interface WakeSnapshot {
   readonly id: string;
+  readonly ownerSessionId: string;
+  readonly ownerEpoch: number;
+  readonly deliveryKey: string;
   readonly condition: WakeCondition;
   /** Exact attempt identities captured when the subscription was registered. */
   readonly references: readonly AttemptIdentity[];
@@ -103,6 +115,9 @@ export interface WakeSnapshot {
   readonly queuedAt?: number;
   readonly enteredAt?: number;
   readonly cancelledAt?: number;
+  readonly blockedAt?: number;
+  readonly revision: number;
+  readonly warnings?: readonly string[];
   readonly dispatchAttempts: number;
   readonly lastDispatchFailure?: string;
   readonly reason?: string;
@@ -110,11 +125,16 @@ export interface WakeSnapshot {
 
 export interface WakeCoordinatorSnapshot {
   readonly version: typeof WAKE_COORDINATOR_VERSION;
+  readonly ownerSessionId: string;
+  readonly ownerEpoch: number;
   readonly wakes: readonly WakeSnapshot[];
 }
 
 export interface WakeDispatch {
   readonly wake: WakeSnapshot;
+  readonly ownerSessionId: string;
+  readonly ownerEpoch: number;
+  readonly deliveryKey: string;
   readonly payload: WakePayload;
 }
 
@@ -125,13 +145,20 @@ export type WakeListener = (wake: WakeSnapshot) => void;
 
 export interface WakeCoordinatorOptions {
   readonly workflow: DelegateWorkflowCoordinator;
+  readonly ownerSessionId?: string;
+  readonly ownerEpoch?: number;
+  /** Alias for ownerEpoch at delivery integration boundaries. */
+  readonly deliveryEpoch?: number;
   readonly now?: () => number;
   readonly dispatch?: WakeDispatchHandler;
   readonly onChange?: () => void;
+  readonly onWarning?: (warning: WakeWarning) => void;
 }
 
 interface WakeRecord {
   readonly id: string;
+  readonly ownerSessionId: string;
+  readonly ownerEpoch: number;
   readonly condition: WakeCondition;
   readonly references: readonly AttemptIdentity[];
   readonly payloadSelectors: readonly CanonicalWakePayloadSelector[];
@@ -142,6 +169,9 @@ interface WakeRecord {
   queuedAt?: number;
   enteredAt?: number;
   cancelledAt?: number;
+  blockedAt?: number;
+  revision: number;
+  warnings?: readonly string[];
   dispatchAttempts: number;
   lastDispatchFailure?: string;
   reason?: string;
@@ -156,6 +186,31 @@ class WakePayloadPendingError extends Error {
   }
 }
 
+function validateOwnerSessionId(value: string): void {
+  if (
+    value.length === 0 ||
+    value.length > MAX_OWNER_SESSION_ID_LENGTH ||
+    [...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    throw new Error('Invalid wake owner session ID.');
+}
+
+function validateOwnerEpoch(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error('Invalid wake owner epoch.');
+}
+
+function deliveryKey(
+  ownerSessionId: string,
+  ownerEpoch: number,
+  id: string,
+): string {
+  return `${ownerSessionId}:${ownerEpoch}:${id}`;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -168,6 +223,25 @@ function boundedReason(value: unknown): string {
 
 function jsonBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+}
+
+function cloneAndFreezeJson(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) throw new Error('Wake payload contains a cycle.');
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const result = value.map((item) => cloneAndFreezeJson(item, seen));
+    seen.delete(value);
+    return Object.freeze(result);
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value))
+    result[key] = cloneAndFreezeJson(item, seen);
+  seen.delete(value);
+  return Object.freeze(result);
 }
 
 function validTimestamp(value: unknown): value is number {
@@ -274,6 +348,10 @@ function normalizeCondition(condition: WakeCondition): {
     if (!Array.isArray(references)) continue;
     if (references.length === 0)
       throw new Error(`Wake ${kind} condition cannot be empty.`);
+    if (references.length > WAKE_MAX_CONDITION_REFERENCES)
+      throw new Error(
+        `Wake ${kind} condition exceeds ${WAKE_MAX_CONDITION_REFERENCES} references.`,
+      );
     if (references.some((reference) => typeof reference !== 'string'))
       throw new Error(`Wake ${kind} condition references must be strings.`);
     if (new Set(references).size !== references.length)
@@ -292,6 +370,13 @@ function normalizeCondition(condition: WakeCondition): {
 function copySnapshot(record: WakeRecord): WakeSnapshot {
   return Object.freeze({
     id: record.id,
+    ownerSessionId: record.ownerSessionId,
+    ownerEpoch: record.ownerEpoch,
+    deliveryKey: deliveryKey(
+      record.ownerSessionId,
+      record.ownerEpoch,
+      record.id,
+    ),
     condition: copyCondition(record.condition),
     references: Object.freeze([...record.references]),
     payload: copyPayloadSelectors(record.payloadSelectors),
@@ -305,6 +390,12 @@ function copySnapshot(record: WakeRecord): WakeSnapshot {
     queuedAt: record.queuedAt,
     enteredAt: record.enteredAt,
     cancelledAt: record.cancelledAt,
+    blockedAt: record.blockedAt,
+    revision: record.revision,
+    warnings:
+      record.warnings === undefined
+        ? undefined
+        : Object.freeze([...record.warnings]),
     dispatchAttempts: record.dispatchAttempts,
     lastDispatchFailure: record.lastDispatchFailure,
     reason: record.reason,
@@ -315,6 +406,47 @@ function isWakeTerminal(state: WakeState): boolean {
   return state === 'entered' || state === 'cancelled' || state === 'blocked';
 }
 
+function wakeStateProgress(state: WakeState): number {
+  if (state === 'pending') return 0;
+  if (state === 'ready') return 1;
+  if (state === 'queued') return 2;
+  return 3;
+}
+
+function timestampOrderIsValid(record: WakeRecord): boolean {
+  const { createdAt, readyAt, queuedAt, enteredAt, cancelledAt, blockedAt } =
+    record;
+  if (readyAt !== undefined && readyAt < createdAt) return false;
+  if (queuedAt !== undefined && queuedAt < (readyAt ?? createdAt)) return false;
+  if (enteredAt !== undefined && enteredAt < (queuedAt ?? readyAt ?? createdAt))
+    return false;
+  if (cancelledAt !== undefined && cancelledAt < createdAt) return false;
+  if (blockedAt !== undefined && blockedAt < createdAt) return false;
+  if (record.state === 'ready' && readyAt === undefined) return false;
+  if (
+    record.state === 'queued' &&
+    (readyAt === undefined || queuedAt === undefined)
+  )
+    return false;
+  if (record.state === 'entered' && enteredAt === undefined) return false;
+  if (record.state === 'cancelled' && cancelledAt === undefined) return false;
+  if (record.state === 'blocked' && blockedAt === undefined) return false;
+  return true;
+}
+
+function shouldKeepLiveRecord(live: WakeRecord, incoming: WakeRecord): boolean {
+  if (live.revision > incoming.revision) return true;
+  const liveProgress = wakeStateProgress(live.state);
+  const incomingProgress = wakeStateProgress(incoming.state);
+  if (liveProgress > incomingProgress) return true;
+  if (liveProgress === incomingProgress && live.state !== incoming.state)
+    return true;
+  // Terminal states are one-shot and may not be rewritten by a stale branch.
+  if (isWakeTerminal(live.state) && live.state !== incoming.state) return true;
+  if (live.state === 'queued' && incoming.state !== 'queued') return true;
+  return false;
+}
+
 /**
  * Pure, one-shot wake state machine. It observes workflow terminal events but
  * owns neither jobs nor model-facing delivery. The dispatch callback is an
@@ -322,9 +454,12 @@ function isWakeTerminal(state: WakeState): boolean {
  */
 export class WakeCoordinator {
   readonly workflow: DelegateWorkflowCoordinator;
+  readonly ownerSessionId: string;
+  readonly ownerEpoch: number;
   private readonly now: () => number;
   private dispatchHandler?: WakeDispatchHandler;
   private readonly onChange?: () => void;
+  private readonly onWarning?: (warning: WakeWarning) => void;
   private readonly records = new Map<string, WakeRecord>();
   private readonly listeners = new Set<WakeListener>();
   private disposed = false;
@@ -332,9 +467,21 @@ export class WakeCoordinator {
 
   constructor(options: WakeCoordinatorOptions) {
     this.workflow = options.workflow;
+    this.ownerSessionId = options.ownerSessionId ?? DEFAULT_OWNER_SESSION_ID;
+    const configuredEpoch = options.ownerEpoch ?? options.deliveryEpoch;
+    this.ownerEpoch = configuredEpoch ?? DEFAULT_OWNER_EPOCH;
+    validateOwnerSessionId(this.ownerSessionId);
+    validateOwnerEpoch(this.ownerEpoch);
+    if (
+      options.ownerEpoch !== undefined &&
+      options.deliveryEpoch !== undefined &&
+      options.ownerEpoch !== options.deliveryEpoch
+    )
+      throw new Error('Wake owner and delivery epochs disagree.');
     this.now = options.now ?? Date.now;
     this.dispatchHandler = options.dispatch;
     this.onChange = options.onChange;
+    this.onWarning = options.onWarning;
     this.unsubscribeWorkflow = this.workflow.subscribeTerminal(() =>
       this.reevaluatePending(),
     );
@@ -365,17 +512,30 @@ export class WakeCoordinator {
       normalizePayload(options),
       references,
     );
+    const boundCondition = this.bindCondition(normalized.condition, references);
+    const warnings = this.overlapWarnings(references);
     const timestamp = this.now();
     const record: WakeRecord = {
       id: options.id,
-      condition: this.bindCondition(normalized.condition, references),
+      ownerSessionId: this.ownerSessionId,
+      ownerEpoch: this.ownerEpoch,
+      condition: boundCondition,
       references: Object.freeze([...references]),
       payloadSelectors,
       createdAt: timestamp,
       state: 'pending',
+      warnings: warnings.length > 0 ? Object.freeze(warnings) : undefined,
+      revision: 0,
       dispatchAttempts: 0,
       dispatchGeneration: 0,
     };
+    for (const message of warnings) {
+      try {
+        this.onWarning?.({ wakeId: record.id, message });
+      } catch {
+        // Warning observers cannot prevent registration.
+      }
+    }
     // Install before evaluating: an onChange/dispatch observer may re-enter.
     this.records.set(record.id, record);
     this.emit(record);
@@ -405,22 +565,44 @@ export class WakeCoordinator {
   snapshot(): WakeCoordinatorSnapshot {
     return Object.freeze({
       version: WAKE_COORDINATOR_VERSION,
+      ownerSessionId: this.ownerSessionId,
+      ownerEpoch: this.ownerEpoch,
       wakes: Object.freeze(this.list()),
     });
   }
 
-  /** Replace the in-memory state with trusted-looking, validated metadata. */
+  /**
+   * Restore a complete metadata snapshot transactionally. Queued entries are
+   * intentionally not redelivered; an operator must reconcile them explicitly.
+   */
   restore(value: unknown): void {
     if (this.disposed) throw new Error('Wake coordinator is disposed.');
     const candidate = isRecord(value) ? value : undefined;
-    if (candidate?.version !== WAKE_COORDINATOR_VERSION) return;
-    if (!Array.isArray(candidate.wakes)) return;
-    this.records.clear();
-    for (const item of candidate.wakes.slice(0, WAKE_MAX_SUBSCRIPTIONS)) {
+    if (
+      candidate?.version !== WAKE_COORDINATOR_VERSION ||
+      candidate.ownerSessionId !== this.ownerSessionId ||
+      candidate.ownerEpoch !== this.ownerEpoch ||
+      !Array.isArray(candidate.wakes) ||
+      candidate.wakes.length > WAKE_MAX_SUBSCRIPTIONS
+    )
+      return;
+    const incoming = new Map<string, WakeRecord>();
+    for (const item of candidate.wakes) {
       const record = this.parseRestoredRecord(item);
-      if (record) this.records.set(record.id, record);
+      if (!record || incoming.has(record.id)) return;
+      incoming.set(record.id, record);
     }
-    for (const record of this.records.values()) {
+    const next = new Map(this.records);
+    const accepted: WakeRecord[] = [];
+    for (const record of incoming.values()) {
+      const live = next.get(record.id);
+      if (live && shouldKeepLiveRecord(live, record)) continue;
+      next.set(record.id, record);
+      accepted.push(record);
+    }
+    this.records.clear();
+    for (const [id, record] of next) this.records.set(id, record);
+    for (const record of accepted) {
       this.emit(record);
       this.reevaluate(record);
     }
@@ -443,7 +625,21 @@ export class WakeCoordinator {
   }
 
   retryDispatch(id: string): WakeSnapshot {
+    const record = this.requireRecord(id);
+    if (record.state === 'queued') {
+      // Explicit reconciliation is the only path that may reconsider a queued
+      // delivery after restore or a process crash.
+      record.state = 'ready';
+      record.payload = undefined;
+      this.emit(record);
+      if (this.dispatchHandler) this.queue(record);
+      return copySnapshot(record);
+    }
     return this.retry(id);
+  }
+
+  reconcileQueued(id: string): WakeSnapshot {
+    return this.retryDispatch(id);
   }
 
   markEntered(id: string): WakeSnapshot {
@@ -496,6 +692,25 @@ export class WakeCoordinator {
       throw new Error(
         `Invalid wake ID "${String(id)}": use lowercase kebab-case.`,
       );
+  }
+
+  private overlapWarnings(references: readonly AttemptIdentity[]): string[] {
+    const warnings: string[] = [];
+    for (const existing of this.records.values()) {
+      const overlap = references.filter((identity) =>
+        existing.references.includes(identity),
+      ).length;
+      if (
+        overlap === 0 ||
+        overlap < Math.min(references.length, existing.references.length)
+      )
+        continue;
+      warnings.push(
+        `Wake overlaps subscription "${existing.id}" on ${overlap} exact attempt${overlap === 1 ? '' : 's'}.`,
+      );
+      if (warnings.length >= 2) break;
+    }
+    return warnings;
   }
 
   private bindPayloadSelectors(
@@ -565,6 +780,7 @@ export class WakeCoordinator {
           return;
         }
         record.state = 'blocked';
+        record.blockedAt = this.now();
         record.reason = boundedReason(error);
         this.emit(record);
         return;
@@ -586,6 +802,7 @@ export class WakeCoordinator {
     } catch (error) {
       if (error instanceof WakePayloadPendingError) return;
       record.state = 'blocked';
+      record.blockedAt = this.now();
       record.reason = boundedReason(error);
       this.emit(record);
       return;
@@ -677,7 +894,10 @@ export class WakeCoordinator {
             throw new Error('Wake metadata payload exceeds its bounded limit.');
           next = {
             ...current,
-            metadata: selected.value as Record<string, unknown>,
+            metadata: cloneAndFreezeJson(selected.value) as Record<
+              string,
+              unknown
+            >,
           };
         } else {
           if (
@@ -691,7 +911,7 @@ export class WakeCoordinator {
             ...current,
             views: {
               ...(current.views ?? {}),
-              [selector.name ?? '']: selected.value,
+              [selector.name ?? '']: cloneAndFreezeJson(selected.value),
             },
           };
         }
@@ -735,6 +955,7 @@ export class WakeCoordinator {
           return;
         }
         record.state = 'blocked';
+        record.blockedAt = this.now();
         record.reason = boundedReason(error);
         this.emit(record);
         return;
@@ -747,6 +968,7 @@ export class WakeCoordinator {
     const payload = record.payload;
     if (!payload) {
       record.state = 'blocked';
+      record.blockedAt = this.now();
       record.reason = 'Wake payload was unavailable at dispatch.';
       this.emit(record);
       return;
@@ -760,7 +982,17 @@ export class WakeCoordinator {
       return;
     let result: void | Promise<void>;
     try {
-      result = this.dispatchHandler({ wake: copySnapshot(record), payload });
+      result = this.dispatchHandler({
+        wake: copySnapshot(record),
+        ownerSessionId: this.ownerSessionId,
+        ownerEpoch: this.ownerEpoch,
+        deliveryKey: deliveryKey(
+          this.ownerSessionId,
+          this.ownerEpoch,
+          record.id,
+        ),
+        payload,
+      });
     } catch (error) {
       this.dispatchFailed(record, generation, error);
       return;
@@ -782,6 +1014,29 @@ export class WakeCoordinator {
     record.reason = record.lastDispatchFailure;
     record.payload = undefined;
     this.emit(record);
+  }
+
+  private parseWarnings(
+    value: unknown,
+    wakeId: string,
+  ): readonly string[] | undefined | null {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.length > 2) return null;
+    try {
+      const warnings = value.map((warning) => {
+        if (
+          typeof warning !== 'string' ||
+          warning.length === 0 ||
+          warning.length > 256 ||
+          [...warning].some((character) => character.charCodeAt(0) < 32)
+        )
+          throw new Error(`Invalid warning for wake ${wakeId}.`);
+        return warning;
+      });
+      return Object.freeze(warnings);
+    } catch {
+      return null;
+    }
   }
 
   private parseRestoredRecord(value: unknown): WakeRecord | undefined {
@@ -827,9 +1082,14 @@ export class WakeCoordinator {
     } catch {
       return undefined;
     }
-    if (this.records.has(id)) return undefined;
     const state = value.state;
     if (typeof state !== 'string' || !WAKE_STATES.has(state as WakeState))
+      return undefined;
+    if (
+      typeof value.revision !== 'number' ||
+      !Number.isSafeInteger(value.revision) ||
+      value.revision < 1
+    )
       return undefined;
     let readyReferences: readonly AttemptIdentity[] | undefined;
     try {
@@ -867,13 +1127,24 @@ export class WakeCoordinator {
     } catch {
       return undefined;
     }
+    const warnings = this.parseWarnings(value.warnings, id);
+    if (warnings === null) return undefined;
+    if (
+      typeof value.dispatchAttempts !== 'number' ||
+      !Number.isSafeInteger(value.dispatchAttempts) ||
+      value.dispatchAttempts < 0 ||
+      value.dispatchAttempts > 1000
+    )
+      return undefined;
     const record: WakeRecord = {
       id,
+      ownerSessionId: this.ownerSessionId,
+      ownerEpoch: this.ownerEpoch,
       condition: normalized.condition,
       references: normalized.references,
       payloadSelectors,
       createdAt: value.createdAt,
-      state: state === 'queued' ? 'ready' : (state as WakeState),
+      state: state as WakeState,
       readyAt: validTimestamp(value.readyAt) ? value.readyAt : undefined,
       readyReferences,
       queuedAt: validTimestamp(value.queuedAt) ? value.queuedAt : undefined,
@@ -881,27 +1152,22 @@ export class WakeCoordinator {
       cancelledAt: validTimestamp(value.cancelledAt)
         ? value.cancelledAt
         : undefined,
-      dispatchAttempts:
-        typeof value.dispatchAttempts === 'number' &&
-        Number.isSafeInteger(value.dispatchAttempts) &&
-        value.dispatchAttempts >= 0 &&
-        value.dispatchAttempts <= 1000
-          ? value.dispatchAttempts
-          : 0,
+      blockedAt: validTimestamp(value.blockedAt) ? value.blockedAt : undefined,
+      revision: value.revision,
+      warnings,
+      dispatchAttempts: value.dispatchAttempts,
       // Failure/cancellation prose is deliberately not trusted from a session
       // entry; the state and timestamps are enough to recover delivery safely.
       lastDispatchFailure: undefined,
       reason: undefined,
       dispatchGeneration: 0,
     };
-    if (record.state === 'entered' && record.enteredAt === undefined)
-      return undefined;
-    if (record.state === 'cancelled' && record.cancelledAt === undefined)
-      return undefined;
+    if (!timestampOrderIsValid(record)) return undefined;
     return record;
   }
 
   private emit(record: WakeRecord): void {
+    record.revision++;
     const snapshot = copySnapshot(record);
     this.onChange?.();
     for (const listener of this.listeners) {
