@@ -50,6 +50,7 @@ describe('dashboard HTTP boundary', () => {
       sessionFeeds: {
         get(id: string): {
           subscribe(options: {
+            lastEventId?: string;
             buildSnapshot: (sequence: number) => Promise<unknown>;
           }): AsyncGenerator<unknown>;
         };
@@ -94,7 +95,94 @@ describe('dashboard HTTP boundary', () => {
         },
       },
     });
+    const priorEventId = (event.value as { id: string }).id;
     await stream.return(undefined);
+
+    // The idle feed is invalidated before this append, so reconnecting with
+    // the old Last-Event-ID must take the authoritative snapshot path.
+    await writeFile(
+      file,
+      `${[
+        { type: 'session', id: 'live-child', cwd: '/tmp' },
+        {
+          type: 'message',
+          id: 'live-message',
+          message: { role: 'assistant', content: 'from append' },
+        },
+        {
+          type: 'message',
+          id: 'disconnected-message',
+          message: { role: 'assistant', content: 'while disconnected' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    server.publishSessionIndexChange('live-child', true);
+    const resumedFeed = internals.sessionFeeds.get('live-child');
+    const resumed = resumedFeed.subscribe({
+      lastEventId: priorEventId,
+      buildSnapshot: (sequence) =>
+        internals.buildSessionSnapshot('live-child', undefined, sequence),
+    });
+    const resumedSnapshot = await resumed.next();
+    expect(resumedSnapshot.value).toMatchObject({ kind: 'snapshot' });
+    expect(
+      (resumedSnapshot.value as { snapshot: { entries: unknown[] } }).snapshot
+        .entries,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'disconnected-message' }),
+      ]),
+    );
+    expect((await resumed.next()).value).toMatchObject({ kind: 'caught-up' });
+
+    await writeFile(
+      file,
+      `${[
+        { type: 'session', id: 'live-child', cwd: '/tmp' },
+        {
+          type: 'message',
+          id: 'live-message',
+          message: { role: 'assistant', content: 'from append' },
+        },
+        {
+          type: 'message',
+          id: 'disconnected-message',
+          message: { role: 'assistant', content: 'while disconnected' },
+        },
+        {
+          type: 'message',
+          id: 'later-message',
+          message: { role: 'assistant', content: 'after rebase' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    server.publishSessionIndexChange('live-child', true);
+    await expect(
+      Promise.race([
+        resumed.next(),
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(
+            () => reject(new Error('post-rebase event timed out')),
+            2_000,
+          ),
+        ),
+      ]),
+    ).resolves.toMatchObject({
+      value: {
+        kind: 'event',
+        event: {
+          event: {
+            type: 'message.finished',
+            message: { messageId: 'later-message' },
+          },
+        },
+      },
+    });
+    await resumed.return(undefined);
   });
 
   it('loads delegate history summaries without details and fetches one selected run lazily', async () => {

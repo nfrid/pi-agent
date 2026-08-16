@@ -602,6 +602,39 @@ describe('session index', () => {
     ]);
   });
 
+  it('uses an exact empty source cut and tolerates malformed historical lines during seeding', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-seed-policy-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'seed-child', cwd: '/tmp' })}\n{malformed}\n${JSON.stringify({ type: 'message', id: 'seed-message', message: { role: 'assistant', content: 'seed' } })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    await expect(index.readAppendCursor('seed-child')).resolves.toMatchObject({
+      ordinal: 3,
+    });
+    const stat = await fs.stat(file);
+    const page = await index.readEntries('seed-child', undefined, undefined, {
+      sourceCursor: {
+        version: 1,
+        dev: stat.dev,
+        ino: stat.ino,
+        ordinal: 0,
+        byteOffset: 0,
+        prefixHash:
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      },
+    });
+    expect(page.entries).toEqual([]);
+  });
+
   it('resets auxiliary append cursors on truncation, rewrite, and malformed lines', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-auxiliary-append-recovery-'),

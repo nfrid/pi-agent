@@ -2,6 +2,7 @@ import { createHash, type Hash, randomUUID } from 'node:crypto';
 import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { Readable } from 'node:stream';
 import {
   deriveSessionTitle,
   isRecord,
@@ -26,17 +27,25 @@ export interface SessionHistoryPage {
   nextBefore?: string;
 }
 
+interface AuxiliaryCursorCheckpoint {
+  readonly cursorKey: string;
+  readonly hash: Hash;
+  readonly probeHash: string;
+  readonly probeBytes: number;
+}
+
 export interface AuxiliarySourceCursor {
   /** Cursor format is server-internal and intentionally opaque to browsers. */
   version: 1;
   dev: number;
   ino: number;
-  /** Number of complete, non-empty JSONL records through byteOffset. */
+  /** Number of complete, non-empty JSONL lines through byteOffset (malformed lines included). */
   ordinal: number;
   /** Exact UTF-8 byte offset at the end of the last complete line. */
   byteOffset: number;
   /** SHA-256 of the exact bytes in [0, byteOffset). */
   prefixHash: string;
+  readonly checkpoint?: AuxiliaryCursorCheckpoint;
 }
 
 export type AuxiliaryAppendResetReason =
@@ -124,7 +133,40 @@ const AUXILIARY_ENTRY_BYTES = 384 * 1024;
 /** Range reads are deliberately smaller than a history page and repeatable. */
 const AUXILIARY_RANGE_BYTES = 256 * 1024;
 const AUXILIARY_RANGE_RECORDS = 256;
+const AUXILIARY_PROBE_BYTES = 64 * 1024;
+const AUXILIARY_SEED_PARTIAL_BYTES = 24 * 1024 * 1024;
 const EMPTY_PREFIX_HASH = createHash('sha256').digest('hex');
+
+function isJsonlWhitespaceByte(byte: number): boolean {
+  return (
+    byte === 0x09 ||
+    byte === 0x0b ||
+    byte === 0x0c ||
+    byte === 0x0d ||
+    byte === 0x20
+  );
+}
+
+function isBlankJsonlLine(line: Uint8Array): boolean {
+  for (const byte of line) if (!isJsonlWhitespaceByte(byte)) return false;
+  return true;
+}
+
+function cursorKey(cursor: AuxiliarySourceCursor): string {
+  return `${cursor.version}:${cursor.dev}:${cursor.ino}:${cursor.ordinal}:${cursor.byteOffset}:${cursor.prefixHash}`;
+}
+
+function attachCheckpoint(
+  cursor: AuxiliarySourceCursor,
+  checkpoint: AuxiliaryCursorCheckpoint,
+): AuxiliarySourceCursor {
+  Object.defineProperty(cursor, 'checkpoint', {
+    value: checkpoint,
+    enumerable: false,
+    configurable: true,
+  });
+  return cursor;
+}
 
 type SessionFileVersion = {
   dev: number;
@@ -150,9 +192,17 @@ function sameSessionFileVersion(
 async function verifySessionFileVersion(
   file: string,
   expected: SessionFileVersion,
+  allowGrowth = false,
 ): Promise<void> {
   const current = await fs.stat(file).catch(() => undefined);
-  if (!current || !sameSessionFileVersion(expected, current))
+  if (
+    !current ||
+    current.dev !== expected.dev ||
+    current.ino !== expected.ino ||
+    (allowGrowth
+      ? current.size < expected.size
+      : !sameSessionFileVersion(expected, current))
+  )
     throw new SessionFileChangedError();
 }
 
@@ -228,6 +278,10 @@ export class SessionIndex {
   private readonly watcherRetries = new Map<string, NodeJS.Timeout>();
   private readonly scheduled = new Map<string, NodeJS.Timeout>();
   private readonly indexing = new Map<string, Promise<void>>();
+  private readonly appendCheckpoints = new Map<
+    string,
+    AuxiliaryCursorCheckpoint
+  >();
   private workspaces: readonly WorkspaceTarget[] = [];
   constructor(
     private readonly sessionDir: string,
@@ -243,6 +297,7 @@ export class SessionIndex {
     this.workspaces = workspaces;
     this.files.clear();
     this.fileIds.clear();
+    this.appendCheckpoints.clear();
     const paths = (
       await Promise.all(this.sessionRoots().map((root) => this.findJsonl(root)))
     ).flat();
@@ -290,6 +345,7 @@ export class SessionIndex {
     const result = await this.scanAuxiliaryAppend(id, undefined, {
       collect: false,
       enforceEntrySize: false,
+      tolerateMalformed: true,
     });
     return result.nextCursor;
   }
@@ -359,20 +415,48 @@ export class SessionIndex {
         'source-truncated',
         'Auxiliary session file was truncated.',
       );
+    const key = cursorKey(cursor);
+    const cached = this.appendCheckpoints.get(file);
+    if (cached?.cursorKey === key) {
+      await this.verifyAuxiliaryProbe(file, cached);
+      return;
+    }
     const prefix = await this.hashAuxiliaryPrefix(file, cursor.byteOffset);
-    if (prefix.hash !== cursor.prefixHash || prefix.ordinal !== cursor.ordinal)
+    if (
+      prefix.hash.copy().digest('hex') !== cursor.prefixHash ||
+      prefix.ordinal !== cursor.ordinal
+    )
       throw new AuxiliaryAppendError(
         'source-rewrite',
         'Auxiliary session source prefix changed.',
       );
+    this.appendCheckpoints.set(file, {
+      cursorKey: key,
+      hash: prefix.hash.copy(),
+      probeHash: prefix.probeHash,
+      probeBytes: prefix.probeBytes,
+    });
   }
 
   private async hashAuxiliaryPrefix(
     file: string,
     byteOffset: number,
-  ): Promise<{ hash: string; ordinal: number }> {
+  ): Promise<{
+    hash: Hash;
+    ordinal: number;
+    probeHash: string;
+    probeBytes: number;
+  }> {
     const hash = createHash('sha256');
-    if (byteOffset === 0) return { hash: hash.digest('hex'), ordinal: 0 };
+    const probe = createHash('sha256');
+    const probeBytes = Math.min(byteOffset, AUXILIARY_PROBE_BYTES);
+    if (byteOffset === 0)
+      return {
+        hash,
+        ordinal: 0,
+        probeHash: probe.digest('hex'),
+        probeBytes: 0,
+      };
     const handle = await fs.open(file, 'r').catch(() => undefined);
     if (!handle)
       throw new AuxiliaryAppendError(
@@ -394,13 +478,15 @@ export class SessionIndex {
           );
         const chunk = buffer.subarray(0, bytesRead);
         hash.update(chunk);
+        if (position < probeBytes)
+          probe.update(
+            chunk.subarray(0, Math.min(bytesRead, probeBytes - position)),
+          );
         for (const byte of chunk) {
           if (byte === 0x0a) {
             if (nonEmpty) ordinal += 1;
             nonEmpty = false;
-          } else if (byte !== 0x0d && byte !== 0x20 && byte !== 0x09) {
-            nonEmpty = true;
-          }
+          } else if (!isJsonlWhitespaceByte(byte)) nonEmpty = true;
         }
         position += bytesRead;
       }
@@ -415,13 +501,74 @@ export class SessionIndex {
         'source-rewrite',
         'Cursor is not line aligned.',
       );
-    return { hash: hash.digest('hex'), ordinal };
+    return {
+      hash,
+      ordinal,
+      probeHash: probe.digest('hex'),
+      probeBytes,
+    };
+  }
+
+  private async verifyAuxiliaryProbe(
+    file: string,
+    checkpoint: AuxiliaryCursorCheckpoint,
+  ): Promise<void> {
+    if (checkpoint.probeBytes === 0) return;
+    const handle = await fs.open(file, 'r').catch(() => undefined);
+    if (!handle) throw new AuxiliaryAppendError('source-truncated');
+    const hash = createHash('sha256');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    try {
+      while (position < checkpoint.probeBytes) {
+        const length = Math.min(
+          buffer.length,
+          checkpoint.probeBytes - position,
+        );
+        const { bytesRead } = await handle.read(buffer, 0, length, position);
+        if (bytesRead === 0) throw new AuxiliaryAppendError('source-truncated');
+        hash.update(buffer.subarray(0, bytesRead));
+        position += bytesRead;
+      }
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+    if (hash.digest('hex') !== checkpoint.probeHash)
+      throw new AuxiliaryAppendError('source-rewrite');
+  }
+
+  private async readAuxiliaryProbe(
+    file: string,
+    bytes: number,
+  ): Promise<string> {
+    if (bytes === 0) return EMPTY_PREFIX_HASH;
+    const handle = await fs.open(file, 'r').catch(() => undefined);
+    if (!handle) throw new AuxiliaryAppendError('source-truncated');
+    const hash = createHash('sha256');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    try {
+      while (position < bytes) {
+        const length = Math.min(buffer.length, bytes - position);
+        const { bytesRead } = await handle.read(buffer, 0, length, position);
+        if (bytesRead === 0) throw new AuxiliaryAppendError('source-truncated');
+        hash.update(buffer.subarray(0, bytesRead));
+        position += bytesRead;
+      }
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+    return hash.digest('hex');
   }
 
   private async scanAuxiliaryAppend(
     id: string,
     cursor: AuxiliarySourceCursor | undefined,
-    options: { collect: boolean; enforceEntrySize?: boolean },
+    options: {
+      collect: boolean;
+      enforceEntrySize?: boolean;
+      tolerateMalformed?: boolean;
+    },
   ): Promise<AuxiliaryAppendRange> {
     const { file, stat } = await this.auxiliaryFile(id);
     const start: AuxiliarySourceCursor =
@@ -439,10 +586,13 @@ export class SessionIndex {
       await this.validateAuxiliaryCursor(file, stat, cursor);
 
     const records: unknown[] = [];
-    const hash = createHash('sha256');
-    // The validated prefix hash is a digest, not a resumable Hash object.
-    // Rehashing the prefix keeps the cursor contract simple and bounded.
-    if (start.byteOffset > 0) {
+    const cached =
+      cursor !== undefined &&
+      this.appendCheckpoints.get(file)?.cursorKey === cursorKey(cursor)
+        ? this.appendCheckpoints.get(file)
+        : undefined;
+    const hash = cached?.hash.copy() ?? createHash('sha256');
+    if (!cached && start.byteOffset > 0) {
       const prefixHandle = await fs.open(file, 'r');
       const prefixBuffer = Buffer.allocUnsafe(64 * 1024);
       let prefixPosition = 0;
@@ -502,7 +652,7 @@ export class SessionIndex {
           'Auxiliary JSONL contains invalid UTF-8.',
         );
       }
-      if (text.trim().length === 0) {
+      if (isBlankJsonlLine(withoutCr)) {
         hash.update(rawWithNewline);
         nextOffset += rawWithNewline.length;
         return;
@@ -519,6 +669,13 @@ export class SessionIndex {
       try {
         parsed = JSON.parse(text) as unknown;
       } catch {
+        if (options.tolerateMalformed) {
+          hash.update(rawWithNewline);
+          nextOffset += rawWithNewline.length;
+          ordinal += 1;
+          completeBytes += rawWithNewline.length;
+          return;
+        }
         throw new AuxiliaryAppendError(
           'source-malformed',
           'Auxiliary JSONL contains a malformed complete entry.',
@@ -545,8 +702,11 @@ export class SessionIndex {
             ? Buffer.from(buffer.subarray(0, bytesRead))
             : Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
         if (
-          options.enforceEntrySize !== false &&
-          pending.length > AUXILIARY_ENTRY_BYTES + 1 &&
+          pending.length >
+            (options.enforceEntrySize === false
+              ? AUXILIARY_SEED_PARTIAL_BYTES
+              : AUXILIARY_ENTRY_BYTES) +
+              1 &&
           !pending.includes(0x0a)
         )
           throw new AuxiliaryAppendError(
@@ -571,8 +731,10 @@ export class SessionIndex {
       }
       if (
         !stopped &&
-        options.enforceEntrySize !== false &&
-        pending.length > AUXILIARY_ENTRY_BYTES
+        pending.length >
+          (options.enforceEntrySize === false
+            ? AUXILIARY_SEED_PARTIAL_BYTES
+            : AUXILIARY_ENTRY_BYTES)
       )
         throw new AuxiliaryAppendError(
           'entry-too-large',
@@ -598,19 +760,43 @@ export class SessionIndex {
         'source-truncated',
         'Auxiliary session file was truncated while reading.',
       );
+    const prefixHash = hash.copy().digest('hex');
     const nextCursor: AuxiliarySourceCursor = {
       version: 1,
       dev: stat.dev,
       ino: stat.ino,
       ordinal,
       byteOffset: nextOffset,
-      prefixHash: hash.digest('hex'),
+      prefixHash,
     };
+    const checkpoint: AuxiliaryCursorCheckpoint = {
+      cursorKey: cursorKey(nextCursor),
+      hash: hash.copy(),
+      probeHash: await this.readAuxiliaryProbe(
+        file,
+        Math.min(nextOffset, AUXILIARY_PROBE_BYTES),
+      ),
+      probeBytes: Math.min(nextOffset, AUXILIARY_PROBE_BYTES),
+    };
+    this.appendCheckpoints.set(file, checkpoint);
     return {
       records,
-      nextCursor,
+      nextCursor: attachCheckpoint(nextCursor, checkpoint),
       hasMore: finalStat.size > nextOffset,
     };
+  }
+
+  private sourceReadStream(
+    file: string,
+    sourceCursor: AuxiliarySourceCursor | undefined,
+  ): import('node:stream').Readable {
+    if (sourceCursor?.byteOffset === 0) return Readable.from([]);
+    return createReadStream(file, {
+      encoding: 'utf8',
+      ...(sourceCursor === undefined
+        ? {}
+        : { start: 0, end: sourceCursor.byteOffset - 1 }),
+    });
   }
 
   // TODO: switch older pages to reverse-file reads if page counts grow; the
@@ -729,12 +915,7 @@ export class SessionIndex {
     // so nextBefore needs no retained original serialization.
     const seenHasher = createHash('sha256');
     let reachedUpperBound = false;
-    const input = createReadStream(indexed.file, {
-      encoding: 'utf8',
-      ...(sourceCursor === undefined || sourceCursor.byteOffset === 0
-        ? {}
-        : { start: 0, end: sourceCursor.byteOffset - 1 }),
-    });
+    const input = this.sourceReadStream(indexed.file, sourceCursor);
     const lines = readline.createInterface({
       input,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -912,12 +1093,7 @@ export class SessionIndex {
     let headerSeen = false;
     let latestEntryId: string | undefined;
     let sourceOrdinal = 0;
-    const firstPassInput = createReadStream(file, {
-      encoding: 'utf8',
-      ...(sourceCursor === undefined || sourceCursor.byteOffset === 0
-        ? {}
-        : { start: 0, end: sourceCursor.byteOffset - 1 }),
-    });
+    const firstPassInput = this.sourceReadStream(file, sourceCursor);
     const firstPassLines = readline.createInterface({
       input: firstPassInput,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -954,7 +1130,8 @@ export class SessionIndex {
     // The first pass chooses the leaf and the second pass materializes its
     // ancestry. A concurrent append between them must force a fresh leaf
     // resolution rather than returning a page for the old file version.
-    if (resolveLatestLeaf) await verifySessionFileVersion(file, stat);
+    if (resolveLatestLeaf)
+      await verifySessionFileVersion(file, stat, sourceCursor !== undefined);
     const resolvedLeafId = resolveLatestLeaf ? latestEntryId : leafId;
     if (!headerSeen) throw new Error('Invalid session branch.');
 
@@ -1002,12 +1179,7 @@ export class SessionIndex {
     let reachedUpperBound = false;
     const seenHasher = createHash('sha256');
     const upperBound = cursor?.before;
-    const secondPassInput = createReadStream(file, {
-      encoding: 'utf8',
-      ...(sourceCursor === undefined || sourceCursor.byteOffset === 0
-        ? {}
-        : { start: 0, end: sourceCursor.byteOffset - 1 }),
-    });
+    const secondPassInput = this.sourceReadStream(file, sourceCursor);
     const secondPassLines = readline.createInterface({
       input: secondPassInput,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -1106,7 +1278,8 @@ export class SessionIndex {
       secondPassLines.close();
       secondPassInput.destroy();
     }
-    if (resolveLatestLeaf) await verifySessionFileVersion(file, stat);
+    if (resolveLatestLeaf)
+      await verifySessionFileVersion(file, stat, sourceCursor !== undefined);
     if (upperBound !== undefined && branchOrdinal === upperBound)
       reachedUpperBound = true;
     if (
@@ -1179,6 +1352,7 @@ export class SessionIndex {
     this.watcherRetries.clear();
     for (const timer of this.scheduled.values()) clearTimeout(timer);
     this.scheduled.clear();
+    this.appendCheckpoints.clear();
   }
 
   private sessionRoots(): string[] {
@@ -1446,6 +1620,7 @@ export class SessionIndex {
     const resolved = path.resolve(file);
     const id = this.fileIds.get(resolved);
     this.fileIds.delete(resolved);
+    this.appendCheckpoints.delete(resolved);
     if (id && this.files.get(id)?.file === resolved) this.files.delete(id);
   }
 }

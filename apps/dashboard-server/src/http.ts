@@ -1044,6 +1044,24 @@ export class DashboardServerImpl implements DashboardServer {
     }
   }
 
+  private invalidateIdleAuxiliaryFeed(
+    sessionId: string,
+    feed = this.sessionFeeds.peek(sessionId),
+  ): void {
+    // This synchronous check-and-invalidate is the fail-closed boundary: a
+    // subscriber cannot appear between the zero-subscriber check and feed
+    // removal on the event loop. Active subscribers are never disturbed.
+    if (!feed) {
+      this.auxiliaryFeeds.delete(sessionId);
+      return;
+    }
+    if (feed.metrics().subscribers !== 0) return;
+    if (this.sessionFeeds.peek(sessionId) === feed)
+      this.sessionFeeds.invalidate(sessionId);
+    if (this.auxiliaryFeeds.get(sessionId) === undefined) return;
+    this.auxiliaryFeeds.delete(sessionId);
+  }
+
   private scheduleAuxiliaryWorker(sessionId: string): void {
     const state = this.auxiliaryFeeds.get(sessionId);
     const feed = this.sessionFeeds.peek(sessionId);
@@ -1058,6 +1076,7 @@ export class DashboardServerImpl implements DashboardServer {
     void this.runAuxiliaryWorker(sessionId, state).finally(() => {
       state.workerRunning = false;
       if (
+        this.auxiliaryFeeds.get(sessionId) === state &&
         state.dirty &&
         this.lifecycle === 'started' &&
         this.sessionFeeds.peek(sessionId)?.metrics().subscribers !== 0
@@ -1077,8 +1096,7 @@ export class DashboardServerImpl implements DashboardServer {
     ) {
       const feed = this.sessionFeeds.peek(sessionId);
       if (!feed || feed.metrics().subscribers === 0) {
-        state.cursor = undefined;
-        state.dirty = false;
+        this.invalidateIdleAuxiliaryFeed(sessionId, feed);
         return;
       }
       if (state.cursor === undefined) return;
@@ -1246,11 +1264,7 @@ export class DashboardServerImpl implements DashboardServer {
     // Watchers before the first subscriber must not turn old child history into
     // a replay. The first authoritative snapshot seeds at the current end.
     if (!feed || feed.metrics().subscribers === 0) {
-      const state = this.auxiliaryFeeds.get(sessionId);
-      if (state) {
-        state.cursor = undefined;
-        state.dirty = false;
-      }
+      this.invalidateIdleAuxiliaryFeed(sessionId, feed);
       return;
     }
     let state: AuxiliaryFeedState;
