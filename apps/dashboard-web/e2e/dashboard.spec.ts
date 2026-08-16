@@ -1988,7 +1988,7 @@ Note: Recovery completed after the final check.`,
   await page.goto('/sessions/s1');
   const steeringMessage = page.locator('.message-steering');
   await expect(steeringMessage).toContainText('Focus on mobile readability.');
-  await expect(steeringMessage.locator('.message-role')).toHaveText('steer');
+  await expect(steeringMessage.locator('.transcript-time')).toBeVisible();
   await expect(steeringMessage.locator('.message-delivery-mode')).toHaveCount(
     0,
   );
@@ -2018,9 +2018,7 @@ Note: Recovery completed after the final check.`,
   expect(compactHeader.text).not.toContain('/tmp');
   expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
-  await expect(page.locator('.message-assistant .message-role')).toHaveText(
-    'agent',
-  );
+  await expect(page.locator('.message-meta, .message-role')).toHaveCount(0);
   await expect(page.locator('.activity-step-time')).toBeVisible();
   const fullWidthGeometry = await page.evaluate(() => {
     const transcript = document.querySelector('.transcript');

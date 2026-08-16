@@ -13,7 +13,7 @@ import {
   StructuredResultSection,
   ToolInspector,
 } from './inspector';
-import { transcriptItemTimestamp, transcriptRoleLabel } from './landmarks';
+import { transcriptItemTimestamp } from './landmarks';
 
 function ThinkingBlobs({
   thinking,
@@ -293,15 +293,7 @@ function TranscriptEntry({
           <article
             className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
           >
-            <header className="message-meta">
-              <span className="message-role">
-                {transcriptRoleLabel(item.role, item.deliveryMode)}
-              </span>
-              <DashboardTime
-                className="transcript-time"
-                timestamp={timestamp}
-              />
-            </header>
+            <DashboardTime className="transcript-time" timestamp={timestamp} />
             {item.imageCount ? (
               <span className="message-attachment">
                 {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}

@@ -210,7 +210,6 @@ details.session-event {
   border: 0;
   border-radius: 0;
   background: transparent;
-  padding: 1px 2px 1px 0;
 }
 .activity-step-dot {
   display: grid;

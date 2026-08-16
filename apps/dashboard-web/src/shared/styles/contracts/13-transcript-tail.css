@@ -13,7 +13,6 @@
   grid-template-columns: 14px max-content minmax(0, 1fr) auto;
   align-items: center;
   min-width: 0;
-  gap: 6px;
   padding: 8px 0;
 }
 .tool-detail > summary.activity-step .activity-tool-argument {
@@ -25,7 +24,6 @@
 .transcript-entry > summary {
   display: flex;
   min-width: 0;
-  gap: 8px;
 }
 .transcript-thinking-blobs {
   display: grid;
@@ -55,7 +53,7 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
-.activity-detail .message-meta .transcript-time {
+.activity-detail .message-bubble > .transcript-time {
   margin-right: -14px;
 }
 .transcript-thinking-blob .markdown {

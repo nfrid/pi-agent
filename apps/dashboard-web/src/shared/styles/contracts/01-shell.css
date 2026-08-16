@@ -497,18 +497,10 @@ h2 {
 .message-assistant {
   border-color: var(--purple);
 }
-.message-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 5px;
-}
-.message-role {
+.message-bubble::after {
   display: block;
-  color: var(--pink);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  clear: both;
+  content: "";
 }
 .transcript-time {
   margin-left: auto;
@@ -519,11 +511,9 @@ h2 {
   text-transform: none;
   white-space: nowrap;
 }
-.message-assistant .message-role {
-  color: var(--purple);
-}
-.message-steering .message-role {
-  color: var(--orange);
+.message-bubble > .transcript-time {
+  float: inline-end;
+  margin-left: 12px;
 }
 .message-attachment {
   display: inline-block;
