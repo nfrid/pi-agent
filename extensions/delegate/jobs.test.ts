@@ -325,10 +325,12 @@ describe('DelegateJobManager', () => {
   test('does not auto-deliver a result returned by a waiting peek', async () => {
     let finish!: (result: DelegateJobResult) => void;
     const onSettled = vi.fn();
+    const onTerminal = vi.fn();
     const manager = new DelegateJobManager({ onSettled });
     const started = manager.start({
       mode: 'single',
       tasks: ['inspect'],
+      onTerminal,
       execute: () =>
         new Promise<DelegateJobResult>((resolve) => {
           finish = resolve;
@@ -339,6 +341,10 @@ describe('DelegateJobManager', () => {
     finish(successfulResult());
     await expect(waiting).resolves.toMatchObject({ state: 'success' });
     expect(onSettled).not.toHaveBeenCalled();
+    expect(onTerminal).toHaveBeenCalledOnce();
+    expect(onTerminal.mock.calls[0]?.[0]).toMatchObject({
+      handoff: expect.stringContaining('succeeded'),
+    });
     await manager.dispose();
   });
 

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
+  assertWorkflowAttemptTransition,
+  canTransitionWorkflowAttemptState,
   createWorkflowModel,
   isLogicalId,
   MAX_LOGICAL_ID_LENGTH,
@@ -133,6 +135,28 @@ describe('WorkflowModel', () => {
         identity: 'Impl@1',
       }),
     ).toThrow(/logical ID, ordinal, and identity must agree/);
+  });
+
+  test('prepares identity atomically before committing a plan', () => {
+    const model = createWorkflowModel();
+    const plan = model.planFresh('impl');
+    expect(model.snapshot().attempts).toEqual([]);
+    expect(Object.isFrozen(plan)).toBe(true);
+    expect(Object.isFrozen(plan.attempt)).toBe(true);
+    expect(model.commit(plan)).toMatchObject({ identity: 'impl@1' });
+    expect(() => model.commit(plan)).toThrow(/already exists/);
+  });
+
+  test('enforces terminal lifecycle transitions', () => {
+    expect(canTransitionWorkflowAttemptState('scheduled', 'running')).toBe(
+      false,
+    );
+    expect(canTransitionWorkflowAttemptState('scheduled', 'queued')).toBe(true);
+    expect(canTransitionWorkflowAttemptState('running', 'success')).toBe(true);
+    expect(canTransitionWorkflowAttemptState('success', 'error')).toBe(false);
+    expect(() => assertWorkflowAttemptTransition('success', 'running')).toThrow(
+      /Illegal workflow attempt transition/,
+    );
   });
 
   test('parses bare and exact references distinctly', () => {

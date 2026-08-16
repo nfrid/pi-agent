@@ -11,6 +11,18 @@ const EXACT_REFERENCE_PATTERN =
 /** A model-owned logical node name, without its attempt ordinal. */
 export type LogicalId = string;
 
+/** The coordinator lifecycle of one immutable attempt. */
+export type WorkflowAttemptState =
+  | 'scheduled'
+  | 'queued'
+  | 'running'
+  | 'success'
+  | 'error'
+  | 'timed-out'
+  | 'aborted'
+  | 'cancelled'
+  | 'blocked';
+
 /** The stable, human-readable identity of one immutable attempt. */
 export type AttemptIdentity = string;
 
@@ -22,6 +34,58 @@ export interface WorkflowAttempt {
 
 export interface WorkflowModelSnapshot {
   readonly attempts: readonly WorkflowAttempt[];
+}
+
+/** A mutation prepared without changing the model. */
+export interface WorkflowModelPlan {
+  readonly kind: 'fresh' | 'continuation';
+  readonly attempt: WorkflowAttempt;
+  readonly predecessor?: WorkflowAttempt;
+}
+
+const TERMINAL_ATTEMPT_STATES: ReadonlySet<WorkflowAttemptState> = new Set([
+  'success',
+  'error',
+  'timed-out',
+  'aborted',
+  'cancelled',
+  'blocked',
+]);
+
+/** Whether an attempt has settled, regardless of whether it succeeded. */
+export function isTerminalWorkflowAttemptState(
+  state: WorkflowAttemptState,
+): boolean {
+  return TERMINAL_ATTEMPT_STATES.has(state);
+}
+
+/** The legal coordinator transitions for an attempt. */
+export function canTransitionWorkflowAttemptState(
+  from: WorkflowAttemptState,
+  to: WorkflowAttemptState,
+): boolean {
+  if (from === to) return true;
+  if (isTerminalWorkflowAttemptState(from)) return false;
+  if (to === 'scheduled') return false;
+  if (from === 'scheduled')
+    return (
+      to === 'queued' ||
+      to === 'error' ||
+      to === 'cancelled' ||
+      to === 'blocked'
+    );
+  if (from === 'queued')
+    return to === 'running' || isTerminalWorkflowAttemptState(to);
+  return from === 'running' && isTerminalWorkflowAttemptState(to);
+}
+
+/** Assert a lifecycle transition instead of silently accepting stale state. */
+export function assertWorkflowAttemptTransition(
+  from: WorkflowAttemptState,
+  to: WorkflowAttemptState,
+): void {
+  if (!canTransitionWorkflowAttemptState(from, to))
+    throw new Error(`Illegal workflow attempt transition: ${from} -> ${to}.`);
 }
 
 function invalidLogicalId(logicalId: string): Error {
@@ -109,31 +173,82 @@ export class WorkflowModel {
   >();
   private readonly attempts: WorkflowAttempt[] = [];
 
-  /** Create the first attempt for a logical node. */
-  createFresh(logicalId: LogicalId): WorkflowAttempt {
+  /** Prepare the first attempt for a logical node without mutating identity state. */
+  planFresh(logicalId: LogicalId): WorkflowModelPlan {
     assertLogicalId(logicalId);
     if (this.attemptsByLogicalId.has(logicalId))
       throw new Error(
         `Logical ID "${logicalId}" already exists; continue it instead of creating it again.`,
       );
-    return this.addAttempt(logicalId, 1);
+    return Object.freeze({
+      kind: 'fresh',
+      attempt: Object.freeze({
+        logicalId,
+        ordinal: 1,
+        identity: `${logicalId}@1`,
+      }),
+    });
   }
 
-  /** Create the next immutable attempt in an existing lineage. */
-  continue(logicalId: LogicalId): WorkflowAttempt {
+  /** Prepare the next immutable attempt without mutating identity state. */
+  planContinuation(logicalId: LogicalId): WorkflowModelPlan {
     assertLogicalId(logicalId);
     const lineage = this.attemptsByLogicalId.get(logicalId);
     if (!lineage)
       throw new Error(
         `Unknown logical ID "${logicalId}"; create it before continuing.`,
       );
-    const latest = lineage[lineage.length - 1];
-    if (!latest) throw new Error(`Logical ID "${logicalId}" has no attempts.`);
-    if (latest.ordinal >= MAX_ATTEMPT_ORDINAL)
+    const predecessor = lineage[lineage.length - 1];
+    if (!predecessor)
+      throw new Error(`Logical ID "${logicalId}" has no attempts.`);
+    if (predecessor.ordinal >= MAX_ATTEMPT_ORDINAL)
       throw new Error(
         `Logical ID "${logicalId}" has reached its attempt limit.`,
       );
-    return this.addAttempt(logicalId, latest.ordinal + 1);
+    const attempt = {
+      logicalId,
+      ordinal: predecessor.ordinal + 1,
+      identity: `${logicalId}@${predecessor.ordinal + 1}`,
+    };
+    return Object.freeze({
+      kind: 'continuation',
+      attempt: Object.freeze(attempt),
+      predecessor: copyAttempt(predecessor),
+    });
+  }
+
+  /** Commit a previously prepared mutation after all adapter validation passes. */
+  commit(plan: WorkflowModelPlan): WorkflowAttempt {
+    const attempt = normalizeWorkflowAttempt(plan.attempt);
+    const lineage = this.attemptsByLogicalId.get(attempt.logicalId);
+    if (plan.kind === 'fresh') {
+      if (lineage)
+        throw new Error(
+          `Logical ID "${attempt.logicalId}" already exists; cannot commit a fresh attempt.`,
+        );
+      if (attempt.ordinal !== 1)
+        throw new Error('Invalid fresh workflow model plan.');
+    } else {
+      const predecessor = plan.predecessor;
+      const latest = lineage?.[lineage.length - 1];
+      if (!predecessor || !latest || latest.identity !== predecessor.identity)
+        throw new Error(
+          `Workflow model changed before continuing "${attempt.logicalId}".`,
+        );
+      if (attempt.ordinal !== latest.ordinal + 1)
+        throw new Error('Invalid continuation workflow model plan.');
+    }
+    return this.addAttempt(attempt.logicalId, attempt.ordinal);
+  }
+
+  /** Create the first attempt for a logical node. */
+  createFresh(logicalId: LogicalId): WorkflowAttempt {
+    return this.commit(this.planFresh(logicalId));
+  }
+
+  /** Create the next immutable attempt in an existing lineage. */
+  continue(logicalId: LogicalId): WorkflowAttempt {
+    return this.commit(this.planContinuation(logicalId));
   }
 
   /** Bind a bare reference now, or resolve an exact reference immutably. */

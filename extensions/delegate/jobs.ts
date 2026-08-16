@@ -90,6 +90,10 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   controller: AbortController;
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
   materialize?: DelegateJobMaterializer;
+  onTerminal?: (
+    result: DelegateJobResult,
+    snapshot: DelegateJobSnapshot,
+  ) => void;
   materializing?: Promise<void>;
 }
 
@@ -108,6 +112,11 @@ export interface DelegateJobStartOptions {
   tasks: string[];
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
   materialize?: DelegateJobMaterializer;
+  /** Unconditional terminal notification, including settlement observed by peek. */
+  onTerminal?: (
+    result: DelegateJobResult,
+    snapshot: DelegateJobSnapshot,
+  ) => void;
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
@@ -189,6 +198,7 @@ export class DelegateJobManager {
         controller: new AbortController(),
         execute: item.execute,
         materialize: item.materialize,
+        onTerminal: item.onTerminal,
       }),
     );
     for (const record of records) this.registry.add(record);
@@ -300,6 +310,11 @@ export class DelegateJobManager {
     await this.registry.dispose();
   }
 
+  /** Preflight capacity and disposal checks before a coordinator commits identity. */
+  assertAccepting(additional = 1): void {
+    this.registry.assertAccepting(additional);
+  }
+
   get runningCount(): number {
     return this.registry.activeCount;
   }
@@ -335,8 +350,9 @@ export class DelegateJobManager {
     record.startedAt = Date.now();
     this.registry.changed();
     let state: DelegateJobState;
+    let result: DelegateJobResult;
     try {
-      const result = await record.execute(record.controller.signal);
+      result = await record.execute(record.controller.signal);
       record.runs = result.retainedRuns ?? result.runs;
       record.snapshotRuns =
         result.retainedRuns && result.retainedRuns !== result.runs
@@ -368,8 +384,12 @@ export class DelegateJobManager {
       record.runs = runs;
       record.handoff = buildParentHandoff(runs);
       record.error = error instanceof Error ? error.message : String(error);
+      result = { runs, handoff: record.handoff };
     }
-    this.registry.settle(record, state);
+    const settled = this.registry.settle(record, state);
+    // Unlike registry.onSettled, this is per-job and deliberately ignores
+    // observer count so a waiting peek cannot suppress workflow readiness.
+    record.onTerminal?.(result, settled);
   }
 }
 
