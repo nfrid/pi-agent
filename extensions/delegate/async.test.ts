@@ -16,6 +16,7 @@ import {
 } from '../shared/artifacts';
 import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getLiveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
+import { getScopedServices } from '../shared/runtime/scoped-services';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
 import {
@@ -28,6 +29,7 @@ import * as sessionModule from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
 import { createRun, type DelegatedRun } from './types';
+import * as worktreeModule from './worktree';
 
 interface RegisteredTool {
   name: string;
@@ -317,6 +319,160 @@ describe('async delegate extension', () => {
 
     finish('gated');
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('captures model WIP before an async worktree workflow barrier and releases its pin once', async () => {
+    const { ctx, finish, hasFinish, handlers, tools } =
+      await createAsyncHarness();
+    const events: string[] = [];
+    const privateRef = 'refs/private/pi-worktree-manager/wip/captured-test';
+    const dispose = vi.fn(async () => {
+      events.push('dispose');
+    });
+    vi.spyOn(worktreeModule, 'captureWorkInProgress').mockImplementation(
+      async () => {
+        events.push('capture');
+        return {
+          repositoryRoot: '/tmp/project',
+          baseHead: 'a'.repeat(40),
+          snapshotCommit: 'b'.repeat(40),
+          carriedWip: true,
+          carryCommit: 'b'.repeat(40),
+          ref: privateRef,
+          dispose,
+        };
+      },
+    );
+    const childPlans: Array<
+      Parameters<typeof taskLifecycle.prepareDelegateTask>[0]
+    > = [];
+    vi.mocked(taskLifecycle.prepareDelegateTask).mockImplementation(
+      async (plan) => {
+        events.push(`prepare:${plan.task}`);
+        if (plan.task === 'child') childPlans.push(plan);
+        const item = prepared(plan.task, `token-${plan.task}`);
+        return {
+          ...item,
+          plan,
+          cwd: plan.requestedCwd,
+          allowWrites: plan.writeRequested,
+          isolation: plan.isolation,
+          warnings: [...plan.warnings],
+        };
+      },
+    );
+
+    await tools
+      .get('delegate')
+      ?.execute(
+        'gate-call',
+        { id: 'gate', task: 'gate', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    await vi.waitFor(() => expect(hasFinish('gate')).toBe(true));
+    const receipt = await tools.get('delegate')?.execute(
+      'child-call',
+      {
+        id: 'child',
+        task: 'child',
+        route: 'quick',
+        isolation: 'worktree',
+        from: 'wip',
+        after: ['gate'],
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    events.push('receipt');
+
+    expect(receipt?.content[0]?.text).toContain('child@1');
+    expect(events.indexOf('capture')).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf('capture')).toBeLessThan(events.indexOf('receipt'));
+    expect(childPlans).toHaveLength(0);
+
+    // The parent source can change after scheduling; the child still uses the
+    // immutable ref captured before the dependency barrier.
+    events.push('parent-changed');
+    finish('gate');
+    await vi.waitFor(() => expect(childPlans).toHaveLength(1));
+    expect(childPlans[0]?.baseRef).toBe(privateRef);
+    expect(childPlans[0]?.base).toBeUndefined();
+    expect(events.indexOf('prepare:child')).toBeGreaterThan(
+      events.indexOf('parent-changed'),
+    );
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    expect(events.indexOf('prepare:child')).toBeLessThan(
+      events.indexOf('dispose'),
+    );
+
+    finish('child');
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    await handlers.get('session_shutdown')?.({}, ctx);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  test('from head skips model WIP capture', async () => {
+    const { ctx, handlers, tools } = await createAsyncHarness();
+    const capture = vi.spyOn(worktreeModule, 'captureWorkInProgress');
+    vi.mocked(taskLifecycle.runPreparedDelegateTask).mockResolvedValue(
+      successfulRun(),
+    );
+
+    await tools.get('delegate')?.execute(
+      'head-call',
+      {
+        id: 'head-source',
+        task: 'head source',
+        route: 'quick',
+        isolation: 'worktree',
+        from: 'head',
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(capture).not.toHaveBeenCalled();
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('disposes a captured source when model schedule validation fails before identity admission', async () => {
+    const { ctx, handlers, tools } = await createAsyncHarness();
+    const privateRef = 'refs/private/pi-worktree-manager/wip/invalid-test';
+    const dispose = vi.fn();
+    vi.spyOn(worktreeModule, 'captureWorkInProgress').mockResolvedValue({
+      repositoryRoot: '/tmp/project',
+      baseHead: 'a'.repeat(40),
+      snapshotCommit: 'a'.repeat(40),
+      carriedWip: false,
+      ref: privateRef,
+      dispose,
+    });
+
+    await expect(
+      tools.get('delegate')?.execute(
+        'invalid-call',
+        {
+          id: 'invalid',
+          task: 'invalid',
+          route: 'quick',
+          isolation: 'worktree',
+          from: 'wip',
+          after: ['missing-dependency'],
+        },
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow(/Unknown (?:logical ID|workflow attempt)/);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(getScopedServices('parent').delegateWorkflow?.get('invalid')).toBe(
+      undefined,
+    );
+    expect(getScopedServices('parent').delegateWorkflow?.list()).toEqual([]);
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
