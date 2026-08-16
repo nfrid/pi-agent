@@ -185,6 +185,7 @@ export function registerDelegateJobsTool(
     job: DelegateJobSnapshot,
   ) => AutomaticDeliveryState | undefined = () => undefined,
   workflow?: DelegateWorkflowCoordinator,
+  getWorkflow?: () => DelegateWorkflowCoordinator | undefined,
 ): void {
   pi.registerTool<
     typeof Parameters,
@@ -214,6 +215,7 @@ export function registerDelegateJobsTool(
       ctx: ExtensionContext,
     ) {
       const request = params as typeof params & { wait_seconds?: number };
+      const activeWorkflow = getWorkflow?.() ?? workflow;
       const action = (params as { action: string }).action;
       switch (action) {
         case 'list': {
@@ -221,7 +223,7 @@ export function registerDelegateJobsTool(
             .list(ctx)
             .filter((job) => !job.attemptIdentity)
             .map(compactJob);
-          const attempts = workflow?.list().map(compactAttempt) ?? [];
+          const attempts = activeWorkflow?.list().map(compactAttempt) ?? [];
           return {
             content: [
               {
@@ -237,7 +239,7 @@ export function registerDelegateJobsTool(
         }
         case 'status': {
           const id = requireText(params.id, 'id');
-          const attempt = workflow?.get(id);
+          const attempt = activeWorkflow?.get(id);
           if (attempt) {
             return {
               content: [{ type: 'text', text: attemptSummary(attempt) }],
@@ -287,7 +289,7 @@ export function registerDelegateJobsTool(
         }
         case 'feedback': {
           const id = requireText(params.id, 'id');
-          const attempt = workflow?.get(id);
+          const attempt = activeWorkflow?.get(id);
           if (attempt) {
             if (!attempt.jobId)
               return {
@@ -308,7 +310,7 @@ export function registerDelegateJobsTool(
               requireText(params.message, 'message'),
               ctx,
             );
-            const current = workflow?.get(attempt.identity);
+            const current = activeWorkflow?.get(attempt.identity);
             return {
               content: [
                 {
@@ -346,10 +348,10 @@ export function registerDelegateJobsTool(
         case 'cancel': {
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
-          const logicalIds = ids.filter((id) => workflow?.get(id));
+          const logicalIds = ids.filter((id) => activeWorkflow?.get(id));
           const adapterIds = ids.filter((id) => !logicalIds.includes(id));
-          const logicalAttempts = workflow
-            ? await workflow.cancel(logicalIds)
+          const logicalAttempts = activeWorkflow
+            ? await activeWorkflow.cancel(logicalIds)
             : [];
           const jobs = adapterIds.length
             ? await manager.cancel(adapterIds, signal, ctx)

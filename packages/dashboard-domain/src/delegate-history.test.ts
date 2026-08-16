@@ -802,6 +802,219 @@ describe('delegate history adapter', () => {
     expect(JSON.stringify(response)).not.toContain('secret report');
   });
 
+  it('folds deltas after v1 snapshots and keeps owner plus identity exact', () => {
+    const attempt = (
+      ownerBranchId: string,
+      state: string,
+      settledAt?: number,
+    ) => ({
+      ownerBranchId,
+      logicalId: 'review',
+      attempt: 1,
+      identity: 'review@1',
+      state,
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...(settledAt === undefined ? {} : { settledAt }),
+    });
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'custom',
+        id: 'workflow-snapshot',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: { version: 1, attempts: [attempt('owner-a', 'scheduled')] },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-delta-b',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: { version: 1, attempts: [attempt('owner-b', 'scheduled')] },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-delta-a',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            attempts: [attempt('owner-a', 'success', 4)],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(2);
+    expect(
+      response.groups.map((group) => group.workflow?.ownerBranchId),
+    ).toEqual(expect.arrayContaining(['owner-a', 'owner-b']));
+    expect(
+      response.groups.find(
+        (group) => group.workflow?.ownerBranchId === 'owner-a',
+      ),
+    ).toMatchObject({ state: 'success', workflow: { identity: 'review@1' } });
+    expect(
+      response.groups.find(
+        (group) => group.workflow?.ownerBranchId === 'owner-b',
+      ),
+    ).toMatchObject({ state: 'scheduled', workflow: { identity: 'review@1' } });
+    expect(parseDelegateHistoryResponse(response)).toEqual(response);
+
+    const projected = projectDelegateHistoryEntry(branch[2], {
+      sessionId: 'parent-1',
+    }).entry as { data?: { kind?: string; state?: { attempts?: unknown[] } } };
+    expect(projected.data?.kind).toBe('delta');
+    expect(projected.data?.state?.attempts).toHaveLength(1);
+  });
+
+  it('fails closed on malformed durable workflow deltas', () => {
+    const malformed = {
+      type: 'custom',
+      id: 'bad-workflow',
+      customType: 'delegate-workflow:v1',
+      data: {
+        version: 1,
+        kind: 'delta',
+        state: { version: 1, attempts: [{ identity: 'incomplete' }] },
+      },
+    };
+    const projected = projectDelegateHistoryEntry(malformed, {
+      sessionId: 'parent-1',
+    }).entry;
+    expect(projected).not.toHaveProperty('data');
+    expect(delegateHistoryFromBranch('parent-1', [malformed]).groups).toEqual(
+      [],
+    );
+  });
+
+  it('rejects noncanonical workflow identities and references before rendering', () => {
+    const attempt = (overrides: Record<string, unknown> = {}) => ({
+      logicalId: 'foo',
+      attempt: 1,
+      identity: 'foo@1',
+      state: 'scheduled',
+      dependencies: ['gate@1'],
+      waitingFor: ['gate@1'],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...overrides,
+    });
+    const entry = (metadata: Record<string, unknown>) => ({
+      type: 'custom',
+      customType: 'delegate-workflow:v1',
+      data: {
+        version: 1,
+        kind: 'snapshot',
+        state: { version: 1, attempts: [metadata] },
+      },
+    });
+    const malformed = [
+      attempt({ logicalId: 'Foo', identity: 'Foo@1' }),
+      attempt({ logicalId: 'foo\u0000bar', identity: 'foo\u0000bar@1' }),
+      attempt({ identity: 'foo@2' }),
+      attempt({ attempt: 0, identity: 'foo@0' }),
+      attempt({ attempt: 1_000_000_000, identity: 'foo@1000000000' }),
+      attempt({ dependencies: ['gate'] }),
+      attempt({ dependencies: ['Gate@1'] }),
+      attempt({ dependencies: ['gate@1', 'gate@1'] }),
+      attempt({ waitingFor: ['other@1'] }),
+      attempt({
+        dependencies: Array.from(
+          { length: 33 },
+          (_, index) => `gate-${index}@1`,
+        ),
+        waitingFor: [],
+      }),
+    ];
+    for (const metadata of malformed)
+      expect(
+        delegateHistoryFromBranch('parent-1', [entry(metadata)]).groups,
+      ).toEqual([]);
+  });
+
+  it('folds wake replacement deltas without retaining raw payloads', () => {
+    const baseWake = {
+      id: 'review',
+      state: 'pending',
+      condition: { node: 'later@1' },
+      references: ['later@1'],
+      payload: [{ kind: 'handoff' }],
+      createdAt: 1,
+      revision: 1,
+      dispatchGeneration: 0,
+      dispatchAttempts: 0,
+    };
+    const enteredWake = {
+      ...baseWake,
+      state: 'entered',
+      enteredAt: 4,
+      revision: 2,
+      dispatchGeneration: 1,
+      dispatchAttempts: 1,
+      handoff: 'secret delta handoff',
+    };
+    const branch = [
+      {
+        type: 'custom',
+        id: 'wake-snapshot',
+        customType: 'delegate-wake:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            ownerSessionId: 'parent-1',
+            ownerEpoch: 1,
+            wakes: [baseWake],
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'wake-delta',
+        customType: 'delegate-wake:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            ownerSessionId: 'parent-1',
+            ownerEpoch: 1,
+            wakes: [enteredWake],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(1);
+    expect(response.groups[0]).toMatchObject({
+      lineageId: 'wake:review',
+      state: 'success',
+      wake: { id: 'review', state: 'entered', enteredAt: 4 },
+    });
+    expect(JSON.stringify(response)).not.toContain('secret delta handoff');
+    const projected = projectDelegateHistoryEntry(branch[1], {
+      sessionId: 'parent-1',
+    }).entry;
+    expect(projected).toMatchObject({
+      customType: 'delegate-wake:v1',
+      data: { kind: 'delta' },
+    });
+    expect(JSON.stringify(projected)).not.toContain('payload');
+  });
+
   it('projects entered wake metadata from existing wake entries after reload', () => {
     const entry = {
       type: 'custom',

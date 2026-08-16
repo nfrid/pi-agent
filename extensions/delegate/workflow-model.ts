@@ -3,6 +3,8 @@ export const MAX_LOGICAL_ID_LENGTH = 64;
 
 /** Maximum ordinal representable in a public attempt identity. */
 export const MAX_ATTEMPT_ORDINAL = 999_999_999;
+/** Maximum number of persisted dependency references on one attempt. */
+export const MAX_WORKFLOW_DEPENDENCIES = 32;
 
 const LOGICAL_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const EXACT_REFERENCE_PATTERN =
@@ -109,6 +111,22 @@ export function isLogicalId(value: string): boolean {
     value.length > 0 &&
     value.length <= MAX_LOGICAL_ID_LENGTH &&
     LOGICAL_ID_PATTERN.test(value)
+  );
+}
+
+/** Whether a value is a canonical exact attempt identity. */
+export function isCanonicalWorkflowAttemptReference(
+  value: unknown,
+): value is AttemptIdentity {
+  if (typeof value !== 'string') return false;
+  const exact = EXACT_REFERENCE_PATTERN.exec(value);
+  if (!exact?.groups) return false;
+  const logicalId = exact.groups.logicalId;
+  const ordinal = Number(exact.groups.ordinal);
+  return (
+    ordinal <= MAX_ATTEMPT_ORDINAL &&
+    isLogicalId(logicalId) &&
+    value === `${logicalId}@${ordinal}`
   );
 }
 
@@ -281,6 +299,33 @@ export class WorkflowModel {
   /** Resolve an already-created reference; equivalent to bind for this model. */
   lookup(reference: string): WorkflowAttempt {
     return this.bind(reference);
+  }
+
+  /**
+   * Import an attempt that was persisted on an ancestor branch. Imported
+   * attempts retain their public identity but do not create a new ordinal.
+   */
+  importAttempt(value: WorkflowAttempt): WorkflowAttempt {
+    const attempt = normalizeWorkflowAttempt(value);
+    const existing = this.attemptsByLogicalId.get(attempt.logicalId) ?? [];
+    const duplicate = existing.find(
+      (candidate) => candidate.ordinal === attempt.ordinal,
+    );
+    if (duplicate) {
+      if (duplicate.identity !== attempt.identity)
+        throw new Error('Conflicting imported workflow attempt identity.');
+      return copyAttempt(duplicate);
+    }
+    const latest = existing.at(-1);
+    if (latest && attempt.ordinal !== latest.ordinal + 1)
+      throw new Error(
+        `Cannot import workflow attempt ${attempt.identity} without its predecessor.`,
+      );
+    if (!latest && attempt.ordinal !== 1)
+      throw new Error(
+        `Cannot import workflow attempt ${attempt.identity} without its first attempt.`,
+      );
+    return this.addAttempt(attempt.logicalId, attempt.ordinal);
   }
 
   /** Return detached, immutable records in creation order. */

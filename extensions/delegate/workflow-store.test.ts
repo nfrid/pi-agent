@@ -3,7 +3,9 @@ import { DelegateWorkflowCoordinator } from './workflow-coordinator';
 import {
   attachWorkflowStore,
   latestWorkflowState,
+  persistWorkflowState,
   WORKFLOW_ENTRY_TYPE,
+  workflowStoreHistory,
 } from './workflow-store';
 
 function branch(entries: unknown[]) {
@@ -115,6 +117,32 @@ describe('workflow store', () => {
     await coordinator.dispose();
   });
 
+  test('defers owner snapshots while a sibling runtime is active', () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    const entries: unknown[] = [];
+    let ownerActive = false;
+    attachWorkflowStore(coordinator, piFor(entries), {
+      isOwnerActive: () => ownerActive,
+    });
+
+    coordinator.schedule({
+      logicalId: 'deferred',
+      mode: 'single',
+      tasks: ['deferred'],
+      execute: async () => ({ runs: [], handoff: 'owner-only' }),
+    });
+    expect(entries).toHaveLength(0);
+
+    ownerActive = true;
+    persistWorkflowState(coordinator, piFor(entries), {
+      isOwnerActive: () => ownerActive,
+    });
+    expect(entries).toHaveLength(1);
+    expect(JSON.stringify(entries)).not.toContain('owner-only');
+  });
+
   test('detach stops appending snapshots', () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const entries: unknown[] = [];
@@ -127,6 +155,127 @@ describe('workflow store', () => {
       execute: async () => ({ runs: [], handoff: 'not persisted' }),
     });
     expect(entries).toHaveLength(0);
+  });
+
+  test('uses linear-sized deltas for hundreds of lifecycle metadata changes', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const entries: unknown[] = [];
+    const detach = attachWorkflowStore(coordinator, piFor(entries));
+    const gate = coordinator.schedule({
+      logicalId: 'gate',
+      mode: 'single',
+      tasks: ['gate'],
+      execute: (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => resolve({ runs: [], handoff: 'private' }),
+            { once: true },
+          ),
+        ),
+    });
+    for (let index = 0; index < 240; index += 1)
+      coordinator.schedule({
+        logicalId: `step-${index}`,
+        mode: 'single',
+        tasks: [`step-${index}`],
+        after: [gate.identity],
+        execute: async () => ({ runs: [], handoff: 'private' }),
+      });
+
+    const data = entries.map(
+      (entry) => (entry as { data: unknown }).data,
+    ) as Array<{
+      kind?: unknown;
+      state?: { attempts?: unknown[] };
+    }>;
+    expect(data.every((entry) => entry.kind === 'delta')).toBe(true);
+    expect(
+      data.every((entry) => (entry.state?.attempts?.length ?? 0) <= 32),
+    ).toBe(true);
+    const serializedBytes = JSON.stringify(entries).length;
+    const latestBytes = JSON.stringify(
+      latestWorkflowState(branch(entries)),
+    ).length;
+    expect(serializedBytes).toBeLessThan(latestBytes * 4);
+    expect(latestWorkflowState(branch(entries))?.attempts).toHaveLength(241);
+    expect(workflowStoreHistory(branch(entries))).toHaveLength(entries.length);
+
+    detach();
+    await coordinator.cancel(gate.identity);
+    await coordinator.dispose();
+  });
+
+  test('fails closed when a delta is malformed after a valid snapshot', () => {
+    const valid = {
+      type: 'custom',
+      customType: WORKFLOW_ENTRY_TYPE,
+      data: {
+        version: 1,
+        kind: 'snapshot',
+        state: { version: 1, attempts: [] },
+      },
+    };
+    const malformed = {
+      type: 'custom',
+      customType: WORKFLOW_ENTRY_TYPE,
+      data: {
+        version: 1,
+        kind: 'delta',
+        state: { version: 1, attempts: [{ identity: 'not-complete' }] },
+      },
+    };
+    expect(latestWorkflowState(branch([valid, malformed]))).toBeUndefined();
+    expect(workflowStoreHistory(branch([valid, malformed]))).toBeUndefined();
+  });
+
+  test('rejects noncanonical and inconsistent journal metadata as a whole', () => {
+    const attempt = (overrides: Record<string, unknown> = {}) => ({
+      logicalId: 'foo',
+      attempt: 1,
+      identity: 'foo@1',
+      state: 'scheduled',
+      dependencies: ['gate@1'],
+      waitingFor: ['gate@1'],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...overrides,
+    });
+    const entry = (metadata: Record<string, unknown>) => ({
+      type: 'custom',
+      customType: WORKFLOW_ENTRY_TYPE,
+      data: {
+        version: 1,
+        kind: 'snapshot',
+        state: { version: 1, attempts: [metadata] },
+      },
+    });
+    const malformed = [
+      attempt({ logicalId: 'Foo', identity: 'Foo@1' }),
+      attempt({ logicalId: 'foo\u0000bar', identity: 'foo\u0000bar@1' }),
+      attempt({ identity: 'foo@2' }),
+      attempt({ attempt: 0, identity: 'foo@0' }),
+      attempt({ attempt: 1_000_000_000, identity: 'foo@1000000000' }),
+      attempt({ dependencies: ['gate'] }),
+      attempt({ dependencies: ['Gate@1'] }),
+      attempt({ dependencies: ['gate@1', 'gate@1'] }),
+      attempt({ waitingFor: ['other@1'] }),
+      attempt({
+        dependencies: Array.from(
+          { length: 33 },
+          (_, index) => `gate-${index}@1`,
+        ),
+        waitingFor: [],
+      }),
+      attempt({
+        dependencies: ['gate@1'],
+        waitingFor: Array.from({ length: 33 }, (_, index) => `gate-${index}@1`),
+      }),
+    ];
+    for (const metadata of malformed) {
+      expect(latestWorkflowState(branch([entry(metadata)]))).toBeUndefined();
+      expect(workflowStoreHistory(branch([entry(metadata)]))).toBeUndefined();
+    }
   });
 
   test('writes the versioned custom entry type', () => {

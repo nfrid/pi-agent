@@ -16,6 +16,7 @@ import {
 } from '../shared/artifacts';
 import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getLiveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
+import { getScopedServices } from '../shared/runtime/scoped-services';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
 import {
@@ -28,6 +29,8 @@ import * as sessionModule from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
 import { createRun, type DelegatedRun } from './types';
+import { WAKE_RELOAD_ORPHAN_REASON } from './wake-coordinator';
+import * as worktreeModule from './worktree';
 
 interface RegisteredTool {
   name: string;
@@ -182,7 +185,18 @@ afterEach(() => {
   rmSync(artifactRoot, { recursive: true, force: true });
 });
 
-async function createAsyncHarness(initialScope = 'parent') {
+async function createAsyncHarness(
+  initialScope = 'parent',
+  restored?: {
+    entries: Array<{
+      type: string;
+      customType?: string;
+      data?: unknown;
+      message?: unknown;
+    }>;
+    leafId?: string;
+  },
+) {
   vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
     ...config,
     maxParallelTasks: 3,
@@ -203,8 +217,12 @@ async function createAsyncHarness(initialScope = 'parent') {
   const activeTools = new Set(['delegate', 'artifact_retrieve']);
   const sendMessage = vi.fn();
   const eventListeners = new Map<string, Set<(value: unknown) => void>>();
-  const entries: Array<{ type: string; customType?: string; data?: unknown }> =
-    [];
+  const entries: Array<{
+    type: string;
+    customType?: string;
+    data?: unknown;
+    message?: unknown;
+  }> = restored ? [...restored.entries] : [];
   const pi = {
     on(event: string, handler: Handler) {
       handlers.set(event, handler);
@@ -246,7 +264,10 @@ async function createAsyncHarness(initialScope = 'parent') {
       getSessionId: () => initialScope,
       getEntries: () => entries,
       getHeader: () => ({}),
-      getBranch: () => [],
+      getBranch: () => (restored ? entries : []),
+      ...(restored?.leafId
+        ? { getLeafId: () => restored.leafId as string }
+        : {}),
     },
   } as unknown as ExtensionContext;
 
@@ -267,10 +288,12 @@ async function createAsyncHarness(initialScope = 'parent') {
     ctx,
     pi,
     finish,
+    hasFinish: (task: string) => finishes.has(task),
     handlers,
     sendMessage,
     tools,
     activeTools,
+    entries,
   };
 }
 
@@ -297,6 +320,160 @@ describe('async delegate extension', () => {
 
     finish('gated');
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('captures model WIP before an async worktree workflow barrier and releases its pin once', async () => {
+    const { ctx, finish, hasFinish, handlers, tools } =
+      await createAsyncHarness();
+    const events: string[] = [];
+    const privateRef = 'refs/private/pi-worktree-manager/wip/captured-test';
+    const dispose = vi.fn(async () => {
+      events.push('dispose');
+    });
+    vi.spyOn(worktreeModule, 'captureWorkInProgress').mockImplementation(
+      async () => {
+        events.push('capture');
+        return {
+          repositoryRoot: '/tmp/project',
+          baseHead: 'a'.repeat(40),
+          snapshotCommit: 'b'.repeat(40),
+          carriedWip: true,
+          carryCommit: 'b'.repeat(40),
+          ref: privateRef,
+          dispose,
+        };
+      },
+    );
+    const childPlans: Array<
+      Parameters<typeof taskLifecycle.prepareDelegateTask>[0]
+    > = [];
+    vi.mocked(taskLifecycle.prepareDelegateTask).mockImplementation(
+      async (plan) => {
+        events.push(`prepare:${plan.task}`);
+        if (plan.task === 'child') childPlans.push(plan);
+        const item = prepared(plan.task, `token-${plan.task}`);
+        return {
+          ...item,
+          plan,
+          cwd: plan.requestedCwd,
+          allowWrites: plan.writeRequested,
+          isolation: plan.isolation,
+          warnings: [...plan.warnings],
+        };
+      },
+    );
+
+    await tools
+      .get('delegate')
+      ?.execute(
+        'gate-call',
+        { id: 'gate', task: 'gate', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    await vi.waitFor(() => expect(hasFinish('gate')).toBe(true));
+    const receipt = await tools.get('delegate')?.execute(
+      'child-call',
+      {
+        id: 'child',
+        task: 'child',
+        route: 'quick',
+        isolation: 'worktree',
+        from: 'wip',
+        after: ['gate'],
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    events.push('receipt');
+
+    expect(receipt?.content[0]?.text).toContain('child@1');
+    expect(events.indexOf('capture')).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf('capture')).toBeLessThan(events.indexOf('receipt'));
+    expect(childPlans).toHaveLength(0);
+
+    // The parent source can change after scheduling; the child still uses the
+    // immutable ref captured before the dependency barrier.
+    events.push('parent-changed');
+    finish('gate');
+    await vi.waitFor(() => expect(childPlans).toHaveLength(1));
+    expect(childPlans[0]?.baseRef).toBe(privateRef);
+    expect(childPlans[0]?.base).toBeUndefined();
+    expect(events.indexOf('prepare:child')).toBeGreaterThan(
+      events.indexOf('parent-changed'),
+    );
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    expect(events.indexOf('prepare:child')).toBeLessThan(
+      events.indexOf('dispose'),
+    );
+
+    finish('child');
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    await handlers.get('session_shutdown')?.({}, ctx);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  test('from head skips model WIP capture', async () => {
+    const { ctx, handlers, tools } = await createAsyncHarness();
+    const capture = vi.spyOn(worktreeModule, 'captureWorkInProgress');
+    vi.mocked(taskLifecycle.runPreparedDelegateTask).mockResolvedValue(
+      successfulRun(),
+    );
+
+    await tools.get('delegate')?.execute(
+      'head-call',
+      {
+        id: 'head-source',
+        task: 'head source',
+        route: 'quick',
+        isolation: 'worktree',
+        from: 'head',
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(capture).not.toHaveBeenCalled();
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('disposes a captured source when model schedule validation fails before identity admission', async () => {
+    const { ctx, handlers, tools } = await createAsyncHarness();
+    const privateRef = 'refs/private/pi-worktree-manager/wip/invalid-test';
+    const dispose = vi.fn();
+    vi.spyOn(worktreeModule, 'captureWorkInProgress').mockResolvedValue({
+      repositoryRoot: '/tmp/project',
+      baseHead: 'a'.repeat(40),
+      snapshotCommit: 'a'.repeat(40),
+      carriedWip: false,
+      ref: privateRef,
+      dispose,
+    });
+
+    await expect(
+      tools.get('delegate')?.execute(
+        'invalid-call',
+        {
+          id: 'invalid',
+          task: 'invalid',
+          route: 'quick',
+          isolation: 'worktree',
+          from: 'wip',
+          after: ['missing-dependency'],
+        },
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow(/Unknown (?:logical ID|workflow attempt)/);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(getScopedServices('parent').delegateWorkflow?.get('invalid')).toBe(
+      undefined,
+    );
+    expect(getScopedServices('parent').delegateWorkflow?.list()).toEqual([]);
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
@@ -1386,6 +1563,404 @@ describe('async delegate extension', () => {
       'Third finding.',
     );
     await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('isolates same IDs and inherits only current branch workflow entries', async () => {
+    const { ctx, pi, finish, hasFinish, handlers, tools } =
+      await createAsyncHarness();
+    type Path = { entries: unknown[]; leaf: string };
+    const paths = new Map<string, Path>([
+      // Keep a real parent entry before the first owner marker so the fork
+      // exercises an interior target rather than reusing the marker tip.
+      [
+        'left',
+        {
+          entries: [{ id: 'left', parentId: null, type: 'message' }],
+          leaf: 'left',
+        },
+      ],
+      ['right', { entries: [], leaf: 'right' }],
+    ]);
+    let activePath = 'left';
+    let sequence = 0;
+    const manager = ctx.sessionManager as unknown as {
+      getLeafId: () => string;
+      getBranch: () => unknown[];
+      getEntries: () => unknown[];
+      getChildren: (parentId: string) => unknown[];
+    };
+    manager.getLeafId = () => paths.get(activePath)?.leaf ?? activePath;
+    manager.getBranch = () => paths.get(activePath)?.entries ?? [];
+    manager.getEntries = () =>
+      [...paths.values()].flatMap((path) => path.entries);
+    manager.getChildren = (parentId) =>
+      manager
+        .getEntries()
+        .filter(
+          (entry) => (entry as { parentId?: string }).parentId === parentId,
+        );
+    const api = pi as unknown as {
+      appendEntry: (type: string, data: unknown) => void;
+    };
+    api.appendEntry = (type, data) => {
+      const path = paths.get(activePath);
+      if (!path) throw new Error(`Unknown test path ${activePath}`);
+      const id = `${activePath}-${++sequence}`;
+      path.entries = [
+        ...path.entries,
+        { id, parentId: path.leaf, type: 'custom', customType: type, data },
+      ];
+      path.leaf = id;
+    };
+
+    handlers.get('session_tree')?.({ oldLeafId: null, newLeafId: 'left' }, ctx);
+    const leftReceipt = await tools
+      .get('delegate')
+      ?.execute(
+        'left-call',
+        { id: 'impl', task: 'left task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(leftReceipt?.content[0]?.text).toContain('impl@1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finish('left task');
+    await vi.waitFor(async () => {
+      const listed = await tools
+        .get('delegate_jobs')
+        ?.execute('left-list', { action: 'list' }, undefined, undefined, ctx);
+      expect(JSON.stringify(listed)).toContain('impl@1');
+    });
+
+    const leftEntries = [...(paths.get('left')?.entries ?? [])];
+    const leftLeaf = paths.get('left')?.leaf ?? 'left';
+    const ownerMarkerIndex = leftEntries.findIndex(
+      (entry) =>
+        (entry as { customType?: string }).customType ===
+        'delegate-branch-owner:v1',
+    );
+    expect(ownerMarkerIndex).toBeGreaterThanOrEqual(0);
+    const forkEntries = leftEntries.slice(0, ownerMarkerIndex);
+    const forkLeaf = (forkEntries.at(-1) as { id?: string } | undefined)?.id;
+    if (!forkLeaf) throw new Error('missing mapped ancestor leaf');
+    paths.set('right', { entries: forkEntries, leaf: forkLeaf });
+    activePath = 'right';
+    handlers.get('session_tree')?.(
+      { oldLeafId: leftLeaf, newLeafId: forkLeaf },
+      ctx,
+    );
+    const rightReceipt = await tools
+      .get('delegate')
+      ?.execute(
+        'right-call',
+        { id: 'impl', task: 'right task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(rightReceipt?.content[0]?.text).toContain('impl@1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    finish('right task');
+    await vi.waitFor(async () => {
+      const status = await tools
+        .get('delegate_jobs')
+        ?.execute(
+          'right-status',
+          { action: 'status', id: 'impl@1' },
+          undefined,
+          undefined,
+          ctx,
+        );
+      expect(status?.content[0]?.text).toContain('impl@1 success');
+      const rightEntries = paths.get('right')?.entries ?? [];
+      expect(JSON.stringify(rightEntries)).not.toContain('left task finding.');
+      const rightOwner = rightEntries.find(
+        (entry) =>
+          (entry as { customType?: string }).customType ===
+          'delegate-branch-owner:v1',
+      ) as { data?: { ownerBranchId?: string } } | undefined;
+      const leftOwner = leftEntries.find(
+        (entry) =>
+          (entry as { customType?: string }).customType ===
+          'delegate-branch-owner:v1',
+      ) as { data?: { ownerBranchId?: string } } | undefined;
+      expect(rightOwner?.data?.ownerBranchId).toBeDefined();
+      expect(rightOwner?.data?.ownerBranchId).not.toBe(
+        leftOwner?.data?.ownerBranchId,
+      );
+      const rightWorkflow = [...rightEntries]
+        .reverse()
+        .find(
+          (entry) =>
+            (entry as { customType?: string }).customType ===
+            'delegate-workflow:v1',
+        ) as
+        | {
+            data?: {
+              state?: {
+                attempts?: Array<{
+                  identity?: string;
+                  ownerBranchId?: string;
+                  state?: string;
+                }>;
+              };
+            };
+          }
+        | undefined;
+      expect(rightWorkflow?.data?.state?.attempts?.[0]).toMatchObject({
+        identity: 'impl@1',
+        state: 'success',
+      });
+      expect(rightWorkflow?.data?.state?.attempts?.[0]?.ownerBranchId).not.toBe(
+        (
+          leftEntries.find(
+            (entry) =>
+              (entry as { customType?: string }).customType ===
+              'delegate-workflow:v1',
+          ) as
+            | {
+                data?: {
+                  state?: {
+                    attempts?: Array<{ ownerBranchId?: string }>;
+                  };
+                };
+              }
+            | undefined
+        )?.data?.state?.attempts?.[0]?.ownerBranchId,
+      );
+    });
+
+    paths.set('descendant', { entries: leftEntries, leaf: 'descendant' });
+    activePath = 'descendant';
+    handlers.get('session_tree')?.(
+      { oldLeafId: 'right', newLeafId: 'descendant' },
+      ctx,
+    );
+    const continued = await tools.get('delegate')?.execute(
+      'descendant-call',
+      {
+        id: 'review',
+        task: 'descendant task',
+        route: 'quick',
+        after: ['impl'],
+        inputs: [{ node: 'impl', include: ['report'] }],
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(continued?.content[0]?.text).toContain('review@1');
+    await vi.waitFor(() => expect(hasFinish('descendant task')).toBe(true));
+    finish('descendant task');
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('does not append unchanged workflow checkpoints on repeated tip activation', async () => {
+    const { ctx, pi, finish, hasFinish, handlers, tools } =
+      await createAsyncHarness();
+    type Path = { entries: unknown[]; leaf: string };
+    const paths = new Map<string, Path>([
+      ['root', { entries: [{ id: 'root', type: 'message' }], leaf: 'root' }],
+    ]);
+    let sequence = 0;
+    const activePath = 'root';
+    const manager = ctx.sessionManager as unknown as {
+      getLeafId: () => string;
+      getBranch: () => unknown[];
+      getEntries: () => unknown[];
+      getChildren: (parentId: string) => unknown[];
+    };
+    manager.getLeafId = () => paths.get(activePath)?.leaf ?? activePath;
+    manager.getBranch = () => paths.get(activePath)?.entries ?? [];
+    manager.getEntries = () =>
+      [...paths.values()].flatMap((path) => path.entries);
+    manager.getChildren = (parentId) =>
+      manager
+        .getEntries()
+        .filter(
+          (entry) => (entry as { parentId?: string }).parentId === parentId,
+        );
+    (
+      pi as unknown as { appendEntry: (type: string, data: unknown) => void }
+    ).appendEntry = (type, data) => {
+      const path = paths.get(activePath);
+      if (!path) throw new Error(`Unknown test path ${activePath}`);
+      const id = `root-${++sequence}`;
+      path.entries = [
+        ...path.entries,
+        { id, parentId: path.leaf, type: 'custom', customType: type, data },
+      ];
+      path.leaf = id;
+    };
+
+    handlers.get('session_tree')?.({ oldLeafId: null, newLeafId: 'root' }, ctx);
+    await tools
+      .get('delegate')
+      ?.execute(
+        'stable-call',
+        { id: 'stable', task: 'stable task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    await vi.waitFor(() =>
+      expect(
+        (paths.get('root')?.entries ?? []).some(
+          (entry) =>
+            (entry as { customType?: string }).customType ===
+            'delegate-branch-owner:v1',
+        ),
+      ).toBe(true),
+    );
+    await vi.waitFor(() => expect(hasFinish('stable task')).toBe(true));
+    finish('stable task');
+    await vi.waitFor(() => {
+      const entries = paths.get('root')?.entries ?? [];
+      expect(JSON.stringify(entries)).toContain('stable@1');
+      expect(
+        entries.some(
+          (entry) =>
+            (entry as { customType?: string }).customType ===
+            'delegate-workflow:v1',
+        ),
+      ).toBe(true);
+    });
+
+    const before = (paths.get('root')?.entries ?? []).length;
+    const tip = paths.get('root')?.leaf;
+    if (!tip) throw new Error('missing stable branch tip');
+    for (let index = 0; index < 25; index += 1)
+      handlers.get('session_tree')?.({ oldLeafId: tip, newLeafId: tip }, ctx);
+    expect(paths.get('root')?.entries).toHaveLength(before);
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('admits one persisted queued wake after runtime recreation', async () => {
+    const first = await createAsyncHarness('reload-parent');
+    await first.tools
+      .get('delegate')
+      ?.execute(
+        'reload-source-call',
+        { id: 'reload-source', task: 'reload source task', route: 'quick' },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    await vi.waitFor(() =>
+      expect(first.hasFinish('reload source task')).toBe(true),
+    );
+    first.finish('reload source task');
+    await vi.waitFor(async () => {
+      const status = await first.tools
+        .get('delegate_jobs')
+        ?.execute(
+          'reload-source-status',
+          { action: 'status', id: 'reload-source@1' },
+          undefined,
+          undefined,
+          first.ctx,
+        );
+      expect(status?.content[0]?.text).toContain('success');
+    });
+    await first.tools.get('delegate_wake')?.execute(
+      'reload-wake-call',
+      {
+        action: 'subscribe',
+        id: 'reload-ready',
+        condition: { node: 'reload-source@1' },
+        payload: ['handoff'],
+      },
+      undefined,
+      undefined,
+      first.ctx,
+    );
+    await vi.waitFor(() => expect(first.sendMessage).toHaveBeenCalledOnce());
+    const persistedMessage = first.sendMessage.mock.calls[0]?.[0];
+    if (!persistedMessage) throw new Error('missing queued wake message');
+    await first.handlers.get('session_shutdown')?.({}, first.ctx);
+
+    const persistedEntries = [
+      ...first.entries,
+      {
+        type: 'custom_message',
+        customType: 'delegate-wake-result',
+        message: persistedMessage,
+      },
+    ];
+    const restored = await createAsyncHarness('reload-parent', {
+      entries: persistedEntries,
+      leafId: 'leaf-after-reload',
+    });
+    expect(restored.sendMessage).not.toHaveBeenCalled();
+    const firstContext = restored.handlers.get('context')?.({
+      messages: [persistedMessage],
+    }) as { messages?: unknown[] } | undefined;
+    expect(firstContext?.messages).toEqual([persistedMessage]);
+    const repeatedContext = restored.handlers.get('context')?.({
+      messages: [persistedMessage],
+    }) as { messages?: unknown[] } | undefined;
+    expect(repeatedContext?.messages).toEqual([]);
+    expect(restored.sendMessage).not.toHaveBeenCalled();
+    await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
+  });
+
+  test('blocks a persisted pending wake over a running attempt after recreation', async () => {
+    const first = await createAsyncHarness('reload-pending');
+    await first.tools
+      .get('delegate')
+      ?.execute(
+        'reload-running-call',
+        { id: 'reload-running', task: 'reload running task', route: 'quick' },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    await vi.waitFor(() =>
+      expect(first.hasFinish('reload running task')).toBe(true),
+    );
+    const pending = await first.tools.get('delegate_wake')?.execute(
+      'reload-pending-wake-call',
+      {
+        action: 'subscribe',
+        id: 'reload-pending',
+        condition: { node: 'reload-running@1' },
+      },
+      undefined,
+      undefined,
+      first.ctx,
+    );
+    expect(pending?.details).toMatchObject({
+      wake: { state: 'pending' },
+    });
+    // Snapshot the running/pending journal before letting the first runtime
+    // finish; shutdown otherwise waits for the deliberately unresolved mock.
+    const persistedEntries = [...first.entries];
+    first.finish('reload running task');
+    await vi.waitFor(() => expect(first.sendMessage).toHaveBeenCalledOnce());
+    await first.handlers.get('session_shutdown')?.({}, first.ctx);
+
+    const restored = await createAsyncHarness('reload-pending', {
+      entries: persistedEntries,
+      leafId: 'leaf-after-pending-reload',
+    });
+    const status = await restored.tools
+      .get('delegate_wake')
+      ?.execute(
+        'reload-pending-status',
+        { action: 'status', id: 'reload-pending' },
+        undefined,
+        undefined,
+        restored.ctx,
+      );
+    expect(status?.details).toMatchObject({
+      wake: {
+        state: 'blocked',
+        reason: WAKE_RELOAD_ORPHAN_REASON,
+      },
+    });
+    expect(restored.sendMessage).not.toHaveBeenCalled();
+    await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
 
   test('shows live activity and suppresses delivery after tree navigation', async () => {

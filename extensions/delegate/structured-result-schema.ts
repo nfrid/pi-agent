@@ -35,7 +35,7 @@ export interface NormalizedDelegateResultSpec {
 export interface StructuredValidationResult {
   valid: boolean;
   value?: unknown;
-  errors: string[];
+  errors: readonly string[];
 }
 
 export interface StructuredProjectionResult {

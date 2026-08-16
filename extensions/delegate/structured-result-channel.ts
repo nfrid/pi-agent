@@ -118,7 +118,7 @@ function attemptValidation(
 function channelError(
   spec: NormalizedDelegateResultSpec,
   channel: StructuredChannel | undefined,
-): string[] {
+): readonly string[] {
   if (!channel) return ['/: delegate_result channel is missing'];
   if (channel.calls > STRUCTURED_RESULT_CAPS.maxAttempts)
     return [

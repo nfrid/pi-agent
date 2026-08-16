@@ -54,6 +54,9 @@ export type DelegateRunContext = {
   ctx: ExtensionContext;
   /** Session owning the invocation, captured before preparation can await. */
   launchSessionId?: string;
+  /** Branch owning exact metadata/artifact writes, captured before awaits. */
+  launchBranchId?: string;
+  isLaunchBranchActive?: () => boolean;
   config: DelegateConfig;
   signal?: AbortSignal;
   getSnapshot: SnapshotLookup;
@@ -146,6 +149,8 @@ async function runPreparedWithLifecycle(
   hooks: RunHooks = {},
 ): Promise<DelegatedRun> {
   const { config, signal } = runCtx;
+  const launchSessionId =
+    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
   const parallel = mode === 'parallel';
   // Setup failures still represent one stable invocation in public details.
   const runId = prepared.runId;
@@ -183,7 +188,7 @@ async function runPreparedWithLifecycle(
       timeoutMs: config.timeoutMs,
       maxConcurrency: config.maxConcurrency,
       signal,
-      ownerSessionId: runCtx.launchSessionId,
+      ownerSessionId: launchSessionId,
       control: hooks.control,
       onUpdate: hooks.onUpdate,
       onRunUpdate: hooks.onRunUpdate,
@@ -303,6 +308,8 @@ export async function prepareDelegateExecution(
   runCtx: DelegateRunContext,
   params: DelegateParams,
 ): Promise<PreparedDelegateExecution> {
+  const launchSessionId =
+    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
   const built = buildDelegatePlans(
     params,
     runCtx.ctx,
@@ -323,11 +330,7 @@ export async function prepareDelegateExecution(
   }
   return {
     mode: built.parallel ? 'parallel' : 'single',
-    tasks: await preparePlans(
-      tasks,
-      built.parallel,
-      runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId(),
-    ),
+    tasks: await preparePlans(tasks, built.parallel, launchSessionId),
   };
 }
 
@@ -409,16 +412,19 @@ async function executeDelegate(
   params: DelegateParams,
   hooks: RunHooks,
 ) {
-  const execution = await prepareDelegateExecution(runCtx, params);
-  const runs = await runPreparedDelegateExecution(runCtx, execution, hooks);
   const launchSessionId =
     runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
+  const launchBranchId = runCtx.launchBranchId;
+  const execution = await prepareDelegateExecution(runCtx, params);
+  const runs = await runPreparedDelegateExecution(runCtx, execution, hooks);
   return delegateToolResult(
     runCtx.pi,
     runCtx.ctx,
     execution.mode,
     runs,
     launchSessionId,
+    launchBranchId,
+    runCtx.isLaunchBranchActive,
   );
 }
 
@@ -440,6 +446,9 @@ export async function prepareDelegateWorkflowLaunch(
   workflow: import('./workflow-coordinator').DelegateWorkflowLaunchContext,
   hooks: AsyncDelegateLaunchHooks = {},
 ): Promise<import('./workflow-coordinator').DelegateWorkflowPreparedLaunch> {
+  const launchSessionId =
+    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
+  const launchBranchId = runCtx.launchBranchId;
   let launchPlan = plan;
   const branch = workflow.inputs.find(
     (input) => input.kind === 'branch',
@@ -492,12 +501,12 @@ export async function prepareDelegateWorkflowLaunch(
   const prepared = await prepareDelegateTask(
     finalPlan,
     preflightDelegateContinuation(finalPlan),
-    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId(),
+    launchSessionId,
+    workflow.signal,
   );
   const pending = pendingRuns({ mode: 'single', tasks: [prepared] })[0];
   if (pending) hooks.onRunUpdate?.(pending);
-  const ownerSessionId =
-    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
+  const ownerSessionId = launchSessionId;
   let control: ReturnType<typeof createDelegateControlChannel>;
   try {
     control = createDelegateControlChannel(
@@ -522,6 +531,8 @@ export async function prepareDelegateWorkflowLaunch(
       ctx,
       ownerSessionId,
       runs,
+      launchBranchId,
+      runCtx.isLaunchBranchActive,
     );
     return { runs, retainedRuns: runs, handoff };
   };
@@ -530,6 +541,7 @@ export async function prepareDelegateWorkflowLaunch(
     launch: {
       name: finalPlan.name,
       ownerSessionId,
+      ownerBranchId: launchBranchId,
       mode: 'single',
       tasks: [finalPlan.task],
       route: finalPlan.routing?.route,

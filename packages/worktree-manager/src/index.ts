@@ -6,6 +6,9 @@
  * and retirement.
  */
 export {
+  type CapturedWipSource,
+  type CaptureWorkInProgressOptions,
+  captureWorkInProgress,
   createWorktreeCreator,
   type ExistingWorktreeValidation,
   validateExistingWorktree,
@@ -21,6 +24,7 @@ export {
 } from './finish.js';
 export {
   canonical,
+  type GitOptions,
   git,
   gitText,
   isInside,

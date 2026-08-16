@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
@@ -41,6 +42,181 @@ const WORKTREE_LOCK_TIMEOUT_MS = 30_000;
 const WORKTREE_LOCK_RETRY_MS = 20;
 const WORKTREE_LOCK_STALE_MS = 120_000;
 const WORKTREE_LOCK_OWNER = randomUUID();
+const CAPTURE_REF_PREFIX = 'refs/private/pi-worktree-manager/wip/';
+
+export interface CapturedWipSource {
+  /** Canonical root of the repository that was captured. */
+  repositoryRoot: string;
+  /** HEAD at the time the source was captured. */
+  baseHead: string;
+  /** Commit containing the immutable source snapshot. */
+  snapshotCommit: string;
+  /** Whether the snapshot contains changes beyond `baseHead`. */
+  carriedWip: boolean;
+  /** The synthetic commit containing carried WIP, when there was any. */
+  carryCommit?: string;
+  /** Private ref pinning `snapshotCommit` until this source is disposed. */
+  ref: string;
+  /** Remove this source's pin without deleting a ref that replaced it. */
+  dispose(): Promise<void>;
+}
+
+export interface CaptureWorkInProgressOptions {
+  /** Abort Git work and remove any pin created before the abort. */
+  signal?: AbortSignal;
+  /** Extra environment for Git commands. `GIT_INDEX_FILE` is reserved. */
+  env?: NodeJS.ProcessEnv;
+  /** Message for the synthetic commit, when WIP differs from HEAD. */
+  commitMessage?: string;
+}
+
+function abortIfRequested(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new Error('work-in-progress capture was aborted');
+}
+
+async function disposeCapturedWipRef(
+  repositoryRoot: string,
+  ref: string,
+  snapshotCommit: string,
+  env: NodeJS.ProcessEnv | undefined,
+): Promise<void> {
+  try {
+    await git(
+      repositoryRoot,
+      ['update-ref', '--no-deref', '-d', ref, snapshotCommit],
+      { env },
+    );
+  } catch (error) {
+    // `update-ref -d <ref> <old>` intentionally fails when the ref is absent
+    // or has been replaced. Both cases are already safe: never remove the
+    // replacement and make disposal repeatable for callers.
+    try {
+      const current = await gitText(
+        repositoryRoot,
+        ['rev-parse', '--verify', `${ref}^{commit}`],
+        { env },
+      );
+      if (current !== snapshotCommit) return;
+    } catch {
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Capture the caller's source state without touching its index or worktree.
+ *
+ * An alternate index is populated from HEAD and then with `git add --all`, so
+ * tracked staged/unstaged changes and non-ignored untracked files are all
+ * represented while ignored files remain out of the snapshot. The resulting
+ * commit is pinned by a short-lived private UUID ref. There is deliberately no
+ * automatic stale-ref sweep: without a durable owner sidecar, an expired ref
+ * cannot be safely distinguished from a ref another process still owns, so
+ * callers must dispose each returned source explicitly.
+ */
+export async function captureWorkInProgress(
+  cwd: string,
+  options: CaptureWorkInProgressOptions = {},
+): Promise<CapturedWipSource> {
+  abortIfRequested(options.signal);
+  const baseGitOptions = {
+    env: options.env,
+    signal: options.signal,
+  };
+  const root = await repositoryRoot(cwd, baseGitOptions);
+  const baseHead = await gitText(
+    root,
+    ['rev-parse', '--verify', 'HEAD'],
+    baseGitOptions,
+  );
+  const temporaryDirectory = mkdtempSync(
+    path.join(tmpdir(), 'pi-worktree-wip-'),
+  );
+  const indexPath = path.join(temporaryDirectory, 'index');
+  const alternateIndexOptions = {
+    env: { ...options.env, GIT_INDEX_FILE: indexPath },
+    signal: options.signal,
+  };
+  const ref = `${CAPTURE_REF_PREFIX}${randomUUID()}`;
+  let pinAttempted = false;
+  let snapshotCommit: string | undefined;
+
+  try {
+    abortIfRequested(options.signal);
+    await git(root, ['read-tree', 'HEAD'], alternateIndexOptions);
+    await git(root, ['add', '--all'], alternateIndexOptions);
+    const snapshotTree = await gitText(
+      root,
+      ['write-tree'],
+      alternateIndexOptions,
+    );
+    const baseTree = await gitText(
+      root,
+      ['rev-parse', 'HEAD^{tree}'],
+      alternateIndexOptions,
+    );
+    const carriedWip = snapshotTree !== baseTree;
+    const carryCommit = carriedWip
+      ? await gitText(
+          root,
+          [
+            'commit-tree',
+            snapshotTree,
+            '-p',
+            baseHead,
+            '-m',
+            options.commitMessage ?? DEFAULT_CARRY_COMMIT_MESSAGE,
+          ],
+          alternateIndexOptions,
+        )
+      : undefined;
+    const capturedSnapshotCommit = carryCommit ?? baseHead;
+    snapshotCommit = capturedSnapshotCommit;
+
+    pinAttempted = true;
+    await git(
+      root,
+      [
+        'update-ref',
+        '--no-deref',
+        ref,
+        capturedSnapshotCommit,
+        '0'.repeat(baseHead.length),
+      ],
+      baseGitOptions,
+    );
+    abortIfRequested(options.signal);
+
+    let disposal: Promise<void> | undefined;
+    return {
+      repositoryRoot: root,
+      baseHead,
+      snapshotCommit: capturedSnapshotCommit,
+      carriedWip,
+      ...(carryCommit ? { carryCommit } : {}),
+      ref,
+      dispose: () => {
+        disposal ??= disposeCapturedWipRef(
+          root,
+          ref,
+          capturedSnapshotCommit,
+          options.env,
+        );
+        return disposal;
+      },
+    };
+  } catch (error) {
+    if (pinAttempted && snapshotCommit)
+      await disposeCapturedWipRef(root, ref, snapshotCommit, options.env).catch(
+        () => undefined,
+      );
+    throw error;
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
 
 function slugify(name: string): string {
   const slug = name
@@ -77,15 +253,17 @@ function excludeWorktreeDir(repositoryRoot: string): void {
 async function uniqueBranch(
   repositoryRoot: string,
   base: string,
+  signal?: AbortSignal,
 ): Promise<string> {
+  abortIfRequested(signal);
   const existing = new Set(
     splitZ(
       String(
-        await git(repositoryRoot, [
-          'for-each-ref',
-          '--format=%(refname:short)%00',
-          'refs/heads',
-        ]),
+        await git(
+          repositoryRoot,
+          ['for-each-ref', '--format=%(refname:short)%00', 'refs/heads'],
+          { signal },
+        ),
       ),
     ),
   );
@@ -115,30 +293,34 @@ async function carryWorkInProgress(
   repositoryRoot: string,
   worktreePath: string,
   commitMessage: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
+  abortIfRequested(signal);
   let carried = false;
 
   const diff = (await git(repositoryRoot, ['diff', 'HEAD', '--binary'], {
     encoding: 'buffer',
+    signal,
   })) as Buffer;
   if (diff.length > 0) {
     await git(worktreePath, ['apply', '--whitespace=nowarn', '-'], {
       input: diff,
+      signal,
     });
     carried = true;
   }
 
   const untracked = splitZ(
     String(
-      await git(repositoryRoot, [
-        'ls-files',
-        '--others',
-        '--exclude-standard',
-        '-z',
-      ]),
+      await git(
+        repositoryRoot,
+        ['ls-files', '--others', '--exclude-standard', '-z'],
+        { signal },
+      ),
     ),
   );
   for (const relative of untracked) {
+    abortIfRequested(signal);
     const source = path.join(repositoryRoot, relative);
     const target = path.join(worktreePath, relative);
     if (!existsSync(source) || existsSync(target)) continue;
@@ -148,16 +330,21 @@ async function carryWorkInProgress(
   }
 
   if (!carried) return undefined;
-  await git(worktreePath, ['add', '--all']);
-  await git(worktreePath, [
-    '-c',
-    'core.hooksPath=/dev/null',
-    'commit',
-    '--no-verify',
-    '--message',
-    commitMessage,
-  ]);
-  return await gitText(worktreePath, ['rev-parse', 'HEAD']);
+  abortIfRequested(signal);
+  await git(worktreePath, ['add', '--all'], { signal });
+  await git(
+    worktreePath,
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      'commit',
+      '--no-verify',
+      '--message',
+      commitMessage,
+    ],
+    { signal },
+  );
+  return await gitText(worktreePath, ['rev-parse', 'HEAD'], { signal });
 }
 
 function processIsAlive(pid: number): boolean {
@@ -178,9 +365,11 @@ function processIsAlive(pid: number): boolean {
 export async function withWorktreePathLock<T>(
   worktreePath: string,
   action: () => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
+  abortIfRequested(signal);
   const targetPath = canonical(worktreePath);
-  const identity = await repositoryIdentity(targetPath);
+  const identity = await repositoryIdentity(targetPath, { signal });
   const lockRoot = path.join(tmpdir(), 'pi-worktree-manager-locks');
   mkdirSync(lockRoot, { recursive: true });
   const key = createHash('sha256')
@@ -191,6 +380,7 @@ export async function withWorktreePathLock<T>(
   const startedAt = Date.now();
 
   while (true) {
+    abortIfRequested(signal);
     try {
       mkdirSync(lockPath);
       writeFileSync(
@@ -221,13 +411,23 @@ export async function withWorktreePathLock<T>(
       }
       if (Date.now() - startedAt >= WORKTREE_LOCK_TIMEOUT_MS)
         throw new Error('timed out waiting for the caller worktree claim');
-      await new Promise((resolve) =>
-        setTimeout(resolve, WORKTREE_LOCK_RETRY_MS),
-      );
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', onAbort);
+          reject(signal?.reason ?? new Error('worktree preparation aborted'));
+        };
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, WORKTREE_LOCK_RETRY_MS);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
     }
   }
 
   try {
+    abortIfRequested(signal);
     return await action();
   } finally {
     rmSync(lockPath, { recursive: true, force: true });
@@ -241,9 +441,12 @@ interface RegisteredWorktree {
 
 async function registeredWorktrees(
   repositoryRootPath: string,
+  signal?: AbortSignal,
 ): Promise<RegisteredWorktree[]> {
   const lines = String(
-    await git(repositoryRootPath, ['worktree', 'list', '--porcelain']),
+    await git(repositoryRootPath, ['worktree', 'list', '--porcelain'], {
+      signal,
+    }),
   ).split(/\r?\n/);
   const entries: RegisteredWorktree[] = [];
   let current: RegisteredWorktree | undefined;
@@ -281,7 +484,10 @@ export async function validateExistingWorktree(options: {
   allowRequestedCheckout?: boolean;
   /** Finish-time validation may inspect a writable dirty checkout. */
   requireClean?: boolean;
+  /** Abort in-flight Git validation when preparation is cancelled. */
+  signal?: AbortSignal;
 }): Promise<ExistingWorktreeValidation> {
+  abortIfRequested(options.signal);
   if (!path.isAbsolute(options.worktreePath))
     throw new Error('the caller worktree path must be absolute');
   if (!existsSync(options.worktreePath))
@@ -291,26 +497,31 @@ export async function validateExistingWorktree(options: {
   if (!statSync(options.worktreePath).isDirectory())
     throw new Error('the caller worktree path is not a directory');
 
-  const requestedRoot = await repositoryRoot(options.cwd);
+  const requestedRoot = await repositoryRoot(options.cwd, {
+    signal: options.signal,
+  });
   const targetPath = canonical(options.worktreePath);
-  const targetRoot = await repositoryRoot(targetPath);
+  const targetRoot = await repositoryRoot(targetPath, {
+    signal: options.signal,
+  });
   if (targetRoot !== targetPath)
     throw new Error('the caller path must be the worktree root');
   if (targetPath === requestedRoot && !options.allowRequestedCheckout)
     throw new Error('the caller worktree must not be the requested checkout');
   if (
-    (await repositoryIdentity(options.cwd)) !==
-    (await repositoryIdentity(targetPath))
+    (await repositoryIdentity(options.cwd, { signal: options.signal })) !==
+    (await repositoryIdentity(targetPath, { signal: options.signal }))
   )
     throw new Error('the caller worktree belongs to a different repository');
   if (
     options.expectedRepositoryRoot &&
-    (await repositoryIdentity(options.expectedRepositoryRoot)) !==
-      (await repositoryIdentity(targetPath))
+    (await repositoryIdentity(options.expectedRepositoryRoot, {
+      signal: options.signal,
+    })) !== (await repositoryIdentity(targetPath, { signal: options.signal }))
   )
     throw new Error('the recorded worktree repository no longer matches');
 
-  const registered = await registeredWorktrees(requestedRoot);
+  const registered = await registeredWorktrees(requestedRoot, options.signal);
   const entry = registered.find((candidate) => {
     try {
       return canonical(candidate.path) === targetPath;
@@ -322,12 +533,11 @@ export async function validateExistingWorktree(options: {
 
   let branch: string;
   try {
-    branch = await gitText(targetPath, [
-      'symbolic-ref',
-      '--quiet',
-      '--short',
-      'HEAD',
-    ]);
+    branch = await gitText(
+      targetPath,
+      ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+      { signal: options.signal },
+    );
   } catch {
     throw new Error('the caller worktree must be checked out on a branch');
   }
@@ -337,11 +547,11 @@ export async function validateExistingWorktree(options: {
     throw new Error('the caller worktree branch changed since delegate setup');
 
   const status = String(
-    await git(targetPath, [
-      'status',
-      '--porcelain=v1',
-      '--untracked-files=all',
-    ]),
+    await git(
+      targetPath,
+      ['status', '--porcelain=v1', '--untracked-files=all'],
+      { signal: options.signal },
+    ),
   );
   if ((options.requireClean ?? true) && status.trim())
     throw new Error('the caller worktree must be clean before delegation');
@@ -349,7 +559,9 @@ export async function validateExistingWorktree(options: {
     if (
       await (async () => {
         try {
-          await git(targetPath, ['rev-parse', '--verify', '--quiet', marker]);
+          await git(targetPath, ['rev-parse', '--verify', '--quiet', marker], {
+            signal: options.signal,
+          });
           return true;
         } catch {
           return false;
@@ -360,7 +572,9 @@ export async function validateExistingWorktree(options: {
         `the caller worktree has an in-progress ${marker} operation`,
       );
   }
-  const gitDir = await gitText(targetPath, ['rev-parse', '--git-dir']);
+  const gitDir = await gitText(targetPath, ['rev-parse', '--git-dir'], {
+    signal: options.signal,
+  });
   const resolvedGitDir = path.isAbsolute(gitDir)
     ? gitDir
     : path.resolve(targetPath, gitDir);
@@ -370,7 +584,9 @@ export async function validateExistingWorktree(options: {
   )
     throw new Error('the caller worktree has an in-progress rebase');
 
-  const headCommit = await gitText(targetPath, ['rev-parse', 'HEAD']);
+  const headCommit = await gitText(targetPath, ['rev-parse', 'HEAD'], {
+    signal: options.signal,
+  });
   if (options.expectedHead && headCommit !== options.expectedHead)
     throw new Error(
       'the caller worktree changed since the previous delegate run',
@@ -403,9 +619,14 @@ export interface WorktreeCreator<
     baseRef?: string;
     /** Existing, validated caller-owned worktree to use without creating one. */
     worktreePath?: string;
+    /** Abort in-flight Git/setup operations during lazy preparation. */
+    signal?: AbortSignal;
   }): Promise<WorktreePreparation<Record>>;
   /** Recreate a retired checkout from its retained branch ref. */
-  rehydrateWorktree(record: Record): Promise<PreparedWorktree<Record>>;
+  rehydrateWorktree(
+    record: Record,
+    options?: { signal?: AbortSignal },
+  ): Promise<PreparedWorktree<Record>>;
 }
 
 export function createWorktreeCreator<
@@ -440,10 +661,12 @@ export function createWorktreeCreator<
     base?: WorktreeBase;
     baseRef?: string;
     worktreePath?: string;
+    signal?: AbortSignal;
   }): Promise<WorktreePreparation<Record>> {
     let root: string;
     try {
-      root = await repositoryRoot(options.cwd);
+      abortIfRequested(options.signal);
+      root = await repositoryRoot(options.cwd, { signal: options.signal });
     } catch (error) {
       return {
         fallbackReason: `Worktree unavailable: ${error instanceof Error ? error.message : String(error)}.`,
@@ -459,37 +682,43 @@ export function createWorktreeCreator<
             'Caller worktree selection cannot be combined with a base/ref; the existing branch is the source snapshot.',
         };
       try {
-        return await withWorktreePathLock(options.worktreePath, async () => {
-          const existing = await validateExistingWorktree({
-            cwd: options.cwd,
-            worktreePath: options.worktreePath as string,
-          });
-          claimCallerWorktree?.(existing);
-          const canonicalCwd = canonical(options.cwd);
-          const workingDirectory = path.relative(root, canonicalCwd);
-          const now = new Date().toISOString();
-          const record = {
-            version: 1 as const,
-            id,
-            repositoryRoot: existing.repositoryRoot,
-            worktreePath: existing.worktreePath,
-            workingDirectory,
-            branch: existing.branch,
-            ownership: 'caller' as const,
-            baseHead: existing.headCommit,
-            base: 'head' as const,
-            carriedWip: false,
-            status: 'active' as const,
-            createdAt: now,
-            updatedAt: now,
-            // The selected checkout is already at this tip. Keeping the initial
-            // tip lets read-only runs detect a shell-side commit without ever
-            // committing or deleting caller-owned work.
-            headCommit: existing.headCommit,
-          } as Record;
-          store.writeWorktreeRecord(record);
-          return { worktree: { record, env: environment(id) } };
-        });
+        return await withWorktreePathLock(
+          options.worktreePath,
+          async () => {
+            const existing = await validateExistingWorktree({
+              cwd: options.cwd,
+              worktreePath: options.worktreePath as string,
+              signal: options.signal,
+            });
+            abortIfRequested(options.signal);
+            claimCallerWorktree?.(existing);
+            const canonicalCwd = canonical(options.cwd);
+            const workingDirectory = path.relative(root, canonicalCwd);
+            const now = new Date().toISOString();
+            const record = {
+              version: 1 as const,
+              id,
+              repositoryRoot: existing.repositoryRoot,
+              worktreePath: existing.worktreePath,
+              workingDirectory,
+              branch: existing.branch,
+              ownership: 'caller' as const,
+              baseHead: existing.headCommit,
+              base: 'head' as const,
+              carriedWip: false,
+              status: 'active' as const,
+              createdAt: now,
+              updatedAt: now,
+              // The selected checkout is already at this tip. Keeping the initial
+              // tip lets read-only runs detect a shell-side commit without ever
+              // committing or deleting caller-owned work.
+              headCommit: existing.headCommit,
+            } as Record;
+            store.writeWorktreeRecord(record);
+            return { worktree: { record, env: environment(id) } };
+          },
+          options.signal,
+        );
       } catch (error) {
         return {
           fallbackReason: `Caller worktree unavailable: ${error instanceof Error ? error.message : String(error)}.`,
@@ -527,8 +756,9 @@ export function createWorktreeCreator<
               '--end-of-options',
               `${baseRef}^{commit}`,
             ],
+        { signal: options.signal },
       );
-      branch = await uniqueBranch(root, slugify(options.name));
+      branch = await uniqueBranch(root, slugify(options.name), options.signal);
       worktreePath = path.join(root, WORKTREE_DIR, path.basename(branch));
       if (existsSync(worktreePath))
         worktreePath = path.join(
@@ -541,19 +771,23 @@ export function createWorktreeCreator<
       mkdirSync(path.dirname(worktreePath), { recursive: true });
       // Do not override core.hooksPath: `worktree add` must honor the
       // repository's native checkout/setup hooks.
-      await git(root, [
-        'worktree',
-        'add',
-        '-b',
-        branch,
-        worktreePath,
-        baseHead,
-      ]);
+      await git(
+        root,
+        ['worktree', 'add', '-b', branch, worktreePath, baseHead],
+        { signal: options.signal },
+      );
+      abortIfRequested(options.signal);
 
       const carryCommit =
         base === 'wip'
-          ? await carryWorkInProgress(root, worktreePath, carryCommitMessage)
+          ? await carryWorkInProgress(
+              root,
+              worktreePath,
+              carryCommitMessage,
+              options.signal,
+            )
           : undefined;
+      abortIfRequested(options.signal);
       const now = new Date().toISOString();
       const record = {
         version: 1 as const,
@@ -581,7 +815,9 @@ export function createWorktreeCreator<
 
   async function rehydrateWorktree(
     record: Record,
+    options: { signal?: AbortSignal } = {},
   ): Promise<PreparedWorktree<Record>> {
+    abortIfRequested(options.signal);
     if (record.ownership === 'caller' && !existsSync(record.worktreePath))
       throw new Error(
         'This caller-owned worktree is unavailable and will not be recreated by the harness.',
@@ -599,12 +835,12 @@ export function createWorktreeCreator<
       mkdirSync(path.dirname(record.worktreePath), { recursive: true });
       // Keep native Git worktree semantics for snapshot rehydration too, so the
       // configured checkout/setup hooks can recreate ignored child-local state.
-      await git(record.repositoryRoot, [
-        'worktree',
-        'add',
-        record.worktreePath,
-        record.branch,
-      ]);
+      await git(
+        record.repositoryRoot,
+        ['worktree', 'add', record.worktreePath, record.branch],
+        { signal: options.signal },
+      );
+      abortIfRequested(options.signal);
       activateRecord(record);
       return { record, env: environment(record.id) };
     } catch (error) {

@@ -7,6 +7,8 @@ import type {
   DelegateHistoryRunDetailResponse,
 } from '@pi-dashboard/protocol';
 import {
+  isCanonicalWorkflowAttemptReference,
+  isCanonicalWorkflowLogicalId,
   MAX_DELEGATE_HISTORY_DETAIL_BYTES,
   MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
   MAX_DELEGATE_HISTORY_DETAIL_TEXT,
@@ -15,6 +17,8 @@ import {
   MAX_DELEGATE_HISTORY_SUMMARY_BYTES,
   MAX_DELEGATE_HISTORY_TASK,
   MAX_DELEGATE_HISTORY_TOTAL_RUNS,
+  MAX_WORKFLOW_ATTEMPT_ORDINAL,
+  MAX_WORKFLOW_DEPENDENCIES,
 } from '@pi-dashboard/protocol';
 
 /**
@@ -424,33 +428,67 @@ function projectWorkflow(
   createdAt: number,
   route?: string,
 ): RecordValue | undefined {
-  const source = isRecord(run.workflow) ? run.workflow : run.workflowAttempt;
+  const hasWorkflowMetadata = run.workflow !== undefined;
+  const source = hasWorkflowMetadata ? run.workflow : run.workflowAttempt;
   if (!isRecord(source)) return undefined;
-  const logicalId = stringValue(source.logicalId, 64);
-  const identity = stringValue(source.identity, 80);
+  const ownerBranchId = validWorkflowText(source.ownerBranchId, 256);
+  if (
+    (source.ownerBranchId !== undefined && ownerBranchId === undefined) ||
+    (hasWorkflowMetadata && source.dependencies === undefined)
+  )
+    return undefined;
+  const logicalId = isCanonicalWorkflowLogicalId(source.logicalId)
+    ? source.logicalId
+    : undefined;
+  const identity = isCanonicalWorkflowAttemptReference(source.identity)
+    ? source.identity
+    : undefined;
   const ordinal = source.ordinal;
   if (
     logicalId === undefined ||
     identity === undefined ||
     typeof ordinal !== 'number' ||
     !Number.isSafeInteger(ordinal) ||
-    ordinal < 1
+    ordinal < 1 ||
+    ordinal > MAX_WORKFLOW_ATTEMPT_ORDINAL ||
+    identity !== `${logicalId}@${ordinal}`
   )
     return undefined;
-  const dependencies = Array.isArray(source.dependencies)
-    ? source.dependencies.flatMap((value) => {
-        const identity = stringValue(value, 80);
-        return identity ? [identity] : [];
-      })
-    : [];
-  const waitingFor = Array.isArray(source.waitingFor)
-    ? source.waitingFor.flatMap((value) => {
-        const identity = stringValue(value, 80);
-        return identity ? [identity] : [];
-      })
-    : undefined;
-  const reason = stringValue(source.reason, 256);
+  const dependencies =
+    source.dependencies === undefined
+      ? []
+      : Array.isArray(source.dependencies) &&
+          source.dependencies.length <= MAX_WORKFLOW_DEPENDENCIES &&
+          source.dependencies.every(isCanonicalWorkflowAttemptReference)
+        ? (source.dependencies as string[])
+        : undefined;
+  if (
+    dependencies === undefined ||
+    new Set(dependencies).size !== dependencies.length ||
+    dependencies.includes(identity)
+  )
+    return undefined;
+  const waitingFor =
+    source.waitingFor === undefined
+      ? undefined
+      : Array.isArray(source.waitingFor) &&
+          source.waitingFor.length <= MAX_WORKFLOW_DEPENDENCIES &&
+          source.waitingFor.every(isCanonicalWorkflowAttemptReference)
+        ? (source.waitingFor as string[])
+        : undefined;
+  if (
+    waitingFor !== undefined &&
+    (new Set(waitingFor).size !== waitingFor.length ||
+      waitingFor.some((reference) => !dependencies.includes(reference)))
+  )
+    return undefined;
+  const reason =
+    source.reason === undefined
+      ? undefined
+      : validWorkflowText(source.reason, 256);
+  if (source.reason !== undefined && reason === undefined) return undefined;
   return {
+    ...(ownerBranchId ? { ownerBranchId } : {}),
     logicalId,
     attempt: ordinal,
     identity,
@@ -546,6 +584,8 @@ function projectRun(
 }
 
 const WORKFLOW_STORE_ENTRY_TYPE = 'delegate-workflow:v1';
+const MAX_WORKFLOW_HISTORY_ATTEMPTS = 256;
+const MAX_WORKFLOW_DELTA_ATTEMPTS = 32;
 const WORKFLOW_STATES = new Set([
   'scheduled',
   'queued',
@@ -558,43 +598,88 @@ const WORKFLOW_STATES = new Set([
   'blocked',
 ]);
 
+function validWorkflowText(value: unknown, max: number): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > max)
+    return undefined;
+  if (
+    [...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    return undefined;
+  return value;
+}
+
 function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
   if (!isRecord(value)) return undefined;
-  const logicalId = stringValue(value.logicalId, 64);
-  const identity = stringValue(value.identity, 80);
+  const ownerBranchId =
+    value.ownerBranchId === undefined
+      ? undefined
+      : validWorkflowText(value.ownerBranchId, 256);
+  const logicalId = isCanonicalWorkflowLogicalId(value.logicalId)
+    ? value.logicalId
+    : undefined;
+  const identity = isCanonicalWorkflowAttemptReference(value.identity)
+    ? value.identity
+    : undefined;
   const attempt = value.attempt;
   const state = stringValue(value.state, 32);
   if (
-    !logicalId ||
-    !identity ||
+    (value.ownerBranchId !== undefined && ownerBranchId === undefined) ||
+    logicalId === undefined ||
+    identity === undefined ||
     typeof attempt !== 'number' ||
     !Number.isSafeInteger(attempt) ||
     attempt < 1 ||
+    attempt > MAX_WORKFLOW_ATTEMPT_ORDINAL ||
     identity !== `${logicalId}@${attempt}` ||
     !state ||
     !WORKFLOW_STATES.has(state) ||
     !Array.isArray(value.dependencies) ||
-    !Array.isArray(value.waitingFor)
+    value.dependencies.length > MAX_WORKFLOW_DEPENDENCIES ||
+    value.dependencies.some(
+      (dependency) => !isCanonicalWorkflowAttemptReference(dependency),
+    ) ||
+    new Set(value.dependencies).size !== value.dependencies.length ||
+    value.dependencies.includes(identity as string) ||
+    !Array.isArray(value.waitingFor) ||
+    value.waitingFor.length > MAX_WORKFLOW_DEPENDENCIES ||
+    value.waitingFor.some(
+      (dependency) => !isCanonicalWorkflowAttemptReference(dependency),
+    ) ||
+    new Set(value.waitingFor).size !== value.waitingFor.length ||
+    value.waitingFor.some(
+      (dependency) => !(value.dependencies as unknown[]).includes(dependency),
+    )
   )
     return undefined;
-  const dependencies = value.dependencies.slice(0, 32).flatMap((item) => {
-    const dependency = stringValue(item, 80);
-    return dependency ? [dependency] : [];
-  });
-  const waitingFor = value.waitingFor.slice(0, 32).flatMap((item) => {
-    const dependency = stringValue(item, 80);
-    return dependency ? [dependency] : [];
-  });
+  const dependencies = value.dependencies as string[];
+  const waitingFor = value.waitingFor as string[];
   const createdAt = finiteNumber(value.createdAt);
   const scheduledAt = finiteNumber(value.scheduledAt);
   if (createdAt === undefined || scheduledAt === undefined) return undefined;
+  for (const key of ['queuedAt', 'startedAt', 'settledAt'] as const)
+    if (value[key] !== undefined && finiteNumber(value[key]) === undefined)
+      return undefined;
+  const route =
+    value.route === undefined ? undefined : validWorkflowText(value.route, 512);
+  const reason =
+    value.reason === undefined
+      ? undefined
+      : validWorkflowText(value.reason, 256);
+  if (value.route !== undefined && route === undefined) return undefined;
+  if (value.reason !== undefined && reason === undefined) return undefined;
+  if (value.allowWrites !== undefined && typeof value.allowWrites !== 'boolean')
+    return undefined;
   const result: RecordValue = {
+    ...(ownerBranchId ? { ownerBranchId } : {}),
     logicalId,
     attempt,
     identity,
     state,
     dependencies,
-    ...(waitingFor.length ? { waitingFor } : {}),
+    waitingFor,
     createdAt,
     scheduledAt,
   };
@@ -602,13 +687,83 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
     const timestamp = finiteNumber(value[key]);
     if (timestamp !== undefined) result[key] = timestamp;
   }
-  const route = stringValue(value.route, 512);
-  const reason = stringValue(value.reason, 256);
   if (route) result.route = route;
   if (typeof value.allowWrites === 'boolean')
     result.allowWrites = value.allowWrites;
   if (reason) result.reason = reason;
   return result;
+}
+
+type WorkflowStoreOperation = {
+  kind: 'snapshot' | 'delta';
+  attempts: RecordValue[];
+};
+
+/** null means this is not a workflow entry; undefined means malformed. */
+function workflowStoreOperation(
+  entry: RecordValue,
+): WorkflowStoreOperation | null | undefined {
+  if (entry.customType !== WORKFLOW_STORE_ENTRY_TYPE) return null;
+  const data = isRecord(entry.data) ? entry.data : undefined;
+  const state = data && isRecord(data.state) ? data.state : undefined;
+  const kind = data?.kind;
+  const max =
+    kind === 'snapshot'
+      ? MAX_WORKFLOW_HISTORY_ATTEMPTS
+      : MAX_WORKFLOW_DELTA_ATTEMPTS;
+  if (
+    data?.version !== 1 ||
+    (kind !== 'snapshot' && kind !== 'delta') ||
+    !state ||
+    state.version !== 1 ||
+    !Array.isArray(state.attempts) ||
+    state.attempts.length > max
+  )
+    return undefined;
+  const attempts: RecordValue[] = [];
+  const keys = new Set<string>();
+  for (const source of state.attempts) {
+    const attempt = projectWorkflowStoreAttempt(source);
+    if (!attempt) return undefined;
+    const key = `${String(attempt.ownerBranchId ?? '')}\u0000${String(attempt.identity)}`;
+    if (keys.has(key)) return undefined;
+    keys.add(key);
+    attempts.push(attempt);
+  }
+  return { kind, attempts };
+}
+
+function workflowStoreAttemptRun(metadata: RecordValue): RecordValue {
+  const ownerBranchId = validWorkflowText(metadata.ownerBranchId, 256);
+  const identity = String(metadata.identity);
+  const logicalId = String(metadata.logicalId);
+  const runId = ownerBranchId
+    ? `workflow:${stableHash(`owner:${ownerBranchId}\u0000${identity}`)}`
+    : identity;
+  const lineageId = ownerBranchId
+    ? `workflow:${stableHash(`owner:${ownerBranchId}\u0000${logicalId}`)}`
+    : logicalId;
+  return {
+    runId,
+    lineageId,
+    name: logicalId,
+    state: metadata.state,
+    createdAt: metadata.createdAt,
+    ...(metadata.queuedAt === undefined ? {} : { queuedAt: metadata.queuedAt }),
+    ...(metadata.startedAt === undefined
+      ? {}
+      : { startedAt: metadata.startedAt }),
+    ...(metadata.settledAt === undefined
+      ? {}
+      : { finishedAt: metadata.settledAt }),
+    allowWrites: metadata.allowWrites === true,
+    workflow: metadata,
+  };
+}
+
+function workflowStoreAttempts(entry: RecordValue): RecordValue[] {
+  const operation = workflowStoreOperation(entry);
+  return operation?.attempts.map(workflowStoreAttemptRun) ?? [];
 }
 
 function projectWakeStoreSnapshot(value: unknown): RecordValue | undefined {
@@ -659,103 +814,127 @@ function projectWakeStoreSnapshot(value: unknown): RecordValue | undefined {
   return result;
 }
 
-function wakeStoreEntries(entry: RecordValue): RecordValue[] {
-  if (entry.customType !== 'delegate-wake:v1') return [];
+const WAKE_STORE_ENTRY_TYPE = 'delegate-wake:v1';
+const MAX_WAKE_HISTORY = 256;
+const MAX_WAKE_DELTA_WAKES = 32;
+
+type WakeStoreOperation = {
+  kind: 'snapshot' | 'delta';
+  wakes: RecordValue[];
+  ownerSessionId?: string;
+  ownerEpoch?: number;
+};
+
+function wakeStoreOperation(
+  entry: RecordValue,
+): WakeStoreOperation | null | undefined {
+  if (entry.customType !== WAKE_STORE_ENTRY_TYPE) return null;
   const data = isRecord(entry.data) ? entry.data : undefined;
   const state = data && isRecord(data.state) ? data.state : undefined;
-  if (data?.version !== 1 || data.kind !== 'snapshot' || !state) return [];
-  if (state.version !== 1 || !Array.isArray(state.wakes)) return [];
-  return state.wakes.slice(-256).flatMap((wake) => {
+  const kind = data?.kind;
+  const maximum = kind === 'snapshot' ? MAX_WAKE_HISTORY : MAX_WAKE_DELTA_WAKES;
+  if (
+    data?.version !== 1 ||
+    (kind !== 'snapshot' && kind !== 'delta') ||
+    !state ||
+    state.version !== 1 ||
+    !Array.isArray(state.wakes) ||
+    state.wakes.length > maximum
+  )
+    return undefined;
+  const wakes: RecordValue[] = [];
+  const wakeIds = new Set<string>();
+  for (const wake of state.wakes) {
     const metadata = projectWakeStoreSnapshot(wake);
-    if (!metadata) return [];
-    const lifecycleState =
-      metadata.state === 'entered'
-        ? 'success'
-        : metadata.state === 'cancelled' || metadata.state === 'blocked'
-          ? 'error'
-          : 'running';
-    return [
-      {
-        runId: `wake:${metadata.id}`,
-        lineageId: `wake:${metadata.id}`,
-        name: `Wake ${metadata.id}`,
-        state: lifecycleState,
-        createdAt: metadata.createdAt,
-        ...(metadata.queuedAt === undefined
-          ? {}
-          : { queuedAt: metadata.queuedAt }),
-        ...(metadata.enteredAt === undefined
-          ? {}
-          : { finishedAt: metadata.enteredAt }),
-        allowWrites: false,
-        wake: metadata,
-      },
-    ];
-  });
-}
-
-function projectWakeStoreEntry(entry: RecordValue): RecordValue | undefined {
-  const wakes = wakeStoreEntries(entry);
-  if (wakes.length === 0) return undefined;
+    const id = metadata ? stringValue(metadata.id, 256) : undefined;
+    if (!metadata || !id || wakeIds.has(id)) return undefined;
+    wakeIds.add(id);
+    wakes.push(metadata);
+  }
+  const ownerSessionId = stringValue(state.ownerSessionId, 256);
+  const ownerEpoch = finiteNumber(state.ownerEpoch);
+  if (
+    (state.ownerSessionId !== undefined && ownerSessionId === undefined) ||
+    (state.ownerEpoch !== undefined &&
+      (ownerEpoch === undefined ||
+        !Number.isSafeInteger(ownerEpoch) ||
+        ownerEpoch < 0))
+  )
+    return undefined;
   return {
-    ...projectedEntryMetadata(entry),
-    type: 'custom',
-    customType: 'delegate-wake:v1',
-    data: {
-      version: 1,
-      kind: 'snapshot',
-      state: { version: 1, wakes: wakes.map((wake) => wake.wake) },
-    },
+    kind,
+    wakes,
+    ...(ownerSessionId === undefined ? {} : { ownerSessionId }),
+    ...(ownerEpoch === undefined ? {} : { ownerEpoch }),
   };
 }
 
-function workflowStoreAttempts(entry: RecordValue): RecordValue[] {
-  if (entry.customType !== WORKFLOW_STORE_ENTRY_TYPE) return [];
-  const data = isRecord(entry.data) ? entry.data : undefined;
-  const state = data && isRecord(data.state) ? data.state : undefined;
-  if (data?.version !== 1 || data.kind !== 'snapshot' || !state) return [];
-  if (state.version !== 1 || !Array.isArray(state.attempts)) return [];
-  return state.attempts.slice(-256).flatMap((attempt) => {
-    const metadata = projectWorkflowStoreAttempt(attempt);
-    if (!metadata) return [];
-    return [
-      {
-        runId: metadata.identity,
-        lineageId: metadata.logicalId,
-        name: metadata.logicalId,
-        state: metadata.state,
-        createdAt: metadata.createdAt,
-        ...(metadata.queuedAt === undefined
+function wakeRun(metadata: RecordValue): RecordValue {
+  const lifecycleState =
+    metadata.state === 'entered'
+      ? 'success'
+      : metadata.state === 'cancelled' || metadata.state === 'blocked'
+        ? 'error'
+        : 'running';
+  return {
+    runId: `wake:${metadata.id}`,
+    lineageId: `wake:${metadata.id}`,
+    name: `Wake ${metadata.id}`,
+    state: lifecycleState,
+    createdAt: metadata.createdAt,
+    ...(metadata.queuedAt === undefined ? {} : { queuedAt: metadata.queuedAt }),
+    ...(metadata.enteredAt === undefined
+      ? {}
+      : { finishedAt: metadata.enteredAt }),
+    allowWrites: false,
+    wake: metadata,
+  };
+}
+
+function wakeStoreEntries(entry: RecordValue): RecordValue[] {
+  const operation = wakeStoreOperation(entry);
+  return operation?.wakes.map(wakeRun) ?? [];
+}
+
+function projectWakeStoreEntry(entry: RecordValue): RecordValue | undefined {
+  const operation = wakeStoreOperation(entry);
+  if (!operation || operation.wakes.length === 0) return undefined;
+  return {
+    ...projectedEntryMetadata(entry),
+    type: 'custom',
+    customType: WAKE_STORE_ENTRY_TYPE,
+    data: {
+      version: 1,
+      kind: operation.kind,
+      state: {
+        version: 1,
+        ...(operation.ownerSessionId === undefined
           ? {}
-          : { queuedAt: metadata.queuedAt }),
-        ...(metadata.startedAt === undefined
+          : { ownerSessionId: operation.ownerSessionId }),
+        ...(operation.ownerEpoch === undefined
           ? {}
-          : { startedAt: metadata.startedAt }),
-        ...(metadata.settledAt === undefined
-          ? {}
-          : { finishedAt: metadata.settledAt }),
-        allowWrites: metadata.allowWrites === true,
-        workflow: metadata,
+          : { ownerEpoch: operation.ownerEpoch }),
+        wakes: operation.wakes,
       },
-    ];
-  });
+    },
+  };
 }
 
 function projectWorkflowStoreEntry(
   entry: RecordValue,
 ): RecordValue | undefined {
-  const attempts = workflowStoreAttempts(entry);
-  if (attempts.length === 0) return undefined;
+  const operation = workflowStoreOperation(entry);
+  if (!operation) return undefined;
   return {
     ...projectedEntryMetadata(entry),
     type: 'custom',
     customType: WORKFLOW_STORE_ENTRY_TYPE,
     data: {
       version: 1,
-      kind: 'snapshot',
+      kind: operation.kind,
       state: {
         version: 1,
-        attempts: attempts.map((attempt) => attempt.workflow),
+        attempts: operation.attempts,
       },
     },
   };
@@ -981,32 +1160,148 @@ export function isDelegateHistoryEntry(value: unknown): boolean {
   );
 }
 
-function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
-  const ordinary: DelegateOccurrence[] = [];
-  const latestMetadata = new Map<string, DelegateOccurrence>();
+function workflowJournal(
+  branch: readonly unknown[],
+): DelegateOccurrence[] | undefined {
+  const latest = new Map<string, DelegateOccurrence>();
   for (const [entryIndex, value] of branch.entries()) {
     if (!isRecord(value)) continue;
-    for (const occurrence of workflowDetails(value, entryIndex)) {
-      const workflow = isRecord(occurrence.run.workflow)
-        ? stringValue(occurrence.run.workflow.identity, 80)
-        : undefined;
-      const wake = isRecord(occurrence.run.wake)
-        ? stringValue(occurrence.run.wake.id, 256)
-        : undefined;
-      const key = workflow
-        ? `workflow:${workflow}`
-        : wake
-          ? `wake:${wake}`
-          : undefined;
-      if (key) latestMetadata.set(key, occurrence);
-      else ordinary.push(occurrence);
+    const operation = workflowStoreOperation(value);
+    // A malformed workflow record invalidates the complete metadata journal;
+    // never render a valid prefix or an incomplete delta as current state.
+    if (operation === undefined) return undefined;
+    if (operation === null) continue;
+    if (operation.kind === 'snapshot') latest.clear();
+    for (const metadata of operation.attempts) {
+      const owner = validWorkflowText(metadata.ownerBranchId, 256) ?? '';
+      const identity = String(metadata.identity);
+      const key = `workflow:${owner}\u0000${identity}`;
+      latest.delete(key);
+      latest.set(key, {
+        run: workflowStoreAttemptRun(metadata),
+        kind: 'background',
+        entryIndex,
+        runIndex: identity,
+        entryIdentity: stringValue(value.id),
+        entryTimestamp: entryTimestamp(value),
+      });
     }
+    while (latest.size > MAX_WORKFLOW_HISTORY_ATTEMPTS) {
+      const oldest = latest.keys().next().value;
+      if (oldest === undefined) break;
+      latest.delete(oldest);
+    }
+  }
+  return [...latest.values()];
+}
+
+function wakeStateProgress(state: unknown): number {
+  if (state === 'pending') return 0;
+  if (state === 'ready') return 1;
+  if (state === 'queued') return 2;
+  return 3;
+}
+
+function wakeIsTerminal(state: unknown): boolean {
+  return state === 'entered' || state === 'cancelled' || state === 'blocked';
+}
+
+function keepPriorWakeOccurrence(
+  previous: DelegateOccurrence,
+  next: DelegateOccurrence,
+): boolean {
+  const oldWake = isRecord(previous.run.wake) ? previous.run.wake : undefined;
+  const newWake = isRecord(next.run.wake) ? next.run.wake : undefined;
+  if (!oldWake || !newWake) return false;
+  const oldRevision = finiteNumber(oldWake.revision) ?? 0;
+  const newRevision = finiteNumber(newWake.revision) ?? 0;
+  if (oldRevision >= newRevision) return true;
+  const oldProgress = wakeStateProgress(oldWake.state);
+  const newProgress = wakeStateProgress(newWake.state);
+  if (oldProgress > newProgress) return true;
+  if (oldProgress === newProgress && oldWake.state !== newWake.state)
+    return true;
+  if (wakeIsTerminal(oldWake.state) && oldWake.state !== newWake.state)
+    return true;
+  if (oldWake.state === 'queued' && newWake.state !== 'queued') return true;
+  return false;
+}
+
+function wakeJournal(
+  branch: readonly unknown[],
+): DelegateOccurrence[] | undefined {
+  const latest = new Map<string, DelegateOccurrence>();
+  let ownerKey: string | undefined;
+  for (const [entryIndex, value] of branch.entries()) {
+    if (!isRecord(value)) continue;
+    const operation = wakeStoreOperation(value);
+    // A malformed wake record invalidates the complete journal; do not render
+    // a valid prefix or a partial delta as current state.
+    if (operation === undefined) return undefined;
+    if (operation === null) continue;
+    const nextOwnerKey = `${operation.ownerSessionId ?? ''}\u0000${operation.ownerEpoch ?? ''}`;
+    if (ownerKey !== undefined && ownerKey !== nextOwnerKey) latest.clear();
+    ownerKey = nextOwnerKey;
+    const occurrences = operation.wakes.map((metadata, runIndex) => ({
+      run: wakeRun(metadata),
+      kind: 'background' as const,
+      entryIndex,
+      runIndex: String(runIndex),
+      entryIdentity: stringValue(value.id),
+      entryTimestamp: entryTimestamp(value),
+    }));
+    if (operation.kind === 'snapshot') {
+      const prior = new Map(latest);
+      latest.clear();
+      for (const occurrence of occurrences) {
+        const wakeId = stringValue(
+          (occurrence.run.wake as RecordValue).id,
+          256,
+        );
+        if (!wakeId) continue;
+        const key = `${nextOwnerKey}\u0000${wakeId}`;
+        const previous = prior.get(key);
+        latest.set(
+          key,
+          previous && keepPriorWakeOccurrence(previous, occurrence)
+            ? previous
+            : occurrence,
+        );
+      }
+    } else {
+      for (const occurrence of occurrences) {
+        const wakeId = stringValue(
+          (occurrence.run.wake as RecordValue).id,
+          256,
+        );
+        if (!wakeId) continue;
+        const key = `${nextOwnerKey}\u0000${wakeId}`;
+        const previous = latest.get(key);
+        if (!previous || !keepPriorWakeOccurrence(previous, occurrence))
+          latest.set(key, occurrence);
+      }
+    }
+    while (latest.size > MAX_WAKE_HISTORY) {
+      const oldest = latest.keys().next().value;
+      if (oldest === undefined) break;
+      latest.delete(oldest);
+    }
+  }
+  return [...latest.values()];
+}
+
+function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
+  const ordinary: DelegateOccurrence[] = [];
+  const workflow = workflowJournal(branch) ?? [];
+  const wakes = wakeJournal(branch) ?? [];
+  for (const [entryIndex, value] of branch.entries()) {
+    if (!isRecord(value)) continue;
     ordinary.push(
       ...foregroundDetails(value, entryIndex),
       ...backgroundDetails(value, entryIndex),
     );
   }
-  return [...ordinary, ...latestMetadata.values()].sort(
+  return [...ordinary, ...workflow, ...wakes].sort(
     (left, right) => left.entryIndex - right.entryIndex,
   );
 }
@@ -1148,6 +1443,10 @@ function invocation(
   const workflowSource = isRecord(occurrence.run.workflow)
     ? occurrence.run.workflow
     : undefined;
+  const workflowOwnerBranchId = validWorkflowText(
+    workflowSource?.ownerBranchId,
+    256,
+  );
   const workflowLogicalId = stringValue(workflowSource?.logicalId, 64);
   const workflowIdentity = stringValue(workflowSource?.identity, 80);
   const workflowAttempt = workflowSource?.attempt;
@@ -1159,6 +1458,9 @@ function invocation(
     Number.isSafeInteger(workflowAttempt) &&
     workflowAttempt >= 1
       ? {
+          ...(workflowOwnerBranchId
+            ? { ownerBranchId: workflowOwnerBranchId }
+            : {}),
           logicalId: workflowLogicalId,
           attempt: workflowAttempt,
           identity: workflowIdentity,

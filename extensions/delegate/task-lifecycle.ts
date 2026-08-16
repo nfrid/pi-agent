@@ -169,6 +169,7 @@ export async function prepareDelegateTask(
   plan: DelegateTaskPlan,
   preflight = preflightDelegateContinuation(plan),
   parentSessionId?: string,
+  signal?: AbortSignal,
 ): Promise<PreparedDelegateTask> {
   const state = { ...preflight, warnings: [...preflight.warnings] };
   let session: DelegateSession | undefined;
@@ -184,6 +185,7 @@ export async function prepareDelegateTask(
         baseRef: plan.baseRef,
         worktreePath: plan.worktreePath,
         parentSessionId,
+        signal,
       });
       if (prepared.worktree && plan.workingDirectory !== undefined) {
         const root = prepared.worktree.record.worktreePath;
@@ -223,6 +225,7 @@ export async function prepareDelegateTask(
         expectedHead:
           state.worktree.record.headCommit ?? state.worktree.record.baseHead,
         allowRequestedCheckout: true,
+        signal,
       });
     }
 
@@ -239,6 +242,7 @@ export async function prepareDelegateTask(
         name: plan.name,
         base: plan.refresh,
         parentSessionId,
+        signal,
       });
       if (!prepared.worktree)
         throw new Error(
@@ -276,6 +280,7 @@ export async function prepareDelegateTask(
       state.worktree = await rehydrateWorktreeSession(
         state.worktree.record,
         plan.resumed.token,
+        signal,
       );
       state.cwd = path.join(
         state.worktree.record.worktreePath,

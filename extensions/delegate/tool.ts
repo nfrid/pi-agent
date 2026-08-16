@@ -1,5 +1,8 @@
 import { StringEnum } from '@earendil-works/pi-ai';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
 import { loadGuidelines } from '../shared/instructions';
 import {
@@ -34,6 +37,7 @@ import type {
   DelegateWorkflowCoordinator,
 } from './workflow-coordinator';
 import { parseWorkflowReference } from './workflow-model';
+import { captureWorkInProgress } from './worktree';
 
 const DELEGATE_TOOL_DESCRIPTION =
   'Schedule one focused child agent asynchronously. Choose a route, workspace mode, and either a prose or structured result contract; use after and inputs to compose work and delegate_wake to receive selected results.';
@@ -330,10 +334,16 @@ function workflowReceipt(attempt: DelegateWorkflowAttemptSnapshot): {
 }
 
 export interface DelegateBackgroundRuntime {
-  /** Session-scoped logical workflow coordinator. */
+  /** Session-scoped logical workflow coordinator (legacy static form). */
   workflow?: DelegateWorkflowCoordinator;
+  /** Current branch runtime selected by session_tree. */
+  getWorkflow?: () => DelegateWorkflowCoordinator | undefined;
   manager: DelegateJobManager;
   statuses: DelegateStatusStore;
+  getStatuses?: () => DelegateStatusStore | undefined;
+  /** Current immutable branch owner, when the host exposes branch identity. */
+  getBranchId?: () => string | undefined;
+  ensureBranchOwner?: (ctx: ExtensionContext) => void;
   getDeliveryEpoch: () => number;
   activateJobs?: () => void;
   activateBranches?: () => void;
@@ -370,7 +380,10 @@ export function registerDelegateTool(
         return snapshot;
       };
 
+      // Capture ownership before any preparation can await or tree navigation
+      // can move the active session branch.
       const launchSessionId = ctx.sessionManager.getSessionId();
+      const launchBranchId = backgroundRuntime?.getBranchId?.();
       const runCtx = {
         pi,
         ctx,
@@ -378,15 +391,23 @@ export function registerDelegateTool(
         signal,
         getSnapshot,
         launchSessionId,
+        launchBranchId,
+        isLaunchBranchActive: () =>
+          launchBranchId !== undefined &&
+          backgroundRuntime?.getBranchId?.() === launchBranchId,
       };
+      const activeWorkflow =
+        backgroundRuntime?.getWorkflow?.() ?? backgroundRuntime?.workflow;
+      const activeStatuses =
+        backgroundRuntime?.getStatuses?.() ?? backgroundRuntime?.statuses;
       // Legacy batch payloads and calls without a logical id stay behind this
       // boundary. A new id/continue call treats background as a no-op and
       // always uses the coordinator.
       const legacySurface =
         Array.isArray((rawParams as { tasks?: unknown }).tasks) ||
         (params.id === undefined && params.continue === undefined);
-
-      if (backgroundRuntime?.workflow && !legacySurface) {
+      if (activeWorkflow && activeStatuses && !legacySurface) {
+        backgroundRuntime?.ensureBranchOwner?.(ctx);
         if (Array.isArray(params.tasks))
           throw new Error(
             'A delegate call schedules one logical node at a time.',
@@ -404,10 +425,10 @@ export function registerDelegateTool(
         if (!logicalId)
           throw new Error('Fresh delegate calls require a stable id.');
         if (continuationReference)
-          backgroundRuntime.workflow.require(continuationReference);
+          activeWorkflow.require(continuationReference);
         const requestedRoute = params.route?.trim();
         const inheritedRouting = continuationReference
-          ? backgroundRuntime.workflow.getRouting(continuationReference)
+          ? activeWorkflow.getRouting(continuationReference)
           : undefined;
         const routeResult =
           requestedRoute || !continuationReference
@@ -441,6 +462,41 @@ export function registerDelegateTool(
           initialPlan = built.tasks[0]?.plan;
           if (!initialPlan) throw new Error('Delegate plan was not created.');
         }
+        const symbolicBranchSource =
+          params.inputs?.some((input) => input.include?.includes('branch')) ??
+          false;
+        let capturedWip:
+          | Awaited<ReturnType<typeof captureWorkInProgress>>
+          | undefined;
+        if (
+          !continuationReference &&
+          initialPlan &&
+          initialPlan.isolation === 'worktree' &&
+          initialPlan.worktreePath === undefined &&
+          initialPlan.baseRef === undefined &&
+          initialPlan.base !== 'head' &&
+          !symbolicBranchSource
+        ) {
+          capturedWip = await captureWorkInProgress(initialPlan.requestedCwd, {
+            signal,
+          });
+          initialPlan = {
+            ...initialPlan,
+            base: undefined,
+            baseRef: capturedWip.ref,
+          };
+        }
+        const releaseCapturedWip = async (): Promise<void> => {
+          const source = capturedWip;
+          capturedWip = undefined;
+          if (source) await source.dispose();
+        };
+        if (signal?.aborted) {
+          await releaseCapturedWip();
+          throw (
+            signal.reason ?? new Error('Delegate scheduling was cancelled.')
+          );
+        }
         const pending = createRun(task, routing, {
           name: params.name?.trim() || logicalId,
           context: continuationReference
@@ -450,12 +506,11 @@ export function registerDelegateTool(
           writeRequested: params.allowWrites,
           isolation: params.isolation,
         });
-        const statusIds = backgroundRuntime.statuses.start(
-          [pending],
-          'background',
-        );
+        let statusIds: string[] = [];
+        let scheduled = false;
         try {
-          const attempt = backgroundRuntime.workflow.schedule({
+          statusIds = activeStatuses.start([pending], 'background');
+          const attempt = activeWorkflow.schedule({
             logicalId,
             continuation: continuationReference,
             after: params.after,
@@ -464,9 +519,11 @@ export function registerDelegateTool(
               | undefined,
             name: params.name?.trim() || logicalId,
             ownerSessionId: launchSessionId,
+            ownerBranchId: launchBranchId,
             route: routing.route,
             routing,
             allowWrites: params.allowWrites,
+            ...(capturedWip ? { preparationCleanup: releaseCapturedWip } : {}),
 
             prepare: async (workflowContext) => {
               let plan = initialPlan;
@@ -514,41 +571,37 @@ export function registerDelegateTool(
                 {
                   onRunUpdate: (run) => {
                     const statusId = statusIds[0];
-                    if (statusId)
-                      backgroundRuntime.statuses.update(statusId, run);
-                    if (run.worktree) backgroundRuntime.activateBranches?.();
+                    if (statusId) activeStatuses.update(statusId, run);
+                    if (run.worktree) backgroundRuntime?.activateBranches?.();
                   },
                 },
               );
             },
           });
+          scheduled = true;
           const statusId = statusIds[0];
-          if (statusId)
-            backgroundRuntime.statuses.setWorkflow(statusId, attempt);
+          if (statusId) activeStatuses.setWorkflow(statusId, attempt);
           if (statusId && attempt.jobId)
-            backgroundRuntime.statuses.setJobId(statusId, attempt.jobId);
+            activeStatuses.setJobId(statusId, attempt.jobId);
           const updateTerminalStatus = (
             terminal: DelegateWorkflowAttemptSnapshot,
           ) => {
             if (!statusId) return;
-            const run = backgroundRuntime.workflow?.getResult(terminal.identity)
-              ?.runs[0];
-            if (run) backgroundRuntime.statuses.update(statusId, run);
+            const run = activeWorkflow.getTerminalRun(terminal.identity);
+            if (run) activeStatuses.update(statusId, run);
           };
           if (attempt.settledAt !== undefined) updateTerminalStatus(attempt);
           else {
             let unsubscribe: (() => void) | undefined;
-            unsubscribe = backgroundRuntime.workflow.subscribeTerminal(
-              (terminal) => {
-                if (terminal.identity !== attempt.identity) return;
-                updateTerminalStatus(terminal);
-                unsubscribe?.();
-              },
-            );
+            unsubscribe = activeWorkflow.subscribeTerminal((terminal) => {
+              if (terminal.identity !== attempt.identity) return;
+              updateTerminalStatus(terminal);
+              unsubscribe?.();
+            });
           }
-          backgroundRuntime.activateJobs?.();
+          backgroundRuntime?.activateJobs?.();
           if (attempt.state === 'running' && statusId)
-            backgroundRuntime.statuses.update(statusId, {
+            activeStatuses.update(statusId, {
               ...pending,
               state: 'running',
               startedAt: attempt.startedAt,
@@ -558,7 +611,8 @@ export function registerDelegateTool(
             details: import('./types').LegacyDelegateDetails;
           };
         } catch (error) {
-          backgroundRuntime.statuses.finish(statusIds);
+          if (!scheduled) await releaseCapturedWip().catch(() => undefined);
+          activeStatuses.finish(statusIds);
           throw error;
         }
       }
@@ -576,7 +630,7 @@ export function registerDelegateTool(
         throw new Error('Background delegate runtime is unavailable.');
       const execution = await prepareDelegateExecution(runCtx, params);
       const initialRuns = pendingRuns(execution);
-      const statusIds = backgroundRuntime?.statuses.start(
+      const statusIds = activeStatuses?.start(
         initialRuns,
         params.background ? 'background' : 'foreground',
       );
@@ -594,16 +648,22 @@ export function registerDelegateTool(
             materializeCtx,
             launchSessionId,
             runs,
+            launchBranchId,
+            () =>
+              launchBranchId !== undefined &&
+              backgroundRuntime?.getBranchId?.() === launchBranchId,
           );
           const ownerSession =
-            materializeCtx.sessionManager.getSessionId() === launchSessionId;
+            materializeCtx.sessionManager.getSessionId() === launchSessionId &&
+            (launchBranchId === undefined ||
+              backgroundRuntime?.getBranchId?.() === launchBranchId);
           const publicRuns = runs.map((run) =>
             serializeDelegateRunForPublic(run, {
               includeArtifacts: ownerSession,
             }),
           );
           if (ownerSession && statusId && publicRuns[0])
-            backgroundRuntime.statuses.update(statusId, publicRuns[0]);
+            activeStatuses?.update(statusId, publicRuns[0]);
           return {
             runs: ownerSession
               ? publicRuns
@@ -632,6 +692,7 @@ export function registerDelegateTool(
               return {
                 name: item.plan.name,
                 ownerSessionId: launchSessionId,
+                ownerBranchId: launchBranchId,
                 mode: 'single' as const,
                 tasks: [item.plan.task],
                 deliveryEpoch: backgroundRuntime.getDeliveryEpoch(),
@@ -647,10 +708,7 @@ export function registerDelegateTool(
                         control,
                         onRunUpdate: (run) => {
                           if (statusIds?.[index])
-                            backgroundRuntime.statuses.update(
-                              statusIds[index],
-                              run,
-                            );
+                            activeStatuses?.update(statusIds[index], run);
                         },
                       },
                     );
@@ -660,7 +718,7 @@ export function registerDelegateTool(
                     control.close();
                     const run = runs[0];
                     if (run && statusIds?.[index])
-                      backgroundRuntime.statuses.update(statusIds[index], run);
+                      activeStatuses?.update(statusIds[index], run);
                     return materializeHandoff(ctx, runs, statusIds?.[index]);
                   } finally {
                     control.close();
@@ -673,7 +731,7 @@ export function registerDelegateTool(
           );
         } catch (error) {
           for (const control of controls) control.close();
-          if (statusIds) backgroundRuntime.statuses.finish(statusIds);
+          if (statusIds) activeStatuses?.finish(statusIds);
           const warnings = await rollbackPreparedDelegateTasks(execution.tasks);
           const message =
             error instanceof Error ? error.message : String(error);
@@ -684,10 +742,7 @@ export function registerDelegateTool(
         for (const [index, run] of initialRuns.entries()) {
           run.backgroundJobId = jobs[index]?.id;
           if (statusIds?.[index] && jobs[index]?.id)
-            backgroundRuntime.statuses.setJobId(
-              statusIds[index],
-              jobs[index].id,
-            );
+            activeStatuses?.setJobId(statusIds[index], jobs[index].id);
         }
         backgroundRuntime.activateJobs?.();
         if (initialRuns.some((run) => run.worktree))
@@ -723,12 +778,12 @@ export function registerDelegateTool(
           controls,
           onRunUpdate: (run, index = 0) => {
             const statusId = statusIds?.[index];
-            if (statusId) backgroundRuntime?.statuses.update(statusId, run);
+            if (statusId) activeStatuses?.update(statusId, run);
           },
           onUpdate,
         });
       } catch (error) {
-        if (statusIds) backgroundRuntime?.statuses.finish(statusIds);
+        if (statusIds) activeStatuses?.finish(statusIds);
         throw error;
       } finally {
         for (const control of controls) control.close();
@@ -741,13 +796,17 @@ export function registerDelegateTool(
         execution.mode,
         runs,
         launchSessionId,
+        launchBranchId,
+        () =>
+          launchBranchId !== undefined &&
+          backgroundRuntime?.getBranchId?.() === launchBranchId,
       );
       if (statusIds) {
         // delegateToolResult publishes lifecycle diagnostics before returning;
         // refresh terminal status with that owner-safe projection rather than
         // leaving live status at its pre-materialization view.
-        backgroundRuntime?.statuses.updateMany(statusIds, runs);
-        backgroundRuntime?.statuses.resultEntered(statusIds);
+        activeStatuses?.updateMany(statusIds, runs);
+        activeStatuses?.resultEntered(statusIds);
       }
       return result;
     },

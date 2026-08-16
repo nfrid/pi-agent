@@ -1,6 +1,11 @@
 import { existsSync } from 'node:fs';
+import type {
+  CapturedWipSource,
+  CaptureWorkInProgressOptions,
+} from '@pi-dashboard/worktree-manager';
 import {
   canonical,
+  captureWorkInProgress as captureGenericWorkInProgress,
   createWorktreeCreator,
   isInside,
   validateExistingWorktree,
@@ -48,6 +53,7 @@ export async function prepareWorktree(options: {
   /** Existing caller-owned Git worktree; no checkout or branch is created. */
   worktreePath?: string;
   parentSessionId?: string;
+  signal?: AbortSignal;
 }): Promise<WorktreePreparation> {
   const preparation = await creator.prepareWorktree(options);
   if (!preparation.worktree || !options.parentSessionId) return preparation;
@@ -62,6 +68,13 @@ export async function prepareWorktree(options: {
 }
 
 /** Delegate session ownership remains caller-specific record metadata. */
+export async function captureWorkInProgress(
+  cwd: string,
+  options: CaptureWorkInProgressOptions = {},
+): Promise<CapturedWipSource> {
+  return captureGenericWorkInProgress(cwd, options);
+}
+
 export function attachWorktreeSession(
   worktree: PreparedWorktree,
   token: string,
@@ -87,6 +100,7 @@ export function restoreWorktreeSession(
 export async function rehydrateWorktreeSession(
   record: WorktreeRecord,
   token: string,
+  signal?: AbortSignal,
 ): Promise<PreparedWorktree> {
   if (existsSync(record.worktreePath))
     return restoreWorktreeSession(record, token);
@@ -98,7 +112,7 @@ export async function rehydrateWorktreeSession(
     throw new Error('This worktree belongs to another delegate session.');
   if (record.status === 'removed')
     throw new Error('This worktree has already been removed.');
-  return creator.rehydrateWorktree(record);
+  return creator.rehydrateWorktree(record, { signal });
 }
 
 export { isInside, validateExistingWorktree, WORKTREE_DIR };

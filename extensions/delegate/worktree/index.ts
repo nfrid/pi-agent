@@ -7,8 +7,11 @@
  * the work, and the orchestrator integrates it with ordinary git rather than a
  * bespoke patch protocol.
  */
+
+export type { CapturedWipSource } from '@pi-dashboard/worktree-manager';
 export {
   attachWorktreeSession,
+  captureWorkInProgress,
   prepareWorktree,
   rehydrateWorktreeSession,
   restoreWorktreeSession,
