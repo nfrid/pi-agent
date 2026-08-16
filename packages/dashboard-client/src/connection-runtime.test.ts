@@ -573,6 +573,66 @@ describe('DashboardConnectionRuntime', () => {
     stop();
   });
 
+  it('rebases only the target session on an auxiliary transcript reset', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const a = f.runtime.acquireSession('session-a');
+    const b = f.runtime.acquireSession('session-b');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.shell({
+      id: 'shell-reset-test',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
+      },
+    });
+    f.shell({
+      id: 'shell-reset-live',
+      data: { type: 'caught-up', sequence: 0 },
+    });
+    for (const id of ['session-a', 'session-b']) {
+      f.session(id, {
+        id: `${id}-snapshot`,
+        data: {
+          type: 'snapshot',
+          sequence: 0,
+          snapshot: sessionSnapshot(0, id),
+        },
+      });
+      f.session(id, {
+        id: `${id}-live`,
+        data: { type: 'caught-up', sequence: 0 },
+      });
+    }
+    const before = f.counts().sessionSubscriptions;
+    f.session('session-a', {
+      id: 'a-reset',
+      data: {
+        type: 'session-event',
+        sequence: 1,
+        sessionId: 'session-a',
+        event: {
+          type: 'session.transcript.reset',
+          sessionId: 'session-a',
+          reason: 'source-rewrite',
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.counts().sessionSubscriptions).toBe(before + 1);
+    expect(f.store.getSnapshot().sessionSyncById['session-b']).toMatchObject({
+      status: 'live',
+      generation: 1,
+    });
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'synchronizing',
+    );
+    a.release();
+    b.release();
+    stop();
+  });
+
   it('accepts daemon-generation snapshots and reacquires referenced sessions', async () => {
     const f = fixture();
     const stop = f.runtime.start();

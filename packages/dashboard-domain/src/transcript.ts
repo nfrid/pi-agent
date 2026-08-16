@@ -640,22 +640,35 @@ function mergeTool(
   const previous = items[payload.toolCallId];
   // Finished and errored entities are terminal. In particular, a duplicate
   // finished event must not replace an earlier result or error.
-  if (previous && isFinished(previous)) return projection;
+  if (
+    previous &&
+    isFinished(previous) &&
+    !(
+      previous.kind === 'tool' &&
+      previous.result === undefined &&
+      payload.result !== undefined
+    )
+  )
+    return projection;
   const previousTool = previous?.kind === 'tool' ? previous : undefined;
   const status: TranscriptEntityStatus =
     payload.isError === true ||
     payload.status === 'error' ||
     payload.status === 'failed'
       ? 'error'
-      : phase === 'finished' ||
-          payload.status === 'complete' ||
-          payload.status === 'completed' ||
-          payload.status === 'finished' ||
-          payload.status === 'success'
-        ? 'finished'
-        : phase === 'started'
-          ? 'pending'
-          : 'running';
+      : payload.status === 'pending'
+        ? 'pending'
+        : payload.status === 'running'
+          ? 'running'
+          : phase === 'finished' ||
+              payload.status === 'complete' ||
+              payload.status === 'completed' ||
+              payload.status === 'finished' ||
+              payload.status === 'success'
+            ? 'finished'
+            : phase === 'started'
+              ? 'pending'
+              : 'running';
   const owner = findToolOwner(projection, items, payload);
   const timestamp =
     payload.timestamp ?? previousTool?.timestamp ?? owner?.item.timestamp;
@@ -1149,6 +1162,90 @@ export function hydrateTranscript(
   };
   return projection;
 }
+
+/**
+ * Convert one durable Pi entry to the same normalized lifecycle vocabulary as
+ * the runtime bridge. The projector deliberately hydrates a single entry
+ * instead of keeping a second semantic baseline, so IDs, toolResult folding,
+ * embedded-tool chronology, and entry-N fallbacks stay aligned with
+ * hydrateTranscript.
+ */
+export function persistedEntryToTranscriptEvents(
+  raw: unknown,
+  sessionId: string,
+  options: { fallbackEntryOffset?: number } = {},
+): BridgeEvent[] {
+  if (isSteeringMarkerEntry(isRecord(raw) ? raw : {})) return [];
+  const projection = hydrateTranscript([raw], sessionId, {
+    fallbackEntryIds: true,
+    fallbackEntryOffset: options.fallbackEntryOffset,
+  });
+  const events: BridgeEvent[] = [];
+  for (const id of projection.order) {
+    const item = projection.items[id];
+    if (!item) continue;
+    if (item.kind === 'message') {
+      const message = {
+        messageId: item.messageId,
+        role: item.role,
+        content: item.content,
+        ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
+        ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        ...(item.toolCallIds === undefined
+          ? {}
+          : { toolCallIds: [...item.toolCallIds] }),
+        phase: 'finished' as const,
+      };
+      if (!tryParseNormalizedMessagePayload(message))
+        throw new Error(
+          'Persisted message cannot be represented as a live event.',
+        );
+      events.push({
+        type: 'message.finished',
+        sessionId,
+        message,
+      } as BridgeEvent);
+      continue;
+    }
+    if (item.kind === 'tool') {
+      const status =
+        item.status === 'streaming'
+          ? 'running'
+          : item.status === 'finished'
+            ? 'finished'
+            : item.status;
+      const tool = {
+        toolCallId: item.toolCallId,
+        name: item.name || 'tool',
+        ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
+        ...(item.result === undefined ? {} : { result: item.result }),
+        ...(item.isError === undefined ? {} : { isError: item.isError }),
+        ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
+        status,
+        ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        ...(item.data === undefined ? {} : { data: item.data }),
+        phase: 'finished' as const,
+      };
+      if (!tryParseNormalizedToolPayload(tool))
+        throw new Error(
+          'Persisted tool cannot be represented as a live event.',
+        );
+      events.push({
+        type: 'tool.finished',
+        sessionId,
+        tool,
+      } as BridgeEvent);
+      continue;
+    }
+    events.push({
+      type: 'session.compacted',
+      sessionId,
+      entry: item.raw,
+    } as BridgeEvent);
+  }
+  return events;
+}
+
 export const hydrateTranscriptProjection = hydrateTranscript;
 
 const NON_RENDERED_PI_ENTRY_TYPES = new Set([

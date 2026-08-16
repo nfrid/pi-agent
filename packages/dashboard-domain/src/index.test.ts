@@ -8,6 +8,7 @@ import {
   createRuntimeReducerState,
   createTranscriptProjection,
   hydrateTranscript,
+  persistedEntryToTranscriptEvents,
   projectTranscriptForRender,
   reduceTranscriptEvent,
   STEERING_MESSAGE_MARKER_TYPE,
@@ -48,6 +49,58 @@ function envelope(
 }
 
 describe('dashboard domain reducers', () => {
+  it('converts persisted messages, embedded tools, and tool results through the hydrate identities', () => {
+    const entries = [
+      {
+        type: 'message',
+        id: 'assistant-entry',
+        timestamp: 100,
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'answer' },
+            {
+              type: 'toolCall',
+              toolCallId: 'embedded-call',
+              name: 'read',
+              arguments: { path: 'source.ts' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'tool-result-entry',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'embedded-call',
+          toolName: 'read',
+          content: 'done',
+          details: { lines: 3 },
+        },
+      },
+    ];
+    const events = entries.flatMap((entry, index) =>
+      persistedEntryToTranscriptEvents(entry, 's', {
+        fallbackEntryOffset: index,
+      }),
+    );
+    let reduced = createTranscriptProjection('s');
+    for (const event of events) reduced = reduceTranscriptEvent(reduced, event);
+    const hydrated = hydrateTranscript(entries, 's');
+    expect(reduced.order).toEqual(hydrated.order);
+    expect(reduced.items).toMatchObject({
+      'assistant-entry': { kind: 'message', status: 'finished' },
+      'embedded-call': {
+        kind: 'tool',
+        result: { content: 'done', details: { lines: 3 } },
+      },
+    });
+    expect(reduced.items['embedded-call']).toMatchObject(
+      hydrated.items['embedded-call'],
+    );
+  });
+
   it('hydrates steering markers onto user messages without rendering marker rows', () => {
     const projection = hydrateTranscript([
       {

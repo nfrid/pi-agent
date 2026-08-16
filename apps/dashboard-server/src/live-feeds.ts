@@ -108,6 +108,11 @@ export class SessionFeedRegistry {
     this.options = options;
   }
 
+  /** Inspect an existing feed without creating an idle feed. */
+  peek(sessionId: string): SessionFeed | undefined {
+    return this.feeds.get(sessionId);
+  }
+
   get(sessionId: string): SessionFeed {
     let feed = this.feeds.get(sessionId);
     if (!feed) {

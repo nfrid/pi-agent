@@ -24,6 +24,79 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('publishes auxiliary JSONL appends as ordered normalized session events', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-live-feed-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    const delegateDir = path.join(root, '.delegate-sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await mkdir(delegateDir, { recursive: true });
+    const file = path.join(delegateDir, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'live-child', cwd: '/tmp' })}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      delegateSessionDir: delegateDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const internals = server as unknown as {
+      sessionFeeds: {
+        get(id: string): {
+          subscribe(options: {
+            buildSnapshot: (sequence: number) => Promise<unknown>;
+          }): AsyncGenerator<unknown>;
+        };
+      };
+      buildSessionSnapshot(
+        id: string,
+        before: string | undefined,
+        sequence: number,
+      ): Promise<unknown>;
+    };
+    const feed = internals.sessionFeeds.get('live-child');
+    const stream = feed.subscribe({
+      buildSnapshot: (sequence) =>
+        internals.buildSessionSnapshot('live-child', undefined, sequence),
+    });
+    expect((await stream.next()).value).toMatchObject({ kind: 'snapshot' });
+    expect((await stream.next()).value).toMatchObject({ kind: 'caught-up' });
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'live-child', cwd: '/tmp' })}\n${JSON.stringify(
+        {
+          type: 'message',
+          id: 'live-message',
+          message: { role: 'assistant', content: 'from append' },
+        },
+      )}\n`,
+    );
+    server.publishSessionIndexChange('live-child', true);
+    const event = await Promise.race([
+      stream.next(),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error('append event timed out')), 2_000),
+      ),
+    ]);
+    expect(event.value).toMatchObject({
+      kind: 'event',
+      event: {
+        type: 'session-event',
+        event: {
+          type: 'message.finished',
+          message: { messageId: 'live-message', role: 'assistant' },
+        },
+      },
+    });
+    await stream.return(undefined);
+  });
+
   it('loads delegate history summaries without details and fetches one selected run lazily', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-delegate-history-lazy-'),

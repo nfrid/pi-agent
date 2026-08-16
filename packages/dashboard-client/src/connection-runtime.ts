@@ -639,6 +639,16 @@ export class DashboardConnectionRuntime {
       return;
     }
     if (
+      payload.type === 'session-event' &&
+      payload.event.type === 'session.transcript.reset'
+    ) {
+      // The source cursor is server-internal. A reset invalidates only this
+      // acquired session; the next generation obtains its own authoritative
+      // snapshot and cannot apply stale events from the old subscription.
+      this.rebaseSession(entry);
+      return;
+    }
+    if (
       !this.store.acceptSessionEvent(
         entry.id,
         sequence,

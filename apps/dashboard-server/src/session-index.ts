@@ -26,9 +26,48 @@ export interface SessionHistoryPage {
   nextBefore?: string;
 }
 
+export interface AuxiliarySourceCursor {
+  /** Cursor format is server-internal and intentionally opaque to browsers. */
+  version: 1;
+  dev: number;
+  ino: number;
+  /** Number of complete, non-empty JSONL records through byteOffset. */
+  ordinal: number;
+  /** Exact UTF-8 byte offset at the end of the last complete line. */
+  byteOffset: number;
+  /** SHA-256 of the exact bytes in [0, byteOffset). */
+  prefixHash: string;
+}
+
+export type AuxiliaryAppendResetReason =
+  | 'source-rewrite'
+  | 'source-truncated'
+  | 'source-replaced'
+  | 'source-malformed'
+  | 'entry-too-large';
+
+export class AuxiliaryAppendError extends Error {
+  readonly reason: AuxiliaryAppendResetReason;
+
+  constructor(reason: AuxiliaryAppendResetReason, message: string = reason) {
+    super(message);
+    this.name = 'AuxiliaryAppendError';
+    this.reason = reason;
+  }
+}
+
+export interface AuxiliaryAppendRange {
+  readonly records: readonly unknown[];
+  readonly nextCursor: AuxiliarySourceCursor;
+  /** More complete records or a partial final line remain after nextCursor. */
+  readonly hasMore: boolean;
+}
+
 export interface SessionReadOptions {
   /** Resolve the active leaf from the latest valid entry in the file. */
   resolveLatestLeaf?: boolean;
+  /** Read an auxiliary snapshot at this exact source cut. Server-internal. */
+  sourceCursor?: AuxiliarySourceCursor;
 }
 
 export interface SelectedBranchEntryProjection {
@@ -80,6 +119,12 @@ interface HistoryCursor {
 // history uses its own projection budget below and is intentionally unchanged.
 const HISTORY_PAGE_BYTES = 384 * 1024;
 const LATEST_LEAF_READ_ATTEMPTS = 3;
+/** A single source line must leave room for its normalized protocol envelope. */
+const AUXILIARY_ENTRY_BYTES = 384 * 1024;
+/** Range reads are deliberately smaller than a history page and repeatable. */
+const AUXILIARY_RANGE_BYTES = 256 * 1024;
+const AUXILIARY_RANGE_RECORDS = 256;
+const EMPTY_PREFIX_HASH = createHash('sha256').digest('hex');
 
 type SessionFileVersion = {
   dev: number;
@@ -236,6 +281,338 @@ export class SessionIndex {
     return entry ? this.isAuxiliaryFile(entry.file) : false;
   }
 
+  /**
+   * Return the exact source cut at the end of the currently complete JSONL
+   * input. This is used to seed an auxiliary snapshot; it never retains the
+   * transcript and intentionally leaves a partial final line unconsumed.
+   */
+  async readAppendCursor(id: string): Promise<AuxiliarySourceCursor> {
+    const result = await this.scanAuxiliaryAppend(id, undefined, {
+      collect: false,
+      enforceEntrySize: false,
+    });
+    return result.nextCursor;
+  }
+
+  /**
+   * Read a bounded append range from the durable auxiliary JSONL source.
+   * Prefix identity is validated before reading, and the final partial line
+   * remains at the input cursor for a later completion retry.
+   */
+  async readAppendRange(
+    id: string,
+    cursor?: AuxiliarySourceCursor,
+  ): Promise<AuxiliaryAppendRange> {
+    return this.scanAuxiliaryAppend(id, cursor, { collect: true });
+  }
+
+  private async auxiliaryFile(id: string): Promise<{
+    indexed: IndexedFile;
+    file: string;
+    stat: import('node:fs').Stats;
+  }> {
+    const indexed = this.files.get(id);
+    if (
+      !indexed ||
+      !this.isAuxiliaryFile(indexed.file) ||
+      !(await this.isSafeSessionFile(indexed.file))
+    )
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Unknown auxiliary session.',
+      );
+    const stat = await fs.stat(indexed.file).catch(() => undefined);
+    if (!stat)
+      throw new AuxiliaryAppendError(
+        'source-truncated',
+        'Auxiliary session disappeared.',
+      );
+    return { indexed, file: indexed.file, stat };
+  }
+
+  private async validateAuxiliaryCursor(
+    file: string,
+    stat: import('node:fs').Stats,
+    cursor: AuxiliarySourceCursor,
+  ): Promise<void> {
+    if (
+      cursor.version !== 1 ||
+      !Number.isSafeInteger(cursor.dev) ||
+      !Number.isSafeInteger(cursor.ino) ||
+      !Number.isSafeInteger(cursor.ordinal) ||
+      cursor.ordinal < 0 ||
+      !Number.isSafeInteger(cursor.byteOffset) ||
+      cursor.byteOffset < 0 ||
+      !/^[a-f0-9]{64}$/.test(cursor.prefixHash)
+    )
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Invalid source cursor.',
+      );
+    if (cursor.dev !== stat.dev || cursor.ino !== stat.ino)
+      throw new AuxiliaryAppendError(
+        'source-replaced',
+        'Auxiliary session file identity changed.',
+      );
+    if (stat.size < cursor.byteOffset)
+      throw new AuxiliaryAppendError(
+        'source-truncated',
+        'Auxiliary session file was truncated.',
+      );
+    const prefix = await this.hashAuxiliaryPrefix(file, cursor.byteOffset);
+    if (prefix.hash !== cursor.prefixHash || prefix.ordinal !== cursor.ordinal)
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Auxiliary session source prefix changed.',
+      );
+  }
+
+  private async hashAuxiliaryPrefix(
+    file: string,
+    byteOffset: number,
+  ): Promise<{ hash: string; ordinal: number }> {
+    const hash = createHash('sha256');
+    if (byteOffset === 0) return { hash: hash.digest('hex'), ordinal: 0 };
+    const handle = await fs.open(file, 'r').catch(() => undefined);
+    if (!handle)
+      throw new AuxiliaryAppendError(
+        'source-truncated',
+        'Auxiliary session file disappeared.',
+      );
+    let position = 0;
+    let ordinal = 0;
+    let nonEmpty = false;
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    try {
+      while (position < byteOffset) {
+        const length = Math.min(buffer.length, byteOffset - position);
+        const { bytesRead } = await handle.read(buffer, 0, length, position);
+        if (bytesRead === 0)
+          throw new AuxiliaryAppendError(
+            'source-truncated',
+            'Auxiliary session file ended before its cursor.',
+          );
+        const chunk = buffer.subarray(0, bytesRead);
+        hash.update(chunk);
+        for (const byte of chunk) {
+          if (byte === 0x0a) {
+            if (nonEmpty) ordinal += 1;
+            nonEmpty = false;
+          } else if (byte !== 0x0d && byte !== 0x20 && byte !== 0x09) {
+            nonEmpty = true;
+          }
+        }
+        position += bytesRead;
+      }
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+    if (position !== byteOffset)
+      throw new AuxiliaryAppendError('source-truncated');
+    // Cursors always end after a complete line. A partial prefix is invalid.
+    if (nonEmpty)
+      throw new AuxiliaryAppendError(
+        'source-rewrite',
+        'Cursor is not line aligned.',
+      );
+    return { hash: hash.digest('hex'), ordinal };
+  }
+
+  private async scanAuxiliaryAppend(
+    id: string,
+    cursor: AuxiliarySourceCursor | undefined,
+    options: { collect: boolean; enforceEntrySize?: boolean },
+  ): Promise<AuxiliaryAppendRange> {
+    const { file, stat } = await this.auxiliaryFile(id);
+    const start: AuxiliarySourceCursor =
+      cursor === undefined
+        ? {
+            version: 1,
+            dev: stat.dev,
+            ino: stat.ino,
+            ordinal: 0,
+            byteOffset: 0,
+            prefixHash: EMPTY_PREFIX_HASH,
+          }
+        : cursor;
+    if (cursor !== undefined)
+      await this.validateAuxiliaryCursor(file, stat, cursor);
+
+    const records: unknown[] = [];
+    const hash = createHash('sha256');
+    // The validated prefix hash is a digest, not a resumable Hash object.
+    // Rehashing the prefix keeps the cursor contract simple and bounded.
+    if (start.byteOffset > 0) {
+      const prefixHandle = await fs.open(file, 'r');
+      const prefixBuffer = Buffer.allocUnsafe(64 * 1024);
+      let prefixPosition = 0;
+      try {
+        while (prefixPosition < start.byteOffset) {
+          const length = Math.min(
+            prefixBuffer.length,
+            start.byteOffset - prefixPosition,
+          );
+          const { bytesRead } = await prefixHandle.read(
+            prefixBuffer,
+            0,
+            length,
+            prefixPosition,
+          );
+          if (bytesRead === 0)
+            throw new AuxiliaryAppendError('source-truncated');
+          hash.update(prefixBuffer.subarray(0, bytesRead));
+          prefixPosition += bytesRead;
+        }
+      } finally {
+        await prefixHandle.close().catch(() => undefined);
+      }
+    }
+
+    const handle = await fs.open(file, 'r').catch(() => undefined);
+    if (!handle)
+      throw new AuxiliaryAppendError(
+        'source-truncated',
+        'Auxiliary session file disappeared.',
+      );
+    let position = start.byteOffset;
+    let pending = Buffer.alloc(0);
+    let ordinal = start.ordinal;
+    let nextOffset = start.byteOffset;
+    let completeBytes = 0;
+    let stopped = false;
+    const maxBytes = options.collect
+      ? AUXILIARY_RANGE_BYTES
+      : Number.POSITIVE_INFINITY;
+    const maxRecords = options.collect
+      ? AUXILIARY_RANGE_RECORDS
+      : Number.POSITIVE_INFINITY;
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const appendRecord = (rawLine: Buffer, rawWithNewline: Buffer): void => {
+      const withoutCr =
+        rawLine.length > 0 && rawLine.at(-1) === 0x0d
+          ? rawLine.subarray(0, rawLine.length - 1)
+          : rawLine;
+      let text: string;
+      try {
+        text = decoder.decode(withoutCr);
+      } catch {
+        throw new AuxiliaryAppendError(
+          'source-malformed',
+          'Auxiliary JSONL contains invalid UTF-8.',
+        );
+      }
+      if (text.trim().length === 0) {
+        hash.update(rawWithNewline);
+        nextOffset += rawWithNewline.length;
+        return;
+      }
+      if (
+        options.enforceEntrySize !== false &&
+        withoutCr.length > AUXILIARY_ENTRY_BYTES
+      )
+        throw new AuxiliaryAppendError(
+          'entry-too-large',
+          'Auxiliary JSONL entry exceeds the append budget.',
+        );
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        throw new AuxiliaryAppendError(
+          'source-malformed',
+          'Auxiliary JSONL contains a malformed complete entry.',
+        );
+      }
+      hash.update(rawWithNewline);
+      nextOffset += rawWithNewline.length;
+      ordinal += 1;
+      completeBytes += rawWithNewline.length;
+      if (options.collect) records.push(redactImageData(parsed));
+    };
+    try {
+      while (!stopped) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          buffer.length,
+          position,
+        );
+        if (bytesRead === 0) break;
+        position += bytesRead;
+        pending =
+          pending.length === 0
+            ? Buffer.from(buffer.subarray(0, bytesRead))
+            : Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
+        if (
+          options.enforceEntrySize !== false &&
+          pending.length > AUXILIARY_ENTRY_BYTES + 1 &&
+          !pending.includes(0x0a)
+        )
+          throw new AuxiliaryAppendError(
+            'entry-too-large',
+            'Auxiliary JSONL entry exceeds the append budget.',
+          );
+        while (true) {
+          const newline = pending.indexOf(0x0a);
+          if (newline < 0) break;
+          const rawLine = pending.subarray(0, newline);
+          const rawWithNewline = pending.subarray(0, newline + 1);
+          appendRecord(rawLine, rawWithNewline);
+          pending = pending.subarray(newline + 1);
+          if (
+            records.length >= maxRecords ||
+            (completeBytes >= maxBytes && records.length > 0)
+          ) {
+            stopped = true;
+            break;
+          }
+        }
+      }
+      if (
+        !stopped &&
+        options.enforceEntrySize !== false &&
+        pending.length > AUXILIARY_ENTRY_BYTES
+      )
+        throw new AuxiliaryAppendError(
+          'entry-too-large',
+          'Auxiliary JSONL partial entry exceeds the append budget.',
+        );
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+
+    const finalStat = await fs.stat(file).catch(() => undefined);
+    if (!finalStat)
+      throw new AuxiliaryAppendError(
+        'source-truncated',
+        'Auxiliary file disappeared.',
+      );
+    if (finalStat.dev !== stat.dev || finalStat.ino !== stat.ino)
+      throw new AuxiliaryAppendError(
+        'source-replaced',
+        'Auxiliary session file identity changed while reading.',
+      );
+    if (finalStat.size < nextOffset)
+      throw new AuxiliaryAppendError(
+        'source-truncated',
+        'Auxiliary session file was truncated while reading.',
+      );
+    const nextCursor: AuxiliarySourceCursor = {
+      version: 1,
+      dev: stat.dev,
+      ino: stat.ino,
+      ordinal,
+      byteOffset: nextOffset,
+      prefixHash: hash.digest('hex'),
+    };
+    return {
+      records,
+      nextCursor,
+      hasMore: finalStat.size > nextOffset,
+    };
+  }
+
   // TODO: switch older pages to reverse-file reads if page counts grow; the
   // bounded streaming scan keeps current history sizes simple and safe.
   async readEntries(
@@ -248,12 +625,23 @@ export class SessionIndex {
     entries: unknown[];
     entriesComplete: boolean;
     history: SessionHistoryPage;
+    /** Present only for an auxiliary snapshot read at an exact source cut. */
+    sourceCursor?: AuxiliarySourceCursor;
   }> {
     const indexed = this.files.get(id);
     if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
       throw new Error('Unknown session.');
     const stat = await fs.stat(indexed.file).catch(() => undefined);
     if (!stat) throw new Error('Unknown session.');
+    const sourceCursor = options.sourceCursor;
+    if (sourceCursor !== undefined)
+      await this.validateAuxiliaryCursor(indexed.file, stat, sourceCursor);
+    const readStat =
+      sourceCursor === undefined
+        ? stat
+        : Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+            size: sourceCursor.byteOffset,
+          });
     const cursor =
       before === undefined ? undefined : decodeHistoryCursor(before);
     const requestedLeafId = leafId ?? cursor?.leafId;
@@ -287,11 +675,14 @@ export class SessionIndex {
           await this.readBranchEntries(
             id,
             indexed.file,
-            stat,
+            readStat,
             metadata,
             requestedLeafId,
             cursor,
             false,
+            undefined,
+            undefined,
+            sourceCursor,
           ),
         );
       let latestStat = stat;
@@ -301,11 +692,14 @@ export class SessionIndex {
             await this.readBranchEntries(
               id,
               indexed.file,
-              latestStat,
+              sourceCursor === undefined ? latestStat : readStat,
               metadata,
               undefined,
               cursor,
               true,
+              undefined,
+              undefined,
+              sourceCursor,
             ),
           );
         } catch (error) {
@@ -335,7 +729,12 @@ export class SessionIndex {
     // so nextBefore needs no retained original serialization.
     const seenHasher = createHash('sha256');
     let reachedUpperBound = false;
-    const input = createReadStream(indexed.file, { encoding: 'utf8' });
+    const input = createReadStream(indexed.file, {
+      encoding: 'utf8',
+      ...(sourceCursor === undefined || sourceCursor.byteOffset === 0
+        ? {}
+        : { start: 0, end: sourceCursor.byteOffset - 1 }),
+    });
     const lines = readline.createInterface({
       input,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -412,7 +811,7 @@ export class SessionIndex {
           file: indexed.file,
           dev: stat.dev,
           ino: stat.ino,
-          size: stat.size,
+          size: readStat.size,
           prefixHash: page[0]?.prefixHash ?? seenHasher.copy().digest('hex'),
           before: start,
         })
@@ -429,6 +828,7 @@ export class SessionIndex {
         hasOlder,
         ...(nextBefore === undefined ? {} : { nextBefore }),
       },
+      ...(sourceCursor === undefined ? {} : { sourceCursor }),
     };
   }
 
@@ -498,6 +898,7 @@ export class SessionIndex {
     resolveLatestLeaf: boolean,
     selector?: SelectedBranchEntrySelector,
     projectEntry?: SelectedBranchEntryProjector,
+    sourceCursor?: AuxiliarySourceCursor,
   ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
@@ -511,7 +912,12 @@ export class SessionIndex {
     let headerSeen = false;
     let latestEntryId: string | undefined;
     let sourceOrdinal = 0;
-    const firstPassInput = createReadStream(file, { encoding: 'utf8' });
+    const firstPassInput = createReadStream(file, {
+      encoding: 'utf8',
+      ...(sourceCursor === undefined || sourceCursor.byteOffset === 0
+        ? {}
+        : { start: 0, end: sourceCursor.byteOffset - 1 }),
+    });
     const firstPassLines = readline.createInterface({
       input: firstPassInput,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -596,7 +1002,12 @@ export class SessionIndex {
     let reachedUpperBound = false;
     const seenHasher = createHash('sha256');
     const upperBound = cursor?.before;
-    const secondPassInput = createReadStream(file, { encoding: 'utf8' });
+    const secondPassInput = createReadStream(file, {
+      encoding: 'utf8',
+      ...(sourceCursor === undefined || sourceCursor.byteOffset === 0
+        ? {}
+        : { start: 0, end: sourceCursor.byteOffset - 1 }),
+    });
     const secondPassLines = readline.createInterface({
       input: secondPassInput,
       crlfDelay: Number.POSITIVE_INFINITY,
@@ -735,6 +1146,7 @@ export class SessionIndex {
         hasOlder,
         ...(nextBefore === undefined ? {} : { nextBefore }),
       },
+      ...(sourceCursor === undefined ? {} : { sourceCursor }),
     };
   }
 

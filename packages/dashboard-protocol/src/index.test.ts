@@ -49,6 +49,27 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates a narrow per-session transcript reset event', () => {
+    expect(
+      parseBridgeEvent({
+        type: 'session.transcript.reset',
+        sessionId: 'session-1',
+        reason: 'source-rewrite',
+      }),
+    ).toEqual({
+      type: 'session.transcript.reset',
+      sessionId: 'session-1',
+      reason: 'source-rewrite',
+    });
+    expect(() =>
+      parseBridgeEvent({
+        type: 'session.transcript.reset',
+        sessionId: 'session-1',
+        reason: 'gap',
+      }),
+    ).toThrow();
+  });
+
   it('validates typed runtime command input and receipts', () => {
     expect(
       parseRuntimeCommandInput({

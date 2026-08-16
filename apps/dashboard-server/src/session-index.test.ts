@@ -11,7 +11,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { SessionIndex } from './session-index.js';
+import { AuxiliaryAppendError, SessionIndex } from './session-index.js';
 
 describe('session index', () => {
   it('refreshes workspace ownership and removes deleted session files', async () => {
@@ -547,6 +547,93 @@ describe('session index', () => {
     expect(JSON.stringify({ list: index.list(), child })).not.toContain(
       '.delegate-sessions',
     );
+  });
+
+  it('reads bounded auxiliary append ranges and retries a partial final line', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-append-range-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'append-child', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const seed = await index.readAppendCursor('append-child');
+    const appended = Array.from({ length: 300 }, (_, ordinal) => ({
+      type: 'message',
+      id: `append-${ordinal}`,
+      message: { role: 'assistant', content: 'x'.repeat(1_200) },
+    }));
+    await appendFile(
+      file,
+      `${appended.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const records: unknown[] = [];
+    let cursor = seed;
+    do {
+      const range = await index.readAppendRange('append-child', cursor);
+      records.push(...range.records);
+      cursor = range.nextCursor;
+      if (range.records.length === 0) break;
+      if (!range.hasMore) break;
+    } while (records.length < appended.length);
+    expect(records.map((entry) => (entry as { id?: string }).id)).toEqual(
+      appended.map((entry) => entry.id),
+    );
+    const partial = JSON.stringify({
+      type: 'message',
+      id: 'partial',
+      message: { role: 'user', content: 'later' },
+    });
+    await appendFile(file, partial, 'utf8');
+    const waiting = await index.readAppendRange('append-child', cursor);
+    expect(waiting.records).toEqual([]);
+    expect(waiting.nextCursor).toEqual(cursor);
+    await appendFile(file, '\n', 'utf8');
+    const completed = await index.readAppendRange('append-child', cursor);
+    expect(completed.records).toEqual([
+      expect.objectContaining({ id: 'partial' }),
+    ]);
+  });
+
+  it('resets auxiliary append cursors on truncation, rewrite, and malformed lines', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-append-recovery-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const file = path.join(delegates, 'child.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'recovery-child', cwd: '/tmp' })}\n${JSON.stringify({ type: 'message', id: 'stable', message: { role: 'user', content: 'stable' } })}\n`,
+    );
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+    const seed = await index.readAppendCursor('recovery-child');
+    await writeFile(file, 'rewritten\n', 'utf8');
+    await expect(
+      index.readAppendRange('recovery-child', seed),
+    ).rejects.toBeInstanceOf(AuxiliaryAppendError);
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'recovery-child', cwd: '/tmp' })}\n${JSON.stringify({ type: 'message', id: 'stable', message: { role: 'user', content: 'stable' } })}\n`,
+    );
+    await index.refresh();
+    const current = await index.readAppendCursor('recovery-child');
+    await appendFile(file, '{malformed}\n', 'utf8');
+    await expect(
+      index.readAppendRange('recovery-child', current),
+    ).rejects.toMatchObject({
+      reason: 'source-malformed',
+    });
   });
 
   it('rejects auxiliary session symlinks that escape the configured root', async () => {
