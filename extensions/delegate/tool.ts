@@ -30,7 +30,7 @@ const RouteSchema = Type.String({
   minLength: 1,
   maxLength: 512,
   description:
-    'Exact route key from the delegate catalog. Required for fresh tasks; continuations reuse their persisted route when omitted.',
+    'Delegate catalog route; fresh tasks require it, continuations inherit it when omitted.',
 });
 const ContextSchema = StringEnum(['branch', 'fresh'] as const, {
   description:
@@ -38,8 +38,7 @@ const ContextSchema = StringEnum(['branch', 'fresh'] as const, {
 });
 const ScopeSchema = Type.Array(Type.String({ maxLength: 4096 }), {
   maxItems: 100,
-  description:
-    'Paths where the work is expected to land. Guidance for the child, not a hard boundary.',
+  description: 'Advisory paths for expected work; not a hard boundary.',
 });
 const BaseSchema = StringEnum(['wip', 'head'] as const, {
   description:
@@ -152,7 +151,7 @@ const NameSchema = Type.String({
   minLength: 1,
   maxLength: 120,
   description:
-    'Required for fresh batch items; valid new-format continuation items inherit it when omitted. Short human-readable subagent name shown in status UI, such as "Phase 5 review" or "Audit for regressions".',
+    'Display name; required for fresh tasks and inherited by continuations when omitted.',
 });
 
 const TaskSchema = Type.String({

@@ -40,7 +40,7 @@ import {
   updateDelegateSessionRouting,
 } from './session';
 import { normalizeInternalDelegateResultSpec as normalizeDelegateResultSpec } from './structured-result-schema';
-import { delegatePromptGuidelines } from './tool';
+import { delegatePromptGuidelines, registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import {
   createRun,
@@ -145,6 +145,21 @@ describe('delegate', () => {
     expect(prompt).not.toContain('## Machine-readable completion');
     expect(prompt).not.toContain('800 words');
     expect(prompt).not.toMatch(/Use this exact structure/);
+  });
+
+  test('keeps the serialized delegate schema compact', () => {
+    let parameters: unknown;
+    registerDelegateTool(
+      {
+        registerTool(definition: { parameters: unknown }) {
+          parameters = definition.parameters;
+        },
+      } as never,
+      '/tmp/project',
+    );
+    expect(Buffer.byteLength(JSON.stringify(parameters), 'utf8')).toBeLessThan(
+      9_000,
+    );
   });
 
   test('protects recorded branch history in writable continuations', () => {

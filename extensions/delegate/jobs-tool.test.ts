@@ -119,7 +119,9 @@ describe('delegate_jobs rendering', () => {
       },
     } as unknown as ExtensionAPI;
     let automaticQueued = true;
-    registerDelegateJobsTool(pi, manager, undefined, () => automaticQueued);
+    registerDelegateJobsTool(pi, manager, undefined, () =>
+      automaticQueued ? 'queued' : undefined,
+    );
 
     const started = manager.start({
       mode: 'single',
@@ -134,7 +136,7 @@ describe('delegate_jobs rendering', () => {
       action: 'peek',
       id: started.id,
     });
-    expect(suppressed?.content[0]?.text).toContain('already delivered');
+    expect(suppressed?.content[0]?.text).toContain('already queued');
     expect(suppressed?.details).toMatchObject({
       delivery: 'automatic-queued',
       job: { id: started.id },

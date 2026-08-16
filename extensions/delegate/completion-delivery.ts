@@ -15,7 +15,7 @@ export const COMPLETION_WAVE_BURST_MS = 50;
 export const COMPLETION_WAVE_GRACE_MS = COMPLETION_WAVE_BURST_MS;
 export const AUTOMATIC_DELIVERY_STATE_LIMIT = 256;
 
-type AutomaticDeliveryState = 'queued' | 'entered';
+export type AutomaticDeliveryState = 'queued' | 'entered';
 
 type CompletionState = Extract<
   DelegateRunState,
@@ -133,7 +133,9 @@ export interface CompletionDeliveryController {
     messages: readonly unknown[],
   ) => void;
   readonly hasQueuedAutomaticDeliveries: () => boolean;
-  readonly automaticDeliveryQueued: (job: DelegateJobSnapshot) => boolean;
+  readonly automaticDeliveryState: (
+    job: DelegateJobSnapshot,
+  ) => AutomaticDeliveryState | undefined;
   readonly pendingCount: () => number;
   readonly filterPending: (keep: (job: DelegateJobSnapshot) => boolean) => void;
 }
@@ -308,7 +310,7 @@ export function createCompletionDelivery(options: {
     },
     hasQueuedAutomaticDeliveries: () =>
       [...automaticDeliveryStates.values()].some((state) => state === 'queued'),
-    automaticDeliveryQueued: (job) => automaticDeliveryStates.has(job.id),
+    automaticDeliveryState: (job) => automaticDeliveryStates.get(job.id),
     pendingCount: () => pendingCompletions.length,
     filterPending: (keep) => {
       pendingCompletions = pendingCompletions.filter(keep);

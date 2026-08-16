@@ -246,9 +246,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   const syncWidget = () => widget.sync();
 
-  pi.on('session_start', (event, ctx) => {
+  pi.on('session_start', async (event, ctx) => {
     const sessionScopeId = getSessionScopeId(ctx);
-    const resumedJobs = jobs?.list(ctx).length ?? 0;
+    const branchEntries = await listBranchEntries({
+      scope: 'session',
+      sessionId: sessionScopeId,
+    }).catch(() => []);
     if (jobs && scopeId !== 'default' && scopeId !== sessionScopeId) {
       const closingJobs = jobs;
       const closingStatuses = statuses;
@@ -320,25 +323,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         statuses?.settleJobs(completed);
         statuses?.jobResultEntered(completed.map((job) => job.id));
       },
-      delivery.automaticDeliveryQueued,
+      delivery.automaticDeliveryState,
     );
     registerDelegateBranchesTool(pi);
     // Keep the broker tools registered for stable extension ownership, but do
     // not expose either one until a job or retained branch makes it useful.
     setDelegateToolActive(pi, 'delegate_jobs', false);
     setDelegateToolActive(pi, 'delegate_branches', false);
-    if (resumedJobs > 0) activateJobsTool();
-    void listBranchEntries({
-      scope: 'session',
-      sessionId: sessionScopeId,
-    })
-      .then((entries) => {
-        if (runtimeActive && scopeId === sessionScopeId && entries.length > 0)
-          activateBranchesTool();
-      })
-      .catch(() => {
-        // A corrupt or concurrently removed record must not block the session.
-      });
+    if (branchEntries.length > 0) activateBranchesTool();
     syncWidget();
   });
 

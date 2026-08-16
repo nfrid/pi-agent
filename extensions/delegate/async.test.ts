@@ -182,7 +182,7 @@ afterEach(() => {
   rmSync(artifactRoot, { recursive: true, force: true });
 });
 
-function createAsyncHarness(initialScope = 'parent') {
+async function createAsyncHarness(initialScope = 'parent') {
   vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
     ...config,
     maxParallelTasks: 3,
@@ -251,7 +251,7 @@ function createAsyncHarness(initialScope = 'parent') {
   } as unknown as ExtensionContext;
 
   delegate(pi);
-  handlers.get('session_start')?.({}, ctx);
+  await handlers.get('session_start')?.({}, ctx);
   const finish = (task: string, supplied?: DelegatedRun) => {
     const run = supplied ?? successfulRun();
     run.task = task;
@@ -277,7 +277,7 @@ function createAsyncHarness(initialScope = 'parent') {
 describe('async delegate extension', () => {
   test('state-gates broker tools until their state is actionable', async () => {
     const { ctx, finish, handlers, sendMessage, tools, activeTools } =
-      createAsyncHarness();
+      await createAsyncHarness();
     expect(activeTools).toEqual(new Set(['delegate', 'artifact_retrieve']));
 
     await tools.get('delegate')?.execute(
@@ -301,7 +301,7 @@ describe('async delegate extension', () => {
   });
 
   test('enrolls a delegate control channel opened after pause was requested', async () => {
-    const { ctx, handlers, pi } = createAsyncHarness();
+    const { ctx, handlers, pi } = await createAsyncHarness();
     const requested = requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
       path.join(artifactRoot, 'late-delegate.jsonl'),
@@ -319,7 +319,7 @@ describe('async delegate extension', () => {
   });
 
   test('advances two delegate rows from pausing to paused and clears them on resume', async () => {
-    const { ctx, finish, handlers, pi, tools } = createAsyncHarness();
+    const { ctx, finish, handlers, pi, tools } = await createAsyncHarness();
     await tools.get('delegate')?.execute(
       'call-two-paused',
       {
@@ -418,7 +418,7 @@ describe('async delegate extension', () => {
   });
 
   test('binds foreground delegate controls to live pause rows', async () => {
-    const { ctx, finish, handlers, pi, tools } = createAsyncHarness();
+    const { ctx, finish, handlers, pi, tools } = await createAsyncHarness();
     const execution = tools.get('delegate')?.execute(
       'call-foreground-paused',
       {
@@ -464,7 +464,7 @@ describe('async delegate extension', () => {
   });
 
   test('keeps an active delegate enrolled when pause delivery fails', async () => {
-    const { ctx, handlers, pi } = createAsyncHarness();
+    const { ctx, handlers, pi } = await createAsyncHarness();
     const requested = requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
       path.join(artifactRoot, 'missing', 'delegate.jsonl'),
@@ -484,7 +484,7 @@ describe('async delegate extension', () => {
   });
 
   test('keeps pause wiring active after a complete session replacement', async () => {
-    const { ctx, handlers, pi } = createAsyncHarness('scope-A');
+    const { ctx, handlers, pi } = await createAsyncHarness('scope-A');
     await handlers.get('session_shutdown')?.({}, ctx);
     const replacement = {
       ...ctx,
@@ -493,7 +493,7 @@ describe('async delegate extension', () => {
         getSessionId: () => 'scope-B',
       },
     };
-    handlers.get('session_start')?.({}, replacement);
+    await handlers.get('session_start')?.({}, replacement);
     const requested = requestRuntimePause(pi, replacement);
     const channel = createDelegateControlChannel(
       path.join(artifactRoot, 'replacement-delegate.jsonl'),
@@ -514,7 +514,7 @@ describe('async delegate extension', () => {
   });
 
   test('resumes old-scope channels after a replacement session starts', async () => {
-    const { ctx, handlers, pi } = createAsyncHarness('scope-A');
+    const { ctx, handlers, pi } = await createAsyncHarness('scope-A');
     requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
       path.join(artifactRoot, 'old-scope-delegate.jsonl'),
@@ -528,7 +528,7 @@ describe('async delegate extension', () => {
         getSessionId: () => 'scope-B',
       },
     };
-    handlers.get('session_start')?.({}, replacement);
+    await handlers.get('session_start')?.({}, replacement);
 
     resumeRuntimePause(pi, ctx);
     expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
@@ -538,7 +538,7 @@ describe('async delegate extension', () => {
   });
 
   test('does not enroll a late control channel owned by a replaced session', async () => {
-    const { ctx, handlers, pi } = createAsyncHarness('current');
+    const { ctx, handlers, pi } = await createAsyncHarness('current');
     requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
       path.join(artifactRoot, 'stale-delegate.jsonl'),
@@ -556,7 +556,7 @@ describe('async delegate extension', () => {
 
   test('ignores a late shutdown from a replaced session scope', async () => {
     const { ctx, finish, handlers, sendMessage, tools } =
-      createAsyncHarness('scope-A');
+      await createAsyncHarness('scope-A');
     const replacementContext = {
       ...ctx,
       sessionManager: {
@@ -564,7 +564,7 @@ describe('async delegate extension', () => {
         getSessionId: () => 'scope-B',
       },
     };
-    handlers.get('session_start')?.({}, replacementContext);
+    await handlers.get('session_start')?.({}, replacementContext);
 
     await tools.get('delegate')?.execute(
       'call-replacement',
@@ -587,7 +587,8 @@ describe('async delegate extension', () => {
   });
 
   test('refreshes terminal live status after owner lifecycle artifact materialization', async () => {
-    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    const { ctx, finish, handlers, sendMessage, tools } =
+      await createAsyncHarness();
     const launch = await tools.get('delegate')?.execute(
       'call-lifecycle-status',
       {
@@ -794,7 +795,7 @@ describe('async delegate extension', () => {
     expect(timedOutCompletion).toContain('◷');
     expect(timedOutCompletion).toContain('timed out');
 
-    handlers.get('session_start')?.({}, ctx);
+    await handlers.get('session_start')?.({}, ctx);
     const delegateTool = tools.get('delegate');
     expect(delegateTool).toBeDefined();
     expect(tools.has('delegate_jobs')).toBe(true);
@@ -1021,7 +1022,8 @@ describe('async delegate extension', () => {
 
   test('removes pre-flush terminal results but suppresses a queued automatic handoff', async () => {
     vi.useFakeTimers();
-    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    const { ctx, finish, handlers, sendMessage, tools } =
+      await createAsyncHarness();
     const launch = await tools.get('delegate')?.execute(
       'call-batch',
       {
@@ -1087,7 +1089,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(queuedPeek?.content[0]?.text).toContain('already delivered');
+    expect(queuedPeek?.content[0]?.text).toContain('already queued');
     expect(queuedPeek?.content[0]?.text).not.toContain('third finding');
     expect(queuedPeek?.details).toMatchObject({
       action: 'peek',
@@ -1104,7 +1106,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(queuedCancel?.content[0]?.text).toContain('already delivered');
+    expect(queuedCancel?.content[0]?.text).toContain('already queued');
     expect(queuedCancel?.details).toMatchObject({
       action: 'cancel',
       delivery: 'automatic-queued',
@@ -1132,7 +1134,7 @@ describe('async delegate extension', () => {
     expect(deliveredPeek?.details).toMatchObject({
       action: 'peek',
       job: { id: 'dj-3', state: 'success' },
-      delivery: 'automatic-queued',
+      delivery: 'automatic-delivered',
     });
     await handlers.get('session_shutdown')?.({}, ctx);
   });
@@ -1140,7 +1142,8 @@ describe('async delegate extension', () => {
   test('rolls back queued delivery state when sendMessage throws', async () => {
     vi.useFakeTimers();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    const { ctx, finish, handlers, sendMessage, tools } =
+      await createAsyncHarness();
     sendMessage.mockImplementation(() => {
       throw new Error('send failed');
     });
@@ -1178,7 +1181,7 @@ describe('async delegate extension', () => {
 
   test('restores explicit inspection when an accepted steer never enters context', async () => {
     vi.useFakeTimers();
-    const { ctx, finish, handlers, tools } = createAsyncHarness();
+    const { ctx, finish, handlers, tools } = await createAsyncHarness();
     await tools.get('delegate')?.execute(
       'call-lost-steer',
       {
@@ -1214,7 +1217,8 @@ describe('async delegate extension', () => {
 
   test('keeps automatic delivery for nonterminal peeks but not waiting peeks', async () => {
     vi.useFakeTimers();
-    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    const { ctx, finish, handlers, sendMessage, tools } =
+      await createAsyncHarness();
     await tools.get('delegate')?.execute(
       'call-first',
       {
@@ -1327,7 +1331,7 @@ describe('async delegate extension', () => {
     } as unknown as ExtensionContext;
 
     delegate(pi);
-    handlers.get('session_start')?.({}, ctx);
+    await handlers.get('session_start')?.({}, ctx);
     const launch = await tools.get('delegate')?.execute(
       'call-batch',
       {
@@ -1484,7 +1488,7 @@ describe('async delegate extension', () => {
       '/reload establishes prompt guidance',
     );
     notify.mockClear();
-    handlers.get('session_start')?.({}, ctx);
+    await handlers.get('session_start')?.({}, ctx);
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify).toHaveBeenCalledWith(
       expect.stringContaining('Comparison: same'),
@@ -1521,7 +1525,7 @@ describe('async delegate extension', () => {
       error: 'delegate.timeoutMs must be an integer between 10000 and 3600000.',
     };
     configLoader.mockReturnValue(invalidConfig);
-    handlers.get('session_start')?.({}, ctx);
+    await handlers.get('session_start')?.({}, ctx);
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify.mock.calls[0]?.[0]).toContain('Comparison: same');
     expect(notify.mock.calls[0]?.[0]).toContain('valid=no');
@@ -1542,7 +1546,7 @@ describe('async delegate extension', () => {
       '/reload refreshes prompt guidance. Delegate execution re-reads current settings on demand.',
     );
     notify.mockClear();
-    handlers.get('session_start')?.({}, ctx);
+    await handlers.get('session_start')?.({}, ctx);
     configLoader.mockReturnValue(invalidConfig);
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify.mock.calls[0]?.[0]).toContain(
