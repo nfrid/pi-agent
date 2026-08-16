@@ -3,6 +3,7 @@ import { useRouterState } from '@tanstack/react-router';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { CommandPalette } from './command-palette';
 import { useDashboardUtility } from './dashboard-utility-context';
+import { UsageCapsule } from './usage-indicator';
 
 export function runtimeStatusCounts(snapshot: BrowserSnapshot) {
   return {
@@ -84,6 +85,7 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
             </b>
           )}
         </button>
+        <UsageCapsule usage={snapshot.usage} />
         <CommandPalette snapshot={snapshot} disabled={paletteDisabled} />
       </div>
     </header>

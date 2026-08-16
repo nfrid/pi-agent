@@ -8,7 +8,8 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import styles from './notifications.module.css';
-import { DashboardTime, timestampDate } from './timestamp';
+import { DashboardTime } from './timestamp';
+import { parseUsage, type UsageWindow } from './usage-indicator';
 
 export function PushButton() {
   const [status, setStatus] = useState<'off' | 'on' | 'unavailable'>('off');
@@ -69,42 +70,15 @@ function decodeVapidKey(value: string): ArrayBuffer {
 
 const NOTIFICATION_PREVIEW_LIMIT = 8;
 
-function usageNumber(
-  value: Record<string, unknown> | undefined,
-  keys: readonly string[],
-): number | undefined {
-  for (const key of keys)
-    if (typeof value?.[key] === 'number' && Number.isFinite(value[key]))
-      return value[key];
-  return undefined;
-}
-
-function resetTimestamp(
-  value: Record<string, unknown>,
-): number | string | undefined {
-  const raw =
-    value.resetAt ?? value.reset_at ?? value.resetTime ?? value.reset_time;
-  if (typeof raw === 'number' && Number.isFinite(raw))
-    return raw < 100_000_000_000 ? raw * 1_000 : raw;
-  if (typeof raw === 'string' && timestampDate(raw)) return raw;
-  return undefined;
-}
-
-function ResetTiming({ window }: { window?: Record<string, unknown> }) {
+function ResetTiming({ window }: { window?: UsageWindow }) {
   if (!window) return null;
-  const reset = resetTimestamp(window);
-  if (reset !== undefined)
+  if (window.resetsAt !== undefined)
     return (
       <span className={styles.usageReset}>
-        resets <DashboardTime timestamp={reset} />
+        resets <DashboardTime timestamp={window.resetsAt} />
       </span>
     );
-  const seconds = usageNumber(window, [
-    'resetAfterSeconds',
-    'reset_after_seconds',
-    'resetInSeconds',
-    'reset_in_seconds',
-  ]);
+  const seconds = window.resetAfterSeconds;
   if (seconds === undefined) return null;
   const minutes = Math.max(0, Math.ceil(seconds / 60));
   return (
@@ -244,12 +218,7 @@ export function UsagePanel({
   usage: unknown;
   error?: string;
 }) {
-  const snapshots =
-    usage &&
-    typeof usage === 'object' &&
-    Array.isArray((usage as Record<string, unknown>).snapshots)
-      ? ((usage as Record<string, unknown>).snapshots as unknown[])
-      : [];
+  const snapshots = parseUsage(usage);
   return (
     <section className={styles.usagePanel} aria-labelledby="usage-heading">
       <div className="subsection-heading">
@@ -262,43 +231,21 @@ export function UsagePanel({
         </p>
       )}
       {snapshots.length ? (
-        snapshots.map((item, index) => {
-          const record =
-            item && typeof item === 'object'
-              ? (item as Record<string, unknown>)
-              : {};
-          const primary =
-            record.primary && typeof record.primary === 'object'
-              ? (record.primary as Record<string, unknown>)
-              : undefined;
-          const usedPercent = usageNumber(primary, [
-            'usedPercent',
-            'used_percent',
-          ]);
-          const used =
-            usedPercent === undefined
-              ? 'window reported'
-              : `${Math.round(usedPercent)}% used`;
-          const resetWindow =
-            primary ??
-            (record.secondary && typeof record.secondary === 'object'
-              ? (record.secondary as Record<string, unknown>)
-              : undefined);
-          return (
-            <div
-              className={styles.usageRow}
-              key={String(record.limitId ?? index)}
-            >
-              <strong>
-                {String(record.limitName ?? record.limitId ?? 'limit')}
-              </strong>
-              <span>
-                {used}
-                <ResetTiming window={resetWindow} />
-              </span>
-            </div>
-          );
-        })
+        snapshots.map((snapshot) => (
+          <div className={styles.usageRow} key={snapshot.id}>
+            <strong>{snapshot.name}</strong>
+            <span>
+              {[snapshot.primary, snapshot.secondary]
+                .filter((window): window is UsageWindow => Boolean(window))
+                .map((window) => (
+                  <span key={window.kind}>
+                    {window.label} {Math.round(window.usedPercent)}% used
+                    <ResetTiming window={window} />
+                  </span>
+                ))}
+            </span>
+          </div>
+        ))
       ) : (
         <p className="muted">Usage data is unavailable.</p>
       )}
