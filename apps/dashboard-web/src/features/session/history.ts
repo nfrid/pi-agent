@@ -162,6 +162,12 @@ export function useOlderSessionHistory({
     clearAnchor();
   }, [clearAnchor]);
 
+  const completePrependRestore = useCallback((revision: number) => {
+    setPrependAnchor((current) =>
+      current?.revision === revision ? undefined : current,
+    );
+  }, []);
+
   useEffect(() => {
     void id;
     historyGenerationRef.current += 1;
@@ -290,8 +296,7 @@ export function useOlderSessionHistory({
       previousScrollTopRef.current = top;
       if (previous !== undefined && top > previous + 1) {
         topIntentRef.current = false;
-        const programmaticRestore = element.dataset.prependRestoring === 'true';
-        if (pointerGestureRef.current || !programmaticRestore)
+        if (pointerGestureRef.current || historyRequestRef.current)
           cancelPendingRestore();
       }
       if (
@@ -504,6 +509,7 @@ export function useOlderSessionHistory({
     historyError,
     loadEarlierHistory,
     cancelScrollRestore,
+    completePrependRestore,
     prependAnchor,
   };
 }

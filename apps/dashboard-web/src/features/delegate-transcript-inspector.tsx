@@ -254,6 +254,7 @@ function DelegateCanonicalTranscript({
     historyError,
     historyLoading,
     loadEarlierHistory,
+    completePrependRestore,
     prependAnchor,
   } = useOlderSessionHistory({
     id: sessionId,
@@ -291,6 +292,7 @@ function DelegateCanonicalTranscript({
           history?.hasOlder ? history.leadingContinuation : undefined
         }
         prependAnchor={prependAnchor}
+        onPrependAnchorRestored={completePrependRestore}
       />
     </section>
   );

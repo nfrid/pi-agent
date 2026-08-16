@@ -47,6 +47,7 @@ export function Transcript({
   scrollElementRef,
   leadingContinuation,
   prependAnchor,
+  onPrependAnchorRestored,
   virtualize = false,
 }: {
   /** Legacy raw-entry input retained for embedders. */
@@ -63,6 +64,7 @@ export function Transcript({
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   leadingContinuation?: boolean;
   prependAnchor?: { key: string; offset: number; revision: number };
+  onPrependAnchorRestored?: (revision: number) => void;
 }) {
   const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
@@ -99,29 +101,40 @@ export function Transcript({
     )
       return;
     const element = transcriptScrollElementRef.current;
-    const target = Array.from(
-      element.querySelectorAll<HTMLElement>(
-        '[data-transcript-row], [data-transcript-key]',
-      ),
-    ).find(
-      (candidate) =>
-        (candidate.dataset.transcriptRow ?? candidate.dataset.transcriptKey) ===
-        prependAnchor.key,
-    );
-    if (!target) return;
-    const offset =
-      target.getBoundingClientRect().top - element.getBoundingClientRect().top;
-    element.dataset.prependRestoring = 'true';
-    element.scrollTop += offset - prependAnchor.offset;
-    restoredRevisionRef.current = prependAnchor.revision;
-    const frame = window.requestAnimationFrame(() => {
-      delete element.dataset.prependRestoring;
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      delete element.dataset.prependRestoring;
+    const restore = () => {
+      const target = Array.from(
+        element.querySelectorAll<HTMLElement>(
+          '[data-transcript-row], [data-transcript-key]',
+        ),
+      ).find(
+        (candidate) =>
+          (candidate.dataset.transcriptRow ??
+            candidate.dataset.transcriptKey) === prependAnchor.key,
+      );
+      if (!target) return false;
+      const offset =
+        target.getBoundingClientRect().top -
+        element.getBoundingClientRect().top;
+      element.scrollTop += offset - prependAnchor.offset;
+      return true;
     };
-  }, [isVirtualizedTranscript, prependAnchor, transcriptScrollElementRef]);
+    if (restore()) {
+      restoredRevisionRef.current = prependAnchor.revision;
+      onPrependAnchorRestored?.(prependAnchor.revision);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      restore();
+      restoredRevisionRef.current = prependAnchor.revision;
+      onPrependAnchorRestored?.(prependAnchor.revision);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    isVirtualizedTranscript,
+    onPrependAnchorRestored,
+    prependAnchor,
+    transcriptScrollElementRef,
+  ]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
@@ -167,6 +180,7 @@ export function Transcript({
         onBeforeScroll={onBeforeScroll}
         scrollElementRef={transcriptScrollElementRef}
         prependAnchor={prependAnchor}
+        onPrependAnchorRestored={onPrependAnchorRestored}
       />
     );
   return (
@@ -312,6 +326,7 @@ function VirtualizedTranscript({
   onBeforeScroll,
   scrollElementRef,
   prependAnchor,
+  onPrependAnchorRestored,
 }: {
   items: readonly TranscriptModelItem[];
   groups: readonly TranscriptGroup[];
@@ -324,6 +339,7 @@ function VirtualizedTranscript({
   onBeforeScroll?: () => void;
   scrollElementRef: RefObject<HTMLDivElement | null>;
   prependAnchor?: { key: string; offset: number; revision: number };
+  onPrependAnchorRestored?: (revision: number) => void;
 }) {
   const rows = useMemo(
     () => buildVirtualTranscriptRows(items, groups),
@@ -331,6 +347,7 @@ function VirtualizedTranscript({
   );
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
+  const restoredPrependRevisionRef = useRef(0);
   const virtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
@@ -393,52 +410,53 @@ function VirtualizedTranscript({
   useLayoutEffect(() => {
     const anchor = prependAnchor;
     const scrollElement = scrollElementRef.current;
-    if (!anchor || !scrollElement || rows.length === 0) return;
+    if (
+      !anchor ||
+      !scrollElement ||
+      rows.length === 0 ||
+      restoredPrependRevisionRef.current === anchor.revision
+    )
+      return;
     const rowIndex = rowIndexByKey.get(anchor.key);
     if (rowIndex === undefined) return;
-    // VirtualizedTranscript is the sole prepend restore owner. Resolve the
-    // semantic row after the virtualizer has accepted the new row map.
-    scrollElement.dataset.prependRestoring = 'true';
+    // Offset once, correct once after measurement, then retire the anchor.
+    // Keeping restoration alive across frames makes normal upward scrolling
+    // feel pinned instead of behaving like an infinite list prepend.
     virtualizer.measure();
     virtualizer.scrollToIndex(rowIndex, { align: 'start' });
     let correctionFrame: number | undefined;
-    let releaseFrame: number | undefined;
-    let attempts = 0;
-    const release = () => {
-      delete scrollElement.dataset.prependRestoring;
+    const finish = () => {
+      restoredPrependRevisionRef.current = anchor.revision;
+      onPrependAnchorRestored?.(anchor.revision);
     };
-    const correct = () => {
+    const correct = (retry: boolean) => {
       correctionFrame = undefined;
-      attempts += 1;
-      if (attempts > 60) {
-        release();
-        return;
-      }
       const row = Array.from(
         virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
           [],
       ).find((element) => element.dataset.transcriptRow === anchor.key);
-      if (!row) {
-        correctionFrame = window.requestAnimationFrame(correct);
+      if (!row && retry) {
+        correctionFrame = window.requestAnimationFrame(() => correct(false));
         return;
       }
-      virtualizer.measureElement(row);
-      const offset =
-        row.getBoundingClientRect().top -
-        scrollElement.getBoundingClientRect().top;
-      scrollElement.scrollTop += offset - anchor.offset;
-      releaseFrame = window.requestAnimationFrame(release);
+      if (row) {
+        virtualizer.measureElement(row);
+        const offset =
+          row.getBoundingClientRect().top -
+          scrollElement.getBoundingClientRect().top;
+        scrollElement.scrollTop += offset - anchor.offset;
+      }
+      // If the semantic row is still unavailable, keep the estimated
+      // scrollToIndex position rather than pinning the viewport while waiting.
+      finish();
     };
-    correctionFrame = window.requestAnimationFrame(() => {
-      correctionFrame = window.requestAnimationFrame(correct);
-    });
+    correctionFrame = window.requestAnimationFrame(() => correct(true));
     return () => {
       if (correctionFrame !== undefined)
         window.cancelAnimationFrame(correctionFrame);
-      if (releaseFrame !== undefined) window.cancelAnimationFrame(releaseFrame);
-      release();
     };
   }, [
+    onPrependAnchorRestored,
     prependAnchor,
     rowIndexByKey,
     rows.length,

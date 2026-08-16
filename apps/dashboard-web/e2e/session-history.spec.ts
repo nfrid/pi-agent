@@ -222,6 +222,23 @@ async function verifyEarlierHistoryAnchor(page: Page) {
       }, beforePrepend.key),
     )
     .toBeCloseTo(beforePrepend.offset, 0);
+  const continuedTop = await page
+    .locator('.session-transcript-scroll')
+    .evaluate((element) => {
+      const nextTop = Math.max(0, element.scrollTop - 48);
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -48 }));
+      element.scrollTop = nextTop;
+      element.dispatchEvent(new Event('scroll'));
+      return nextTop;
+    });
+  await page.waitForTimeout(500);
+  await expect
+    .poll(() =>
+      page
+        .locator('.session-transcript-scroll')
+        .evaluate((element) => element.scrollTop),
+    )
+    .toBeCloseTo(continuedTop, 0);
   await page.locator('.session-transcript-scroll').evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     element.scrollTop = 0;
