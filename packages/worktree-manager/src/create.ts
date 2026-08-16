@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
@@ -41,6 +42,181 @@ const WORKTREE_LOCK_TIMEOUT_MS = 30_000;
 const WORKTREE_LOCK_RETRY_MS = 20;
 const WORKTREE_LOCK_STALE_MS = 120_000;
 const WORKTREE_LOCK_OWNER = randomUUID();
+const CAPTURE_REF_PREFIX = 'refs/private/pi-worktree-manager/wip/';
+
+export interface CapturedWipSource {
+  /** Canonical root of the repository that was captured. */
+  repositoryRoot: string;
+  /** HEAD at the time the source was captured. */
+  baseHead: string;
+  /** Commit containing the immutable source snapshot. */
+  snapshotCommit: string;
+  /** Whether the snapshot contains changes beyond `baseHead`. */
+  carriedWip: boolean;
+  /** The synthetic commit containing carried WIP, when there was any. */
+  carryCommit?: string;
+  /** Private ref pinning `snapshotCommit` until this source is disposed. */
+  ref: string;
+  /** Remove this source's pin without deleting a ref that replaced it. */
+  dispose(): Promise<void>;
+}
+
+export interface CaptureWorkInProgressOptions {
+  /** Abort Git work and remove any pin created before the abort. */
+  signal?: AbortSignal;
+  /** Extra environment for Git commands. `GIT_INDEX_FILE` is reserved. */
+  env?: NodeJS.ProcessEnv;
+  /** Message for the synthetic commit, when WIP differs from HEAD. */
+  commitMessage?: string;
+}
+
+function abortIfRequested(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new Error('work-in-progress capture was aborted');
+}
+
+async function disposeCapturedWipRef(
+  repositoryRoot: string,
+  ref: string,
+  snapshotCommit: string,
+  env: NodeJS.ProcessEnv | undefined,
+): Promise<void> {
+  try {
+    await git(
+      repositoryRoot,
+      ['update-ref', '--no-deref', '-d', ref, snapshotCommit],
+      { env },
+    );
+  } catch (error) {
+    // `update-ref -d <ref> <old>` intentionally fails when the ref is absent
+    // or has been replaced. Both cases are already safe: never remove the
+    // replacement and make disposal repeatable for callers.
+    try {
+      const current = await gitText(
+        repositoryRoot,
+        ['rev-parse', '--verify', `${ref}^{commit}`],
+        { env },
+      );
+      if (current !== snapshotCommit) return;
+    } catch {
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Capture the caller's source state without touching its index or worktree.
+ *
+ * An alternate index is populated from HEAD and then with `git add --all`, so
+ * tracked staged/unstaged changes and non-ignored untracked files are all
+ * represented while ignored files remain out of the snapshot. The resulting
+ * commit is pinned by a short-lived private UUID ref. There is deliberately no
+ * automatic stale-ref sweep: without a durable owner sidecar, an expired ref
+ * cannot be safely distinguished from a ref another process still owns, so
+ * callers must dispose each returned source explicitly.
+ */
+export async function captureWorkInProgress(
+  cwd: string,
+  options: CaptureWorkInProgressOptions = {},
+): Promise<CapturedWipSource> {
+  abortIfRequested(options.signal);
+  const baseGitOptions = {
+    env: options.env,
+    signal: options.signal,
+  };
+  const root = await repositoryRoot(cwd, baseGitOptions);
+  const baseHead = await gitText(
+    root,
+    ['rev-parse', '--verify', 'HEAD'],
+    baseGitOptions,
+  );
+  const temporaryDirectory = mkdtempSync(
+    path.join(tmpdir(), 'pi-worktree-wip-'),
+  );
+  const indexPath = path.join(temporaryDirectory, 'index');
+  const alternateIndexOptions = {
+    env: { ...options.env, GIT_INDEX_FILE: indexPath },
+    signal: options.signal,
+  };
+  const ref = `${CAPTURE_REF_PREFIX}${randomUUID()}`;
+  let pinAttempted = false;
+  let snapshotCommit: string | undefined;
+
+  try {
+    abortIfRequested(options.signal);
+    await git(root, ['read-tree', 'HEAD'], alternateIndexOptions);
+    await git(root, ['add', '--all'], alternateIndexOptions);
+    const snapshotTree = await gitText(
+      root,
+      ['write-tree'],
+      alternateIndexOptions,
+    );
+    const baseTree = await gitText(
+      root,
+      ['rev-parse', 'HEAD^{tree}'],
+      alternateIndexOptions,
+    );
+    const carriedWip = snapshotTree !== baseTree;
+    const carryCommit = carriedWip
+      ? await gitText(
+          root,
+          [
+            'commit-tree',
+            snapshotTree,
+            '-p',
+            baseHead,
+            '-m',
+            options.commitMessage ?? DEFAULT_CARRY_COMMIT_MESSAGE,
+          ],
+          alternateIndexOptions,
+        )
+      : undefined;
+    const capturedSnapshotCommit = carryCommit ?? baseHead;
+    snapshotCommit = capturedSnapshotCommit;
+
+    pinAttempted = true;
+    await git(
+      root,
+      [
+        'update-ref',
+        '--no-deref',
+        ref,
+        capturedSnapshotCommit,
+        '0'.repeat(baseHead.length),
+      ],
+      baseGitOptions,
+    );
+    abortIfRequested(options.signal);
+
+    let disposal: Promise<void> | undefined;
+    return {
+      repositoryRoot: root,
+      baseHead,
+      snapshotCommit: capturedSnapshotCommit,
+      carriedWip,
+      ...(carryCommit ? { carryCommit } : {}),
+      ref,
+      dispose: () => {
+        disposal ??= disposeCapturedWipRef(
+          root,
+          ref,
+          capturedSnapshotCommit,
+          options.env,
+        );
+        return disposal;
+      },
+    };
+  } catch (error) {
+    if (pinAttempted && snapshotCommit)
+      await disposeCapturedWipRef(root, ref, snapshotCommit, options.env).catch(
+        () => undefined,
+      );
+    throw error;
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
 
 function slugify(name: string): string {
   const slug = name
