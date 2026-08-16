@@ -74,6 +74,8 @@ interface WorkflowRecord {
   reason?: string;
   launched: boolean;
   cancellationRequested: boolean;
+  cancellationWaiters: Array<() => void>;
+  cancellationInFlight?: Promise<void>;
   result?: DelegateJobResult;
   launch: DelegateJobStartOptions;
 }
@@ -156,7 +158,7 @@ export class DelegateWorkflowCoordinator {
 
     // This is the adapter's only preflight. No model or coordinator identity
     // has been committed before every reference and launch input is checked.
-    if (dependencies.length === 0) this.jobs.assertAccepting();
+    if (this.dependenciesReady(dependencies)) this.jobs.assertAccepting();
 
     const timestamp = this.now();
     const record: WorkflowRecord = {
@@ -168,6 +170,7 @@ export class DelegateWorkflowCoordinator {
       route: options.route,
       launched: false,
       cancellationRequested: false,
+      cancellationWaiters: [],
       launch: {
         name: options.name,
         ownerSessionId: options.ownerSessionId,
@@ -187,7 +190,7 @@ export class DelegateWorkflowCoordinator {
     this.records.set(record.attempt.identity, record);
     this.changed();
 
-    if (dependencies.length === 0) this.launch(record);
+    if (this.dependenciesReady(record.dependencies)) this.launch(record);
     return this.snapshotRecord(record);
   }
 
@@ -237,29 +240,38 @@ export class DelegateWorkflowCoordinator {
   ): Promise<DelegateWorkflowAttemptSnapshot[]> {
     const requested =
       typeof references === 'string' ? [references] : references;
-    const records = requested.map((reference) => this.requireRecord(reference));
+    const records: WorkflowRecord[] = [];
+    const seen = new Set<AttemptIdentity>();
+    for (const reference of requested) {
+      const record = this.requireRecord(reference);
+      if (seen.has(record.attempt.identity)) continue;
+      seen.add(record.attempt.identity);
+      records.push(record);
+    }
+
+    // Mark the complete request before settling one scheduled record. That
+    // prevents an upstream barrier release from launching a requested child.
+    for (const record of records)
+      if (!isTerminalWorkflowAttemptState(record.state))
+        record.cancellationRequested = true;
+
     const active = records.filter(
       (record) => record.state === 'queued' || record.state === 'running',
     );
-    for (const record of records) {
+    const launching = active.filter((record) => record.jobId === undefined);
+    const waitingForLaunch = launching.map((record) =>
+      this.waitForCancellation(record),
+    );
+    for (const record of records)
       if (record.state === 'scheduled')
         this.settle(record, 'cancelled', 'Cancelled before launch.');
-      else if (!isTerminalWorkflowAttemptState(record.state))
-        record.cancellationRequested = true;
-    }
-    if (active.length > 0) {
-      try {
-        await this.jobs.cancel(
-          active
-            .map((record) => record.jobId)
-            .filter((id): id is string => !!id),
-        );
-      } catch (error) {
-        for (const record of active)
-          if (!isTerminalWorkflowAttemptState(record.state))
-            this.settle(record, 'cancelled', boundedReason(error));
-      }
-    }
+
+    await Promise.all([
+      ...active
+        .filter((record) => record.jobId !== undefined)
+        .map((record) => this.cancelStartedJob(record)),
+      ...waitingForLaunch,
+    ]);
     return records.map((record) => this.snapshotRecord(record));
   }
 
@@ -319,6 +331,10 @@ export class DelegateWorkflowCoordinator {
   private launch(record: WorkflowRecord): void {
     if (record.launched || isTerminalWorkflowAttemptState(record.state)) return;
     record.launched = true;
+    if (record.cancellationRequested) {
+      this.settle(record, 'cancelled', 'Cancelled before launch.');
+      return;
+    }
     record.queuedAt = this.now();
     this.transition(record, 'queued');
     try {
@@ -329,14 +345,64 @@ export class DelegateWorkflowCoordinator {
           this.handleTerminal(record, result, snapshot),
       });
       record.jobId = job.id;
+      // A cancellation can be requested by an adapter change hook while
+      // start() is still assigning its opaque job identity. Abort this exact
+      // job as soon as the identity is available.
+      if (record.cancellationRequested) void this.cancelStartedJob(record);
       if (job.state === 'running') {
         record.startedAt = job.startedAt ?? this.now();
         this.transition(record, 'running');
       }
       this.changed();
     } catch (error) {
-      this.settle(record, 'error', `Launch failed: ${boundedReason(error)}`);
+      this.settle(
+        record,
+        record.cancellationRequested ? 'cancelled' : 'error',
+        record.cancellationRequested
+          ? 'Cancelled before launch completed.'
+          : `Launch failed: ${boundedReason(error)}`,
+      );
     }
+  }
+
+  private dependenciesReady(dependencies: readonly AttemptIdentity[]): boolean {
+    return dependencies.every((identity) => {
+      const dependency = this.records.get(identity);
+      return (
+        dependency !== undefined &&
+        isTerminalWorkflowAttemptState(dependency.state)
+      );
+    });
+  }
+
+  private waitForCancellation(record: WorkflowRecord): Promise<void> {
+    if (isTerminalWorkflowAttemptState(record.state)) return Promise.resolve();
+    return new Promise((resolve) => record.cancellationWaiters.push(resolve));
+  }
+
+  private cancelStartedJob(record: WorkflowRecord): Promise<void> {
+    if (record.cancellationInFlight) return record.cancellationInFlight;
+    const jobId = record.jobId;
+    if (!jobId) return this.waitForCancellation(record);
+    const work = (async () => {
+      try {
+        await this.jobs.cancel([jobId]);
+        if (!isTerminalWorkflowAttemptState(record.state))
+          this.settle(record, 'cancelled', 'Delegate job was cancelled.');
+      } catch (error) {
+        if (!isTerminalWorkflowAttemptState(record.state))
+          this.settle(record, 'cancelled', boundedReason(error));
+      } finally {
+        this.resolveCancellationWaiters(record);
+      }
+    })();
+    record.cancellationInFlight = work;
+    return work;
+  }
+
+  private resolveCancellationWaiters(record: WorkflowRecord): void {
+    const waiters = record.cancellationWaiters.splice(0);
+    for (const resolve of waiters) resolve();
   }
 
   private handleTerminal(
@@ -376,6 +442,7 @@ export class DelegateWorkflowCoordinator {
     this.transition(record, state);
     record.settledAt = this.now();
     if (reason) record.reason = boundedReason(reason);
+    this.resolveCancellationWaiters(record);
     if (!record.result) {
       const result = emptyResult(record.reason ?? `Workflow attempt ${state}.`);
       record.result = result;
@@ -386,13 +453,7 @@ export class DelegateWorkflowCoordinator {
       if (
         dependent.state === 'scheduled' &&
         dependent.dependencies.includes(record.attempt.identity) &&
-        dependent.dependencies.every((identity) => {
-          const dependency = this.records.get(identity);
-          return (
-            dependency !== undefined &&
-            isTerminalWorkflowAttemptState(dependency.state)
-          );
-        })
+        this.dependenciesReady(dependent.dependencies)
       )
         this.launch(dependent);
     }

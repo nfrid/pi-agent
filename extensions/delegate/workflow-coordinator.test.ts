@@ -1,7 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
 import { DelegateJobManager, type DelegateJobResult } from './jobs';
 import { createRun } from './types';
-import { DelegateWorkflowCoordinator } from './workflow-coordinator';
+import {
+  type DelegateWorkflowAttemptSnapshot,
+  DelegateWorkflowCoordinator,
+} from './workflow-coordinator';
 import {
   assertWorkflowAttemptTransition,
   canTransitionWorkflowAttemptState,
@@ -60,6 +63,52 @@ describe('DelegateWorkflowCoordinator', () => {
     await manager.dispose();
   });
 
+  test('launches after an already-successful dependency commits', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const upstream = coordinator.schedule(
+      scheduleOptions('upstream', async () => result('upstream')),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require(upstream.identity).state).toBe('success'),
+    );
+    const dependentExecute = vi.fn(async () => result('dependent'));
+    const dependent = coordinator.schedule(
+      scheduleOptions('dependent', dependentExecute, {
+        after: [upstream.identity],
+      }),
+    );
+
+    expect(dependent.state).toBe('running');
+    expect(dependentExecute).toHaveBeenCalledOnce();
+    await settle(coordinator);
+    await manager.dispose();
+  });
+
+  test('launches a continuation after its terminal predecessor commits', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const predecessor = coordinator.schedule(
+      scheduleOptions('impl', async () => result('predecessor')),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require(predecessor.identity).state).toBe('success'),
+    );
+    const continuationExecute = vi.fn(async () => result('continuation'));
+    const continuation = coordinator.schedule(
+      scheduleOptions('impl', continuationExecute, { continuation: true }),
+    );
+
+    expect(continuation).toMatchObject({
+      identity: 'impl@2',
+      dependencies: ['impl@1'],
+      state: 'running',
+    });
+    expect(continuationExecute).toHaveBeenCalledOnce();
+    await settle(coordinator);
+    await manager.dispose();
+  });
+
   test('waits for a running upstream and launches a dependent once', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
@@ -108,6 +157,163 @@ describe('DelegateWorkflowCoordinator', () => {
     await settle(coordinator);
     expect(coordinator.require(upstream.identity).state).toBe(expectedState);
     expect(dependentExecute).toHaveBeenCalledOnce();
+    await manager.dispose();
+  });
+
+  test.each([
+    'error',
+    'aborted',
+    'timed-out',
+  ] as const)('launches after an already-%s dependency commits', async (state) => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const upstream = coordinator.schedule(
+      scheduleOptions('upstream', async () => result('upstream', state)),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require(upstream.identity).state).toBe(state),
+    );
+    const dependentExecute = vi.fn(async () => result('dependent'));
+    const dependent = coordinator.schedule(
+      scheduleOptions('dependent', dependentExecute, {
+        after: [upstream.identity],
+      }),
+    );
+
+    expect(dependent.state).toBe('running');
+    expect(dependentExecute).toHaveBeenCalledOnce();
+    await settle(coordinator);
+    await manager.dispose();
+  });
+
+  test('releases immediately for cancelled and blocked dependencies', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    let gateFinish!: (value: DelegateJobResult) => void;
+    const gate = coordinator.schedule(
+      scheduleOptions(
+        'gate',
+        () =>
+          new Promise<DelegateJobResult>((resolve) => (gateFinish = resolve)),
+      ),
+    );
+    const cancelled = coordinator.schedule(
+      scheduleOptions('cancelled', async () => result('cancelled'), {
+        after: [gate.identity],
+      }),
+    );
+    await coordinator.cancel(cancelled.identity);
+    const cancelledChildExecute = vi.fn(async () => result('cancelled-child'));
+    const cancelledChild = coordinator.schedule(
+      scheduleOptions('cancelled-child', cancelledChildExecute, {
+        after: [cancelled.identity],
+      }),
+    );
+    expect(cancelledChild.state).toBe('running');
+    expect(cancelledChildExecute).toHaveBeenCalledOnce();
+
+    const blocked = coordinator.schedule(
+      scheduleOptions('blocked', async () => result('blocked'), {
+        after: [gate.identity],
+      }),
+    );
+    const blockedChildExecute = vi.fn(async () => result('blocked-child'));
+    const blockedChild = coordinator.schedule(
+      scheduleOptions('blocked-child', blockedChildExecute, {
+        after: [blocked.identity],
+      }),
+    );
+    expect(blockedChild.state).toBe('scheduled');
+    coordinator.block(blocked.identity, 'blocked by policy');
+    expect(coordinator.require(blockedChild.identity).state).toBe('running');
+    expect(blockedChildExecute).toHaveBeenCalledOnce();
+
+    gateFinish(result('gate'));
+    await settle(coordinator);
+    await manager.dispose();
+  });
+
+  test('cancelling a scheduled chain marks every requested attempt first', async () => {
+    for (const order of [
+      ['a', 'b', 'c'],
+      ['c', 'b', 'a'],
+    ]) {
+      const manager = new DelegateJobManager();
+      const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+      const gate = coordinator.schedule(
+        scheduleOptions(
+          'gate',
+          (signal) =>
+            new Promise<DelegateJobResult>((resolve) => {
+              signal.addEventListener(
+                'abort',
+                () => resolve(result('gate', 'aborted')),
+                {
+                  once: true,
+                },
+              );
+            }),
+        ),
+      );
+      const executes = new Map<string, ReturnType<typeof vi.fn>>();
+      const aExecute = vi.fn(async () => result('a'));
+      executes.set('a', aExecute);
+      const a = coordinator.schedule(
+        scheduleOptions('a', aExecute, { after: [gate.identity] }),
+      );
+      const bExecute = vi.fn(async () => result('b'));
+      executes.set('b', bExecute);
+      const b = coordinator.schedule(
+        scheduleOptions('b', bExecute, { after: [a.identity] }),
+      );
+      const cExecute = vi.fn(async () => result('c'));
+      executes.set('c', cExecute);
+      const c = coordinator.schedule(
+        scheduleOptions('c', cExecute, { after: [b.identity] }),
+      );
+
+      await coordinator.cancel(order);
+      expect(a.state).toBe('scheduled');
+      expect(b.state).toBe('scheduled');
+      expect(c.state).toBe('scheduled');
+      expect(executes.get('a')).not.toHaveBeenCalled();
+      expect(executes.get('b')).not.toHaveBeenCalled();
+      expect(executes.get('c')).not.toHaveBeenCalled();
+      expect(coordinator.require('a').state).toBe('cancelled');
+      expect(coordinator.require('b').state).toBe('cancelled');
+      expect(coordinator.require('c').state).toBe('cancelled');
+      await coordinator.cancel(gate.identity);
+      await manager.dispose();
+    }
+  });
+
+  test('cancellation during start aborts the assigned job identity', async () => {
+    let coordinator!: DelegateWorkflowCoordinator;
+    let cancellation!: Promise<DelegateWorkflowAttemptSnapshot[]>;
+    const manager = new DelegateJobManager({
+      onChange: () => {
+        if (!cancellation) cancellation = coordinator.cancel('race');
+      },
+    });
+    coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const execute = vi.fn(
+      (signal: AbortSignal) =>
+        new Promise<DelegateJobResult>((resolve) => {
+          signal.addEventListener(
+            'abort',
+            () => resolve(result('race', 'aborted')),
+            { once: true },
+          );
+        }),
+    );
+
+    const race = coordinator.schedule(scheduleOptions('race', execute));
+    await cancellation;
+    await vi.waitFor(() =>
+      expect(coordinator.require(race.identity).state).toBe('cancelled'),
+    );
+    expect(execute).toHaveBeenCalledOnce();
+    expect(manager.runningCount).toBe(0);
     await manager.dispose();
   });
 
