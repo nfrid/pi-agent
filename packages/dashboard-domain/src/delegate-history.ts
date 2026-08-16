@@ -814,52 +814,108 @@ function projectWakeStoreSnapshot(value: unknown): RecordValue | undefined {
   return result;
 }
 
-function wakeStoreEntries(entry: RecordValue): RecordValue[] {
-  if (entry.customType !== 'delegate-wake:v1') return [];
+const WAKE_STORE_ENTRY_TYPE = 'delegate-wake:v1';
+const MAX_WAKE_HISTORY = 256;
+const MAX_WAKE_DELTA_WAKES = 32;
+
+type WakeStoreOperation = {
+  kind: 'snapshot' | 'delta';
+  wakes: RecordValue[];
+  ownerSessionId?: string;
+  ownerEpoch?: number;
+};
+
+function wakeStoreOperation(
+  entry: RecordValue,
+): WakeStoreOperation | null | undefined {
+  if (entry.customType !== WAKE_STORE_ENTRY_TYPE) return null;
   const data = isRecord(entry.data) ? entry.data : undefined;
   const state = data && isRecord(data.state) ? data.state : undefined;
-  if (data?.version !== 1 || data.kind !== 'snapshot' || !state) return [];
-  if (state.version !== 1 || !Array.isArray(state.wakes)) return [];
-  return state.wakes.slice(-256).flatMap((wake) => {
+  const kind = data?.kind;
+  const maximum = kind === 'snapshot' ? MAX_WAKE_HISTORY : MAX_WAKE_DELTA_WAKES;
+  if (
+    data?.version !== 1 ||
+    (kind !== 'snapshot' && kind !== 'delta') ||
+    !state ||
+    state.version !== 1 ||
+    !Array.isArray(state.wakes) ||
+    state.wakes.length > maximum
+  )
+    return undefined;
+  const wakes: RecordValue[] = [];
+  const wakeIds = new Set<string>();
+  for (const wake of state.wakes) {
     const metadata = projectWakeStoreSnapshot(wake);
-    if (!metadata) return [];
-    const lifecycleState =
-      metadata.state === 'entered'
-        ? 'success'
-        : metadata.state === 'cancelled' || metadata.state === 'blocked'
-          ? 'error'
-          : 'running';
-    return [
-      {
-        runId: `wake:${metadata.id}`,
-        lineageId: `wake:${metadata.id}`,
-        name: `Wake ${metadata.id}`,
-        state: lifecycleState,
-        createdAt: metadata.createdAt,
-        ...(metadata.queuedAt === undefined
-          ? {}
-          : { queuedAt: metadata.queuedAt }),
-        ...(metadata.enteredAt === undefined
-          ? {}
-          : { finishedAt: metadata.enteredAt }),
-        allowWrites: false,
-        wake: metadata,
-      },
-    ];
-  });
+    const id = metadata ? stringValue(metadata.id, 256) : undefined;
+    if (!metadata || !id || wakeIds.has(id)) return undefined;
+    wakeIds.add(id);
+    wakes.push(metadata);
+  }
+  const ownerSessionId = stringValue(state.ownerSessionId, 256);
+  const ownerEpoch = finiteNumber(state.ownerEpoch);
+  if (
+    (state.ownerSessionId !== undefined && ownerSessionId === undefined) ||
+    (state.ownerEpoch !== undefined &&
+      (ownerEpoch === undefined ||
+        !Number.isSafeInteger(ownerEpoch) ||
+        ownerEpoch < 0))
+  )
+    return undefined;
+  return {
+    kind,
+    wakes,
+    ...(ownerSessionId === undefined ? {} : { ownerSessionId }),
+    ...(ownerEpoch === undefined ? {} : { ownerEpoch }),
+  };
+}
+
+function wakeRun(metadata: RecordValue): RecordValue {
+  const lifecycleState =
+    metadata.state === 'entered'
+      ? 'success'
+      : metadata.state === 'cancelled' || metadata.state === 'blocked'
+        ? 'error'
+        : 'running';
+  return {
+    runId: `wake:${metadata.id}`,
+    lineageId: `wake:${metadata.id}`,
+    name: `Wake ${metadata.id}`,
+    state: lifecycleState,
+    createdAt: metadata.createdAt,
+    ...(metadata.queuedAt === undefined ? {} : { queuedAt: metadata.queuedAt }),
+    ...(metadata.enteredAt === undefined
+      ? {}
+      : { finishedAt: metadata.enteredAt }),
+    allowWrites: false,
+    wake: metadata,
+  };
+}
+
+function wakeStoreEntries(entry: RecordValue): RecordValue[] {
+  const operation = wakeStoreOperation(entry);
+  return operation?.wakes.map(wakeRun) ?? [];
 }
 
 function projectWakeStoreEntry(entry: RecordValue): RecordValue | undefined {
-  const wakes = wakeStoreEntries(entry);
-  if (wakes.length === 0) return undefined;
+  const operation = wakeStoreOperation(entry);
+  if (!operation || operation.wakes.length === 0) return undefined;
   return {
     ...projectedEntryMetadata(entry),
     type: 'custom',
-    customType: 'delegate-wake:v1',
+    customType: WAKE_STORE_ENTRY_TYPE,
     data: {
       version: 1,
-      kind: 'snapshot',
-      state: { version: 1, wakes: wakes.map((wake) => wake.wake) },
+      kind: operation.kind,
+      state: {
+        version: 1,
+        ...(operation.ownerSessionId === undefined
+          ? {}
+          : { ownerSessionId: operation.ownerSessionId }),
+        ...(operation.ownerEpoch === undefined
+          ? {}
+          : { ownerEpoch: operation.ownerEpoch }),
+        wakes: operation.wakes,
+      },
     },
   };
 }
@@ -1139,31 +1195,113 @@ function workflowJournal(
   return [...latest.values()];
 }
 
-function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
-  const ordinary: DelegateOccurrence[] = [];
-  const latestMetadata = new Map<string, DelegateOccurrence>();
-  const workflow = workflowJournal(branch) ?? [];
+function wakeStateProgress(state: unknown): number {
+  if (state === 'pending') return 0;
+  if (state === 'ready') return 1;
+  if (state === 'queued') return 2;
+  return 3;
+}
+
+function wakeIsTerminal(state: unknown): boolean {
+  return state === 'entered' || state === 'cancelled' || state === 'blocked';
+}
+
+function keepPriorWakeOccurrence(
+  previous: DelegateOccurrence,
+  next: DelegateOccurrence,
+): boolean {
+  const oldWake = isRecord(previous.run.wake) ? previous.run.wake : undefined;
+  const newWake = isRecord(next.run.wake) ? next.run.wake : undefined;
+  if (!oldWake || !newWake) return false;
+  const oldRevision = finiteNumber(oldWake.revision) ?? 0;
+  const newRevision = finiteNumber(newWake.revision) ?? 0;
+  if (oldRevision >= newRevision) return true;
+  const oldProgress = wakeStateProgress(oldWake.state);
+  const newProgress = wakeStateProgress(newWake.state);
+  if (oldProgress > newProgress) return true;
+  if (oldProgress === newProgress && oldWake.state !== newWake.state)
+    return true;
+  if (wakeIsTerminal(oldWake.state) && oldWake.state !== newWake.state)
+    return true;
+  if (oldWake.state === 'queued' && newWake.state !== 'queued') return true;
+  return false;
+}
+
+function wakeJournal(
+  branch: readonly unknown[],
+): DelegateOccurrence[] | undefined {
+  const latest = new Map<string, DelegateOccurrence>();
+  let ownerKey: string | undefined;
   for (const [entryIndex, value] of branch.entries()) {
     if (!isRecord(value)) continue;
-    for (const occurrence of wakeStoreEntries(value).map((run, runIndex) => ({
-      run,
+    const operation = wakeStoreOperation(value);
+    // A malformed wake record invalidates the complete journal; do not render
+    // a valid prefix or a partial delta as current state.
+    if (operation === undefined) return undefined;
+    if (operation === null) continue;
+    const nextOwnerKey = `${operation.ownerSessionId ?? ''}\u0000${operation.ownerEpoch ?? ''}`;
+    if (ownerKey !== undefined && ownerKey !== nextOwnerKey) latest.clear();
+    ownerKey = nextOwnerKey;
+    const occurrences = operation.wakes.map((metadata, runIndex) => ({
+      run: wakeRun(metadata),
       kind: 'background' as const,
       entryIndex,
       runIndex: String(runIndex),
       entryIdentity: stringValue(value.id),
       entryTimestamp: entryTimestamp(value),
-    }))) {
-      const wake = isRecord(occurrence.run.wake)
-        ? stringValue(occurrence.run.wake.id, 256)
-        : undefined;
-      if (wake) latestMetadata.set(`wake:${wake}`, occurrence);
+    }));
+    if (operation.kind === 'snapshot') {
+      const prior = new Map(latest);
+      latest.clear();
+      for (const occurrence of occurrences) {
+        const wakeId = stringValue(
+          (occurrence.run.wake as RecordValue).id,
+          256,
+        );
+        if (!wakeId) continue;
+        const key = `${nextOwnerKey}\u0000${wakeId}`;
+        const previous = prior.get(key);
+        latest.set(
+          key,
+          previous && keepPriorWakeOccurrence(previous, occurrence)
+            ? previous
+            : occurrence,
+        );
+      }
+    } else {
+      for (const occurrence of occurrences) {
+        const wakeId = stringValue(
+          (occurrence.run.wake as RecordValue).id,
+          256,
+        );
+        if (!wakeId) continue;
+        const key = `${nextOwnerKey}\u0000${wakeId}`;
+        const previous = latest.get(key);
+        if (!previous || !keepPriorWakeOccurrence(previous, occurrence))
+          latest.set(key, occurrence);
+      }
     }
+    while (latest.size > MAX_WAKE_HISTORY) {
+      const oldest = latest.keys().next().value;
+      if (oldest === undefined) break;
+      latest.delete(oldest);
+    }
+  }
+  return [...latest.values()];
+}
+
+function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
+  const ordinary: DelegateOccurrence[] = [];
+  const workflow = workflowJournal(branch) ?? [];
+  const wakes = wakeJournal(branch) ?? [];
+  for (const [entryIndex, value] of branch.entries()) {
+    if (!isRecord(value)) continue;
     ordinary.push(
       ...foregroundDetails(value, entryIndex),
       ...backgroundDetails(value, entryIndex),
     );
   }
-  return [...ordinary, ...workflow, ...latestMetadata.values()].sort(
+  return [...ordinary, ...workflow, ...wakes].sort(
     (left, right) => left.entryIndex - right.entryIndex,
   );
 }

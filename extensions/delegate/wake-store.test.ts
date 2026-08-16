@@ -6,6 +6,7 @@ import {
 } from './wake-coordinator';
 import {
   attachWakeStore,
+  latestWakeState,
   persistWakeState,
   restoreWakeState,
   WAKE_ENTRY_TYPE,
@@ -110,6 +111,7 @@ describe('wake store', () => {
     const detach = attachWakeStore(wake, pi);
     wake.register({ id: 'waiting', condition: { node: later.identity } });
     expect(entries).toHaveLength(1);
+    expect((entries[0] as { kind: unknown }).kind).toBe('delta');
     expect((entries[0] as { state: unknown }).state).toBeDefined();
     detach();
     wake.cancel('waiting');
@@ -607,6 +609,144 @@ describe('wake store', () => {
         .state,
     ).toBe('entered');
     expect(dispatches).toBe(0);
+    await workflow.dispose();
+  });
+
+  test('uses bounded replacement deltas for hundreds of wake lifecycles and reloads them', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    let finishGate!: (result: { runs: []; handoff: string }) => void;
+    const gate = workflow.schedule({
+      logicalId: 'wake-gate',
+      mode: 'single',
+      tasks: ['wake-gate'],
+      execute: () =>
+        new Promise((resolve) => {
+          finishGate = resolve;
+        }),
+    });
+    const entries: unknown[] = [];
+    const wake = new WakeCoordinator({ workflow });
+    const detach = attachWakeStore(wake, {
+      appendEntry(type: string, data: unknown) {
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+    for (let index = 0; index < 220; index += 1)
+      wake.register({
+        id: `wake-${index}`,
+        condition: { node: gate.identity },
+      });
+
+    expect(entries).toHaveLength(220);
+    expect(
+      entries.every(
+        (entry) =>
+          (entry as { data?: { kind?: unknown } }).data?.kind === 'delta',
+      ),
+    ).toBe(true);
+    expect(
+      entries.every(
+        (entry) =>
+          ((entry as { data?: { state?: { wakes?: unknown[] } } }).data?.state
+            ?.wakes?.length ?? 0) <= 32,
+      ),
+    ).toBe(true);
+
+    finishGate({ runs: [], handoff: 'raw wake report must not persist' });
+    await vi.waitFor(() =>
+      expect(wake.require('wake-219').state).toBe('ready'),
+    );
+    expect(JSON.stringify(entries)).not.toContain('raw wake report');
+    const serializedBytes = JSON.stringify(entries).length;
+    const latest = latestWakeState({
+      sessionManager: { getBranch: () => entries },
+    } as never);
+    expect(latest?.wakes).toHaveLength(220);
+    expect(serializedBytes).toBeLessThan(JSON.stringify(latest).length * 4);
+
+    const restored = new WakeCoordinator({ workflow });
+    restoreWakeState(restored, {
+      sessionManager: { getBranch: () => entries },
+    } as never);
+    expect(restored.list()).toHaveLength(220);
+    expect(restored.require('wake-219').state).toBe('ready');
+    expect(JSON.stringify(restored.snapshot())).not.toContain(
+      'raw wake report',
+    );
+    detach();
+    await workflow.dispose();
+  });
+
+  test('keeps failed and inactive writes dirty until a later flush', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const gate = workflow.schedule({
+      logicalId: 'dirty-gate',
+      mode: 'single',
+      tasks: ['dirty-gate'],
+      execute: async () => ({ runs: [], handoff: 'dirty' }),
+    });
+    const entries: unknown[] = [];
+    let fail = true;
+    const wake = new WakeCoordinator({ workflow });
+    const detach = attachWakeStore(wake, {
+      appendEntry(type: string, data: unknown) {
+        if (fail) throw new Error('append failed');
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+    wake.register({ id: 'dirty-wake', condition: { node: gate.identity } });
+    expect(entries).toHaveLength(0);
+    fail = false;
+    wake.cancel('dirty-wake');
+    expect(entries).toHaveLength(1);
+    expect((entries[0] as { data?: { kind?: string } }).data?.kind).toBe(
+      'delta',
+    );
+    detach();
+    await workflow.dispose();
+  });
+
+  test('rejects a malformed replacement delta after a valid checkpoint', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const gate = workflow.schedule({
+      logicalId: 'malformed-gate',
+      mode: 'single',
+      tasks: ['malformed-gate'],
+      execute: (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => resolve({ runs: [], handoff: 'hidden' }),
+            { once: true },
+          ),
+        ),
+    });
+    const source = new WakeCoordinator({ workflow });
+    source.register({ id: 'valid-wake', condition: { node: gate.identity } });
+    const entries: unknown[] = [];
+    persistWakeState(source, {
+      appendEntry(type: string, data: unknown) {
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+    entries.push({
+      type: 'custom',
+      customType: WAKE_ENTRY_TYPE,
+      data: {
+        version: 1,
+        kind: 'delta',
+        state: {
+          version: 1,
+          ownerSessionId: 'default',
+          ownerEpoch: 0,
+          wakes: [{ id: 'malformed', evidence: 'raw report' }],
+        },
+      },
+    });
+    expect(latestWakeState(branch(entries))).toBeUndefined();
+    const restored = new WakeCoordinator({ workflow });
+    restoreWakeState(restored, branch(entries));
+    expect(restored.list()).toEqual([]);
     await workflow.dispose();
   });
 
