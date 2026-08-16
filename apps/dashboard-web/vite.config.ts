@@ -61,18 +61,6 @@ function dashboardVersionPlugin(): Plugin {
         );
       });
     },
-    configurePreviewServer(server) {
-      server.middlewares.use('/version.json', (_request, response) => {
-        serveDashboardAsset(response, 'application/json', versionPayload);
-      });
-      server.middlewares.use('/sw.js', (_request, response) => {
-        serveDashboardAsset(
-          response,
-          'application/javascript',
-          serviceWorkerPayload,
-        );
-      });
-    },
     generateBundle() {
       this.emitFile({
         type: 'asset',

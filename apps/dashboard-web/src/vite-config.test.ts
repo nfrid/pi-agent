@@ -16,6 +16,21 @@ describe('dashboard Vite proxy configuration', () => {
     });
   });
 
+  it('lets preview serve the build-time version assets unchanged', () => {
+    const plugins = (
+      (config as { plugins?: unknown[] }).plugins ?? []
+    ).flat(Infinity) as Array<{
+      name?: string;
+      configurePreviewServer?: unknown;
+    }>;
+    const versionPlugin = plugins.find(
+      (plugin) => plugin?.name === 'dashboard-version',
+    );
+
+    expect(versionPlugin).toBeDefined();
+    expect(versionPlugin?.configurePreviewServer).toBeUndefined();
+  });
+
   it('stamps each emitted worker with its build ID', () => {
     const source = readFileSync(
       new URL('../public/sw.js', import.meta.url),
