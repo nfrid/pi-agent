@@ -53,6 +53,9 @@ import {
 import { failedLifecycleRun } from './worktree-lifecycle';
 
 export const MAX_WORKFLOW_ATTEMPTS = 256;
+/** Fixed, metadata-only reason for attempts orphaned by process recreation. */
+export const WORKFLOW_RELOAD_ORPHAN_REASON =
+  'Workflow blocked: execution state unavailable after reload.' as const;
 const MAX_WORKFLOW_REASON_LENGTH = 256;
 const MAX_WORKFLOW_TOKEN_BYTES = 16 * 1024;
 const MAX_TERMINAL_FIELD_BYTES = 1024;
@@ -934,25 +937,42 @@ export class DelegateWorkflowCoordinator {
         continue;
       }
       if (this.records.has(attempt.identity)) continue;
+      const orphaned = !isTerminalWorkflowAttemptState(metadata.state);
+      const settledAt = orphaned
+        ? Math.max(
+            this.now(),
+            metadata.createdAt,
+            metadata.scheduledAt,
+            metadata.queuedAt ?? 0,
+            metadata.startedAt ?? 0,
+            metadata.settledAt ?? 0,
+          )
+        : metadata.settledAt;
       const record: WorkflowRecord = {
         attempt,
         ownerBranchId: owner,
         dependencies: Object.freeze([...metadata.dependencies]),
-        state: metadata.state,
+        state: orphaned ? 'blocked' : metadata.state,
         createdAt: metadata.createdAt,
         scheduledAt: metadata.scheduledAt,
         queuedAt: metadata.queuedAt,
         startedAt: metadata.startedAt,
-        settledAt: metadata.settledAt,
+        settledAt,
         route: metadata.route,
         allowWrites: metadata.allowWrites,
         jobId: undefined,
-        reason: metadata.reason,
+        reason: orphaned ? WORKFLOW_RELOAD_ORPHAN_REASON : metadata.reason,
         launched: true,
         cancellationRequested: false,
         cancellationWaiters: [],
         selectors: Object.freeze([]),
       };
+      if (orphaned) {
+        record.result = compactResult(
+          setupFailureResult(record, WORKFLOW_RELOAD_ORPHAN_REASON),
+        );
+        this.results.set(attempt.identity, record.result);
+      }
       this.records.set(attempt.identity, record);
     }
     this.reconcileImportedDependants();
@@ -1090,12 +1110,17 @@ export class DelegateWorkflowCoordinator {
     const waitingForLaunch = launching.map((record) =>
       this.waitForCancellation(record),
     );
-    const preparing = waitForPreparation
-      ? localRecords
-          .map((record) => record.preparationInFlight)
-          .filter((work): work is Promise<void> => work !== undefined)
-          .map((work) => this.waitForPreparationGrace(work))
-      : [];
+    const preparationWork = new Set<Promise<void>>();
+    if (waitForPreparation)
+      for (const record of localRecords) {
+        if (record.preparationInFlight)
+          preparationWork.add(record.preparationInFlight);
+        if (record.preparationDiscardInFlight)
+          preparationWork.add(record.preparationDiscardInFlight);
+      }
+    const preparing = [...preparationWork].map((work) =>
+      this.waitForPreparationGrace(work),
+    );
     for (const record of localRecords)
       if (record.state === 'scheduled')
         this.settle(record, 'cancelled', 'Cancelled before launch.');
@@ -1129,7 +1154,7 @@ export class DelegateWorkflowCoordinator {
     const identities = this.list()
       .filter((attempt) => !this.importedRecordIdentities.has(attempt.identity))
       .map((attempt) => attempt.identity);
-    await this.cancel(identities, false);
+    await this.cancel(identities, true);
     if (this.ownsJobs) await this.jobs.dispose();
     for (const detach of this.importedSourceDetachers.values()) detach();
     this.importedSourceDetachers.clear();

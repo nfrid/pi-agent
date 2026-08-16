@@ -29,6 +29,7 @@ import * as sessionModule from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
 import { createRun, type DelegatedRun } from './types';
+import { WAKE_RELOAD_ORPHAN_REASON } from './wake-coordinator';
 import * as worktreeModule from './worktree';
 
 interface RegisteredTool {
@@ -1796,6 +1797,64 @@ describe('async delegate extension', () => {
       messages: [persistedMessage],
     }) as { messages?: unknown[] } | undefined;
     expect(repeatedContext?.messages).toEqual([]);
+    expect(restored.sendMessage).not.toHaveBeenCalled();
+    await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
+  });
+
+  test('blocks a persisted pending wake over a running attempt after recreation', async () => {
+    const first = await createAsyncHarness('reload-pending');
+    await first.tools
+      .get('delegate')
+      ?.execute(
+        'reload-running-call',
+        { id: 'reload-running', task: 'reload running task', route: 'quick' },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    await vi.waitFor(() =>
+      expect(first.hasFinish('reload running task')).toBe(true),
+    );
+    const pending = await first.tools.get('delegate_wake')?.execute(
+      'reload-pending-wake-call',
+      {
+        action: 'subscribe',
+        id: 'reload-pending',
+        condition: { node: 'reload-running@1' },
+      },
+      undefined,
+      undefined,
+      first.ctx,
+    );
+    expect(pending?.details).toMatchObject({
+      wake: { state: 'pending' },
+    });
+    // Snapshot the running/pending journal before letting the first runtime
+    // finish; shutdown otherwise waits for the deliberately unresolved mock.
+    const persistedEntries = [...first.entries];
+    first.finish('reload running task');
+    await vi.waitFor(() => expect(first.sendMessage).toHaveBeenCalledOnce());
+    await first.handlers.get('session_shutdown')?.({}, first.ctx);
+
+    const restored = await createAsyncHarness('reload-pending', {
+      entries: persistedEntries,
+      leafId: 'leaf-after-pending-reload',
+    });
+    const status = await restored.tools
+      .get('delegate_wake')
+      ?.execute(
+        'reload-pending-status',
+        { action: 'status', id: 'reload-pending' },
+        undefined,
+        undefined,
+        restored.ctx,
+      );
+    expect(status?.details).toMatchObject({
+      wake: {
+        state: 'blocked',
+        reason: WAKE_RELOAD_ORPHAN_REASON,
+      },
+    });
     expect(restored.sendMessage).not.toHaveBeenCalled();
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
