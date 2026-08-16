@@ -698,6 +698,67 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('retains inherited active tool anchors across authoritative hydration', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    store.hydrateSession({
+      ...sessionResponse(4),
+      history: { version: 1, start: 189, end: 227, hasOlder: true },
+      entriesComplete: false,
+      entries: [
+        {
+          type: 'message',
+          id: 'persisted-assistant-newer',
+          message: { role: 'assistant', content: 'newer', timestamp: 200 },
+        },
+        {
+          type: 'message',
+          id: 'persisted-user-newer',
+          message: { role: 'user', content: 'follow-up', timestamp: 220 },
+        },
+      ],
+      active: {
+        pendingInteractions: [],
+        messages: [
+          {
+            messageId: 'active-message',
+            role: 'assistant',
+            content: 'current response',
+            timestamp: 150,
+          },
+        ],
+        tools: [
+          {
+            toolCallId: 'delayed-a',
+            name: 'read',
+            status: 'finished',
+            timestamp: 100,
+          },
+          {
+            toolCallId: 'delayed-b',
+            name: 'grep',
+            status: 'finished',
+            timestamp: 100,
+          },
+        ],
+        delegates: [],
+        truncated: true,
+      },
+      completeThroughCursor: false,
+    } as AuthoritativeSessionSnapshot);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual([
+      'delayed-a',
+      'delayed-b',
+      'active-message',
+      'persisted-assistant-newer',
+      'persisted-user-newer',
+    ]);
+    expect(projection?.items['delayed-a']).toMatchObject({ timestamp: 100 });
+    expect(projection?.items['delayed-b']).toMatchObject({ timestamp: 100 });
+  });
+
   it('applies compaction completion as a transcript delta', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

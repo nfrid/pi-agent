@@ -633,6 +633,7 @@ function itemTool(
     ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
     ...(item.result === undefined ? {} : { result: item.result }),
     ...(item.isError === undefined ? {} : { isError: item.isError }),
+    ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
     status: item.status,
     ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
     ...(item.data === undefined ? {} : { data: item.data }),

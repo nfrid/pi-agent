@@ -620,6 +620,10 @@ export const NormalizedToolPayloadSchema = Type.Object(
     arguments: Type.Optional(UnknownSchema),
     result: Type.Optional(UnknownSchema),
     isError: Type.Optional(Type.Boolean()),
+    /** Chronology inherited from the owning assistant message when needed. */
+    timestamp: Type.Optional(
+      Type.Union([Type.String({ maxLength: 128 }), Type.Number()]),
+    ),
     status: Type.Optional(
       Type.Union([
         Type.Literal('pending'),

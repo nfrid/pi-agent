@@ -204,6 +204,8 @@ describe('authoritative application snapshot lifecycle', () => {
         messageId: 'assistant-1',
         role: 'assistant',
         content: 'partial',
+        timestamp: 100,
+        toolCallIds: ['tool-1'],
         phase: 'updated',
       },
     });
@@ -231,7 +233,7 @@ describe('authoritative application snapshot lifecycle', () => {
       { messageId: 'assistant-1', content: 'partial' },
     ]);
     expect(snapshot.active.tools).toMatchObject([
-      { toolCallId: 'tool-1', status: 'running' },
+      { toolCallId: 'tool-1', status: 'running', timestamp: 100 },
     ]);
     expect(snapshot.active.delegates[0]?.transcript[0]?.id).toBe(
       'd'.repeat(300),

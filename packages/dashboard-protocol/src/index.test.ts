@@ -798,6 +798,13 @@ describe('dashboard protocol', () => {
         })?.status,
       ).toBe(status);
     expect(
+      tryParseNormalizedToolPayload({
+        toolCallId: 'anchored-tool',
+        name: 'read',
+        timestamp: '2024-06-01T12:00:00.000Z',
+      })?.timestamp,
+    ).toBe('2024-06-01T12:00:00.000Z');
+    expect(
       parseDashboardEventEnvelope({
         cursor: 1,
         emittedAt: 100,
