@@ -2,6 +2,7 @@ import {
   type DashboardLiveStore,
   dashboardHttpClient,
   SESSION_HISTORY_BUDGET,
+  type SessionHistoryCoverage,
   selectSessionHistoryCoverage,
   useDashboardStore,
 } from '@pi-dashboard/client';
@@ -84,6 +85,21 @@ function firstVisibleAnchor(element: HTMLDivElement): ScrollAnchor | undefined {
   };
 }
 
+function historyFromCoverage(coverage: SessionHistoryCoverage): SessionHistory {
+  return {
+    version: coverage.version,
+    start: coverage.coveredStart,
+    end: coverage.coveredEnd,
+    hasOlder: coverage.hasOlder,
+    ...(coverage.nextBefore === undefined
+      ? {}
+      : { nextBefore: coverage.nextBefore }),
+    ...(coverage.leadingContinuation === undefined
+      ? {}
+      : { leadingContinuation: coverage.leadingContinuation }),
+  };
+}
+
 function jsonByteLength(value: unknown): number {
   try {
     const serialized = JSON.stringify(value);
@@ -125,6 +141,7 @@ export function useOlderSessionHistory({
   const topIntentRef = useRef(false);
   const previousScrollTopRef = useRef<number | undefined>(undefined);
   const preserveAnchorOnCoverageRef = useRef(false);
+  const preserveErrorOnCoverageRef = useRef(false);
   const loadEarlierHistoryRef = useRef<() => Promise<void>>(
     async () => undefined,
   );
@@ -148,6 +165,7 @@ export function useOlderSessionHistory({
     historySessionRef.current = undefined;
     historyWindowRef.current = undefined;
     historyRef.current = undefined;
+    preserveErrorOnCoverageRef.current = false;
     setHistory(undefined);
     setHistoryLoading(false);
     setHistoryError(undefined);
@@ -164,18 +182,7 @@ export function useOlderSessionHistory({
   useEffect(() => {
     if (data?.metadata.id !== id && !coverage) return;
     const authoritativeHistory = coverage
-      ? {
-          version: coverage.version,
-          start: coverage.coveredStart,
-          end: coverage.coveredEnd,
-          hasOlder: coverage.hasOlder,
-          ...(coverage.nextBefore === undefined
-            ? {}
-            : { nextBefore: coverage.nextBefore }),
-          ...(coverage.leadingContinuation === undefined
-            ? {}
-            : { leadingContinuation: coverage.leadingContinuation }),
-        }
+      ? historyFromCoverage(coverage)
       : data?.history;
     if (!authoritativeHistory) return;
     const nextKey = coverage
@@ -198,18 +205,24 @@ export function useOlderSessionHistory({
       historyRef.current = authoritativeHistory;
       return;
     }
-    historyGenerationRef.current += 1;
-    historyRequestRef.current?.controller.abort();
-    historyRequestRef.current = undefined;
+    const requestContinues =
+      coverage !== undefined && historyRequestRef.current?.id === id;
+    if (!requestContinues) {
+      historyGenerationRef.current += 1;
+      historyRequestRef.current?.controller.abort();
+      historyRequestRef.current = undefined;
+    }
     historySessionRef.current = id;
     historyWindowRef.current = nextKey;
     historyRef.current = authoritativeHistory;
     setHistory(authoritativeHistory);
-    setHistoryLoading(false);
-    setHistoryError(undefined);
+    if (!requestContinues) setHistoryLoading(false);
+    if (preserveErrorOnCoverageRef.current)
+      preserveErrorOnCoverageRef.current = false;
+    else setHistoryError(undefined);
     if (preserveAnchorOnCoverageRef.current)
       preserveAnchorOnCoverageRef.current = false;
-    else clearAnchor();
+    else if (!requestContinues) clearAnchor();
   }, [clearAnchor, coverage, data, id]);
 
   useEffect(() => {
@@ -300,104 +313,126 @@ export function useOlderSessionHistory({
       historyGenerationRef.current === request.generation &&
       request.id === id &&
       !request.controller.signal.aborted;
-    const pages: AuthoritativeSessionSnapshot[] = [];
-    const seenBefore = new Set<string>();
-    const seenRanges = new Set<string>();
-    const existingCoverage = store.getSnapshot().sessionHistoryCoverageById[id];
-    let fetchedEntries = 0;
-    let fetchedBytes = 0;
-    let expected = initialHistory;
     const failClosed = (message: string): never => {
+      preserveErrorOnCoverageRef.current = true;
       store.resetSessionHistoryToNewest(id);
       store.reconnectSession(id);
       throw new Error(message);
     };
     try {
-      while (expected.hasOlder && expected.nextBefore) {
-        const before = expected.nextBefore;
-        if (seenBefore.has(before)) failClosed('History cursor cycle.');
-        seenBefore.add(before);
-        const page = await dashboardHttpClient.sessionBefore(
-          id,
-          before,
-          request.controller.signal,
-        );
-        if (!isCurrent()) return;
-        const pageHistory =
-          page.history ??
-          failClosed('Dashboard returned missing history metadata.');
-        if (
-          !isContiguousOlderHistory(
+      let coverageRetries = 0;
+      while (true) {
+        const attemptState = store.getSnapshot();
+        const existingCoverage = attemptState.sessionHistoryCoverageById[id];
+        let expected = existingCoverage
+          ? historyFromCoverage(existingCoverage)
+          : initialHistory;
+        if (!expected.hasOlder || !expected.nextBefore) return;
+        const pages: AuthoritativeSessionSnapshot[] = [];
+        const seenBefore = new Set<string>();
+        const seenRanges = new Set<string>();
+        let fetchedEntries = 0;
+        let fetchedBytes = 0;
+        while (expected.hasOlder && expected.nextBefore) {
+          const before = expected.nextBefore;
+          if (seenBefore.has(before)) failClosed('History cursor cycle.');
+          seenBefore.add(before);
+          const page = await dashboardHttpClient.sessionBefore(
             id,
-            page.metadata.id,
-            pageHistory,
-            expected,
             before,
+            request.controller.signal,
+          );
+          if (!isCurrent()) return;
+          const pageHistory =
+            page.history ??
+            failClosed('Dashboard returned missing history metadata.');
+          if (
+            existingCoverage &&
+            ((page.serverId ?? attemptState.serverId) !==
+              existingCoverage.serverId ||
+              page.runtimeEpoch !== existingCoverage.runtimeEpoch)
           )
-        ) {
-          failClosed('Dashboard returned non-contiguous older history.');
-        }
-        const rangeKey = `${pageHistory.start}:${pageHistory.end}`;
-        if (seenRanges.has(rangeKey)) failClosed('History range cycle.');
-        seenRanges.add(rangeKey);
-        fetchedEntries += page.entries.length;
-        fetchedBytes += jsonByteLength(page.entries);
-        const pageCount = (existingCoverage?.pageCount ?? 0) + pages.length + 1;
-        const entryCount = (existingCoverage?.entryCount ?? 0) + fetchedEntries;
-        const byteCount = (existingCoverage?.byteCount ?? 0) + fetchedBytes;
-        if (
-          pageCount > SESSION_HISTORY_BUDGET.maxPages ||
-          entryCount > SESSION_HISTORY_BUDGET.maxEntries ||
-          byteCount > SESSION_HISTORY_BUDGET.maxBytes
-        )
-          failClosed('Older history exceeds the bounded page budget.');
-        pages.push(page);
-        expected = pageHistory;
-        if (pageHistory.nextBefore) {
-          if (seenBefore.has(pageHistory.nextBefore))
-            failClosed('History cursor cycle.');
-        }
-        // A leading continuation must be resolved to its owner or origin
-        // before any buffered page is made visible.
-        if (!expected.leadingContinuation || !expected.hasOlder) break;
-      }
-      if (!isCurrent()) return;
-      const resolvedAnchor =
-        request.anchor ??
-        (scrollElementRef?.current
-          ? firstVisibleAnchor(scrollElementRef.current)
-          : undefined);
-      preserveAnchorOnCoverageRef.current = true;
-      if (!store.prependSessionHistoryPages(pages, id)) {
-        preserveAnchorOnCoverageRef.current = false;
-        store.reconnectSession(id);
-        throw new Error('Session changed while loading older history.');
-      }
-      const nextCoverage = store.getSnapshot().sessionHistoryCoverageById[id];
-      const nextHistory = nextCoverage
-        ? {
-            version: nextCoverage.version,
-            start: nextCoverage.coveredStart,
-            end: nextCoverage.coveredEnd,
-            hasOlder: nextCoverage.hasOlder,
-            ...(nextCoverage.nextBefore === undefined
-              ? {}
-              : { nextBefore: nextCoverage.nextBefore }),
-            ...(nextCoverage.leadingContinuation === undefined
-              ? {}
-              : { leadingContinuation: nextCoverage.leadingContinuation }),
+            failClosed(
+              'Dashboard returned history for a different session generation.',
+            );
+          if (
+            !isContiguousOlderHistory(
+              id,
+              page.metadata.id,
+              pageHistory,
+              expected,
+              before,
+            )
+          ) {
+            failClosed('Dashboard returned non-contiguous older history.');
           }
-        : expected;
-      historyRef.current = nextHistory;
-      setHistory(nextHistory);
-      if (
-        resolvedAnchor &&
-        request.intentRevision === scrollIntentRevisionRef.current
-      )
-        setPrependAnchor({
-          ...resolvedAnchor,
-          revision: request.requestId,
-        });
+          const rangeKey = `${pageHistory.start}:${pageHistory.end}`;
+          if (seenRanges.has(rangeKey)) failClosed('History range cycle.');
+          seenRanges.add(rangeKey);
+          fetchedEntries += page.entries.length;
+          fetchedBytes += jsonByteLength(page.entries);
+          const pageCount =
+            (existingCoverage?.pageCount ?? 0) + pages.length + 1;
+          const entryCount =
+            (existingCoverage?.entryCount ?? 0) + fetchedEntries;
+          const byteCount = (existingCoverage?.byteCount ?? 0) + fetchedBytes;
+          if (
+            pageCount > SESSION_HISTORY_BUDGET.maxPages ||
+            entryCount > SESSION_HISTORY_BUDGET.maxEntries ||
+            byteCount > SESSION_HISTORY_BUDGET.maxBytes
+          )
+            failClosed('Older history exceeds the bounded page budget.');
+          pages.push(page);
+          expected = pageHistory;
+          if (pageHistory.nextBefore) {
+            if (seenBefore.has(pageHistory.nextBefore))
+              failClosed('History cursor cycle.');
+          }
+          // A leading continuation must be resolved to its owner or origin
+          // before any buffered page is made visible.
+          if (!expected.leadingContinuation || !expected.hasOlder) break;
+        }
+        if (!isCurrent()) return;
+        if (
+          store.getSnapshot().sessionHistoryCoverageById[id] !==
+          existingCoverage
+        ) {
+          if (coverageRetries >= 1)
+            throw new Error(
+              'Session kept changing while loading older history.',
+            );
+          coverageRetries += 1;
+          continue;
+        }
+        const resolvedAnchor =
+          request.anchor ??
+          (scrollElementRef?.current
+            ? firstVisibleAnchor(scrollElementRef.current)
+            : undefined);
+        preserveAnchorOnCoverageRef.current = true;
+        preserveErrorOnCoverageRef.current = true;
+        if (!store.prependSessionHistoryPages(pages, id)) {
+          preserveAnchorOnCoverageRef.current = false;
+          store.reconnectSession(id);
+          throw new Error('Session changed while loading older history.');
+        }
+        preserveErrorOnCoverageRef.current = false;
+        const nextCoverage = store.getSnapshot().sessionHistoryCoverageById[id];
+        const nextHistory = nextCoverage
+          ? historyFromCoverage(nextCoverage)
+          : expected;
+        historyRef.current = nextHistory;
+        setHistory(nextHistory);
+        if (
+          resolvedAnchor &&
+          request.intentRevision === scrollIntentRevisionRef.current
+        )
+          setPrependAnchor({
+            ...resolvedAnchor,
+            revision: request.requestId,
+          });
+        return;
+      }
     } catch (loadError) {
       if (!isCurrent()) return;
       if (loadError instanceof Error && loadError.name === 'AbortError') return;
