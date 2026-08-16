@@ -87,6 +87,7 @@ export function branchContainsWorkflowOwner(
       entry.type === 'custom' &&
       entry.customType === 'delegate-workflow:v1' &&
       isRecord(entry.data) &&
+      (entry.data.kind === 'snapshot' || entry.data.kind === 'delta') &&
       isRecord(entry.data.state) &&
       Array.isArray(entry.data.state.attempts) &&
       entry.data.state.attempts.some(
@@ -119,6 +120,7 @@ export function branchContainsOwner(
       entry.type === 'custom' &&
       entry.customType === 'delegate-workflow:v1' &&
       isRecord(entry.data) &&
+      (entry.data.kind === 'snapshot' || entry.data.kind === 'delta') &&
       isRecord(entry.data.state) &&
       Array.isArray(entry.data.state.attempts) &&
       entry.data.state.attempts.some(

@@ -754,6 +754,8 @@ const DelegateWorkflowStateSchema = Type.Union([
 ]);
 export const DelegateWorkflowMetadataSchema = Type.Object(
   {
+    /** Immutable branch owner used to disambiguate identical logical attempts. */
+    ownerBranchId: Type.Optional(IdentifierSchema),
     logicalId: Type.String({ minLength: 1, maxLength: 64 }),
     attempt: Type.Integer({ minimum: 1 }),
     identity: Type.String({ minLength: 1, maxLength: 80 }),

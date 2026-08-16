@@ -15,15 +15,39 @@ export const WORKFLOW_ENTRY_TYPE = 'delegate-workflow:v1';
 export const MAX_WORKFLOW_HISTORY_ATTEMPTS = 256;
 export const MAX_WORKFLOW_HISTORY_REASON = 256;
 export const MAX_WORKFLOW_HISTORY_ROUTE = 512;
+/** A lifecycle journal entry is intentionally much smaller than a checkpoint. */
+export const MAX_WORKFLOW_DELTA_ATTEMPTS = 32;
 
-export interface WorkflowStoreEntry {
+export interface WorkflowStoreState {
+  readonly version: 1;
+  readonly attempts: readonly DelegateWorkflowMetadataSnapshot[];
+}
+
+export interface WorkflowStoreSnapshotEntry {
   readonly version: 1;
   readonly kind: 'snapshot';
-  readonly state: DelegateWorkflowMetadataHistory;
+  readonly state: WorkflowStoreState;
 }
+
+export interface WorkflowStoreDeltaEntry {
+  readonly version: 1;
+  readonly kind: 'delta';
+  /** Complete replacement records for only the attempts changed since the last append. */
+  readonly state: WorkflowStoreState;
+}
+
+export type WorkflowStoreEntry =
+  | WorkflowStoreSnapshotEntry
+  | WorkflowStoreDeltaEntry;
 
 type AppendOnly = Pick<ExtensionAPI, 'appendEntry'>;
 type SessionBranch = Pick<ExtensionContext, 'sessionManager'>;
+
+type PersistedMetadata = Map<string, DelegateWorkflowMetadataSnapshot>;
+const persistedMetadata = new WeakMap<
+  DelegateWorkflowCoordinator,
+  PersistedMetadata
+>();
 
 const WORKFLOW_STATES: ReadonlySet<WorkflowAttemptState> = new Set([
   'scheduled',
@@ -105,17 +129,45 @@ function validAttempt(
   return true;
 }
 
-function isWorkflowStoreEntry(value: unknown): value is WorkflowStoreEntry {
-  if (!isRecord(value) || value.version !== 1 || value.kind !== 'snapshot')
+function metadataKey(attempt: DelegateWorkflowMetadataSnapshot): string {
+  return `${attempt.ownerBranchId ?? ''}\u0000${attempt.identity}`;
+}
+
+function validState(
+  value: unknown,
+  kind: WorkflowStoreEntry['kind'],
+): value is WorkflowStoreState {
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    !Array.isArray(value.attempts) ||
+    value.attempts.length >
+      (kind === 'snapshot'
+        ? MAX_WORKFLOW_HISTORY_ATTEMPTS
+        : MAX_WORKFLOW_DELTA_ATTEMPTS) ||
+    value.attempts.some((attempt) => !validAttempt(attempt))
+  )
     return false;
-  const state = value.state;
-  return (
-    isRecord(state) &&
-    state.version === 1 &&
-    Array.isArray(state.attempts) &&
-    state.attempts.length <= MAX_WORKFLOW_HISTORY_ATTEMPTS &&
-    state.attempts.every(validAttempt)
-  );
+  const keys = new Set<string>();
+  return value.attempts.every((attempt) => {
+    const key = metadataKey(attempt);
+    if (keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
+}
+
+function parseWorkflowStoreEntry(
+  value: unknown,
+): WorkflowStoreEntry | undefined {
+  if (!isRecord(value) || value.version !== 1) return undefined;
+  const kind = value.kind;
+  if (
+    (kind !== 'snapshot' && kind !== 'delta') ||
+    !validState(value.state, kind)
+  )
+    return undefined;
+  return value as unknown as WorkflowStoreEntry;
 }
 
 function boundedState(
@@ -159,6 +211,21 @@ function boundedState(
   return Object.freeze({ version: 1, attempts: Object.freeze(attempts) });
 }
 
+function metadataMap(
+  state: DelegateWorkflowMetadataHistory,
+): PersistedMetadata {
+  return new Map(
+    state.attempts.map((attempt) => [metadataKey(attempt), attempt]),
+  );
+}
+
+function sameMetadata(
+  left: DelegateWorkflowMetadataSnapshot,
+  right: DelegateWorkflowMetadataSnapshot,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export interface WorkflowStoreWriteGuard {
   /** False defers the owner write until its branch runtime is active again. */
   isOwnerActive?: () => boolean;
@@ -166,11 +233,10 @@ export interface WorkflowStoreWriteGuard {
   onPersist?: () => void;
 }
 
-/** Append one metadata-only snapshot. Execution payloads are never accepted. */
-export function persistWorkflowState(
+function appendCheckpoint(
   coordinator: DelegateWorkflowCoordinator,
   pi: AppendOnly,
-  guard: WorkflowStoreWriteGuard = {},
+  guard: WorkflowStoreWriteGuard,
 ): void {
   if (guard.isOwnerActive && !guard.isOwnerActive()) return;
   const state = boundedState(coordinator.metadataSnapshot());
@@ -178,14 +244,73 @@ export function persistWorkflowState(
     version: 1,
     kind: 'snapshot',
     state,
-  } satisfies WorkflowStoreEntry);
+  } satisfies WorkflowStoreSnapshotEntry);
+  persistedMetadata.set(coordinator, metadataMap(state));
   guard.onPersist?.();
+}
+
+/**
+ * Persist lifecycle changes as complete metadata records. A callback can emit
+ * several small journal entries, but never repeats unchanged attempts.
+ */
+export function persistWorkflowDelta(
+  coordinator: DelegateWorkflowCoordinator,
+  pi: AppendOnly,
+  guard: WorkflowStoreWriteGuard = {},
+): void {
+  if (guard.isOwnerActive && !guard.isOwnerActive()) return;
+  const state = boundedState(coordinator.metadataSnapshot());
+  const previous = persistedMetadata.get(coordinator) ?? new Map();
+  const changed = state.attempts.filter((attempt) => {
+    const prior = previous.get(metadataKey(attempt));
+    return prior === undefined || !sameMetadata(prior, attempt);
+  });
+  if (changed.length === 0) return;
+
+  const next = new Map(previous);
+  let persisted = false;
+  for (
+    let offset = 0;
+    offset < changed.length;
+    offset += MAX_WORKFLOW_DELTA_ATTEMPTS
+  ) {
+    const attempts = changed.slice(
+      offset,
+      offset + MAX_WORKFLOW_DELTA_ATTEMPTS,
+    );
+    const delta = {
+      version: 1,
+      kind: 'delta',
+      state: Object.freeze({ version: 1, attempts: Object.freeze(attempts) }),
+    } satisfies WorkflowStoreDeltaEntry;
+    pi.appendEntry(WORKFLOW_ENTRY_TYPE, delta);
+    for (const attempt of attempts) next.set(metadataKey(attempt), attempt);
+    persisted = true;
+  }
+  if (persisted) {
+    persistedMetadata.set(coordinator, next);
+    guard.onPersist?.();
+  }
+}
+
+/** Append one bounded metadata checkpoint (the compatibility v1 format). */
+export function persistWorkflowState(
+  coordinator: DelegateWorkflowCoordinator,
+  pi: AppendOnly,
+  guard: WorkflowStoreWriteGuard = {},
+): void {
+  appendCheckpoint(coordinator, pi, guard);
+}
+
+interface FoldedWorkflowHistory {
+  readonly states: DelegateWorkflowMetadataHistory[];
 }
 
 function workflowHistory(
   ctx: SessionBranch,
-): DelegateWorkflowMetadataHistory[] | undefined {
-  const history: DelegateWorkflowMetadataHistory[] = [];
+): FoldedWorkflowHistory | undefined {
+  const folded = new Map<string, DelegateWorkflowMetadataSnapshot>();
+  const states: DelegateWorkflowMetadataHistory[] = [];
   for (const entry of ctx.sessionManager.getBranch()) {
     if (
       !isRecord(entry) ||
@@ -193,34 +318,48 @@ function workflowHistory(
       entry.customType !== WORKFLOW_ENTRY_TYPE
     )
       continue;
-    if (!isWorkflowStoreEntry(entry.data)) return undefined;
-    history.push(boundedState(entry.data.state));
+    const parsed = parseWorkflowStoreEntry(entry.data);
+    // One malformed journal record invalidates the whole fold. In particular,
+    // do not expose a valid prefix as if it were the current workflow state.
+    if (!parsed) return undefined;
+    if (parsed.kind === 'snapshot') folded.clear();
+    for (const attempt of parsed.state.attempts) {
+      const key = metadataKey(attempt);
+      folded.delete(key);
+      folded.set(key, attempt);
+    }
+    while (folded.size > MAX_WORKFLOW_HISTORY_ATTEMPTS) {
+      const oldest = folded.keys().next().value;
+      if (oldest === undefined) break;
+      folded.delete(oldest);
+    }
+    states.push(boundedState({ version: 1, attempts: [...folded.values()] }));
   }
-  return history;
+  return { states };
 }
 
-/** Return all valid append-only snapshots on the current branch. */
+/** Return each folded state from valid v1 snapshots and v1 deltas. */
 export function workflowStoreHistory(
   ctx: SessionBranch,
 ): readonly DelegateWorkflowMetadataHistory[] | undefined {
-  return workflowHistory(ctx);
+  return workflowHistory(ctx)?.states;
 }
 
-/** Return the latest valid metadata snapshot on the current branch. */
+/** Return the latest folded metadata state on the current branch. */
 export function latestWorkflowState(
   ctx: SessionBranch,
 ): DelegateWorkflowMetadataHistory | undefined {
-  return workflowHistory(ctx)?.at(-1);
+  return workflowHistory(ctx)?.states.at(-1);
 }
 
-/** Attach append-only persistence to coordinator lifecycle changes. */
+/** Attach append-only delta persistence to coordinator lifecycle changes. */
 export function attachWorkflowStore(
   coordinator: DelegateWorkflowCoordinator,
   pi: AppendOnly,
   guard: WorkflowStoreWriteGuard = {},
 ): () => void {
   return coordinator.subscribeChanges(() =>
-    persistWorkflowState(coordinator, pi, guard),
+    persistWorkflowDelta(coordinator, pi, guard),
   );
 }
 

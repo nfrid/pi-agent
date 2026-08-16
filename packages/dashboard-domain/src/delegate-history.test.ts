@@ -802,6 +802,103 @@ describe('delegate history adapter', () => {
     expect(JSON.stringify(response)).not.toContain('secret report');
   });
 
+  it('folds deltas after v1 snapshots and keeps owner plus identity exact', () => {
+    const attempt = (
+      ownerBranchId: string,
+      state: string,
+      settledAt?: number,
+    ) => ({
+      ownerBranchId,
+      logicalId: 'review',
+      attempt: 1,
+      identity: 'review@1',
+      state,
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...(settledAt === undefined ? {} : { settledAt }),
+    });
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'custom',
+        id: 'workflow-snapshot',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: { version: 1, attempts: [attempt('owner-a', 'scheduled')] },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-delta-b',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: { version: 1, attempts: [attempt('owner-b', 'scheduled')] },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-delta-a',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            attempts: [attempt('owner-a', 'success', 4)],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(2);
+    expect(
+      response.groups.map((group) => group.workflow?.ownerBranchId),
+    ).toEqual(expect.arrayContaining(['owner-a', 'owner-b']));
+    expect(
+      response.groups.find(
+        (group) => group.workflow?.ownerBranchId === 'owner-a',
+      ),
+    ).toMatchObject({ state: 'success', workflow: { identity: 'review@1' } });
+    expect(
+      response.groups.find(
+        (group) => group.workflow?.ownerBranchId === 'owner-b',
+      ),
+    ).toMatchObject({ state: 'scheduled', workflow: { identity: 'review@1' } });
+    expect(parseDelegateHistoryResponse(response)).toEqual(response);
+
+    const projected = projectDelegateHistoryEntry(branch[2], {
+      sessionId: 'parent-1',
+    }).entry as { data?: { kind?: string; state?: { attempts?: unknown[] } } };
+    expect(projected.data?.kind).toBe('delta');
+    expect(projected.data?.state?.attempts).toHaveLength(1);
+  });
+
+  it('fails closed on malformed durable workflow deltas', () => {
+    const malformed = {
+      type: 'custom',
+      id: 'bad-workflow',
+      customType: 'delegate-workflow:v1',
+      data: {
+        version: 1,
+        kind: 'delta',
+        state: { version: 1, attempts: [{ identity: 'incomplete' }] },
+      },
+    };
+    const projected = projectDelegateHistoryEntry(malformed, {
+      sessionId: 'parent-1',
+    }).entry;
+    expect(projected).not.toHaveProperty('data');
+    expect(delegateHistoryFromBranch('parent-1', [malformed]).groups).toEqual(
+      [],
+    );
+  });
+
   it('projects entered wake metadata from existing wake entries after reload', () => {
     const entry = {
       type: 'custom',

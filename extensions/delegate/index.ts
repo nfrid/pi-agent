@@ -257,7 +257,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       }
     }
     const persisted = latestWorkflowState(ctx);
-    if (persisted) nextWorkflow.restoreMetadata(persisted);
+    // Legacy v1 snapshots predate ownerBranchId; bind those records to the
+    // currently activated owner while preserving explicit owners in deltas.
+    if (persisted) nextWorkflow.restoreMetadata(persisted, branchId);
     const runtime: BranchRuntime = {
       branchId,
       workflow: nextWorkflow,
