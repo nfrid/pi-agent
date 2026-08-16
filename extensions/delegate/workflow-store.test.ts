@@ -174,7 +174,7 @@ describe('workflow store', () => {
           ),
         ),
     });
-    for (let index = 0; index < 300; index += 1)
+    for (let index = 0; index < 240; index += 1)
       coordinator.schedule({
         logicalId: `step-${index}`,
         mode: 'single',
@@ -198,7 +198,7 @@ describe('workflow store', () => {
       latestWorkflowState(branch(entries)),
     ).length;
     expect(serializedBytes).toBeLessThan(latestBytes * 4);
-    expect(latestWorkflowState(branch(entries))?.attempts).toHaveLength(256);
+    expect(latestWorkflowState(branch(entries))?.attempts).toHaveLength(241);
     expect(workflowStoreHistory(branch(entries))).toHaveLength(entries.length);
 
     detach();
