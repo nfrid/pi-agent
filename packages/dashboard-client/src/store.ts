@@ -249,10 +249,20 @@ function mergeLatestTranscript(
   // and live-only entities. This prevents a routine append from duplicating a
   // bounded tail whose IDs changed as the file window advanced.
   const newestPageIds = new Set(coverage.pages.at(-1)?.entryIds ?? []);
-  const latestIds = new Set(latest.order);
-  const retainedOrder = retained.order.filter(
-    (id) => !newestPageIds.has(id) && !latestIds.has(id),
+  const allHistoryIds = new Set(
+    coverage.pages.flatMap((page) => page.entryIds),
   );
+  const latestIds = new Set(latest.order);
+  const retainedHistory = retained.order.filter(
+    (id) =>
+      allHistoryIds.has(id) &&
+      !newestPageIds.has(id) &&
+      !latestIds.has(id),
+  );
+  const retainedLive = retained.order.filter(
+    (id) => !allHistoryIds.has(id) && !latestIds.has(id),
+  );
+  const retainedOrder = [...retainedHistory, ...retainedLive];
   const items: Record<string, TranscriptProjection['items'][string]> = {};
   for (const id of retainedOrder) {
     const item = retained.items[id];
@@ -261,7 +271,7 @@ function mergeLatestTranscript(
   for (const [id, item] of Object.entries(latest.items)) items[id] = item;
   return {
     ...latest,
-    order: [...retainedOrder, ...latest.order],
+    order: [...retainedHistory, ...latest.order, ...retainedLive],
     items,
   };
 }
@@ -870,6 +880,17 @@ export class DashboardLiveStore {
     this.publish(this.withCoverage(this.state, sessionId, undefined));
   }
 
+  /** Fail closed to the newest authoritative window for an expected session. */
+  resetSessionHistoryToNewest(sessionId: string): void {
+    const coverage = this.state.sessionHistoryCoverageById[sessionId];
+    const current = this.state.transcriptsBySessionId[sessionId];
+    if (!coverage || !current) {
+      this.clearHistoryCoverage(sessionId);
+      return;
+    }
+    this.publish(this.resetCoverageToNewest(sessionId, current, coverage));
+  }
+
   private resetCoverageToNewest(
     sessionId: string,
     current: TranscriptProjection | undefined,
@@ -1222,8 +1243,9 @@ export class DashboardLiveStore {
     sequence: number,
     generation: number,
     authoritativeRebase = false,
+    expectedSessionId = response.metadata.id,
   ): boolean {
-    const current = this.state.sessionSyncById[response.metadata.id];
+    const current = this.state.sessionSyncById[expectedSessionId];
     if (
       current &&
       (current.generation !== generation ||
@@ -1232,10 +1254,17 @@ export class DashboardLiveStore {
           sequence <= current.sequence))
     ) {
       if (current.generation !== generation)
-        this.clearHistoryCoverage(response.metadata.id);
+        this.resetSessionHistoryToNewest(expectedSessionId);
       return false;
     }
-    const projection = this.hydrateSession(response, { replace: true });
+    if (response.metadata.id !== expectedSessionId) {
+      this.resetSessionHistoryToNewest(expectedSessionId);
+      return false;
+    }
+    const projection = this.hydrateSession(response, {
+      replace: true,
+      expectedSessionId,
+    });
     if (!projection) return false;
     const coverage =
       this.state.sessionHistoryCoverageById[response.metadata.id];
@@ -1598,7 +1627,7 @@ export class DashboardLiveStore {
   ): boolean {
     const current = this.state.sessionSyncById[sessionId];
     if (current && current.generation !== generation) {
-      this.clearHistoryCoverage(sessionId);
+      this.resetSessionHistoryToNewest(sessionId);
       return false;
     }
     const coverage = this.state.sessionHistoryCoverageById[sessionId];
@@ -1607,9 +1636,15 @@ export class DashboardLiveStore {
       value.runtimeEpoch !== undefined &&
       value.runtimeEpoch !== coverage.runtimeEpoch
     )
-      this.clearHistoryCoverage(sessionId);
-    if (current?.sequenceKnown && sequence <= current.sequence) return false;
-    if (value.event.type === 'session.transcript.reset') return false;
+      this.resetSessionHistoryToNewest(sessionId);
+    if (current?.sequenceKnown && sequence <= current.sequence) {
+      this.resetSessionHistoryToNewest(sessionId);
+      return false;
+    }
+    if (value.event.type === 'session.transcript.reset') {
+      this.resetSessionHistoryToNewest(sessionId);
+      return false;
+    }
     return this.applyEventEnvelope(
       {
         cursor: sequence,
@@ -1633,8 +1668,16 @@ export class DashboardLiveStore {
   /** Install an authoritative session-feed snapshot. */
   hydrateSession(
     response: AuthoritativeSessionSnapshot,
-    options: { replace?: boolean } = {},
+    options: { replace?: boolean; expectedSessionId?: string } = {},
   ): TranscriptProjection | undefined {
+    const expectedSessionId = options.expectedSessionId;
+    if (
+      expectedSessionId !== undefined &&
+      response.metadata.id !== expectedSessionId
+    ) {
+      this.resetSessionHistoryToNewest(expectedSessionId);
+      return undefined;
+    }
     const requestOrder = options.replace
       ? undefined
       : (response as ClientAuthoritativeSessionSnapshot)[SESSION_REQUEST_ORDER];
@@ -1644,14 +1687,14 @@ export class DashboardLiveStore {
       this.state.serverId !== undefined &&
       response.serverId !== this.state.serverId
     ) {
-      this.clearHistoryCoverage(sessionId);
+      this.resetSessionHistoryToNewest(sessionId);
       return undefined;
     }
     const snapshotCursor = response.cursor ?? this.state.cursor;
     if (requestOrder !== undefined) {
       const accepted = this.latestSessionRequestOrders.get(sessionId);
       if (accepted !== undefined && requestOrder < accepted) {
-        this.clearHistoryCoverage(sessionId);
+        this.resetSessionHistoryToNewest(sessionId);
         return undefined;
       }
     }
@@ -1665,7 +1708,7 @@ export class DashboardLiveStore {
     ) {
       // A stale/rewrite response must not leave a verified cursor claiming
       // continuity through data it never observed.
-      this.clearHistoryCoverage(sessionId);
+      this.resetSessionHistoryToNewest(sessionId);
       return undefined;
     }
     // Authoritative feed snapshots replace the selected domain directly.
@@ -1816,7 +1859,10 @@ export class DashboardLiveStore {
           previousCoverage.runtimeEpoch === responseEpoch;
         const contiguousLatestWindow =
           newestPage !== undefined &&
-          responsePage.start <= previousCoverage.coveredEnd &&
+          // A moving window cannot skip the bridge between the old newest
+          // page and the new response. We do not retain raw bridge rows, so
+          // reset to the authoritative latest window when its start advances.
+          responsePage.start <= newestPage.start &&
           responsePage.end >= newestPage.start &&
           responsePage.end >= previousCoverage.coveredEnd;
         const rewrite =
@@ -1980,10 +2026,11 @@ export class DashboardLiveStore {
    */
   prependSessionHistoryPages(
     responses: readonly AuthoritativeSessionSnapshot[],
+    expectedSessionId?: string,
   ): TranscriptProjection | undefined {
     if (responses.length === 0) return undefined;
     const first = responses[0];
-    const sessionId = first?.metadata.id;
+    const sessionId = expectedSessionId ?? first?.metadata.id;
     if (!sessionId) return undefined;
     const current = this.state.transcriptsBySessionId[sessionId];
     const coverage = this.state.sessionHistoryCoverageById[sessionId];

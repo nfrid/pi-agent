@@ -87,6 +87,37 @@ export function Transcript({
     [modelEntries, runtime],
   );
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const isVirtualizedTranscript =
+    items.length > 80 && virtualize && Boolean(transcriptScrollElementRef);
+  const restoredRevisionRef = useRef(0);
+  useLayoutEffect(() => {
+    if (
+      isVirtualizedTranscript ||
+      !transcriptScrollElementRef?.current ||
+      !prependAnchor ||
+      restoredRevisionRef.current === prependAnchor.revision
+    )
+      return;
+    const element = transcriptScrollElementRef.current;
+    const target = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        '[data-transcript-row], [data-transcript-key]',
+      ),
+    ).find(
+      (candidate) =>
+        (candidate.dataset.transcriptRow ?? candidate.dataset.transcriptKey) ===
+        prependAnchor.key,
+    );
+    if (!target) return;
+    const offset =
+      target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    element.scrollTop += offset - prependAnchor.offset;
+    restoredRevisionRef.current = prependAnchor.revision;
+  }, [
+    isVirtualizedTranscript,
+    prependAnchor,
+    transcriptScrollElementRef,
+  ]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
@@ -118,7 +149,7 @@ export function Transcript({
     () => buildTranscriptGroupCoverage(items.length, groups),
     [groups, items.length],
   );
-  if (items.length > 80 && virtualize && transcriptScrollElementRef)
+  if (isVirtualizedTranscript)
     return (
       <VirtualizedTranscript
         items={items}

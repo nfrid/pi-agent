@@ -1,6 +1,7 @@
 import {
   type DashboardLiveStore,
   dashboardHttpClient,
+  SESSION_HISTORY_BUDGET,
   selectSessionHistoryCoverage,
   useDashboardStore,
 } from '@pi-dashboard/client';
@@ -13,7 +14,6 @@ import type { RefObject } from 'react';
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -89,21 +89,29 @@ function firstVisibleAnchor(element: HTMLDivElement): ScrollAnchor | undefined {
   };
 }
 
+function jsonByteLength(value: unknown): number {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined
+      ? 0
+      : new TextEncoder().encode(serialized).byteLength;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
 export function useOlderSessionHistory({
   id,
   data,
   store,
   scrollElementRef,
   sessionMounted,
-  virtualized = false,
 }: {
   id: string;
   data: SessionApiResponse | undefined;
   store: DashboardLiveStore;
   sessionMounted: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
-  /** VirtualizedTranscript is the sole owner of virtual row restoration. */
-  virtualized?: boolean;
 }) {
   const coverage = useDashboardStore(store, selectSessionHistoryCoverage(id));
   const [history, setHistory] = useState<SessionApiResponse['history']>();
@@ -121,7 +129,6 @@ export function useOlderSessionHistory({
   const scrollIntentRevisionRef = useRef(0);
   const topIntentRef = useRef(false);
   const previousScrollTopRef = useRef<number | undefined>(undefined);
-  const restoredRevisionRef = useRef(0);
   const preserveAnchorOnCoverageRef = useRef(false);
   const loadEarlierHistoryRef = useRef<() => Promise<void>>(
     async () => undefined,
@@ -181,6 +188,8 @@ export function useOlderSessionHistory({
           coverage.generation,
           coverage.serverId,
           coverage.runtimeEpoch,
+          coverage.version,
+          coverage.hasOlder,
           coverage.coveredStart,
           coverage.coveredEnd,
           coverage.nextBefore,
@@ -270,7 +279,7 @@ export function useOlderSessionHistory({
       element.removeEventListener('scroll', onScroll);
       window.removeEventListener('keydown', onKeyDown);
     };
-  });
+  }, [clearAnchor, scrollElementRef, sessionMounted]);
 
   const loadEarlierHistory = useCallback(async () => {
     if (historyRequestRef.current) return;
@@ -297,10 +306,22 @@ export function useOlderSessionHistory({
       request.id === id &&
       !request.controller.signal.aborted;
     const pages: AuthoritativeSessionSnapshot[] = [];
+    const seenBefore = new Set<string>();
+    const seenRanges = new Set<string>();
+    const existingCoverage = store.getSnapshot().sessionHistoryCoverageById[id];
+    let fetchedEntries = 0;
+    let fetchedBytes = 0;
     let expected = initialHistory;
+    const failClosed = (message: string): never => {
+      store.resetSessionHistoryToNewest(id);
+      store.reconnectSession(id);
+      throw new Error(message);
+    };
     try {
       while (expected.hasOlder && expected.nextBefore) {
         const before = expected.nextBefore;
+        if (seenBefore.has(before)) failClosed('History cursor cycle.');
+        seenBefore.add(before);
         const page = await dashboardHttpClient.sessionBefore(
           id,
           before,
@@ -314,17 +335,32 @@ export function useOlderSessionHistory({
             page.history,
             expected,
             before,
-          )
-        ) {
-          // Route the malformed response through the store's fail-closed
-          // validator so verified coverage is reset, not merely retried.
-          store.prependSessionHistoryPages([...pages, page]);
-          throw new Error('Dashboard returned non-contiguous older history.');
-        }
+          ) ||
+          !page.history
+        )
+          failClosed('Dashboard returned non-contiguous older history.');
+        const rangeKey = `${page.history.start}:${page.history.end}`;
+        if (seenRanges.has(rangeKey)) failClosed('History range cycle.');
+        seenRanges.add(rangeKey);
+        fetchedEntries += page.entries.length;
+        fetchedBytes += jsonByteLength(page.entries);
+        const pageCount = (existingCoverage?.pageCount ?? 0) + pages.length + 1;
+        const entryCount =
+          (existingCoverage?.entryCount ?? 0) + fetchedEntries;
+        const byteCount =
+          (existingCoverage?.byteCount ?? 0) + fetchedBytes;
+        if (
+          pageCount > SESSION_HISTORY_BUDGET.maxPages ||
+          entryCount > SESSION_HISTORY_BUDGET.maxEntries ||
+          byteCount > SESSION_HISTORY_BUDGET.maxBytes
+        )
+          failClosed('Older history exceeds the bounded page budget.');
         pages.push(page);
-        if (!page.history)
-          throw new Error('Dashboard returned missing history metadata.');
         expected = page.history;
+        if (page.history.nextBefore) {
+          if (seenBefore.has(page.history.nextBefore))
+            failClosed('History cursor cycle.');
+        }
         // A leading continuation must be resolved to its owner or origin
         // before any buffered page is made visible.
         if (!expected.leadingContinuation || !expected.hasOlder) break;
@@ -336,8 +372,9 @@ export function useOlderSessionHistory({
           ? firstVisibleAnchor(scrollElementRef.current)
           : undefined);
       preserveAnchorOnCoverageRef.current = true;
-      if (!store.prependSessionHistoryPages(pages)) {
+      if (!store.prependSessionHistoryPages(pages, id)) {
         preserveAnchorOnCoverageRef.current = false;
+        store.reconnectSession(id);
         throw new Error('Session changed while loading older history.');
       }
       const nextCoverage = store.getSnapshot().sessionHistoryCoverageById[id];
@@ -393,29 +430,6 @@ export function useOlderSessionHistory({
       return;
     void loadEarlierHistory();
   }, [history, loadEarlierHistory, sessionMounted]);
-
-  // Non-virtualized rows restore the first visible semantic key in layout.
-  // There is intentionally no height delta fallback or timeout writer.
-  useLayoutEffect(() => {
-    if (virtualized || !scrollElementRef?.current || !prependAnchor) return;
-    if (restoredRevisionRef.current === prependAnchor.revision) return;
-    const element = scrollElementRef.current;
-    const target = Array.from(
-      element.querySelectorAll<HTMLElement>(
-        '[data-transcript-row], [data-transcript-key]',
-      ),
-    ).find(
-      (candidate) =>
-        (candidate.dataset.transcriptRow ?? candidate.dataset.transcriptKey) ===
-        prependAnchor.key,
-    );
-    if (!target) return;
-    if (prependAnchor.revision <= 0) return;
-    const offset =
-      target.getBoundingClientRect().top - element.getBoundingClientRect().top;
-    element.scrollTop += offset - prependAnchor.offset;
-    restoredRevisionRef.current = prependAnchor.revision;
-  }, [prependAnchor, scrollElementRef, virtualized]);
 
   return {
     history,

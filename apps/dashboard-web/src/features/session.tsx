@@ -93,7 +93,6 @@ export function SessionView({
     data,
     store,
     sessionMounted,
-    virtualized: !embedded,
     scrollElementRef: embedded ? undefined : transcriptScrollRef,
   });
 
