@@ -51,8 +51,8 @@ export function isContiguousOlderHistory(
 }
 
 type ScrollAnchor = {
-  key: string;
-  offset: number;
+  scrollTop: number;
+  scrollHeight: number;
 };
 
 type PrependAnchor = ScrollAnchor & { revision: number };
@@ -66,24 +66,10 @@ type HistoryRequest = {
   anchor?: ScrollAnchor;
 };
 
-function firstVisibleAnchor(element: HTMLDivElement): ScrollAnchor | undefined {
-  const viewport = element.getBoundingClientRect();
-  const candidates = Array.from(
-    element.querySelectorAll<HTMLElement>(
-      '[data-transcript-row], [data-transcript-key]',
-    ),
-  );
-  const visible = candidates.find((candidate) => {
-    const rect = candidate.getBoundingClientRect();
-    return rect.bottom >= viewport.top && rect.top <= viewport.bottom;
-  });
-  if (!visible) return undefined;
-  const key =
-    visible.dataset.transcriptRow ?? visible.dataset.transcriptKey ?? '';
-  if (!key) return undefined;
+function captureScrollOffset(element: HTMLDivElement): ScrollAnchor {
   return {
-    key,
-    offset: visible.getBoundingClientRect().top - viewport.top,
+    scrollTop: element.scrollTop,
+    scrollHeight: element.scrollHeight,
   };
 }
 
@@ -330,7 +316,7 @@ export function useOlderSessionHistory({
     const initialHistory = historyRef.current ?? history;
     if (!initialHistory?.hasOlder || !initialHistory.nextBefore) return;
     const capturedAnchor = scrollElementRef?.current
-      ? firstVisibleAnchor(scrollElementRef.current)
+      ? captureScrollOffset(scrollElementRef.current)
       : undefined;
     const request: HistoryRequest = {
       id,
@@ -441,11 +427,11 @@ export function useOlderSessionHistory({
           coverageRetries += 1;
           continue;
         }
-        const resolvedAnchor =
-          request.anchor ??
-          (scrollElementRef?.current
-            ? firstVisibleAnchor(scrollElementRef.current)
-            : undefined);
+        // Recapture immediately before the atomic prepend. This offsets only
+        // the inserted history, excluding live tail growth during the request.
+        const resolvedAnchor = scrollElementRef?.current
+          ? captureScrollOffset(scrollElementRef.current)
+          : request.anchor;
         preserveAnchorOnCoverageRef.current = true;
         preserveErrorOnCoverageRef.current = true;
         if (!store.prependSessionHistoryPages(pages, id)) {
