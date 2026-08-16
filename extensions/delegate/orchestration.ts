@@ -1,4 +1,3 @@
-import * as path from 'node:path';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -428,7 +427,6 @@ export const executeParallelDelegate = executeDelegate;
 
 export interface AsyncDelegateLaunchHooks {
   onRunUpdate?: (run: DelegatedRun) => void;
-  onUpdate?: RunHooks['onUpdate'];
 }
 
 /**
@@ -460,7 +458,7 @@ export async function prepareDelegateWorkflowLaunch(
       );
     launchPlan = {
       ...plan,
-      requestedCwd: path.join(branch.repositoryRoot, branch.workingDirectory),
+      requestedCwd: branch.repositoryRoot,
       isolation: 'worktree',
       base: undefined,
       baseRef: branch.headCommit,
@@ -544,7 +542,6 @@ export async function prepareDelegateWorkflowLaunch(
             { mode: 'single', tasks: [prepared] },
             {
               control,
-              onUpdate: hooks.onUpdate,
               onRunUpdate: (run) => hooks.onRunUpdate?.(run),
             },
           );

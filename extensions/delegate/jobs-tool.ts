@@ -36,7 +36,7 @@ const Parameters = Type.Object({
 });
 
 const DELEGATE_JOBS_DESCRIPTION =
-  'Inspect bounded metadata, steer, and cancel asynchronous delegate workflow attempts. Completions are delivered automatically through delegate_wake. Use feedback with one bounded message to steer a running child; this tool never polls or consumes result bodies.';
+  'Inspect bounded metadata, steer, and cancel asynchronous delegate workflow attempts. Selected results are delivered only by an explicitly registered delegate_wake. Use feedback with one bounded message to steer a running child; this tool never polls or consumes result bodies.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -44,7 +44,9 @@ function requireText(value: string | undefined, name: string): string {
   return text;
 }
 
-function summary(job: DelegateJobSnapshot): string {
+function summary(
+  job: Pick<DelegateJobSnapshot, 'id' | 'state' | 'name'>,
+): string {
   return `${job.id} ${job.state} — ${job.name}`;
 }
 
@@ -109,20 +111,36 @@ function automaticDeliveryStatus(
     : `Automatic result for ${job.id} was already delivered; no duplicate completion is returned.`;
 }
 
-function compactJob(job: DelegateJobSnapshot): DelegateJobSnapshot {
+type DelegateJobMetadata = Pick<
+  DelegateJobSnapshot,
+  | 'id'
+  | 'name'
+  | 'mode'
+  | 'state'
+  | 'createdAt'
+  | 'startedAt'
+  | 'settledAt'
+  | 'deliveryEpoch'
+  | 'route'
+  | 'allowWrites'
+  | 'logicalId'
+  | 'attemptIdentity'
+>;
+
+function compactJob(job: DelegateJobSnapshot): DelegateJobMetadata {
   return {
     id: job.id,
     name: job.name,
     mode: job.mode,
     state: job.state,
-    // The already-delivered response is a status, not another task replay.
-    tasks: [],
     createdAt: job.createdAt,
     startedAt: job.startedAt,
     settledAt: job.settledAt,
     deliveryEpoch: job.deliveryEpoch,
     route: job.route,
     allowWrites: job.allowWrites,
+    logicalId: job.logicalId,
+    attemptIdentity: job.attemptIdentity,
   };
 }
 
@@ -139,8 +157,8 @@ export function registerDelegateJobsTool(
     typeof Parameters,
     {
       action: 'list' | 'status' | 'feedback' | 'cancel' | 'peek';
-      job?: DelegateJobSnapshot;
-      jobs?: DelegateJobSnapshot[];
+      job?: DelegateJobSnapshot | DelegateJobMetadata;
+      jobs?: Array<DelegateJobSnapshot | DelegateJobMetadata>;
       attempt?: DelegateWorkflowAttemptSnapshot;
       attempts?: DelegateWorkflowAttemptSnapshot[];
       delivery?:
@@ -166,7 +184,10 @@ export function registerDelegateJobsTool(
       const action = (params as { action: string }).action;
       switch (action) {
         case 'list': {
-          const jobs = manager.list(ctx).map(compactJob);
+          const jobs = manager
+            .list(ctx)
+            .filter((job) => !job.attemptIdentity)
+            .map(compactJob);
           const attempts = workflow?.list().map(compactAttempt) ?? [];
           return {
             content: [
@@ -467,7 +488,7 @@ export function registerDelegateJobsTool(
       }
 
       if (details.action === 'peek' && details.job) {
-        const job = details.job;
+        const job = details.job as DelegateJobSnapshot;
         const display = stateDisplay(job.state);
         const preview =
           job.handoff ?? job.error ?? job.tasks[0] ?? 'Waiting for subagent';

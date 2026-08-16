@@ -230,13 +230,11 @@ const TaskItem = Type.Object({
   result: Type.Optional(ResultSpecSchema),
 });
 
-const DelegateParamsSchema = Type.Object({
-  id: Type.Optional(LogicalIdSchema),
-  continue: Type.Optional(ContinueSchema),
+const DelegateCommonParamsSchema = Type.Object({
   after: Type.Optional(AfterSchema),
   inputs: Type.Optional(Type.Array(WorkflowInputSchema, { maxItems: 4 })),
   name: Type.Optional(NameSchema),
-  task: Type.Optional(TaskSchema),
+  task: TaskSchema,
   cwd: Type.Optional(CwdSchema),
   route: Type.Optional(RouteSchema),
   context: Type.Optional(ContextSchema),
@@ -250,6 +248,20 @@ const DelegateParamsSchema = Type.Object({
   handoffFrom: Type.Optional(HandoffFromSchema),
   result: Type.Optional(ResultSpecSchema),
 });
+
+const DelegateParamsSchema = Type.Intersect([
+  DelegateCommonParamsSchema,
+  Type.Union([
+    Type.Object({
+      id: LogicalIdSchema,
+      continue: Type.Optional(Type.Never()),
+    }),
+    Type.Object({
+      continue: ContinueSchema,
+      id: Type.Optional(Type.Never()),
+    }),
+  ]),
+]);
 
 export type DelegateParams = Static<typeof DelegateParamsSchema> & {
   /** Internal compatibility only; not part of DelegateParamsSchema. */
@@ -480,6 +492,7 @@ export function registerDelegateTool(
                     const statusId = statusIds[0];
                     if (statusId)
                       backgroundRuntime.statuses.update(statusId, run);
+                    if (run.worktree) backgroundRuntime.activateBranches?.();
                   },
                 },
               );

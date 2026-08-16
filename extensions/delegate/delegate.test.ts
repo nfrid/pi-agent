@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { Value } from 'typebox/value';
 import { describe, expect, test } from 'vitest';
 import { buildSystemPrompt } from '../system-prompt';
 import { acquireSession } from './concurrency';
@@ -160,16 +161,17 @@ describe('delegate', () => {
     expect(Buffer.byteLength(JSON.stringify(parameters), 'utf8')).toBeLessThan(
       9_000,
     );
-    const schema = parameters as {
-      properties?: Record<string, unknown>;
-    };
-    expect(schema.properties?.background).toBeUndefined();
-    expect(schema.properties?.tasks).toBeUndefined();
-    expect(schema.properties?.continuation).toBeUndefined();
-    expect(schema.properties?.id).toBeDefined();
-    expect(schema.properties?.continue).toBeDefined();
-    expect(schema.properties?.after).toBeDefined();
-    expect(schema.properties?.inputs).toBeDefined();
+    const serialized = JSON.stringify(parameters);
+    expect(serialized).not.toContain('"background"');
+    expect(serialized).not.toContain('"tasks"');
+    expect(serialized).not.toContain('"continuation"');
+    const schema = parameters as Parameters<typeof Value.Check>[0];
+    expect(Value.Check(schema, { id: 'impl', task: 'implement' })).toBe(true);
+    expect(Value.Check(schema, { continue: 'impl', task: 'fix' })).toBe(true);
+    expect(Value.Check(schema, { task: 'missing identity' })).toBe(false);
+    expect(
+      Value.Check(schema, { id: 'impl', continue: 'impl', task: 'ambiguous' }),
+    ).toBe(false);
   });
 
   test('protects recorded branch history in writable continuations', () => {

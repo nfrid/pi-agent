@@ -65,7 +65,7 @@ describe('delegate_jobs rendering', () => {
     registerDelegateJobsTool(pi, manager);
 
     expect(tool?.description).toContain(
-      'Completions are delivered automatically',
+      'only by an explicitly registered delegate_wake',
     );
     expect(tool?.description).toContain(
       'Use feedback with one bounded message to steer a running child',
