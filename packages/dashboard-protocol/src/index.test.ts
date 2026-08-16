@@ -33,6 +33,7 @@ import {
   parseRuntimeCommandOutput,
   parseRuntimeExtensionSurface,
   parseRuntimeSnapshot,
+  parseSchema,
   parseSessionAdoptCommand,
   parseSessionApiResponse,
   parseShellSnapshotRequest,
@@ -50,6 +51,29 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('enforces canonical workflow identity and reference shapes', () => {
+    const valid = {
+      logicalId: 'foo-bar',
+      attempt: 2,
+      identity: 'foo-bar@2',
+      state: 'scheduled',
+      dependencies: ['gate@1'],
+      waitingFor: ['gate@1'],
+      createdAt: 1,
+      scheduledAt: 1,
+    };
+    expect(parseSchema(DelegateWorkflowMetadataSchema, valid)).toEqual(valid);
+    for (const value of [
+      { ...valid, logicalId: 'Foo', identity: 'Foo@2' },
+      { ...valid, identity: 'foo-bar@0' },
+      { ...valid, identity: 'foo-bar@1000000000' },
+      { ...valid, dependencies: ['gate'] },
+    ])
+      expect(() =>
+        parseSchema(DelegateWorkflowMetadataSchema, value),
+      ).toThrow();
+  });
+
   it('validates a narrow per-session transcript reset event', () => {
     expect(
       parseBridgeEvent({

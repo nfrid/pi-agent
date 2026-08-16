@@ -3,6 +3,8 @@ export const MAX_LOGICAL_ID_LENGTH = 64;
 
 /** Maximum ordinal representable in a public attempt identity. */
 export const MAX_ATTEMPT_ORDINAL = 999_999_999;
+/** Maximum number of persisted dependency references on one attempt. */
+export const MAX_WORKFLOW_DEPENDENCIES = 32;
 
 const LOGICAL_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const EXACT_REFERENCE_PATTERN =
@@ -109,6 +111,22 @@ export function isLogicalId(value: string): boolean {
     value.length > 0 &&
     value.length <= MAX_LOGICAL_ID_LENGTH &&
     LOGICAL_ID_PATTERN.test(value)
+  );
+}
+
+/** Whether a value is a canonical exact attempt identity. */
+export function isCanonicalWorkflowAttemptReference(
+  value: unknown,
+): value is AttemptIdentity {
+  if (typeof value !== 'string') return false;
+  const exact = EXACT_REFERENCE_PATTERN.exec(value);
+  if (!exact?.groups) return false;
+  const logicalId = exact.groups.logicalId;
+  const ordinal = Number(exact.groups.ordinal);
+  return (
+    ordinal <= MAX_ATTEMPT_ORDINAL &&
+    isLogicalId(logicalId) &&
+    value === `${logicalId}@${ordinal}`
   );
 }
 

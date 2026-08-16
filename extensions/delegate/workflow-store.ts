@@ -8,7 +8,14 @@ import type {
   DelegateWorkflowMetadataHistory,
   DelegateWorkflowMetadataSnapshot,
 } from './workflow-coordinator';
-import type { WorkflowAttemptState } from './workflow-model';
+import {
+  isCanonicalWorkflowAttemptReference,
+  isLogicalId,
+  MAX_ATTEMPT_ORDINAL,
+  MAX_LOGICAL_ID_LENGTH,
+  MAX_WORKFLOW_DEPENDENCIES,
+  type WorkflowAttemptState,
+} from './workflow-model';
 
 /** Custom entry type for append-only workflow lifecycle metadata. */
 export const WORKFLOW_ENTRY_TYPE = 'delegate-workflow:v1';
@@ -69,11 +76,11 @@ function validTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function validIdentity(value: unknown): value is string {
+function validBoundedText(value: unknown, maximum: number): value is string {
   return (
     typeof value === 'string' &&
     value.length > 0 &&
-    value.length <= 80 &&
+    value.length <= maximum &&
     ![...value].some((character) => {
       const code = character.charCodeAt(0);
       return code < 32 || code === 127;
@@ -89,21 +96,32 @@ function validAttempt(
     (value.ownerBranchId !== undefined &&
       !isBranchOwnerId(value.ownerBranchId)) ||
     typeof value.logicalId !== 'string' ||
-    value.logicalId.length === 0 ||
-    value.logicalId.length > 64 ||
+    !isLogicalId(value.logicalId) ||
+    value.logicalId.length > MAX_LOGICAL_ID_LENGTH ||
     typeof value.attempt !== 'number' ||
     !Number.isSafeInteger(value.attempt) ||
     value.attempt < 1 ||
-    !validIdentity(value.identity) ||
+    value.attempt > MAX_ATTEMPT_ORDINAL ||
+    !isCanonicalWorkflowAttemptReference(value.identity) ||
     value.identity !== `${value.logicalId}@${value.attempt}` ||
     typeof value.state !== 'string' ||
     !WORKFLOW_STATES.has(value.state as WorkflowAttemptState) ||
     !Array.isArray(value.dependencies) ||
-    value.dependencies.length > 32 ||
-    value.dependencies.some((dependency) => !validIdentity(dependency)) ||
+    value.dependencies.length > MAX_WORKFLOW_DEPENDENCIES ||
+    value.dependencies.some(
+      (dependency) => !isCanonicalWorkflowAttemptReference(dependency),
+    ) ||
+    new Set(value.dependencies).size !== value.dependencies.length ||
+    value.dependencies.includes(value.identity as string) ||
     !Array.isArray(value.waitingFor) ||
-    value.waitingFor.length > 32 ||
-    value.waitingFor.some((dependency) => !validIdentity(dependency)) ||
+    value.waitingFor.length > MAX_WORKFLOW_DEPENDENCIES ||
+    value.waitingFor.some(
+      (dependency) => !isCanonicalWorkflowAttemptReference(dependency),
+    ) ||
+    new Set(value.waitingFor).size !== value.waitingFor.length ||
+    value.waitingFor.some(
+      (dependency) => !(value.dependencies as unknown[]).includes(dependency),
+    ) ||
     !validTimestamp(value.createdAt) ||
     !validTimestamp(value.scheduledAt)
   )
@@ -112,18 +130,14 @@ function validAttempt(
     if (value[key] !== undefined && !validTimestamp(value[key])) return false;
   if (
     value.route !== undefined &&
-    (typeof value.route !== 'string' ||
-      value.route.length === 0 ||
-      value.route.length > MAX_WORKFLOW_HISTORY_ROUTE)
+    !validBoundedText(value.route, MAX_WORKFLOW_HISTORY_ROUTE)
   )
     return false;
   if (value.allowWrites !== undefined && typeof value.allowWrites !== 'boolean')
     return false;
   if (
     value.reason !== undefined &&
-    (typeof value.reason !== 'string' ||
-      value.reason.length === 0 ||
-      value.reason.length > MAX_WORKFLOW_HISTORY_REASON)
+    !validBoundedText(value.reason, MAX_WORKFLOW_HISTORY_REASON)
   )
     return false;
   return true;
@@ -172,23 +186,21 @@ function parseWorkflowStoreEntry(
 
 function boundedState(
   state: DelegateWorkflowMetadataHistory,
-): DelegateWorkflowMetadataHistory {
-  const attempts = state.attempts
-    .slice(-MAX_WORKFLOW_HISTORY_ATTEMPTS)
-    .map((attempt) => ({
+): DelegateWorkflowMetadataHistory | undefined {
+  // The coordinator is the admission boundary. Persistence must not repair a
+  // malformed state by clipping fields or evicting records.
+  if (!validState(state, 'snapshot')) return undefined;
+  const attempts = state.attempts.map((attempt) =>
+    Object.freeze({
       ...(attempt.ownerBranchId
         ? { ownerBranchId: attempt.ownerBranchId }
         : {}),
-      logicalId: attempt.logicalId.slice(0, 64),
+      logicalId: attempt.logicalId,
       attempt: attempt.attempt,
-      identity: attempt.identity.slice(0, 80),
+      identity: attempt.identity,
       state: attempt.state,
-      dependencies: Object.freeze(
-        attempt.dependencies.slice(0, 32).map((value) => value.slice(0, 80)),
-      ),
-      waitingFor: Object.freeze(
-        attempt.waitingFor.slice(0, 32).map((value) => value.slice(0, 80)),
-      ),
+      dependencies: Object.freeze([...attempt.dependencies]),
+      waitingFor: Object.freeze([...attempt.waitingFor]),
       createdAt: attempt.createdAt,
       scheduledAt: attempt.scheduledAt,
       ...(attempt.queuedAt === undefined ? {} : { queuedAt: attempt.queuedAt }),
@@ -198,16 +210,13 @@ function boundedState(
       ...(attempt.settledAt === undefined
         ? {}
         : { settledAt: attempt.settledAt }),
-      ...(attempt.route === undefined
-        ? {}
-        : { route: attempt.route.slice(0, MAX_WORKFLOW_HISTORY_ROUTE) }),
+      ...(attempt.route === undefined ? {} : { route: attempt.route }),
       ...(attempt.allowWrites === undefined
         ? {}
         : { allowWrites: attempt.allowWrites }),
-      ...(attempt.reason === undefined
-        ? {}
-        : { reason: attempt.reason.slice(0, MAX_WORKFLOW_HISTORY_REASON) }),
-    }));
+      ...(attempt.reason === undefined ? {} : { reason: attempt.reason }),
+    }),
+  );
   return Object.freeze({ version: 1, attempts: Object.freeze(attempts) });
 }
 
@@ -240,6 +249,7 @@ function appendCheckpoint(
 ): void {
   if (guard.isOwnerActive && !guard.isOwnerActive()) return;
   const state = boundedState(coordinator.metadataSnapshot());
+  if (!state) return;
   pi.appendEntry(WORKFLOW_ENTRY_TYPE, {
     version: 1,
     kind: 'snapshot',
@@ -260,6 +270,7 @@ export function persistWorkflowDelta(
 ): void {
   if (guard.isOwnerActive && !guard.isOwnerActive()) return;
   const state = boundedState(coordinator.metadataSnapshot());
+  if (!state) return;
   const previous = persistedMetadata.get(coordinator) ?? new Map();
   const changed = state.attempts.filter((attempt) => {
     const prior = previous.get(metadataKey(attempt));
@@ -333,7 +344,9 @@ function workflowHistory(
       if (oldest === undefined) break;
       folded.delete(oldest);
     }
-    states.push(boundedState({ version: 1, attempts: [...folded.values()] }));
+    const state = boundedState({ version: 1, attempts: [...folded.values()] });
+    if (!state) return undefined;
+    states.push(state);
   }
   return { states };
 }

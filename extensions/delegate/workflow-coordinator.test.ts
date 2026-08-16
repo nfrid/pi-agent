@@ -665,6 +665,48 @@ describe('DelegateWorkflowCoordinator', () => {
     ]);
   });
 
+  test('rejects oversized direct and combined dependencies before identity commit', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const execute = async () => result();
+    const prepare = async () => ({
+      mode: 'single' as const,
+      tasks: ['dependency'],
+      execute,
+    });
+    const references: string[] = [];
+    for (let index = 0; index < 33; index += 1) {
+      const attempt = coordinator.schedule({
+        logicalId: `dependency-${index}`,
+        prepare,
+      });
+      references.push(attempt.identity);
+    }
+    expect(() =>
+      coordinator.schedule(
+        scheduleOptions('direct-overflow', execute, {
+          after: references,
+        }),
+      ),
+    ).toThrow(/at most 32 explicit dependencies/);
+    expect(coordinator.get('direct-overflow')).toBeUndefined();
+
+    const predecessor = coordinator.schedule({
+      logicalId: 'lineage',
+      prepare,
+    });
+    expect(() =>
+      coordinator.schedule({
+        logicalId: 'lineage',
+        continuation: true,
+        after: references.slice(0, 32),
+        prepare,
+      }),
+    ).toThrow(/at most 32 combined dependencies/);
+    expect(coordinator.get(predecessor.identity)).toBeDefined();
+    expect(coordinator.get('lineage@2')).toBeUndefined();
+    await coordinator.dispose();
+  });
+
   test('scheduled cancellation never launches and releases downstream readiness', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
