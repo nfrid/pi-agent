@@ -1860,10 +1860,14 @@ export class DashboardLiveStore {
       const responseEpoch = response.runtimeEpoch;
       if (previousCoverage) {
         const newestPage = previousCoverage.pages.at(-1);
+        const explicitRuntimeMismatch =
+          previousCoverage.runtimeEpoch !== undefined &&
+          responseEpoch !== undefined &&
+          previousCoverage.runtimeEpoch !== responseEpoch;
         const sameIdentity =
           previousCoverage.generation === this.generation &&
           previousCoverage.serverId === responseServerId &&
-          previousCoverage.runtimeEpoch === responseEpoch;
+          !explicitRuntimeMismatch;
         const contiguousLatestWindow =
           newestPage !== undefined &&
           // A moving window cannot skip the bridge between the old newest
@@ -1894,7 +1898,7 @@ export class DashboardLiveStore {
           nextCoverage = this.coverageWithPages(
             pages,
             responseServerId,
-            responseEpoch,
+            responseEpoch ?? previousCoverage.runtimeEpoch,
           );
         }
       }

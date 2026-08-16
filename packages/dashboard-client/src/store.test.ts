@@ -2720,6 +2720,88 @@ describe('DashboardLiveStore', () => {
     ).toEqual(['older', 'newer-2']);
   });
 
+  it('preserves verified older coverage across an epochless reconnect snapshot', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(1),
+          runtimeEpoch: 'epoch-1',
+          entries: [
+            {
+              type: 'message',
+              id: 'newer',
+              message: { role: 'assistant', content: 'newer' },
+            },
+          ],
+          history: {
+            version: 1,
+            start: 10,
+            end: 20,
+            hasOlder: true,
+            nextBefore: 'before-10',
+          },
+        },
+        1,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        entries: [
+          {
+            type: 'message',
+            id: 'older',
+            message: { role: 'user', content: 'older' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeDefined();
+
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(1),
+          // Inactivity reconnects can snapshot a disk-only session without a
+          // live runtime epoch. Omission is neutral, not a new generation.
+          entries: [
+            {
+              type: 'message',
+              id: 'newer',
+              message: { role: 'assistant', content: 'newer' },
+            },
+          ],
+          history: {
+            version: 1,
+            start: 10,
+            end: 20,
+            hasOlder: true,
+            nextBefore: 'before-10',
+          },
+        },
+        1,
+        1,
+        true,
+      ),
+    ).toBe(true);
+
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({
+      coveredStart: 0,
+      coveredEnd: 20,
+      pageCount: 2,
+      runtimeEpoch: 'epoch-1',
+    });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['older', 'newer']);
+  });
+
   it('rejects an explicit runtime mismatch on a historical page', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
