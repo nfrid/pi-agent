@@ -260,11 +260,17 @@ describe('buildDelegatePlans', () => {
     ).toThrow('Unknown or expired delegate continuation token.');
   });
 
-  test('inherits persisted continuation names and preserves explicit overrides', () => {
+  test('inherits exact persisted continuation metadata and preserves explicit overrides', () => {
+    const persistedRouting: DelegateRouteState = {
+      ...routing,
+      model: 'historical-model',
+      thinking: 'high',
+      relativeCost: 9,
+    };
     const session = createDelegateSession({
       cwd: '/tmp/project',
       name: 'Original agent',
-      routing,
+      routing: persistedRouting,
     });
     try {
       expect(
@@ -274,19 +280,23 @@ describe('buildDelegatePlans', () => {
           config,
           () => null,
         ).tasks[0]?.plan,
-      ).toMatchObject({ name: 'Original agent' });
+      ).toMatchObject({
+        name: 'Original agent',
+        routing: persistedRouting,
+      });
       expect(
         buildDelegatePlans(
           {
             name: 'Override agent',
             task: 'continue differently',
             continuation: session.token,
+            route: 'quick',
           },
           ctx,
           config,
           () => null,
         ).tasks[0]?.plan,
-      ).toMatchObject({ name: 'Override agent' });
+      ).toMatchObject({ name: 'Override agent', routing });
     } finally {
       removeDelegateSession(session);
     }

@@ -280,11 +280,15 @@ export function buildDelegatePlans(
     );
 
   namedTasks = namedTasks.map((task) => {
+    const requestedRoute = task.input.route ?? shared.route;
+    if (requestedRoute === undefined && task.resumed?.routing)
+      return {
+        ...task,
+        routing: task.resumed.routing,
+        routingError: undefined,
+      };
     const result = resolveDelegateRoute(
-      mergeDelegateRouteRequest(
-        task.input.route ?? shared.route,
-        task.resumed?.routing,
-      ),
+      mergeDelegateRouteRequest(requestedRoute, task.resumed?.routing),
       config,
     );
     return {

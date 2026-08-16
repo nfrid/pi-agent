@@ -5,6 +5,7 @@ import {
   type DelegateJobStartOptions,
 } from './jobs';
 import { buildParentHandoff } from './output';
+import type { DelegateRouteState } from './types';
 import {
   type BoundWorkflowSelector,
   type ResolvedWorkflowInput,
@@ -63,6 +64,8 @@ export interface DelegateWorkflowScheduleOptions
   > {
   /** Logical identity of the new attempt. */
   logicalId: string;
+  /** Exact selected route state retained for continuation inheritance. */
+  routing?: DelegateRouteState;
   /** Continue the latest attempt in this lineage instead of creating @1. */
   continuation?: boolean | string;
   /** References to attempts that must settle before this attempt launches. */
@@ -124,6 +127,7 @@ interface WorkflowRecord {
   startedAt?: number;
   settledAt?: number;
   route?: string;
+  routing?: DelegateRouteState;
   jobId?: string;
   reason?: string;
   launched: boolean;
@@ -138,6 +142,12 @@ interface WorkflowRecord {
   discard?: () => void | Promise<void>;
   continuationPredecessor?: AttemptIdentity;
   preparationDiscarded?: boolean;
+}
+
+function copyRouting(
+  routing: DelegateRouteState | undefined,
+): DelegateRouteState | undefined {
+  return routing ? Object.freeze({ ...routing }) : undefined;
 }
 
 function boundedReason(value: unknown): string {
@@ -308,7 +318,8 @@ export class DelegateWorkflowCoordinator {
       state: 'scheduled',
       createdAt: timestamp,
       scheduledAt: timestamp,
-      route: options.route,
+      route: options.routing?.route ?? options.route,
+      routing: copyRouting(options.routing),
       launched: false,
       cancellationRequested: false,
       cancellationWaiters: [],
@@ -364,6 +375,12 @@ export class DelegateWorkflowCoordinator {
     if (!record)
       throw new Error(`Unknown workflow attempt "${attempt.identity}".`);
     return this.snapshotRecord(record);
+  }
+
+  /** Return the exact retained route state without exposing it in snapshots. */
+  getRouting(reference: string): DelegateRouteState | undefined {
+    const attempt = this.model.lookup(reference);
+    return copyRouting(this.records.get(attempt.identity)?.routing);
   }
 
   list(): DelegateWorkflowAttemptSnapshot[] {

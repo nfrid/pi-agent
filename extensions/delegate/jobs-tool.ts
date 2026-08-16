@@ -54,14 +54,14 @@ function attemptSummary(attempt: DelegateWorkflowAttemptSnapshot): string {
   const waiting = attempt.dependencies.length
     ? `, waiting for ${attempt.dependencies.join(', ')}`
     : '';
-  return `${attempt.identity} ${attempt.state}${waiting}`;
+  const reason = attempt.reason ? ` — ${attempt.reason}` : '';
+  return `${attempt.identity} ${attempt.state}${waiting}${reason}`;
 }
 
 function compactAttempt(
   attempt: DelegateWorkflowAttemptSnapshot,
 ): DelegateWorkflowAttemptSnapshot {
-  const { reason: _reason, ...metadata } = attempt;
-  return metadata;
+  return attempt;
 }
 
 function feedbackText(

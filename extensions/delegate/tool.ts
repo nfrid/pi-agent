@@ -230,7 +230,7 @@ const TaskItem = Type.Object({
   result: Type.Optional(ResultSpecSchema),
 });
 
-const DelegateCommonParamsSchema = Type.Object({
+const DelegateCommonParamProperties = {
   after: Type.Optional(AfterSchema),
   inputs: Type.Optional(Type.Array(WorkflowInputSchema, { maxItems: 4 })),
   name: Type.Optional(NameSchema),
@@ -247,28 +247,36 @@ const DelegateCommonParamsSchema = Type.Object({
   worktreePath: Type.Optional(WorktreePathSchema),
   handoffFrom: Type.Optional(HandoffFromSchema),
   result: Type.Optional(ResultSpecSchema),
+};
+
+type DelegateCommonParams = Omit<Static<typeof TaskItem>, 'continuation'> & {
+  after?: Static<typeof AfterSchema>;
+  inputs?: Array<Static<typeof WorkflowInputSchema>>;
+};
+type ModelDelegateParams = DelegateCommonParams &
+  ({ id: string; continue?: never } | { continue: string; id?: never });
+
+const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
+  type: 'object',
+  properties: {
+    id: LogicalIdSchema,
+    continue: ContinueSchema,
+    ...DelegateCommonParamProperties,
+  },
+  required: ['task'],
+  additionalProperties: false,
+  oneOf: [
+    { required: ['id'], not: { required: ['continue'] } },
+    { required: ['continue'], not: { required: ['id'] } },
+  ],
 });
 
-const DelegateParamsSchema = Type.Intersect([
-  DelegateCommonParamsSchema,
-  Type.Union([
-    Type.Object({
-      id: LogicalIdSchema,
-      continue: Type.Optional(Type.Never()),
-    }),
-    Type.Object({
-      continue: ContinueSchema,
-      id: Type.Optional(Type.Never()),
-    }),
-  ]),
-]);
-
-export type DelegateParams = Static<typeof DelegateParamsSchema> & {
-  /** Internal compatibility only; not part of DelegateParamsSchema. */
+/** Internal compatibility shape used below the closed model-facing schema. */
+export type DelegateParams = Partial<DelegateCommonParams> & {
+  id?: string;
+  continue?: string;
   tasks?: Array<Static<typeof TaskItem>>;
-  /** Legacy opaque child token, used only after logical continuation binds. */
   continuation?: string;
-  /** Internal compatibility only; ignored for new async scheduling. */
   background?: boolean;
 };
 
@@ -396,14 +404,21 @@ export function registerDelegateTool(
           : params.id?.trim();
         if (!logicalId)
           throw new Error('Fresh delegate calls require a stable id.');
-        const previous = continuationReference
-          ? backgroundRuntime.workflow.require(continuationReference)
+        if (continuationReference)
+          backgroundRuntime.workflow.require(continuationReference);
+        const requestedRoute = params.route?.trim();
+        const inheritedRouting = continuationReference
+          ? backgroundRuntime.workflow.getRouting(continuationReference)
           : undefined;
-        const capturedRoute =
-          params.route?.trim() || previous?.route || undefined;
-        const routeResult = resolveDelegateRoute(capturedRoute, config);
+        const routeResult =
+          requestedRoute || !continuationReference
+            ? resolveDelegateRoute(requestedRoute, config)
+            : { routing: inheritedRouting };
         if (routeResult.error || !routeResult.routing)
-          throw new Error(routeResult.error ?? 'A delegate route is required.');
+          throw new Error(
+            routeResult.error ??
+              'The predecessor has no persisted route; provide route explicitly.',
+          );
         const routing = routeResult.routing;
         let initialPlan:
           | import('./task-lifecycle').DelegateTaskPlan
@@ -451,6 +466,7 @@ export function registerDelegateTool(
             name: params.name?.trim() || logicalId,
             ownerSessionId: launchSessionId,
             route: routing.route,
+            routing,
             prepare: async (workflowContext) => {
               let plan = initialPlan;
               if (!plan) {
@@ -466,7 +482,7 @@ export function registerDelegateTool(
                     continue: undefined,
                     continuation: token,
                     name: params.name?.trim() || logicalId,
-                    route: routing.route,
+                    route: requestedRoute,
                     task,
                   },
                   ctx,
@@ -479,7 +495,14 @@ export function registerDelegateTool(
               }
               if (!plan)
                 throw new Error('Delegate continuation plan was not created.');
-              if (plan.routing?.route !== routing.route)
+              if (
+                !plan.routing ||
+                plan.routing.route !== routing.route ||
+                plan.routing.provider !== routing.provider ||
+                plan.routing.model !== routing.model ||
+                plan.routing.thinking !== routing.thinking ||
+                plan.routing.relativeCost !== routing.relativeCost
+              )
                 throw new Error(
                   'Delegate route changed while preparing the attempt.',
                 );

@@ -172,6 +172,11 @@ describe('delegate', () => {
     expect(
       Value.Check(schema, { id: 'impl', continue: 'impl', task: 'ambiguous' }),
     ).toBe(false);
+    for (const legacy of ['background', 'tasks', 'continuation']) {
+      expect(
+        Value.Check(schema, { id: 'impl', task: 'work', [legacy]: true }),
+      ).toBe(false);
+    }
   });
 
   test('protects recorded branch history in writable continuations', () => {
