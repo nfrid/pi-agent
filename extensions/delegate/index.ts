@@ -149,7 +149,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const manager = ctx.sessionManager as ExtensionContext['sessionManager'] & {
       getLeafId?: () => string | null | undefined;
     };
-    if (typeof manager.getLeafId === 'function') return manager.getLeafId();
+    if (typeof manager.getLeafId === 'function') {
+      const leafId = manager.getLeafId();
+      return leafId === '' ? null : leafId;
+    }
     const branch = manager.getBranch();
     const last = branch.at(-1) as { id?: unknown } | undefined;
     return typeof last?.id === 'string' ? last.id : undefined;
@@ -194,7 +197,11 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     wakeBranches.clear();
   };
 
-  const activateWakeBranch = (ctx: ExtensionContext, key: string): void => {
+  const activateWakeBranch = (
+    ctx: ExtensionContext,
+    key: string,
+    allowLegacyMigration = false,
+  ): void => {
     const activeWorkflow = workflow;
     if (!activeWorkflow || !runtimeActive) return;
     const current = activeWake;
@@ -207,9 +214,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       // The branch key is part of ownership and therefore of every delivery
       // acknowledgement. Inherited entries from a fork cannot acknowledge a
       // wake on the newly selected branch.
-      const legacyRootOwner =
-        key === `${scopeId}:root` && persisted?.ownerSessionId === scopeId;
-      const ownerSessionId = legacyRootOwner ? scopeId : wakeOwnerId(key);
+      // Legacy snapshots predate branch-qualified ownership. Migrate them only
+      // during session startup onto the branch that actually contains the
+      // entry; never inherit them during a later tree switch.
+      const legacyOwner =
+        allowLegacyMigration && persisted?.ownerSessionId === scopeId;
+      const ownerSessionId = legacyOwner ? scopeId : wakeOwnerId(key);
       const inheritedEpoch =
         persisted?.ownerSessionId === ownerSessionId
           ? persisted.ownerEpoch
@@ -463,34 +473,25 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     setDelegateToolActive(pi, 'delegate_jobs', false);
     setDelegateToolActive(pi, 'delegate_branches', false);
     if (branchEntries.length > 0) activateBranchesTool();
-    activateWakeBranch(ctx, wakeBranchKey);
+    activateWakeBranch(ctx, wakeBranchKey, true);
     syncWidget();
   });
 
   pi.on('session_tree', (event, ctx) => {
-    const eventGeneration = sessionManagerGenerations.get(ctx.sessionManager);
-    if (
-      !runtimeActive ||
-      (eventGeneration !== undefined && eventGeneration !== runtimeGeneration)
-    )
-      return;
-    // A known current manager may expose a changed synthetic session ID in
-    // compatibility shims. Preserve legacy completion invalidation, but never
-    // activate wake state from the foreign scope.
-    if (getSessionScopeId(ctx) !== scopeId) {
-      if (eventGeneration === runtimeGeneration) {
-        deliveryEpoch++;
-        delivery.resetAutomaticDelivery();
-      }
-      return;
-    }
+    if (!runtimeActive) return;
+    // Every tree transition invalidates legacy automatic completion delivery,
+    // even when the event is stale or foreign. Wake activation remains strict.
     deliveryEpoch++;
     delivery.resetAutomaticDelivery();
+    const eventGeneration = sessionManagerGenerations.get(ctx.sessionManager);
+    if (
+      eventGeneration !== runtimeGeneration ||
+      getSessionScopeId(ctx) !== scopeId
+    )
+      return;
     const treeEvent = event as { newLeafId?: string | null };
-    const leafId =
-      treeEvent.newLeafId === undefined
-        ? sessionLeafId(ctx)
-        : treeEvent.newLeafId;
+    const eventLeafId = treeEvent.newLeafId === '' ? null : treeEvent.newLeafId;
+    const leafId = eventLeafId === undefined ? sessionLeafId(ctx) : eventLeafId;
     // Old host shims without branch identity cannot safely distinguish a fork;
     // keep the current wake branch rather than abandoning or cross-binding it.
     if (leafId === undefined) return;
