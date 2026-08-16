@@ -274,29 +274,53 @@ describe('delegate status store', () => {
     );
   });
 
-  test('marks wake sources delivered and clears entered terminal lineages', () => {
+  test('clears a lineage when only its latest async attempt is delivered', () => {
     const store = new DelegateStatusStore();
-    const run = createRun('completed review');
-    run.state = 'success';
-    run.exitCode = 0;
-    run.finishedAt = 3;
-    const [id] = store.start([run], 'background');
-    store.setWorkflow(id, {
-      attempt: { logicalId: 'review', ordinal: 1, identity: 'review@1' },
-      logicalId: 'review',
+    const first = createRun('initial implementation', undefined, {
+      lineageId: 'lineage-impl',
+    });
+    first.state = 'success';
+    first.exitCode = 0;
+    first.finishedAt = 2;
+    const second = createRun('corrected implementation', undefined, {
+      lineageId: 'lineage-impl',
+    });
+    second.state = 'success';
+    second.exitCode = 0;
+    second.finishedAt = 4;
+    const [firstId, secondId] = store.start([first, second], 'background');
+    store.setWorkflow(firstId, {
+      attempt: { logicalId: 'impl', ordinal: 1, identity: 'impl@1' },
+      logicalId: 'impl',
       ordinal: 1,
-      identity: 'review@1',
+      identity: 'impl@1',
       dependencies: [],
       waitingFor: [],
       inputs: [],
       state: 'success',
       createdAt: 1,
       scheduledAt: 1,
-      settledAt: 3,
+      settledAt: 2,
+    });
+    store.setWorkflow(secondId, {
+      attempt: { logicalId: 'impl', ordinal: 2, identity: 'impl@2' },
+      logicalId: 'impl',
+      ordinal: 2,
+      identity: 'impl@2',
+      dependencies: ['impl@1'],
+      waitingFor: [],
+      inputs: [],
+      state: 'success',
+      createdAt: 3,
+      scheduledAt: 3,
+      settledAt: 4,
     });
 
-    store.markWorkflowDelivered(['review@1']);
-    expect(store.list()[0]?.workflow?.deliveredToParent).toBe(true);
+    store.markWorkflowDelivered(['impl@2']);
+    expect(store.list()[0]?.workflow).toMatchObject({
+      identity: 'impl@2',
+      deliveredToParent: true,
+    });
     store.parentSettled();
     store.parentUserMessage();
     expect(store.list()).toEqual([]);

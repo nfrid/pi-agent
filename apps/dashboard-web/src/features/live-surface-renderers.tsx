@@ -33,19 +33,30 @@ function short(value: string, max = 180): string {
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
 }
 
-function workflowState(row: DelegateStatus): string {
-  return row.workflow?.state ?? row.state;
+function workflowState(row: DelegateInspectionStatus): string {
+  return row.wake?.state ?? row.workflow?.state ?? row.state;
 }
 
 function stateLabel(value: string): string {
   const state = value.toLowerCase();
   if (state === 'running' || state === 'doing') return 'running';
-  if (state === 'queued' || state === 'todo' || state === 'scheduled')
+  if (
+    state === 'queued' ||
+    state === 'todo' ||
+    state === 'scheduled' ||
+    state === 'pending' ||
+    state === 'ready'
+  )
     return 'queued';
-  if (state === 'success' || state === 'done' || state === 'completed')
+  if (
+    state === 'success' ||
+    state === 'done' ||
+    state === 'completed' ||
+    state === 'entered'
+  )
     return 'done';
   if (state === 'aborted') return 'aborted';
-  if (state === 'dropped') return 'dropped';
+  if (state === 'dropped' || state === 'cancelled') return 'dropped';
   if (
     state === 'error' ||
     state === 'failed' ||
@@ -226,6 +237,12 @@ export function delegateActivityLabel(
 ): string {
   if (pauseState === 'paused') return 'Paused at a safe boundary';
   if (pauseState === 'pausing') return 'Pausing at a safe boundary';
+  if (row.wake)
+    return row.wake.state === 'entered'
+      ? `delivered for ${row.wake.references.join(', ')}`
+      : row.wake.state === 'pending' || row.wake.state === 'ready'
+        ? `waiting for ${row.wake.references.join(', ')}`
+        : `wake ${row.wake.state} · ${row.wake.references.join(', ')}`;
   if (row.workflow?.waitingFor?.length)
     return `waiting for ${row.workflow.waitingFor.join(', ')}`;
   if (row.workflow?.state === 'blocked' && row.workflow.reason)

@@ -4,6 +4,7 @@ import type {
   DelegateHistoryInvocation,
   DelegateHistoryResponse,
   DelegateHistoryRunDetail,
+  DelegateWakeMetadata,
 } from '@pi-dashboard/protocol';
 import type {
   DelegateResult,
@@ -20,6 +21,7 @@ export type DelegateInspectionStatus = DelegateStatus & {
   historical?: boolean;
   historyIncomplete?: boolean;
   warnings?: readonly string[];
+  wake?: DelegateWakeMetadata;
 };
 
 export interface DelegateCompositeRun {
@@ -206,6 +208,9 @@ export function delegateHistoryInvocationToStatus(
               : {}),
           },
         }
+      : {}),
+    ...(run.wake
+      ? { wake: { ...run.wake, references: [...run.wake.references] } }
       : {}),
     activity: activitySummary(details),
     runCount: 1,

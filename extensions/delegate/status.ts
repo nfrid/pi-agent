@@ -601,12 +601,17 @@ export class DelegateStatusStore {
     }
     let changed = false;
     for (const records of lineages.values()) {
-      if (
-        !records.every(
-          (record) => isSettled(record.state) && record.resultEntered,
-        )
-      )
-        continue;
+      if (!records.every((record) => isSettled(record.state))) continue;
+      const workflowRecords = records.filter((record) => record.workflow);
+      const deliveryComplete = workflowRecords.length
+        ? [...workflowRecords]
+            .sort(
+              (left, right) =>
+                (left.workflow?.attempt ?? 0) - (right.workflow?.attempt ?? 0),
+            )
+            .at(-1)?.resultEntered === true
+        : records.every((record) => record.resultEntered);
+      if (!deliveryComplete) continue;
       for (const record of records) {
         if (record.clearOnNextUserMessage) continue;
         record.clearOnNextUserMessage = true;
