@@ -4,11 +4,13 @@ import {
   type DelegateJobResult,
   type DelegateJobStartOptions,
 } from './jobs';
+import { getDelegateLifecycle } from './lifecycle';
 import { createRun } from './types';
 import {
   type DelegateWorkflowAttemptSnapshot,
   DelegateWorkflowCoordinator,
 } from './workflow-coordinator';
+import type { SymbolicWorkflowSelector } from './workflow-inputs';
 import {
   assertWorkflowAttemptTransition,
   canTransitionWorkflowAttemptState,
@@ -423,6 +425,10 @@ describe('DelegateWorkflowCoordinator', () => {
     });
     expect(coordinator.require(blocked.identity).state).toBe('blocked');
     expect(blockedPrepare).not.toHaveBeenCalled();
+    const blockedRun = coordinator.getResult(blocked.identity)?.runs[0];
+    expect(blockedRun && getDelegateLifecycle(blockedRun)).toMatchObject({
+      reason: 'setup-failure',
+    });
 
     const errorPrepare = vi.fn(async () => {
       throw new Error('preparation exploded');
@@ -438,6 +444,10 @@ describe('DelegateWorkflowCoordinator', () => {
     expect(coordinator.require(errored.identity).reason).toContain(
       'preparation exploded',
     );
+    const erroredRun = coordinator.getResult(errored.identity)?.runs[0];
+    expect(erroredRun && getDelegateLifecycle(erroredRun)).toMatchObject({
+      reason: 'setup-failure',
+    });
     await manager.dispose();
   });
 
@@ -470,6 +480,55 @@ describe('DelegateWorkflowCoordinator', () => {
     expect(coordinator.require(child.identity).state).toBe('cancelled');
     expect(execute).not.toHaveBeenCalled();
     await manager.dispose();
+  });
+
+  test('disposal cancels unresolved preparation without recreating a job', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    let finishPreparation!: (options: DelegateJobStartOptions) => void;
+    const execute = vi.fn(async () => result('must not run'));
+    const prepare = vi.fn(
+      () =>
+        new Promise<DelegateJobStartOptions>((resolve) => {
+          finishPreparation = resolve;
+        }),
+    );
+    const child = coordinator.schedule({ logicalId: 'child', prepare });
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    await coordinator.dispose();
+    finishPreparation({ mode: 'single', tasks: ['child'], execute });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(execute).not.toHaveBeenCalled();
+    expect(() =>
+      coordinator.schedule(scheduleOptions('later', execute)),
+    ).toThrow(/disposed/);
+    expect(child.identity).toBe('child@1');
+    await manager.dispose();
+  });
+
+  test('bounds and validates symbolic selector metadata atomically', () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const execute = async () => result();
+    coordinator.schedule(scheduleOptions('upstream', execute));
+    const prepare = async () => ({
+      mode: 'single' as const,
+      tasks: ['child'],
+      execute,
+    });
+    const cases: readonly SymbolicWorkflowSelector[][] = [
+      [{ node: 'upstream', include: [] }],
+      [{ node: 'upstream', include: ['report', 'report'] }],
+      [{ node: 'upstream', view: 'bad.view' }],
+      [{ node: 'upstream', label: 'x'.repeat(257) }],
+      Array.from({ length: 5 }, () => ({ node: 'upstream' })),
+    ];
+    for (const inputs of cases)
+      expect(() =>
+        coordinator.schedule({ logicalId: 'child', inputs, prepare }),
+      ).toThrow();
+    expect(coordinator.list().map(({ identity }) => identity)).toEqual([
+      'upstream@1',
+    ]);
   });
 
   test('rejects malformed, unknown, duplicate references without partial mutation', () => {

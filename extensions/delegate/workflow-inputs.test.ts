@@ -81,6 +81,10 @@ describe('workflow symbolic inputs', () => {
     const resolved = resolveWorkflowInputs([bound('impl', ['report'])], () =>
       source({ runs: [runWithReport(report)], handoff: 'handoff' }),
     );
+    expect(resolved.inputs.map((input) => input.kind)).toEqual([
+      'report',
+      'metadata',
+    ]);
     expect(resolved.inputs[0]).toMatchObject({
       identity: 'impl@1',
       kind: 'report',
@@ -114,6 +118,41 @@ describe('workflow symbolic inputs', () => {
         }),
       ),
     ).toThrow(/16384/);
+  });
+
+  test('uses retained canonical runs for exact prose and private named views', () => {
+    const retained = runWithReport('retained exact report');
+    const spec = normalizeInternalDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { summary: { type: 'string' } },
+        required: ['summary'],
+      },
+      views: { summary: '/summary' },
+    });
+    setDelegateResultSpec(retained, spec);
+    captureDelegateResultEvent(
+      retained,
+      { details: { summary: 'private view' } },
+      false,
+    );
+    expect(settleDelegateResult(retained)?.valid).toBe(true);
+    retained.messages = runWithReport('retained exact report').messages;
+    const publicRun = runWithReport('public projection only');
+    const result = {
+      runs: [publicRun],
+      retainedRuns: [retained],
+      handoff: 'retained handoff',
+    };
+    expect(
+      resolveWorkflowInputs([bound('impl', ['report'])], () => source(result))
+        .inputs[0]?.value,
+    ).toBe('retained exact report');
+    expect(
+      resolveWorkflowInputs([bound('impl', undefined, 'summary')], () =>
+        source(result),
+      ).inputs[0]?.value,
+    ).toBe('private view');
   });
 
   test('resolves named views from private validated structured values', () => {

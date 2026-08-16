@@ -1,5 +1,5 @@
 import type { DelegateJobResult } from './jobs';
-import { getDelegateLifecycle } from './lifecycle';
+import { ensureDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
 import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
 import {
   getDelegateResultSpec,
@@ -129,8 +129,12 @@ function frameOne(label: string, text: string): string {
   return frame;
 }
 
+function canonicalRuns(result: DelegateJobResult): DelegatedRun[] {
+  return result.retainedRuns ?? result.runs;
+}
+
 function proseRuns(result: DelegateJobResult): DelegatedRun[] {
-  return result.runs.filter((run) => !getDelegateResultSpec(run));
+  return canonicalRuns(result);
 }
 
 function resolveReport(source: WorkflowInputSource): string {
@@ -151,8 +155,8 @@ function resolveReport(source: WorkflowInputSource): string {
 }
 
 function resolveHandoff(source: WorkflowInputSource): string {
-  const handoff = source.result?.handoff?.trim();
-  if (!handoff)
+  const handoff = source.result?.handoff;
+  if (!handoff?.trim())
     throw new WorkflowInputBlockedError(
       `Required handoff is unavailable for ${source.attempt.identity}.`,
     );
@@ -167,7 +171,7 @@ function resolveView(source: WorkflowInputSource, view: string): unknown {
     throw new WorkflowInputBlockedError(
       `Structured view "${view}" is unavailable: source has no retained result.`,
     );
-  for (const run of result.runs) {
+  for (const run of canonicalRuns(result)) {
     const spec = getDelegateResultSpec(run);
     const settlement = getSettledDelegateResult(run);
     const path = spec?.views[view];
@@ -185,27 +189,31 @@ function resolveView(source: WorkflowInputSource, view: string): unknown {
 }
 
 function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
-  const runs = (source.result?.runs ?? []).map((run) => {
-    const lifecycle = getDelegateLifecycle(run, { includeArtifact: false });
-    return {
-      runId: run.runId,
-      name: run.name,
-      state: run.state,
-      exitCode: run.exitCode,
-      ...(run.model ? { model: run.model } : {}),
-      ...(run.routing?.route ? { route: run.routing.route } : {}),
-      ...(lifecycle
-        ? {
-            lifecycle: {
-              reason: lifecycle.reason,
-              continuationUsable: lifecycle.continuationUsable,
-              writableBranchRetained: lifecycle.writableBranchRetained,
-              readOnlySnapshotRetained: lifecycle.readOnlySnapshotRetained,
-            },
-          }
-        : {}),
-    };
-  });
+  const runs = canonicalRuns(source.result ?? { runs: [], handoff: '' }).map(
+    (run) => {
+      if (['error', 'aborted', 'timed-out'].includes(run.state))
+        ensureDelegateLifecycle(run);
+      const lifecycle = getDelegateLifecycle(run, { includeArtifact: false });
+      return {
+        runId: run.runId,
+        name: run.name,
+        state: run.state,
+        exitCode: run.exitCode,
+        ...(run.model ? { model: run.model } : {}),
+        ...(run.routing?.route ? { route: run.routing.route } : {}),
+        ...(lifecycle
+          ? {
+              lifecycle: {
+                reason: lifecycle.reason,
+                continuationUsable: lifecycle.continuationUsable,
+                writableBranchRetained: lifecycle.writableBranchRetained,
+                readOnlySnapshotRetained: lifecycle.readOnlySnapshotRetained,
+              },
+            }
+          : {}),
+      };
+    },
+  );
   return {
     identity: source.attempt.identity,
     logicalId: source.attempt.logicalId,
@@ -219,7 +227,7 @@ function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
 }
 
 function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
-  const candidates = (source.result?.runs ?? [])
+  const candidates = canonicalRuns(source.result ?? { runs: [], handoff: '' })
     .map((run) => run.worktree)
     .filter(
       (worktree): worktree is NonNullable<DelegatedRun['worktree']> =>
@@ -266,6 +274,7 @@ function kindsForSelector(
       ? []
       : ['report'];
   if (selector.selector.view) include.push('view');
+  if (!include.includes('metadata')) include.push('metadata');
   return include;
 }
 

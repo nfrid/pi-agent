@@ -4,6 +4,7 @@ import {
   type DelegateJobSnapshot,
   type DelegateJobStartOptions,
 } from './jobs';
+import { buildParentHandoff } from './output';
 import {
   type BoundWorkflowSelector,
   type ResolvedWorkflowInput,
@@ -22,6 +23,7 @@ import {
   type WorkflowModel,
   type WorkflowModelPlan,
 } from './workflow-model';
+import { failedLifecycleRun } from './worktree-lifecycle';
 
 const MAX_WORKFLOW_REASON_LENGTH = 256;
 
@@ -173,6 +175,26 @@ function emptyResult(reason: string): DelegateJobResult {
   return { runs: [], handoff: reason };
 }
 
+function setupFailureResult(
+  record: WorkflowRecord,
+  reason: string,
+): DelegateJobResult {
+  const task = record.launch?.tasks[0] ?? record.attempt.identity;
+  const run = failedLifecycleRun(
+    task,
+    undefined,
+    {
+      name: record.launch?.name ?? record.attempt.identity,
+      backgroundJobId: record.jobId,
+      workflowAttempt: record.attempt,
+      warnings: [],
+    },
+    reason,
+    'setup-failure',
+  );
+  return { runs: [run], handoff: buildParentHandoff([run]) };
+}
+
 /**
  * Owns workflow identity, dependency barriers, and attempt lifecycle. Jobs are
  * intentionally only an execution adapter; exact results live here and are not
@@ -186,6 +208,7 @@ export class DelegateWorkflowCoordinator {
   private readonly onChange?: () => void;
   private readonly records = new Map<AttemptIdentity, WorkflowRecord>();
   private readonly results = new Map<AttemptIdentity, DelegateJobResult>();
+  private disposed = false;
 
   constructor(options: DelegateWorkflowCoordinatorOptions = {}) {
     this.model = options.model ?? createWorkflowModel();
@@ -200,6 +223,8 @@ export class DelegateWorkflowCoordinator {
   schedule(
     options: DelegateWorkflowScheduleOptions,
   ): DelegateWorkflowAttemptSnapshot {
+    if (this.disposed)
+      throw new Error('Delegate workflow coordinator is disposed.');
     validateScheduleInput(options);
     const plan = options.continuation
       ? this.model.planContinuation(options.logicalId)
@@ -345,6 +370,10 @@ export class DelegateWorkflowCoordinator {
   }
 
   async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    const identities = this.list().map((attempt) => attempt.identity);
+    await this.cancel(identities);
     if (this.ownsJobs) await this.jobs.dispose();
     this.records.clear();
     this.changed();
@@ -353,6 +382,10 @@ export class DelegateWorkflowCoordinator {
   private bindSelectors(
     selectors: readonly SymbolicWorkflowSelector[],
   ): readonly BoundWorkflowSelector[] {
+    if (selectors.length > 4)
+      throw new Error(
+        'A workflow attempt may declare at most 4 symbolic selectors.',
+      );
     return Object.freeze(
       selectors.map((selector) => {
         if (!selector || typeof selector !== 'object')
@@ -373,14 +406,34 @@ export class DelegateWorkflowCoordinator {
             );
           return kind;
         });
+        if (
+          selector.include &&
+          selector.include.length === 0 &&
+          selector.view === undefined
+        )
+          throw new Error(
+            'Symbolic workflow selector include cannot be empty.',
+          );
         if (include && new Set(include).size !== include.length)
           throw new Error(
             'Duplicate symbolic workflow input kinds are not allowed.',
           );
-        if (selector.view !== undefined && typeof selector.view !== 'string')
-          throw new Error('Invalid symbolic workflow selector view.');
-        if (selector.label !== undefined && typeof selector.label !== 'string')
-          throw new Error('Invalid symbolic workflow selector label.');
+        if (
+          selector.view !== undefined &&
+          (typeof selector.view !== 'string' ||
+            !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(selector.view))
+        )
+          throw new Error(
+            'Invalid or noncanonical symbolic workflow selector view.',
+          );
+        if (
+          selector.label !== undefined &&
+          (typeof selector.label !== 'string' ||
+            Buffer.byteLength(selector.label, 'utf8') > 256)
+        )
+          throw new Error(
+            'Symbolic workflow selector label exceeds 256 bytes.',
+          );
         const attempt = this.model.bind(selector.node);
         if (!this.records.has(attempt.identity))
           throw new Error(
@@ -664,7 +717,13 @@ export class DelegateWorkflowCoordinator {
     if (reason) record.reason = boundedReason(reason);
     this.resolveCancellationWaiters(record);
     if (!record.result) {
-      const result = emptyResult(record.reason ?? `Workflow attempt ${state}.`);
+      const result =
+        state === 'error' || state === 'blocked'
+          ? setupFailureResult(
+              record,
+              record.reason ?? `Workflow attempt ${state}.`,
+            )
+          : emptyResult(record.reason ?? `Workflow attempt ${state}.`);
       record.result = result;
       this.results.set(record.attempt.identity, result);
     }
