@@ -1569,7 +1569,15 @@ describe('async delegate extension', () => {
       await createAsyncHarness();
     type Path = { entries: unknown[]; leaf: string };
     const paths = new Map<string, Path>([
-      ['left', { entries: [], leaf: 'left' }],
+      // Keep a real parent entry before the first owner marker so the fork
+      // exercises an interior target rather than reusing the marker tip.
+      [
+        'left',
+        {
+          entries: [{ id: 'left', parentId: null, type: 'message' }],
+          leaf: 'left',
+        },
+      ],
       ['right', { entries: [], leaf: 'right' }],
     ]);
     let activePath = 'left';
@@ -1632,7 +1640,7 @@ describe('async delegate extension', () => {
         'delegate-branch-owner:v1',
     );
     expect(ownerMarkerIndex).toBeGreaterThanOrEqual(0);
-    const forkEntries = leftEntries.slice(0, ownerMarkerIndex + 1);
+    const forkEntries = leftEntries.slice(0, ownerMarkerIndex);
     const forkLeaf = (forkEntries.at(-1) as { id?: string } | undefined)?.id;
     if (!forkLeaf) throw new Error('missing mapped ancestor leaf');
     paths.set('right', { entries: forkEntries, leaf: forkLeaf });
@@ -1664,7 +1672,23 @@ describe('async delegate extension', () => {
           ctx,
         );
       expect(status?.content[0]?.text).toContain('impl@1 success');
-      const rightWorkflow = [...(paths.get('right')?.entries ?? [])]
+      const rightEntries = paths.get('right')?.entries ?? [];
+      expect(JSON.stringify(rightEntries)).not.toContain('left task finding.');
+      const rightOwner = rightEntries.find(
+        (entry) =>
+          (entry as { customType?: string }).customType ===
+          'delegate-branch-owner:v1',
+      ) as { data?: { ownerBranchId?: string } } | undefined;
+      const leftOwner = leftEntries.find(
+        (entry) =>
+          (entry as { customType?: string }).customType ===
+          'delegate-branch-owner:v1',
+      ) as { data?: { ownerBranchId?: string } } | undefined;
+      expect(rightOwner?.data?.ownerBranchId).toBeDefined();
+      expect(rightOwner?.data?.ownerBranchId).not.toBe(
+        leftOwner?.data?.ownerBranchId,
+      );
+      const rightWorkflow = [...rightEntries]
         .reverse()
         .find(
           (entry) =>
@@ -1728,6 +1752,86 @@ describe('async delegate extension', () => {
     expect(continued?.content[0]?.text).toContain('review@1');
     await vi.waitFor(() => expect(hasFinish('descendant task')).toBe(true));
     finish('descendant task');
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('does not append unchanged workflow checkpoints on repeated tip activation', async () => {
+    const { ctx, pi, finish, hasFinish, handlers, tools } =
+      await createAsyncHarness();
+    type Path = { entries: unknown[]; leaf: string };
+    const paths = new Map<string, Path>([
+      ['root', { entries: [{ id: 'root', type: 'message' }], leaf: 'root' }],
+    ]);
+    let sequence = 0;
+    const activePath = 'root';
+    const manager = ctx.sessionManager as unknown as {
+      getLeafId: () => string;
+      getBranch: () => unknown[];
+      getEntries: () => unknown[];
+      getChildren: (parentId: string) => unknown[];
+    };
+    manager.getLeafId = () => paths.get(activePath)?.leaf ?? activePath;
+    manager.getBranch = () => paths.get(activePath)?.entries ?? [];
+    manager.getEntries = () =>
+      [...paths.values()].flatMap((path) => path.entries);
+    manager.getChildren = (parentId) =>
+      manager
+        .getEntries()
+        .filter(
+          (entry) => (entry as { parentId?: string }).parentId === parentId,
+        );
+    (
+      pi as unknown as { appendEntry: (type: string, data: unknown) => void }
+    ).appendEntry = (type, data) => {
+      const path = paths.get(activePath);
+      if (!path) throw new Error(`Unknown test path ${activePath}`);
+      const id = `root-${++sequence}`;
+      path.entries = [
+        ...path.entries,
+        { id, parentId: path.leaf, type: 'custom', customType: type, data },
+      ];
+      path.leaf = id;
+    };
+
+    handlers.get('session_tree')?.({ oldLeafId: null, newLeafId: 'root' }, ctx);
+    await tools
+      .get('delegate')
+      ?.execute(
+        'stable-call',
+        { id: 'stable', task: 'stable task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    await vi.waitFor(() =>
+      expect(
+        (paths.get('root')?.entries ?? []).some(
+          (entry) =>
+            (entry as { customType?: string }).customType ===
+            'delegate-branch-owner:v1',
+        ),
+      ).toBe(true),
+    );
+    await vi.waitFor(() => expect(hasFinish('stable task')).toBe(true));
+    finish('stable task');
+    await vi.waitFor(() => {
+      const entries = paths.get('root')?.entries ?? [];
+      expect(JSON.stringify(entries)).toContain('stable@1');
+      expect(
+        entries.some(
+          (entry) =>
+            (entry as { customType?: string }).customType ===
+            'delegate-workflow:v1',
+        ),
+      ).toBe(true);
+    });
+
+    const before = (paths.get('root')?.entries ?? []).length;
+    const tip = paths.get('root')?.leaf;
+    if (!tip) throw new Error('missing stable branch tip');
+    for (let index = 0; index < 25; index += 1)
+      handlers.get('session_tree')?.({ oldLeafId: tip, newLeafId: tip }, ctx);
+    expect(paths.get('root')?.entries).toHaveLength(before);
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 

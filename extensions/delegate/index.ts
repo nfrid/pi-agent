@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -81,7 +81,8 @@ import { createDelegateWorkflowCoordinator } from './workflow-coordinator';
 import {
   attachWorkflowStore,
   latestWorkflowState,
-  persistWorkflowState,
+  persistWorkflowDelta,
+  seedWorkflowPersistence,
 } from './workflow-store';
 import { loadWorktree } from './worktree';
 import { registerDelegateWorktreesCommand } from './worktrees-command';
@@ -155,11 +156,11 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   };
   const wakeBranches = new Map<string, WakeBranch>();
   let activeWake: WakeBranch | undefined;
-  const syncWorkflowSurface = () => {
+  const syncWorkflowSurface = (mapActiveLeaf = true) => {
     if (!statuses) return;
     if (workflow) statuses.updateWorkflow(workflow.list());
     if (activeWake) statuses.setWakes(activeWake.coordinator.snapshot().wakes);
-    if (activeContext && activeRuntime) {
+    if (mapActiveLeaf && activeContext && activeRuntime) {
       const leaf = branchRuntimeKey(
         getSessionLeafId(activeContext.sessionManager),
       );
@@ -212,20 +213,34 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const ownerBranchIsActive = (ownerBranchId: string): boolean =>
     runtimeActive && activeRuntime?.branchId === ownerBranchId;
 
+  const allocateForkOwnerId = (): string => {
+    let ownerId: string;
+    do ownerId = `branch-${randomUUID()}`;
+    while (branchRuntimes.has(ownerId));
+    return ownerId;
+  };
+
   const activateWorkflowRuntime = (
     ctx: ExtensionContext,
     branchId: string,
+    options: {
+      mapCurrentLeaf?: boolean;
+      deferInitialFlush?: boolean;
+    } = {},
   ): BranchRuntime | undefined => {
     if (!jobs || !runtimeActive) return undefined;
+    const mapCurrentLeaf = options.mapCurrentLeaf !== false;
     const existing = branchRuntimes.get(branchId);
     if (existing) {
       activeRuntime = existing;
       workflow = existing.workflow;
       statuses = existing.statuses;
-      if (existing.workflow.list().length > 0)
-        persistWorkflowState(existing.workflow, pi, {
-          isOwnerActive: () => ownerBranchIsActive(branchId),
-        });
+      // Re-activation is also the retry point for changes that occurred while
+      // this owner was inactive (or whose previous append failed). A delta
+      // flush is a no-op when the durable baseline is already current.
+      persistWorkflowDelta(existing.workflow, pi, {
+        isOwnerActive: () => ownerBranchIsActive(branchId),
+      });
       syncWorkflowSurface();
       return existing;
     }
@@ -260,6 +275,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     // Legacy v1 snapshots predate ownerBranchId; bind those records to the
     // currently activated owner while preserving explicit owners in deltas.
     if (persisted) nextWorkflow.restoreMetadata(persisted, branchId);
+    // The loaded journal is the baseline. Imported live records not present in
+    // it remain dirty and are emitted by the post-activation delta flush.
+    seedWorkflowPersistence(nextWorkflow, persisted);
     const runtime: BranchRuntime = {
       branchId,
       workflow: nextWorkflow,
@@ -277,15 +295,19 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     });
     branchRuntimes.set(branchId, runtime);
     const currentLeaf = branchRuntimeKey(getSessionLeafId(ctx.sessionManager));
-    if (currentLeaf) branchLeafRuntimes.set(currentLeaf, runtime);
+    if (mapCurrentLeaf && currentLeaf)
+      branchLeafRuntimes.set(currentLeaf, runtime);
     activeRuntime = runtime;
     workflow = nextWorkflow;
     statuses = nextStatuses;
-    if (nextWorkflow.list().length > 0)
-      persistWorkflowState(nextWorkflow, pi, {
+    if (!options.deferInitialFlush)
+      persistWorkflowDelta(nextWorkflow, pi, {
         isOwnerActive: () => ownerBranchIsActive(branchId),
       });
-    syncWorkflowSurface();
+    // An interior fork deliberately avoids mapping its source leaf. The
+    // caller writes the owner marker first, then the resulting marker/tip is
+    // the only leaf associated with this fresh runtime.
+    syncWorkflowSurface(mapCurrentLeaf);
     return runtime;
   };
 
@@ -660,11 +682,32 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const persistedOwner = targetIsInterior
       ? undefined
       : branchOwnerMarkers(ctx.sessionManager).at(-1);
+    // An interior/summarized target is not a runtime key. In particular, the
+    // target leaf may already identify an older runtime through a stale map.
+    // Allocate an opaque owner before activation and do not map the source
+    // leaf; the owner marker below establishes the new branch tip.
+    const targetBranchId = targetIsInterior
+      ? allocateForkOwnerId()
+      : (persistedOwner ?? leafKey);
     const target =
-      known ?? activateWorkflowRuntime(ctx, persistedOwner ?? leafKey);
+      known ??
+      activateWorkflowRuntime(
+        ctx,
+        targetBranchId,
+        targetIsInterior
+          ? { mapCurrentLeaf: false, deferInitialFlush: true }
+          : undefined,
+      );
     if (!target) return;
-    branchLeafRuntimes.set(leafKey, target);
-    if (targetIsInterior) ensureBranchOwner(target, ctx);
+    if (!targetIsInterior) branchLeafRuntimes.set(leafKey, target);
+    if (targetIsInterior) {
+      ensureBranchOwner(target, ctx);
+      // The marker is the first durable write for this fresh owner. Any
+      // imported live metadata is flushed only after that marker exists.
+      persistWorkflowDelta(target.workflow, pi, {
+        isOwnerActive: () => ownerBranchIsActive(target.branchId),
+      });
+    }
     activeRuntime = target;
     workflow = target.workflow;
     statuses = target.statuses;

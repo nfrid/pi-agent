@@ -56,6 +56,21 @@ const persistedMetadata = new WeakMap<
   PersistedMetadata
 >();
 
+/**
+ * Seed a newly restored coordinator with the durable baseline it was loaded
+ * from. Later lifecycle changes are then emitted as deltas instead of an
+ * unchanged checkpoint, while records imported from a live ancestor remain
+ * dirty until their owner can persist them.
+ */
+export function seedWorkflowPersistence(
+  coordinator: DelegateWorkflowCoordinator,
+  state: DelegateWorkflowMetadataHistory | undefined,
+): void {
+  if (!state) return;
+  const bounded = boundedState(state);
+  if (bounded) persistedMetadata.set(coordinator, metadataMap(bounded));
+}
+
 const WORKFLOW_STATES: ReadonlySet<WorkflowAttemptState> = new Set([
   'scheduled',
   'queued',

@@ -681,27 +681,27 @@ export class WakeCoordinator {
    * Restore a complete metadata snapshot transactionally. Queued entries are
    * intentionally not redelivered; an operator must reconcile them explicitly.
    */
-  restore(value: unknown): void {
+  restore(value: unknown): boolean {
     if (this.disposed) throw new Error('Wake coordinator is disposed.');
     const incoming = this.parseSnapshot(value);
-    if (incoming) this.applyIncoming(incoming);
+    return incoming ? this.applyIncoming(incoming) : false;
   }
 
   /** Consolidate append-only history before mutating live wake state. */
-  restoreHistory(values: readonly unknown[]): void {
+  restoreHistory(values: readonly unknown[]): boolean {
     if (this.disposed) throw new Error('Wake coordinator is disposed.');
     const ledger = new Map<string, WakeRecord>();
     for (const value of values) {
       const incoming = this.parseSnapshot(value);
-      if (!incoming) return;
+      if (!incoming) return false;
       for (const record of incoming.values()) {
         const prior = ledger.get(record.id);
         if (prior && shouldKeepLiveRecord(prior, record)) continue;
         ledger.set(record.id, record);
-        if (ledger.size > WAKE_MAX_SUBSCRIPTIONS) return;
+        if (ledger.size > WAKE_MAX_SUBSCRIPTIONS) return false;
       }
     }
-    this.applyIncoming(ledger);
+    return this.applyIncoming(ledger);
   }
 
   private parseSnapshot(value: unknown): Map<string, WakeRecord> | undefined {
@@ -723,7 +723,7 @@ export class WakeCoordinator {
     return incoming;
   }
 
-  private applyIncoming(incoming: Map<string, WakeRecord>): void {
+  private applyIncoming(incoming: Map<string, WakeRecord>): boolean {
     const next = new Map(this.records);
     const accepted: WakeRecord[] = [];
     for (const record of incoming.values()) {
@@ -732,7 +732,7 @@ export class WakeCoordinator {
       next.set(record.id, record);
       accepted.push(record);
     }
-    if (next.size > WAKE_MAX_SUBSCRIPTIONS) return;
+    if (next.size > WAKE_MAX_SUBSCRIPTIONS) return false;
     this.records.clear();
     for (const [id, record] of next) this.records.set(id, record);
     for (const record of accepted) {
@@ -740,6 +740,7 @@ export class WakeCoordinator {
       this.emit(record);
       this.reevaluate(record);
     }
+    return true;
   }
 
   private blockReloadOrphan(record: WakeRecord): void {

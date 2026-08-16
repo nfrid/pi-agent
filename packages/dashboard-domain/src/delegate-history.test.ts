@@ -944,6 +944,77 @@ describe('delegate history adapter', () => {
       ).toEqual([]);
   });
 
+  it('folds wake replacement deltas without retaining raw payloads', () => {
+    const baseWake = {
+      id: 'review',
+      state: 'pending',
+      condition: { node: 'later@1' },
+      references: ['later@1'],
+      payload: [{ kind: 'handoff' }],
+      createdAt: 1,
+      revision: 1,
+      dispatchGeneration: 0,
+      dispatchAttempts: 0,
+    };
+    const enteredWake = {
+      ...baseWake,
+      state: 'entered',
+      enteredAt: 4,
+      revision: 2,
+      dispatchGeneration: 1,
+      dispatchAttempts: 1,
+      handoff: 'secret delta handoff',
+    };
+    const branch = [
+      {
+        type: 'custom',
+        id: 'wake-snapshot',
+        customType: 'delegate-wake:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            ownerSessionId: 'parent-1',
+            ownerEpoch: 1,
+            wakes: [baseWake],
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'wake-delta',
+        customType: 'delegate-wake:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            ownerSessionId: 'parent-1',
+            ownerEpoch: 1,
+            wakes: [enteredWake],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(1);
+    expect(response.groups[0]).toMatchObject({
+      lineageId: 'wake:review',
+      state: 'success',
+      wake: { id: 'review', state: 'entered', enteredAt: 4 },
+    });
+    expect(JSON.stringify(response)).not.toContain('secret delta handoff');
+    const projected = projectDelegateHistoryEntry(branch[1], {
+      sessionId: 'parent-1',
+    }).entry;
+    expect(projected).toMatchObject({
+      customType: 'delegate-wake:v1',
+      data: { kind: 'delta' },
+    });
+    expect(JSON.stringify(projected)).not.toContain('payload');
+  });
+
   it('projects entered wake metadata from existing wake entries after reload', () => {
     const entry = {
       type: 'custom',
