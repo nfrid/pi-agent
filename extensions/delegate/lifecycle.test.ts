@@ -9,8 +9,8 @@ import {
 } from './lifecycle';
 import { getDetails } from './render-utils';
 import { runDelegate } from './runner';
+import { serializeDelegateRunForPublic } from './serialize';
 import { DelegateStatusStore } from './status';
-import { serializeDelegateRunForPublic } from './structured-result';
 import { buildArtifactBackedHandoff, makeDetails } from './tool-result';
 import { createRun } from './types';
 
@@ -47,6 +47,38 @@ describe('delegate lifecycle failure projection', () => {
       diagnostic: 'runner failed',
     });
     expect(JSON.stringify(details)).not.toContain('spoofed');
+  });
+
+  test('drops removed structured-result fields and activities from public records', () => {
+    const run = createRun('stale structured fields');
+    (run as unknown as { structuredResult: unknown }).structuredResult = {
+      valid: true,
+      value: { secret: 'removed result' },
+    };
+    run.activities = [
+      {
+        type: 'tool',
+        label: 'submit removed result',
+        status: 'completed',
+        toolName: 'delegate_result',
+        toolArguments: { secret: 'removed arguments' },
+        toolResult: { secret: 'removed output' },
+      },
+      {
+        type: 'tool',
+        label: 'read source',
+        status: 'completed',
+        toolName: 'read',
+        toolArguments: { path: 'src/a.ts' },
+      },
+    ];
+
+    const serialized = serializeDelegateRunForPublic(run);
+    expect(serialized.activities).toEqual([
+      expect.objectContaining({ toolName: 'read', label: 'read source' }),
+    ]);
+    expect(JSON.stringify(serialized)).not.toContain('removed result');
+    expect(JSON.stringify(serialized)).not.toContain('delegate_result');
   });
 
   test('retains lifecycle projections across trusted details and status snapshots', () => {

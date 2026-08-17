@@ -1,9 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai';
-import {
-  captureDelegateResultEvent,
-  markStructuredResultRepair,
-  redactDelegateResultTerminalProse,
-} from './structured-result';
+
 import type { DelegatedRun } from './types';
 
 const MAX_ACTIVITY_COUNT = 96;
@@ -121,10 +117,6 @@ function toolLabel(name: string, args: unknown): string {
 }
 
 function toolInputPreview(name: string, args: unknown): string | undefined {
-  // The terminating structured channel may contain the complete artifact-only
-  // result. Never put its arguments in a progress activity, even as a
-  // non-enumerable preview.
-  if (name === 'delegate_result') return undefined;
   if (!args || typeof args !== 'object') return undefined;
   const a = args as Record<string, unknown>;
   if (name === 'bash') return compactPreview(a.command ?? '');
@@ -337,7 +329,6 @@ function addMessage(run: DelegatedRun, message: Message) {
         }
       : message;
   run.messages.push(sanitized as Message);
-  redactDelegateResultTerminalProse(run);
   while (
     run.messages.length > 1 &&
     (run.messages.length > MAX_MESSAGE_COUNT ||
@@ -395,9 +386,6 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
   if (!event) return false;
 
   switch (event.type) {
-    case 'delegate_structured_repair':
-      markStructuredResultRepair(run);
-      return true;
     case 'message_end':
       if (
         event.message &&
@@ -429,9 +417,7 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
     case 'tool_execution_start': {
       const name = String(event.toolName || 'tool');
       const input =
-        name === 'delegate_result' || event.args === undefined
-          ? undefined
-          : boundedToolPayload(event.args);
+        event.args === undefined ? undefined : boundedToolPayload(event.args);
       upsertActivity(run, {
         id: eventId(event, 'tool'),
         type: 'tool',
@@ -454,16 +440,12 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
       return true;
     case 'tool_execution_end': {
       const name = String(event.toolName || 'tool');
-      if (name === 'delegate_result')
-        captureDelegateResultEvent(run, event.result, event.isError === true);
       const output =
-        name === 'delegate_result' || event.result === undefined
+        event.result === undefined
           ? undefined
           : boundedToolPayload(event.result);
       const input =
-        name === 'delegate_result' || event.args === undefined
-          ? undefined
-          : boundedToolPayload(event.args);
+        event.args === undefined ? undefined : boundedToolPayload(event.args);
       upsertActivity(run, {
         id: eventId(event, 'tool'),
         type: 'tool',

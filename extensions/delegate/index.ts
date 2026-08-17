@@ -54,10 +54,7 @@ import { clearDelegateSurface, publishDelegateSurface } from './live';
 import { registerDelegateCapability } from './register-capability';
 import { pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
-import {
-  parseChildDelegateResultSpec,
-  registerChildDelegateResultTool,
-} from './structured-result';
+
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import { registerDelegateTranscriptCommand } from './transcript';
@@ -120,10 +117,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const isChild = process.env.PI_DELEGATE_CHILD === '1';
 
   if (isChild) {
-    const resultSpec = parseChildDelegateResultSpec(
-      process.env.PI_DELEGATE_RESULT_SCHEMA,
-    );
-    if (resultSpec) registerChildDelegateResultTool(pi, resultSpec);
     registerDelegateControl(pi, process.env.PI_DELEGATE_CONTROL_FILE);
     pi.on('tool_call', (event, ctx) => {
       const reason = delegateToolBoundary(event.toolName, event.input, ctx.cwd);

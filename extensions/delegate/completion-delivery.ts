@@ -5,7 +5,6 @@ import {
 } from '../shared/ui/background-completion';
 import type { DelegateJobSnapshot } from './jobs';
 import type { DelegateStatusStore } from './status';
-import { boundPublicStructuredRuns } from './structured-result';
 import { type DelegateRunState, getRunState } from './types';
 import { formatElapsed } from './widget';
 
@@ -204,9 +203,7 @@ export function createCompletionDelivery(options: {
     const stale = queued.filter((job) => job.deliveryEpoch !== deliveryEpoch);
     if (stale.length > 0) notifyStaleCompletions(stale);
     if (completed.length === 0) return;
-    const completionRuns = boundPublicStructuredRuns(
-      completed.flatMap((job) => job.runs ?? []),
-    );
+    const completionRuns = completed.flatMap((job) => job.runs ?? []);
     let completionRunIndex = 0;
     const detailJobs = completed.map((job) => {
       const runs = job.runs?.flatMap(() => {

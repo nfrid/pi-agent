@@ -1,9 +1,6 @@
-import type { DelegateResult } from './contribution';
 import { cloneDelegateLifecycle } from './lifecycle';
-import {
-  getDelegateResultSpec,
-  serializeDelegateRunForPublic,
-} from './structured-result';
+import { serializeDelegateRunForPublic } from './serialize';
+
 import type {
   DelegateContext,
   DelegatedActivity,
@@ -98,7 +95,6 @@ export interface DelegateStatusSnapshot {
   /** Ordered, bounded activity and response history across the lineage. */
   transcript?: DelegateTranscriptEntry[];
   transcriptTruncated?: boolean;
-  result?: DelegateResult;
   /** Harness-authored terminal projection retained in status snapshots. */
   lifecycle?: DelegateLifecycleProjection;
   /** Compact workflow identity/lifecycle metadata; never a result payload. */
@@ -212,28 +208,6 @@ function isWorkflowTerminal(state: WorkflowAttemptState): boolean {
     state === 'cancelled' ||
     state === 'blocked'
   );
-}
-
-function resultProjection(run: DelegatedRun): DelegateResult | undefined {
-  const captured = serializeDelegateRunForPublic(run).structuredResult;
-  if (!getDelegateResultSpec(run) && !captured) return undefined;
-  if (!isSettled(getRunState(run)))
-    return { kind: 'structured', status: 'pending' };
-  if (!captured)
-    return {
-      kind: 'structured',
-      status: 'invalid',
-      errors: ['/: structured result settlement is unavailable'],
-    };
-  return {
-    kind: 'structured',
-    status: captured.valid ? 'valid' : 'invalid',
-    ...(captured.valid && captured.value !== undefined
-      ? { value: captured.value }
-      : {}),
-    ...(captured.valid && captured.valueOmitted ? { valueOmitted: true } : {}),
-    ...(captured.errors.length ? { errors: [...captured.errors] } : {}),
-  };
 }
 
 function workflowStatusFromAttempt(
@@ -353,7 +327,6 @@ export class DelegateStatusStore {
         allowWrites: run.allowWrites === true,
         activity: displayActivity(run, undefined),
         transcript: transcript(run, inputRun.activities),
-        result: resultProjection(inputRun),
         lifecycle: cloneDelegateLifecycle(run.lifecycle),
         ...(run.workflowAttempt
           ? {
@@ -388,7 +361,6 @@ export class DelegateStatusStore {
     record.allowWrites = run.allowWrites === true;
     record.activity = displayActivity(run, record.activity);
     record.transcript = transcript(run, inputRun.activities);
-    record.result = resultProjection(inputRun);
     record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
     if (run.workflowAttempt)
       record.workflow = workflowStatusFromRun(
@@ -418,7 +390,6 @@ export class DelegateStatusStore {
       record.allowWrites = run.allowWrites === true;
       record.activity = displayActivity(run, record.activity);
       record.transcript = transcript(run, inputRun.activities);
-      record.result = resultProjection(inputRun);
       record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
       if (run.workflowAttempt)
         record.workflow = workflowStatusFromRun(
@@ -654,7 +625,6 @@ export class DelegateStatusStore {
         runs: _runs,
         transcript: _transcript,
         transcriptTruncated: _transcriptTruncated,
-        result: _result,
         ...snapshot
       } = current;
       const fullTranscript = ordered.flatMap((record, runIndex) =>
@@ -682,7 +652,6 @@ export class DelegateStatusStore {
           finishedAt: record.finishedAt,
         })),
         transcript: boundedTranscript,
-        ...(current.result ? { result: current.result } : {}),
         ...(boundedTranscript.length < fullTranscript.length
           ? { transcriptTruncated: true }
           : {}),

@@ -43,8 +43,6 @@ export function formatWakeDispatch(dispatch: WakeDispatch): string {
       sections.push(
         `### Metadata\n\`\`\`json\n${json(source.metadata)}\n\`\`\``,
       );
-    for (const [name, value] of Object.entries(source.views ?? {}))
-      sections.push(`### View ${name}\n\`\`\`json\n${json(value)}\n\`\`\``);
   }
   return sections.join('\n\n');
 }

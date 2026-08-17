@@ -361,7 +361,6 @@ describe('dashboard protocol', () => {
           ...response.groups[0].runs[0],
           details: {
             response: 'The selected bounded response.',
-            structuredResult: { valid: true, errors: [] },
             truncated: false,
           },
         },

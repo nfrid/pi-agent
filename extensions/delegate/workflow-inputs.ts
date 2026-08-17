@@ -2,11 +2,7 @@ import * as path from 'node:path';
 import type { DelegateJobResult } from './jobs';
 import { ensureDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
 import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
-import {
-  getDelegateResultSpec,
-  getSettledDelegateResult,
-  selectStructuredPath,
-} from './structured-result';
+
 import {
   type DelegatedRun,
   type DelegateWorkflowBranchDescriptor,
@@ -45,17 +41,11 @@ export function captureWorkflowText(
   });
 }
 
-export type WorkflowInputKind =
-  | 'report'
-  | 'handoff'
-  | 'view'
-  | 'branch'
-  | 'metadata';
+export type WorkflowInputKind = 'report' | 'handoff' | 'branch' | 'metadata';
 
 export interface SymbolicWorkflowSelector {
   node: string;
-  include?: readonly Exclude<WorkflowInputKind, 'view'>[];
-  view?: string;
+  include?: readonly WorkflowInputKind[];
   label?: string;
 }
 
@@ -94,7 +84,7 @@ export interface ResolvedWorkflowInput {
   /** Exact internal evidence/value; never placed in coordinator snapshots. */
   readonly value?: unknown;
   readonly branch?: WorkflowBranchSource;
-  /** A framed, untrusted prompt fragment for report/handoff/view/metadata. */
+  /** A framed, untrusted prompt fragment for report/handoff/metadata. */
   readonly evidence?: string;
 }
 
@@ -184,9 +174,7 @@ function legacyRuns(result: WorkflowSourceResult): readonly DelegatedRun[] {
 }
 
 function proseRuns(result: DelegateJobResult): DelegatedRun[] {
-  return (result.retainedRuns ?? result.runs).filter(
-    (run) => !getDelegateResultSpec(run) && !run.structuredResult,
-  );
+  return result.retainedRuns ?? result.runs;
 }
 
 function exactEvidence(
@@ -238,54 +226,6 @@ function resolveHandoff(source: WorkflowInputSource): string {
     return result.handoff;
   throw new WorkflowInputBlockedError(
     `Required handoff is unavailable for ${source.attempt.identity}.`,
-  );
-}
-
-function resolveView(source: WorkflowInputSource, view: string): unknown {
-  if (!view.trim())
-    throw new WorkflowInputBlockedError('A structured view name is required.');
-  const result = source.result;
-  if (!result)
-    throw new WorkflowInputBlockedError(
-      `Structured view "${view}" is unavailable: source has no retained result.`,
-    );
-  if (isCompactResult(result)) {
-    const matches = result.runs
-      .map((run) => run.structured?.views)
-      .filter(
-        (views): views is Readonly<Record<string, unknown>> =>
-          views !== undefined && Object.hasOwn(views, view),
-      )
-      .map((views) => views[view]);
-    if (matches.length > 1)
-      throw new WorkflowInputBlockedError(
-        `Structured view "${view}" is ambiguous across multiple runs for ${source.attempt.identity}.`,
-      );
-    if (matches.length === 1) return matches[0];
-    throw new WorkflowInputBlockedError(
-      `Structured view "${view}" is unavailable or invalid for ${source.attempt.identity}.`,
-    );
-  }
-  const matches: unknown[] = [];
-  for (const run of legacyRuns(result)) {
-    const spec = getDelegateResultSpec(run);
-    const settlement = getSettledDelegateResult(run);
-    const viewPath = spec?.views[view];
-    if (!spec || !settlement?.valid || viewPath === undefined) continue;
-    const selected = selectStructuredPath(settlement.value, viewPath);
-    if (!selected.present)
-      throw new WorkflowInputBlockedError(
-        `Structured view "${view}" is unavailable for ${source.attempt.identity}.`,
-      );
-    matches.push(selected.value);
-  }
-  if (matches.length > 1)
-    throw new WorkflowInputBlockedError(
-      `Structured view "${view}" is ambiguous across multiple runs for ${source.attempt.identity}.`,
-    );
-  if (matches.length === 1) return matches[0];
-  throw new WorkflowInputBlockedError(
-    `Structured view "${view}" is unavailable or invalid for ${source.attempt.identity}.`,
   );
 }
 
@@ -440,12 +380,9 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
 function kindsForSelector(
   selector: BoundWorkflowSelector,
 ): WorkflowInputKind[] {
-  const include: WorkflowInputKind[] = selector.selector.include?.length
+  const include = selector.selector.include?.length
     ? [...selector.selector.include]
-    : selector.selector.view
-      ? []
-      : ['report'];
-  if (selector.selector.view) include.push('view');
+    : (['report'] as WorkflowInputKind[]);
   if (!include.includes('metadata')) include.push('metadata');
   return include;
 }
@@ -466,8 +403,6 @@ export function resolveWorkflowInputs(
       let branch: WorkflowBranchSource | undefined;
       if (kind === 'report') value = resolveReport(source);
       else if (kind === 'handoff') value = resolveHandoff(source);
-      else if (kind === 'view')
-        value = resolveView(source, bound.selector.view ?? '');
       else if (kind === 'metadata') value = resolveMetadata(source);
       else {
         branch = resolveBranch(source);
@@ -486,11 +421,7 @@ export function resolveWorkflowInputs(
       });
       if (kind !== 'branch') {
         const text =
-          kind === 'metadata'
-            ? jsonText(value, 'metadata')
-            : kind === 'view'
-              ? jsonText(value, `view "${bound.selector.view}"`)
-              : String(value);
+          kind === 'metadata' ? jsonText(value, 'metadata') : String(value);
         const evidence = frameOne(label, text);
         frames.push(evidence);
         resolved.push(freeze({ ...input, evidence }));

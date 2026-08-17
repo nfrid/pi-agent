@@ -149,30 +149,6 @@ describe('render', () => {
     expect(output).not.toContain('…');
   });
 
-  test('renders the full validated structured value in expanded results', () => {
-    const run = createRun('return audit JSON');
-    run.state = 'success';
-    run.structuredResult = {
-      valid: true,
-      value: {
-        outcome: 'done',
-        findings: [{ path: 'src/index.ts', count: 2 }],
-      },
-      errors: [],
-    };
-    const output = renderDelegateResult(
-      { details: { mode: 'single', runs: [run] } },
-      { expanded: true },
-      theme,
-    )
-      .render(120)
-      .join('\\n');
-    expect(output).toContain('Structured result valid');
-    expect(output).toContain('Findings:');
-    expect(output).toContain('1.');
-    expect(output).toContain('Path: src/index.ts');
-  });
-
   test('keeps result task previews to one line and reveals the full task', () => {
     const prompt = `${'inspect every relevant subsystem '.repeat(20)}FINAL-TASK-DETAIL`;
     const run = createRun(prompt, undefined, {

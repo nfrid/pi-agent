@@ -7,7 +7,6 @@ import type {
   DelegateWakeMetadata,
 } from '@pi-dashboard/protocol';
 import type {
-  DelegateResult,
   DelegateStatus,
   DelegateTranscriptEntry,
 } from '../../../../extensions/delegate/contribution';
@@ -58,7 +57,6 @@ const lifecycleReasons: readonly DelegateLifecycleReason[] = [
   'provider-runner-error',
   'setup-failure',
   'lifecycle-cleanup-failure',
-  'child-result-invalid',
   'unknown',
 ];
 
@@ -74,20 +72,6 @@ function lifecycleReason(value: string): DelegateLifecycleReason {
   return lifecycleReasons.includes(value as DelegateLifecycleReason)
     ? (value as DelegateLifecycleReason)
     : 'unknown';
-}
-
-function historyResult(
-  details: DelegateHistoryDetails,
-): DelegateResult | undefined {
-  const result = details.structuredResult;
-  if (!result) return undefined;
-  return {
-    kind: 'structured',
-    status: result.valid ? 'valid' : 'invalid',
-    ...(result.value === undefined ? {} : { value: result.value }),
-    ...(result.valueOmitted ? { valueOmitted: true } : {}),
-    ...(result.errors.length ? { errors: result.errors } : {}),
-  };
 }
 
 function historyTranscript(
@@ -223,9 +207,6 @@ export function delegateHistoryInvocationToStatus(
     ],
     transcript: historyTranscript(run, details),
     ...(details?.truncated ? { transcriptTruncated: true } : {}),
-    ...(details && historyResult(details)
-      ? { result: historyResult(details) }
-      : {}),
     ...(lifecycle
       ? {
           lifecycle: {
@@ -278,7 +259,6 @@ function augmentLiveStatus(
     transcriptTruncated:
       currentLive.transcriptTruncated === true ||
       durable.transcriptTruncated === true,
-    result: currentLive.result ?? durable.result,
     lifecycle: currentLive.lifecycle ?? durable.lifecycle,
     warnings: durable.warnings,
   } as DelegateInspectionStatus;

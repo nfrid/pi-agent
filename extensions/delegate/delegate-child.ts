@@ -157,7 +157,7 @@ export async function spawnDelegateChild(
 
     const processControlAck = (
       line: string,
-    ): false | 'control' | 'checkpoint' | 'structured-repair' => {
+    ): false | 'control' | 'checkpoint' => {
       try {
         const event = JSON.parse(line) as {
           type?: unknown;
@@ -165,8 +165,6 @@ export async function spawnDelegateChild(
           controlKind?: unknown;
           controlGeneration?: unknown;
         };
-        if (event.type === 'delegate_structured_repair')
-          return 'structured-repair';
         if (
           event.type !== 'delegate_control_ack' ||
           typeof event.controlId !== 'string' ||
@@ -197,12 +195,7 @@ export async function spawnDelegateChild(
 
     const processLine = (line: string) => {
       if (terminating) return;
-      const privateEvent = processControlAck(line);
-      if (privateEvent === 'structured-repair') {
-        processJsonLine(line, run);
-        options.onLine();
-        return;
-      }
+      processControlAck(line);
       if (!processJsonLine(line, run)) return;
       options.onLine();
     };
@@ -246,8 +239,7 @@ export async function spawnDelegateChild(
       stderrBuffer = lines.pop() || '';
       for (const line of lines) {
         const control = processControlAck(line);
-        if (control === 'checkpoint' || control === 'structured-repair') {
-          if (control === 'structured-repair') processJsonLine(line, run);
+        if (control === 'checkpoint') {
           options.onLine();
         } else if (!control)
           run.stderr = appendTail(run.stderr, `${line}\n`, MAX_STDERR_BYTES);
@@ -264,9 +256,7 @@ export async function spawnDelegateChild(
       stderrBuffer += stderrDecoder.end();
       if (stderrBuffer) {
         const control = processControlAck(stderrBuffer);
-        if (control === 'checkpoint' || control === 'structured-repair') {
-          if (control === 'structured-repair')
-            processJsonLine(stderrBuffer, run);
+        if (control === 'checkpoint') {
           options.onLine();
         } else if (!control)
           run.stderr = appendTail(run.stderr, stderrBuffer, MAX_STDERR_BYTES);

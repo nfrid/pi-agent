@@ -212,24 +212,6 @@ describe('delegate status store', () => {
     expect(store.list()).toEqual([]);
   });
 
-  test('retains the validated structured value in status snapshots', () => {
-    const store = new DelegateStatusStore();
-    const run = createRun('audit');
-    run.state = 'success';
-    run.structuredResult = {
-      valid: true,
-      value: { summary: 'complete', findings: [{ path: 'src/index.ts' }] },
-      errors: [],
-    };
-    const [id] = store.start([run], 'background');
-    store.update(id, run);
-    expect(store.list()[0]?.result).toEqual({
-      kind: 'structured',
-      status: 'valid',
-      value: { summary: 'complete', findings: [{ path: 'src/index.ts' }] },
-    });
-  });
-
   test('publishes logical workflow attempts and metadata-only wake state', () => {
     const store = new DelegateStatusStore();
     const run = createRun('scheduled review');

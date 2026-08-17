@@ -1,11 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
 import { DelegateJobManager, type DelegateJobResult } from './jobs';
-import {
-  captureDelegateResultEvent,
-  normalizeInternalDelegateResultSpec,
-  setDelegateResultSpec,
-  settleDelegateResult,
-} from './structured-result';
 import { createRun } from './types';
 import {
   cloneAndFreezeWakeJson,
@@ -35,24 +29,6 @@ function options(logicalId: string, execute: () => Promise<DelegateJobResult>) {
     tasks: [logicalId],
     execute,
   };
-}
-
-function structuredResult(task: string, summary: string): DelegateJobResult {
-  const run = createRun(task);
-  run.state = 'success';
-  run.exitCode = 0;
-  const spec = normalizeInternalDelegateResultSpec({
-    schema: {
-      type: 'object',
-      properties: { summary: { type: 'string' } },
-      required: ['summary'],
-    },
-    views: { summary: '/summary' },
-  });
-  setDelegateResultSpec(run, spec);
-  captureDelegateResultEvent(run, { details: { summary } }, false);
-  settleDelegateResult(run);
-  return { runs: [run], handoff: `Status: success\\nOutcome: ${task}` };
 }
 
 async function settled(
@@ -269,59 +245,6 @@ describe('WakeCoordinator', () => {
     await workflow.dispose();
   });
 
-  test('resolves only an explicit named view, not the complete structured value', async () => {
-    const run = createRun('structured');
-    run.state = 'success';
-    run.exitCode = 0;
-    const spec = normalizeInternalDelegateResultSpec({
-      schema: {
-        type: 'object',
-        properties: {
-          summary: { type: 'string' },
-          secret: { type: 'string' },
-        },
-        required: ['summary', 'secret'],
-      },
-      views: { summary: '/summary' },
-    });
-    setDelegateResultSpec(run, spec);
-    captureDelegateResultEvent(
-      run,
-      { details: { summary: 'selected', secret: 'must stay private' } },
-      false,
-    );
-    settleDelegateResult(run);
-    const workflow = new DelegateWorkflowCoordinator();
-    const attempt = workflow.schedule({
-      logicalId: 'structured',
-      mode: 'single',
-      tasks: ['structured'],
-      execute: async () => ({
-        runs: [run],
-        handoff: 'compact handoff',
-      }),
-    });
-    await settled(workflow, attempt.identity);
-    const payloads: WakeDispatch[] = [];
-    const wake = new WakeCoordinator({
-      workflow,
-      dispatch: (dispatch) => {
-        payloads.push(dispatch);
-      },
-    });
-    wake.register({
-      id: 'view-only',
-      condition: { node: attempt.identity },
-      payload: [{ view: 'summary' }],
-    });
-    expect(payloads[0]?.payload.views).toEqual({ summary: 'selected' });
-    expect(Object.isFrozen(payloads[0]?.payload.views)).toBe(true);
-    expect(JSON.stringify(payloads[0]?.payload)).not.toContain(
-      'must stay private',
-    );
-    await workflow.dispose();
-  });
-
   test('deep-clones own __proto__ payload keys safely', () => {
     const selected = cloneAndFreezeWakeJson(
       JSON.parse('{"__proto__":{"safe":"yes"}}'),
@@ -399,42 +322,6 @@ describe('WakeCoordinator', () => {
     });
     expect(explicitPayload.sources['a@1']?.handoff).toContain('a complete');
     expect(explicitPayload.sources['b@1']?.metadata?.identity).toBe('b@1');
-    await workflow.dispose();
-  });
-
-  test('duplicate named views remain separate across sources', async () => {
-    const workflow = new DelegateWorkflowCoordinator();
-    const a = workflow.schedule({
-      logicalId: 'a',
-      mode: 'single',
-      tasks: ['a'],
-      execute: async () => structuredResult('a', 'from-a'),
-    });
-    const b = workflow.schedule({
-      logicalId: 'b',
-      mode: 'single',
-      tasks: ['b'],
-      execute: async () => structuredResult('b', 'from-b'),
-    });
-    await settled(workflow, a.identity);
-    await settled(workflow, b.identity);
-    let payload!: WakeDispatch['payload'];
-    const wake = new WakeCoordinator({
-      workflow,
-      dispatch: (dispatch) => {
-        payload = dispatch.payload;
-      },
-    });
-    wake.register({
-      id: 'both-views',
-      condition: { all: [a.identity, b.identity] },
-      payload: [{ view: 'summary' }],
-    });
-    expect(payload.sources['a@1']?.views).toEqual({ summary: 'from-a' });
-    expect(payload.sources['b@1']?.views).toEqual({ summary: 'from-b' });
-    expect(payload.sources['a@1']?.views).not.toBe(
-      payload.sources['b@1']?.views,
-    );
     await workflow.dispose();
   });
 

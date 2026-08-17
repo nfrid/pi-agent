@@ -25,15 +25,6 @@ export interface TranscriptTodoTask {
   status: string;
 }
 
-/** Bounded canonical structured output captured from one delegate run. */
-export interface TranscriptStructuredResult {
-  label: string;
-  status: 'pending' | 'valid' | 'invalid';
-  value?: unknown;
-  valueOmitted?: boolean;
-  errors?: readonly string[];
-}
-
 export type TranscriptEvent =
   | {
       kind: 'compaction' | 'branch-summary';
@@ -53,7 +44,6 @@ export type TranscriptEvent =
       status: 'success' | 'error';
       content?: string;
       details?: unknown;
-      structuredResults?: readonly TranscriptStructuredResult[];
     }
   | {
       kind: 'settings';
@@ -250,136 +240,6 @@ function todoEvent(
   };
 }
 
-const MAX_DELEGATE_STRUCTURED_JOBS = 16;
-const MAX_DELEGATE_STRUCTURED_RUNS = 64;
-const MAX_DELEGATE_STRUCTURED_RESULTS = 64;
-const MAX_DELEGATE_STRUCTURED_ERRORS = 16;
-const MAX_DELEGATE_STRUCTURED_VALUE_BYTES = 64 * 1024;
-
-interface StructuredResultBudget {
-  remainingBytes: number;
-  values: number;
-}
-
-function jsonByteLength(value: unknown): number | undefined {
-  try {
-    const serialized = JSON.stringify(value);
-    return serialized === undefined
-      ? undefined
-      : new TextEncoder().encode(serialized).byteLength;
-  } catch {
-    return undefined;
-  }
-}
-
-function structuredResultView(
-  value: Record<string, unknown>,
-  label: string,
-  budget: StructuredResultBudget,
-): TranscriptStructuredResult {
-  const rawStatus = stringField(value, 'status');
-  const status: TranscriptStructuredResult['status'] =
-    rawStatus === 'pending' || rawStatus === 'valid' || rawStatus === 'invalid'
-      ? rawStatus
-      : value.valid === true
-        ? 'valid'
-        : 'invalid';
-  const errors = Array.isArray(value.errors)
-    ? value.errors
-        .filter((error): error is string => typeof error === 'string')
-        .slice(0, MAX_DELEGATE_STRUCTURED_ERRORS)
-        .map((error) => error.slice(0, 240))
-    : undefined;
-  const hasValue = Object.hasOwn(value, 'value') && value.value !== undefined;
-  const valueBytes = hasValue ? jsonByteLength(value.value) : undefined;
-  const valueFitsBudget =
-    hasValue &&
-    valueBytes !== undefined &&
-    budget.values < MAX_DELEGATE_STRUCTURED_RESULTS &&
-    valueBytes <= budget.remainingBytes;
-  if (valueFitsBudget && valueBytes !== undefined) {
-    budget.values++;
-    budget.remainingBytes -= valueBytes;
-  }
-  return {
-    label,
-    status,
-    ...(valueFitsBudget ? { value: value.value } : {}),
-    ...(value.valueOmitted === true || (status === 'valid' && !valueFitsBudget)
-      ? { valueOmitted: true }
-      : {}),
-    ...(errors?.length ? { errors } : {}),
-  };
-}
-
-/**
- * Pull only the bounded, harness-authored structured result projections out of
- * delegate job details. Prose remains a separate handoff field; this data is
- * rendered with structured controls instead of being serialized into Markdown.
- */
-function delegateStructuredResults(
-  details: Record<string, unknown> | undefined,
-): TranscriptStructuredResult[] | undefined {
-  if (!details || !Array.isArray(details.jobs)) return undefined;
-  const jobs = details.jobs
-    .filter(
-      (value): value is Record<string, unknown> => record(value) !== undefined,
-    )
-    .slice(0, MAX_DELEGATE_STRUCTURED_JOBS);
-  const results: TranscriptStructuredResult[] = [];
-  const budget: StructuredResultBudget = {
-    remainingBytes: MAX_DELEGATE_STRUCTURED_VALUE_BYTES,
-    values: 0,
-  };
-  for (const [jobIndex, job] of jobs.entries()) {
-    const jobName =
-      stringField(job, 'name') ??
-      (stringField(job, 'id')
-        ? `Delegate ${stringField(job, 'id')}`
-        : `Delegate ${jobIndex + 1}`);
-    const runs = Array.isArray(job.runs)
-      ? job.runs
-          .filter(
-            (value): value is Record<string, unknown> =>
-              record(value) !== undefined,
-          )
-          .slice(0, MAX_DELEGATE_STRUCTURED_RUNS)
-      : [];
-    for (const [runIndex, run] of runs.entries()) {
-      const structured = record(run.structuredResult);
-      if (!structured) continue;
-      const label =
-        jobs.length > 1 || runs.length > 1
-          ? `${jobName} · Run ${runIndex + 1}`
-          : jobName;
-      if (results.length >= MAX_DELEGATE_STRUCTURED_RESULTS) break;
-      results.push(structuredResultView(structured, label, budget));
-    }
-    if (results.length >= MAX_DELEGATE_STRUCTURED_RESULTS) break;
-  }
-  return results.length ? results : undefined;
-}
-
-/** Remove the machine-only parent projection line when structured fields
- * are available. Keep status, recovery, artifact, and other useful prose. */
-function withoutStructuredProjectionSummary(content: string): string {
-  return content
-    .split(/\r?\n/u)
-    .filter((line) => {
-      const match = line.trim().match(/^Projection:\s*(.+)$/u);
-      if (!match) return true;
-      try {
-        JSON.parse(match[1]);
-        return false;
-      } catch {
-        return true;
-      }
-    })
-    .join('\n')
-    .replace(/\n{3,}/gu, '\n\n')
-    .trim();
-}
-
 function asyncResultEvent(
   raw: Record<string, unknown>,
 ):
@@ -406,17 +266,13 @@ function asyncResultEvent(
         : 'success';
     const subject =
       jobs.length > 1 ? `${jobs.length} delegate jobs` : (name ?? 'Delegate');
-    const structuredResults = delegateStructuredResults(details);
-    const visibleContent = structuredResults
-      ? withoutStructuredProjectionSummary(content)
-      : content;
+    const visibleContent = content;
     return {
       kind: 'delegate-result',
       label: `${status === 'error' ? 'Delegate failed' : 'Delegate finished'} · ${subject}`,
       status,
       ...(visibleContent ? { content: visibleContent } : {}),
       ...(details ? { details } : {}),
-      ...(structuredResults ? { structuredResults } : {}),
     };
   }
   if (customType === 'background-terminal-result') {

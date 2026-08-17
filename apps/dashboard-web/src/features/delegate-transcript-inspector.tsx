@@ -13,7 +13,6 @@ import type {
 } from '../../../../extensions/delegate/contribution';
 import { Transcript } from '../entities/transcript';
 import { TranscriptEntry } from '../entities/transcript/entries';
-import { StructuredResultSection } from '../entities/transcript/inspector';
 import { useDashboardNavigate } from '../routes/navigation';
 import type { TranscriptModelItem } from '../transcript';
 import {
@@ -348,7 +347,6 @@ export function DelegateInspectorMetadata({
       <span className={inspectorStateClass(state)}>{state}</span>
       {duration && <span>{duration}</span>}
       {row.runCount && row.runCount > 1 && <span>{row.runCount} attempts</span>}
-      {row.result && <span>result {row.result.status}</span>}
       {lifecycle && (
         <>
           <span>recovery {lifecycle.reason}</span>
@@ -380,24 +378,6 @@ function artifactHandle(row: DelegateStatus): string | undefined {
     typeof (artifact as { handle?: unknown }).handle === 'string'
     ? (artifact as { handle: string }).handle
     : undefined;
-}
-
-export function DelegateStructuredResultSection({
-  row,
-}: {
-  row: DelegateInspectionStatus;
-}) {
-  if (!row.result) return null;
-  return (
-    <StructuredResultSection
-      ariaLabel="Structured result"
-      rawJsonLabel="structured result JSON"
-      result={row.result}
-      title="Structured result"
-      valueOmittedMessage="Structured result value unavailable in this bounded live snapshot."
-      valueUnavailableMessage="Structured result value is unavailable in this snapshot."
-    />
-  );
 }
 
 function DelegateInspectorDetails({
@@ -626,7 +606,6 @@ export function DelegateTranscriptInspector({
             Open as session
           </button>
         )}
-        <DelegateStructuredResultSection row={displayedRow} />
         <DelegateInspectorDetails row={displayedRow} now={now} />
         <DelegateInspectorTranscript
           row={displayedRow}

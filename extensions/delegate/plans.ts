@@ -1,5 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { resolveArtifact, resolveArtifactView } from '../shared/artifacts';
+import { resolveArtifact } from '../shared/artifacts';
 import { type DelegateConfig, resolveDelegateRoute } from './config';
 import {
   assertDistinctContinuationTokens,
@@ -7,11 +7,7 @@ import {
 } from './param-errors';
 import { mergeDelegateRouteRequest, writeWarnings } from './routing-warnings';
 import { type DelegateSession, resolveDelegateSession } from './session';
-import {
-  type DelegateResultSpecInput,
-  type NormalizedDelegateResultSpec,
-  normalizeDelegateResultSpec,
-} from './structured-result';
+
 import {
   type ContinuationPreflight,
   type DelegateTaskPlan,
@@ -50,7 +46,6 @@ interface TaskInput {
   refresh?: DelegateTaskPlan['refresh'];
   worktreePath?: string;
   handoffFrom?: DelegateHandoffInput;
-  result?: unknown;
 }
 
 interface NamedTaskInput extends TaskInput {
@@ -69,7 +64,6 @@ interface SharedDefaults {
   refresh?: DelegateTaskPlan['refresh'];
   worktreePath?: string;
   handoffFrom?: DelegateHandoffInput;
-  result?: unknown;
 }
 
 interface DerivedTask {
@@ -85,7 +79,6 @@ interface DerivedTask {
   isolationExplicit: boolean;
   isolation: DelegateTaskPlan['isolation'];
   worktreePath?: string;
-  resultSpec?: NormalizedDelegateResultSpec;
   warnings: string[];
 }
 
@@ -155,7 +148,6 @@ function normalizeInputs(params: DelegateParams): {
       refresh: params.refresh,
       worktreePath: params.worktreePath,
       handoffFrom: params.handoffFrom,
-      result: params.result,
     };
     const inputs = (params.tasks ?? [])
       .map((item) => ({
@@ -189,7 +181,6 @@ function normalizeInputs(params: DelegateParams): {
         refresh: params.refresh,
         worktreePath: params.worktreePath,
         handoffFrom: params.handoffFrom,
-        result: params.result,
       },
     ],
     shared: {},
@@ -313,27 +304,6 @@ export function buildDelegatePlans(
   }));
 
   namedTasks = namedTasks.map((task) => {
-    // Result contracts belong to this invocation only. A continuation may
-    // explicitly request a new contract, but its prior session never supplies
-    // an implicit fallback.
-    const raw =
-      task.input.result !== undefined ? task.input.result : shared.result;
-    try {
-      return {
-        ...task,
-        resultSpec:
-          raw === undefined
-            ? undefined
-            : normalizeDelegateResultSpec(raw as DelegateResultSpecInput),
-      };
-    } catch (error) {
-      return invalidParams(
-        `Invalid delegate result specification: ${errorText(error)}`,
-      );
-    }
-  });
-
-  namedTasks = namedTasks.map((task) => {
     const writeRequestExplicit =
       task.input.allowWrites !== undefined || shared.allowWrites !== undefined;
     const requested = task.input.allowWrites ?? shared.allowWrites;
@@ -441,7 +411,6 @@ export function buildDelegatePlans(
       handoffFrom: normalizeHandoffFrom(
         task.input.handoffFrom ?? shared.handoffFrom,
       ),
-      resultSpec: task.resultSpec,
       writeRequested: task.writeRequested,
       isolation: task.isolation,
       allowWritesExplicit: task.writeRequestExplicit,
@@ -504,12 +473,7 @@ export async function resolveDelegateHandoffs(
     const seenHandles = new Set<string>();
     for (const ref of refs) {
       if (!ref.handle.trim()) handoffError(ref, 'the handle is empty');
-      if (
-        ref.view !== undefined &&
-        !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(ref.view)
-      )
-        handoffError(ref, 'the named view is invalid');
-      const duplicateKey = `${ref.handle}\u0000${ref.view ?? ''}`;
+      const duplicateKey = ref.handle;
       if (seenHandles.has(duplicateKey))
         handoffError(ref, 'the handle is duplicated for this child');
       seenHandles.add(duplicateKey);
@@ -518,9 +482,7 @@ export async function resolveDelegateHandoffs(
     for (const ref of refs) {
       let artifact: Awaited<ReturnType<typeof resolveArtifact>>;
       try {
-        artifact = ref.view
-          ? await resolveArtifactView(ctx, ref.handle, ref.view)
-          : await resolver(ctx, ref.handle);
+        artifact = await resolver(ctx, ref.handle);
       } catch {
         handoffError(ref, 'it could not be resolved in the current session');
       }
@@ -538,13 +500,8 @@ export async function resolveDelegateHandoffs(
           `it exceeds the ${DELEGATE_HANDOFF_CAPS.perItemMaxBytes} byte raw-artifact per-item limit`,
         );
       const label = ref.label?.trim() || ref.handle;
-      const viewLabel = ref.view ? ` view ${ref.view}` : '';
       const text = artifact.bytes.toString('utf8');
-      const frame = frameWorkflowEvidence(
-        `${label}${viewLabel}`,
-        text,
-        'artifact',
-      );
+      const frame = frameWorkflowEvidence(label, text, 'artifact');
       const itemPromptBytes = workflowEvidencePromptBytes([frame]);
       if (itemPromptBytes > DELEGATE_HANDOFF_CAPS.perItemMaxBytes)
         handoffError(

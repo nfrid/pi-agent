@@ -109,35 +109,6 @@ function statusSnapshot(
   surfaceBudget: { remaining: number },
 ) {
   const active = status.state === 'queued' || status.state === 'running';
-  const resultValue = status.result?.value;
-  const result = status.result
-    ? {
-        kind: status.result.kind,
-        status: status.result.status,
-        ...(status.result.errors?.length
-          ? (() => {
-              const errors: string[] = [];
-              for (const error of status.result?.errors ?? []) {
-                const bounded = takeText(error, 240, surfaceBudget);
-                if (bounded === undefined) break;
-                errors.push(bounded);
-                if (errors.length === 16) break;
-              }
-              return errors.length > 0 ? { errors } : {};
-            })()
-          : {}),
-        ...(resultValue === undefined
-          ? status.result.valueOmitted
-            ? { valueOmitted: true }
-            : {}
-          : (() => {
-              const included = takeValue(resultValue, surfaceBudget);
-              return included.included
-                ? { value: included.value }
-                : { valueOmitted: true };
-            })()),
-      }
-    : undefined;
   return {
     id: text(status.id, 256),
     runId: text(status.runId, 256),
@@ -198,7 +169,6 @@ function statusSnapshot(
           })),
         }
       : {}),
-    ...(result ? { result } : {}),
     ...(status.workflow
       ? {
           workflow: {

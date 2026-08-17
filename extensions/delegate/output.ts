@@ -1,12 +1,5 @@
 import { ensureDelegateLifecycle } from './lifecycle';
-import {
-  getDelegateResultSpec,
-  getSettledDelegateResult,
-  getStructuredArtifacts,
-  projectStructuredResult,
-  type StructuredValidationResult,
-  settleDelegateResult,
-} from './structured-result';
+
 import {
   continuationRecoveryNote,
   type DelegatedRun,
@@ -111,42 +104,10 @@ function runBody(run: DelegatedRun): {
   text: string;
   originalReport?: string;
 } {
-  // Structured children are artifact/projection-only. This remains true for
-  // invalid settlement: child prose is not a harness-authored diagnostic and
-  // must not become a second, unvalidated result channel.
-  if (getDelegateResultSpec(run) || run.structuredResult) return { text: '' };
   const originalReport = getExactFinalAssistantText(run.messages);
   if (originalReport) return { text: originalReport, originalReport };
   return {
     text: run.errorMessage?.trim() || run.stderr.trim() || '(no output)',
-  };
-}
-
-function structuredEnvelope(run: DelegatedRun):
-  | {
-      settlement: StructuredValidationResult;
-      projection?: string;
-      omittedPaths: string[];
-    }
-  | undefined {
-  const spec = getDelegateResultSpec(run);
-  if (!spec) {
-    const persisted = run.structuredResult;
-    return persisted ? { settlement: persisted, omittedPaths: [] } : undefined;
-  }
-  const settlement = getSettledDelegateResult(run) ??
-    settleDelegateResult(run, spec) ?? {
-      valid: false,
-      errors: ['/: structured result settlement is unavailable'],
-    };
-  if (!settlement.valid) return { settlement, omittedPaths: [] };
-  const projection = projectStructuredResult(spec, settlement.value);
-  return {
-    settlement,
-    omittedPaths: projection.omittedPaths,
-    ...(projection.value === undefined
-      ? {}
-      : { projection: JSON.stringify(projection.value) }),
   };
 }
 
@@ -160,30 +121,11 @@ interface PreparedRun {
 }
 
 function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
-  // Settle first so invalid structured runs receive the same bounded lifecycle
-  // diagnostic as every other failed run; all child prose stays suppressed.
-  const structured = structuredEnvelope(run);
   const { text: originalBody, originalReport } = runBody(run);
   const lines = [
     `Status: ${getRunState(run)}`,
-    ...(structured
-      ? [
-          ...(structured.settlement.valid
-            ? []
-            : [
-                `Structured result invalid: ${clip(structured.settlement.errors.join('; '), 900)}`,
-              ]),
-          ...(structured.projection
-            ? [`Projection: ${structured.projection}`]
-            : []),
-          ...(structured.omittedPaths.length
-            ? [`Projection omissions: ${structured.omittedPaths.join(', ')}`]
-            : []),
-        ]
-      : [
-          `Outcome: ${extractReportField(originalBody, 'Outcome', 32) ?? '(not reported)'}`,
-          `Conclusion: ${extractReportField(originalBody, 'Conclusion', 600) ?? '(not reported)'}`,
-        ]),
+    `Outcome: ${extractReportField(originalBody, 'Outcome', 32) ?? '(not reported)'}`,
+    `Conclusion: ${extractReportField(originalBody, 'Conclusion', 600) ?? '(not reported)'}`,
   ];
   if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
   if (run.checkpoint) {
@@ -204,9 +146,6 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     lines.push(
       `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,
     );
-  const namedViews = getStructuredArtifacts(run)?.views;
-  if (namedViews && Object.keys(namedViews).length > 0)
-    lines.push(`Views: ${Object.keys(namedViews).sort().join(', ')}`);
   if (run.worktree) {
     if (run.worktree.snapshot) {
       lines.push(
@@ -230,25 +169,7 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     const lifecycle = ensureDelegateLifecycle(run);
     if (lifecycle) {
       lines.push(`Lifecycle reason: ${lifecycle.reason}`);
-      // Structured validation already carries the actionable failure above;
-      // repeating the same diagnostic here only adds ceremony. Preserve any
-      // recovery-only prose appended by the structured repair path.
-      if (structured && lifecycle.reason === 'child-result-invalid') {
-        if (lifecycle.diagnosticArtifact)
-          lines.push(
-            `Failure artifact: ${lifecycle.diagnosticArtifact.handle} (${lifecycle.diagnosticArtifact.size} bytes, sha256 ${lifecycle.diagnosticArtifact.sha256})`,
-          );
-        else {
-          const recoveryPrefix = 'Unvalidated child prose (recovery only):';
-          const recoveryIndex =
-            lifecycle.diagnostic?.indexOf(recoveryPrefix) ?? -1;
-          if (recoveryIndex >= 0)
-            lines.push(
-              clip(lifecycle.diagnostic?.slice(recoveryIndex) ?? '', 900),
-            );
-        }
-      } else if (lifecycle.diagnostic)
-        lines.push(`Failure: ${lifecycle.diagnostic}`);
+      if (lifecycle.diagnostic) lines.push(`Failure: ${lifecycle.diagnostic}`);
       else if (lifecycle.diagnosticArtifact)
         lines.push(
           `Failure artifact: ${lifecycle.diagnosticArtifact.handle} (${lifecycle.diagnosticArtifact.size} bytes, sha256 ${lifecycle.diagnosticArtifact.sha256})`,
@@ -264,32 +185,22 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
           'Read-only snapshot retained for inspection or continuation.',
         );
     } else {
-      const failure = structured
-        ? run.errorMessage?.trim() || 'Structured result settlement failed.'
-        : run.errorMessage?.trim() || run.stderr.trim() || originalBody;
+      const failure =
+        run.errorMessage?.trim() || run.stderr.trim() || originalBody;
       lines.push(`Failure: ${clip(failure, 120)}`);
     }
   }
   const recoveryNote = continuationRecoveryNote(run);
   if (recoveryNote) lines.push(`Note: ${recoveryNote}`);
   const warnings = [run.routing?.warning, ...(run.warnings ?? [])].filter(
-    (item): item is string =>
-      typeof item === 'string' &&
-      item.length > 0 &&
-      !(
-        structured &&
-        !structured.settlement.valid &&
-        item.startsWith('Structured result rejected')
-      ),
+    (item): item is string => typeof item === 'string' && item.length > 0,
   );
   if (warnings.length)
     lines.push(`Warnings: ${clip(warnings.join('; '), 120)}`);
-  if (!structured) {
-    const evidence = extractReportField(originalBody, 'Evidence', 400);
-    if (evidence) lines.push(`Evidence: ${evidence}`);
-    const risks = extractReportField(originalBody, 'Risks', 240);
-    if (risks) lines.push(`Risks: ${risks}`);
-  }
+  const evidence = extractReportField(originalBody, 'Evidence', 400);
+  if (evidence) lines.push(`Evidence: ${evidence}`);
+  const risks = extractReportField(originalBody, 'Risks', 240);
+  if (risks) lines.push(`Risks: ${risks}`);
   return {
     run,
     envelope: lines.join('\n'),

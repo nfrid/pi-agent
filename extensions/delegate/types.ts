@@ -20,7 +20,6 @@ export type DelegateLifecycleReason =
   | 'provider-runner-error'
   | 'setup-failure'
   | 'lifecycle-cleanup-failure'
-  | 'child-result-invalid'
   | 'unknown';
 
 /** One bounded, harness-authored recovery projection for failed runs. */
@@ -34,16 +33,6 @@ export interface DelegateLifecycleProjection {
   continuationUsable: boolean;
   writableBranchRetained: boolean;
   readOnlySnapshotRetained: boolean;
-}
-
-/** Bounded projected value retained for human-facing details/status surfaces. */
-export interface DelegateStructuredResult {
-  valid: boolean;
-  /** Only the contract's parent-visible projection; never the full result. */
-  value?: unknown;
-  /** True when no bounded user-visible value could be retained. */
-  valueOmitted?: boolean;
-  errors: readonly string[];
 }
 
 export interface UsageStats {
@@ -179,8 +168,6 @@ export interface DelegatedRun extends DelegateRunMetadata {
   activities: DelegatedActivity[];
   /** Canonical lifecycle state for every current/internal run. */
   state: DelegateRunState;
-  /** Public validated result capture; never used for parent handoff content. */
-  structuredResult?: DelegateStructuredResult;
   queuedAt?: number;
   startedAt?: number;
   finishedAt?: number;
@@ -202,21 +189,6 @@ export interface DelegateWorkflowTextEvidence {
   readonly oversized?: true;
 }
 
-/** Private, schema-validated structured evidence retained for named views. */
-export interface DelegateWorkflowStructuredEvidence {
-  readonly valid: boolean;
-  /** The complete validated JSON value, bounded by the result contract. */
-  readonly value?: unknown;
-  readonly valueOmitted?: true;
-  readonly errors: readonly string[];
-  /** Only declared schema views are retained for symbolic forwarding. */
-  readonly views: Readonly<Record<string, unknown>>;
-  /** Published artifact handles for the full value and declared views. */
-  readonly artifacts: Readonly<
-    Record<string, { readonly handle: string; readonly size: number }>
-  >;
-}
-
 /** Minimal terminal run projection used by workflow status and symbolic inputs. */
 export interface DelegateWorkflowRunProjection {
   readonly runId: string;
@@ -236,8 +208,6 @@ export interface DelegateWorkflowRunProjection {
   readonly worktree?: DelegateWorkflowBranchDescriptor;
   readonly artifact?: ArtifactMetadata;
   readonly lifecycle?: DelegateLifecycleProjection;
-  readonly structuredResult?: DelegateStructuredResult;
-  readonly structured?: DelegateWorkflowStructuredEvidence;
   readonly queuedAt?: number;
   readonly startedAt?: number;
   readonly finishedAt?: number;

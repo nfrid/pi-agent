@@ -6,12 +6,6 @@ import {
   type DelegateJobStartOptions,
 } from './jobs';
 import { getDelegateLifecycle } from './lifecycle';
-import {
-  captureDelegateResultEvent,
-  normalizeInternalDelegateResultSpec,
-  setDelegateResultSpec,
-  settleDelegateResult,
-} from './structured-result';
 import { createRun } from './types';
 import {
   type DelegateWorkflowAttemptSnapshot,
@@ -769,9 +763,8 @@ describe('DelegateWorkflowCoordinator', () => {
     const cases: readonly SymbolicWorkflowSelector[][] = [
       [{ node: 'upstream', include: [] }],
       [{ node: 'upstream', include: ['report', 'report'] }],
-      [{ node: 'upstream', view: 'bad.view' }],
       [{ node: 'upstream', label: 'x'.repeat(121) }],
-      [{ node: 'upstream' }, { node: 'upstream@1', view: 'summary' }],
+      [{ node: 'upstream' }, { node: 'upstream@1' }],
       Array.from({ length: 5 }, () => ({ node: 'upstream' })),
     ];
     for (const inputs of cases)
@@ -1002,63 +995,6 @@ describe('DelegateWorkflowCoordinator', () => {
     expect(JSON.stringify(evidence)).not.toContain('child-session-object');
     const publicResult = coordinator.getResult(upstream.identity);
     expect(JSON.stringify(publicResult)).not.toContain('hidden');
-    await coordinator.dispose();
-  });
-
-  test('retains private validated structured values and declared named views', async () => {
-    const coordinator = new DelegateWorkflowCoordinator();
-    const upstream = coordinator.schedule(
-      scheduleOptions('structured', async () => {
-        const run = createRun('structured');
-        run.state = 'success';
-        run.exitCode = 0;
-        const spec = normalizeInternalDelegateResultSpec({
-          schema: {
-            type: 'object',
-            properties: {
-              summary: { type: 'string' },
-              secret: { type: 'string' },
-            },
-            required: ['summary', 'secret'],
-          },
-          projection: ['/summary'],
-          views: { summary: '/summary' },
-        });
-        setDelegateResultSpec(run, spec);
-        captureDelegateResultEvent(
-          run,
-          { details: { summary: 'view value', secret: 'private value' } },
-          false,
-        );
-        settleDelegateResult(run);
-        return { runs: [run], handoff: 'structured handoff' };
-      }),
-    );
-    await settle(coordinator);
-    const evidence = coordinator.getResultEvidence(upstream.identity);
-    expect(evidence?.runs[0]?.structured?.value).toEqual({
-      summary: 'view value',
-      secret: 'private value',
-    });
-    expect(evidence?.runs[0]?.structured?.views).toEqual({
-      summary: 'view value',
-    });
-    let view: unknown;
-    const dependent = coordinator.schedule({
-      logicalId: 'view-consumer',
-      inputs: [{ node: upstream.identity, view: 'summary' }],
-      prepare: async (context) => {
-        view = context.inputs.find((input) => input.kind === 'view')?.value;
-        return {
-          mode: 'single' as const,
-          tasks: ['view-consumer'],
-          execute: async () => result('view-consumer'),
-        };
-      },
-    });
-    await settle(coordinator);
-    expect(view).toBe('view value');
-    expect(coordinator.require(dependent.identity).state).toBe('success');
     await coordinator.dispose();
   });
 

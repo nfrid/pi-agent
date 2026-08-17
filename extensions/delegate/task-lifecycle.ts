@@ -8,7 +8,6 @@ import {
   updateDelegateSessionRouting,
   updateDelegateSessionWorktree,
 } from './session';
-import type { NormalizedDelegateResultSpec } from './structured-result';
 import type { DelegateHandoffFrom } from './tool';
 import type {
   DelegateContext,
@@ -54,8 +53,6 @@ export interface DelegateTaskPlan {
   handoffFrom?: DelegateHandoffFrom[];
   /** Resolved artifact text, kept out of run details. */
   handoffText?: string;
-  /** Bounded machine-readable result contract, kept out of run details. */
-  resultSpec?: NormalizedDelegateResultSpec;
   writeRequested: boolean;
   /** Effective workspace isolation, independent from write capability. */
   isolation: DelegateIsolation;
@@ -437,7 +434,6 @@ export async function runPreparedDelegateTask(
       .filter((item): item is string => Boolean(item?.trim()))
       .join('\n\n'),
     handoffText: prepared.plan.handoffText,
-    resultSpec: prepared.plan.resultSpec,
     scope: prepared.scope,
     routing: prepared.plan.routing,
     writeRequested: prepared.plan.writeRequested,

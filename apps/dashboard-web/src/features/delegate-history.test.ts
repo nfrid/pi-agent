@@ -64,11 +64,7 @@ const history = {
           allowWrites: false,
           details: {
             task: 'second attempt',
-            structuredResult: {
-              valid: true,
-              value: { ok: true },
-              errors: [],
-            },
+            response: 'The second durable response.',
             activities: [],
             truncated: false,
           },

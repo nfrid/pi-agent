@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'vitest';
 import { processJsonLine } from './events';
-import { getDelegateLifecycle } from './lifecycle';
-import {
-  normalizeDelegateResultSpec,
-  setDelegateResultSpec,
-  settleDelegateResult,
-} from './structured-result';
 import { createRun } from './types';
 
 const assistantMessage = {
@@ -15,30 +9,6 @@ const assistantMessage = {
 };
 
 describe('events', () => {
-  test('retains the private repair marker without exposing it as child content', () => {
-    const run = createRun('repair marker');
-    const spec = normalizeDelegateResultSpec({ shape: { ok: 'boolean' } });
-    if (!spec) throw new Error('expected normalized result spec');
-    setDelegateResultSpec(run, spec);
-    run.messages = [
-      {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'repair recovery prose' }],
-      },
-    ] as never;
-    expect(
-      processJsonLine(
-        JSON.stringify({ type: 'delegate_structured_repair' }),
-        run,
-      ),
-    ).toBe(true);
-    settleDelegateResult(run);
-    expect(JSON.stringify(run)).not.toContain('delegate_structured_repair');
-    expect(getDelegateLifecycle(run)?.diagnostic).toContain(
-      'repair recovery prose',
-    );
-  });
-
   test('does not duplicate agent_end messages received through message_end', () => {
     const run = createRun('test');
     expect(
@@ -91,48 +61,6 @@ describe('events', () => {
     ).toBe(true);
     expect(run.messages).toHaveLength(1);
     expect(run.usage.turns).toBe(1);
-  });
-
-  test('captures terminating structured details outside enumerable run data', () => {
-    const run = createRun('structured');
-    processJsonLine(
-      JSON.stringify({
-        type: 'tool_execution_end',
-        toolCallId: 'result-1',
-        toolName: 'delegate_result',
-        result: { details: { secret: 'artifact-only' } },
-        isError: false,
-      }),
-      run,
-    );
-    expect(JSON.stringify(run)).not.toContain('artifact-only');
-  });
-
-  test('redacts prose from the terminating structured tool turn', () => {
-    const run = createRun('structured');
-    processJsonLine(
-      JSON.stringify({
-        type: 'message_end',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'prose and {"secret":"result"}' }],
-          usage: {},
-        },
-      }),
-      run,
-    );
-    processJsonLine(
-      JSON.stringify({
-        type: 'tool_execution_end',
-        toolCallId: 'result-1',
-        toolName: 'delegate_result',
-        result: { details: { secret: 'result' } },
-        isError: false,
-      }),
-      run,
-    );
-    expect(JSON.stringify(run)).not.toContain('prose');
-    expect(JSON.stringify(run)).not.toContain('secret');
   });
 
   test('preserves detailed tool labels when end events omit args', () => {

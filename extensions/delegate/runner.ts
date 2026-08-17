@@ -17,12 +17,7 @@ import {
   setDelegateLifecycleText,
 } from './lifecycle';
 import { buildDelegatePrompt } from './prompt';
-import {
-  getDelegateChannelPresent,
-  getDelegateResultSpec,
-  type NormalizedDelegateResultSpec,
-  setDelegateResultSpec,
-} from './structured-result';
+
 import { makeDetails } from './tool-result';
 import {
   createRun,
@@ -68,12 +63,9 @@ export function resolvePiSpawn(): { command: string; prefixArgs: string[] } {
 }
 
 function progressText(run: DelegatedRun): string {
-  // Structured results are artifact-only. Assistant prose can arrive before
-  // the terminating delegate_result event, so never use it for live progress.
-  const structured = Boolean(getDelegateResultSpec(run));
-  const final = structured ? '' : getFinalAssistantText(run.messages).trim();
+  const final = getFinalAssistantText(run.messages).trim();
   if (final) return final;
-  if (!structured && run.errorMessage?.trim()) return run.errorMessage.trim();
+  if (run.errorMessage?.trim()) return run.errorMessage.trim();
   const recent = run.activities.slice(-8);
   if (recent.length > 0) {
     return recent
@@ -113,8 +105,6 @@ export interface RunDelegateOptions {
   contextNote?: string;
   /** Resolved upstream evidence, never included in parent-visible run details. */
   handoffText?: string;
-  /** Bounded structured result contract, kept outside parent-visible details. */
-  resultSpec?: NormalizedDelegateResultSpec;
   scope?: string[];
   continuation?: string;
   resuming?: boolean;
@@ -139,7 +129,6 @@ export function buildChildArgs(
     | 'worktree'
     | 'contextNote'
     | 'handoffText'
-    | 'resultSpec'
     | 'scope'
     | 'resuming'
   > & { timeoutMs?: number },
@@ -149,7 +138,7 @@ export function buildChildArgs(
   if (allowWrites && !options.worktree)
     throw new Error('Writable delegates require a prepared worktree.');
   const baseTools = allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS;
-  const tools = options.resultSpec ? `${baseTools},delegate_result` : baseTools;
+  const tools = baseTools;
   const args = [
     '--mode',
     'json',
@@ -180,7 +169,6 @@ export function buildChildArgs(
       allowWrites,
       contextNote: options.contextNote,
       handoffText: options.handoffText,
-      resultSpec: options.resultSpec,
       scope: options.scope,
       continuation: options.resuming,
       timeoutMs: options.timeoutMs,
@@ -212,7 +200,6 @@ export async function runDelegate(
     scope: options.scope,
     continuation: options.continuation,
   });
-  setDelegateResultSpec(run, options.resultSpec);
   const control =
     options.control ??
     createDelegateControlChannel(options.sessionPath, options.ownerSessionId);
@@ -251,13 +238,6 @@ export async function runDelegate(
       env: {
         ...(options.worktree?.env ?? {}),
         PI_DELEGATE_CONTROL_FILE: control.filePath,
-        ...(options.resultSpec
-          ? {
-              PI_DELEGATE_RESULT_SCHEMA: JSON.stringify(
-                options.resultSpec.schema,
-              ),
-            }
-          : {}),
       },
     };
 
@@ -348,11 +328,9 @@ export async function runDelegate(
         run.stopReason === 'error' ||
         run.stopReason === 'aborted' ||
         run.exitCode !== 0 ||
-        (options.resultSpec
-          ? !getDelegateChannelPresent(run)
-          : !getFinalAssistantText(run.messages).trim());
+        !getFinalAssistantText(run.messages).trim();
       run.state = failed ? 'error' : 'success';
-      if (failed && !getDelegateResultSpec(run) && !getDelegateLifecycle(run)) {
+      if (failed && !getDelegateLifecycle(run)) {
         run.stopReason = 'error';
         run.errorMessage ||=
           'The child exited without a final assistant response.';

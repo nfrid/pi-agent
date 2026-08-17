@@ -26,7 +26,6 @@ import {
   assertDistinctContinuationTokens,
   throwIfAllRunsFailed,
 } from './param-errors';
-import { buildDelegatePlans } from './plans';
 import { buildDelegatePrompt } from './prompt';
 import { formatDelegateRoutingConfig } from './routing';
 import { mergeDelegateRouteRequest } from './routing-warnings';
@@ -40,7 +39,6 @@ import {
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
-import { normalizeInternalDelegateResultSpec as normalizeDelegateResultSpec } from './structured-result-schema';
 import { delegatePromptGuidelines, registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import {
@@ -192,29 +190,6 @@ describe('delegate', () => {
     expect(prompt).toContain(
       'do not amend, rebase, reset, or otherwise rewrite its recorded history',
     );
-  });
-
-  test('gives structured children only the delegate_result completion contract', () => {
-    const resultSpec = normalizeDelegateResultSpec({
-      schema: {
-        type: 'object',
-        properties: { ok: { type: 'boolean' } },
-        required: ['ok'],
-      },
-    });
-    const prompt = buildDelegatePrompt('Inspect the repository', {
-      resultSpec,
-    });
-    expect(prompt).toContain('## Machine-readable completion');
-    expect(prompt).toContain('delegate_result');
-    expect(prompt).not.toContain('## Child report');
-    expect(prompt).not.toContain('Outcome: done | partial | blocked | failed');
-    expect(prompt).not.toContain(
-      'Return a short result the parent can act on.',
-    );
-    expect(prompt).toContain('## Machine-readable completion');
-    expect(prompt).not.toContain('<delegate_result_schema>');
-    expect(prompt).not.toContain('"properties":{"ok":{"type":"boolean"}}');
   });
 
   test('frames forwarded artifacts as untrusted upstream evidence', () => {
@@ -559,96 +534,6 @@ describe('delegate', () => {
     }
   });
 
-  test('keeps result contracts invocation-scoped across continuations', () => {
-    const session = createDelegateSession({
-      cwd: '/tmp/project',
-      name: 'Structured follow-up',
-      routing: {
-        route: 'quick-high',
-        provider: 'openai-codex',
-        model: 'quick',
-        thinking: 'high',
-        relativeCost: 1,
-      },
-    });
-    const config = parseDelegateConfig({
-      modelCatalog: {
-        'quick-high': {
-          provider: 'openai-codex',
-          model: 'quick',
-          thinking: 'high',
-          relativeCost: 1,
-          useFor: 'checks',
-          avoid: 'none',
-        },
-      },
-    });
-    const context = { cwd: '/tmp/project' } as never;
-    try {
-      const legacy = buildDelegatePlans(
-        { task: 'continue the audit', continuation: session.token } as never,
-        context,
-        config,
-        () => null,
-      );
-      expect(legacy.tasks[0]?.plan.resultSpec).toBeUndefined();
-      expect(() =>
-        buildDelegatePlans(
-          {
-            name: 'Schema rejection',
-            task: 'legacy schema must be rejected',
-            continuation: session.token,
-            result: { schema: { type: 'string' } },
-          } as never,
-          context,
-          config,
-          () => null,
-        ),
-      ).toThrow(/internal-only.*shape/);
-
-      const structured = buildDelegatePlans(
-        {
-          task: 'return a fresh machine-readable audit',
-          continuation: session.token,
-          result: { shape: 'string' },
-        } as never,
-        context,
-        config,
-        () => null,
-      );
-      expect(structured.tasks[0]?.plan.resultSpec?.schema).toEqual({
-        type: 'string',
-        maxLength: 4096,
-      });
-
-      const parallel = buildDelegatePlans(
-        {
-          route: 'quick-high',
-          tasks: [
-            {
-              name: 'text',
-              task: 'text contract',
-              result: { shape: 'string' },
-            },
-            {
-              name: 'count',
-              task: 'count contract',
-              result: { shape: 'integer' },
-            },
-          ],
-        } as never,
-        context,
-        config,
-        () => null,
-      );
-      expect(
-        parallel.tasks.map((task) => task.plan.resultSpec?.schema.type),
-      ).toEqual(['string', 'integer']);
-    } finally {
-      removeDelegateSession(session);
-    }
-  });
-
   test('migrates legacy session isolation from its worktree link', () => {
     const shared = createDelegateSession({ cwd: '/tmp/project' });
     const isolated = createDelegateSession({
@@ -752,22 +637,6 @@ describe('delegate', () => {
     expect(tools).toBe('read,bash,grep,find,ls');
     expect(tools).not.toContain('write');
     expect(tools).not.toContain('edit');
-  });
-
-  test('enables the terminating result tool only for structured children', () => {
-    const resultSpec = normalizeDelegateResultSpec({
-      schema: {
-        type: 'object',
-        properties: { ok: { type: 'boolean' } },
-        required: ['ok'],
-      },
-    });
-    const args = buildChildArgs(
-      { task: 'report', resultSpec },
-      '/tmp/structured-child.jsonl',
-    );
-    const tools = args[args.indexOf('--tools') + 1].split(',');
-    expect(tools).toContain('delegate_result');
   });
 
   test('keeps delegate framing out of the canonical system prompt', () => {

@@ -405,7 +405,7 @@ describe('dashboard domain reducers', () => {
       content: [{ type: 'text', text: 'structured delegate handoff' }],
       details: {
         mode: 'single',
-        runs: [{ name: 'Audit', structuredResult: { valid: true } }],
+        runs: [{ name: 'Audit' }],
       },
     };
     let state = hydrateTranscript([], 's');

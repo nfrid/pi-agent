@@ -106,24 +106,6 @@ function sanitizePayload(value: unknown): unknown[] | undefined {
         ...(node === undefined ? {} : { node }),
       };
     }
-    if (selector.kind === 'view' && typeof selector.name === 'string') {
-      const allowed =
-        node === undefined ? ['kind', 'name'] : ['kind', 'name', 'node'];
-      if (keys.some((key) => !allowed.includes(key))) return undefined;
-      return {
-        kind: 'view',
-        name: selector.name,
-        ...(node === undefined ? {} : { node }),
-      };
-    }
-    if (typeof selector.view === 'string') {
-      const allowed = node === undefined ? ['view'] : ['view', 'node'];
-      if (keys.some((key) => !allowed.includes(key))) return undefined;
-      return {
-        view: selector.view,
-        ...(node === undefined ? {} : { node }),
-      };
-    }
     return undefined;
   });
   return sanitized.every((selector) => selector !== undefined)

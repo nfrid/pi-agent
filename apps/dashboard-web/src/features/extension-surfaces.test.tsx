@@ -6,7 +6,6 @@ import type {
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import { StructuredDelegateResults } from '../entities/transcript/entries';
 import {
   delegateHistoryInvocationToStatus,
   delegateHistorySettledRunIds,
@@ -14,7 +13,6 @@ import {
 import {
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
-  DelegateStructuredResultSection,
   delegateDetailHasError,
   delegateTranscriptItems,
   selectedDelegateRunId,
@@ -959,7 +957,7 @@ describe('live extension surface fixtures', () => {
     expect(before[1]?.key).toBe(after[0]?.key);
   });
 
-  it('keeps delegate lifecycle and result facts in the inspector header', () => {
+  it('keeps delegate lifecycle facts in the inspector header', () => {
     const markup = renderToStaticMarkup(
       <DelegateInspectorMetadata
         now={2_000}
@@ -975,7 +973,6 @@ describe('live extension surface fixtures', () => {
           finishedAt: 2_000,
           allowWrites: true,
           runCount: 2,
-          result: { kind: 'structured', status: 'invalid' },
           lifecycle: {
             reason: 'timeout',
             diagnostic: 'Runner disconnected after retry.',
@@ -990,7 +987,6 @@ describe('live extension surface fixtures', () => {
 
     expect(markup).toContain('aria-label="Delegate details"');
     expect(markup).toContain('2 attempts');
-    expect(markup).toContain('result invalid');
     expect(markup).toContain('recovery timeout');
     expect(markup).toContain('continuation ready');
     expect(markup).toContain('read-only snapshot retained');
@@ -1022,139 +1018,6 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('paused');
     expect(markup).toContain('10s');
     expect(markup).not.toContain('1m');
-  });
-
-  it('renders validated structured results in a dedicated inspector section', () => {
-    const markup = renderToStaticMarkup(
-      <DelegateStructuredResultSection
-        row={{
-          id: 'd1',
-          runId: 'run-d1',
-          lineageId: 'lineage-d1',
-          name: 'Structured audit',
-          kind: 'background',
-          state: 'success',
-          createdAt: 1,
-          finishedAt: 2,
-          allowWrites: false,
-          result: {
-            kind: 'structured',
-            status: 'valid',
-            value: {
-              outcome: 'done',
-              findings: [
-                {
-                  path: 'src/index.ts',
-                  summary: '# Finding\n\nUse `code`.',
-                },
-              ],
-            },
-          },
-        }}
-      />,
-    );
-    expect(markup).toContain('aria-label="Structured result"');
-    expect(markup).not.toContain('aria-level=');
-    expect(markup).not.toContain('role="heading"');
-    expect(markup).toContain('object · 2 fields');
-    expect(markup).toContain('>Findings</span>');
-    expect(markup).toContain('array · 1 item');
-    expect(markup).toMatch(/class="markdown(?: |")/u);
-    expect(markup).toContain('<h1>Finding</h1>');
-    expect(markup).toContain('<code>code</code>');
-    expect(markup).not.toContain('<ol class="structured-result-list">');
-    expect(markup).toContain('&quot;outcome&quot;: &quot;done&quot;');
-    expect(markup).toContain('&quot;path&quot;: &quot;src/index.ts&quot;');
-  });
-
-  it('keeps transcript and live result adapters equivalent for common bounded content', () => {
-    const value = { outcome: 'done', findings: [{ path: 'src/index.ts' }] };
-    const transcriptMarkup = renderToStaticMarkup(
-      <StructuredDelegateResults
-        results={[{ label: 'Audit', status: 'valid', value }]}
-      />,
-    );
-    const liveMarkup = renderToStaticMarkup(
-      <DelegateStructuredResultSection
-        row={{
-          id: 'd-equivalent',
-          runId: 'run-d-equivalent',
-          lineageId: 'lineage-d-equivalent',
-          name: 'Audit',
-          kind: 'background',
-          state: 'success',
-          createdAt: 1,
-          allowWrites: false,
-          result: { kind: 'structured', status: 'valid', value },
-        }}
-      />,
-    );
-
-    for (const fragment of [
-      'Status: valid',
-      'class="structured-result-value"',
-      'object · 2 fields',
-      'array · 1 item',
-      'Raw JSON',
-      '&quot;outcome&quot;: &quot;done&quot;',
-    ]) {
-      expect(transcriptMarkup).toContain(fragment);
-      expect(liveMarkup).toContain(fragment);
-    }
-    expect(transcriptMarkup.match(/class="payload-section"/gu)).toHaveLength(1);
-    expect(liveMarkup.match(/class="payload-section"/gu)).toHaveLength(1);
-  });
-
-  it('shows an explicit notice when a bounded live result omits its value', () => {
-    const markup = renderToStaticMarkup(
-      <DelegateStructuredResultSection
-        row={{
-          id: 'd-omitted',
-          runId: 'run-d-omitted',
-          lineageId: 'lineage-d-omitted',
-          name: 'Large audit',
-          kind: 'background',
-          state: 'success',
-          createdAt: 1,
-          allowWrites: false,
-          result: {
-            kind: 'structured',
-            status: 'valid',
-            valueOmitted: true,
-          },
-        }}
-      />,
-    );
-    expect(markup).toContain(
-      'Structured result value unavailable in this bounded live snapshot.',
-    );
-    expect(markup).not.toContain('payload-preview');
-  });
-
-  it('shows structured validation errors without rendering invalid values', () => {
-    const markup = renderToStaticMarkup(
-      <DelegateStructuredResultSection
-        row={{
-          id: 'd2',
-          runId: 'run-d2',
-          lineageId: 'lineage-d2',
-          name: 'Invalid audit',
-          kind: 'foreground',
-          state: 'error',
-          createdAt: 1,
-          allowWrites: false,
-          result: {
-            kind: 'structured',
-            status: 'invalid',
-            errors: ['/outcome: expected string', '/outcome: expected string'],
-          },
-        }}
-      />,
-    );
-    expect(markup).toContain('/outcome: expected string');
-    expect(markup.match(/\/outcome: expected string/g)).toHaveLength(2);
-    expect(markup).not.toContain('malformed attempt value');
-    expect(markup).not.toContain('payload-preview');
   });
 
   it('renders logical workflow identity, dependency waits, and wake metadata', () => {

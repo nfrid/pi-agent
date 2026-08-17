@@ -3,12 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import type { DelegateJobResult } from './jobs';
-import {
-  captureDelegateResultEvent,
-  normalizeInternalDelegateResultSpec,
-  setDelegateResultSpec,
-  settleDelegateResult,
-} from './structured-result';
 import { createRun, type DelegatedRun } from './types';
 import {
   type BoundWorkflowSelector,
@@ -121,106 +115,6 @@ describe('workflow symbolic inputs', () => {
         }),
       ),
     ).toThrow(/16384/);
-  });
-
-  test('uses retained canonical runs for exact prose and private named views', () => {
-    const proseResult = {
-      runs: [runWithReport('public projection only')],
-      retainedRuns: [runWithReport('retained exact report')],
-      handoff: 'retained handoff',
-    };
-    expect(
-      resolveWorkflowInputs([bound('impl', ['report'])], () =>
-        source(proseResult),
-      ).inputs[0]?.value,
-    ).toBe('retained exact report');
-
-    const retainedStructured = runWithReport('not a prose result channel');
-    const spec = normalizeInternalDelegateResultSpec({
-      schema: {
-        type: 'object',
-        properties: { summary: { type: 'string' } },
-        required: ['summary'],
-      },
-      views: { summary: '/summary' },
-    });
-    setDelegateResultSpec(retainedStructured, spec);
-    captureDelegateResultEvent(
-      retainedStructured,
-      { details: { summary: 'private view' } },
-      false,
-    );
-    expect(settleDelegateResult(retainedStructured)?.valid).toBe(true);
-    const structuredResult = {
-      runs: [runWithReport('public structured projection')],
-      retainedRuns: [retainedStructured],
-      handoff: 'retained handoff',
-    };
-    expect(
-      resolveWorkflowInputs([bound('impl', undefined, 'summary')], () =>
-        source(structuredResult),
-      ).inputs[0]?.value,
-    ).toBe('private view');
-    expect(() =>
-      resolveWorkflowInputs([bound('impl', ['report'])], () =>
-        source(structuredResult),
-      ),
-    ).toThrow(/Required report/);
-
-    const persistedStructured = runWithReport('must remain private');
-    persistedStructured.structuredResult = {
-      valid: true,
-      value: { summary: 'public projection' },
-      errors: [],
-    };
-    expect(() =>
-      resolveWorkflowInputs([bound('impl', ['report'])], () =>
-        source({ runs: [persistedStructured], handoff: '' }),
-      ),
-    ).toThrow(/Required report/);
-  });
-
-  test('resolves named views from private validated structured values', () => {
-    const run = runWithReport('not the structured result');
-    const spec = {
-      schema: {
-        type: 'object',
-        properties: { summary: { type: 'string' } },
-        required: ['summary'],
-      },
-      views: { summary: '/summary' },
-    };
-    setDelegateResultSpec(run, normalizeInternalDelegateResultSpec(spec));
-    captureDelegateResultEvent(
-      run,
-      { details: { summary: 'private value' } },
-      false,
-    );
-    expect(settleDelegateResult(run)?.valid).toBe(true);
-    const resolved = resolveWorkflowInputs(
-      [bound('impl', undefined, 'summary')],
-      () => source({ runs: [run], handoff: '' }),
-    );
-    expect(resolved.inputs[0]?.value).toBe('private value');
-    expect(() =>
-      resolveWorkflowInputs([bound('impl', undefined, 'missing')], () =>
-        source({ runs: [run], handoff: '' }),
-      ),
-    ).toThrow(/unavailable or invalid/);
-
-    const duplicate = runWithReport('second structured result');
-    setDelegateResultSpec(duplicate, normalizeInternalDelegateResultSpec(spec));
-    captureDelegateResultEvent(
-      duplicate,
-      { details: { summary: 'second value' } },
-      false,
-    );
-    expect(settleDelegateResult(duplicate)?.valid).toBe(true);
-    expect(() =>
-      resolveWorkflowInputs([bound('impl', undefined, 'summary')], () =>
-        source({ runs: [run, duplicate], handoff: '' }),
-      ),
-    ).toThrow(/ambiguous across multiple runs/);
   });
 
   test('resolves only verified durable branch descriptors and rejects conflicts', () => {

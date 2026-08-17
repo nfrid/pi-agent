@@ -12,12 +12,7 @@ import {
   hydrateDelegateLifecycle,
 } from './lifecycle';
 import { buildParentHandoff } from './output';
-import {
-  getDelegateResultSpec,
-  getSettledDelegateResult,
-  getStructuredArtifacts,
-  selectStructuredPath,
-} from './structured-result';
+
 import {
   type DelegatedRun,
   type DelegateRouteState,
@@ -25,7 +20,6 @@ import {
   type DelegateWorkflowResultProjection,
   type DelegateWorkflowResultRecord,
   type DelegateWorkflowRunProjection,
-  type DelegateWorkflowStructuredEvidence,
   emptyUsage,
   getExactFinalAssistantText,
 } from './types';
@@ -331,38 +325,6 @@ function copyBranch(
 }
 
 function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
-  const spec = getDelegateResultSpec(run);
-  const settlement = spec ? getSettledDelegateResult(run) : undefined;
-  const hasStructuredChannel = Boolean(spec || run.structuredResult);
-  const privateValue = settlement?.valid ? settlement.value : undefined;
-  const views: Record<string, unknown> = Object.create(null) as Record<
-    string,
-    unknown
-  >;
-  if (spec && settlement?.valid && privateValue !== undefined) {
-    for (const [name, path] of Object.entries(spec.views)) {
-      const selected = selectStructuredPath(privateValue, path);
-      if (selected.present) views[name] = selected.value;
-    }
-  }
-  const structuredArtifacts = getStructuredArtifacts(run)?.views ?? {};
-  const artifacts: Record<
-    string,
-    { readonly handle: string; readonly size: number }
-  > = Object.create(null) as Record<
-    string,
-    { readonly handle: string; readonly size: number }
-  >;
-  for (const [name, artifact] of Object.entries(structuredArtifacts))
-    if (
-      typeof artifact.handle === 'string' &&
-      Number.isSafeInteger(artifact.size) &&
-      artifact.size >= 0
-    )
-      artifacts[name] = Object.freeze({
-        handle: artifact.handle,
-        size: artifact.size,
-      });
   const lifecycle =
     ['error', 'aborted', 'timed-out'].includes(run.state) &&
     !getDelegateLifecycle(run)
@@ -371,34 +333,13 @@ function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
           includeArtifact: true,
           includeBoundedFallback: true,
         });
-  const publicStructured = run.structuredResult
-    ? Object.freeze({
-        valid: run.structuredResult.valid,
-        ...(run.structuredResult.value === undefined
-          ? run.structuredResult.valueOmitted
-            ? { valueOmitted: true as const }
-            : {}
-          : { value: run.structuredResult.value }),
-        errors: Object.freeze([...run.structuredResult.errors]),
-      })
-    : settlement
-      ? Object.freeze({
-          valid: settlement.valid,
-          ...(settlement.valid && privateValue === undefined
-            ? { valueOmitted: true as const }
-            : {}),
-          errors: Object.freeze([...settlement.errors]),
-        })
-      : undefined;
   const compactLifecycle = lifecycle
     ? cloneDelegateLifecycle(lifecycle, { includeArtifact: true })
     : undefined;
-  const report = hasStructuredChannel
-    ? undefined
-    : (() => {
-        const text = getExactFinalAssistantText(run.messages);
-        return text.trim() ? captureWorkflowText(text) : undefined;
-      })();
+  const report = (() => {
+    const text = getExactFinalAssistantText(run.messages);
+    return text.trim() ? captureWorkflowText(text) : undefined;
+  })();
   const continuation = run.continuation?.trim();
   return Object.freeze({
     runId: boundedTerminalField(run.runId, 'unknown-run'),
@@ -427,39 +368,7 @@ function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
     ...(copyArtifact(run.artifact)
       ? { artifact: copyArtifact(run.artifact) }
       : {}),
-    ...(compactLifecycle
-      ? {
-          lifecycle: Object.freeze({
-            ...compactLifecycle,
-            ...(compactLifecycle.diagnosticArtifact
-              ? {
-                  diagnosticArtifact: Object.freeze({
-                    ...compactLifecycle.diagnosticArtifact,
-                  }),
-                }
-              : {}),
-          }),
-        }
-      : {}),
-    ...(publicStructured ? { structuredResult: publicStructured } : {}),
-    ...(hasStructuredChannel
-      ? {
-          structured: Object.freeze({
-            valid: settlement?.valid ?? run.structuredResult?.valid ?? false,
-            ...(settlement?.valid && privateValue !== undefined
-              ? { value: privateValue }
-              : {}),
-            ...(settlement?.valid && privateValue === undefined
-              ? { valueOmitted: true as const }
-              : {}),
-            errors: Object.freeze(
-              settlement?.errors ?? run.structuredResult?.errors ?? [],
-            ),
-            views: Object.freeze(views),
-            artifacts: Object.freeze(artifacts),
-          }) satisfies DelegateWorkflowStructuredEvidence,
-        }
-      : {}),
+    ...(compactLifecycle ? { lifecycle: compactLifecycle } : {}),
     ...(run.queuedAt === undefined ? {} : { queuedAt: run.queuedAt }),
     ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
     ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
@@ -570,19 +479,6 @@ function publicRunFromCompact(
       : {}),
     ...(includeArtifacts && run.artifact
       ? { artifact: { ...run.artifact } }
-      : {}),
-    ...(run.structuredResult
-      ? {
-          structuredResult: {
-            valid: run.structuredResult.valid,
-            ...(run.structuredResult.value === undefined
-              ? run.structuredResult.valueOmitted
-                ? { valueOmitted: true }
-                : {}
-              : { value: run.structuredResult.value }),
-            errors: [...run.structuredResult.errors],
-          },
-        }
       : {}),
   };
   if (run.lifecycle) {
@@ -1191,23 +1087,11 @@ export class DelegateWorkflowCoordinator {
           );
         return kind;
       });
-      if (
-        selector.include &&
-        selector.include.length === 0 &&
-        selector.view === undefined
-      )
+      if (selector.include && selector.include.length === 0)
         throw new Error('Symbolic workflow selector include cannot be empty.');
       if (include && new Set(include).size !== include.length)
         throw new Error(
           'Duplicate symbolic workflow input kinds are not allowed.',
-        );
-      if (
-        selector.view !== undefined &&
-        (typeof selector.view !== 'string' ||
-          !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(selector.view))
-      )
-        throw new Error(
-          'Invalid or noncanonical symbolic workflow selector view.',
         );
       if (
         selector.label !== undefined &&
@@ -1225,7 +1109,6 @@ export class DelegateWorkflowCoordinator {
         selector: Object.freeze({
           node: selector.node,
           ...(include ? { include: Object.freeze(include) } : {}),
-          ...(selector.view !== undefined ? { view: selector.view } : {}),
           ...(selector.label !== undefined ? { label: selector.label } : {}),
         }),
         identity: attempt.identity,

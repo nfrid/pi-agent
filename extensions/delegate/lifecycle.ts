@@ -36,7 +36,6 @@ const LIFECYCLE_REASONS: readonly DelegateLifecycleReason[] = [
   'provider-runner-error',
   'setup-failure',
   'lifecycle-cleanup-failure',
-  'child-result-invalid',
   'unknown',
 ];
 
@@ -130,8 +129,6 @@ export function buildLifecycleDiagnostic(
         return 'Delegate setup failed before the child launched.';
       case 'lifecycle-cleanup-failure':
         return 'The delegate finished, but lifecycle cleanup failed.';
-      case 'child-result-invalid':
-        return 'The child did not return a valid structured result.';
       case 'unknown':
         return 'The harness could not determine why the delegate did not settle successfully.';
     }

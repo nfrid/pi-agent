@@ -7,10 +7,9 @@ import type {
 import { copyDelegateLifecycle } from './lifecycle';
 import { buildParentHandoff } from './output';
 import {
-  boundPublicStructuredRuns,
   serializeDelegateRunForPublic,
   serializeDelegateRunForStaleSession,
-} from './structured-result';
+} from './serialize';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
 import {
@@ -133,16 +132,6 @@ export interface DelegateJobStartOptions {
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
-}
-
-function hideStructuredBranchValue(run: DelegatedRun): DelegatedRun {
-  const structured = run.structuredResult;
-  if (!structured?.valid || structured.value === undefined) return run;
-  const { value: _value, ...withoutValue } = structured;
-  return {
-    ...run,
-    structuredResult: { ...withoutValue, valueOmitted: true },
-  };
 }
 
 function aggregateState(
@@ -357,13 +346,9 @@ export class DelegateJobManager {
   ): DelegateJobSnapshot {
     const record = this.registry.require(job.id);
     if (!ctx || this.exactOwnerVisible(record, ctx)) return job;
-    const branchMismatch =
-      record.ownerBranchId !== undefined &&
-      this.isOwnerBranchActive !== undefined &&
-      !this.isOwnerBranchActive(record.ownerBranchId, ctx);
     const runs = job.runs?.map((run) => {
       const safe = serializeDelegateRunForStaleSession(run);
-      return branchMismatch ? hideStructuredBranchValue(safe) : safe;
+      return safe;
     });
     const { handoff: _handoff, ...safeJob } = job;
     return { ...safeJob, runs };
@@ -446,8 +431,7 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
         serializeDelegateRunForPublic(run),
       );
       if (!projectedRuns) return undefined;
-      const boundedRuns = boundPublicStructuredRuns(projectedRuns);
-      return boundedRuns.map((projected) => {
+      return projectedRuns.map((projected) => {
         // JSON-like job snapshots clone the enumerable run, so retain the
         // harness record for another trusted snapshot/owner-session projection.
         const clone = { ...projected };

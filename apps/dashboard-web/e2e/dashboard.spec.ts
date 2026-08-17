@@ -1812,45 +1812,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
               { type: 'thinking_level_change', thinkingLevel: 'medium' },
               {
                 type: 'custom_message',
-                customType: 'delegate-job-result',
-                display: true,
-                content: `# Background delegate job dj-1 (UX audit) success
-
-Delegated results: 1 run(s)
-
-Status: success
-Structured result: valid
-Projection: {"outcome":"done"}
-Note: Recovery completed after the final check.`,
-                details: {
-                  jobs: [
-                    {
-                      name: 'UX audit',
-                      state: 'success',
-                      runs: [
-                        {
-                          structuredResult: {
-                            valid: true,
-                            value: {
-                              outcome: 'done',
-                              findings: [
-                                {
-                                  filePath: 'src/App.tsx',
-                                  notes:
-                                    '## Finding notes\n\n- [dashboard](https://example.com)\n- use `code`\n\n```ts\nconst ready = true;\n```',
-                                },
-                              ],
-                            },
-                            errors: [],
-                          },
-                        },
-                      ],
-                    },
-                  ],
-                },
-              },
-              {
-                type: 'custom_message',
                 customType: 'background-terminal-result',
                 display: true,
                 content: 'Background build completed.',
@@ -2066,165 +2027,6 @@ Note: Recovery completed after the final check.`,
   const delegateEvent = page.locator('details.event-delegate-result');
   await expect(delegateResult).toBeVisible();
   await delegateResult.click();
-  const structuredDelegateResults = page.getByRole('region', {
-    name: 'Structured delegate results',
-  });
-  await expect(structuredDelegateResults).toBeVisible();
-  await expect(structuredDelegateResults).toContainText('Outcome');
-  await expect(structuredDelegateResults).toContainText('done');
-  await expect(structuredDelegateResults).toContainText('src/App.tsx');
-  await expect(
-    structuredDelegateResults.locator('.structured-result-markdown h2'),
-  ).toHaveText('Finding notes');
-  await expect(
-    structuredDelegateResults
-      .locator('.structured-result-markdown')
-      .getByRole('link', { name: 'dashboard' }),
-  ).toBeVisible();
-  await expect(
-    structuredDelegateResults
-      .locator('.structured-result-markdown code')
-      .first(),
-  ).toHaveText('code');
-  await expect(
-    structuredDelegateResults.locator('.structured-result-markdown pre code'),
-  ).toHaveText(/const ready = true;/);
-  await expect(structuredDelegateResults.getByText('Raw JSON')).toBeVisible();
-  const structuredPayload = structuredDelegateResults.locator(
-    '.structured-result-value',
-  );
-  const payloadRoot = structuredPayload
-    .locator('details.structured-result-node')
-    .first();
-  await expect(payloadRoot).toHaveAttribute('open', '');
-  const findingsSummary = structuredPayload
-    .locator('summary')
-    .filter({ hasText: 'Findings' });
-  const findingsNode = findingsSummary.locator('..');
-  await expect(findingsNode).toHaveAttribute('open', '');
-  await findingsSummary.click();
-  await expect(findingsNode).not.toHaveAttribute('open', '');
-  await findingsSummary.click();
-  await expect(findingsNode).toHaveAttribute('open', '');
-  const payloadOverflow = await structuredPayload.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(payloadOverflow.scrollWidth).toBeLessThanOrEqual(
-    payloadOverflow.clientWidth,
-  );
-  const structuredGeometry = await structuredPayload.evaluate((element) => {
-    const flowElements = Array.from(
-      element.querySelectorAll<HTMLElement>(
-        '.structured-result-summary, .structured-result-label, .structured-result-field-label, .structured-result-primitive',
-      ),
-    );
-    const list = element.querySelector<HTMLElement>('.structured-result-list');
-    const firstItem = list?.querySelector<HTMLElement>(
-      '.structured-result-list-item',
-    );
-    const firstItemLabel = firstItem?.querySelector<HTMLElement>(
-      '.structured-result-field-label, .structured-result-label',
-    );
-    const markdownHeading = element.querySelector<HTMLElement>(
-      '.structured-result-markdown .markdown h2',
-    );
-    const markdown = markdownHeading?.closest<HTMLElement>('.markdown');
-    const markdownItem = markdown?.querySelector<HTMLElement>('li');
-    const markdownPre = markdown?.querySelector<HTMLElement>('pre');
-    const markdownCode = markdown?.querySelector<HTMLElement>('pre code');
-    const structuralElements = Array.from(
-      element.querySelectorAll<HTMLElement>(
-        '.structured-result-node, .structured-result-fields, .structured-result-list, .structured-result-field, .structured-result-list-item, .structured-result-node-content, .structured-result-summary',
-      ),
-    );
-    const structuralStyles = structuralElements.map((structuralElement) => {
-      const style = getComputedStyle(structuralElement);
-      return {
-        border: [
-          style.borderTopWidth,
-          style.borderRightWidth,
-          style.borderBottomWidth,
-          style.borderLeftWidth,
-        ],
-        paddingLeft: style.paddingInlineStart,
-        paddingRight: style.paddingInlineEnd,
-        marginLeft: style.marginInlineStart,
-      };
-    });
-    const firstSummary = element.querySelector<HTMLElement>(
-      '.structured-result-node > summary',
-    );
-    const summaryMarker = firstSummary
-      ? getComputedStyle(firstSummary, '::after')
-      : undefined;
-    return {
-      lefts: flowElements.map((flowElement) =>
-        Math.round(flowElement.getBoundingClientRect().left),
-      ),
-      listLeft: list?.getBoundingClientRect().left,
-      listPadding: list ? getComputedStyle(list).paddingInlineStart : undefined,
-      listMargin: list ? getComputedStyle(list).marginInlineStart : undefined,
-      listStyle: list ? getComputedStyle(list).listStyleType : undefined,
-      itemStyle: firstItem
-        ? getComputedStyle(firstItem).listStyleType
-        : undefined,
-      firstItemLeft: firstItem?.getBoundingClientRect().left,
-      firstItemLabelLeft: firstItemLabel?.getBoundingClientRect().left,
-      markdownLeft: markdown?.getBoundingClientRect().left,
-      markdownHeadingLeft: markdownHeading?.getBoundingClientRect().left,
-      markdownItemLeft: markdownItem?.getBoundingClientRect().left,
-      markdownPreLeft: markdownPre?.getBoundingClientRect().left,
-      markdownCodeDisplay: markdownCode
-        ? getComputedStyle(markdownCode).display
-        : undefined,
-      structuralStyles,
-      summaryPaddingRight: firstSummary
-        ? getComputedStyle(firstSummary).paddingInlineEnd
-        : undefined,
-      summaryMarker: summaryMarker
-        ? { right: summaryMarker.right, content: summaryMarker.content }
-        : undefined,
-    };
-  });
-  expect(new Set(structuredGeometry.lefts).size).toBe(1);
-  expect(structuredGeometry.listPadding).toBe('0px');
-  expect(structuredGeometry.listMargin).toBe('0px');
-  expect(structuredGeometry.listStyle).toBe('none');
-  expect(structuredGeometry.itemStyle).toBe('none');
-  expect(structuredGeometry.firstItemLeft).toBe(structuredGeometry.listLeft);
-  expect(structuredGeometry.firstItemLabelLeft).toBe(
-    structuredGeometry.listLeft,
-  );
-  expect(structuredGeometry.markdownHeadingLeft).toBe(
-    structuredGeometry.markdownLeft,
-  );
-  expect(structuredGeometry.markdownItemLeft).toBe(
-    structuredGeometry.markdownLeft,
-  );
-  expect(structuredGeometry.markdownPreLeft).toBe(
-    structuredGeometry.markdownLeft,
-  );
-  expect(structuredGeometry.markdownCodeDisplay).toBe('inline');
-  expect(
-    structuredGeometry.structuralStyles.every(
-      ({ border, paddingLeft, paddingRight, marginLeft }) =>
-        border.every((width) => width === '0px') &&
-        paddingLeft === '0px' &&
-        marginLeft === '0px' &&
-        (paddingRight === '0px' || paddingRight === '14px'),
-    ),
-  ).toBe(true);
-  expect(structuredGeometry.summaryPaddingRight).toBe('14px');
-  expect(structuredGeometry.summaryMarker).toEqual({
-    right: '0px',
-    content: '"▾"',
-  });
-  expect(
-    await page
-      .locator('body')
-      .evaluate((element) => element.scrollWidth <= element.clientWidth),
-  ).toBe(true);
   await expect(delegateEvent).toContainText('Status: success');
   await expect(delegateEvent).toContainText(
     'Recovery completed after the final check.',
@@ -2232,8 +2034,6 @@ Note: Recovery completed after the final check.`,
   await expect(delegateEvent).not.toContainText(
     'Projection: {"outcome":"done"}',
   );
-  await delegateResult.click();
-  await expect(structuredDelegateResults).toHaveCount(0);
   await expect(
     page.getByText(/Background command finished · Dashboard build · 2s/),
   ).toBeVisible();
@@ -4818,7 +4618,6 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
                       },
                       { state: 'running', startedAt: delegateStartedAt },
                     ],
-                    result: { kind: 'structured', status: 'valid' },
                     lifecycle: {
                       reason: 'timeout',
                       diagnostic:

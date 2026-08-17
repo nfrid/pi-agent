@@ -46,30 +46,7 @@ const WakePayloadSchema = Type.Union([
   StringEnum(['handoff', 'metadata'] as const),
   Type.Object(
     {
-      view: Type.String({
-        minLength: 1,
-        maxLength: 64,
-        pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$',
-      }),
-      node: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
       kind: StringEnum(['handoff', 'metadata'] as const),
-      node: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      kind: Type.Literal('view'),
-      name: Type.String({
-        minLength: 1,
-        maxLength: 64,
-        pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$',
-      }),
       node: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     },
     { additionalProperties: false },

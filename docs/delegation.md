@@ -4,7 +4,7 @@ The delegate extension runs focused child agents using user-owned model routes. 
 
 ## Always-async workflow scheduling
 
-Normal model-facing delegation always schedules work and returns immediately. A fresh node supplies one stable logical `id` and an exact `route`; a continuation supplies `continue` and creates the next immutable attempt (`impl@1`, `impl@2`, …). Use `after` to bind exact dependency attempts and `inputs` to pipe symbolic reports, metadata, named views, or branch/snapshot references without copying them through the parent. A missing or invalid required input becomes a terminal `blocked` attempt with a bounded reason.
+Normal model-facing delegation always schedules work and returns immediately. A fresh node supplies one stable logical `id` and an exact `route`; a continuation supplies `continue` and creates the next immutable attempt (`impl@1`, `impl@2`, …). Use `after` to bind exact dependency attempts and `inputs` to pipe symbolic reports, handoffs, metadata, or branch/snapshot references without copying them through the parent. A missing or invalid required input becomes a terminal `blocked` attempt with a bounded reason.
 
 Register `delegate_wake` as a one-shot subscription before settling when work gates the next decision. It binds exact attempts and returns immediately. Select only the compact evidence the parent needs; the runtime queues delivery while the parent is busy and wakes an idle parent once. Send one concise waiting status and settle—do not poll with `delegate_jobs`. `delegate_jobs` is metadata-only status plus bounded feedback and cancellation; it never waits, consumes a report, or replaces a wake rule.
 
@@ -85,93 +85,17 @@ The safety bounds are 12 KiB for one result, 8 KiB per task in parallel, and 50 
 
 An exact-output artifact is created only when the parent handoff genuinely omits or truncates that original report. A report that fits does not get an artifact merely because its fields also appear in the envelope.
 
-## Schema-driven results
+## Completion contract
 
-A delegate call may include a `result` contract. Contracts are scoped to that
-invocation only: a continuation does not inherit the prior call's contract.
-Omit `result` on a continuation to return to the legacy prose contract, or
-supply a new task-level/top-level contract explicitly. The contract is
-independent for every parallel task; a top-level `result` is the shared default
-and a task-level `result` replaces it. A contract uses the compact `shape`
-form, which is the complete agent-facing result API:
+Delegates always return a concise prose report using `Outcome`, `Conclusion`,
+`Evidence`, `Risks`, and `Blocked` sections when applicable. There is no model-authored
+result schema or result tool. The parent-visible handoff bounds the report while
+retaining lifecycle metadata, branch/worktree information, and exact report artifacts
+when needed.
 
-```json
-{
-  "result": {
-    "shape": {
-      "outcome": ["done", "partial", "blocked"],
-      "summary": {
-        "$optional": { "$type": "string", "maxLength": 500 }
-      },
-      "findings": [{
-        "title": "string",
-        "severity": ["low", "medium", "high"]
-      }]
-    },
-    "projection": ["/outcome", "/findings/*/title"]
-  }
-}
-```
-
-Primitive strings (`string`, `number`, `integer`, `boolean`, and `null`) name
-types. Object fields are required by default. A one-item array declares a
-homogeneous list, while an array of two or more same-typed JSON literals declares
-an enum. Nest those forms to declare a list of enum values. An exact
-`{"$optional": shape}` wrapper makes one object field optional. A `$type`
-descriptor adds supported constraints, such as
-`{"$type":"string","minLength":1,"maxLength":500}`. Ordinary shape-object
-keys beginning with `$` are reserved for these operators. To use a safe
-`$`-prefixed result property, use the explicit object descriptor form, for
-example `{"$type":"object","properties":{"$metadata":"string"}}`.
-The dangerous names `__proto__`, `constructor`, and `prototype` remain
-rejected. Shapes are expanded deterministically into one closed bounded
-normalized representation used for child registration, validation, projection,
-and artifacts; JSON-schema syntax is an internal transport detail, not a
-parent-call compatibility form.
-
-Paths use canonical JSON-pointer-like syntax: `/` means the complete result,
-otherwise each segment is a declared object property. Use `projection: "all"` as
-shorthand for `projection: ["/"]`; explicit path arrays, including `["/"]`,
-remain supported. `~0` and `~1` encode `~` and `/`. Empty, `.`, `..`, numeric
-array indexes, arbitrary JSONPath, and bad
-escapes are rejected. Numeric object-property names are allowed when declared;
-array indexes must use `*`, not a numeric segment. The only wildcard is `*`,
-and it may select an array's items (`/findings/*/title`). A named view cannot
-use `/`, because that would expose the complete result. Projection paths select
-the compact parent completion; named view paths select separate JSON artifacts.
-The full result is never copied into parent content or enumerable delegate
-details. Human-facing delegate details, job snapshots, status surfaces, and
-dashboard transcript events carry only the bounded parent-visible projection;
-when its aggregate value budget cannot fit, they set `valueOmitted` and render
-an explicit unavailable notice. The complete validated result remains
-owner-session artifact-only (including named views), so these UI bounds never
-weaken artifact redaction.
-
-The global bounds are 16 KiB normalized-schema bytes, depth 8, 128 schema
-nodes, 64 array items, 4,096 Unicode characters per string, 64 KiB result
-bytes, 32 projection
-paths, 8 KiB projected bytes, and 16 named views. Schema/path errors are
-reported before child setup or launch. The child receives a dynamic terminating
-`delegate_result` tool and must call it exactly once as its final action; JSON
-in prose is not a structured result. If the first agent turn ends cleanly without
-that call, the child extension sends one hidden bounded follow-up in the same
-process/session; no follow-up is attempted after any result call, and the
-original hard timeout remains authoritative. Parent settlement validates the captured
-tool details once. Missing/malformed channels, wrong types, missing required
-properties, extra properties, enum violations, and limits make the run
-non-success with bounded validation errors.
-
-A valid result is stored as an immutable owner-session `delegate-output` JSON
-artifact. Only selected projections and lifecycle metadata appear in the
-parent envelope. Each named view is stored separately and registered against
-the full artifact handle in the owner session. The storage layer verifies
-that the selected bytes equal the declared source path; callers cannot write an
-arbitrary registry mapping. A source/name mapping is non-shadowable: conflicting
-append-only entries fail closed rather than remapping an existing view. Forward it with
-`handoffFrom: { "handle": "...", "view": "evidence" }`; the harness verifies
-current-session ownership and the registry, then frames only that view as
-untrusted evidence. Omitting `result` preserves the legacy prose report and
-artifact behavior exactly.
+Async composition uses prose `report` and `handoff` inputs, harness-authored
+`metadata`, and verified `branch` inputs. Register `delegate_wake` before settling
+when downstream work depends on an attempt.
 
 ### Failed-run lifecycle contract
 
@@ -179,10 +103,9 @@ Every errored, aborted, or timed-out run has a harness-authored `lifecycle`
 projection. Its `reason` is one of the stable observed codes
 `user-cancellation`, `queued-cancellation`, `timeout`,
 `child-nonzero-exit`, `provider-runner-error`, `setup-failure`,
-`lifecycle-cleanup-failure`, `child-result-invalid`, or `unknown`. These codes
+`lifecycle-cleanup-failure`, or `unknown`. These codes
 report only what the harness observed; they do not infer a provider-specific
-cause or retryability. Child prose and child structured-result fields cannot
-set or override the projection.
+cause or retryability. Child prose cannot set or override the projection.
 
 The projection contains exactly one actionable diagnostic: complete bounded
 text in `diagnostic`, or an owner-session exact `diagnosticArtifact` when the
@@ -201,12 +124,8 @@ reported as retained; a resumed setup failure may truthfully report the
 worktree still retained by its continuation session. A read-only diagnostic
 checkout and a retired read-only snapshot both count as read-only recovery
 resources until removed. The same projection is rendered for single and
-parallel results and for legacy job completion and inspection;
-missing or invalid structured child results receive the same contract. Invalid
-structured runs expose bounded harness validation/lifecycle diagnostics only;
-when the one missing-channel repair also ends without a result, that diagnostic
-may include a clearly labelled, UTF-8-bounded final-prose recovery excerpt.
-Structured result fields and ordinary child prose are never fallback channels.
+parallel results and for job completion and inspection. Child report prose is not
+interpreted as lifecycle metadata.
 
 ## Read-only delegates
 
@@ -314,8 +233,7 @@ bounded details view, then use:
 
 In TUI mode this opens a supported Pi `ctx.ui.custom({ overlay: true })`
 scrollable modal (`↑↓`, `PgUp/PgDn`, `Home/End`, `Esc`). It shows the bounded
-transcript Pi retained for the run; structured result payloads and private child
-thinking are intentionally not copied into public details. In RPC/headless
+transcript Pi retained for the run; private child thinking is intentionally not copied into public details. In RPC/headless
 modes the command falls back to a bounded notification because Pi does not
 provide a terminal modal there.
 

@@ -1807,15 +1807,6 @@ const DelegateHistoryActivitySchema = Type.Object(
   },
   { additionalProperties: false },
 );
-const DelegateHistoryStructuredResultSchema = Type.Object(
-  {
-    valid: Type.Boolean(),
-    value: Type.Optional(DelegateHistoryValueSchema),
-    valueOmitted: Type.Optional(Type.Boolean()),
-    errors: Type.Array(Type.String({ maxLength: 240 }), { maxItems: 16 }),
-  },
-  { additionalProperties: false },
-);
 const DelegateHistoryLifecycleSchema = Type.Object(
   {
     reason: Type.String({ minLength: 1, maxLength: 128 }),
@@ -1846,7 +1837,6 @@ const DelegateHistoryDetailsSchema = Type.Object(
         }),
       ),
     ),
-    structuredResult: Type.Optional(DelegateHistoryStructuredResultSchema),
     lifecycle: Type.Optional(DelegateHistoryLifecycleSchema),
     warnings: Type.Optional(
       Type.Array(Type.String({ maxLength: 512 }), { maxItems: 32 }),

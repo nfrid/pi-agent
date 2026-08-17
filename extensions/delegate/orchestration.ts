@@ -5,17 +5,14 @@ import type {
 import type { DelegateConfig } from './config';
 import { createDelegateControlChannel } from './control';
 import { createOpaqueId } from './identity';
-import { ensureDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
+import { ensureDelegateLifecycle } from './lifecycle';
 import {
   type BuiltDelegateTask,
   buildDelegatePlans,
   resolveDelegateHandoffs,
 } from './plans';
 import { mapWithConcurrency } from './runner';
-import {
-  setDelegateResultSpec,
-  settleDelegateResult,
-} from './structured-result';
+
 import {
   cleanupFreshPreparedTask,
   type PreparedDelegateTask,
@@ -91,7 +88,6 @@ export function pendingRuns(
         : item.session.token,
       warnings: item.warnings,
     });
-    setDelegateResultSpec(run, item.plan.resultSpec);
     return run;
   });
 }
@@ -237,21 +233,6 @@ async function runPreparedWithLifecycle(
     if (prepared.worktree) markLifecycleFailure(run, prepared.worktree, error);
     else throw error;
   }
-  // Settlement validation happens after the child and worktree lifecycle have
-  // both settled, and is idempotent for artifact materialization.
-  const lifecycleBeforeSettlement = ensureDelegateLifecycle(run);
-  const settlement = settleDelegateResult(run, prepared.plan.resultSpec);
-  if (
-    settlement &&
-    !settlement.valid &&
-    (!lifecycleBeforeSettlement ||
-      lifecycleBeforeSettlement.reason === 'unknown')
-  )
-    setDelegateLifecycle(
-      run,
-      'child-result-invalid',
-      settlement.errors.join('; '),
-    );
   ensureDelegateLifecycle(run);
   return run;
 }

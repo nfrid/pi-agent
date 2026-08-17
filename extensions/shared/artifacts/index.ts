@@ -15,19 +15,16 @@ export {
   retrieveArtifact,
 } from './retrieval';
 export {
-  type ArtifactViewPublication,
   artifactRoot,
   clearArtifactRoot,
   type PutArtifactOptions,
   putArtifact,
   recoverArtifactFromEntries,
   resolveArtifact,
-  resolveArtifactView,
   restoreArtifacts,
 } from './storage';
 export type {
   ArtifactMetadata,
-  ArtifactViewRegistryEntry,
   ContentClass,
   ProducerClass,
   PutArtifactInput,
@@ -35,7 +32,6 @@ export type {
 } from './types';
 export {
   ARTIFACT_ENTRY_TYPE,
-  ARTIFACT_VIEW_ENTRY_TYPE,
   MAX_ARTIFACT_BYTES,
 } from './types';
 export { validateMetadata } from './validation';

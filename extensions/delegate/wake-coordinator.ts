@@ -25,12 +25,10 @@ export const WAKE_MAX_PAYLOAD_SELECTORS = 8;
 export const WAKE_PAYLOAD_CAPS = {
   handoffBytes: 12 * 1024,
   metadataBytes: 8 * 1024,
-  viewBytes: 8 * 1024,
   aggregateBytes: 24 * 1024,
 } as const;
 
 const WAKE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-const VIEW_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const DEFAULT_OWNER_SESSION_ID = 'default';
 const DEFAULT_OWNER_EPOCH = 0;
 const MAX_OWNER_SESSION_ID_LENGTH = 256;
@@ -53,12 +51,10 @@ export type WakeCondition =
 export type WakePayloadSelector =
   | 'handoff'
   | 'metadata'
-  | { readonly view: string }
   | { readonly kind: 'handoff'; readonly node?: string }
-  | { readonly kind: 'metadata'; readonly node?: string }
-  | { readonly kind: 'view'; readonly name: string; readonly node?: string };
+  | { readonly kind: 'metadata'; readonly node?: string };
 
-export type WakePayloadKind = 'handoff' | 'metadata' | 'view';
+export type WakePayloadKind = 'handoff' | 'metadata';
 
 export interface CanonicalWakePayloadSelector {
   readonly kind: WakePayloadKind;
@@ -80,8 +76,6 @@ export interface WakePayloadSource {
   readonly handoff?: string;
   /** Compact lifecycle metadata, without messages or prose. */
   readonly metadata?: Record<string, unknown>;
-  /** Selected named structured views only. */
-  readonly views?: Readonly<Record<string, unknown>>;
 }
 
 export interface WakePayload extends WakePayloadSource {
@@ -367,24 +361,7 @@ function normalizePayloadSelector(
       kind: 'metadata',
       ...(node !== undefined ? { node } : {}),
     });
-  if (kind === 'view' && typeof candidate.name === 'string')
-    return normalizeView(candidate.name, node);
-  if (typeof candidate.view === 'string')
-    return normalizeView(candidate.view, node);
   throw new Error('Invalid wake payload selector.');
-}
-
-function normalizeView(
-  name: string,
-  node?: string,
-): CanonicalWakePayloadSelector {
-  if (!VIEW_NAME_PATTERN.test(name))
-    throw new Error('Invalid wake named view.');
-  return Object.freeze({
-    kind: 'view',
-    name,
-    ...(node !== undefined ? { node } : {}),
-  });
 }
 
 function normalizePayload(
@@ -401,8 +378,7 @@ function normalizePayload(
     throw new Error('Too many wake payload selectors.');
   const normalized = values.map(normalizePayloadSelector);
   const keys = normalized.map(
-    (selector) =>
-      `${selector.node ?? ''}:${selector.kind}:${selector.name ?? ''}`,
+    (selector) => `${selector.node ?? ''}:${selector.kind}`,
   );
   if (new Set(keys).size !== keys.length)
     throw new Error('Duplicate wake payload selectors are not allowed.');
@@ -1098,14 +1074,7 @@ export class WakeCoordinator {
           );
         const symbolic: SymbolicWorkflowSelector = {
           node: identity,
-          ...(selector.kind === 'handoff'
-            ? { include: ['handoff'] as const }
-            : selector.kind === 'metadata'
-              ? { include: ['metadata'] as const }
-              : {
-                  include: ['metadata'] as const,
-                  view: selector.name,
-                }),
+          include: [selector.kind],
         };
         const bound: BoundWorkflowSelector = Object.freeze({
           selector: Object.freeze(symbolic),
@@ -1129,7 +1098,7 @@ export class WakeCoordinator {
           )
             throw new Error('Wake handoff payload exceeds its bounded limit.');
           next = { ...current, handoff: selected.value };
-        } else if (selector.kind === 'metadata') {
+        } else {
           if (
             selected.value === undefined ||
             jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.metadataBytes
@@ -1141,21 +1110,6 @@ export class WakeCoordinator {
               string,
               unknown
             >,
-          };
-        } else {
-          if (
-            selected.value === undefined ||
-            jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.viewBytes
-          )
-            throw new Error(
-              `Wake view "${selector.name}" exceeds its bounded limit.`,
-            );
-          next = {
-            ...current,
-            views: Object.freeze({
-              ...(current.views ?? {}),
-              [selector.name ?? '']: cloneAndFreezeWakeJson(selected.value),
-            }),
           };
         }
         sourceValues.set(identity, next);
@@ -1178,7 +1132,6 @@ export class WakeCoordinator {
       sources: frozenSources,
       ...(only?.handoff !== undefined ? { handoff: only.handoff } : {}),
       ...(only?.metadata !== undefined ? { metadata: only.metadata } : {}),
-      ...(only?.views !== undefined ? { views: only.views } : {}),
     });
   }
 

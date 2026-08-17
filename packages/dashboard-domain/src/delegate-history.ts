@@ -157,14 +157,12 @@ function normalizedState(
   if (run.exitCode === -1) return 'running';
   if (run.stopReason === 'aborted') return 'aborted';
   if (run.exitCode === 124) return 'timed-out';
-  const structuredResultIsValid =
-    isRecord(run.structuredResult) && run.structuredResult.valid === true;
   if (
     run.stopReason === 'error' ||
     run.stopReason === 'aborted' ||
     (typeof run.exitCode === 'number' && run.exitCode !== 0) ||
     run.errorMessage ||
-    (!hasAssistantText(run) && !structuredResultIsValid)
+    !hasAssistantText(run)
   )
     return 'error';
   return 'success';
@@ -335,27 +333,6 @@ function publicDetails(run: RecordValue): DelegateHistoryDetails {
     details.activities = activities;
     if (run.activities.length > MAX_DELEGATE_HISTORY_DETAIL_ENTRIES)
       budget.truncated = true;
-  }
-  if (isRecord(run.structuredResult)) {
-    const structured: RecordValue = {
-      valid: run.structuredResult.valid === true,
-      errors: Array.isArray(run.structuredResult.errors)
-        ? run.structuredResult.errors.slice(0, 16).flatMap((error) => {
-            const text = boundedString(error, 240, budget);
-            return text ? [text] : [];
-          })
-        : [],
-    };
-    if (
-      Array.isArray(run.structuredResult.errors) &&
-      run.structuredResult.errors.length > 16
-    )
-      budget.truncated = true;
-    const value = boundedValue(run.structuredResult.value, 6, budget);
-    if (value !== undefined) structured.value = value;
-    if (run.structuredResult.valueOmitted === true)
-      structured.valueOmitted = true;
-    details.structuredResult = structured;
   }
   if (isRecord(run.lifecycle)) {
     const reason = boundedString(run.lifecycle.reason, 128, budget);
@@ -565,8 +542,6 @@ function projectRun(
   const context = validContext(run.context);
   if (context) projected.context = context;
   if (run.allowWrites === true) projected.allowWrites = true;
-  if (isRecord(run.structuredResult))
-    projected.structuredResult = { valid: run.structuredResult.valid === true };
   const hasError =
     typeof run.errorMessage === 'string' && run.errorMessage.trim().length > 0;
   if (hasError) projected.errorMessage = 'error';

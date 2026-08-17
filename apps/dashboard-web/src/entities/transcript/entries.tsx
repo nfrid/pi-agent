@@ -1,18 +1,11 @@
 import { useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
-import type {
-  TranscriptModelItem,
-  TranscriptStructuredResult,
-} from '../../transcript';
+import type { TranscriptModelItem } from '../../transcript';
 import { activityStepParts } from './activity';
 import { activityTitleLine } from './activity-lead';
 import { ActivityStepContent } from './activity-summary';
-import {
-  BoundedPayloadPreview,
-  StructuredResultSection,
-  ToolInspector,
-} from './inspector';
+import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
 
 function ThinkingBlobs({
@@ -50,34 +43,6 @@ function compactTokenCount(tokens: number): string {
     notation: 'compact',
     maximumFractionDigits: 0,
   }).format(tokens);
-}
-
-export function StructuredDelegateResults({
-  results,
-}: {
-  results: readonly TranscriptStructuredResult[];
-}) {
-  const occurrences = new Map<string, number>();
-  return (
-    <section
-      className="session-event-structured-results"
-      aria-label="Structured delegate results"
-    >
-      {results.map((result) => {
-        const occurrence = (occurrences.get(result.label) ?? 0) + 1;
-        occurrences.set(result.label, occurrence);
-        return (
-          <StructuredResultSection
-            ariaLabel={result.label}
-            key={`${result.label}-${occurrence}`}
-            rawJsonLabel={`${result.label} structured result JSON`}
-            result={result}
-            title={result.label}
-          />
-        );
-      })}
-    </section>
-  );
 }
 
 function TranscriptEventEntry({
@@ -123,16 +88,11 @@ function TranscriptEventEntry({
     ) : event.kind === 'delegate-result' ||
       event.kind === 'background-result' ||
       event.kind === 'custom-message' ? (
-      <>
-        {event.content ? (
-          <div className="session-event-details">
-            <Markdown>{event.content}</Markdown>
-          </div>
-        ) : null}
-        {event.kind === 'delegate-result' && event.structuredResults ? (
-          <StructuredDelegateResults results={event.structuredResults} />
-        ) : null}
-      </>
+      event.content ? (
+        <div className="session-event-details">
+          <Markdown>{event.content}</Markdown>
+        </div>
+      ) : null
     ) : null
   ) : null;
   const hasDetails =
@@ -142,9 +102,7 @@ function TranscriptEventEntry({
     ((event.kind === 'delegate-result' ||
       event.kind === 'background-result' ||
       event.kind === 'custom-message') &&
-      (Boolean(event.content) ||
-        (event.kind === 'delegate-result' &&
-          Boolean(event.structuredResults?.length))));
+      Boolean(event.content));
   const className = `session-event event-${event.kind}${failed ? ' event-failed' : ''}`;
   const heading = (
     <>

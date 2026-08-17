@@ -22,9 +22,9 @@ import { invalidParams } from './param-errors';
 import { buildDelegatePlans } from './plans';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { formatDelegateRoutingPrompt } from './routing';
+import { serializeDelegateRunForPublic } from './serialize';
 import { buildSessionSnapshotJsonl } from './session';
 import type { DelegateStatusStore } from './status';
-import { serializeDelegateRunForPublic } from './structured-result';
 import { rollbackPreparedDelegateTasks } from './task-lifecycle';
 import {
   buildSessionBoundArtifactBackedHandoff,
@@ -40,7 +40,7 @@ import { parseWorkflowReference } from './workflow-model';
 import { captureWorkInProgress } from './worktree';
 
 const DELEGATE_TOOL_DESCRIPTION =
-  'Schedule one focused child agent asynchronously. Choose a route, workspace mode, and either a prose or structured result contract; use after and inputs to compose work and delegate_wake to receive selected results.';
+  'Schedule one focused child agent asynchronously. Choose a route and workspace mode; children return concise prose reports. Use after and inputs to compose work and delegate_wake to receive reports, handoffs, branches, or metadata.';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -94,14 +94,6 @@ const HandoffArtifactSchema = Type.Object({
         'Optional label for the upstream evidence in the child prompt',
     }),
   ),
-  view: Type.Optional(
-    Type.String({
-      minLength: 1,
-      maxLength: 64,
-      pattern: '^[A-Za-z][A-Za-z0-9_-]*$',
-      description: 'Named schema-selected view of the full delegate artifact',
-    }),
-  ),
 });
 
 const HandoffFromListSchema = Type.Array(HandoffArtifactSchema, {
@@ -117,46 +109,8 @@ const HandoffFromSchema = Type.Union([
   HandoffFromListSchema,
 ]);
 
-const ResultProjectionSchema = Type.Optional(
-  Type.Union([
-    Type.Literal('all', {
-      description: 'Expose the complete bounded result to the parent',
-    }),
-    Type.Array(Type.String({ maxLength: 256 }), {
-      maxItems: 32,
-      description:
-        'Static result paths selected for the compact parent envelope; use "/" for the complete result',
-    }),
-  ]),
-);
-const ResultViewsSchema = Type.Optional(
-  Type.Record(
-    Type.String({
-      minLength: 1,
-      maxLength: 64,
-      pattern: '^[A-Za-z][A-Za-z0-9_-]*$',
-    }),
-    Type.String({ maxLength: 256 }),
-    { maxProperties: 16 },
-  ),
-);
-const ResultSpecSchema = Type.Object(
-  {
-    shape: Type.Optional(
-      Type.Any({
-        description:
-          'Recommended complete result shape: primitive type tokens; required-by-default object fields; one-item arrays for homogeneous lists; multi-literal arrays for enums; exact {$optional: shape} wrappers; and $type descriptors for constraints',
-      }),
-    ),
-    projection: ResultProjectionSchema,
-    views: ResultViewsSchema,
-  },
-  { additionalProperties: false },
-);
-
 export type DelegateHandoffFrom = Static<typeof HandoffArtifactSchema>;
 export type DelegateHandoffInput = Static<typeof HandoffFromSchema>;
-export type DelegateResultSpec = Static<typeof ResultSpecSchema>;
 
 const LogicalIdSchema = Type.String({
   minLength: 1,
@@ -176,13 +130,6 @@ const WorkflowInputSchema = Type.Object(
         StringEnum(['report', 'handoff', 'branch', 'metadata'] as const),
         { minItems: 1, maxItems: 4 },
       ),
-    ),
-    view: Type.Optional(
-      Type.String({
-        minLength: 1,
-        maxLength: 64,
-        pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$',
-      }),
     ),
     label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
   },
@@ -231,7 +178,6 @@ const TaskItem = Type.Object({
   refresh: Type.Optional(RefreshSchema),
   worktreePath: Type.Optional(WorktreePathSchema),
   handoffFrom: Type.Optional(HandoffFromSchema),
-  result: Type.Optional(ResultSpecSchema),
 });
 
 const DelegateCommonParamProperties = {
@@ -249,7 +195,6 @@ const DelegateCommonParamProperties = {
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
   worktreePath: Type.Optional(WorktreePathSchema),
-  result: Type.Optional(ResultSpecSchema),
 };
 
 type DelegateCommonParams = Omit<Static<typeof TaskItem>, 'continuation'> & {

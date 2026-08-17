@@ -387,7 +387,7 @@
   overflow-wrap: anywhere;
   color: var(--muted);
 }
-/* Structured results are one document flow: depth only controls disclosure. */
+/* Structured payloads are one document flow: depth only controls disclosure. */
 .structured-result-node,
 .structured-result-fields,
 .structured-result-list,

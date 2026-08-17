@@ -519,16 +519,7 @@ describe('delegate history adapter', () => {
           toolName: 'delegate',
           details: {
             mode: 'single',
-            runs: [
-              oldRun({
-                task: 'task '.repeat(20_000),
-                structuredResult: {
-                  valid: true,
-                  value: 'value '.repeat(20_000),
-                  errors: [],
-                },
-              }),
-            ],
+            runs: [oldRun({ task: 'task '.repeat(20_000) })],
           },
         },
       },
@@ -589,46 +580,6 @@ describe('delegate history adapter', () => {
       error: 'The runner failed safely.',
     });
     expect(JSON.stringify(detail)).not.toContain('private stderr');
-  });
-
-  it('keeps selected structured runs with absent messages valid', () => {
-    const branch = [
-      { type: 'session', id: 'parent-1' },
-      {
-        type: 'message',
-        id: 'result-empty-messages',
-        message: {
-          role: 'toolResult',
-          toolName: 'delegate',
-          details: {
-            mode: 'single',
-            runs: [
-              oldRun({
-                state: undefined,
-                messages: [],
-                structuredResult: { valid: true, errors: [] },
-              }),
-            ],
-          },
-        },
-      },
-    ];
-    const response = delegateHistoryFromBranch('parent-1', branch);
-    const detail = delegateHistoryRunDetailFromBranch(
-      'parent-1',
-      branch,
-      response.groups[0]?.runs[0]?.runId ?? '',
-      response.groups[0]?.runs[0]?.lineageId,
-    );
-    expect(response.groups[0]?.runs[0]).toMatchObject({ state: 'success' });
-    expect(detail.run).toMatchObject({
-      state: 'success',
-      details: {
-        structuredResult: { valid: true, errors: [] },
-        truncated: false,
-      },
-    });
-    expect(detail.run.details).not.toHaveProperty('response');
   });
 
   it('projects oversized persisted entries before summary and detail scans', () => {
