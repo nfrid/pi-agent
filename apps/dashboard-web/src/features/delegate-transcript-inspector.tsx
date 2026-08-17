@@ -382,7 +382,7 @@ function artifactHandle(row: DelegateStatus): string | undefined {
     : undefined;
 }
 
-function DelegateInspectorDetails({
+export function DelegateInspectorDetails({
   row,
   now,
 }: {

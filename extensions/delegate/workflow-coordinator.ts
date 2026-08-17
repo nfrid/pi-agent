@@ -742,8 +742,8 @@ export class DelegateWorkflowCoordinator {
             ...(record.allowWrites === undefined
               ? {}
               : { allowWrites: record.allowWrites }),
-            ...(record.inputMetadata.length > 0
-              ? { inputs: Object.freeze([...record.inputMetadata]) }
+            ...(record.inputs.length > 0
+              ? { inputs: inputMetadata(record.inputs) }
               : {}),
             ...(record.reason === undefined ? {} : { reason: record.reason }),
           });
@@ -911,7 +911,14 @@ export class DelegateWorkflowCoordinator {
           ),
         ),
         inputMetadata: Object.freeze(
-          (metadata.inputs ?? []).map((input) => Object.freeze({ ...input })),
+          (metadata.inputs ?? []).map((input) =>
+            Object.freeze({
+              ...input,
+              ...(input.include
+                ? { include: Object.freeze([...input.include]) }
+                : {}),
+            }),
+          ),
         ),
       };
       if (orphaned) {
@@ -1151,6 +1158,7 @@ export class DelegateWorkflowCoordinator {
         throw new Error(
           'Symbolic workflow selector label exceeds 120 characters.',
         );
+      const label = selector.label?.trim();
       const attempt = this.model.bind(selector.node);
       if (!this.records.has(attempt.identity))
         throw new Error(
@@ -1160,7 +1168,7 @@ export class DelegateWorkflowCoordinator {
         selector: Object.freeze({
           node: selector.node,
           ...(include ? { include: Object.freeze(include) } : {}),
-          ...(selector.label !== undefined ? { label: selector.label } : {}),
+          ...(label ? { label } : {}),
         }),
         identity: attempt.identity,
       });

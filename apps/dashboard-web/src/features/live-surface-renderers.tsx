@@ -291,6 +291,19 @@ export function delegateActivityLabel(
   return 'starting';
 }
 
+export function delegateRowActivityLabel(
+  row: DelegateInspectionStatus,
+  wakes: DelegateStatusViewModel['wakes'],
+  runState: string,
+  pauseState?: string,
+): string {
+  const waitingRelationship = delegateWaitingRelationship(row);
+  const action = delegateActivityLabel(row, runState, pauseState, false);
+  return [waitingRelationship ?? action, delegateWakeEffect(row, wakes)]
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
+}
+
 export function selectedDelegateInspectionRow(
   selectedLineageId: string | undefined,
   rows: readonly DelegateInspectionStatus[],
@@ -467,19 +480,13 @@ export function DelegateSurface({
                       const runState = stateLabel(rawState);
                       const pauseState = row.pauseState;
                       const state = pauseState ?? runState;
-                      const waitingRelationship =
-                        delegateWaitingRelationship(row);
-                      const wakeEffect = delegateWakeEffect(row, model.wakes);
-                      const action = delegateActivityLabel(
-                        row,
-                        runState,
-                        pauseState,
-                        false,
-                      );
                       const activityLabel = short(
-                        [waitingRelationship ?? action, wakeEffect]
-                          .filter((value): value is string => Boolean(value))
-                          .join(' · '),
+                        delegateRowActivityLabel(
+                          row,
+                          model.wakes,
+                          runState,
+                          pauseState,
+                        ),
                         140,
                       );
                       const name = short(row.name, 70);

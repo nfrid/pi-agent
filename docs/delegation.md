@@ -214,11 +214,12 @@ The normal model surface has no foreground/background choice, no `peek`, and no 
 
 ## TUI inspection bounds
 
-The delegate rail keeps all queued/running and failed, timed-out, or aborted
-rows visible. Successful history is capped at eight rows and the rail adds an
-explicit hidden-count line rather than letting old completions push active work
-off screen. Expanded parallel calls/results use the same policy for successful
-runs; the full run count and diagnostics remain in the result metadata.
+The delegate rail keeps all scheduled/queued/running and failed, timed-out, or
+aborted rows visible. Successful rows leave the rail immediately; when every
+tracked delegate succeeds, the rail disappears. Expanded parallel results keep
+up to eight successful runs and report omitted history explicitly. Full history
+and diagnostics remain available through `/delegates`, the dashboard, and
+result metadata.
 
 Expanded results separate `Result`, `Lifecycle / recovery`,
 `Continuation / worktree`, `Runtime`, `Usage`, and `Transcript` sections.

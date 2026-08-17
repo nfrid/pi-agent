@@ -458,7 +458,7 @@ function projectWorkflow(
   const identity = isCanonicalWorkflowAttemptReference(source.identity)
     ? source.identity
     : undefined;
-  const ordinal = source.ordinal;
+  const ordinal = hasWorkflowMetadata ? source.attempt : source.ordinal;
   if (
     logicalId === undefined ||
     identity === undefined ||
@@ -505,9 +505,7 @@ function projectWorkflow(
       : validWorkflowText(source.reason, 256);
   if (source.reason !== undefined && reason === undefined) return undefined;
   const canonicalRoute =
-    source.route === undefined
-      ? route
-      : stringValue(source.route, 512);
+    source.route === undefined ? route : stringValue(source.route, 512);
   if (source.route !== undefined && canonicalRoute === undefined)
     return undefined;
   return {
@@ -1453,6 +1451,7 @@ function invocation(
   const createdAt =
     queuedAt ??
     startedAt ??
+    finiteNumber(occurrence.run.createdAt) ??
     finishedAt ??
     occurrence.entryTimestamp ??
     occurrence.entryIndex;
@@ -1462,7 +1461,11 @@ function invocation(
   const route =
     (isRecord(occurrence.run.routing)
       ? stringValue(occurrence.run.routing.route, 512)
-      : undefined) ?? stringValue(occurrence.job?.route, 512);
+      : undefined) ??
+    (isRecord(occurrence.run.workflow)
+      ? stringValue(occurrence.run.workflow.route, 512)
+      : undefined) ??
+    stringValue(occurrence.job?.route, 512);
   const context = validContext(occurrence.run.context);
   const task = stringValue(occurrence.run.task, MAX_DELEGATE_HISTORY_TASK);
   const allowWrites =
@@ -1480,6 +1483,7 @@ function invocation(
   const workflowLogicalId = stringValue(workflowSource?.logicalId, 64);
   const workflowIdentity = stringValue(workflowSource?.identity, 80);
   const workflowAttempt = workflowSource?.attempt;
+  const workflowInputs = projectWorkflowInputs(workflowSource?.inputs);
   const workflow =
     workflowSource &&
     workflowLogicalId &&
@@ -1507,6 +1511,7 @@ function invocation(
                 ),
               }
             : {}),
+          ...(workflowInputs?.length ? { inputs: workflowInputs } : {}),
           state,
           createdAt,
           scheduledAt: finiteNumber(workflowSource.scheduledAt) ?? createdAt,

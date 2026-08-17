@@ -479,7 +479,7 @@ describe('DelegateWorkflowCoordinator', () => {
     const child = coordinator.schedule({
       logicalId: 'child',
       after: ['impl'],
-      inputs: [{ node: 'impl' }],
+      inputs: [{ node: 'impl', label: '   ' }],
       prepare,
     });
     expect(child).toMatchObject({
@@ -597,6 +597,13 @@ describe('DelegateWorkflowCoordinator', () => {
             state: 'scheduled',
             dependencies: ['upstream@1'],
             waitingFor: ['upstream@1'],
+            inputs: [
+              {
+                node: 'upstream',
+                identity: 'upstream@1',
+                include: ['report'],
+              },
+            ],
             createdAt: 11,
             scheduledAt: 21,
           },
@@ -604,6 +611,19 @@ describe('DelegateWorkflowCoordinator', () => {
       },
       'branch-restored',
     );
+
+    const restored = coordinator.require('dependent@1');
+    expect(restored.inputs).toMatchObject([
+      {
+        identity: 'upstream@1',
+        selector: { node: 'upstream', include: ['report'] },
+      },
+    ]);
+    expect(Object.isFrozen(restored.inputs?.[0]?.selector.include)).toBe(true);
+    const restoredMetadata = coordinator
+      .metadataSnapshot()
+      .attempts.find((attempt) => attempt.identity === 'dependent@1');
+    expect(Object.isFrozen(restoredMetadata?.inputs?.[0]?.include)).toBe(true);
 
     expect(coordinator.list()).toEqual(
       expect.arrayContaining([

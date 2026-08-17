@@ -268,7 +268,7 @@ function timing(row: DelegateInspectionStatus) {
   const startedAt = row.workflow?.startedAt ?? row.startedAt;
   const finishedAt = row.workflow?.settledAt ?? row.finishedAt;
   return {
-    state: row.workflow?.state ?? row.state,
+    state: row.state,
     ...(startedAt === undefined ? {} : { startedAt }),
     ...(finishedAt === undefined ? {} : { finishedAt }),
   };

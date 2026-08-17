@@ -11,9 +11,9 @@ import {
   delegateHistorySettledRunIds,
 } from './delegate-history';
 import {
+  DelegateInspectorDetails,
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
-  DelegateTranscriptInspector,
   delegateDetailHasError,
   delegateTranscriptItems,
   selectedDelegateRunId,
@@ -37,6 +37,7 @@ import {
 import {
   DelegateSurface,
   delegateActivityLabel,
+  delegateRowActivityLabel,
   selectedDelegateInspectionRow,
 } from './live-surface-renderers';
 
@@ -1055,109 +1056,95 @@ describe('live extension surface fixtures', () => {
     expect(markup).not.toContain('1m');
   });
 
-  it('renders logical workflow identity, dependency waits, and wake metadata', () => {
+  it('renders dependency waits and wake effects once without a wake block', () => {
+    const row = {
+      id: 'ds-review',
+      runId: 'run-review',
+      lineageId: 'lineage-review',
+      name: 'Review implementation',
+      kind: 'background' as const,
+      state: 'queued' as const,
+      createdAt: 1,
+      allowWrites: false,
+      workflow: {
+        logicalId: 'review',
+        attempt: 1,
+        identity: 'review@1',
+        state: 'scheduled' as const,
+        dependencies: ['impl@1'],
+        waitingFor: ['impl@1'],
+        reason: 'waiting for impl@1',
+        createdAt: 1,
+        scheduledAt: 1,
+      },
+    };
+    const wakes = [
+      {
+        id: 'review-ready',
+        state: 'pending' as const,
+        references: ['review@1'],
+        waitingFor: ['review@1'],
+        createdAt: 1,
+      },
+    ];
+    expect(delegateRowActivityLabel(row, wakes, 'queued')).toBe(
+      'after impl@1 · resumes parent',
+    );
     const markup = renderToStaticMarkup(
       <DelegateSurface
         surface={{
           id: 'delegate-workflow',
           rendererId: 'delegate.status',
-          viewModel: {
-            version: 1,
-            statuses: [
-              {
-                id: 'ds-review',
-                runId: 'run-review',
-                lineageId: 'lineage-review',
-                name: 'Review implementation',
-                kind: 'background',
-                state: 'queued',
-                createdAt: 1,
-                allowWrites: false,
-                workflow: {
-                  logicalId: 'review',
-                  attempt: 1,
-                  identity: 'review@1',
-                  state: 'scheduled',
-                  dependencies: ['impl@1'],
-                  waitingFor: ['impl@1'],
-                  reason: 'waiting for impl@1',
-                  createdAt: 1,
-                  scheduledAt: 1,
-                },
-              },
-            ],
-            wakes: [
-              {
-                id: 'review-ready',
-                state: 'pending',
-                references: ['review@1'],
-                waitingFor: ['review@1'],
-                createdAt: 1,
-              },
-            ],
-          },
+          viewModel: { version: 1, statuses: [row], wakes },
         }}
       />,
     );
-    expect(markup).toContain('review@1');
-    expect(markup).toContain('scheduled');
-    expect(markup).toContain('after impl@1');
-    expect(markup).toContain('resumes parent');
     expect(markup).not.toContain('Wake rules');
     expect(markup).not.toContain('review-ready');
-    expect(markup).not.toContain('pending');
     expect(markup).not.toContain('handoff');
     expect(markup).not.toContain('payload');
   });
 
   it('composes the current action with a parent wake effect', () => {
-    const markup = renderToStaticMarkup(
-      <DelegateSurface
-        surface={{
-          id: 'delegate-action-wake',
-          rendererId: 'delegate.status',
-          viewModel: {
-            version: 1,
-            statuses: [
-              {
-                id: 'ds-action-wake',
-                runId: 'run-action-wake',
-                lineageId: 'lineage-action-wake',
-                name: 'Running review',
-                kind: 'background',
-                state: 'running',
-                createdAt: 1,
-                allowWrites: false,
-                activity: {
-                  type: 'tool',
-                  label: 'Inspect files',
-                  latestText: 'current action',
-                  status: 'running',
-                },
-                workflow: {
-                  logicalId: 'review',
-                  attempt: 1,
-                  identity: 'review@1',
-                  state: 'running',
-                  dependencies: [],
-                  createdAt: 1,
-                  scheduledAt: 1,
-                },
-              },
-            ],
-            wakes: [
-              {
-                id: 'wake-review',
-                state: 'pending',
-                references: ['review@1'],
-                createdAt: 1,
-              },
-            ],
+    const row = {
+      id: 'ds-action-wake',
+      runId: 'run-action-wake',
+      lineageId: 'lineage-action-wake',
+      name: 'Running review',
+      kind: 'background' as const,
+      state: 'running' as const,
+      createdAt: 1,
+      allowWrites: false,
+      activity: {
+        type: 'tool' as const,
+        label: 'Inspect files',
+        latestText: 'current action',
+        status: 'running' as const,
+      },
+      workflow: {
+        logicalId: 'review',
+        attempt: 1,
+        identity: 'review@1',
+        state: 'running' as const,
+        dependencies: [],
+        createdAt: 1,
+        scheduledAt: 1,
+      },
+    };
+    expect(
+      delegateRowActivityLabel(
+        row,
+        [
+          {
+            id: 'wake-review',
+            state: 'pending',
+            references: ['review@1'],
+            createdAt: 1,
           },
-        }}
-      />,
-    );
-    expect(markup).toContain('current action · resumes parent');
+        ],
+        'running',
+      ),
+    ).toBe('current action · resumes parent');
   });
 
   it('renders bounded dependency and input relationships in the inspector', () => {
@@ -1180,7 +1167,7 @@ describe('live extension surface fixtures', () => {
           {
             node: 'impl',
             identity: 'impl@1',
-            include: ['report', 'branch'],
+            include: ['report' as const, 'branch' as const],
           },
         ],
         createdAt: 1,
@@ -1188,12 +1175,7 @@ describe('live extension surface fixtures', () => {
       },
     };
     const markup = renderToStaticMarkup(
-      <DelegateTranscriptInspector
-        row={row}
-        now={2_000}
-        isOpen
-        onClose={() => {}}
-      />,
+      <DelegateInspectorDetails row={row} now={2_000} />,
     );
     expect(markup).toContain('After');
     expect(markup).toContain('gate@1');
