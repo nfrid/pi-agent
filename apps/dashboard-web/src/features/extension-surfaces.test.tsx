@@ -996,6 +996,40 @@ describe('live extension surface fixtures', () => {
     expect(markup).not.toContain('Observed failure');
   });
 
+  it('uses canonical workflow state and timestamps in inspector metadata', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateInspectorMetadata
+        now={10_000}
+        row={{
+          id: 'd-workflow',
+          runId: 'run-workflow',
+          lineageId: 'lineage-workflow',
+          name: 'Settled delegate',
+          kind: 'background',
+          state: 'running',
+          createdAt: 1,
+          startedAt: 1_000,
+          finishedAt: 9_000,
+          allowWrites: false,
+          workflow: {
+            logicalId: 'review',
+            attempt: 1,
+            identity: 'review@1',
+            state: 'success',
+            dependencies: [],
+            createdAt: 1,
+            scheduledAt: 1,
+            startedAt: 8_000,
+            settledAt: 9_000,
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('done');
+    expect(markup).toContain('1s');
+    expect(markup).not.toContain('8s');
+  });
+
   it('uses per-delegate pause state and timestamp in inspector metadata', () => {
     const markup = renderToStaticMarkup(
       <DelegateInspectorMetadata
