@@ -16,6 +16,7 @@ import {
   DelegateInspectorTranscript,
   delegateDetailHasError,
   delegateTranscriptItems,
+  delegateTranscriptSessionId,
   selectedDelegateRunId,
 } from './delegate-transcript-inspector';
 import {
@@ -476,6 +477,33 @@ describe('live extension surface fixtures', () => {
       'run-2',
     );
     expect(selectedDelegateRunId('run-1', first, true)).toBe('run-2');
+  });
+
+  it('inspects the shared continuation session even when a selected run omitted it', () => {
+    const option = (
+      id: string,
+      sessionId?: string,
+    ): import('./delegate-transcript-inspector').DelegateInspectorRunOption => ({
+      id,
+      label: id,
+      row: {
+        id,
+        runId: id,
+        lineageId: 'lineage-1',
+        name: id,
+        kind: 'background',
+        state: 'success',
+        createdAt: 1,
+        allowWrites: false,
+        ...(sessionId ? { sessionId } : {}),
+      },
+    });
+    expect(
+      delegateTranscriptSessionId(option('run-1').row, [
+        option('run-1'),
+        option('run-2', 'child-session-shared'),
+      ]),
+    ).toBe('child-session-shared');
   });
 
   it('treats nullish successful detail errors as absent', () => {

@@ -721,6 +721,9 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
   if (typeof value.allowWrites === 'boolean')
     result.allowWrites = value.allowWrites;
   if (reason) result.reason = reason;
+  const sessionId = stringValue(value.sessionId, 256);
+  if (sessionId && validWorkflowText(sessionId, 256))
+    result.sessionId = sessionId;
   return result;
 }
 
@@ -787,6 +790,9 @@ function workflowStoreAttemptRun(metadata: RecordValue): RecordValue {
       ? {}
       : { finishedAt: metadata.settledAt }),
     allowWrites: metadata.allowWrites === true,
+    ...(stringValue(metadata.sessionId, 256)
+      ? { sessionId: metadata.sessionId }
+      : {}),
     workflow: metadata,
   };
 }

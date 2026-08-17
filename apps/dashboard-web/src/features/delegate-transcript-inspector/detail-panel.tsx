@@ -212,3 +212,19 @@ export function selectedDelegateRunId(
     return previousId;
   return options?.at(-1)?.id;
 }
+
+/** Continuations share one child session; inspect that session, not per-run parent details. */
+export function delegateTranscriptSessionId(
+  row: DelegateInspectionStatus,
+  runOptions?: readonly DelegateInspectorRunOption[],
+  detail?: DelegateInspectorDetailState,
+): string | undefined {
+  const candidates = [
+    detail?.run?.run.sessionId,
+    ...[...(runOptions ?? [])].reverse().map((run) => run.row.sessionId),
+    row.sessionId,
+  ];
+  return candidates.find(
+    (value): value is string => typeof value === 'string' && value.length > 0,
+  );
+}

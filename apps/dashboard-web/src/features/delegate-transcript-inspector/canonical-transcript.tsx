@@ -77,6 +77,7 @@ function DelegateCanonicalTranscript({
     data: snapshot,
     store,
     sessionMounted: mounted,
+    autoloadAll: true,
   });
   if (!mounted)
     return (
@@ -94,13 +95,18 @@ function DelegateCanonicalTranscript({
       className="delegate-canonical-session-transcript"
       aria-label="Canonical child session transcript"
     >
-      {history?.hasOlder && (
-        <SessionHistoryControl
-          loading={historyLoading}
-          error={historyError}
-          onLoad={() => void loadEarlierHistory()}
-        />
-      )}
+      {(historyLoading || historyError) &&
+        (historyError ? (
+          <SessionHistoryControl
+            loading={historyLoading}
+            error={historyError}
+            onLoad={() => void loadEarlierHistory()}
+          />
+        ) : (
+          <p className="delegate-transcript-loading" role="status">
+            Loading earlier child session history…
+          </p>
+        ))}
       <Transcript
         projection={projection}
         runtime={runtime}

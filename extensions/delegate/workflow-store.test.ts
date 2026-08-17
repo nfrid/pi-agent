@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { createRun } from './types';
 import { DelegateWorkflowCoordinator } from './workflow-coordinator';
 import {
   attachWorkflowStore,
@@ -155,6 +156,36 @@ describe('workflow store', () => {
       execute: async () => ({ runs: [], handoff: 'not persisted' }),
     });
     expect(entries).toHaveLength(0);
+  });
+
+  test('persists the canonical child session identity on settled attempts', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const entries: unknown[] = [];
+    attachWorkflowStore(coordinator, piFor(entries));
+    const run = createRun('review', undefined, {
+      sessionId: 'child-session-1',
+    });
+    run.state = 'success';
+    run.exitCode = 0;
+    coordinator.schedule({
+      logicalId: 'review',
+      mode: 'single',
+      tasks: ['review'],
+      execute: async () => ({ runs: [run], handoff: 'secret report' }),
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require('review@1').state).toBe('success'),
+    );
+    expect(coordinator.metadataSnapshot().attempts[0]).toMatchObject({
+      identity: 'review@1',
+      sessionId: 'child-session-1',
+    });
+    expect(latestWorkflowState(branch(entries))?.attempts[0]).toMatchObject({
+      identity: 'review@1',
+      sessionId: 'child-session-1',
+    });
+    expect(JSON.stringify(entries)).not.toContain('secret report');
+    await coordinator.dispose();
   });
 
   test('uses linear-sized deltas for hundreds of lifecycle metadata changes', async () => {

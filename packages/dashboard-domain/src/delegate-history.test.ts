@@ -1108,6 +1108,56 @@ describe('delegate history adapter', () => {
     expect(projected.data?.state?.attempts).toHaveLength(1);
   });
 
+  it('exposes persisted child session identity from workflow journal placeholders', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'custom',
+        id: 'workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                ownerBranchId: 'owner-a',
+                logicalId: 'review',
+                attempt: 1,
+                identity: 'review@1',
+                state: 'success',
+                dependencies: [],
+                waitingFor: [],
+                createdAt: 1,
+                scheduledAt: 1,
+                settledAt: 3,
+                sessionId: 'child-session-journal',
+              },
+            ],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups[0]).toMatchObject({
+      sessionId: 'child-session-journal',
+      runs: [{ sessionId: 'child-session-journal' }],
+    });
+    expect(JSON.stringify(response.groups[0]?.workflow)).not.toContain(
+      'child-session-journal',
+    );
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      response.groups[0]?.runId ?? '',
+      response.groups[0]?.lineageId,
+    );
+    expect(detail.run.sessionId).toBe('child-session-journal');
+    expect(parseDelegateHistoryResponse(response)).toEqual(response);
+    expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);
+  });
+
   it('fails closed on malformed durable workflow deltas', () => {
     const malformed = {
       type: 'custom',

@@ -12,5 +12,6 @@ export {
   DelegateTranscriptInspector,
   delegateDetailHasError,
   delegateTranscriptItems,
+  delegateTranscriptSessionId,
   selectedDelegateRunId,
 } from './delegate-transcript-inspector/index';

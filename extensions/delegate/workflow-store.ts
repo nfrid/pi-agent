@@ -189,6 +189,8 @@ function validAttempt(
     !validBoundedText(value.reason, MAX_WORKFLOW_HISTORY_REASON)
   )
     return false;
+  if (value.sessionId !== undefined && !validBoundedText(value.sessionId, 256))
+    return false;
   return true;
 }
 
@@ -279,6 +281,9 @@ function boundedState(
       ...(attempt.allowWrites === undefined
         ? {}
         : { allowWrites: attempt.allowWrites }),
+      ...(attempt.sessionId === undefined
+        ? {}
+        : { sessionId: attempt.sessionId }),
       ...(attempt.reason === undefined ? {} : { reason: attempt.reason }),
     }),
   );

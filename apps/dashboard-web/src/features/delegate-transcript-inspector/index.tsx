@@ -11,6 +11,7 @@ import {
   DelegateInspectorMetadata,
   type DelegateInspectorRunOption,
   delegateDetailHasError,
+  delegateTranscriptSessionId,
   selectedDelegateRunId,
 } from './detail-panel';
 
@@ -57,6 +58,14 @@ export function DelegateTranscriptInspector({
       ? delegateHistoryInvocationToStatus(detail.run.run)
       : undefined;
   const displayedRow = selectedDetail ?? inspectedRow;
+  const transcriptSessionId = delegateTranscriptSessionId(
+    row,
+    runOptions,
+    detail,
+  );
+  const transcriptRow = transcriptSessionId
+    ? { ...displayedRow, sessionId: transcriptSessionId }
+    : displayedRow;
   return (
     <SurfaceDrawer
       title="Delegate transcript"
@@ -90,24 +99,22 @@ export function DelegateTranscriptInspector({
             ))}
           </fieldset>
         )}
-        {detail?.loading && (
+        {detail?.loading && !transcriptSessionId && (
           <p className="delegate-transcript-loading" role="status">
             Loading persisted delegate transcript…
           </p>
         )}
-        {delegateDetailHasError(detail) && (
+        {delegateDetailHasError(detail) && !transcriptSessionId && (
           <p className="delegate-transcript-error" role="alert">
             Unable to load this persisted delegate transcript.
           </p>
         )}
-        {displayedRow.sessionId && (
+        {transcriptSessionId && (
           <button
             type="button"
             className="delegate-open-session"
             onClick={() =>
-              go(
-                `/sessions/${encodeURIComponent(displayedRow.sessionId ?? '')}`,
-              )
+              go(`/sessions/${encodeURIComponent(transcriptSessionId)}`)
             }
           >
             Open as session
@@ -115,7 +122,7 @@ export function DelegateTranscriptInspector({
         )}
         <DelegateInspectorDetails row={displayedRow} now={now} />
         <DelegateInspectorTranscript
-          row={displayedRow}
+          row={transcriptRow}
           store={store}
           isOpen={isOpen}
         />
@@ -132,5 +139,6 @@ export {
   DelegateInspectorMetadata,
   type DelegateInspectorRunOption,
   delegateDetailHasError,
+  delegateTranscriptSessionId,
   selectedDelegateRunId,
 } from './detail-panel';

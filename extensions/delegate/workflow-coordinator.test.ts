@@ -588,6 +588,7 @@ describe('DelegateWorkflowCoordinator', () => {
             scheduledAt: 20,
             queuedAt: 30,
             startedAt: 40,
+            sessionId: 'child-session-restored',
           },
           {
             ownerBranchId: 'branch-restored',
@@ -647,6 +648,11 @@ describe('DelegateWorkflowCoordinator', () => {
     );
     expect(coordinator.getResult('upstream@1')).toBeDefined();
     expect(coordinator.getResult('dependent@1')).toBeDefined();
+    expect(
+      coordinator
+        .metadataSnapshot()
+        .attempts.find((attempt) => attempt.identity === 'upstream@1'),
+    ).toMatchObject({ sessionId: 'child-session-restored' });
   });
 
   test('cancelling during async symbolic preparation prevents job launch', async () => {

@@ -167,6 +167,8 @@ export interface DelegateWorkflowMetadataSnapshot {
   readonly settledAt?: number;
   readonly route?: string;
   readonly allowWrites?: boolean;
+  /** Canonical Pi child session shared by this node's continuations. */
+  readonly sessionId?: string;
   readonly reason?: string;
 }
 
@@ -231,6 +233,8 @@ interface WorkflowRecord {
   continuationPredecessor?: AttemptIdentity;
   /** Canonical predecessor token captured before lazy preparation starts. */
   continuationToken?: string;
+  /** Canonical Pi child session shared by this node's continuations. */
+  sessionId?: string;
 }
 
 function inputMetadata(
@@ -264,6 +268,29 @@ function boundedReason(value: unknown): string {
   return normalized.length > MAX_WORKFLOW_REASON_LENGTH
     ? `${normalized.slice(0, MAX_WORKFLOW_REASON_LENGTH - 1)}…`
     : normalized;
+}
+
+function boundedSessionId(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256)
+    return undefined;
+  if (
+    [...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    return undefined;
+  return value;
+}
+
+function compactSessionId(
+  evidence: DelegateWorkflowResultRecord | undefined,
+): string | undefined {
+  return (
+    evidence?.runs.find((run) => run.sessionId)?.sessionId ??
+    evidence?.continuationToken ??
+    evidence?.runs.find((run) => run.continuation)?.continuation
+  );
 }
 
 function validateScheduleInput(options: DelegateWorkflowScheduleOptions): void {
@@ -712,45 +739,52 @@ export class DelegateWorkflowCoordinator {
     return Object.freeze({
       version: 1,
       attempts: Object.freeze(
-        this.list().map((record) => {
-          const waitingFor = record.dependencies.filter((identity) => {
-            const dependency = this.records.get(identity);
-            return (
-              dependency !== undefined &&
-              !isTerminalWorkflowAttemptState(dependency.state)
-            );
-          });
-          return Object.freeze({
-            ...(record.ownerBranchId
-              ? { ownerBranchId: record.ownerBranchId }
-              : {}),
-            logicalId: record.attempt.logicalId,
-            attempt: record.attempt.ordinal,
-            identity: record.attempt.identity,
-            state: record.state,
-            dependencies: Object.freeze([...record.dependencies]),
-            waitingFor: Object.freeze(waitingFor),
-            createdAt: record.createdAt,
-            scheduledAt: record.scheduledAt,
-            ...(record.queuedAt === undefined
-              ? {}
-              : { queuedAt: record.queuedAt }),
-            ...(record.startedAt === undefined
-              ? {}
-              : { startedAt: record.startedAt }),
-            ...(record.settledAt === undefined
-              ? {}
-              : { settledAt: record.settledAt }),
-            ...(record.route === undefined ? {} : { route: record.route }),
-            ...(record.allowWrites === undefined
-              ? {}
-              : { allowWrites: record.allowWrites }),
-            ...(record.inputs.length > 0
-              ? { inputs: inputMetadata(record.inputs) }
-              : {}),
-            ...(record.reason === undefined ? {} : { reason: record.reason }),
-          });
-        }),
+        this.model
+          .snapshot()
+          .attempts.map((attempt) => this.records.get(attempt.identity))
+          .filter((record): record is WorkflowRecord => record !== undefined)
+          .map((record) => {
+            const waitingFor = record.dependencies.filter((identity) => {
+              const dependency = this.records.get(identity);
+              return (
+                dependency !== undefined &&
+                !isTerminalWorkflowAttemptState(dependency.state)
+              );
+            });
+            return Object.freeze({
+              ...(record.ownerBranchId
+                ? { ownerBranchId: record.ownerBranchId }
+                : {}),
+              logicalId: record.attempt.logicalId,
+              attempt: record.attempt.ordinal,
+              identity: record.attempt.identity,
+              state: record.state,
+              dependencies: Object.freeze([...record.dependencies]),
+              waitingFor: Object.freeze(waitingFor),
+              createdAt: record.createdAt,
+              scheduledAt: record.scheduledAt,
+              ...(record.queuedAt === undefined
+                ? {}
+                : { queuedAt: record.queuedAt }),
+              ...(record.startedAt === undefined
+                ? {}
+                : { startedAt: record.startedAt }),
+              ...(record.settledAt === undefined
+                ? {}
+                : { settledAt: record.settledAt }),
+              ...(record.route === undefined ? {} : { route: record.route }),
+              ...(record.allowWrites === undefined
+                ? {}
+                : { allowWrites: record.allowWrites }),
+              ...(boundedSessionId(record.sessionId)
+                ? { sessionId: record.sessionId }
+                : {}),
+              ...(record.selectors.length > 0
+                ? { inputs: inputMetadata(record.selectors) }
+                : {}),
+              ...(record.reason === undefined ? {} : { reason: record.reason }),
+            });
+          }),
       ),
     });
   }
@@ -924,6 +958,7 @@ export class DelegateWorkflowCoordinator {
           ),
         ),
       };
+      this.rememberChildSession(record, metadata.sessionId);
       if (orphaned) {
         record.result = compactResult(
           setupFailureResult(record, WORKFLOW_RELOAD_ORPHAN_REASON),
@@ -1289,6 +1324,7 @@ export class DelegateWorkflowCoordinator {
         ? canonicalContinuationToken(predecessorResult)
         : undefined;
       record.continuationToken = continuationToken;
+      this.rememberChildSession(record, continuationToken);
       const resolved = resolveWorkflowInputs(record.selectors, (identity) =>
         this.sourceFor(identity),
       );
@@ -1554,6 +1590,10 @@ export class DelegateWorkflowCoordinator {
     const evidence = compactResult(result);
     record.result = evidence;
     this.results.set(record.attempt.identity, evidence);
+    this.rememberChildSession(
+      record,
+      compactSessionId(evidence) ?? record.continuationToken,
+    );
     if (isTerminalWorkflowAttemptState(record.state)) {
       record.launch = undefined;
       // Drop lazy closures immediately. A late preparation still writes its
@@ -1604,6 +1644,10 @@ export class DelegateWorkflowCoordinator {
       record.result = evidence;
       this.results.set(record.attempt.identity, evidence);
     }
+    this.rememberChildSession(
+      record,
+      compactSessionId(record.result) ?? record.continuationToken,
+    );
     // The launch adapter can close over child sessions and execution state.
     // Once terminal evidence exists, drop it rather than keeping that graph
     // alive alongside the compact canonical record.
@@ -1636,6 +1680,14 @@ export class DelegateWorkflowCoordinator {
   ): void {
     assertWorkflowAttemptTransition(record.state, state);
     record.state = state;
+  }
+
+  private rememberChildSession(
+    record: WorkflowRecord,
+    sessionId: string | undefined,
+  ): void {
+    const next = boundedSessionId(sessionId);
+    if (next) record.sessionId = next;
   }
 
   private snapshotRecord(

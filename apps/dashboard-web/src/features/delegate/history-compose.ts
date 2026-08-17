@@ -497,21 +497,36 @@ function groupModel(
     ...run,
     label: runLabel(index, run.row, index === currentIndex),
   }));
+  const inheritedSessionId = [...labeledRuns]
+    .reverse()
+    .find((run) => run.row.sessionId)?.row.sessionId;
+  const sessionRuns =
+    inheritedSessionId === undefined
+      ? labeledRuns
+      : labeledRuns.map((run) =>
+          run.row.sessionId
+            ? run
+            : {
+                ...run,
+                row: { ...run.row, sessionId: inheritedSessionId },
+              },
+        );
   const latest =
-    (currentIndex >= 0 ? labeledRuns[currentIndex]?.row : undefined) ??
-    labeledRuns.at(-1)?.row;
+    (currentIndex >= 0 ? sessionRuns[currentIndex]?.row : undefined) ??
+    sessionRuns.at(-1)?.row;
   if (!latest) throw new Error('Delegate history lineage has no runs.');
   const row: DelegateInspectionStatus = {
     ...latest,
     id: group.lineageId,
     lineageId: group.lineageId,
-    runCount: labeledRuns.length,
-    runs: labeledRuns.map((run) => timing(run.row)),
+    runCount: sessionRuns.length,
+    runs: sessionRuns.map((run) => timing(run.row)),
+    ...(inheritedSessionId ? { sessionId: inheritedSessionId } : {}),
   };
   return {
     lineageId: group.lineageId,
     row,
-    runs: labeledRuns,
+    runs: sessionRuns,
     section: sectionFor(row, live !== undefined),
   };
 }

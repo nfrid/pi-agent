@@ -152,6 +152,101 @@ describe('useOlderSessionHistory', () => {
     }
   });
 
+  it('drains remaining older pages when autoloadAll is set', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const store = new DashboardLiveStore();
+    const metadata = {
+      id: 'session-1',
+      file: '/tmp/session.jsonl',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    const active: AuthoritativeSessionSnapshot['active'] = {
+      pendingInteractions: [],
+      messages: [],
+      tools: [],
+      delegates: [],
+      truncated: false,
+    };
+    const initial = {
+      serverId: 'daemon-1',
+      cursor: 1,
+      metadata,
+      entries: [
+        { type: 'message', id: 'newest', message: { role: 'assistant' } },
+      ],
+      history: {
+        version: 1 as const,
+        start: 20,
+        end: 30,
+        hasOlder: true,
+        nextBefore: 'before-20',
+      },
+      entriesComplete: true,
+      active,
+      completeThroughCursor: true,
+    } as AuthoritativeSessionSnapshot;
+    store.hydrateSession(initial);
+    const pages = [
+      {
+        ...initial,
+        entries: [
+          { type: 'message', id: 'middle', message: { role: 'assistant' } },
+        ],
+        history: {
+          version: 1 as const,
+          start: 10,
+          end: 20,
+          hasOlder: true,
+          nextBefore: 'before-10',
+        },
+      },
+      {
+        ...initial,
+        entries: [
+          { type: 'message', id: 'oldest', message: { role: 'assistant' } },
+        ],
+        history: {
+          version: 1 as const,
+          start: 0,
+          end: 10,
+          hasOlder: false,
+        },
+      },
+    ];
+    const sessionBefore = vi
+      .spyOn(dashboardHttpClient, 'sessionBefore')
+      .mockImplementation(async () => {
+        const page = pages.shift();
+        if (!page) throw new Error('unexpected request');
+        return page;
+      });
+    function Probe() {
+      useOlderSessionHistory({
+        id: 'session-1',
+        data: initial,
+        store,
+        sessionMounted: true,
+        autoloadAll: true,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe));
+      });
+      await vi.waitFor(() => expect(sessionBefore).toHaveBeenCalledTimes(2));
+      expect(
+        store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+      ).toEqual(['oldest', 'middle', 'newest']);
+    } finally {
+      sessionBefore.mockRestore();
+      renderer?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('retries transparently when the authoritative window changes before commit', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const store = new DashboardLiveStore();

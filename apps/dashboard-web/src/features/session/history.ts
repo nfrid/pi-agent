@@ -105,12 +105,15 @@ export function useOlderSessionHistory({
   store,
   scrollElementRef,
   sessionMounted,
+  autoloadAll = false,
 }: {
   id: string;
   data: SessionApiResponse | undefined;
   store: DashboardLiveStore;
   sessionMounted: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
+  /** Drain remaining older pages without a user pagination control. */
+  autoloadAll?: boolean;
 }) {
   const coverage = useDashboardStore(store, selectSessionHistoryCoverage(id));
   const [history, setHistory] = useState<SessionApiResponse['history']>();
@@ -479,15 +482,18 @@ export function useOlderSessionHistory({
 
   // A partial head is never rendered as a hanging activity. Resolve its owner
   // automatically; the visible control remains available for retry/error UI.
+  // Inspectors can also drain every remaining older page so the composed
+  // transcript is complete without a pagination control.
   useEffect(() => {
-    if (
-      !sessionMounted ||
-      !history?.leadingContinuation ||
-      historyRequestRef.current
-    )
-      return;
+    if (!sessionMounted || historyRequestRef.current) return;
+    const shouldAutoload =
+      Boolean(history?.leadingContinuation) ||
+      (autoloadAll &&
+        history?.hasOlder === true &&
+        Boolean(history.nextBefore));
+    if (!shouldAutoload) return;
     void loadEarlierHistory();
-  }, [history, loadEarlierHistory, sessionMounted]);
+  }, [autoloadAll, history, loadEarlierHistory, sessionMounted]);
 
   return {
     history,

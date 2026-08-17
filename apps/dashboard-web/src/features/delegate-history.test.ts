@@ -244,6 +244,33 @@ describe('delegate history composition', () => {
     expect(model.groups[0]?.runs[0]?.row.historyIncomplete).toBe(true);
   });
 
+  it('reuses the continuation child session across historical runs', () => {
+    const model = composeDelegateHistory(
+      {
+        ...history,
+        groups: [
+          {
+            ...history.groups[0],
+            sessionId: 'child-session-shared',
+            runs: [
+              history.groups[0].runs[0],
+              {
+                ...history.groups[0].runs[1],
+                sessionId: 'child-session-shared',
+              },
+            ],
+          },
+        ],
+      },
+      [],
+    );
+    expect(model.groups[0]?.row.sessionId).toBe('child-session-shared');
+    expect(model.groups[0]?.runs.map((run) => run.row.sessionId)).toEqual([
+      'child-session-shared',
+      'child-session-shared',
+    ]);
+  });
+
   it('uses durable history without requiring a runtime surface', () => {
     const model = composeDelegateHistory(history, []);
     expect(model.groups[0]?.section).toBe('history');
