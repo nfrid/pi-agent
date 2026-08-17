@@ -149,30 +149,6 @@
   font-size: 8px;
   font-style: normal;
 }
-.session-status.status-working i {
-  color: var(--green);
-}
-.session-status.status-compacting i {
-  color: var(--purple);
-  animation: tui-pulse 1.2s steps(2, end) infinite;
-}
-.session-status.status-waiting i {
-  color: var(--purple);
-}
-.session-status.status-paused i,
-.session-status.status-input i {
-  color: var(--orange);
-}
-.session-status.status-failed i,
-.session-status.status-aborting i,
-.session-status.status-stopping i {
-  color: var(--red);
-}
-@media (prefers-reduced-motion: reduce) {
-  .session-status.status-compacting i {
-    animation: none;
-  }
-}
 .session-heading-actions {
   display: flex;
   align-items: center;
@@ -234,7 +210,7 @@
   margin: 0 0 6px;
 }
 .extension-surface {
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg-alt) 76%, var(--bg));
   box-shadow: none;

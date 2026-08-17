@@ -75,7 +75,7 @@
 
 .detail small {
   flex: 0 0 auto;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 999px;
   padding: 1px 5px;
   color: var(--dim);

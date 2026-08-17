@@ -7,6 +7,7 @@ import {
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { errorMessage } from '../shared/lib/error-message';
 import styles from './notifications.module.css';
 import { DashboardTime } from './timestamp';
 import { parseUsage, type UsageWindow } from './usage-indicator';
@@ -126,7 +127,7 @@ export function NotificationList({
         queryKey: ['dashboard', 'notifications'],
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   const markAllRead = async () => {
@@ -137,7 +138,7 @@ export function NotificationList({
         queryKey: ['dashboard', 'notifications'],
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   return (

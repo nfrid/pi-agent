@@ -15,6 +15,7 @@ import {
   renderDashboardContribution,
   resolveDashboardRenderer,
 } from '../renderer-registry';
+import { errorMessage } from '../shared/lib/error-message';
 
 export type InteractionKeyAction =
   | { type: 'move'; index: number }
@@ -217,7 +218,7 @@ function InteractionCard({
       else throw new Error('Answer action is not supported by this runtime.');
       setSent(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   const cancel = async () => {
@@ -238,7 +239,7 @@ function InteractionCard({
       else throw new Error('Cancel action is not supported by this runtime.');
       setSent(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   const selectChoice = (index: number) => {

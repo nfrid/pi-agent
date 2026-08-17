@@ -8,4 +8,4 @@ export {
   ComposerThinkingControl,
 } from './controls';
 export { MarkdownComposerEditor } from './editor';
-export { ComposerRichSurface } from './shell';
+export { ComposerRichSurface, ComposerShell } from './shell';

@@ -3,7 +3,7 @@
 .panel {
   order: 0;
   margin: 0 0 5px;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg-alt) 65%, transparent);
   overflow: hidden;
@@ -18,11 +18,11 @@
   border-bottom: 1px solid var(--line-soft);
   color: var(--muted);
   font-size: 10px;
-}
 
-.heading :global(.eyebrow) {
-  margin: 0;
-  color: var(--orange);
+  :global(.eyebrow) {
+    margin: 0;
+    color: var(--orange);
+  }
 }
 
 .list {

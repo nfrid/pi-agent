@@ -29,7 +29,7 @@
   gap: 8px;
   min-width: 0;
   margin-top: 6px;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg) 42%, transparent);
   padding: 5px;
@@ -37,7 +37,7 @@
 .composer.dragging {
   border-style: dashed;
   border-color: var(--cyan);
-  background: #343746cc;
+  background: var(--bg-alt-80);
 }
 .composer-actions {
   display: flex;
@@ -68,7 +68,7 @@
 }
 .composer-attach:hover {
   border-color: var(--cyan);
-  background: #8be9fd12;
+  background: var(--cyan-7);
 }
 .composer-attach:disabled,
 .composer-send:disabled,
@@ -114,7 +114,7 @@
   height: 20px;
   border: 1px solid var(--fg);
   border-radius: 50%;
-  background: #282a36dd;
+  background: var(--bg-87);
   color: var(--fg);
   line-height: 1;
   padding: 0;
@@ -165,7 +165,7 @@
 }
 .composer-abort:hover {
   border-color: var(--pink);
-  background: #ff79c612;
+  background: var(--pink-7);
   color: var(--pink);
 }
 .composer-mode {
@@ -187,7 +187,7 @@
 .composer-mode button.selected {
   border-color: var(--pink);
   color: var(--pink);
-  background: #ff79c612;
+  background: var(--pink-7);
 }
 .context-indicator {
   margin-left: auto;

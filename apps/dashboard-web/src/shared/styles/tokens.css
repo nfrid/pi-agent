@@ -16,4 +16,43 @@
   --tool-pending: #303241;
   --tool-success: #263a33;
   --tool-error: #3b2832;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-pill: 999px;
+
+  /* Micro-label typography */
+  --label-size: 10px;
+  --label-tracking: 0.12em;
+
+  /* Borders */
+  --border-soft: 1px solid var(--line-soft);
+
+  /* Focus */
+  --focus-ring: 2px solid var(--pink);
+  --focus-ring-offset: 2px;
+
+  /* Pre-mixed alphas */
+  --pink-7: color-mix(in srgb, var(--pink) 7%, transparent);
+  --pink-10: color-mix(in srgb, var(--pink) 10%, transparent);
+  --purple-5: color-mix(in srgb, var(--purple) 5%, transparent);
+  --purple-hover-bg: color-mix(in srgb, var(--purple) 11%, transparent);
+  --cyan-7: color-mix(in srgb, var(--cyan) 7%, transparent);
+  --orange-9: color-mix(in srgb, var(--orange) 9%, transparent);
+  --orange-12: color-mix(in srgb, var(--orange) 12%, transparent);
+  --orange-15: color-mix(in srgb, var(--orange) 15%, transparent);
+  --scrim-dark: color-mix(in srgb, #181923 60%, transparent);
+  --scrim-dark-heavy: color-mix(in srgb, #181923 67%, transparent);
+  --scrim-warm: color-mix(in srgb, #28231f 60%, transparent);
+  --bg-alt-80: color-mix(in srgb, var(--bg-alt) 80%, transparent);
+  --bg-87: color-mix(in srgb, var(--bg) 87%, transparent);
 }

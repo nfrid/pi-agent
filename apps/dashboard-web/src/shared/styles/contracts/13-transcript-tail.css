@@ -153,7 +153,7 @@
     overflow: hidden;
     flex-direction: column;
     gap: 3px;
-    border: 1px solid var(--line-soft);
+    border: var(--border-soft);
     border-radius: 6px;
     background: color-mix(in srgb, var(--bg-alt) 97%, transparent);
     box-shadow: 0 7px 24px #0008;

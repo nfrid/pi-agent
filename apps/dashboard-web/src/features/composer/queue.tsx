@@ -13,6 +13,7 @@ import {
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { errorMessage } from '../../shared/lib/error-message';
 import styles from './queue.module.css';
 
 export type QueuedMessage = {
@@ -224,7 +225,7 @@ export function QueuePanel({
       );
       setEditingId(undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   const remove = async (item: QueuedMessage) => {
@@ -240,7 +241,7 @@ export function QueuePanel({
       );
       if (editingId === item.id) setEditingId(undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   if (!items.length) return null;
@@ -249,16 +250,16 @@ export function QueuePanel({
       className={`queue-panel ${styles.panel}`}
       aria-label="Queued messages"
     >
-      <div className={`queue-heading ${styles.heading}`}>
+      <div className={styles.heading}>
         <span className="eyebrow">Queue</span>
         <span>{items.length} waiting</span>
       </div>
-      <div className={`queue-list ${styles.list}`}>
+      <div className={styles.list}>
         {items.map((item) => {
           const editing = editingId === item.id;
           return (
-            <div className={`queue-item ${styles.item}`} key={item.id}>
-              <span className={`queue-mode queue-${item.mode} ${styles.mode}`}>
+            <div className={styles.item} key={item.id}>
+              <span className={`queue-${item.mode} ${styles.mode}`}>
                 {item.mode === 'steer' ? 'steer' : 'follow-up'}
               </span>
               {editing ? (
@@ -276,9 +277,9 @@ export function QueuePanel({
                   disabled={mutation.isPending}
                 />
               ) : (
-                <span className={`queue-text ${styles.text}`}>{item.text}</span>
+                <span className={styles.text}>{item.text}</span>
               )}
-              <div className={`queue-actions ${styles.actions}`}>
+              <div className={styles.actions}>
                 {editing ? (
                   <AriaButton
                     type="button"
@@ -310,7 +311,7 @@ export function QueuePanel({
         })}
       </div>
       {error && (
-        <p className={`error queue-error ${styles.error}`} role="alert">
+        <p className={`error ${styles.error}`} role="alert">
           {error}
         </p>
       )}

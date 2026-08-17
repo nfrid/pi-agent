@@ -1,0 +1,121 @@
+/* Global extension contract: dynamic contribution states, work surfaces, and queue vocabulary. */
+.skill-invocation {
+  border-left: 2px solid var(--purple);
+  padding-left: 8px;
+}
+.skill-invocation :where(details > summary) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  cursor: pointer;
+  list-style: none;
+}
+.skill-invocation :where(details > summary)::-webkit-details-marker {
+  display: none;
+}
+.skill-invocation :where(details > summary) strong {
+  color: var(--fg);
+}
+.skill-invocation :where(details > summary) small {
+  color: var(--dim);
+}
+.skill-invocation-details {
+  max-height: min(52vh, 440px);
+  overflow: auto;
+  border-top: 1px solid var(--line-soft);
+  padding: 8px 0 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.skill-invocation-details > small {
+  color: var(--dim);
+}
+.skill-invocation-request {
+  border-top: 1px solid var(--line-soft);
+  margin-top: 4px;
+  padding-top: 7px;
+  color: var(--fg);
+  font-size: 12px;
+}
+.skill-invocation-request > strong {
+  color: var(--purple);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+/* Live extension cards retain the compact status density of the TUI. */
+.extension-surfaces {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 7px;
+  width: 100%;
+  margin: 0 0 7px;
+}
+.pause-status {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.25rem 0;
+  text-align: center;
+}
+
+.extension-surface-slot {
+  min-width: 0;
+}
+.extension-surface-slot:empty,
+.extension-surfaces:not(:has(.extension-surface)) {
+  display: none;
+}
+.extension-surface {
+  min-width: 0;
+  border: var(--border-soft);
+  background: color-mix(in srgb, var(--bg-alt) 92%, var(--purple));
+  box-shadow: 0 5px 16px #0002;
+}
+.surface-title {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.surface-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.surface-chevron {
+  color: var(--purple);
+  font-size: 15px;
+  text-align: right;
+}
+.surface-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 10px;
+}
+.surface-running {
+  color: var(--green);
+}
+.surface-pausing,
+.surface-paused {
+  color: var(--orange);
+}
+.surface-done {
+  color: var(--green);
+}
+.surface-failed {
+  color: var(--red);
+}
+.surface-aborted {
+  color: var(--orange);
+}
+.surface-dropped {
+  color: var(--dim);
+}
+.surface-queued {
+  color: var(--muted);
+}

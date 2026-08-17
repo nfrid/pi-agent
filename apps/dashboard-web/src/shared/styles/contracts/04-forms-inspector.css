@@ -7,7 +7,7 @@
 }
 .diagnostics {
   background: var(--bg-alt);
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   padding: 16px;
 }
 .diagnostics strong {
@@ -31,7 +31,7 @@
   display: grid;
   place-items: start center;
   padding: 12vh 12px 24px;
-  background: #181923aa;
+  background: var(--scrim-dark-heavy);
 }
 .command-palette {
   width: min(620px, calc(100vw - 24px));
@@ -80,7 +80,7 @@
 .palette-list button:hover,
 .palette-list button.palette-selected {
   border-color: var(--purple);
-  background: #bd93f91c;
+  background: var(--purple-hover-bg);
 }
 .palette-list button:disabled {
   color: var(--dim);
@@ -225,7 +225,7 @@
   margin: 7px 0;
   overflow: auto;
   contain: paint;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   background: color-mix(in srgb, var(--bg) 80%, #000 20%);
   color: var(--fg);
   font-size: 11px;

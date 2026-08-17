@@ -5,7 +5,7 @@
   z-index: 45;
   inset: 0;
   pointer-events: auto;
-  background: #18192399;
+  background: var(--scrim-dark);
 }
 [data-swipe-dismiss="right"] {
   touch-action: pan-y;
@@ -204,7 +204,7 @@
   flex-direction: column;
   gap: 0;
   margin: 0;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 9px;
   background: color-mix(in srgb, var(--bg-alt) 92%, var(--bg));
   padding: 8px 9px 7px;

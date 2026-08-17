@@ -7,17 +7,14 @@ import {
 } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { type FormEvent, Suspense, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../../routes/navigation';
+import { errorMessage } from '../../shared/lib/error-message';
+import { ProgressBar } from '../../shared/ui/progress-bar';
 import { hasSettledBackground } from '../presentation-status';
-import {
-  ImageAttachmentInput,
-  ImageAttachmentPreviews,
-  useImageAttachments,
-} from './attachments';
+import { useImageAttachments } from './attachments';
 import { useComposerDraft } from './draft';
-import { MarkdownComposerEditor } from './editor';
 import {
   newQueueId,
   QueuePanel,
@@ -37,7 +34,7 @@ import {
   RuntimeModelControl,
   RuntimeThinkingControl,
 } from './runtime-controls';
-import { ComposerRichSurface } from './shell';
+import { ComposerShell } from './shell';
 
 function ContextIndicator({
   usage,
@@ -53,13 +50,10 @@ function ContextIndicator({
       aria-label={`Context window ${indicator.text}`}
     >
       <span className="context-label">ctx</span>
-      <span className="context-meter" aria-hidden="true">
-        <i
-          style={{
-            width: `${Math.max(0, Math.min(100, indicator.percent ?? 0))}%`,
-          }}
-        />
-      </span>
+      <ProgressBar
+        className="context-meter"
+        value={(indicator.percent ?? 0) / 100}
+      />
       <strong>
         <span>{indicator.percent ?? '?'}%</span>
         <span className="context-detail">
@@ -267,8 +261,7 @@ export function Composer({
       editorRef.current?.setMarkdown('');
       onMessageSubmitted?.();
     } catch (cause) {
-      if (mountedRef.current)
-        setError(cause instanceof Error ? cause.message : String(cause));
+      if (mountedRef.current) setError(errorMessage(cause));
     } finally {
       if (mountedRef.current) setBusy(false);
     }
@@ -282,8 +275,7 @@ export function Composer({
         command: { type: 'abort' },
       });
     } catch (cause) {
-      if (mountedRef.current)
-        setError(cause instanceof Error ? cause.message : String(cause));
+      if (mountedRef.current) setError(errorMessage(cause));
     }
   };
   return (
@@ -299,99 +291,54 @@ export function Composer({
           onItemsChange={setQueue}
         />
       )}
-      <form
-        className={`composer ${dragging ? 'dragging' : ''}`}
+      <ComposerShell
+        ariaLabel="Send a message"
         onSubmit={(event) => void submit(event)}
+        dragging={dragging}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        aria-label="Send a message"
-      >
-        <ImageAttachmentInput
-          enabled={attachmentsEnabled}
-          busy={disabled || busy}
-          inputRef={fileInputRef}
-          onFiles={selectImages}
-        />
-        <ImageAttachmentPreviews
-          attachments={attachments}
-          busy={busy}
-          onRemove={removeImage}
-        />
-        <ComposerRichSurface
-          onPasteCapture={onPasteCapture}
-          submissionDisabled={submissionDisabled || busy}
-        >
-          <Suspense
-            fallback={
-              <div className="composer-editor-loading" role="status">
-                Loading editor…
-              </div>
-            }
-          >
-            <MarkdownComposerEditor
-              ref={editorRef}
-              initialMarkdown={initialDraft}
-              commands={
-                runtime.liveState === 'working' && !settledBackground
-                  ? composerCommands?.filter(
-                      (command) => command.source !== 'builtin',
-                    )
-                  : composerCommands
-              }
-              onChange={updateText}
-              placeholder={
-                disabled ? 'Agent is waiting for input' : 'Message Pi…'
-              }
-              readOnly={disabled || busy}
-            />
-          </Suspense>
-          <div className="composer-actions">
+        attachmentsEnabled={attachmentsEnabled}
+        attachmentsBusy={disabled || busy}
+        fileInputRef={fileInputRef}
+        attachments={attachments}
+        onSelectImages={selectImages}
+        onRemoveImage={removeImage}
+        onPasteCapture={onPasteCapture}
+        editorRef={editorRef}
+        initialMarkdown={initialDraft}
+        commands={
+          runtime.liveState === 'working' && !settledBackground
+            ? composerCommands?.filter(
+                (command) => command.source !== 'builtin',
+              )
+            : composerCommands
+        }
+        onChange={updateText}
+        placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'}
+        readOnly={disabled || busy}
+        submissionDisabled={submissionDisabled || busy}
+        sendDisabled={
+          submissionDisabled || busy || (!text.trim() && !attachments.length)
+        }
+        sendAriaLabel={queuesCurrentMessage ? 'Queue message' : 'Send'}
+        sendSrOnly={queuesCurrentMessage ? 'Queue' : 'Send'}
+        actionExtras={
+          runtime.liveState === 'working' && !settledBackground ? (
             <AriaButton
               type="button"
-              className="composer-attach"
-              isDisabled={!attachmentsEnabled || disabled || busy}
-              onPress={() => fileInputRef.current?.click()}
-              aria-label={
-                attachmentsEnabled
-                  ? 'Attach images'
-                  : 'Attach images (unsupported by selected model)'
-              }
+              className="composer-abort"
+              isDisabled={busy || commandMutation.isPending}
+              onPress={() => void abortTurn()}
+              aria-label="Abort turn"
             >
-              <span aria-hidden="true">＋</span>
-              <span className="composer-attach-label">Image</span>
+              <span aria-hidden="true">■</span>
             </AriaButton>
-            <AriaButton
-              type="submit"
-              className="composer-send"
-              isDisabled={
-                submissionDisabled ||
-                busy ||
-                (!text.trim() && !attachments.length)
-              }
-              aria-label={queuesCurrentMessage ? 'Queue message' : 'Send'}
-            >
-              <span aria-hidden="true">↑</span>
-              <span className="sr-only">
-                {queuesCurrentMessage ? 'Queue' : 'Send'}
-              </span>
-            </AriaButton>
-            {runtime.liveState === 'working' && !settledBackground && (
-              <AriaButton
-                type="button"
-                className="composer-abort"
-                isDisabled={busy || commandMutation.isPending}
-                onPress={() => void abortTurn()}
-                aria-label="Abort turn"
-              >
-                <span aria-hidden="true">■</span>
-              </AriaButton>
-            )}
-          </div>
-        </ComposerRichSurface>
-        <div className="composer-secondary">
-          <div className="composer-mode">
+          ) : undefined
+        }
+        mode={
+          <>
             {runtime.liveState === 'working' && !settledBackground && (
               <>
                 <span>Mode:</span>
@@ -415,18 +362,22 @@ export function Composer({
             )}
             {runtime.liveState === 'waiting' && <span>Answer above</span>}
             <ContextIndicator usage={runtime.contextUsage} />
-          </div>
-          <div className="composer-control-row">
+          </>
+        }
+        controls={
+          <>
             <RuntimeModelControl runtime={runtime} runtimes={runtimes} />
             <RuntimeThinkingControl runtime={runtime} />
-          </div>
-          {error && (
+          </>
+        }
+        footer={
+          error ? (
             <p className="error composer-error" role="alert">
               {error}
             </p>
-          )}
-        </div>
-      </form>
+          ) : undefined
+        }
+      />
     </>
   );
 }

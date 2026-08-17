@@ -1,7 +1,7 @@
 /* Global transcript contract: activity group and legacy transcript entry vocabulary. */
 .activity-group {
   margin: 8px 0;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   background: var(--tool-pending);
 }
 .activity-group.activity-settled {

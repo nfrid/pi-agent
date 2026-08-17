@@ -1,0 +1,9 @@
+.track {
+  display: block;
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+}

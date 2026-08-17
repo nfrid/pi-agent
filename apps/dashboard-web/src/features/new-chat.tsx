@@ -12,24 +12,14 @@ import type {
   StartRuntimeRequest,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import {
-  type FormEvent,
-  Suspense,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import { Button as AriaButton } from 'react-aria-components';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
+import { errorMessage } from '../shared/lib/error-message';
 import { AgentThreadNav } from './agent-thread-nav';
 import {
   ComposerModelControl,
-  ComposerRichSurface,
+  ComposerShell,
   ComposerThinkingControl,
-  ImageAttachmentInput,
-  ImageAttachmentPreviews,
-  MarkdownComposerEditor,
   useImageAttachments,
 } from './composer/public';
 import {
@@ -38,10 +28,6 @@ import {
   type RuntimeModelOption,
 } from './model-option';
 import styles from './new-chat.module.css';
-
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
 
@@ -247,7 +233,7 @@ export function NewChatView({
 
   if (!workspace) {
     return (
-      <section className={`new-chat-missing ${styles.newChatMissing}`}>
+      <section className={styles.newChatMissing}>
         <h1>Workspace not found</h1>
         <p className="error" role="alert">
           This workspace is no longer available.
@@ -319,16 +305,13 @@ export function NewChatView({
           className={`new-chat-page new-chat-pending ${styles.newChatPage}`}
           aria-live="polite"
         >
-          <header className={`new-chat-heading ${styles.newChatHeading}`}>
+          <header className={styles.newChatHeading}>
             <div>
               <p className="eyebrow">{workspace.name}</p>
               <h1>New chat</h1>
             </div>
           </header>
-          <div
-            className={`new-chat-pending-state ${styles.newChatPendingState}`}
-            role="status"
-          >
+          <div className={styles.newChatPendingState} role="status">
             <span className="session-loading-indicator" aria-hidden="true" />
             <strong>Starting agent…</strong>
             <p className="muted">Your chat will open as soon as it is ready.</p>
@@ -350,88 +333,46 @@ export function NewChatView({
         className={`new-chat-page ${styles.newChatPage}`}
         aria-label="New chat"
       >
-        <header className={`new-chat-heading ${styles.newChatHeading}`}>
+        <header className={styles.newChatHeading}>
           <div>
             <p className="eyebrow">{workspace.name}</p>
             <h1>New chat</h1>
           </div>
         </header>
-        <div className={`new-chat-empty ${styles.newChatEmpty}`}>
-          <div className={`new-chat-intro ${styles.newChatIntro}`}>
+        <div className={styles.newChatEmpty}>
+          <div className={styles.newChatIntro}>
             <span className="empty-mark" aria-hidden="true">
               ›_
             </span>
             <h2>Start a conversation</h2>
             <p className="muted">What would you like to work on?</p>
           </div>
-          <form
-            className={`composer new-chat-composer ${styles.newChatComposer} ${dragging ? 'dragging' : ''}`}
-            aria-label="Start a new chat"
+          <ComposerShell
+            className={`new-chat-composer ${styles.newChatComposer}`}
+            ariaLabel="Start a new chat"
             onSubmit={(event) => void submit(event)}
+            dragging={dragging}
             onDragEnter={onDragEnter}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
-          >
-            <ImageAttachmentInput
-              enabled={attachmentsEnabled}
-              busy={busy}
-              inputRef={fileInputRef}
-              onFiles={selectImages}
-            />
-            <ImageAttachmentPreviews
-              attachments={attachments}
-              busy={busy}
-              onRemove={removeImage}
-            />
-            <ComposerRichSurface onPasteCapture={onPasteCapture}>
-              <Suspense
-                fallback={
-                  <div className="composer-editor-loading" role="status">
-                    Loading editor…
-                  </div>
-                }
-              >
-                <MarkdownComposerEditor
-                  ref={editorRef}
-                  commands={composerCommands}
-                  onChange={setText}
-                  placeholder="Message Pi…"
-                  readOnly={busy}
-                />
-              </Suspense>
-              <div className="composer-actions">
-                <AriaButton
-                  type="button"
-                  className="composer-attach"
-                  isDisabled={!attachmentsEnabled || busy}
-                  onPress={() => fileInputRef.current?.click()}
-                  aria-label={
-                    attachmentsEnabled
-                      ? 'Attach images'
-                      : 'Attach images (unsupported by selected model)'
-                  }
-                >
-                  <span aria-hidden="true">＋</span>
-                  <span className="composer-attach-label">Image</span>
-                </AriaButton>
-                <AriaButton
-                  type="submit"
-                  className="composer-send"
-                  isDisabled={
-                    busy || (!text.trim() && attachments.length === 0)
-                  }
-                  aria-label="Send first message"
-                >
-                  <span aria-hidden="true">↑</span>
-                </AriaButton>
-              </div>
-            </ComposerRichSurface>
-            <div className="composer-secondary">
-              <div className="composer-mode">
-                <span>Prompt</span>
-              </div>
-              <div className="composer-control-row">
+            attachmentsEnabled={attachmentsEnabled}
+            attachmentsBusy={busy}
+            fileInputRef={fileInputRef}
+            attachments={attachments}
+            onSelectImages={selectImages}
+            onRemoveImage={removeImage}
+            onPasteCapture={onPasteCapture}
+            editorRef={editorRef}
+            commands={composerCommands}
+            onChange={setText}
+            placeholder="Message Pi…"
+            readOnly={busy}
+            sendDisabled={busy || (!text.trim() && attachments.length === 0)}
+            sendAriaLabel="Send first message"
+            mode={<span>Prompt</span>}
+            controls={
+              <>
                 <ComposerModelControl
                   models={modelOptions}
                   value={modelValue}
@@ -444,17 +385,16 @@ export function NewChatView({
                   disabled={busy || Boolean(startedRuntimeId)}
                   onChange={setThinking}
                 />
-              </div>
-              {error && (
-                <div
-                  className={`new-chat-error ${styles.newChatError}`}
-                  role="alert"
-                >
+              </>
+            }
+            footer={
+              error ? (
+                <div className={styles.newChatError} role="alert">
                   <p className="error">{error}</p>
                 </div>
-              )}
-            </div>
-          </form>
+              ) : undefined
+            }
+          />
         </div>
       </section>
     </div>

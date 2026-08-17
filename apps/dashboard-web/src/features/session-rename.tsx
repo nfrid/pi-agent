@@ -5,6 +5,7 @@ import {
 } from '@pi-dashboard/client';
 import { useMutation } from '@tanstack/react-query';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { errorMessage } from '../shared/lib/error-message';
 
 export function InlineSessionRename({
   id,
@@ -70,7 +71,7 @@ export function InlineSessionRename({
       onRenamed(value);
       setEditing(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
       requestAnimationFrame(() => inputRef.current?.focus());
     } finally {
       savingRef.current = false;

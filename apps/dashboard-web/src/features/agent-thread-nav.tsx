@@ -23,6 +23,7 @@ import {
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,
 } from './runtime-actions';
+import { AgentNavDrawerShell } from './surface-drawer';
 import { DashboardTime } from './timestamp';
 import { UsageCapsule } from './usage-indicator';
 
@@ -48,7 +49,7 @@ function AgentThreadLink({
     <button
       {...lifecycleProps}
       type="button"
-      className={`agent-thread-link ${styles.threadLink}`}
+      className={styles.threadLink}
       aria-current={selected ? 'page' : undefined}
       aria-label={`${row.title} ${statusLabel(row)}`}
       onClick={onSelect}
@@ -62,7 +63,7 @@ function AgentThreadLink({
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
         <strong>{row.title}</strong>
         <small>
-          <span className={`agent-thread-context ${styles.threadContext}`}>
+          <span className={styles.threadContext}>
             <span>{statusLabel(row)}</span>
             <span aria-hidden="true"> · </span>
             <span>{shortPath(row.cwd)}</span>
@@ -138,13 +139,13 @@ export function AgentThreadNav({
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      <div className={`agent-nav-header ${styles.header}`}>
+      <div className={styles.header}>
         <div>
           <p className="eyebrow">Workspace threads</p>
           <strong>Agents</strong>
         </div>
       </div>
-      <label className={`agent-nav-search ${styles.search}`}>
+      <label className={styles.search}>
         <span className="sr-only">Search agents and threads</span>
         <span aria-hidden="true">⌕</span>
         <input
@@ -166,20 +167,11 @@ export function AgentThreadNav({
           </button>
         )}
       </label>
-      <div className={`agent-nav-list ${styles.list}`}>
-        {!groups.length && (
-          <p className={`agent-nav-empty ${styles.empty}`}>
-            No matching threads.
-          </p>
-        )}
+      <div className={styles.list}>
+        {!groups.length && <p className={styles.empty}>No matching threads.</p>}
         {groups.map(([key, group]) => (
-          <section
-            className={`agent-workspace-group ${styles.workspaceGroup}`}
-            key={key}
-          >
-            <div
-              className={`agent-workspace-heading ${styles.workspaceHeading}`}
-            >
+          <section className={styles.workspaceGroup} key={key}>
+            <div className={styles.workspaceHeading}>
               <button
                 type="button"
                 disabled={!group.workspaceId}
@@ -192,14 +184,12 @@ export function AgentThreadNav({
               >
                 {group.workspaceName}
               </button>
-              <span
-                className={`agent-workspace-heading-actions ${styles.workspaceHeadingActions}`}
-              >
+              <span className={styles.workspaceHeadingActions}>
                 <small>{group.rows.length}</small>
                 {group.workspaceId && (
                   <button
                     type="button"
-                    className={`agent-workspace-new ${styles.workspaceNew}`}
+                    className={styles.workspaceNew}
                     aria-label={`New chat in ${group.workspaceName}`}
                     onClick={() => {
                       go(
@@ -251,7 +241,7 @@ export function AgentThreadNav({
       {hiddenRowCount > 0 && (
         <button
           type="button"
-          className={`agent-nav-more ${styles.more}`}
+          className={styles.more}
           onClick={() =>
             setHistoryLimit((current) => current + MAX_VISIBLE_HISTORY_THREADS)
           }
@@ -269,11 +259,11 @@ export function AgentThreadNav({
         </div>
       )}
       <footer
-        className={`agent-nav-footer ${styles.footer} ${mode === 'session' ? styles.sessionFooter : ''}`}
+        className={`${styles.footer} ${mode === 'session' ? styles.sessionFooter : ''}`}
       >
         <button
           type="button"
-          className={`agent-nav-utility ${styles.utility}`}
+          className={styles.utility}
           onClick={() => openUtility('workspaces', '/workspaces')}
         >
           <span aria-hidden="true">⌂</span>
@@ -281,7 +271,7 @@ export function AgentThreadNav({
         </button>
         <button
           type="button"
-          className={`agent-nav-utility ${styles.utility}`}
+          className={styles.utility}
           onClick={() => openUtility('sessions', '/sessions')}
         >
           <span aria-hidden="true">▤</span>
@@ -289,7 +279,7 @@ export function AgentThreadNav({
         </button>
         <button
           type="button"
-          className={`agent-nav-utility ${styles.utility}`}
+          className={styles.utility}
           onClick={() => openUtility('inbox', '/inbox')}
         >
           <span aria-hidden="true">✉</span>
@@ -305,34 +295,18 @@ export function AgentThreadNav({
   );
   if (mode === 'home') return nav;
   return (
-    <>
-      <button
-        ref={handleRef}
-        type="button"
-        className="agent-nav-handle"
-        aria-label="Open agent list"
-        onClick={() => onOpenChange?.(true)}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-      >
-        ‹
-      </button>
-      {drawerPresent && (
-        <button
-          type="button"
-          className={`agent-nav-backdrop${drawerExiting ? ' is-exiting' : ''}`}
-          aria-label="Close agent list"
-          onClick={() => onOpenChange?.(false)}
-        />
-      )}
-      {(!isMobile || drawerPresent) && (
-        <div
-          className={`agent-nav-drawer ${styles.drawer} ${open ? 'open' : ''}${drawerExiting ? ' is-exiting' : ''}`}
-          aria-hidden={isMobile && !open ? true : undefined}
-        >
-          {nav}
-        </div>
-      )}
-    </>
+    <AgentNavDrawerShell
+      open={open}
+      onOpenChange={onOpenChange}
+      isMobile={isMobile}
+      drawerPresent={drawerPresent}
+      drawerExiting={drawerExiting}
+      handleRef={handleRef}
+      drawerClassName={styles.drawer}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
+      {nav}
+    </AgentNavDrawerShell>
   );
 }

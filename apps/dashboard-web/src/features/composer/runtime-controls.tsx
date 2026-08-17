@@ -5,6 +5,7 @@ import {
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { errorMessage } from '../../shared/lib/error-message';
 import {
   configuredModelOptions,
   modelOptionValue,
@@ -49,7 +50,7 @@ export function RuntimeModelControl({
       });
       setModelValue(value);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   return (
@@ -89,7 +90,7 @@ export function RuntimeThinkingControl({
       });
       setThinking(level);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
     }
   };
   return (

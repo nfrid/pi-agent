@@ -1,0 +1,40 @@
+/* Shared runtime status vocabulary and micro-label typography.
+   Imported before feature contracts so downstream sheets can extend context. */
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking, 0.12em);
+  font-size: var(--label-size, 10px);
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.status-glyph {
+  font-style: normal;
+  margin-right: 6px;
+}
+
+.session-status.status-working i {
+  color: var(--green);
+}
+.session-status.status-compacting i {
+  color: var(--purple);
+  animation: tui-pulse 1.2s steps(2, end) infinite;
+}
+.session-status.status-waiting i {
+  color: var(--purple);
+}
+.session-status.status-paused i,
+.session-status.status-input i {
+  color: var(--orange);
+}
+.session-status.status-failed i,
+.session-status.status-aborting i,
+.session-status.status-stopping i {
+  color: var(--red);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-status.status-compacting i {
+    animation: none;
+  }
+}

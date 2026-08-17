@@ -2,6 +2,7 @@ import type {
   RuntimeSnapshot,
   StartRuntimeRequest,
 } from '@pi-dashboard/protocol';
+import { formatCompactCount } from '../../shared/lib/format';
 import { hasSettledBackground } from '../presentation-status';
 
 export function resumeRuntimeRequest(
@@ -16,11 +17,7 @@ export function resumeRuntimeRequest(
 }
 
 export function formatContextTokens(tokens: number): string {
-  if (tokens >= 1_000_000)
-    return `${Number.parseFloat((tokens / 1_000_000).toFixed(1))}m`;
-  if (tokens >= 1_000)
-    return `${Number.parseFloat((tokens / 1_000).toFixed(1))}k`;
-  return `${tokens}`;
+  return formatCompactCount(tokens);
 }
 
 export function contextIndicatorData(

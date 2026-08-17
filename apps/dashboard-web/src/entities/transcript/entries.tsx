@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
+import { formatCompactCount } from '../../shared/lib/format';
 import type { TranscriptModelItem } from '../../transcript';
 import { activityStepParts } from './activity';
 import { ActivityStepContent } from './activity-summary';
@@ -37,13 +38,6 @@ function ThinkingBlobs({
   );
 }
 
-function compactTokenCount(tokens: number): string {
-  return new Intl.NumberFormat('en', {
-    notation: 'compact',
-    maximumFractionDigits: 0,
-  }).format(tokens);
-}
-
 function TranscriptEventEntry({
   event,
   timestamp,
@@ -67,7 +61,7 @@ function TranscriptEventEntry({
             : '✓';
   const metric =
     event.kind === 'compaction' && event.tokensBefore !== undefined
-      ? `${compactTokenCount(event.tokensBefore)} tokens`
+      ? `${formatCompactCount(event.tokensBefore)} tokens`
       : undefined;
   const details = expanded ? (
     event.kind === 'compaction' || event.kind === 'branch-summary' ? (

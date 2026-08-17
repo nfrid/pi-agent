@@ -1,12 +1,12 @@
 import {
   type KeyboardEvent,
   type ReactNode,
-  useEffect,
+  type RefObject,
+  type TouchEvent,
   useId,
-  useRef,
 } from 'react';
 import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
-import { useOverlayPresence } from './overlay-presence';
+import { useOverlayFocusRestore, useOverlayPresence } from './overlay-presence';
 import { useSwipeToDismiss } from './swipe-to-dismiss';
 
 /** Shared overlay primitive for dashboard sheets and panels. */
@@ -70,24 +70,9 @@ export function SurfaceDrawer({
   const generatedTitleId = useId();
   const titleId = providedTitleId ?? generatedTitleId;
   const resolvedCloseLabel = closeLabel ?? `Close ${title}`;
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const wasOpenRef = useRef(false);
   const { present, exiting } = useOverlayPresence(isOpen);
   const swipeHandlers = useSwipeToDismiss(onClose);
-  useEffect(() => {
-    if (isOpen && !wasOpenRef.current) {
-      previousFocusRef.current = document.activeElement as HTMLElement | null;
-      wasOpenRef.current = true;
-      return;
-    }
-    if (!isOpen && wasOpenRef.current) {
-      const previous = previousFocusRef.current;
-      if (previous?.isConnected && previous.getClientRects().length > 0)
-        previous.focus({ preventScroll: true });
-      previousFocusRef.current = null;
-      wasOpenRef.current = false;
-    }
-  }, [isOpen]);
+  useOverlayFocusRestore(isOpen);
   if (!present) return null;
   return (
     <ModalOverlay
@@ -154,5 +139,62 @@ export function SurfaceDrawer({
         </AriaDialog>
       </div>
     </ModalOverlay>
+  );
+}
+
+/** Session-mode agent nav overlay shell (handle, backdrop, drawer wrapper). */
+export function AgentNavDrawerShell({
+  open,
+  onOpenChange,
+  isMobile,
+  drawerPresent,
+  drawerExiting,
+  handleRef,
+  drawerClassName,
+  onTouchStart,
+  onTouchEnd,
+  children,
+}: {
+  open: boolean;
+  onOpenChange?: (open: boolean) => void;
+  isMobile: boolean;
+  drawerPresent: boolean;
+  drawerExiting: boolean;
+  handleRef: RefObject<HTMLButtonElement | null>;
+  drawerClassName?: string;
+  onTouchStart?: (event: TouchEvent) => void;
+  onTouchEnd?: (event: TouchEvent) => void;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <button
+        ref={handleRef}
+        type="button"
+        className="agent-nav-handle"
+        aria-label="Open agent list"
+        onClick={() => onOpenChange?.(true)}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
+        ‹
+      </button>
+      {drawerPresent && (
+        <button
+          type="button"
+          className={`agent-nav-backdrop${drawerExiting ? ' is-exiting' : ''}`}
+          aria-label="Close agent list"
+          onClick={() => onOpenChange?.(false)}
+        />
+      )}
+      {(!isMobile || drawerPresent) && (
+        <div
+          className={`agent-nav-drawer ${drawerClassName ?? ''} ${open ? 'open' : ''}${drawerExiting ? ' is-exiting' : ''}`}
+          aria-hidden={isMobile && !open ? true : undefined}
+        >
+          {children}
+        </div>
+      )}
+    </>
   );
 }

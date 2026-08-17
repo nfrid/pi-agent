@@ -1,0 +1,87 @@
+.task-progress {
+  display: grid;
+  gap: 5px;
+  padding: 8px 11px 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.task-progress-track {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+.task-progress-track i {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+.task-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+}
+.task-row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.task-row-main strong {
+  color: var(--cyan);
+  font-size: 10px;
+}
+.task-row-main span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-row-meta {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: right;
+}
+.task-row-meta b {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+/* Dynamic priority-${priority} classes are emitted by live work rows. */
+.priority-urgent,
+.priority-high {
+  color: var(--orange);
+}
+.priority-low {
+  color: var(--dim);
+}
+.task-row-meta small {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Runtime queue mode vocabulary intentionally stays global for queue-${mode} classes. */
+.queue-followUp {
+  color: var(--purple);
+}
+@media (min-width: 700px) {
+  .interaction-choice-layout.has-preview {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 2fr);
+    align-items: start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-group.activity-pending .activity-icon,
+  .surface-running .surface-state {
+    animation: none;
+  }
+}

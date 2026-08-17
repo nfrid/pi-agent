@@ -28,7 +28,7 @@
 .global-notifications,
 .global-tools .palette-trigger {
   height: 32px;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
   color: var(--muted);

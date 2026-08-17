@@ -1,7 +1,8 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { useDashboardUtility } from '../features/dashboard-utility-context';
+import { usePrefersReducedMotion } from '../shared/hooks/use-prefers-reduced-motion';
 
 export function newChatPath(
   snapshot: BrowserSnapshot,
@@ -35,27 +36,6 @@ export function shouldUseDashboardViewTransition({
     !isSessionPath(current) &&
     !isSessionPath(target)
   );
-}
-
-function usePrefersReducedMotion(): boolean {
-  const [reducedMotion, setReducedMotion] = useState(() =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      : false,
-  );
-  useEffect(() => {
-    if (
-      typeof window === 'undefined' ||
-      typeof window.matchMedia !== 'function'
-    )
-      return;
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const update = () => setReducedMotion(query.matches);
-    update();
-    query.addEventListener?.('change', update);
-    return () => query.removeEventListener?.('change', update);
-  }, []);
-  return reducedMotion;
 }
 
 export function useDashboardNavigate(): (path: string) => void {

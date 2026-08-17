@@ -13,10 +13,7 @@ import {
   pauseStatusRenderer,
 } from '../../../extensions/pause/contribution';
 import { tasksRenderer } from '../../../extensions/tasks/contribution';
-import {
-  renderDelegateSurface,
-  renderTasksSurface,
-} from './features/live-surface-renderers';
+import { renderDelegateSurface, renderTasksSurface } from './features/surfaces';
 
 export interface DashboardRendererContext {
   readonly surfaceId?: string;

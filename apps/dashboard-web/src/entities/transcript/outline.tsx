@@ -1,7 +1,10 @@
 import type { RefObject } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SurfaceDrawer, SurfaceStats } from '../../features/surface-drawer';
-import { DashboardTime } from '../../features/timestamp';
+import {
+  DashboardTime,
+  formatDashboardTimestamp,
+} from '../../features/timestamp';
 import {
   sampleTranscriptLandmarks,
   type TranscriptLandmark,
@@ -20,19 +23,7 @@ function landmarkType(
 function landmarkTime(
   timestamp: number | string | undefined,
 ): string | undefined {
-  if (timestamp === undefined) return undefined;
-  const numeric =
-    typeof timestamp === 'string' && /^\d+$/u.test(timestamp)
-      ? Number(timestamp)
-      : timestamp;
-  const date = new Date(numeric);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
+  return formatDashboardTimestamp(timestamp, 'sidebar');
 }
 
 export function TranscriptOutline({

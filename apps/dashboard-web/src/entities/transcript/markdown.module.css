@@ -58,7 +58,7 @@
 }
 
 .markdown code {
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   background: var(--bg);
   padding: 0.12em 0.35em;
   color: var(--cyan);

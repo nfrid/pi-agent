@@ -1,6 +1,6 @@
 import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import type { ComponentType, RefObject } from 'react';
+import type { ComponentType, ReactNode, RefObject } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
 import {
   DelegateHistorySurface,
@@ -16,6 +16,44 @@ export type SessionComposerProps = {
   onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 };
+
+function SessionHeaderFrame({
+  workspaceLabel,
+  title,
+  status,
+  statusLabel,
+  actions,
+}: {
+  workspaceLabel: string;
+  title: ReactNode;
+  status: string;
+  statusLabel: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="session-context-slot">
+      <header className="session-context session-heading">
+        <div className="session-context-main">
+          <div className="session-identity">
+            <div className="session-breadcrumb">
+              <span className="session-workspace">{workspaceLabel}</span>
+              <span className="session-breadcrumb-separator" aria-hidden="true">
+                /
+              </span>
+              {title}
+            </div>
+            <span className={`session-status status-${status}`}>
+              <i aria-hidden="true">●</i> {statusLabel}
+            </span>
+          </div>
+        </div>
+        {actions ? (
+          <div className="session-heading-actions">{actions}</div>
+        ) : null}
+      </header>
+    </div>
+  );
+}
 
 export function SessionLoadingCurtain({
   error,
@@ -70,43 +108,33 @@ export function SessionHeader({
 }) {
   const title = sessionDisplayTitle(data, entries);
   return (
-    <div className="session-context-slot">
-      <header className="session-context session-heading">
-        <div className="session-context-main">
-          <div className="session-identity">
-            <div className="session-breadcrumb">
-              <span className="session-workspace">{workspaceName}</span>
-              <span className="session-breadcrumb-separator" aria-hidden="true">
-                /
-              </span>
-              <InlineSessionRename
-                id={id}
-                title={title}
-                store={store}
-                onRenamed={(name) => store.updateSessionMetadata(id, { name })}
-              />
-            </div>
-            <span className={`session-status status-${status}`}>
-              <i aria-hidden="true">●</i> {statusLabel}
-            </span>
-          </div>
-        </div>
-        <div className="session-heading-actions">
-          <button
-            type="button"
-            ref={outlineTriggerRef}
-            className="session-icon-button outline-trigger"
-            aria-label="Open transcript outline"
-            aria-haspopup="dialog"
-            onClick={onOpenOutline}
-          >
-            <span className="session-icon-glyph" aria-hidden="true">
-              ≡
-            </span>
-          </button>
-        </div>
-      </header>
-    </div>
+    <SessionHeaderFrame
+      workspaceLabel={workspaceName}
+      title={
+        <InlineSessionRename
+          id={id}
+          title={title}
+          store={store}
+          onRenamed={(name) => store.updateSessionMetadata(id, { name })}
+        />
+      }
+      status={status}
+      statusLabel={statusLabel}
+      actions={
+        <button
+          type="button"
+          ref={outlineTriggerRef}
+          className="session-icon-button outline-trigger"
+          aria-label="Open transcript outline"
+          aria-haspopup="dialog"
+          onClick={onOpenOutline}
+        >
+          <span className="session-icon-glyph" aria-hidden="true">
+            ≡
+          </span>
+        </button>
+      }
+    />
   );
 }
 
@@ -217,27 +245,17 @@ export function SessionLoadingHeader({
   statusLabel: string;
 }) {
   return (
-    <div className="session-context-slot">
-      <header className="session-context session-heading">
-        <div className="session-context-main">
-          <div className="session-identity">
-            <div className="session-breadcrumb">
-              <span className="session-workspace">Session</span>
-              <span className="session-breadcrumb-separator" aria-hidden="true">
-                /
-              </span>
-              <h1>
-                {metadata
-                  ? sessionDisplayTitle(metadata)
-                  : runtime?.session.title || runtime?.session.name || id}
-              </h1>
-            </div>
-            <span className={`session-status status-${status}`}>
-              <i aria-hidden="true">●</i> {statusLabel}
-            </span>
-          </div>
-        </div>
-      </header>
-    </div>
+    <SessionHeaderFrame
+      workspaceLabel="Session"
+      title={
+        <h1>
+          {metadata
+            ? sessionDisplayTitle(metadata)
+            : runtime?.session.title || runtime?.session.name || id}
+        </h1>
+      }
+      status={status}
+      statusLabel={statusLabel}
+    />
   );
 }

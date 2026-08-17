@@ -4,7 +4,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg-alt) 72%, var(--bg));
   color: var(--fg);
@@ -32,7 +32,7 @@
   font-weight: 650;
 }
 .utility {
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
@@ -47,7 +47,7 @@
   align-items: center;
   gap: 6px;
   margin: 0 10px 9px;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 6px;
   background: var(--bg);
   color: var(--dim);
@@ -102,7 +102,7 @@
   width: 19px;
   height: 19px;
   place-items: center;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 4px;
   background: transparent;
   color: var(--purple);
@@ -186,7 +186,7 @@
   max-height: min(280px, calc(100dvh - 16px));
   gap: 1px;
   overflow-y: auto;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg-alt) 96%, var(--bg));
   box-shadow: 0 10px 28px rgb(0 0 0 / 32%);
@@ -358,7 +358,7 @@
 .more {
   width: calc(100% - 20px);
   margin: 0 10px 8px;
-  border: 1px solid var(--line-soft);
+  border: var(--border-soft);
   border-radius: 5px;
   background: transparent;
   color: var(--muted);
