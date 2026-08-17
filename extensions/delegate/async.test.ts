@@ -1025,18 +1025,18 @@ describe('async delegate extension', () => {
       { requestRender: vi.fn() },
       { fg: (_color, text) => text },
     );
-    expect(widget?.render(100).join('\n')).toContain('done');
+    expect(widget?.render(100).join('\n')).toBe('');
 
-    // The completion was queued during an existing turn, so that settlement
-    // cannot arm cleanup before the automatic delivery is processed.
+    // Successful history stays available to inspection and the dashboard, but
+    // it never returns to the persistent rail while delivery settles.
     handlers.get('agent_settled')?.({}, ctx);
-    expect(widget?.render(100).join('\n')).toContain('done');
+    expect(widget?.render(100).join('\n')).toBe('');
 
     handlers.get('context')?.({
       messages: [sendMessage.mock.calls[0]?.[0]],
     });
     handlers.get('agent_settled')?.({}, ctx);
-    expect(widget?.render(100).join('\n')).toContain('done');
+    expect(widget?.render(100).join('\n')).toBe('');
     expect(
       (
         getLiveExtensionSurfaceHub('parent')
@@ -1051,7 +1051,7 @@ describe('async delegate extension', () => {
       ctx,
     );
     handlers.get('input')?.({ source: 'extension' }, ctx);
-    expect(widget?.render(100).join('\n')).toContain('done');
+    expect(widget?.render(100).join('\n')).toBe('');
 
     markDashboardFreshUserTurn('parent');
     handlers.get('input')?.({ source: 'extension' }, ctx);
@@ -2253,7 +2253,7 @@ describe('async delegate extension', () => {
         { requestRender: vi.fn() },
         { fg: (_color, text: string) => text },
       ).render(100) ?? [];
-    expect(afterSettlement.join('\n')).toContain('Subagent');
+    expect(afterSettlement).toEqual([]);
 
     handlers.get('input')?.({ source: 'rpc' }, ctx);
     const afterNextUserMessage =
@@ -2261,9 +2261,9 @@ describe('async delegate extension', () => {
         { requestRender: vi.fn() },
         { fg: (_color, text: string) => text },
       ).render(100) ?? [];
-    // The earlier stale run shares this continuation lineage and has not been
-    // inspected yet, so neither run in the lineage is eligible for cleanup.
-    expect(afterNextUserMessage.join('\n')).toContain('Subagent');
+    // The retained lineage remains inspectable across tree navigation, but
+    // successful history does not reappear in the persistent rail.
+    expect(afterNextUserMessage).toEqual([]);
 
     const crossBranch = await tools
       .get('delegate_jobs')
@@ -2317,7 +2317,7 @@ describe('async delegate extension', () => {
         { requestRender: vi.fn() },
         { fg: (_color, text) => text },
       ).render(100),
-    ).not.toEqual([]);
+    ).toEqual([]);
     handlers.get('input')?.({ source: 'interactive' }, ctx);
     expect(
       widgetFactory?.(
