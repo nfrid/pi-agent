@@ -265,10 +265,12 @@ function augmentLiveStatus(
 }
 
 function timing(row: DelegateInspectionStatus) {
+  const startedAt = row.workflow?.startedAt ?? row.startedAt;
+  const finishedAt = row.workflow?.settledAt ?? row.finishedAt;
   return {
-    state: row.state,
-    ...(row.startedAt === undefined ? {} : { startedAt: row.startedAt }),
-    ...(row.finishedAt === undefined ? {} : { finishedAt: row.finishedAt }),
+    state: row.workflow?.state ?? row.state,
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(finishedAt === undefined ? {} : { finishedAt }),
   };
 }
 

@@ -246,18 +246,36 @@ function delegateContext(row: DelegateStatus): string | undefined {
   return row.context;
 }
 
+function delegateWaitingRelationship(
+  row: DelegateInspectionStatus,
+): string | undefined {
+  const workflow = row.workflow;
+  if (!workflow) return undefined;
+  const inputIdentities = new Set(
+    (workflow.inputs ?? []).map((input) => input.identity),
+  );
+  const dependencies = workflow.waitingFor ?? workflow.dependencies;
+  const after = dependencies.filter(
+    (dependency) => !inputIdentities.has(dependency),
+  );
+  return after.length ? `after ${after.join(', ')}` : undefined;
+}
+
 export function delegateActivityLabel(
   row: DelegateInspectionStatus,
   runState: string,
   pauseState?: string,
+  includeRelationships = true,
 ): string {
   if (pauseState === 'paused') return 'Paused at a safe boundary';
   if (pauseState === 'pausing') return 'Pausing at a safe boundary';
-  if (row.workflow?.waitingFor?.length)
-    return `after ${row.workflow.waitingFor.join(', ')}`;
+  if (includeRelationships) {
+    const waitingRelationship = delegateWaitingRelationship(row);
+    if (waitingRelationship) return waitingRelationship;
+  }
   // Historical rows carry wake metadata on the invocation rather than in the
   // live wake list; keep this as a wait/action fallback, not a node state.
-  if (row.wake)
+  if (includeRelationships && row.wake)
     return row.wake.state === 'entered'
       ? `delivered for ${row.wake.references.join(', ')}`
       : row.wake.state === 'pending' || row.wake.state === 'ready'
@@ -449,15 +467,19 @@ export function DelegateSurface({
                       const runState = stateLabel(rawState);
                       const pauseState = row.pauseState;
                       const state = pauseState ?? runState;
-                      const relationships = [
-                        ...(row.workflow?.waitingFor?.length
-                          ? [`after ${row.workflow.waitingFor.join(', ')}`]
-                          : []),
-                        delegateWakeEffect(row, model.wakes),
-                      ].filter((value): value is string => Boolean(value));
+                      const waitingRelationship =
+                        delegateWaitingRelationship(row);
+                      const wakeEffect = delegateWakeEffect(row, model.wakes);
+                      const action = delegateActivityLabel(
+                        row,
+                        runState,
+                        pauseState,
+                        false,
+                      );
                       const activityLabel = short(
-                        relationships.join(' · ') ||
-                          delegateActivityLabel(row, runState, pauseState),
+                        [waitingRelationship ?? action, wakeEffect]
+                          .filter((value): value is string => Boolean(value))
+                          .join(' · '),
                         140,
                       );
                       const name = short(row.name, 70);
@@ -474,7 +496,7 @@ export function DelegateSurface({
                       );
                       return (
                         <div
-                          className={`delegate-row ${stateClass(state)}${row.historical ? ' delegate-row-history' : ''}`}
+                          className={`delegate-row ${stateClass(state)}`}
                           key={`${surface.id}-${row.id}`}
                         >
                           <AriaButton

@@ -1076,6 +1076,56 @@ describe('live extension surface fixtures', () => {
     expect(markup).not.toContain('payload');
   });
 
+  it('composes the current action with a parent wake effect', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateSurface
+        surface={{
+          id: 'delegate-action-wake',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'ds-action-wake',
+                runId: 'run-action-wake',
+                lineageId: 'lineage-action-wake',
+                name: 'Running review',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                allowWrites: false,
+                activity: {
+                  type: 'tool',
+                  label: 'Inspect files',
+                  latestText: 'current action',
+                  status: 'running',
+                },
+                workflow: {
+                  logicalId: 'review',
+                  attempt: 1,
+                  identity: 'review@1',
+                  state: 'running',
+                  dependencies: [],
+                  createdAt: 1,
+                  scheduledAt: 1,
+                },
+              },
+            ],
+            wakes: [
+              {
+                id: 'wake-review',
+                state: 'pending',
+                references: ['review@1'],
+                createdAt: 1,
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('current action · resumes parent');
+  });
+
   it('renders bounded dependency and input relationships in the inspector', () => {
     const row = {
       id: 'review-lineage',
@@ -1091,7 +1141,7 @@ describe('live extension surface fixtures', () => {
         attempt: 1,
         identity: 'review@1',
         state: 'scheduled' as const,
-        dependencies: ['impl@1'],
+        dependencies: ['impl@1', 'gate@1'],
         inputs: [
           {
             node: 'impl',
@@ -1112,7 +1162,8 @@ describe('live extension surface fixtures', () => {
       />,
     );
     expect(markup).toContain('After');
-    expect(markup).toContain('impl@1');
+    expect(markup).toContain('gate@1');
+    expect(markup).not.toContain('<dd>impl@1</dd>');
     expect(markup).toContain('Inputs');
     expect(markup).toContain('report + branch');
     expect(markup).not.toContain('upstream evidence');

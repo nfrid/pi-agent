@@ -379,10 +379,12 @@ function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
   const count = (state: string) =>
     statuses.filter((status) => effectiveState(status) === state).length;
   const running = count('running');
+  const scheduled = count('scheduled');
   const queued = count('queued');
   const failed = statuses.filter((status) => isFailure(status)).length;
   const parts = [
     running > 0 ? `${running} running` : '',
+    scheduled > 0 ? `${scheduled} scheduled` : '',
     queued > 0 ? `${queued} queued` : '',
     failed > 0 ? `${failed} failed` : '',
   ].filter(Boolean);

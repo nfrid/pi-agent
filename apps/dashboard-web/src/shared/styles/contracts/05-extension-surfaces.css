@@ -328,9 +328,6 @@
   color: var(--purple);
   text-overflow: ellipsis;
 }
-.delegate-row-history {
-  opacity: 0.78;
-}
 .delegate-row-mobile-elapsed {
   display: none;
 }

@@ -488,6 +488,22 @@ describe('DelegateWorkflowCoordinator', () => {
       inputs: [{ identity: 'impl@1', selector: { node: 'impl' } }],
     });
     expect(JSON.stringify(child)).not.toContain('done report');
+    expect(coordinator.metadataSnapshot().attempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          identity: 'child@1',
+          inputs: [
+            {
+              node: 'impl',
+              identity: 'impl@1',
+            },
+          ],
+        }),
+      ]),
+    );
+    expect(JSON.stringify(coordinator.metadataSnapshot())).not.toContain(
+      'done report',
+    );
     const done = result('done');
     const doneRun = done.runs[0];
     if (!doneRun) throw new Error('missing done run');
@@ -1096,6 +1112,9 @@ describe('DelegateWorkflowCoordinator', () => {
     );
     expect(attempt.route).toBe('provider/model');
     expect(attempt.jobId).toBe('dj-1');
+    expect(coordinator.metadataSnapshot().attempts[0]).toMatchObject({
+      route: 'provider/model',
+    });
     await coordinator.dispose();
   });
 

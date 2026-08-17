@@ -742,8 +742,8 @@ export class DelegateWorkflowCoordinator {
             ...(record.allowWrites === undefined
               ? {}
               : { allowWrites: record.allowWrites }),
-            ...(record.inputs.length > 0
-              ? { inputs: inputMetadata(record.inputs) }
+            ...(record.inputMetadata.length > 0
+              ? { inputs: Object.freeze([...record.inputMetadata]) }
               : {}),
             ...(record.reason === undefined ? {} : { reason: record.reason }),
           });

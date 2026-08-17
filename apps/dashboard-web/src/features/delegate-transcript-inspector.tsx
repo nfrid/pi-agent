@@ -332,10 +332,12 @@ export function DelegateInspectorMetadata({
   row: DelegateInspectionStatus;
   now: number;
 }) {
-  const state = inspectorState(row.pauseState ?? row.state);
+  const state = inspectorState(
+    row.pauseState ?? row.workflow?.state ?? row.state,
+  );
   const duration = elapsed(
-    row.startedAt ?? row.createdAt,
-    row.finishedAt,
+    row.workflow?.startedAt ?? row.startedAt ?? row.createdAt,
+    row.workflow?.settledAt ?? row.finishedAt,
     row.pausedAt ?? now,
   );
   const lifecycle = row.lifecycle;
@@ -392,14 +394,20 @@ function DelegateInspectorDetails({
   const warnings = row.warnings ?? [];
   const runKeyOccurrences = new Map<string, number>();
   const handle = artifactHandle(row);
+  const inputIdentities = new Set(
+    (row.workflow?.inputs ?? []).map((input) => input.identity),
+  );
+  const after = (row.workflow?.dependencies ?? []).filter(
+    (dependency) => !inputIdentities.has(dependency),
+  );
   return (
     <details className="delegate-inspector-details">
       <summary>Run and recovery details</summary>
       <dl>
-        {row.workflow?.dependencies.length ? (
+        {after.length > 0 ? (
           <div>
             <dt>After</dt>
-            <dd>{row.workflow.dependencies.join(', ')}</dd>
+            <dd>{after.join(', ')}</dd>
           </div>
         ) : null}
         {row.workflow?.inputs?.map((input) => (

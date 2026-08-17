@@ -504,6 +504,12 @@ function projectWorkflow(
       ? undefined
       : validWorkflowText(source.reason, 256);
   if (source.reason !== undefined && reason === undefined) return undefined;
+  const canonicalRoute =
+    source.route === undefined
+      ? route
+      : stringValue(source.route, 512);
+  if (source.route !== undefined && canonicalRoute === undefined)
+    return undefined;
   return {
     ...(ownerBranchId ? { ownerBranchId } : {}),
     logicalId,
@@ -514,7 +520,7 @@ function projectWorkflow(
     ...(waitingFor?.length ? { waitingFor } : {}),
     ...(inputs?.length ? { inputs } : {}),
     ...(reason ? { reason } : {}),
-    ...(route ? { route } : {}),
+    ...(canonicalRoute ? { route: canonicalRoute } : {}),
     createdAt,
     scheduledAt: finiteNumber(source.scheduledAt) ?? createdAt,
     ...(finiteNumber(source.queuedAt) === undefined
@@ -562,7 +568,11 @@ function projectRun(
     projectedQueuedAt ?? finiteNumber(run.startedAt) ?? Date.now();
   const projectedRoute = isRecord(run.routing)
     ? stringValue(run.routing.route, 512)
-    : undefined;
+    : isRecord(run.workflow)
+      ? stringValue(run.workflow.route, 512)
+      : isRecord(run.workflowAttempt)
+        ? stringValue(run.workflowAttempt.route, 512)
+        : undefined;
   const workflow = projectWorkflow(
     run,
     projectedState,
@@ -576,10 +586,11 @@ function projectRun(
   }
   const jobId = stringValue(run.backgroundJobId, 256);
   if (jobId) projected.backgroundJobId = jobId;
-  const route = isRecord(run.routing)
-    ? stringValue(run.routing.route, 512)
-    : undefined;
-  if (route) projected.routing = { route };
+  const route = projectedRoute;
+  if (route) {
+    projected.route = route;
+    projected.routing = { route };
+  }
   const context = validContext(run.context);
   if (context) projected.context = context;
   if (run.allowWrites === true) projected.allowWrites = true;

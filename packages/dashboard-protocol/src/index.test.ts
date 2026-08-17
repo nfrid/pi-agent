@@ -59,6 +59,15 @@ describe('dashboard protocol', () => {
       state: 'scheduled',
       dependencies: ['gate@1'],
       waitingFor: ['gate@1'],
+      inputs: [
+        {
+          node: 'gate',
+          identity: 'gate@1',
+          include: ['report'],
+          label: 'gate report',
+        },
+      ],
+      route: 'provider/model',
       createdAt: 1,
       scheduledAt: 1,
     };

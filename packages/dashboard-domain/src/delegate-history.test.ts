@@ -737,6 +737,14 @@ describe('delegate history adapter', () => {
                 scheduledAt: 1,
                 settledAt: 3,
                 route: 'review',
+                inputs: [
+                  {
+                    node: 'gate',
+                    identity: 'gate@1',
+                    include: ['report'],
+                    label: 'gate report',
+                  },
+                ],
               },
             ],
           },
@@ -747,7 +755,20 @@ describe('delegate history adapter', () => {
     expect(response.groups[0]).toMatchObject({
       lineageId: 'later',
       state: 'success',
-      workflow: { identity: 'later@1', dependencies: ['gate@1'] },
+      workflow: {
+        identity: 'later@1',
+        dependencies: ['gate@1'],
+        route: 'review',
+        inputs: [
+          {
+            node: 'gate',
+            identity: 'gate@1',
+            include: ['report'],
+            label: 'gate report',
+          },
+        ],
+      },
+      route: 'review',
     });
     expect(response.groups[0]?.runs[0]).not.toHaveProperty('jobId');
     expect(JSON.stringify(response)).not.toContain('secret report');
