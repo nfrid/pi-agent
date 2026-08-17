@@ -5,10 +5,64 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 
 const workspaceRoot = path.resolve(__dirname, '../..');
-const dashboardTarget = `http://127.0.0.1:${process.env.PI_DASHBOARD_PORT ?? 4173}`;
+export const dashboardApiTarget = `http://127.0.0.1:${process.env.PI_DASHBOARD_PORT ?? 4173}`;
+
+type ProxyRequestHeaders = {
+  setHeader(name: string, value: string): void;
+};
+
+type ProxiedBrowserRequest = {
+  headers: {
+    origin?: string;
+  };
+};
+
+type ViteProxyServer = {
+  on(
+    event: 'proxyReq',
+    listener: (
+      proxyReq: ProxyRequestHeaders,
+      request: ProxiedBrowserRequest,
+    ) => void,
+  ): void;
+};
+
+// Vite may bind the next free port when 4174 is already taken. Browser POSTs
+// still send that fallback Origin, which the API rejects unless it is listed
+// in PI_DASHBOARD_ORIGINS. Rewrite loopback origins to the API's own origin,
+// which the daemon always allow-lists after listen.
+export function rewriteDashboardProxyOrigin(
+  proxyReq: ProxyRequestHeaders,
+  request: ProxiedBrowserRequest,
+  target = dashboardApiTarget,
+): void {
+  const origin = request.headers.origin;
+  if (!origin) return;
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname;
+  } catch {
+    return;
+  }
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost') return;
+  proxyReq.setHeader('origin', target);
+}
+
+function attachDashboardProxyOriginRewrite(proxy: ViteProxyServer): void {
+  proxy.on('proxyReq', (proxyReq, request) => {
+    rewriteDashboardProxyOrigin(proxyReq, request);
+  });
+}
+
 const proxy = {
-  '/api': { target: dashboardTarget },
-  '/trpc': { target: dashboardTarget },
+  '/api': {
+    target: dashboardApiTarget,
+    configure: attachDashboardProxyOriginRewrite,
+  },
+  '/trpc': {
+    target: dashboardApiTarget,
+    configure: attachDashboardProxyOriginRewrite,
+  },
 };
 const dashboardBuildId =
   process.env.PI_DASHBOARD_BUILD_ID?.trim() || randomUUID();

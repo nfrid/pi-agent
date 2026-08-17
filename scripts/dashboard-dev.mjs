@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -75,19 +76,49 @@ function stop(exitCode = 0) {
   process.exitCode = exitCode;
 }
 
-if (!existsSync(envFile))
-  process.stderr.write(
-    `Dashboard environment file not found at ${envFile}; using safe local defaults. Copy .env.dashboard.example to .env.dashboard to customize it.\n`,
-  );
-
-if (mode === 'all' || mode === 'daemon')
-  run('daemon', ['--filter', '@pi-dashboard/server', 'dev']);
-if (mode === 'all' || mode === 'web')
-  run('web', ['--filter', '@pi-dashboard/web', 'dev']);
-if (mode === 'serve') {
-  run('daemon', ['--filter', '@pi-dashboard/server', 'start']);
-  run('web', ['--filter', '@pi-dashboard/web', 'preview']);
+function portInUse(host, port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const finish = (used) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(used);
+    };
+    socket.setTimeout(300);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
 }
 
-process.once('SIGINT', () => stop(0));
-process.once('SIGTERM', () => stop(0));
+async function main() {
+  if (!existsSync(envFile))
+    process.stderr.write(
+      `Dashboard environment file not found at ${envFile}; using safe local defaults. Copy .env.dashboard.example to .env.dashboard to customize it.\n`,
+    );
+
+  if (mode === 'all' || mode === 'daemon') {
+    const host = env.PI_DASHBOARD_HOST;
+    const port = Number(env.PI_DASHBOARD_PORT);
+    if (await portInUse(host, port)) {
+      process.stderr.write(
+        `Dashboard API ${host}:${port} is already in use. Refusing to start a second daemon because it would steal dashboard/bridge.sock and make live sessions look dormant.\nUse \`pnpm dashboard:web\` for UI HMR against the running production API.\n`,
+      );
+      process.exit(2);
+    }
+  }
+
+  if (mode === 'all' || mode === 'daemon')
+    run('daemon', ['--filter', '@pi-dashboard/server', 'dev']);
+  if (mode === 'all' || mode === 'web')
+    run('web', ['--filter', '@pi-dashboard/web', 'dev']);
+  if (mode === 'serve') {
+    run('daemon', ['--filter', '@pi-dashboard/server', 'start']);
+    run('web', ['--filter', '@pi-dashboard/web', 'preview']);
+  }
+
+  process.once('SIGINT', () => stop(0));
+  process.once('SIGTERM', () => stop(0));
+}
+
+await main();

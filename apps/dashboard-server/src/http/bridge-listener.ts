@@ -1,6 +1,26 @@
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 
+async function unixSocketIsLive(socketPath: string): Promise<boolean> {
+  try {
+    await fs.access(socketPath);
+  } catch {
+    return false;
+  }
+  return await new Promise((resolve) => {
+    const socket = net.createConnection(socketPath);
+    const finish = (live: boolean) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(live);
+    };
+    socket.setTimeout(250);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
+}
+
 /**
  * Unix-domain bridge acceptor. Tracks every raw socket so shutdown can destroy
  * pre-hello clients the registry does not yet know about.
@@ -8,6 +28,7 @@ import net from 'node:net';
 export class BridgeListener {
   private readonly server: net.Server;
   private readonly sockets = new Set<net.Socket>();
+  private boundPath: string | undefined;
 
   constructor(accept: (socket: net.Socket) => void) {
     this.server = net.createServer((socket) => {
@@ -30,6 +51,8 @@ export class BridgeListener {
   }
 
   async listen(socketPath: string): Promise<void> {
+    if (await unixSocketIsLive(socketPath))
+      throw new Error(`Bridge socket is already in use: ${socketPath}`);
     await fs.rm(socketPath, { force: true }).catch(() => undefined);
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => {
@@ -42,6 +65,7 @@ export class BridgeListener {
         resolve();
       });
     });
+    this.boundPath = socketPath;
     await fs.chmod(socketPath, 0o600).catch(() => undefined);
   }
 
@@ -50,9 +74,13 @@ export class BridgeListener {
   }
 
   async close(socketPath?: string): Promise<void> {
+    const ownedPath = this.boundPath;
+    this.boundPath = undefined;
     if (this.server.listening)
       await new Promise<void>((resolve) => this.server.close(() => resolve()));
-    if (socketPath)
-      await fs.rm(socketPath, { force: true }).catch(() => undefined);
+    // Only unlink a socket this listener actually bound. A failed start must
+    // not delete another daemon's live bridge path.
+    if (ownedPath && (socketPath === undefined || socketPath === ownedPath))
+      await fs.rm(ownedPath, { force: true }).catch(() => undefined);
   }
 }

@@ -1,19 +1,71 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import config, { stampDashboardServiceWorker } from '../vite.config';
+import config, {
+  dashboardApiTarget,
+  rewriteDashboardProxyOrigin,
+  stampDashboardServiceWorker,
+} from '../vite.config';
 
 describe('dashboard Vite proxy configuration', () => {
   it('proxies tRPC through both dev and preview servers', () => {
-    const expectedTarget = `http://127.0.0.1:${process.env.PI_DASHBOARD_PORT ?? 4173}`;
     const serverProxy = config.server?.proxy;
     const previewProxy = config.preview?.proxy;
 
     expect(serverProxy).toMatchObject({
-      '/trpc': { target: expectedTarget },
+      '/api': { target: dashboardApiTarget },
+      '/trpc': { target: dashboardApiTarget },
     });
     expect(previewProxy).toMatchObject({
-      '/trpc': { target: expectedTarget },
+      '/api': { target: dashboardApiTarget },
+      '/trpc': { target: dashboardApiTarget },
     });
+    const serverTrpc = serverProxy?.['/trpc'];
+    const previewTrpc = previewProxy?.['/trpc'];
+    expect(
+      typeof (serverTrpc && typeof serverTrpc !== 'string'
+        ? serverTrpc.configure
+        : undefined),
+    ).toBe('function');
+    expect(
+      typeof (previewTrpc && typeof previewTrpc !== 'string'
+        ? previewTrpc.configure
+        : undefined),
+    ).toBe('function');
+  });
+
+  it('rewrites loopback browser origins so proxied mutations pass the API allow-list', () => {
+    const rewritten: Record<string, string> = {};
+    rewriteDashboardProxyOrigin(
+      {
+        setHeader(name, value) {
+          rewritten[name] = value;
+        },
+      },
+      { headers: { origin: 'http://127.0.0.1:4176' } },
+    );
+    expect(rewritten.origin).toBe(dashboardApiTarget);
+
+    const localhost: Record<string, string> = {};
+    rewriteDashboardProxyOrigin(
+      {
+        setHeader(name, value) {
+          localhost[name] = value;
+        },
+      },
+      { headers: { origin: 'http://localhost:4176' } },
+    );
+    expect(localhost.origin).toBe(dashboardApiTarget);
+
+    const remote: Record<string, string> = {};
+    rewriteDashboardProxyOrigin(
+      {
+        setHeader(name, value) {
+          remote[name] = value;
+        },
+      },
+      { headers: { origin: 'https://evil.example' } },
+    );
+    expect(remote.origin).toBeUndefined();
   });
 
   it('lets preview serve the build-time version assets unchanged', () => {
