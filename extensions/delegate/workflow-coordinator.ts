@@ -229,6 +229,8 @@ interface WorkflowRecord {
   preparationDiscarded?: boolean;
   preparationDiscardInFlight?: Promise<void>;
   continuationPredecessor?: AttemptIdentity;
+  /** Canonical predecessor token captured before lazy preparation starts. */
+  continuationToken?: string;
 }
 
 function inputMetadata(
@@ -552,6 +554,7 @@ function setupFailureResult(
     reason,
     'setup-failure',
   );
+  if (record.continuationToken) run.continuation = record.continuationToken;
   return { runs: [run], handoff: buildParentHandoff([run]) };
 }
 
@@ -1278,6 +1281,14 @@ export class DelegateWorkflowCoordinator {
     signal: AbortSignal,
   ): Promise<void> {
     try {
+      const predecessor = record.continuationPredecessor;
+      const predecessorResult = predecessor
+        ? this.results.get(predecessor)
+        : undefined;
+      const continuationToken = predecessorResult
+        ? canonicalContinuationToken(predecessorResult)
+        : undefined;
+      record.continuationToken = continuationToken;
       const resolved = resolveWorkflowInputs(record.selectors, (identity) =>
         this.sourceFor(identity),
       );
@@ -1291,13 +1302,6 @@ export class DelegateWorkflowCoordinator {
       }
       const prepare = record.prepare;
       if (!prepare) throw new Error('Missing workflow launch factory.');
-      const predecessor = record.continuationPredecessor;
-      const predecessorResult = predecessor
-        ? this.results.get(predecessor)
-        : undefined;
-      const continuationToken = predecessorResult
-        ? canonicalContinuationToken(predecessorResult)
-        : undefined;
       const prepared = await prepare({
         attempt: copyAttempt(record.attempt),
         dependencies: record.selectors,

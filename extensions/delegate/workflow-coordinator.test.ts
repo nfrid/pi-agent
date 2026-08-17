@@ -1174,6 +1174,86 @@ describe('DelegateWorkflowCoordinator', () => {
     await coordinator.dispose();
   });
 
+  test('retains continuation tokens through setup failure for the latest attempt', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const firstResult = result('first');
+    const firstRun = firstResult.runs[0];
+    if (!firstRun) throw new Error('missing first run');
+    firstRun.continuation = 'opaque-child-token';
+    const first = coordinator.schedule(
+      scheduleOptions('impl', async () => firstResult),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require(first.identity).state).toBe('success'),
+    );
+    let failedPreparationToken: string | undefined;
+    const second = coordinator.schedule({
+      logicalId: 'impl',
+      continuation: first.identity,
+      prepare: async (context) => {
+        failedPreparationToken = context.continuationToken;
+        throw new Error('invalid symbolic handoff');
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(second.identity).state).toBe('error'),
+    );
+    expect(failedPreparationToken).toBe('opaque-child-token');
+    expect(coordinator.getResult(second.identity)?.runs[0]?.continuation).toBe(
+      'opaque-child-token',
+    );
+    expect(
+      coordinator.getResultEvidence(second.identity)?.continuationToken,
+    ).toBe('opaque-child-token');
+    expect(() =>
+      coordinator.schedule({
+        logicalId: 'impl',
+        continuation: first.identity,
+        prepare: async () => ({
+          mode: 'single' as const,
+          tasks: ['stale'],
+          execute: async () => result('stale'),
+        }),
+      }),
+    ).toThrow();
+
+    let thirdToken: string | undefined;
+    const third = coordinator.schedule({
+      logicalId: 'impl',
+      continuation: true,
+      prepare: async (context) => {
+        thirdToken = context.continuationToken;
+        return {
+          mode: 'single' as const,
+          tasks: ['third'],
+          execute: async () => result('third'),
+        };
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(third.identity).state).toBe('success'),
+    );
+    expect(third.identity).toBe('impl@3');
+    expect(thirdToken).toBe('opaque-child-token');
+
+    const fresh = coordinator.schedule({
+      logicalId: 'fresh',
+      prepare: async () => {
+        throw new Error('fresh setup failure');
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(fresh.identity).state).toBe('error'),
+    );
+    expect(coordinator.getResult(fresh.identity)?.runs[0]?.continuation).toBe(
+      undefined,
+    );
+    expect(
+      coordinator.getResultEvidence(fresh.identity)?.continuationToken,
+    ).toBe(undefined);
+    await coordinator.dispose();
+  });
+
   test('discards one lazy preparation exactly once when cancellation wins', async () => {
     const coordinator = new DelegateWorkflowCoordinator();
     let release!: (launch: DelegateJobStartOptions) => void;
