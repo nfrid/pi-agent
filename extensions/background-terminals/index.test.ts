@@ -106,6 +106,10 @@ describe('background terminals extension', () => {
     );
 
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    expect(sendMessage.mock.calls[0][0]).toMatchObject({
+      customType: 'background-terminal-result',
+      details: { dedupeKey: expect.any(String), id: expect.any(String) },
+    });
     expect(sendMessage.mock.calls[0][1]).toEqual({
       deliverAs: 'steer',
       triggerTurn: true,

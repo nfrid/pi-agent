@@ -46,7 +46,10 @@ describe('wake delivery', () => {
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         customType: DELEGATE_WAKE_MESSAGE_TYPE,
-        details: expect.objectContaining({ deliveryKey: 'session:3:ready' }),
+        details: expect.objectContaining({
+          dedupeKey: 'session:3:ready',
+          deliveryKey: 'session:3:ready',
+        }),
       }),
       { deliverAs: 'followUp', triggerTurn: true },
     );

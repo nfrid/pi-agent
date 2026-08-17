@@ -11,6 +11,7 @@ import type {
 export const DELEGATE_WAKE_MESSAGE_TYPE = 'delegate-wake-result';
 
 export interface WakeDeliveryDetails {
+  readonly dedupeKey: string;
   readonly deliveryKey: string;
   readonly wakeId: string;
   readonly ownerSessionId: string;
@@ -49,6 +50,7 @@ export function formatWakeDispatch(dispatch: WakeDispatch): string {
 
 function deliveryDetails(dispatch: WakeDispatch): WakeDeliveryDetails {
   return {
+    dedupeKey: dispatch.deliveryKey,
     deliveryKey: dispatch.deliveryKey,
     wakeId: dispatch.wake.id,
     ownerSessionId: dispatch.ownerSessionId,

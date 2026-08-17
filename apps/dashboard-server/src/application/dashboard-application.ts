@@ -558,19 +558,25 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function delegateJobIds(value: unknown): readonly string[] | undefined {
-  const jobs = record(value)?.jobs;
-  if (!Array.isArray(jobs)) return undefined;
-  const ids = jobs.flatMap((job) => {
+function customMessageDedupeKey(value: unknown): string | undefined {
+  const details = record(value);
+  if (!details) return undefined;
+  if (typeof details.dedupeKey === 'string' && details.dedupeKey.length > 0)
+    return details.dedupeKey;
+
+  // Compatibility for custom messages persisted before the shared contract.
+  if (typeof details.deliveryKey === 'string' && details.deliveryKey.length > 0)
+    return `delivery:${details.deliveryKey}`;
+  if (typeof details.id === 'string' && details.id.length > 0)
+    return `id:${details.id}`;
+  if (!Array.isArray(details.jobs)) return undefined;
+  const jobIds = details.jobs.flatMap((job) => {
     const id = record(job)?.id;
     return typeof id === 'string' && id.length > 0 ? [id] : [];
   });
-  return ids.length > 0 ? [...new Set(ids)].sort() : undefined;
-}
-
-function backgroundTerminalId(value: unknown): string | undefined {
-  const id = record(value)?.id;
-  return typeof id === 'string' && id.length > 0 ? id : undefined;
+  return jobIds.length > 0
+    ? `jobs:${[...new Set(jobIds)].sort().join(',')}`
+    : undefined;
 }
 
 function persistedCustomMessage(
@@ -603,19 +609,10 @@ function samePersistedCustomMessage(
     String(activeTimestamp) === String(persistedTimestamp)
   )
     return true;
-  if (persisted.customType === 'background-terminal-result') {
-    const activeId = backgroundTerminalId(record(data?.details));
-    const persistedId = backgroundTerminalId(persisted.details);
-    return activeId !== undefined && activeId === persistedId;
-  }
-  if (persisted.customType !== 'delegate-job-result') return false;
-  const activeJobIds = delegateJobIds(record(data?.details));
-  const persistedJobIds = delegateJobIds(record(persisted.details));
+  const activeDedupeKey = customMessageDedupeKey(data?.details);
   return (
-    activeJobIds !== undefined &&
-    persistedJobIds !== undefined &&
-    activeJobIds.length === persistedJobIds.length &&
-    activeJobIds.every((id, index) => id === persistedJobIds[index])
+    activeDedupeKey !== undefined &&
+    activeDedupeKey === customMessageDedupeKey(persisted.details)
   );
 }
 

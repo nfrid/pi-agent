@@ -212,6 +212,10 @@ export function createCompletionDelivery(options: {
       });
       return { ...job, ...(runs ? { runs } : {}) };
     });
+    const dedupeKey = completed
+      .map((job) => job.id)
+      .sort()
+      .join(',');
     const content = completed
       .map((job) => {
         const body =
@@ -228,7 +232,7 @@ export function createCompletionDelivery(options: {
           customType: 'delegate-job-result',
           content,
           display: true,
-          details: { jobs: detailJobs },
+          details: { dedupeKey, jobs: detailJobs },
         },
         { deliverAs: 'steer', triggerTurn: true },
       );

@@ -57,6 +57,7 @@ export default defineExtension(
             content: formatCompletion(snapshot),
             display: true,
             details: {
+              dedupeKey: snapshot.id,
               id: snapshot.id,
               title: snapshot.title,
               status: snapshot.status,

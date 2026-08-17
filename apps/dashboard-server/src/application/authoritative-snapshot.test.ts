@@ -446,6 +446,62 @@ describe('authoritative application snapshot lifecycle', () => {
     );
   });
 
+  it('retires a live delegate wake through the shared custom-message key', async () => {
+    const f = await fixture();
+    const live = runtime(f.file, { liveState: 'idle' });
+    f.register(live);
+    const content = '# Delegate wake ready ready';
+    const dedupeKey = 'snapshot-session:1:ready';
+    f.event(live, {
+      type: 'message.finished',
+      sessionId: 'snapshot-session',
+      message: {
+        messageId: 'live-delegate-wake',
+        role: 'custom',
+        content,
+        phase: 'finished',
+        data: {
+          customType: 'delegate-wake-result',
+          display: true,
+          details: { dedupeKey, deliveryKey: dedupeKey, wakeId: 'ready' },
+        },
+      },
+    });
+
+    const liveSnapshot = await f.app.sessionSnapshot(
+      'generation-1',
+      'snapshot-session',
+    );
+    expect(liveSnapshot.active.messages).toHaveLength(1);
+
+    await writeFile(
+      f.file,
+      `${JSON.stringify({ type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' })}\n${JSON.stringify(
+        {
+          type: 'custom_message',
+          id: 'persisted-delegate-wake',
+          customType: 'delegate-wake-result',
+          content,
+          display: true,
+          details: { dedupeKey, deliveryKey: dedupeKey, wakeId: 'ready' },
+        },
+      )}\n`,
+    );
+    await f.sessions.refresh([]);
+
+    const durableSnapshot = await f.app.sessionSnapshot(
+      'generation-1',
+      'snapshot-session',
+    );
+    expect(durableSnapshot.active.messages).toEqual([]);
+    expect(durableSnapshot.entries).toContainEqual(
+      expect.objectContaining({
+        type: 'custom_message',
+        id: 'persisted-delegate-wake',
+      }),
+    );
+  });
+
   it('does not confuse earlier repeated message or tool content with current durability', async () => {
     const f = await fixture('snapshot-session', [
       { type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' },
@@ -457,6 +513,13 @@ describe('authoritative application snapshot lifecycle', () => {
           content: 'repeated',
           timestamp: 1,
         },
+      },
+      {
+        type: 'custom_message',
+        id: 'old-custom',
+        customType: 'extension-notice',
+        content: 'repeated custom message',
+        display: true,
       },
       {
         type: 'tool',
@@ -486,6 +549,22 @@ describe('authoritative application snapshot lifecycle', () => {
     f.event(
       live,
       {
+        type: 'message.finished',
+        sessionId: 'snapshot-session',
+        message: {
+          messageId: 'new-custom',
+          role: 'custom',
+          content: 'repeated custom message',
+          phase: 'finished',
+          data: { customType: 'extension-notice', display: true },
+        },
+      },
+      'epoch-1',
+      3,
+    );
+    f.event(
+      live,
+      {
         type: 'tool.finished',
         sessionId: 'snapshot-session',
         tool: {
@@ -498,14 +577,14 @@ describe('authoritative application snapshot lifecycle', () => {
         },
       },
       'epoch-1',
-      3,
+      4,
     );
     const idle = runtime(f.file, { liveState: 'idle' });
     f.event(
       idle,
       { type: 'agent.settled', sessionId: 'snapshot-session' },
       'epoch-1',
-      4,
+      5,
     );
 
     const snapshot = await f.app.sessionSnapshot(
@@ -514,6 +593,7 @@ describe('authoritative application snapshot lifecycle', () => {
     );
     expect(snapshot.active.messages).toMatchObject([
       { messageId: 'new-message', phase: 'finished' },
+      { messageId: 'new-custom', phase: 'finished' },
     ]);
     expect(snapshot.active.tools).toMatchObject([
       { toolCallId: 'new-tool', phase: 'finished' },

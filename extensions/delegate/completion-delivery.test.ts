@@ -46,7 +46,7 @@ describe('delegate completion delivery while paused', () => {
     expect(sendMessage).toHaveBeenCalledOnce();
     expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
       customType: 'delegate-job-result',
-      details: { jobs: [{ id: 'dj-1' }] },
+      details: { dedupeKey: 'dj-1', jobs: [{ id: 'dj-1' }] },
     });
     delivery.flushCompletions();
     expect(sendMessage).toHaveBeenCalledOnce();
