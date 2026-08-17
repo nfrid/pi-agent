@@ -23,7 +23,10 @@ import { askUserCapabilitySnapshot } from '../ask-user/contribution';
 import { registerAskUserCapability } from '../ask-user/register-capability';
 import { registerDelegateCapability } from '../delegate/register-capability';
 import { beginsFreshUserTurn } from '../shared/runtime/agent-lifecycle';
-import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
+import {
+  getLiveExtensionSurfaceHub,
+  LiveSurfaceHub,
+} from '../shared/runtime/live-surfaces';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
 import { registerTasksCapability } from '../tasks/register-capability';
 import {
@@ -2358,7 +2361,8 @@ describe('remote-control bridge', () => {
 });
 
 describe('agent settlement', () => {
-  it('keeps the dashboard working and suppresses settlement while a process is pending', () => {
+  it('publishes compact waiting state while a process is pending', () => {
+    const scope = `session-settled-${Date.now()}`;
     const source = {};
     const events: unknown[] = [];
     let currentSnapshot = { ...snapshot };
@@ -2372,14 +2376,22 @@ describe('agent settlement', () => {
       client: { sendEvent: (event: unknown) => events.push(event) },
     } as unknown as Parameters<typeof emitAgentSettlement>[0];
     const ctx = {
-      sessionManager: { getSessionId: () => 'session-test' },
+      isIdle: () => true,
+      sessionManager: { getSessionId: () => scope },
     } as unknown as ExtensionContext;
 
-    setPendingProcessCount(source, 1);
+    setPendingProcessCount(source, 2, scope);
     try {
       emitAgentSettlement(runtime, ctx);
+      expect(getLiveExtensionSurfaceHub(scope).snapshot()).toEqual([
+        expect.objectContaining({
+          rendererId: 'runtime.settled-background',
+          viewModel: { version: 1, count: 2 },
+        }),
+      ]);
     } finally {
-      setPendingProcessCount(source, 0);
+      setPendingProcessCount(source, 0, scope);
+      getLiveExtensionSurfaceHub(scope).clear('remote-control');
     }
 
     expect(events).toEqual([

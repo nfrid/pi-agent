@@ -70,7 +70,7 @@ export function dashboardStatus(
   runtime: RuntimeSnapshot | undefined,
 ): DashboardStatusPresentation {
   if (!runtime) return { status: 'dormant', label: 'dormant' };
-  if (runtime.pendingInteractions.length > 0)
+  if ((runtime.pendingInteractions?.length ?? 0) > 0)
     return { status: 'input', label: 'input' };
   if (runtime.online === false) return { status: 'offline', label: 'offline' };
 

@@ -6,6 +6,7 @@ import {
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
+  statusGlyph,
 } from './model';
 
 function row(
@@ -98,6 +99,11 @@ describe('agent thread view model', () => {
       updatedAt: undefined,
     });
     expect(after).toMatchObject({ startedAt: 100, updatedAt: 200 });
+  });
+
+  it('uses compact distinct glyphs for passive waiting and input', () => {
+    expect(statusGlyph('waiting')).toBe('◐');
+    expect(statusGlyph('input')).toBe('◆');
   });
 
   it('filters by title, workspace, path, or status', () => {

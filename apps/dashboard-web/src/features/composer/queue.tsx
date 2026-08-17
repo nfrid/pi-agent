@@ -106,8 +106,9 @@ export function shouldShowQueuePanel(
   settledBackground = false,
 ): boolean {
   return (
-    !settledBackground &&
-    (liveState === 'working' || liveState === 'compacting' || queuedCount > 0)
+    queuedCount > 0 ||
+    (!settledBackground &&
+      (liveState === 'working' || liveState === 'compacting'))
   );
 }
 

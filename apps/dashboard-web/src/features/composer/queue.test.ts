@@ -240,6 +240,8 @@ describe('composer queue model', () => {
       upsertQueuedMessage(items, { id: 'q1', mode: 'steer', text: 'new' }),
     ).toEqual([{ id: 'q1', mode: 'steer', text: 'new' }]);
     expect(shouldShowQueuePanel('working', 0)).toBe(true);
+    expect(shouldShowQueuePanel('working', 0, true)).toBe(false);
+    expect(shouldShowQueuePanel('working', 1, true)).toBe(true);
     expect(shouldShowQueuePanel('idle', 0)).toBe(false);
   });
 

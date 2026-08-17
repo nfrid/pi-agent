@@ -111,6 +111,7 @@ export function Composer({
   const { queue, setQueue, addOptimistic, rejectOptimistic } =
     useComposerQueue(runtime);
   const settledBackground = hasSettledBackground(runtime);
+  const defaultMode = composerMode(runtime);
   const disabled = composerIsDisabled(runtime);
   const submissionDisabled = disabled;
   const attachmentsEnabled =
@@ -144,8 +145,8 @@ export function Composer({
     };
   }, []);
   useEffect(() => {
-    setMode(composerMode(runtime));
-  }, [runtime]);
+    setMode(defaultMode);
+  }, [defaultMode]);
   const resume = async () => {
     const request = resumeRuntimeRequest(workspaceId, sessionId);
     if (!request || resumeMutation.isPending) {

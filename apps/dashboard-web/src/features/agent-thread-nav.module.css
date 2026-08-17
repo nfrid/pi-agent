@@ -291,10 +291,10 @@
   border: 1px dotted currentColor;
 }
 .threadRow:global(.status-waiting) .threadGlyph {
-  color: var(--orange);
+  color: var(--purple);
 }
 .threadRow:global(.status-input) .threadGlyph {
-  color: var(--cyan);
+  color: var(--orange);
 }
 .threadRow:global(.status-failed) .threadGlyph {
   color: var(--red);

@@ -156,12 +156,12 @@
   color: var(--purple);
   animation: tui-pulse 1.2s steps(2, end) infinite;
 }
-.session-status.status-waiting i,
-.session-status.status-paused i {
-  color: var(--orange);
+.session-status.status-waiting i {
+  color: var(--purple);
 }
+.session-status.status-paused i,
 .session-status.status-input i {
-  color: var(--cyan);
+  color: var(--orange);
 }
 .session-status.status-failed i,
 .session-status.status-aborting i,

@@ -160,8 +160,8 @@ export function groupAgentThreadRows(
 
 export function statusGlyph(status: AgentThreadRow['status']): string {
   if (status === 'working') return '●';
-  if (status === 'compacting') return '◐';
-  if (status === 'waiting') return '◆';
+  if (status === 'compacting' || status === 'waiting') return '◐';
+  if (status === 'input') return '◆';
   if (status === 'failed') return '!';
   if (status === 'offline') return '○';
   if (status === 'dormant') return '◌';
