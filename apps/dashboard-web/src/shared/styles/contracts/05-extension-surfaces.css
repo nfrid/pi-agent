@@ -171,6 +171,29 @@
   margin: 4px 0 0;
   padding-left: 15px;
 }
+.delegate-wake-conditions {
+  display: grid;
+  gap: 5px;
+  padding: 7px 11px;
+}
+.delegate-wake-condition {
+  display: grid;
+  gap: 2px;
+  border-left: 2px solid var(--purple);
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+}
+.delegate-wake-condition strong {
+  color: var(--purple);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.delegate-wake-condition small {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
 .delegate-rows,
 .task-rows {
   display: grid;
