@@ -8,6 +8,7 @@ import type {
 } from '@pi-dashboard/protocol';
 import type {
   DelegateStatus,
+  DelegateStatusViewModel,
   DelegateTranscriptEntry,
 } from '../../../../extensions/delegate/contribution';
 import type {
@@ -20,7 +21,7 @@ export type DelegateInspectionStatus = DelegateStatus & {
   historical?: boolean;
   historyIncomplete?: boolean;
   warnings?: readonly string[];
-  wake?: DelegateWakeMetadata;
+  wake?: DelegateWakePresentation;
 };
 
 export interface DelegateCompositeRun {
@@ -40,8 +41,14 @@ export interface DelegateCompositeGroup {
   section: DelegateCompositeSection;
 }
 
+export type DelegateWakePresentation =
+  | DelegateWakeMetadata
+  | NonNullable<DelegateStatusViewModel['wakes']>[number];
+
 export interface DelegateCompositeModel {
   groups: readonly DelegateCompositeGroup[];
+  /** Wake conditions retained for inline presentation, never as delegate rows. */
+  wakes: readonly DelegateWakePresentation[];
   sections: readonly {
     id: DelegateCompositeSection;
     label: string;
@@ -319,9 +326,115 @@ function runLabel(
   return `${current ? 'Current · ' : ''}Run ${index + 1} · ${state}`;
 }
 
+function isWakeLineage(lineageId: string): boolean {
+  return lineageId.startsWith('wake:');
+}
+
+function wakeForGroup(
+  group: DelegateHistoryGroup,
+): DelegateWakeMetadata | undefined {
+  return group.wake ?? group.runs.find((run) => run.wake !== undefined)?.wake;
+}
+
+function isWakeGroup(group: DelegateHistoryGroup): boolean {
+  return (
+    isWakeLineage(group.lineageId) ||
+    wakeForGroup(group) !== undefined ||
+    group.runs.some((run) => isWakeLineage(run.lineageId))
+  );
+}
+
+function isWakeStatus(row: DelegateStatus): boolean {
+  return isWakeLineage(row.lineageId);
+}
+
+function wakeForReference(
+  row: DelegateInspectionStatus,
+  wakes: readonly DelegateWakePresentation[],
+): DelegateWakePresentation | undefined {
+  const identity = row.workflow?.identity;
+  if (!identity) return undefined;
+  return wakes.find(
+    (wake) => wake.references.length === 1 && wake.references[0] === identity,
+  );
+}
+
+function annotateWake(
+  group: DelegateCompositeGroup,
+  wakes: readonly DelegateWakePresentation[],
+): DelegateCompositeGroup {
+  const wake = wakeForReference(group.row, wakes);
+  return wake ? { ...group, row: { ...group.row, wake } } : group;
+}
+
+type WorkflowFacts = {
+  identity?: string;
+  owner?: string;
+};
+
+function workflowFacts(value: { workflow?: unknown }): WorkflowFacts {
+  const workflow = value.workflow as
+    | { identity?: unknown; ownerBranchId?: unknown }
+    | undefined;
+  return {
+    ...(typeof workflow?.identity === 'string'
+      ? { identity: workflow.identity }
+      : {}),
+    ...(typeof workflow?.ownerBranchId === 'string'
+      ? { owner: workflow.ownerBranchId }
+      : {}),
+  };
+}
+
+function groupWorkflowFacts(group: DelegateHistoryGroup): WorkflowFacts {
+  const direct = workflowFacts(group);
+  if (direct.identity) return direct;
+  for (const run of group.runs) {
+    const facts = workflowFacts(run);
+    if (facts.identity) return facts;
+  }
+  return {};
+}
+
+function liveWorkflowFacts(live: DelegateStatus): WorkflowFacts {
+  return workflowFacts(live);
+}
+
+function groupMatchesLive(
+  group: DelegateHistoryGroup,
+  live: DelegateStatus,
+): boolean {
+  const groupFacts = groupWorkflowFacts(group);
+  const liveFacts = liveWorkflowFacts(live);
+  if (!groupFacts.identity || groupFacts.identity !== liveFacts.identity)
+    return false;
+  return (
+    !groupFacts.owner ||
+    !liveFacts.owner ||
+    groupFacts.owner === liveFacts.owner
+  );
+}
+
+function workflowPlaceholderIndex(
+  runs: readonly DelegateCompositeRun[],
+  live: DelegateStatus,
+): number {
+  const identity = liveWorkflowFacts(live).identity;
+  if (!identity) return -1;
+  return runs.findIndex((run) => {
+    const facts = workflowFacts(run.row);
+    return (
+      facts.identity === identity &&
+      (run.row.lineageId === run.row.workflow?.logicalId ||
+        run.row.lineageId.startsWith('workflow:'))
+    );
+  });
+}
+
 function groupModel(
   group: DelegateHistoryGroup,
   live: DelegateStatus | undefined,
+  replacePlaceholder = false,
 ): DelegateCompositeGroup {
   const durableRuns: DelegateCompositeRun[] = group.runs.map((run) => {
     const row = delegateHistoryInvocationToStatus(run);
@@ -341,6 +454,12 @@ function groupModel(
           (live.jobId !== undefined && run.row.jobId === live.jobId),
       )
     : -1;
+  const livePlaceholderIndex =
+    live && replacePlaceholder
+      ? workflowPlaceholderIndex(durableRuns, live)
+      : -1;
+  const matchedLiveIndex =
+    livePlaceholderIndex >= 0 ? livePlaceholderIndex : liveDurableIndex;
   const liveRow = live
     ? augmentLiveStatus(
         live,
@@ -353,8 +472,8 @@ function groupModel(
       : liveRow;
   const runs = [...durableRuns];
   if (incompleteLiveRow) {
-    if (liveDurableIndex >= 0) {
-      runs[liveDurableIndex] = {
+    if (matchedLiveIndex >= 0) {
+      runs[matchedLiveIndex] = {
         id: incompleteLiveRow.runId,
         label: '',
         persisted: true,
@@ -420,15 +539,54 @@ function liveOnlyGroup(live: DelegateStatus): DelegateCompositeGroup {
 export function composeDelegateHistory(
   history: DelegateHistoryResponse | undefined,
   liveRows: readonly DelegateStatus[],
+  liveWakes: readonly NonNullable<
+    DelegateStatusViewModel['wakes']
+  >[number][] = [],
 ): DelegateCompositeModel {
-  const liveByLineage = new Map(liveRows.map((row) => [row.lineageId, row]));
+  const durableWakes = (history?.groups ?? [])
+    .filter((group) => isWakeGroup(group))
+    .map(wakeForGroup)
+    .filter((wake): wake is DelegateWakeMetadata => wake !== undefined);
+  const wakesById = new Map<string, DelegateWakePresentation>();
+  for (const wake of durableWakes) wakesById.set(wake.id, wake);
+  // Runtime wake state is authoritative while the branch is mounted.
+  for (const wake of liveWakes) wakesById.set(wake.id, wake);
+  const wakes = [...wakesById.values()];
+  const liveByLineage = new Map(
+    liveRows
+      .filter((row) => !isWakeStatus(row))
+      .map((row) => [row.lineageId, row]),
+  );
   const groups: DelegateCompositeGroup[] = [];
-  for (const group of history?.groups ?? []) {
-    const live = liveByLineage.get(group.lineageId);
-    groups.push(groupModel(group, live));
-    if (live) liveByLineage.delete(group.lineageId);
+  const durableGroups = (history?.groups ?? []).filter(
+    (group) => !isWakeGroup(group),
+  );
+  for (const group of durableGroups) {
+    let live = liveByLineage.get(group.lineageId);
+    let replacePlaceholder = false;
+    if (!live && groupWorkflowFacts(group).identity) {
+      const candidates = [...liveByLineage.values()].filter((candidate) =>
+        groupMatchesLive(group, candidate),
+      );
+      const candidate = candidates[0];
+      const uniqueCandidate =
+        candidate &&
+        candidates.length === 1 &&
+        durableGroups.filter((groupCandidate) =>
+          groupMatchesLive(groupCandidate, candidate),
+        ).length === 1
+          ? candidate
+          : undefined;
+      live = uniqueCandidate;
+      replacePlaceholder = live !== undefined;
+    }
+    groups.push(
+      annotateWake(groupModel(group, live, replacePlaceholder), wakes),
+    );
+    if (live) liveByLineage.delete(live.lineageId);
   }
-  for (const live of liveByLineage.values()) groups.push(liveOnlyGroup(live));
+  for (const live of liveByLineage.values())
+    groups.push(annotateWake(liveOnlyGroup(live), wakes));
   const sections = (
     [
       ['active', 'Active'],
@@ -440,5 +598,5 @@ export function composeDelegateHistory(
     label,
     groups: groups.filter((group) => group.section === id),
   }));
-  return { groups, sections };
+  return { groups, wakes, sections };
 }

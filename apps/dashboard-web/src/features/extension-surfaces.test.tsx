@@ -554,6 +554,108 @@ describe('live extension surface fixtures', () => {
     );
   });
 
+  it('renders wake history inline without wake-owned rows or counts', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateSurface
+        surface={{
+          id: 'delegate-wake-history',
+          rendererId: 'delegate.status',
+          viewModel: { version: 1, statuses: [] },
+        }}
+        history={
+          {
+            version: 2,
+            sessionId: 'offline-session',
+            groups: [
+              {
+                id: 'real-lineage',
+                runId: 'real-run',
+                lineageId: 'real-lineage',
+                name: 'Review worker',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                allowWrites: false,
+                runCount: 1,
+                runs: [
+                  {
+                    runId: 'real-run',
+                    lineageId: 'real-lineage',
+                    name: 'Review worker',
+                    kind: 'background',
+                    state: 'running',
+                    createdAt: 1,
+                    allowWrites: false,
+                    workflow: {
+                      logicalId: 'review',
+                      attempt: 1,
+                      identity: 'review@1',
+                      state: 'running',
+                      dependencies: [],
+                      createdAt: 1,
+                      scheduledAt: 1,
+                    },
+                  },
+                ],
+              },
+              {
+                id: 'wake-lineage',
+                runId: 'wake-run',
+                lineageId: 'wake:review-ready',
+                name: 'Wake review-ready',
+                kind: 'background',
+                state: 'success',
+                createdAt: 2,
+                allowWrites: false,
+                runCount: 1,
+                wake: {
+                  id: 'review-ready',
+                  state: 'entered',
+                  references: ['review@1'],
+                  createdAt: 2,
+                  enteredAt: 3,
+                  revision: 1,
+                  dispatchAttempts: 1,
+                },
+                runs: [],
+              },
+            ],
+          } as DelegateHistoryResponse
+        }
+      />,
+    );
+    expect(markup).toContain('Review worker');
+    expect(markup).toContain('1 active · 0 finished');
+    expect(markup).not.toContain('Wake review-ready');
+    expect(markup).not.toContain('wake:review-ready');
+  });
+
+  it('renders unresolved multi-reference wakes as a non-clickable condition banner', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateSurface
+        surface={{
+          id: 'delegate-multi-wake',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [],
+            wakes: [
+              {
+                id: 'all-ready',
+                state: 'pending',
+                references: ['one@1', 'two@1'],
+                waitingFor: ['two@1'],
+                createdAt: 1,
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('0 active · 0 finished');
+    expect(markup).not.toContain('delegate-row-toggle');
+  });
+
   it('uses a truthful fallback for settled historical rows without activity', () => {
     expect(
       delegateActivityLabel(

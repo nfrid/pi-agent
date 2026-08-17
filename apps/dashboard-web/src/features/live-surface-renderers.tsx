@@ -15,6 +15,7 @@ import {
   type DelegateCompositeGroup,
   type DelegateCompositeRun,
   type DelegateInspectionStatus,
+  type DelegateWakePresentation,
 } from './delegate-history';
 import {
   type DelegateInspectorDetailState,
@@ -109,7 +110,7 @@ function elapsed(
 function delegateRows(
   model: DelegateStatusViewModel,
 ): readonly DelegateStatus[] {
-  return model.statuses;
+  return model.statuses.filter((row) => !row.lineageId.startsWith('wake:'));
 }
 
 function delegateStats(rows: readonly DelegateStatus[]) {
@@ -228,17 +229,23 @@ function WorkSurface({
 
 function delegateWakeEffect(
   row: DelegateInspectionStatus,
-  wakes: DelegateStatusViewModel['wakes'],
+  wakes: readonly DelegateWakePresentation[] | undefined,
 ): string | undefined {
   const identity = row.workflow?.identity;
+  const ownWake = row.wake?.references.length === 1 ? row.wake : undefined;
   const wake =
-    row.wake ??
+    ownWake ??
     wakes?.find(
-      (candidate) => identity && candidate.references.includes(identity),
+      (candidate) =>
+        identity &&
+        candidate.references.length === 1 &&
+        candidate.references[0] === identity,
     );
-  if (!wake || wake.state === 'cancelled' || wake.state === 'blocked')
-    return undefined;
-  return wake.state === 'entered' ? 'resumed parent' : 'resumes parent';
+  if (!wake) return undefined;
+  if (wake.state === 'entered') return 'resumed parent';
+  if (wake.state === 'cancelled') return 'wake cancelled';
+  if (wake.state === 'blocked') return 'wake blocked';
+  return 'resumes parent';
 }
 
 function delegateContext(row: DelegateStatus): string | undefined {
@@ -293,7 +300,7 @@ export function delegateActivityLabel(
 
 export function delegateRowActivityLabel(
   row: DelegateInspectionStatus,
-  wakes: DelegateStatusViewModel['wakes'],
+  wakes: readonly DelegateWakePresentation[] | undefined,
   runState: string,
   pauseState?: string,
 ): string {
@@ -335,10 +342,19 @@ export function DelegateSurface({
   const model = surface.viewModel as DelegateStatusViewModel;
   const liveRows = delegateRows(model);
   const composite = useMemo(
-    () => (history ? composeDelegateHistory(history, liveRows) : undefined),
-    [history, liveRows],
+    () =>
+      history
+        ? composeDelegateHistory(history, liveRows, model.wakes ?? [])
+        : undefined,
+    [history, liveRows, model.wakes],
   );
   const rows = composite?.groups.map((group) => group.row) ?? liveRows;
+  const wakes = composite?.wakes ?? model.wakes ?? [];
+  const wakeConditions = wakes.filter(
+    (wake) =>
+      wake.references.length > 1 &&
+      !['entered', 'cancelled', 'blocked'].includes(wake.state),
+  );
   const historyIncomplete = history?.truncated === true;
   const stats = delegateStats(rows);
   const [selectedLineageId, setSelectedLineageId] = useState<string>();
@@ -441,6 +457,7 @@ export function DelegateSurface({
         count={`${activeCount} active · ${finishedCount} finished`}
         visibleCount={
           rows.length +
+          wakeConditions.length +
           (historyIncomplete ? 1 : 0) +
           (historyLoading || historyError ? 1 : 0)
         }
@@ -459,6 +476,33 @@ export function DelegateSurface({
               Unable to load delegate history. Live delegate status remains
               available.
             </p>
+          )}
+          {wakeConditions.length > 0 && (
+            <section
+              className="delegate-wake-conditions"
+              aria-label="Resume conditions"
+            >
+              {wakeConditions.map((wake) => {
+                const waitingFor =
+                  'waitingFor' in wake && wake.waitingFor
+                    ? wake.waitingFor
+                    : wake.references;
+                const ready = Math.max(
+                  0,
+                  wake.references.length - waitingFor.length,
+                );
+                return (
+                  <aside className="delegate-wake-condition" key={wake.id}>
+                    <strong>Resume condition</strong>
+                    <span>
+                      {ready}/{wake.references.length} ready · waiting for{' '}
+                      {waitingFor.join(', ')}
+                    </span>
+                    <small>{wake.references.join(', ')}</small>
+                  </aside>
+                );
+              })}
+            </section>
           )}
           <div className="delegate-rows">
             {delegateSections.map(
@@ -483,7 +527,7 @@ export function DelegateSurface({
                       const activityLabel = short(
                         delegateRowActivityLabel(
                           row,
-                          model.wakes,
+                          wakes,
                           runState,
                           pauseState,
                         ),

@@ -251,4 +251,265 @@ describe('delegate history composition', () => {
       model.sections.find((section) => section.id === 'history')?.groups,
     ).toHaveLength(1);
   });
+
+  it('suppresses standalone wake groups and annotates their single real reference', () => {
+    const model = composeDelegateHistory(
+      {
+        version: 2,
+        sessionId: 'offline-session',
+        groups: [
+          {
+            id: 'delegate-lineage',
+            runId: 'delegate-run',
+            lineageId: 'delegate-lineage',
+            name: 'Review worker',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            runCount: 1,
+            runs: [
+              {
+                runId: 'delegate-run',
+                lineageId: 'delegate-lineage',
+                name: 'Review worker',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                allowWrites: false,
+                workflow: {
+                  logicalId: 'review',
+                  attempt: 1,
+                  identity: 'review@1',
+                  state: 'running',
+                  dependencies: [],
+                  createdAt: 1,
+                  scheduledAt: 1,
+                },
+              },
+            ],
+          },
+          {
+            id: 'wake-lineage',
+            runId: 'wake-run',
+            lineageId: 'wake:review-ready',
+            name: 'Wake review-ready',
+            kind: 'background',
+            state: 'running',
+            createdAt: 2,
+            allowWrites: false,
+            runCount: 1,
+            wake: {
+              id: 'review-ready',
+              state: 'pending',
+              references: ['review@1'],
+              createdAt: 2,
+              revision: 1,
+              dispatchAttempts: 0,
+            },
+            runs: [
+              {
+                runId: 'wake-run',
+                lineageId: 'wake:review-ready',
+                name: 'Wake review-ready',
+                kind: 'background',
+                state: 'running',
+                createdAt: 2,
+                allowWrites: false,
+                wake: {
+                  id: 'review-ready',
+                  state: 'pending',
+                  references: ['review@1'],
+                  createdAt: 2,
+                  revision: 1,
+                  dispatchAttempts: 0,
+                },
+              },
+            ],
+          },
+        ],
+      } as DelegateHistoryResponse,
+      [],
+    );
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0]?.row.workflow?.identity).toBe('review@1');
+    expect(model.groups[0]?.row.wake?.id).toBe('review-ready');
+    expect(model.groups[0]?.row.wake?.references).toEqual(['review@1']);
+    expect(model.groups[0]?.row.runCount).toBe(1);
+    expect(model.wakes).toHaveLength(1);
+  });
+
+  it('reconciles a workflow placeholder with a unique live run before wake annotation', () => {
+    const placeholderWorkflow = {
+      logicalId: 'impl-inline-wake-ui',
+      attempt: 1,
+      identity: 'impl-inline-wake-ui@1',
+      state: 'running' as const,
+      dependencies: [],
+      createdAt: 1,
+      scheduledAt: 1,
+    };
+    const model = composeDelegateHistory(
+      {
+        version: 2,
+        sessionId: 'offline-session',
+        groups: [
+          {
+            id: 'impl-placeholder',
+            runId: 'impl-placeholder-run',
+            lineageId: 'impl-inline-wake-ui',
+            name: 'impl-inline-wake-ui',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            workflow: placeholderWorkflow,
+            runCount: 1,
+            runs: [
+              {
+                runId: 'impl-placeholder-run',
+                lineageId: 'impl-inline-wake-ui',
+                name: 'impl-inline-wake-ui',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                allowWrites: false,
+                workflow: placeholderWorkflow,
+              },
+            ],
+          },
+          {
+            id: 'wake-lineage',
+            runId: 'wake-run',
+            lineageId: 'wake:impl-ready',
+            name: 'Wake impl-ready',
+            kind: 'background',
+            state: 'running',
+            createdAt: 2,
+            allowWrites: false,
+            runCount: 1,
+            wake: {
+              id: 'impl-ready',
+              state: 'pending',
+              references: ['impl-inline-wake-ui@1'],
+              createdAt: 2,
+              revision: 1,
+              dispatchAttempts: 0,
+            },
+            runs: [],
+          },
+        ],
+      } as DelegateHistoryResponse,
+      [
+        {
+          id: 'actual-live',
+          runId: 'actual-live-run',
+          lineageId: 'actual-live-lineage',
+          name: 'Actual implementation worker',
+          kind: 'background',
+          state: 'running',
+          createdAt: 3,
+          allowWrites: true,
+          workflow: { ...placeholderWorkflow, state: 'running' },
+        },
+      ],
+    );
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0]?.row.runId).toBe('actual-live-run');
+    expect(model.groups[0]?.row.name).toBe('Actual implementation worker');
+    expect(model.groups[0]?.row.runCount).toBe(1);
+    expect(model.groups[0]?.row.wake?.id).toBe('impl-ready');
+
+    const ambiguous = composeDelegateHistory(
+      {
+        version: 2,
+        sessionId: 'offline-session',
+        groups: [
+          {
+            id: 'impl-placeholder',
+            runId: 'impl-placeholder-run',
+            lineageId: 'impl-inline-wake-ui',
+            name: 'impl-inline-wake-ui',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            workflow: placeholderWorkflow,
+            runCount: 1,
+            runs: [
+              {
+                runId: 'impl-placeholder-run',
+                lineageId: 'impl-inline-wake-ui',
+                name: 'impl-inline-wake-ui',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                allowWrites: false,
+                workflow: placeholderWorkflow,
+              },
+            ],
+          },
+        ],
+      } as DelegateHistoryResponse,
+      [
+        {
+          id: 'actual-live',
+          runId: 'actual-live-run',
+          lineageId: 'actual-live-lineage',
+          name: 'Actual implementation worker',
+          kind: 'background',
+          state: 'running',
+          createdAt: 3,
+          allowWrites: true,
+          workflow: { ...placeholderWorkflow, state: 'running' },
+        },
+        {
+          id: 'other-live',
+          runId: 'other-live-run',
+          lineageId: 'other-live-lineage',
+          name: 'Other implementation worker',
+          kind: 'background',
+          state: 'running',
+          createdAt: 3,
+          allowWrites: true,
+          workflow: { ...placeholderWorkflow, state: 'running' },
+        },
+      ],
+    );
+    expect(ambiguous.groups).toHaveLength(3);
+  });
+
+  it('keeps unresolved multi-reference wakes as conditions, not delegate groups', () => {
+    const model = composeDelegateHistory(
+      {
+        version: 2,
+        sessionId: 'offline-session',
+        groups: [
+          {
+            id: 'wake-lineage',
+            runId: 'wake-run',
+            lineageId: 'wake:all-ready',
+            name: 'Wake all-ready',
+            kind: 'background',
+            state: 'running',
+            createdAt: 2,
+            allowWrites: false,
+            runCount: 1,
+            wake: {
+              id: 'all-ready',
+              state: 'pending',
+              references: ['one@1', 'two@1'],
+              createdAt: 2,
+              revision: 1,
+              dispatchAttempts: 0,
+            },
+            runs: [],
+          },
+        ],
+      } as DelegateHistoryResponse,
+      [],
+    );
+    expect(model.groups).toHaveLength(0);
+    expect(model.wakes[0]?.references).toEqual(['one@1', 'two@1']);
+  });
 });
