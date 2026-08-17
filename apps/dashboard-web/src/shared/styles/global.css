@@ -27,6 +27,12 @@ select {
 button {
   color: var(--fg);
   background: var(--pink);
+  border: none;
+  transition: filter 0.2s ease;
+}
+
+button:hover {
+  filter: brightness(1.1);
 }
 
 button:focus-visible,
