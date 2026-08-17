@@ -2,7 +2,7 @@ import {
   createRuntimeCapabilitySnapshot,
   type ExtensionManifest,
 } from '@pi-dashboard/extension-contributions';
-import { Type } from 'typebox';
+import { type Static, Type } from 'typebox';
 
 /**
  * Semantic actions backed directly by the 0.82.1 ExtensionContext APIs.
@@ -80,3 +80,17 @@ export const remoteControlCapabilitySnapshot = createRuntimeCapabilitySnapshot(
     },
   ],
 );
+
+export const SETTLED_BACKGROUND_RENDERER_ID = 'runtime.settled-background';
+export const SETTLED_BACKGROUND_SURFACE_ID = 'runtime.settled-background';
+
+export const SettledBackgroundViewModelSchema = Type.Object(
+  {
+    version: Type.Literal(1),
+    count: Type.Integer({ minimum: 1 }),
+  },
+  { additionalProperties: false },
+);
+export type SettledBackgroundViewModel = Static<
+  typeof SettledBackgroundViewModelSchema
+>;

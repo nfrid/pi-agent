@@ -29,6 +29,7 @@ import {
   type PauseStatusViewModel,
   PauseStatusViewModelSchema,
 } from '../../../../extensions/pause/contribution';
+import { SETTLED_BACKGROUND_RENDERER_ID } from '../../../../extensions/remote-control/contribution';
 import { TASKS_RENDERER_ID } from '../../../../extensions/tasks/contribution';
 import {
   type DashboardRendererContext,
@@ -713,6 +714,9 @@ export function ExtensionSurfaceStack({
     () =>
       runtimeExtensionSurfaces(runtime)
         .filter((surface) => surface.rendererId !== PAUSE_RENDERER_ID)
+        .filter(
+          (surface) => surface.rendererId !== SETTLED_BACKGROUND_RENDERER_ID,
+        )
         .filter(
           (surface) =>
             !excludeDelegate || surface.rendererId !== DELEGATE_RENDERER_ID,

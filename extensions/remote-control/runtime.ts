@@ -17,6 +17,7 @@ import {
   type InteractionBroker,
 } from '../ask-user/broker';
 import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
+import { pendingProcessCount } from '../shared/runtime/pending-processes';
 import {
   getScopedServices,
   releaseScopedServices,
@@ -26,6 +27,7 @@ import {
 import { BridgeClient } from './bridge-client';
 import { expandDashboardInput } from './command-adapter';
 import { dispatchDashboardCommand } from './command-dispatcher';
+import { clearSettledBackground, publishSettledBackground } from './live';
 import { LiveEventNormalizer } from './live-event-normalizer';
 import { isQueueDraftCommand, QueueDraftStore } from './queue-draft-store';
 import { registerRemoteControlCapability } from './register-capability';
@@ -400,15 +402,19 @@ export function emitAgentSettlement(
   runtime: RemoteControlRuntime,
   ctx: ExtensionContext,
 ): void {
+  const scopeId = ctx.sessionManager.getSessionId();
   const hasIdleApi = typeof ctx.isIdle === 'function';
+  const pending = pendingProcessCount(scopeId);
   if (
     !(hasIdleApi
-      ? isGenuineAgentSettlement(false, ctx.sessionManager.getSessionId())
+      ? isGenuineAgentSettlement(false, scopeId)
       : isGenuineAgentSettlement())
   ) {
+    publishSettledBackground(pending, scopeId);
     emitState(runtime, ctx, 'working');
     return;
   }
+  clearSettledBackground(scopeId);
   emitState(runtime, ctx);
   if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({

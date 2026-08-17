@@ -6,7 +6,7 @@ import type {
 } from '@pi-dashboard/protocol';
 import { workspaceForPath } from '@pi-dashboard/protocol';
 import { sessionDisplayTitle } from '../../app-helpers';
-import { runtimePauseStatus } from '../extension-surfaces';
+import { dashboardStatus } from '../presentation-status';
 
 export type AgentThreadRow = {
   id: string;
@@ -14,7 +14,12 @@ export type AgentThreadRow = {
   workspaceId?: string;
   workspaceName: string;
   cwd: string;
-  status: RuntimeSnapshot['liveState'] | 'paused' | 'offline' | 'dormant';
+  status:
+    | RuntimeSnapshot['liveState']
+    | 'paused'
+    | 'offline'
+    | 'dormant'
+    | 'input';
   statusLabel?: string;
   runtime?: RuntimeSnapshot;
   session?: SessionIndexEntry;
@@ -46,21 +51,15 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
   for (const runtime of snapshot.runtimes) {
     const session = sessionsById.get(runtime.session.id);
     const workspace = workspaceForPath(runtime.cwd, workspaces);
-    const pauseStatus = runtimePauseStatus(runtime);
-    const status =
-      runtime.online === false
-        ? 'offline'
-        : pauseStatus
-          ? 'paused'
-          : runtime.liveState;
+    const presentation = dashboardStatus(runtime);
     rows.set(runtime.session.id, {
       id: runtime.session.id,
       title: sessionDisplayTitle(runtime.session, runtime.session.entries),
       workspaceId: session?.workspaceId ?? workspace?.id,
       workspaceName: workspace?.name ?? 'Other workspace',
       cwd: runtime.cwd,
-      status,
-      statusLabel: pauseStatus?.label,
+      status: presentation.status,
+      statusLabel: presentation.label,
       runtime,
       session,
       startedAt: session?.startedAt,

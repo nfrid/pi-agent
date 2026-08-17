@@ -10,6 +10,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, Suspense, useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../../routes/navigation';
+import { hasSettledBackground } from '../presentation-status';
 import {
   ImageAttachmentInput,
   ImageAttachmentPreviews,
@@ -21,11 +22,13 @@ import {
   newQueueId,
   QueuePanel,
   queueCommand,
-  shouldQueueComposerMessage,
   shouldShowQueuePanel,
   useComposerQueue,
 } from './queue';
 import {
+  composerIsDisabled,
+  composerMode,
+  composerSubmissionPolicy,
   contextIndicatorData,
   resumeRuntimeRequest,
   runtimeSupportsImages,
@@ -88,7 +91,7 @@ export function Composer({
   const editorRef = useRef<MDXEditorMethods>(null);
   const mountedRef = useRef(false);
   const [mode, setMode] = useState<'prompt' | 'steer' | 'followUp'>(() =>
-    runtime?.liveState === 'working' ? 'steer' : 'prompt',
+    composerMode(runtime),
   );
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -107,12 +110,8 @@ export function Composer({
     runtime?.composerCommands ?? commandCatalogue.data?.commands;
   const { queue, setQueue, addOptimistic, rejectOptimistic } =
     useComposerQueue(runtime);
-  const disabled =
-    !runtime ||
-    runtime.online === false ||
-    runtime.liveState === 'stopping' ||
-    runtime.liveState === 'waiting' ||
-    runtime.pendingInteractions.length > 0;
+  const settledBackground = hasSettledBackground(runtime);
+  const disabled = composerIsDisabled(runtime);
   const submissionDisabled = disabled;
   const attachmentsEnabled =
     runtime?.liveState !== 'compacting' &&
@@ -134,13 +133,10 @@ export function Composer({
     busy: busy || disabled,
     onError: setError,
   });
-  const queuesCurrentMessage = runtime
-    ? shouldQueueComposerMessage(
-        runtime.liveState,
-        mode,
-        attachments.length > 0,
-      )
-    : false;
+  const submissionPolicy = runtime
+    ? composerSubmissionPolicy(runtime, mode, attachments.length > 0)
+    : { commandType: 'prompt' as const, queues: false };
+  const queuesCurrentMessage = submissionPolicy.queues;
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -148,8 +144,8 @@ export function Composer({
     };
   }, []);
   useEffect(() => {
-    setMode(runtime?.liveState === 'working' ? 'steer' : 'prompt');
-  }, [runtime?.liveState]);
+    setMode(composerMode(runtime));
+  }, [runtime]);
   const resume = async () => {
     const request = resumeRuntimeRequest(workspaceId, sessionId);
     if (!request || resumeMutation.isPending) {
@@ -220,11 +216,12 @@ export function Composer({
     }
     setBusy(true);
     setError(undefined);
+    const commandType = submissionPolicy.commandType;
     const command = {
-      type: runtime.liveState === 'idle' ? 'prompt' : mode,
+      type: commandType,
       text: trimmedText,
     };
-    if (runtime.liveState === 'idle') onPromptSubmitted?.(trimmedText);
+    if (commandType === 'prompt') onPromptSubmitted?.(trimmedText);
     try {
       if (queuesCurrentMessage) {
         const queueId = newQueueId();
@@ -290,7 +287,11 @@ export function Composer({
   };
   return (
     <>
-      {shouldShowQueuePanel(runtime.liveState, queue.length) && (
+      {shouldShowQueuePanel(
+        runtime.liveState,
+        queue.length,
+        settledBackground,
+      ) && (
         <QueuePanel
           runtimeId={runtime.runtimeId}
           items={queue}
@@ -332,7 +333,7 @@ export function Composer({
               ref={editorRef}
               initialMarkdown={initialDraft}
               commands={
-                runtime.liveState === 'working'
+                runtime.liveState === 'working' && !settledBackground
                   ? composerCommands?.filter(
                       (command) => command.source !== 'builtin',
                     )
@@ -375,7 +376,7 @@ export function Composer({
                 {queuesCurrentMessage ? 'Queue' : 'Send'}
               </span>
             </AriaButton>
-            {runtime.liveState === 'working' && (
+            {runtime.liveState === 'working' && !settledBackground && (
               <AriaButton
                 type="button"
                 className="composer-abort"
@@ -390,7 +391,7 @@ export function Composer({
         </ComposerRichSurface>
         <div className="composer-secondary">
           <div className="composer-mode">
-            {runtime.liveState === 'working' && (
+            {runtime.liveState === 'working' && !settledBackground && (
               <>
                 <span>Mode:</span>
                 <AriaButton
@@ -408,7 +409,9 @@ export function Composer({
                 </AriaButton>
               </>
             )}
-            {runtime.liveState === 'idle' && <span>Prompt</span>}
+            {(runtime.liveState === 'idle' || settledBackground) && (
+              <span>Prompt</span>
+            )}
             {runtime.liveState === 'waiting' && <span>Answer above</span>}
             <ContextIndicator usage={runtime.contextUsage} />
           </div>

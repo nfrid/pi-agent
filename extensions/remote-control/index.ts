@@ -4,6 +4,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
 import { compactWithDashboardCancellation } from './compaction-shim';
+import { clearSettledBackground } from './live';
 import {
   directString,
   directValue,
@@ -193,9 +194,14 @@ export default defineExtension('remote-control', (pi) => {
   });
   pi.on('before_agent_start', (_event, ctx) => {
     if (!runtime.isCurrent(ctx)) return;
+    clearSettledBackground(ctx.sessionManager.getSessionId());
     emitState(runtime, ctx, 'working');
   });
-  pi.on('agent_start', (_event, ctx) => emitState(runtime, ctx));
+  pi.on('agent_start', (_event, ctx) => {
+    if (!runtime.isCurrent(ctx)) return;
+    clearSettledBackground(ctx.sessionManager.getSessionId());
+    emitState(runtime, ctx);
+  });
   pi.on('turn_end', (_event, ctx) => {
     emitTurnEnd(runtime, pi, ctx);
   });

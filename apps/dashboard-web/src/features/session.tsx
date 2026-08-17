@@ -16,6 +16,7 @@ import { useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav, workspaceNameForSession } from './agent-thread-nav';
 import { runtimePauseStatus } from './extension-surfaces';
 import { PendingInteractions } from './pending-interaction';
+import { dashboardStatus } from './presentation-status';
 import { useOlderSessionHistory } from './session/history';
 import { useSessionHydration } from './session/hydration';
 import { useSessionScroll } from './session/scroll';
@@ -137,16 +138,10 @@ export function SessionView({
   }, [id, replaceSession, replacementSessionId]);
 
   const pauseStatus = runtimePauseStatus(runtime);
-  const status = runtime
-    ? runtime.online === false
-      ? 'offline'
-      : pauseStatus
-        ? 'paused'
-        : runtime.liveState === 'idle'
-          ? 'ready'
-          : runtime.liveState
-    : 'dormant';
-  const statusLabel = pauseStatus?.label ?? status;
+  const presentation = dashboardStatus(runtime);
+  const status = presentation.status === 'idle' ? 'ready' : presentation.status;
+  const statusLabel =
+    presentation.status === 'idle' ? 'ready' : presentation.label;
   if (!data || !projection || waitingForInitialHistory) {
     return (
       <div

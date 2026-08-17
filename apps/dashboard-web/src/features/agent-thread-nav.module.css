@@ -293,6 +293,9 @@
 .threadRow:global(.status-waiting) .threadGlyph {
   color: var(--orange);
 }
+.threadRow:global(.status-input) .threadGlyph {
+  color: var(--cyan);
+}
 .threadRow:global(.status-failed) .threadGlyph {
   color: var(--red);
 }
@@ -340,6 +343,7 @@
     :global(.status-working),
     :global(.status-compacting),
     :global(.status-waiting),
+    :global(.status-input),
     :global(.status-failed)
   )
   .threadCopy
