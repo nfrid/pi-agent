@@ -299,9 +299,13 @@ function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
 
 const COMMIT_PATTERN = /^[a-f0-9]{7,64}$/;
 
-function safeBranchString(value: string, maxLength: number): boolean {
+function safeBranchString(
+  value: string,
+  maxLength: number,
+  allowEmpty = false,
+): boolean {
   return (
-    value.length > 0 &&
+    (allowEmpty || value.length > 0) &&
     value.length <= maxLength &&
     ![...value].some((character) => {
       const code = character.charCodeAt(0);
@@ -359,7 +363,7 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
     path.isAbsolute(record.workingDirectory) ||
     normalizedWorkingDirectory === '..' ||
     normalizedWorkingDirectory.startsWith(`..${path.sep}`) ||
-    !safeBranchString(record.workingDirectory, 4096)
+    !safeBranchString(record.workingDirectory, 4096, true)
   )
     throw new WorkflowInputBlockedError(
       `Branch source for ${source.attempt.identity} has a missing, mismatched, or unsafe durable worktree record.`,
