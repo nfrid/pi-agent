@@ -152,6 +152,16 @@ describe('workflow symbolic inputs', () => {
         workingDirectory: 'src',
       });
       expect(Object.isFrozen(resolved.inputs[0]?.branch)).toBe(true);
+
+      writeWorktreeRecord({ ...record, workingDirectory: '' });
+      const rootResolved = resolveWorkflowInputs(
+        [bound('impl', ['branch'])],
+        () => source(result),
+      );
+      expect(rootResolved.inputs[0]?.branch).toMatchObject({
+        workingDirectory: '.',
+      });
+
       const mismatched = {
         ...worktreeSummary(record),
         headCommit: 'c'.repeat(40),
