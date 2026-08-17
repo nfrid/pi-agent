@@ -15,9 +15,9 @@ ticket template before changing feedback artifacts.
 Triage is a separate, explicit request. Process a bounded batch (by default,
 reports whose status is `new`), inspect the report evidence and existing tickets,
 and choose `triaged`, `duplicate`, or `parked`. Scan for duplicates before
-grouping; keep source reports in place. For an actionable group, create one
-decision-ready ticket from `TICKET_TEMPLATE.md`, link every source report in
-both directions, and record:
+grouping; keep source reports in place during normal triage. For an actionable
+group, create one decision-ready ticket from `TICKET_TEMPLATE.md`, link every
+source report in both directions, and record:
 
 - the verified baseline and evidence;
 - a falsifiable hypothesis;
@@ -39,5 +39,9 @@ window, compare the result with the baseline and record the date and one result:
 `keep`, `revise`, `revert`, or `insufficient evidence`.
 
 Keep triage, approval, implementation, and post-merge evaluation as distinct
-steps. Do not add taxonomies, archives, databases, automatic routing, transcript
-stores, or unrelated project changes.
+steps. A separately requested cleanup may delete reports and tickets whose
+behavior and proposed remedy are wholly superseded at the current baseline;
+verify that no unresolved concern depends on them, repair surviving links, and
+rely on Git history rather than creating an archive. Do not add taxonomies,
+archives, databases, automatic routing, transcript stores, or unrelated project
+changes.

@@ -25,4 +25,4 @@ A successful unchanged read-only delegate in worktree isolation is retained as a
 - [`TICKET_TEMPLATE.md`](TICKET_TEMPLATE.md) — decision-ready harness proposal
 - [`tickets/`](tickets/) — proposals and evaluation records
 
-Reports in `inbox/` link to tickets as `../tickets/<file>.md`; tickets link back to every source report as `../inbox/<file>.md`. Keep source reports and their history in place.
+Reports in `inbox/` link to tickets as `../tickets/<file>.md`; tickets link back to every source report as `../inbox/<file>.md`. Normal triage keeps source reports in place. An explicit maintenance cleanup may delete wholly superseded reports and tickets after confirming no unresolved concern depends on them and repairing every surviving link; Git history is the archive.
