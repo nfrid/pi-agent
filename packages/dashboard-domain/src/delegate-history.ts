@@ -43,6 +43,8 @@ type DelegateOccurrence = {
   entryIdentity?: string;
   job?: RecordValue;
   entryTimestamp?: number;
+  /** Durable workflow journal attempts are compact placeholders, not runs. */
+  workflowPlaceholder?: boolean;
 };
 
 function isRecord(value: unknown): value is RecordValue {
@@ -1111,6 +1113,7 @@ function workflowDetails(
       runIndex: String(runIndex),
       entryIdentity: stringValue(entry.id),
       entryTimestamp: entryTimestamp(entry),
+      workflowPlaceholder: isRecord(run.workflow),
     }),
   );
 }
@@ -1212,6 +1215,7 @@ function workflowJournal(
         runIndex: identity,
         entryIdentity: stringValue(value.id),
         entryTimestamp: entryTimestamp(value),
+        workflowPlaceholder: true,
       });
     }
     while (latest.size > MAX_WORKFLOW_HISTORY_ATTEMPTS) {
@@ -1348,12 +1352,61 @@ function occurrenceJobId(occurrence: DelegateOccurrence): string | undefined {
   );
 }
 
+type WorkflowOccurrenceIdentity = {
+  identity: string;
+  owner?: string;
+};
+
+function occurrenceWorkflowIdentity(
+  occurrence: DelegateOccurrence,
+): WorkflowOccurrenceIdentity | undefined {
+  const source = isRecord(occurrence.run.workflow)
+    ? occurrence.run.workflow
+    : isRecord(occurrence.run.workflowAttempt)
+      ? occurrence.run.workflowAttempt
+      : undefined;
+  if (!source) return undefined;
+  const logicalId = isCanonicalWorkflowLogicalId(source.logicalId)
+    ? source.logicalId
+    : undefined;
+  const identity = isCanonicalWorkflowAttemptReference(source.identity)
+    ? source.identity
+    : undefined;
+  const ordinal = source.attempt ?? source.ordinal;
+  if (
+    !logicalId ||
+    !identity ||
+    typeof ordinal !== 'number' ||
+    !Number.isSafeInteger(ordinal) ||
+    identity !== `${logicalId}@${ordinal}`
+  )
+    return undefined;
+  const owner =
+    source.ownerBranchId === undefined
+      ? undefined
+      : validWorkflowText(source.ownerBranchId, 256);
+  if (source.ownerBranchId !== undefined && owner === undefined)
+    return undefined;
+  return { identity, ...(owner === undefined ? {} : { owner }) };
+}
+
+function occurrenceWorkflowKey(
+  occurrence: DelegateOccurrence,
+): string | undefined {
+  const workflow = occurrenceWorkflowIdentity(occurrence);
+  return workflow
+    ? `workflow:${workflow.owner ?? ''}\u0000${workflow.identity}`
+    : undefined;
+}
+
 function occurrenceKeys(occurrence: DelegateOccurrence): string[] {
   const keys: string[] = [];
   const runId = stringValue(occurrence.run.runId, 256);
   const jobId = occurrenceJobId(occurrence);
+  const workflowKey = occurrenceWorkflowKey(occurrence);
   if (runId) keys.push(`run:${runId}`);
   if (jobId) keys.push(`job:${jobId}`);
+  if (workflowKey) keys.push(workflowKey);
   return keys;
 }
 
@@ -1378,6 +1431,39 @@ function mergeCanonicalOccurrences(
   previous: DelegateOccurrence,
   next: DelegateOccurrence,
 ): DelegateOccurrence {
+  // Workflow journal attempts are metadata-only placeholders. If one is
+  // reconciled with an ordinary run, keep the ordinary occurrence as the
+  // canonical source so its run identity and public detail cannot be replaced
+  // by the synthetic workflow IDs. Merge the compact workflow metadata in
+  // either order because a later journal snapshot can follow the real run.
+  if (previous.workflowPlaceholder !== next.workflowPlaceholder) {
+    const actual = previous.workflowPlaceholder ? next : previous;
+    const placeholder = previous.workflowPlaceholder ? previous : next;
+    const placeholderWorkflow = isRecord(placeholder.run.workflow)
+      ? placeholder.run.workflow
+      : undefined;
+    const actualWorkflow = isRecord(actual.run.workflow)
+      ? actual.run.workflow
+      : undefined;
+    return {
+      ...actual,
+      run: {
+        ...placeholder.run,
+        ...actual.run,
+        ...(placeholderWorkflow
+          ? {
+              workflow: {
+                ...placeholderWorkflow,
+                ...(actualWorkflow ?? {}),
+              },
+            }
+          : {}),
+      },
+      ...(actual.job === undefined && placeholder.job === undefined
+        ? {}
+        : { job: actual.job ?? placeholder.job }),
+    };
+  }
   const previousState = occurrenceState(previous);
   const nextState = occurrenceState(next);
   const previousTerminal =
@@ -1399,10 +1485,39 @@ function mergeCanonicalOccurrences(
 function canonicalOccurrences(
   branch: readonly unknown[],
 ): DelegateOccurrence[] {
+  const allOccurrences = occurrences(branch);
+  // Public run records carry workflowAttempt without its immutable owner. It
+  // is safe to infer that owner only when the selected branch has one durable
+  // placeholder for the identity; multiple sibling owners must remain
+  // separate rather than arbitrarily attaching the run to one of them.
+  const durableOwners = new Map<string, Set<string>>();
+  for (const occurrence of allOccurrences) {
+    if (!occurrence.workflowPlaceholder) continue;
+    const workflow = occurrenceWorkflowIdentity(occurrence);
+    if (!workflow) continue;
+    let owners = durableOwners.get(workflow.identity);
+    if (!owners) {
+      owners = new Set<string>();
+      durableOwners.set(workflow.identity, owners);
+    }
+    owners.add(workflow.owner ?? '');
+  }
+  const keysFor = (occurrence: DelegateOccurrence): string[] => {
+    const keys = occurrenceKeys(occurrence);
+    const workflow = occurrenceWorkflowIdentity(occurrence);
+    if (!workflow || workflow.owner !== undefined) return keys;
+    const owners = durableOwners.get(workflow.identity);
+    if (owners?.size === 1) {
+      const owner = owners.values().next().value;
+      const key = `workflow:${owner ?? ''}\u0000${workflow.identity}`;
+      if (!keys.includes(key)) keys.push(key);
+    }
+    return keys;
+  };
   const result: DelegateOccurrence[] = [];
   const indexes = new Map<string, number>();
-  for (const occurrence of occurrences(branch)) {
-    const keys = occurrenceKeys(occurrence);
+  for (const occurrence of allOccurrences) {
+    const keys = keysFor(occurrence);
     const index = keys
       .map((key) => indexes.get(key))
       .find((candidate): candidate is number => candidate !== undefined);
@@ -1416,8 +1531,7 @@ function canonicalOccurrences(
     if (!previous) continue;
     const merged = mergeCanonicalOccurrences(previous, occurrence);
     result[index] = merged;
-    for (const key of [...occurrenceKeys(previous), ...keys])
-      indexes.set(key, index);
+    for (const key of [...keysFor(previous), ...keys]) indexes.set(key, index);
   }
   return result;
 }
@@ -1475,14 +1589,16 @@ function invocation(
     : undefined;
   const workflowSource = isRecord(occurrence.run.workflow)
     ? occurrence.run.workflow
-    : undefined;
+    : isRecord(occurrence.run.workflowAttempt)
+      ? occurrence.run.workflowAttempt
+      : undefined;
   const workflowOwnerBranchId = validWorkflowText(
     workflowSource?.ownerBranchId,
     256,
   );
   const workflowLogicalId = stringValue(workflowSource?.logicalId, 64);
   const workflowIdentity = stringValue(workflowSource?.identity, 80);
-  const workflowAttempt = workflowSource?.attempt;
+  const workflowAttempt = workflowSource?.attempt ?? workflowSource?.ordinal;
   const workflowInputs = projectWorkflowInputs(workflowSource?.inputs);
   const workflow =
     workflowSource &&
