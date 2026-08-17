@@ -1,3 +1,4 @@
+import { renderToStaticMarkup } from 'react-dom/server';
 import { Type } from 'typebox';
 import { describe, expect, it } from 'vitest';
 import {
@@ -83,5 +84,37 @@ describe('dashboard renderer registry', () => {
     expect(invalid).toMatchObject({
       props: { children: expect.anything() },
     });
+  });
+
+  it('renders ask-user choices and activity group status chips', () => {
+    const askUser = renderToStaticMarkup(
+      renderDashboardContribution('ask-user.question', {
+        id: 'q1',
+        question: 'Continue?',
+        choices: ['Yes', 'No'],
+        allowCustom: true,
+        customLabel: 'Other',
+      }),
+    );
+    expect(askUser).toContain('Continue?');
+    expect(askUser).toContain('ask-user-choice');
+    expect(askUser).toContain('Other');
+
+    const activity = renderToStaticMarkup(
+      renderDashboardContribution('activity-groups.activity', {
+        id: 'group-1',
+        start: 0,
+        end: 1,
+        kind: 'execute',
+        title: 'Refactor dashboard',
+        status: 'live',
+        expanded: false,
+        toolCount: 3,
+        tools: [],
+      }),
+    );
+    expect(activity).toContain('activity-renderer-chip');
+    expect(activity).toContain('Refactor dashboard');
+    expect(activity).toContain('3 tools');
   });
 });

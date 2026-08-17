@@ -126,11 +126,16 @@
 }
 .activity-summary .activity-steps li {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
+}
+.activity-step-meta {
+  color: var(--dim);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
 }
 .activity-step-dot {
   color: var(--cyan);

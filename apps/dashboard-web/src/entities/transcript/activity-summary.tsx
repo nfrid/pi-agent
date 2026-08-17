@@ -5,6 +5,7 @@ import {
   activityGroupMetadata,
   activityGroupSummary,
   activityStepParts,
+  commandStepMeta,
   type TranscriptGroup,
 } from './activity';
 import { activityStepTimestamps } from './landmarks';
@@ -16,9 +17,13 @@ function lineCountLabel(count: number, kind: string): string {
 function ActivityStepContent({
   action,
   timestamp,
+  showTimestamp = true,
+  meta,
 }: {
   action: ActivityStepParts;
   timestamp?: number | string;
+  showTimestamp?: boolean;
+  meta?: string;
 }) {
   const changes = action.lineChanges;
   const hasChanges = Boolean(
@@ -69,10 +74,13 @@ function ActivityStepContent({
           ) : null}
         </span>
       )}
-      <DashboardTime
-        className="transcript-time activity-step-time"
-        timestamp={timestamp}
-      />
+      {meta ? <span className="activity-step-meta">{meta}</span> : null}
+      {showTimestamp ? (
+        <DashboardTime
+          className="transcript-time activity-step-time"
+          timestamp={timestamp}
+        />
+      ) : null}
     </>
   );
 }
@@ -92,6 +100,7 @@ function CollapsedActivitySummary({
     .slice(-summary.recentTools.length)
     .map((tool, index) => ({
       action: activityStepParts(tool, cwd),
+      meta: commandStepMeta(tool),
       timestamp:
         allTimestamps[
           allTimestamps.length - summary.recentTools.length + index
@@ -108,7 +117,7 @@ function CollapsedActivitySummary({
       )}
       {recentActions.length > 0 && (
         <ol className="activity-steps">
-          {recentActions.map(({ action, timestamp }) => {
+          {recentActions.map(({ action, meta, timestamp }) => {
             const occurrence = (stepKeyCounts.get(action.label) ?? 0) + 1;
             stepKeyCounts.set(action.label, occurrence);
             return (
@@ -116,7 +125,12 @@ function CollapsedActivitySummary({
                 className={`activity-step role-${action.role} step-${action.state}`}
                 key={`${action.label}-${occurrence}`}
               >
-                <ActivityStepContent action={action} timestamp={timestamp} />
+                <ActivityStepContent
+                  action={action}
+                  meta={meta}
+                  showTimestamp={false}
+                  timestamp={timestamp}
+                />
               </li>
             );
           })}

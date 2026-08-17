@@ -75,13 +75,42 @@ const explicitRenderers: readonly DashboardRenderer[] = [
   {
     descriptor: askUserRenderer,
     render: (input) => {
-      const value = input as { question?: unknown };
+      const value = input as {
+        question?: unknown;
+        choices?: unknown;
+        allowCustom?: unknown;
+        customLabel?: unknown;
+      };
+      const choices = Array.isArray(value.choices)
+        ? value.choices.filter(
+            (choice): choice is string =>
+              typeof choice === 'string' && choice.trim().length > 0,
+          )
+        : [];
       return (
-        <p>
-          {typeof value.question === 'string'
-            ? value.question
-            : 'Question unavailable.'}
-        </p>
+        <div className="ask-user-renderer">
+          <p>
+            {typeof value.question === 'string'
+              ? value.question
+              : 'Question unavailable.'}
+          </p>
+          {choices.length > 0 ? (
+            <ul className="ask-user-choices" aria-label="Suggested answers">
+              {choices.slice(0, 6).map((choice) => (
+                <li key={choice}>
+                  <span className="ask-user-choice">{choice}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {value.allowCustom === true ? (
+            <small className="ask-user-custom">
+              {typeof value.customLabel === 'string' && value.customLabel.trim()
+                ? value.customLabel
+                : 'Custom answer allowed'}
+            </small>
+          ) : null}
+        </div>
       );
     },
   },
@@ -93,15 +122,25 @@ const explicitRenderers: readonly DashboardRenderer[] = [
         status?: unknown;
         toolCount?: unknown;
       };
+      const status =
+        typeof value.status === 'string' ? value.status : 'unknown';
+      const statusClass =
+        status === 'ended-error'
+          ? 'activity-ended-error'
+          : status === 'live' || status === 'preparing'
+            ? 'activity-pending'
+            : 'activity-settled';
+      const icon =
+        status === 'ended-error' ? '!' : status === 'settled' ? '•' : '…';
       return (
-        <div className="activity-renderer-fallback">
+        <div className={`activity-renderer-chip ${statusClass}`}>
+          <span className="activity-icon" aria-hidden="true">
+            {icon}
+          </span>
           <strong>
             {typeof value.title === 'string' ? value.title : 'Activity group'}
           </strong>
-          <small>
-            {String(value.status ?? 'unknown')} · {String(value.toolCount ?? 0)}{' '}
-            calls
-          </small>
+          <small>{String(value.toolCount ?? 0)} tools</small>
         </div>
       );
     },

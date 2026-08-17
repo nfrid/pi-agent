@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { commandStepMeta } from './activity';
 import {
   BoundedPayloadPreview,
   boundedInspectorText,
@@ -468,5 +469,294 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain(
       'Source truncated this result before it reached the dashboard.',
     );
+  });
+
+  it('renders read, grep, and delete specialized previews', () => {
+    expect(
+      toolPresentationKind({
+        name: 'read',
+        arguments: { path: 'src/app.ts' },
+      }),
+    ).toBe('read');
+    expect(
+      toolPresentationKind({
+        name: 'grep',
+        arguments: { pattern: 'TODO' },
+      }),
+    ).toBe('grep');
+    expect(
+      toolPresentationKind({
+        name: 'delete',
+        arguments: { path: 'tmp/old.ts' },
+      }),
+    ).toBe('delete');
+    expect(
+      toolPresentationKind({
+        name: 'mcp_server_search',
+        arguments: { query: 'docs' },
+      }),
+    ).toBeUndefined();
+
+    const read = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'read',
+          arguments: { path: 'src/app.ts' },
+          result: 'const ready = true;\n',
+        }}
+      />,
+    );
+    expect(read).toContain('tool-read-presentation');
+    expect(read).toContain('app.ts');
+    expect(read).toContain('1 line');
+
+    const grep = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'grep',
+          arguments: { pattern: 'TODO' },
+          result: 'src/a.ts:1:TODO\nsrc/b.ts:4:TODO',
+        }}
+      />,
+    );
+    expect(grep).toContain('tool-grep-presentation');
+    expect(grep).toContain('TODO');
+    expect(grep).toContain('2 matches');
+
+    const deleted = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'delete',
+          arguments: { path: 'tmp/old.ts' },
+        }}
+      />,
+    );
+    expect(deleted).toContain('tool-delete-presentation');
+    expect(deleted).toContain('tmp/old.ts');
+  });
+
+  it('renders custom extension tools instead of generic JSON', () => {
+    expect(
+      toolPresentationKind({
+        name: 'web_search',
+        arguments: { query: 'activity model' },
+      }),
+    ).toBe('web_search');
+    expect(
+      toolPresentationKind({
+        name: 'fetch_content',
+        arguments: { url: 'https://example.com' },
+      }),
+    ).toBe('fetch_content');
+    expect(toolPresentationKind({ name: 'get_search_content' })).toBe(
+      'get_search_content',
+    );
+    expect(toolPresentationKind({ name: 'artifact_retrieve' })).toBe(
+      'artifact_retrieve',
+    );
+    expect(toolPresentationKind({ name: 'delegate' })).toBe('delegate');
+    expect(toolPresentationKind({ name: 'delegate_jobs' })).toBe(
+      'delegate_jobs',
+    );
+    expect(toolPresentationKind({ name: 'delegate_branches' })).toBe(
+      'delegate_branches',
+    );
+    expect(toolPresentationKind({ name: 'delegate_wake' })).toBe(
+      'delegate_wake',
+    );
+    expect(toolPresentationKind({ name: 'background' })).toBe('background');
+    expect(toolPresentationKind({ name: 'todo' })).toBe('todo');
+    expect(toolPresentationKind({ name: 'ask_user_question' })).toBe(
+      'ask_user',
+    );
+
+    const search = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'web_search',
+          arguments: { queries: ['one', 'two'], recencyFilter: 'week' },
+          result: '## Hits\n\n- example',
+        }}
+      />,
+    );
+    expect(search).toContain('tool-web_search-presentation');
+    expect(search).toContain('2 queries');
+    expect(search).toContain('<h2>Hits</h2>');
+    expect(search).toContain('Raw Arguments');
+
+    const delegate = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'delegate',
+          arguments: {
+            name: 'Review worker',
+            route: 'quick',
+            task: 'Inspect the queue',
+          },
+          result: 'Queued Review worker.',
+        }}
+      />,
+    );
+    expect(delegate).toContain('tool-delegate-presentation');
+    expect(delegate).toContain('Review worker');
+    expect(delegate).toContain('Inspect the queue');
+
+    const background = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'background',
+          arguments: {
+            action: 'start',
+            title: 'dev',
+            command: 'pnpm dev',
+          },
+        }}
+      />,
+    );
+    expect(background).toContain('tool-background-presentation');
+    expect(background).toContain('pnpm dev');
+
+    const asked = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'ask_user_question',
+          arguments: {
+            question: 'Continue?',
+            choices: [{ label: 'Yes' }, { label: 'No' }],
+          },
+          result: 'User selected: Yes',
+        }}
+      />,
+    );
+    expect(asked).toContain('tool-ask_user-presentation');
+    expect(asked).toContain('Continue?');
+    expect(asked).toContain('ask-user-choice');
+
+    const tasks = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'todo',
+          arguments: {
+            action: 'done',
+            id: 'H4',
+            notes:
+              'Focused coordinator suite (43 tests), Biome, root typecheck, and full pnpm run check passed.',
+          },
+          result: 'done H4',
+        }}
+      />,
+    );
+    expect(tasks).toContain('tool-todo-presentation');
+    expect(tasks).toContain('Focused coordinator suite');
+    expect(tasks).toContain('done · H4');
+    expect(tasks).not.toContain('tool-custom-output');
+
+    const listed = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'todo',
+          arguments: { action: 'list' },
+          result: 'H4 [done] Focused coordinator suite',
+        }}
+      />,
+    );
+    expect(listed).toContain('tool-custom-output');
+    expect(listed).toContain('H4 [done] Focused coordinator suite');
+
+    const batched = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'todo',
+          arguments: {
+            action: 'batch',
+            operations: [
+              {
+                action: 'done',
+                id: 'H4',
+                notes: 'Focused coordinator suite passed.',
+              },
+              {
+                action: 'start',
+                id: 'H5',
+                text: 'Ship the dashboard presenters',
+              },
+            ],
+          },
+          result: 'done H4; start H5',
+        }}
+      />,
+    );
+    expect(batched).toContain('2 operations');
+    expect(batched).toContain('done · H4');
+    expect(batched).toContain('Focused coordinator suite passed.');
+    expect(batched).toContain('start · H5');
+    expect(batched).toContain('Ship the dashboard presenters');
+    expect(batched).not.toContain('tool-custom-output');
+
+    const replaced = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'todo',
+          arguments: {
+            action: 'replace',
+            tasks: [
+              {
+                id: 'H4',
+                text: 'Ship presenters',
+                status: 'doing',
+                notes: 'Dashboard inspectors',
+                depends_on: ['H3'],
+              },
+              { id: 'H5', text: 'Follow-up review' },
+            ],
+          },
+          result: 'replaced with 2 tasks',
+        }}
+      />,
+    );
+    expect(replaced).toContain('2 tasks');
+    expect(replaced).toContain('H4 · doing');
+    expect(replaced).toContain('Ship presenters');
+    expect(replaced).toContain('Dashboard inspectors');
+    expect(replaced).toContain('depends on H3');
+    expect(replaced).toContain('Follow-up review');
+    expect(replaced).not.toContain('tool-custom-output');
+
+    const branches = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'delegate_branches',
+          arguments: {
+            action: 'review',
+            id: 'wt-1',
+            incremental: true,
+            paths: ['src/a.ts', 'src/b.ts'],
+          },
+          result:
+            'pi/wt-1 (unmerged), incremental task delta\n\ndiff --git a/src/a.ts',
+        }}
+      />,
+    );
+    expect(branches).toContain('tool-delegate_branches-presentation');
+    expect(branches).toContain('incremental');
+    expect(branches).toContain('src/a.ts');
+    expect(branches).toContain('2 paths');
+  });
+
+  it('formats command exit code and duration for collapsed step meta', () => {
+    expect(
+      commandStepMeta({
+        name: 'bash',
+        args: { command: 'pnpm test' },
+        result: { exitCode: 1, durationMs: 2500 },
+      }),
+    ).toBe('exit 1 · 3s');
+    expect(
+      commandStepMeta({
+        name: 'read',
+        args: { path: 'src/app.ts' },
+        result: { exitCode: 0 },
+      }),
+    ).toBeUndefined();
   });
 });

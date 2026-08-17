@@ -1,3 +1,4 @@
+import { customToolKind } from '@pi-dashboard/activity-model';
 import { diffLines } from 'diff';
 import hljs from 'highlight.js/lib/core';
 import bashLanguage from 'highlight.js/lib/languages/bash';
@@ -9,6 +10,8 @@ import plaintextLanguage from 'highlight.js/lib/languages/plaintext';
 import pythonLanguage from 'highlight.js/lib/languages/python';
 import typescriptLanguage from 'highlight.js/lib/languages/typescript';
 import xmlLanguage from 'highlight.js/lib/languages/xml';
+import { CustomToolInspector } from './custom-preview';
+import { PreviewTruncation, sourceTruncated } from './truncation';
 import {
   INSPECTOR_MAX_RAW_TEXT,
   type NormalizedResultText,
@@ -97,6 +100,15 @@ function validEditReplacements(
   return edits as Array<{ oldText: string; newText: string }>;
 }
 
+function toolPattern(tool: ToolRecord): string | undefined {
+  const args = toolArguments(tool);
+  for (const key of ['pattern', 'query', 'glob_pattern', 'regex']) {
+    if (typeof args?.[key] === 'string' && (args[key] as string).trim())
+      return args[key] as string;
+  }
+  return undefined;
+}
+
 /** Select only complete tool payloads for the specialized presentation. */
 export function toolPresentationKind(
   tool: ToolRecord,
@@ -115,6 +127,18 @@ export function toolPresentationKind(
     toolCommand(tool)
   )
     return 'command';
+  if (name === 'read' && toolPath(tool)) return 'read';
+  if (
+    (name === 'grep' || name === 'find' || name === 'glob') &&
+    toolPattern(tool)
+  )
+    return 'grep';
+  if (
+    (name === 'delete' || name === 'remove' || name === 'unlink') &&
+    toolPath(tool)
+  )
+    return 'delete';
+  if (typeof tool.name === 'string') return customToolKind(tool.name);
   return undefined;
 }
 
@@ -190,34 +214,6 @@ function boundedSpecializedText(value: string): {
     text: value.slice(0, SPECIALIZED_PREVIEW_MAX_TEXT),
     truncated: value.length > SPECIALIZED_PREVIEW_MAX_TEXT,
   };
-}
-
-function PreviewTruncation({
-  label,
-  sourceTruncated: isSourceTruncated,
-  textTruncated,
-}: {
-  label: string;
-  sourceTruncated: boolean;
-  textTruncated: boolean;
-}) {
-  return (
-    <>
-      {textTruncated ? (
-        <p className="payload-truncation-label">
-          {label} preview is truncated after{' '}
-          {SPECIALIZED_PREVIEW_MAX_TEXT.toLocaleString()} characters; remaining
-          characters are not displayed.
-        </p>
-      ) : null}
-      {isSourceTruncated ? (
-        <small className="payload-truncation-label">
-          Source truncated this {label.toLowerCase()} before it reached the
-          dashboard.
-        </small>
-      ) : null}
-    </>
-  );
 }
 
 function HighlightedAdditions({
@@ -386,6 +382,22 @@ export function normalizeToolResultText(value: unknown): string | undefined {
   return normalizedResultText(value)?.text;
 }
 
+function grepMatchCount(result: unknown): number | undefined {
+  const text = normalizeToolResultText(result);
+  if (!text) return undefined;
+  const lines = text.split(/\r\n|\r|\n/u).filter(Boolean);
+  return lines.length > 0 ? lines.length : undefined;
+}
+
+function readLineCount(result: unknown): number | undefined {
+  const text = normalizeToolResultText(result);
+  if (!text) return undefined;
+  return text.split(/\r\n|\r|\n/u).filter((line, index, lines) => {
+    if (index === lines.length - 1 && line === '') return false;
+    return true;
+  }).length;
+}
+
 function resultExitCode(value: unknown): number | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return undefined;
@@ -509,6 +521,95 @@ export function SpecializedToolInspector({
       </div>
     );
   }
+  if (kind === 'read' && path) {
+    const language = toolPreviewLanguage(path);
+    const lineCount = readLineCount(tool.result);
+    const resultText = normalizeToolResultText(tool.result);
+    const bounded = resultText ? boundedSpecializedText(resultText) : undefined;
+    return (
+      <section
+        className="payload-section tool-specialized tool-read-presentation"
+        aria-label="Read presentation"
+      >
+        <p className="tool-read-summary">
+          <strong>{path.split('/').filter(Boolean).at(-1) ?? path}</strong>
+          {lineCount !== undefined ? (
+            <small>{` · ${lineCount} line${lineCount === 1 ? '' : 's'}`}</small>
+          ) : null}
+        </p>
+        {bounded ? (
+          <pre className="tool-code-preview tool-read-preview">
+            <HighlightedLine language={language} value={bounded.text} />
+          </pre>
+        ) : null}
+        {bounded ? (
+          <PreviewTruncation
+            label="Result"
+            sourceTruncated={sourceTruncated(tool, 'result')}
+            textTruncated={bounded.truncated}
+          />
+        ) : null}
+      </section>
+    );
+  }
+  if (kind === 'grep') {
+    const pattern = toolPattern(tool);
+    const matches = grepMatchCount(tool.result);
+    const resultText = normalizeToolResultText(tool.result);
+    const bounded = resultText ? boundedSpecializedText(resultText) : undefined;
+    return (
+      <section
+        className="payload-section tool-specialized tool-grep-presentation"
+        aria-label="Search presentation"
+      >
+        <p className="tool-grep-summary">
+          <strong>{pattern}</strong>
+          {matches !== undefined ? (
+            <small>{` · ${matches} match${matches === 1 ? '' : 'es'}`}</small>
+          ) : null}
+        </p>
+        {bounded ? (
+          <pre className="tool-terminal-output tool-grep-output">
+            {bounded.text}
+          </pre>
+        ) : null}
+        {bounded ? (
+          <PreviewTruncation
+            label="Result"
+            sourceTruncated={sourceTruncated(tool, 'result')}
+            textTruncated={bounded.truncated}
+          />
+        ) : null}
+      </section>
+    );
+  }
+  if (kind === 'delete' && path) {
+    return (
+      <section
+        className="payload-section tool-specialized tool-delete-presentation"
+        aria-label="Delete presentation"
+      >
+        <p className="tool-delete-path">{path}</p>
+      </section>
+    );
+  }
+  const custom = customToolKind(String(tool.name ?? ''));
+  if (custom) {
+    const resultNormalized = normalizedResultText(tool.result);
+    const resultBounded =
+      resultNormalized === undefined
+        ? undefined
+        : (() => {
+            const bounded = boundedSpecializedText(resultNormalized.text);
+            return {
+              text: bounded.text,
+              truncated: resultNormalized.truncated || bounded.truncated,
+            };
+          })();
+    return (
+      <CustomToolInspector kind={custom} result={resultBounded} tool={tool} />
+    );
+  }
   return null;
 }
 
@@ -559,14 +660,4 @@ export function PayloadSection({
   );
 }
 
-export function sourceTruncated(
-  tool: Record<string, unknown>,
-  field: string,
-): boolean {
-  const data = tool.data;
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    (data as Record<string, unknown>)[`${field}Truncated`] === true
-  );
-}
+export { PreviewTruncation, sourceTruncated } from './truncation';

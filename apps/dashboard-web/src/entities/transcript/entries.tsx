@@ -3,7 +3,7 @@ import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
 import type { TranscriptModelItem } from '../../transcript';
-import { activityStepParts } from './activity';
+import { activityStepParts, commandStepMeta } from './activity';
 import { ActivityStepContent } from './activity-summary';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
@@ -259,12 +259,24 @@ function TranscriptEntry({
       },
       cwd,
     );
+    const meta = commandStepMeta({
+      name: tool.name,
+      args: tool.arguments,
+      status: tool.status,
+      isError: tool.isError,
+      result: tool.result,
+      data: tool.data,
+    });
     return (
       <details
         className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
       >
         <summary className="activity-step">
-          <ActivityStepContent action={action} timestamp={timestamp} />
+          <ActivityStepContent
+            action={action}
+            meta={meta}
+            timestamp={timestamp}
+          />
         </summary>
         <ToolInspector tool={tool} />
       </details>

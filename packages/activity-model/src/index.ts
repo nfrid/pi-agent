@@ -7,6 +7,7 @@ export * from './grouping.js';
 export * from './outcome.mjs';
 export * from './raw.js';
 export * from './title.js';
+export * from './tool-presentations.js';
 export {
   activityEntriesFromRaw,
   activityGroupBoundary,

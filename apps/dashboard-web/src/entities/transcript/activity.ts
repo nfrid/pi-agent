@@ -32,6 +32,51 @@ export type ActivityStepParts = {
   state: 'complete' | 'pending' | 'failed';
 };
 
+function toolResultRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function formatCommandDuration(milliseconds: number): string {
+  if (milliseconds < 1_000) return `${Math.round(milliseconds)}ms`;
+  const seconds = Math.round(milliseconds / 1_000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return remaining ? `${minutes}m ${remaining}s` : `${minutes}m`;
+}
+
+/** Compact exit code and duration badges for collapsed command steps. */
+export function commandStepMeta(
+  tool: ActivityStepTool & { result?: unknown; data?: unknown },
+): string | undefined {
+  const name = toolBaseName(tool.name);
+  if (
+    name !== 'bash' &&
+    name !== 'shell' &&
+    name !== 'exec' &&
+    name !== 'inspect_shell'
+  )
+    return undefined;
+  const parts: string[] = [];
+  const result = toolResultRecord(tool.result);
+  const data = toolResultRecord(tool.data);
+  const exitCode = result?.exitCode;
+  if (typeof exitCode === 'number' && Number.isFinite(exitCode))
+    parts.push(`exit ${exitCode}`);
+  const durationMs =
+    (typeof data?.durationMs === 'number' && Number.isFinite(data.durationMs)
+      ? data.durationMs
+      : undefined) ??
+    (typeof result?.durationMs === 'number' &&
+    Number.isFinite(result.durationMs)
+      ? result.durationMs
+      : undefined);
+  if (durationMs !== undefined) parts.push(formatCommandDuration(durationMs));
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 export function displayActivityPath(value: string, cwd = ''): string {
   const normalized = value.replace(/\\/gu, '/').replace(/\/+/gu, '/');
   const normalizedCwd = cwd

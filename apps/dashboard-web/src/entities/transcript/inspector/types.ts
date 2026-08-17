@@ -1,3 +1,5 @@
+import type { CustomToolKind } from '@pi-dashboard/activity-model';
+
 export const INSPECTOR_MAX_TEXT = 1_200;
 export const INSPECTOR_MAX_DEPTH = 3;
 export const SPECIALIZED_PREVIEW_MAX_TEXT = 12_000;
@@ -12,7 +14,14 @@ export const STRUCTURED_VIEW_MAX_TEXT = 1_200;
 
 export type BoundedValue = { text: string; truncated: boolean };
 export type StructuredPrimitive = { text: string; truncated: boolean };
-export type SpecializedToolKind = 'write' | 'edit' | 'command';
+export type SpecializedToolKind =
+  | 'write'
+  | 'edit'
+  | 'command'
+  | 'read'
+  | 'grep'
+  | 'delete'
+  | CustomToolKind;
 export type ToolRecord = Record<string, unknown>;
 export type NormalizedResultText = { text: string; truncated: boolean };
 export type ResultTextWork = { value: unknown; depth: number };
