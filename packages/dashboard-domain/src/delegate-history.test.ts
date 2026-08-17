@@ -791,6 +791,159 @@ describe('delegate history adapter', () => {
     });
   });
 
+  it('reconciles ownerless production workflow attempts with one durable owner', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'production-run-entry',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'production-run',
+                lineageId: 'production-lineage',
+                name: 'Actual production worker',
+                task: 'production task',
+                messages: [
+                  {
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'production detail' }],
+                  },
+                ],
+                // This is the shape emitted by compactRun/publicRunFromCompact.
+                workflowAttempt: {
+                  logicalId: 'review',
+                  ordinal: 1,
+                  identity: 'review@1',
+                },
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'production-workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                ownerBranchId: 'owner-a',
+                logicalId: 'review',
+                attempt: 1,
+                identity: 'review@1',
+                state: 'success',
+                dependencies: ['gate@1'],
+                waitingFor: [],
+                createdAt: 1,
+                scheduledAt: 1,
+                settledAt: 3,
+              },
+            ],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(1);
+    expect(response.groups[0]).toMatchObject({
+      runId: 'production-run',
+      lineageId: 'production-lineage',
+      name: 'Actual production worker',
+      workflow: {
+        ownerBranchId: 'owner-a',
+        identity: 'review@1',
+        dependencies: ['gate@1'],
+        settledAt: 3,
+      },
+      runs: [
+        {
+          runId: 'production-run',
+          task: 'production task',
+          name: 'Actual production worker',
+        },
+      ],
+    });
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      'production-run',
+      'production-lineage',
+    );
+    expect(detail.run.details).toMatchObject({
+      task: 'production task',
+      response: 'production detail',
+    });
+  });
+
+  it('does not ambiguously reconcile ownerless attempts across owners', () => {
+    const attempt = (ownerBranchId: string) => ({
+      ownerBranchId,
+      logicalId: 'review',
+      attempt: 1,
+      identity: 'review@1',
+      state: 'scheduled',
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+    });
+    const response = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'ambiguous-run-entry',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'ambiguous-run',
+                lineageId: 'ambiguous-lineage',
+                workflowAttempt: {
+                  logicalId: 'review',
+                  ordinal: 1,
+                  identity: 'review@1',
+                },
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'ambiguous-workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [attempt('owner-a'), attempt('owner-b')],
+          },
+        },
+      },
+    ]);
+    expect(response.groups).toHaveLength(3);
+    expect(
+      response.groups.find((group) => group.runId === 'ambiguous-run'),
+    ).toMatchObject({
+      lineageId: 'ambiguous-lineage',
+      runCount: 1,
+    });
+    expect(
+      response.groups.map((group) => group.workflow?.ownerBranchId),
+    ).toEqual(expect.arrayContaining(['owner-a', 'owner-b']));
+  });
+
   it('projects durable workflow snapshots after reload without secret payloads', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },

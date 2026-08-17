@@ -1352,9 +1352,14 @@ function occurrenceJobId(occurrence: DelegateOccurrence): string | undefined {
   );
 }
 
-function occurrenceWorkflowKey(
+type WorkflowOccurrenceIdentity = {
+  identity: string;
+  owner?: string;
+};
+
+function occurrenceWorkflowIdentity(
   occurrence: DelegateOccurrence,
-): string | undefined {
+): WorkflowOccurrenceIdentity | undefined {
   const source = isRecord(occurrence.run.workflow)
     ? occurrence.run.workflow
     : isRecord(occurrence.run.workflowAttempt)
@@ -1378,11 +1383,20 @@ function occurrenceWorkflowKey(
     return undefined;
   const owner =
     source.ownerBranchId === undefined
-      ? ''
+      ? undefined
       : validWorkflowText(source.ownerBranchId, 256);
   if (source.ownerBranchId !== undefined && owner === undefined)
     return undefined;
-  return `workflow:${owner ?? ''}\u0000${identity}`;
+  return { identity, ...(owner === undefined ? {} : { owner }) };
+}
+
+function occurrenceWorkflowKey(
+  occurrence: DelegateOccurrence,
+): string | undefined {
+  const workflow = occurrenceWorkflowIdentity(occurrence);
+  return workflow
+    ? `workflow:${workflow.owner ?? ''}\u0000${workflow.identity}`
+    : undefined;
 }
 
 function occurrenceKeys(occurrence: DelegateOccurrence): string[] {
@@ -1425,16 +1439,25 @@ function mergeCanonicalOccurrences(
   if (previous.workflowPlaceholder !== next.workflowPlaceholder) {
     const actual = previous.workflowPlaceholder ? next : previous;
     const placeholder = previous.workflowPlaceholder ? previous : next;
-    const actualHasWorkflow =
-      isRecord(actual.run.workflow) || isRecord(actual.run.workflowAttempt);
+    const placeholderWorkflow = isRecord(placeholder.run.workflow)
+      ? placeholder.run.workflow
+      : undefined;
+    const actualWorkflow = isRecord(actual.run.workflow)
+      ? actual.run.workflow
+      : undefined;
     return {
       ...actual,
       run: {
-        ...(previous.workflowPlaceholder ? placeholder.run : next.run),
+        ...placeholder.run,
         ...actual.run,
-        ...(actualHasWorkflow || !isRecord(placeholder.run.workflow)
-          ? {}
-          : { workflow: placeholder.run.workflow }),
+        ...(placeholderWorkflow
+          ? {
+              workflow: {
+                ...placeholderWorkflow,
+                ...(actualWorkflow ?? {}),
+              },
+            }
+          : {}),
       },
       ...(actual.job === undefined && placeholder.job === undefined
         ? {}
@@ -1462,10 +1485,39 @@ function mergeCanonicalOccurrences(
 function canonicalOccurrences(
   branch: readonly unknown[],
 ): DelegateOccurrence[] {
+  const allOccurrences = occurrences(branch);
+  // Public run records carry workflowAttempt without its immutable owner. It
+  // is safe to infer that owner only when the selected branch has one durable
+  // placeholder for the identity; multiple sibling owners must remain
+  // separate rather than arbitrarily attaching the run to one of them.
+  const durableOwners = new Map<string, Set<string>>();
+  for (const occurrence of allOccurrences) {
+    if (!occurrence.workflowPlaceholder) continue;
+    const workflow = occurrenceWorkflowIdentity(occurrence);
+    if (!workflow) continue;
+    let owners = durableOwners.get(workflow.identity);
+    if (!owners) {
+      owners = new Set<string>();
+      durableOwners.set(workflow.identity, owners);
+    }
+    owners.add(workflow.owner ?? '');
+  }
+  const keysFor = (occurrence: DelegateOccurrence): string[] => {
+    const keys = occurrenceKeys(occurrence);
+    const workflow = occurrenceWorkflowIdentity(occurrence);
+    if (!workflow || workflow.owner !== undefined) return keys;
+    const owners = durableOwners.get(workflow.identity);
+    if (owners?.size === 1) {
+      const owner = owners.values().next().value;
+      const key = `workflow:${owner ?? ''}\u0000${workflow.identity}`;
+      if (!keys.includes(key)) keys.push(key);
+    }
+    return keys;
+  };
   const result: DelegateOccurrence[] = [];
   const indexes = new Map<string, number>();
-  for (const occurrence of occurrences(branch)) {
-    const keys = occurrenceKeys(occurrence);
+  for (const occurrence of allOccurrences) {
+    const keys = keysFor(occurrence);
     const index = keys
       .map((key) => indexes.get(key))
       .find((candidate): candidate is number => candidate !== undefined);
@@ -1479,8 +1531,7 @@ function canonicalOccurrences(
     if (!previous) continue;
     const merged = mergeCanonicalOccurrences(previous, occurrence);
     result[index] = merged;
-    for (const key of [...occurrenceKeys(previous), ...keys])
-      indexes.set(key, index);
+    for (const key of [...keysFor(previous), ...keys]) indexes.set(key, index);
   }
   return result;
 }
