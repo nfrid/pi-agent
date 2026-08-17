@@ -1244,6 +1244,45 @@ describe('delegate history adapter', () => {
     expect(JSON.stringify(projected)).not.toContain('payload');
   });
 
+  it('allows entered wake history to supersede queued history across revisions', () => {
+    const wake = (state: string, revision: number) => ({
+      id: 'review',
+      state,
+      references: ['later@1'],
+      createdAt: 1,
+      revision,
+      dispatchAttempts: state === 'queued' || state === 'entered' ? 1 : 0,
+      ...(state === 'ready' ? { readyAt: 2 } : {}),
+      ...(state === 'queued' || state === 'entered' ? { queuedAt: 3 } : {}),
+      ...(state === 'entered' ? { enteredAt: 4 } : {}),
+    });
+    const branch = ['pending', 'ready', 'queued', 'entered'].map(
+      (state, index) => ({
+        type: 'custom',
+        id: `wake-${state}`,
+        customType: 'delegate-wake:v1',
+        data: {
+          version: 1,
+          kind: index === 0 ? 'snapshot' : 'delta',
+          state: {
+            version: 1,
+            ownerSessionId: 'parent-1',
+            ownerEpoch: 1,
+            wakes: [wake(state, index + 1)],
+          },
+        },
+      }),
+    );
+
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(1);
+    expect(response.groups[0]).toMatchObject({
+      lineageId: 'wake:review',
+      state: 'success',
+      wake: { id: 'review', state: 'entered', revision: 4 },
+    });
+  });
+
   it('projects entered wake metadata from existing wake entries after reload', () => {
     const entry = {
       type: 'custom',

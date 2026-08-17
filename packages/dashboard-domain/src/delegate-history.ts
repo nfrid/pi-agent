@@ -1255,7 +1255,6 @@ function keepPriorWakeOccurrence(
     return true;
   if (wakeIsTerminal(oldWake.state) && oldWake.state !== newWake.state)
     return true;
-  if (oldWake.state === 'queued' && newWake.state !== 'queued') return true;
   return false;
 }
 
