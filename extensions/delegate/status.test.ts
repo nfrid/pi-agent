@@ -222,6 +222,12 @@ describe('delegate status store', () => {
       ordinal: 1,
       identity: 'review@1',
       dependencies: ['impl@1'],
+      inputs: [
+        {
+          selector: { node: 'impl', include: ['report', 'branch'] },
+          identity: 'impl@1',
+        },
+      ],
       state: 'scheduled',
       createdAt: 1,
       scheduledAt: 1,
@@ -240,6 +246,13 @@ describe('delegate status store', () => {
       identity: 'review@1',
       state: 'scheduled',
       dependencies: ['impl@1'],
+      inputs: [
+        {
+          node: 'impl',
+          identity: 'impl@1',
+          include: ['report', 'branch'],
+        },
+      ],
       reason: 'waiting for impl@1',
     });
     expect(store.getWakes()).toEqual([

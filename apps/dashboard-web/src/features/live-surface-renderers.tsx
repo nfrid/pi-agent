@@ -34,7 +34,8 @@ function short(value: string, max = 180): string {
 }
 
 function workflowState(row: DelegateInspectionStatus): string {
-  return row.wake?.state ?? row.workflow?.state ?? row.state;
+  // A wake describes a follow-up effect, never the node's execution state.
+  return row.workflow?.state ?? row.state;
 }
 
 function stateLabel(value: string): string {
@@ -225,6 +226,21 @@ function WorkSurface({
   );
 }
 
+function delegateWakeEffect(
+  row: DelegateInspectionStatus,
+  wakes: DelegateStatusViewModel['wakes'],
+): string | undefined {
+  const identity = row.workflow?.identity;
+  const wake =
+    row.wake ??
+    wakes?.find(
+      (candidate) => identity && candidate.references.includes(identity),
+    );
+  if (!wake || wake.state === 'cancelled' || wake.state === 'blocked')
+    return undefined;
+  return wake.state === 'entered' ? 'resumed parent' : 'resumes parent';
+}
+
 function delegateContext(row: DelegateStatus): string | undefined {
   if ((row.runCount ?? 1) > 1) return `run ${row.runCount}`;
   return row.context;
@@ -237,14 +253,16 @@ export function delegateActivityLabel(
 ): string {
   if (pauseState === 'paused') return 'Paused at a safe boundary';
   if (pauseState === 'pausing') return 'Pausing at a safe boundary';
+  if (row.workflow?.waitingFor?.length)
+    return `after ${row.workflow.waitingFor.join(', ')}`;
+  // Historical rows carry wake metadata on the invocation rather than in the
+  // live wake list; keep this as a wait/action fallback, not a node state.
   if (row.wake)
     return row.wake.state === 'entered'
       ? `delivered for ${row.wake.references.join(', ')}`
       : row.wake.state === 'pending' || row.wake.state === 'ready'
         ? `waiting for ${row.wake.references.join(', ')}`
         : `wake ${row.wake.state} · ${row.wake.references.join(', ')}`;
-  if (row.workflow?.waitingFor?.length)
-    return `waiting for ${row.workflow.waitingFor.join(', ')}`;
   if (row.workflow?.state === 'blocked' && row.workflow.reason)
     return `blocked: ${row.workflow.reason}`;
   if (row.activity?.latestText || row.activity?.label)
@@ -389,18 +407,6 @@ export function DelegateSurface({
         title={title}
         label="Delegates"
         summary={summary}
-        summaryDetail={
-          active?.workflow ? (
-            <small className="surface-summary-detail">
-              {active.workflow.identity} · {active.workflow.state}
-              {active.workflow.reason ? ` · ${active.workflow.reason}` : ''}
-              {active.workflow.deliveredToParent ? ' · delivered' : ''}
-              {model.wakes?.length
-                ? ` · wake ${model.wakes.map((wake) => `${wake.id} (${wake.state})`).join(', ')}`
-                : ''}
-            </small>
-          ) : undefined
-        }
         count={`${activeCount} active · ${finishedCount} finished`}
         visibleCount={
           rows.length +
@@ -423,22 +429,6 @@ export function DelegateSurface({
               available.
             </p>
           )}
-          {model.wakes && model.wakes.length > 0 && (
-            <section className="delegate-wakes" aria-label="Wake rules">
-              <h3 className="delegate-section-title">Wake rules</h3>
-              {model.wakes.map((wake) => (
-                <div className="delegate-wake-row" key={wake.id}>
-                  <strong>{wake.id}</strong>
-                  <span>{wake.state}</span>
-                  <small>
-                    {wake.waitingFor?.length
-                      ? `waiting for ${wake.waitingFor.join(', ')}`
-                      : wake.references.join(', ')}
-                  </small>
-                </div>
-              ))}
-            </section>
-          )}
           <div className="delegate-rows">
             {delegateSections.map(
               (section) =>
@@ -459,12 +449,19 @@ export function DelegateSurface({
                       const runState = stateLabel(rawState);
                       const pauseState = row.pauseState;
                       const state = pauseState ?? runState;
+                      const relationships = [
+                        ...(row.workflow?.waitingFor?.length
+                          ? [`after ${row.workflow.waitingFor.join(', ')}`]
+                          : []),
+                        delegateWakeEffect(row, model.wakes),
+                      ].filter((value): value is string => Boolean(value));
                       const activityLabel = short(
-                        delegateActivityLabel(row, runState, pauseState),
+                        relationships.join(' · ') ||
+                          delegateActivityLabel(row, runState, pauseState),
                         140,
                       );
                       const name = short(row.name, 70);
-                      const route = row.route ?? '';
+                      const route = row.route ?? row.workflow?.route ?? '';
                       const context = delegateContext(row) ?? '';
                       const access =
                         row.allowWrites === true ? 'read/write' : 'read-only';
@@ -477,7 +474,7 @@ export function DelegateSurface({
                       );
                       return (
                         <div
-                          className={`delegate-row ${stateClass(state)}`}
+                          className={`delegate-row ${stateClass(state)}${row.historical ? ' delegate-row-history' : ''}`}
                           key={`${surface.id}-${row.id}`}
                         >
                           <AriaButton
@@ -502,22 +499,51 @@ export function DelegateSurface({
                             <span className="surface-state" aria-hidden="true">
                               {stateGlyph(state)}
                             </span>
+                            <span className="sr-only">{rawState}</span>
                             <span className="delegate-row-main">
-                              <strong>{name}</strong>
-                              {row.workflow?.identity && (
-                                <small>{row.workflow.identity}</small>
-                              )}
-                              <small>{activityLabel}</small>
+                              <span className="delegate-row-name">
+                                <strong>{name}</strong>
+                                {row.workflow?.identity && (
+                                  <small className="delegate-row-identity">
+                                    {row.workflow.identity}
+                                  </small>
+                                )}
+                              </span>
+                              <small
+                                className={`delegate-row-action ${stateClass(state)}`}
+                              >
+                                {activityLabel}
+                              </small>
                             </span>
                             <span className="delegate-row-meta">
-                              <span className="delegate-row-status">
+                              <span
+                                className={`delegate-row-status ${stateClass(state)}`}
+                              >
                                 {rawState}
                                 {elapsedText ? ` · ${elapsedText}` : ''}
                               </span>
                               <span className="delegate-row-properties">
-                                {[context, access, route]
-                                  .filter(Boolean)
-                                  .join(' · ')}
+                                {context && (
+                                  <span className="delegate-row-context">
+                                    {context}
+                                  </span>
+                                )}
+                                {access && (
+                                  <span
+                                    className={
+                                      row.allowWrites === true
+                                        ? 'delegate-row-access-rw'
+                                        : 'delegate-row-access-ro'
+                                    }
+                                  >
+                                    {access}
+                                  </span>
+                                )}
+                                {route && (
+                                  <span className="delegate-row-route">
+                                    {route}
+                                  </span>
+                                )}
                                 {elapsedText && (
                                   <span className="delegate-row-mobile-elapsed">
                                     {' · '}

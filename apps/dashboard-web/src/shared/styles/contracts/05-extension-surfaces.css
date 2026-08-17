@@ -259,6 +259,12 @@
   min-width: 0;
   gap: 2px;
 }
+.delegate-row-name {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
 .delegate-row-main strong,
 .delegate-row-main small {
   min-width: 0;
@@ -274,6 +280,22 @@
   color: var(--muted);
   font-size: 10px;
 }
+.delegate-row-main .delegate-row-action.surface-running {
+  color: var(--green);
+}
+.delegate-row-main .delegate-row-action.surface-queued {
+  color: var(--muted);
+}
+.delegate-row-main .delegate-row-action.surface-failed {
+  color: var(--red);
+}
+.delegate-row-main .delegate-row-action.surface-done,
+.delegate-row-main .delegate-row-action.surface-aborted {
+  color: var(--dim);
+}
+.delegate-row-identity {
+  flex: none;
+}
 .delegate-row-meta {
   display: grid;
   min-width: 0;
@@ -284,10 +306,30 @@
   white-space: nowrap;
 }
 .delegate-row-properties {
+  display: flex;
   max-width: 260px;
+  min-width: 0;
+  gap: 5px;
   overflow: hidden;
   color: var(--dim);
   text-overflow: ellipsis;
+}
+.delegate-row-context {
+  color: var(--muted);
+}
+.delegate-row-access-rw {
+  color: var(--orange);
+}
+.delegate-row-access-ro {
+  color: var(--green);
+}
+.delegate-row-route {
+  overflow: hidden;
+  color: var(--purple);
+  text-overflow: ellipsis;
+}
+.delegate-row-history {
+  opacity: 0.78;
 }
 .delegate-row-mobile-elapsed {
   display: none;

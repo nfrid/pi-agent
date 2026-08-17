@@ -11,8 +11,6 @@ import {
 import type { DelegateStatusSnapshot } from './status';
 
 export const DELEGATE_WIDGET_MAX_WIDTH = 68;
-/** Successful rows are history; active and failed rows are always retained. */
-export const DELEGATE_WIDGET_MAX_SUCCESS_ROWS = 8;
 /** Narrower than this a subagent row is name and elapsed time and nothing else. */
 export const DELEGATE_WIDGET_MIN_WIDTH = 30;
 const MODE_ROUTE_MAX_WIDTH = 16;
@@ -142,10 +140,14 @@ function modeIndicator(
     status.workflow?.identity
       ? theme.fg('accent', compact(status.workflow.identity))
       : '',
-    status.route
+    (status.route ?? status.workflow?.route)
       ? theme.fg(
           'toolTitle',
-          truncateToWidth(compact(status.route), MODE_ROUTE_MAX_WIDTH, '…'),
+          truncateToWidth(
+            compact(status.route ?? status.workflow?.route ?? ''),
+            MODE_ROUTE_MAX_WIDTH,
+            '…',
+          ),
         )
       : '',
     contextIndicator(status, theme),
@@ -329,7 +331,7 @@ function placeBlock(lines: string[], width: number): string[] {
   );
 }
 
-/** Rank for display: active work, failures, then successful history. */
+/** Rank for display: active work first, followed by failures. */
 const STATE_RANK: Record<string, number> = {
   running: 0,
   scheduled: 1,
@@ -339,7 +341,6 @@ const STATE_RANK: Record<string, number> = {
   aborted: 2,
   cancelled: 2,
   blocked: 2,
-  success: 3,
 };
 
 function isActive(status: DelegateStatusSnapshot): boolean {
@@ -358,43 +359,20 @@ function isFailure(status: DelegateStatusSnapshot): boolean {
   );
 }
 
-interface DisplayRows {
-  rows: DelegateStatusSnapshot[];
-  hiddenSuccesses: number;
-}
-
 /**
- * Keep active/error work visible, while completed success history is bounded.
- * The store remains authoritative; this only limits the persistent rail.
+ * Keep active/error work visible. Successful rows are durable history, not
+ * persistent widget content, and disappear as soon as they settle.
  */
-function forDisplay(statuses: readonly DelegateStatusSnapshot[]): DisplayRows {
-  const ordered = [...statuses].sort(
-    (a, b) => STATE_RANK[effectiveState(a)] - STATE_RANK[effectiveState(b)],
-  );
-  const active = ordered.filter(isActive);
-  const terminal = statuses.filter((status) => !isActive(status));
-  const successes = terminal
-    .map((status, index) => ({ status, index }))
-    .filter(({ status }) => effectiveState(status) === 'success');
-  const newestSuccesses = [...successes]
+function forDisplay(
+  statuses: readonly DelegateStatusSnapshot[],
+): DelegateStatusSnapshot[] {
+  return [...statuses]
+    .filter((status) => isActive(status) || isFailure(status))
     .sort(
       (a, b) =>
-        (a.status.finishedAt ?? a.status.createdAt ?? a.index) -
-        (b.status.finishedAt ?? b.status.createdAt ?? b.index),
-    )
-    .slice(-DELEGATE_WIDGET_MAX_SUCCESS_ROWS)
-    .map(({ status }) => status);
-  const visibleSuccesses = new Set(newestSuccesses);
-  const visibleTerminal = terminal.filter(
-    (status) => isFailure(status) || visibleSuccesses.has(status),
-  );
-  return {
-    rows: [...active, ...visibleTerminal],
-    hiddenSuccesses: Math.max(
-      0,
-      successes.length - DELEGATE_WIDGET_MAX_SUCCESS_ROWS,
-    ),
-  };
+        (STATE_RANK[effectiveState(a)] ?? 3) -
+        (STATE_RANK[effectiveState(b)] ?? 3),
+    );
 }
 
 function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
@@ -403,16 +381,10 @@ function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
   const running = count('running');
   const queued = count('queued');
   const failed = statuses.filter((status) => isFailure(status)).length;
-  const completed = statuses.filter(
-    (status) => effectiveState(status) === 'success',
-  ).length;
   const parts = [
     running > 0 ? `${running} running` : '',
     queued > 0 ? `${queued} queued` : '',
     failed > 0 ? `${failed} failed` : '',
-    running === 0 && queued === 0 && completed > 0
-      ? `${completed} completed`
-      : '',
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(', ') : 'finishing';
 }
@@ -426,34 +398,29 @@ export function renderDelegateWidget(
   markdownTheme?: MarkdownTheme,
 ): string[] {
   if (statuses.length === 0 || width <= 0) return [];
+  const display = forDisplay(statuses);
+  // Successful delegates leave no persistent summary or recent-success line.
+  if (display.length === 0) return [];
   const blockWidth = Math.max(1, Math.min(width, DELEGATE_WIDGET_MAX_WIDTH));
   if (!detailed) {
     const line =
       theme.fg('warning', '● ') +
       theme.fg(
         'text',
-        `${statuses.length} subagent${statuses.length === 1 ? '' : 's'}`,
+        `${display.length} subagent${display.length === 1 ? '' : 's'}`,
       ) +
       theme.fg('dim', ' · ') +
-      theme.fg('muted', compactSummary(statuses)) +
+      theme.fg('muted', compactSummary(display)) +
       theme.fg('dim', ' · ') +
       theme.fg('accent', '/delegates');
     return placeBlock([line], width);
   }
 
-  const display = forDisplay(statuses);
-  const lines = display.rows.flatMap((status) => {
+  const lines = display.flatMap((status) => {
     const main = mainLine(status, blockWidth, theme, now);
     return isActive(status)
       ? [main, actionLine(status, blockWidth, theme, markdownTheme)]
       : [main];
   });
-  if (display.hiddenSuccesses > 0)
-    lines.push(
-      theme.fg(
-        'dim',
-        `… ${display.hiddenSuccesses} completed delegate${display.hiddenSuccesses === 1 ? '' : 's'} hidden`,
-      ),
-    );
   return placeBlock(lines, width);
 }

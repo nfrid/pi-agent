@@ -396,6 +396,22 @@ function DelegateInspectorDetails({
     <details className="delegate-inspector-details">
       <summary>Run and recovery details</summary>
       <dl>
+        {row.workflow?.dependencies.length ? (
+          <div>
+            <dt>After</dt>
+            <dd>{row.workflow.dependencies.join(', ')}</dd>
+          </div>
+        ) : null}
+        {row.workflow?.inputs?.map((input) => (
+          <div key={`${input.identity}:${input.node}`}>
+            <dt>Inputs</dt>
+            <dd>
+              {input.identity} ·{' '}
+              {(input.include?.length ? input.include : ['report']).join(' + ')}
+              {input.label ? ` · ${input.label}` : ''}
+            </dd>
+          </div>
+        ))}
         {row.jobId && (
           <div>
             <dt>Job</dt>
@@ -412,10 +428,10 @@ function DelegateInspectorDetails({
             <dd>{row.context}</dd>
           </div>
         )}
-        {row.route && (
+        {(row.route ?? row.workflow?.route) && (
           <div>
             <dt>Route</dt>
-            <dd>{row.route}</dd>
+            <dd>{row.route ?? row.workflow?.route}</dd>
           </div>
         )}
       </dl>

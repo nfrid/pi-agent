@@ -13,6 +13,7 @@ import {
 import {
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
+  DelegateTranscriptInspector,
   delegateDetailHasError,
   delegateTranscriptItems,
   selectedDelegateRunId,
@@ -1066,11 +1067,55 @@ describe('live extension surface fixtures', () => {
     );
     expect(markup).toContain('review@1');
     expect(markup).toContain('scheduled');
-    expect(markup).toContain('waiting for impl@1');
-    expect(markup).toContain('review-ready');
-    expect(markup).toContain('pending');
+    expect(markup).toContain('after impl@1');
+    expect(markup).toContain('resumes parent');
+    expect(markup).not.toContain('Wake rules');
+    expect(markup).not.toContain('review-ready');
+    expect(markup).not.toContain('pending');
     expect(markup).not.toContain('handoff');
     expect(markup).not.toContain('payload');
+  });
+
+  it('renders bounded dependency and input relationships in the inspector', () => {
+    const row = {
+      id: 'review-lineage',
+      runId: 'review-run',
+      lineageId: 'review-lineage',
+      name: 'Review implementation',
+      kind: 'background' as const,
+      state: 'queued' as const,
+      createdAt: 1,
+      allowWrites: false,
+      workflow: {
+        logicalId: 'review',
+        attempt: 1,
+        identity: 'review@1',
+        state: 'scheduled' as const,
+        dependencies: ['impl@1'],
+        inputs: [
+          {
+            node: 'impl',
+            identity: 'impl@1',
+            include: ['report', 'branch'],
+          },
+        ],
+        createdAt: 1,
+        scheduledAt: 1,
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <DelegateTranscriptInspector
+        row={row}
+        now={2_000}
+        isOpen
+        onClose={() => {}}
+      />,
+    );
+    expect(markup).toContain('After');
+    expect(markup).toContain('impl@1');
+    expect(markup).toContain('Inputs');
+    expect(markup).toContain('report + branch');
+    expect(markup).not.toContain('upstream evidence');
   });
 
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {

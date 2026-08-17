@@ -153,11 +153,11 @@ describe('delegate widget', () => {
       100,
       theme as never,
       90_000,
-    )[0];
+    );
 
     expect(queued).toMatch(/0s$/);
     expect(running).toMatch(/40s$/);
-    expect(settled).toMatch(/done.*25s$/);
+    expect(settled).toEqual([]);
   });
 
   test('shows a continuation lineage as one run count with aggregate runtime', () => {
@@ -449,7 +449,7 @@ describe('delegate widget', () => {
     expect(lines).toHaveLength(10);
   });
 
-  test('bounds completed history without hiding active or failed rows', () => {
+  test('hides every successful row while retaining active and failed rows', () => {
     const successes = Array.from({ length: 10 }, (_, index) =>
       status({
         id: `success-${index}`,
@@ -471,14 +471,11 @@ describe('delegate widget', () => {
 
     expect(lines.join('\n')).toContain('Still running');
     expect(lines.join('\n')).toContain('Needs attention');
-    expect(lines.join('\n')).not.toContain('Completed 0');
-    expect(lines.join('\n')).toContain('Completed 2');
-    expect(lines.join('\n')).toContain('Completed 9');
-    expect(lines.join('\n')).not.toContain('Completed 1');
-    expect(lines.join('\n')).toContain('2 completed delegates hidden');
+    expect(lines.join('\n')).not.toMatch(/Completed \d/);
+    expect(lines.join('\n')).not.toContain('completed delegates hidden');
   });
 
-  test('retains the newest successful rows by completion time', () => {
+  test('removes successful rows immediately regardless of completion time', () => {
     const lines = renderDelegateWidget(
       [
         status({
@@ -501,7 +498,8 @@ describe('delegate widget', () => {
       theme as never,
       10_000,
     );
-    expect(lines.join('\\n')).toContain('New success');
+    expect(lines.join('\\n')).not.toContain('Old success');
+    expect(lines.join('\\n')).not.toContain('New success');
     expect(lines.join('\\n')).toContain('Active');
     expect(lines.join('\\n')).toContain('Failed');
   });
@@ -580,11 +578,24 @@ describe('delegate widget', () => {
       theme as never,
       5_000,
     );
-    expect(lines).toHaveLength(4);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toContain('Still working');
     expect(lines[1]).toContain('starting');
-    expect(lines[2]).toContain('Ready to review');
-    expect(lines[3]).toContain('Failed review');
+    expect(lines[2]).toContain('Failed review');
     expect(lines.slice(2).join('\n')).not.toContain('└');
+  });
+
+  test('disappears in compact mode when all delegates succeeded', () => {
+    expect(
+      renderDelegateWidget(
+        [
+          status({ state: 'success' }),
+          status({ id: 'done-2', state: 'success' }),
+        ],
+        false,
+        100,
+        theme as never,
+      ),
+    ).toEqual([]);
   });
 });

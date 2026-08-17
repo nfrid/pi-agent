@@ -399,6 +399,44 @@ function projectedEntryMetadata(entry: RecordValue): RecordValue {
   return result;
 }
 
+function projectWorkflowInputs(value: unknown): RecordValue[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 4) return undefined;
+  const kinds = new Set(['report', 'handoff', 'branch', 'metadata']);
+  const inputs: RecordValue[] = [];
+  for (const input of value) {
+    if (!isRecord(input)) return undefined;
+    const node = isCanonicalWorkflowLogicalId(input.node)
+      ? input.node
+      : undefined;
+    const identity = isCanonicalWorkflowAttemptReference(input.identity)
+      ? input.identity
+      : undefined;
+    if (!node || !identity) return undefined;
+    const include = input.include;
+    if (
+      include !== undefined &&
+      (!Array.isArray(include) ||
+        include.length > 4 ||
+        new Set(include).size !== include.length ||
+        include.some((kind) => typeof kind !== 'string' || !kinds.has(kind)))
+    )
+      return undefined;
+    const label =
+      input.label === undefined
+        ? undefined
+        : validWorkflowText(input.label, 120);
+    if (input.label !== undefined && label === undefined) return undefined;
+    inputs.push({
+      node,
+      identity,
+      ...(include ? { include: [...include] } : {}),
+      ...(label ? { label } : {}),
+    });
+  }
+  return inputs;
+}
+
 function projectWorkflow(
   run: RecordValue,
   state: DelegateHistoryInvocation['state'],
@@ -453,12 +491,14 @@ function projectWorkflow(
           source.waitingFor.every(isCanonicalWorkflowAttemptReference)
         ? (source.waitingFor as string[])
         : undefined;
+  const inputs = projectWorkflowInputs(source.inputs);
   if (
     waitingFor !== undefined &&
     (new Set(waitingFor).size !== waitingFor.length ||
       waitingFor.some((reference) => !dependencies.includes(reference)))
   )
     return undefined;
+  if (source.inputs !== undefined && inputs === undefined) return undefined;
   const reason =
     source.reason === undefined
       ? undefined
@@ -472,6 +512,7 @@ function projectWorkflow(
     state,
     dependencies,
     ...(waitingFor?.length ? { waitingFor } : {}),
+    ...(inputs?.length ? { inputs } : {}),
     ...(reason ? { reason } : {}),
     ...(route ? { route } : {}),
     createdAt,
@@ -631,6 +672,8 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
     return undefined;
   const dependencies = value.dependencies as string[];
   const waitingFor = value.waitingFor as string[];
+  const inputs = projectWorkflowInputs(value.inputs);
+  if (value.inputs !== undefined && inputs === undefined) return undefined;
   const createdAt = finiteNumber(value.createdAt);
   const scheduledAt = finiteNumber(value.scheduledAt);
   if (createdAt === undefined || scheduledAt === undefined) return undefined;
@@ -655,6 +698,7 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
     state,
     dependencies,
     waitingFor,
+    ...(inputs?.length ? { inputs } : {}),
     createdAt,
     scheduledAt,
   };

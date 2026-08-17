@@ -107,6 +107,27 @@ const DelegateTranscriptPayloadSchema = delegateTranscriptPayloadSchema(
   ),
 );
 
+const DelegateWorkflowInputSchema = Type.Object(
+  {
+    node: Type.String({ minLength: 1, maxLength: 80 }),
+    identity: Type.String({ minLength: 1, maxLength: 80 }),
+    include: Type.Optional(
+      Type.Readonly(
+        Type.Array(
+          Type.Union([
+            Type.Literal('report'),
+            Type.Literal('handoff'),
+            Type.Literal('branch'),
+            Type.Literal('metadata'),
+          ]),
+          { maxItems: 4 },
+        ),
+      ),
+    ),
+    label: Type.Optional(Type.String({ maxLength: 120 })),
+  },
+  { additionalProperties: false },
+);
 const DelegateWorkflowStatusSchema = Type.Object(
   {
     logicalId: Type.String({ minLength: 1, maxLength: 64 }),
@@ -117,6 +138,9 @@ const DelegateWorkflowStatusSchema = Type.Object(
       Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
         maxItems: 32,
       }),
+    ),
+    inputs: Type.Optional(
+      Type.Readonly(Type.Array(DelegateWorkflowInputSchema, { maxItems: 4 })),
     ),
     waitingFor: Type.Optional(
       Type.Readonly(

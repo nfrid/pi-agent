@@ -31,6 +31,7 @@ import {
   resolveWorkflowInputs,
   type SymbolicWorkflowSelector,
   WorkflowInputBlockedError,
+  type WorkflowInputKind,
   type WorkflowInputSource,
 } from './workflow-inputs';
 import {
@@ -111,6 +112,13 @@ export interface DelegateWorkflowScheduleOptions
   execute?: DelegateJobStartOptions['execute'];
 }
 
+export interface DelegateWorkflowInputSnapshot {
+  readonly node: string;
+  readonly identity: AttemptIdentity;
+  readonly include?: readonly WorkflowInputKind[];
+  readonly label?: string;
+}
+
 export interface DelegateWorkflowAttemptSnapshot {
   readonly attempt: WorkflowAttempt;
   /** Immutable internal owner; omitted from public/dashboard projections. */
@@ -150,6 +158,8 @@ export interface DelegateWorkflowMetadataSnapshot {
   readonly state: WorkflowAttemptState;
   readonly dependencies: readonly AttemptIdentity[];
   readonly waitingFor: readonly AttemptIdentity[];
+  /** Sanitized symbolic input selectors; never includes resolved evidence. */
+  readonly inputs?: readonly DelegateWorkflowInputSnapshot[];
   readonly createdAt: number;
   readonly scheduledAt: number;
   readonly queuedAt?: number;
@@ -207,6 +217,8 @@ interface WorkflowRecord {
   cancellationInFlight?: Promise<void>;
   result?: DelegateWorkflowResultRecord;
   selectors: readonly BoundWorkflowSelector[];
+  /** Retained separately so restored records can expose selector metadata. */
+  inputMetadata: readonly DelegateWorkflowInputSnapshot[];
   prepare?: DelegateWorkflowLaunchFactory;
   preparationInFlight?: Promise<void>;
   preparationController?: AbortController;
@@ -217,6 +229,25 @@ interface WorkflowRecord {
   preparationDiscarded?: boolean;
   preparationDiscardInFlight?: Promise<void>;
   continuationPredecessor?: AttemptIdentity;
+}
+
+function inputMetadata(
+  selectors: readonly BoundWorkflowSelector[],
+): readonly DelegateWorkflowInputSnapshot[] {
+  return Object.freeze(
+    selectors.map((selector) =>
+      Object.freeze({
+        node: selector.selector.node,
+        identity: selector.identity,
+        ...(selector.selector.include
+          ? { include: Object.freeze([...selector.selector.include]) }
+          : {}),
+        ...(selector.selector.label === undefined
+          ? {}
+          : { label: selector.selector.label }),
+      }),
+    ),
+  );
 }
 
 function copyRouting(
@@ -630,6 +661,7 @@ export class DelegateWorkflowCoordinator {
       cancellationRequested: false,
       cancellationWaiters: [],
       selectors,
+      inputMetadata: inputMetadata(selectors),
       prepare: options.prepare,
       preparationCleanup: options.preparationCleanup,
       continuationPredecessor: plan.predecessor?.identity,
@@ -672,7 +704,7 @@ export class DelegateWorkflowCoordinator {
     return () => this.changeListeners.delete(listener);
   }
 
-  /** Return bounded coordinator metadata without selectors, inputs, or results. */
+  /** Return bounded coordinator metadata without resolved inputs or results. */
   metadataSnapshot(): DelegateWorkflowMetadataHistory {
     return Object.freeze({
       version: 1,
@@ -710,6 +742,9 @@ export class DelegateWorkflowCoordinator {
             ...(record.allowWrites === undefined
               ? {}
               : { allowWrites: record.allowWrites }),
+            ...(record.inputs.length > 0
+              ? { inputs: inputMetadata(record.inputs) }
+              : {}),
             ...(record.reason === undefined ? {} : { reason: record.reason }),
           });
         }),
@@ -861,7 +896,23 @@ export class DelegateWorkflowCoordinator {
         launched: true,
         cancellationRequested: false,
         cancellationWaiters: [],
-        selectors: Object.freeze([]),
+        selectors: Object.freeze(
+          (metadata.inputs ?? []).map((input) =>
+            Object.freeze({
+              selector: Object.freeze({
+                node: input.node,
+                ...(input.include
+                  ? { include: Object.freeze([...input.include]) }
+                  : {}),
+                ...(input.label === undefined ? {} : { label: input.label }),
+              }),
+              identity: input.identity,
+            }),
+          ),
+        ),
+        inputMetadata: Object.freeze(
+          (metadata.inputs ?? []).map((input) => Object.freeze({ ...input })),
+        ),
       };
       if (orphaned) {
         record.result = compactResult(

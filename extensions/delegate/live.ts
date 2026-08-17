@@ -179,6 +179,18 @@ function statusSnapshot(
             dependencies: status.workflow.dependencies
               .slice(0, 32)
               .map((identity) => text(identity, 80)),
+            ...(status.workflow.inputs?.length
+              ? {
+                  inputs: status.workflow.inputs.slice(0, 4).map((input) => ({
+                    node: text(input.node, 80),
+                    identity: text(input.identity, 80),
+                    ...(input.include
+                      ? { include: input.include.slice(0, 4) }
+                      : {}),
+                    ...(input.label ? { label: text(input.label, 120) } : {}),
+                  })),
+                }
+              : {}),
             ...(status.workflow.waitingFor
               ? {
                   waitingFor: status.workflow.waitingFor

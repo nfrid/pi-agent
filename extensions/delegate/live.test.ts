@@ -56,6 +56,12 @@ describe('delegate live surface', () => {
       identity: 'review@1',
       dependencies: ['impl@1'],
       waitingFor: ['impl@1'],
+      inputs: [
+        {
+          selector: { node: 'impl', include: ['report', 'branch'] },
+          identity: 'impl@1',
+        },
+      ],
       state: 'scheduled',
       createdAt: 1,
       scheduledAt: 1,
@@ -78,12 +84,15 @@ describe('delegate live surface', () => {
       identity: 'review@1',
       state: 'scheduled',
       waitingFor: ['impl@1'],
+      inputs: [
+        { node: 'impl', identity: 'impl@1', include: ['report', 'branch'] },
+      ],
     });
     expect(model.wakes).toMatchObject([
       { id: 'review-ready', state: 'pending', waitingFor: ['review@1'] },
     ]);
     expect(JSON.stringify(model.statuses[0]?.workflow)).not.toMatch(
-      /handoff|report|payload|artifact|diagnostic|transcript/i,
+      /handoff|payload|artifact|diagnostic|transcript/i,
     );
   });
 

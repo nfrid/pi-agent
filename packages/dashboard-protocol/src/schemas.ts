@@ -795,6 +795,27 @@ const DelegateWorkflowStateSchema = Type.Union([
   Type.Literal('cancelled'),
   Type.Literal('blocked'),
 ]);
+const DelegateWorkflowInputSchema = Type.Object(
+  {
+    node: WorkflowLogicalIdSchema,
+    identity: WorkflowAttemptReferenceSchema,
+    include: Type.Optional(
+      Type.Readonly(
+        Type.Array(
+          Type.Union([
+            Type.Literal('report'),
+            Type.Literal('handoff'),
+            Type.Literal('branch'),
+            Type.Literal('metadata'),
+          ]),
+          { maxItems: 4 },
+        ),
+      ),
+    ),
+    label: Type.Optional(Type.String({ maxLength: 120 })),
+  },
+  { additionalProperties: false },
+);
 export const DelegateWorkflowMetadataSchema = Type.Object(
   {
     /** Immutable branch owner used to disambiguate identical logical attempts. */
@@ -817,6 +838,9 @@ export const DelegateWorkflowMetadataSchema = Type.Object(
           maxItems: MAX_WORKFLOW_DEPENDENCIES,
         }),
       ),
+    ),
+    inputs: Type.Optional(
+      Type.Readonly(Type.Array(DelegateWorkflowInputSchema, { maxItems: 4 })),
     ),
     reason: Type.Optional(Type.String({ maxLength: 256 })),
     route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),

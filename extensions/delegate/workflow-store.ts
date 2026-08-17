@@ -22,6 +22,8 @@ export const WORKFLOW_ENTRY_TYPE = 'delegate-workflow:v1';
 export const MAX_WORKFLOW_HISTORY_ATTEMPTS = 256;
 export const MAX_WORKFLOW_HISTORY_REASON = 256;
 export const MAX_WORKFLOW_HISTORY_ROUTE = 512;
+export const MAX_WORKFLOW_HISTORY_INPUTS = 4;
+export const MAX_WORKFLOW_HISTORY_INPUT_LABEL = 120;
 /** A lifecycle journal entry is intentionally much smaller than a checkpoint. */
 export const MAX_WORKFLOW_DELTA_ATTEMPTS = 32;
 
@@ -103,6 +105,37 @@ function validBoundedText(value: unknown, maximum: number): value is string {
   );
 }
 
+function validInputMetadata(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > MAX_WORKFLOW_HISTORY_INPUTS)
+    return false;
+  const kinds = new Set(['report', 'handoff', 'branch', 'metadata']);
+  return value.every((input) => {
+    if (!isRecord(input)) return false;
+    if (
+      typeof input.node !== 'string' ||
+      !isLogicalId(input.node) ||
+      typeof input.identity !== 'string' ||
+      !isCanonicalWorkflowAttemptReference(input.identity)
+    )
+      return false;
+    if (input.include !== undefined) {
+      if (
+        !Array.isArray(input.include) ||
+        input.include.length > 4 ||
+        new Set(input.include).size !== input.include.length ||
+        input.include.some(
+          (kind) => typeof kind !== 'string' || !kinds.has(kind),
+        )
+      )
+        return false;
+    }
+    return (
+      input.label === undefined ||
+      validBoundedText(input.label, MAX_WORKFLOW_HISTORY_INPUT_LABEL)
+    );
+  });
+}
+
 function validAttempt(
   value: unknown,
 ): value is DelegateWorkflowMetadataSnapshot {
@@ -130,6 +163,7 @@ function validAttempt(
     value.dependencies.includes(value.identity as string) ||
     !Array.isArray(value.waitingFor) ||
     value.waitingFor.length > MAX_WORKFLOW_DEPENDENCIES ||
+    (value.inputs !== undefined && !validInputMetadata(value.inputs)) ||
     value.waitingFor.some(
       (dependency) => !isCanonicalWorkflowAttemptReference(dependency),
     ) ||
@@ -216,6 +250,22 @@ function boundedState(
       state: attempt.state,
       dependencies: Object.freeze([...attempt.dependencies]),
       waitingFor: Object.freeze([...attempt.waitingFor]),
+      ...(attempt.inputs
+        ? {
+            inputs: Object.freeze(
+              attempt.inputs.map((input) =>
+                Object.freeze({
+                  node: input.node,
+                  identity: input.identity,
+                  ...(input.include
+                    ? { include: Object.freeze([...input.include]) }
+                    : {}),
+                  ...(input.label === undefined ? {} : { label: input.label }),
+                }),
+              ),
+            ),
+          }
+        : {}),
       createdAt: attempt.createdAt,
       scheduledAt: attempt.scheduledAt,
       ...(attempt.queuedAt === undefined ? {} : { queuedAt: attempt.queuedAt }),

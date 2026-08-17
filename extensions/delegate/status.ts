@@ -11,6 +11,7 @@ import type {
 import { getRunState } from './types';
 import type { WakeSnapshot } from './wake-coordinator';
 import type { DelegateWorkflowAttemptSnapshot } from './workflow-coordinator';
+import type { WorkflowInputKind } from './workflow-inputs';
 import type { WorkflowAttemptState } from './workflow-model';
 
 export type DelegateStatusKind = 'foreground' | 'background';
@@ -38,12 +39,21 @@ export interface DelegateTranscriptEntry {
   run?: number;
 }
 
+export interface DelegateWorkflowStatusInput {
+  node: string;
+  identity: string;
+  include?: readonly WorkflowInputKind[];
+  label?: string;
+}
+
 export interface DelegateWorkflowStatus {
   logicalId: string;
   attempt: number;
   identity: string;
   state: WorkflowAttemptState;
   dependencies: string[];
+  /** Sanitized symbolic selectors; evidence and payloads never cross this boundary. */
+  inputs?: DelegateWorkflowStatusInput[];
   waitingFor?: string[];
   reason?: string;
   route?: string;
@@ -220,6 +230,20 @@ function workflowStatusFromAttempt(
     identity: attempt.identity,
     state: attempt.state,
     dependencies: [...attempt.dependencies],
+    ...(attempt.inputs?.length
+      ? {
+          inputs: attempt.inputs.map((input) => ({
+            node: input.selector.node,
+            identity: input.identity,
+            ...(input.selector.include
+              ? { include: [...input.selector.include] }
+              : {}),
+            ...(input.selector.label === undefined
+              ? {}
+              : { label: input.selector.label }),
+          })),
+        }
+      : {}),
     ...(attempt.waitingFor?.length
       ? { waitingFor: [...attempt.waitingFor] }
       : {}),
@@ -251,6 +275,7 @@ function workflowStatusFromRun(
     identity: attempt.identity,
     state,
     dependencies: previous?.dependencies ?? [],
+    ...(previous?.inputs ? { inputs: [...previous.inputs] } : {}),
     ...(previous?.waitingFor ? { waitingFor: [...previous.waitingFor] } : {}),
     ...(previous?.reason ? { reason: previous.reason } : {}),
     ...(run.routing?.route || previous?.route
