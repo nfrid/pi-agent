@@ -3,7 +3,26 @@ import { describe, expect, it } from 'vitest';
 import type { TranscriptModelItem } from '../../transcript';
 import { TranscriptEntry } from './entries';
 
-describe('expanded transcript tool rows', () => {
+describe('transcript entries', () => {
+  it('renders unresolved live assistant text in full instead of a preparing event', () => {
+    const item: TranscriptModelItem = {
+      key: 'assistant-live',
+      raw: {},
+      entry: { kind: 'assistant', speaks: true, streaming: true },
+      role: 'assistant',
+      text: 'Editing the shutdown path.\n\nThis needs a guarded cleanup.',
+      preparing: true,
+    };
+
+    const markup = renderToStaticMarkup(<TranscriptEntry item={item} />);
+
+    expect(markup).toContain('message-bubble message-assistant');
+    expect(markup).toContain('Editing the shutdown path.');
+    expect(markup).toContain('This needs a guarded cleanup.');
+    expect(markup).not.toContain('preparing-toolcall');
+    expect(markup).not.toContain('preparing tool call');
+  });
+
   it('renders compact colored line metrics for edit tools', () => {
     const item: TranscriptModelItem = {
       key: 'tool:edit-call',

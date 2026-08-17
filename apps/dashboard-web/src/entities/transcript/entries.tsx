@@ -3,7 +3,6 @@ import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
 import type { TranscriptModelItem } from '../../transcript';
 import { activityStepParts } from './activity';
-import { activityTitleLine } from './activity-lead';
 import { ActivityStepContent } from './activity-summary';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
@@ -212,17 +211,6 @@ function TranscriptEntry({
   const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
     return <TranscriptEventEntry event={item.event} timestamp={timestamp} />;
-  if (item.preparing)
-    return (
-      <output className="transcript-entry preparing-toolcall">
-        <span className="activity-icon">…</span>
-        <strong>
-          {item.text ? activityTitleLine(item.text) : 'Preparing tool call'}
-        </strong>
-        <small>preparing tool call</small>
-        <DashboardTime className="transcript-time" timestamp={timestamp} />
-      </output>
-    );
   if (
     item.role &&
     suppressAssistantText &&

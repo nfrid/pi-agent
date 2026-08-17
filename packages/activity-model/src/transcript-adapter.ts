@@ -87,7 +87,10 @@ function assistantEntry(raw: Record<string, unknown>): TranscriptEntry {
     message?.streaming === true;
   return {
     kind: 'assistant',
-    speaks: streaming ? false : Boolean(visibleText),
+    // Live text is ordinary speech until a tool association proves it is a
+    // preamble. This keeps it outside the preceding activity while it streams;
+    // once the call arrives, the same entry becomes the next group's leader.
+    speaks: Boolean(visibleText) && !preamble,
     ...(streaming ? { streaming: true } : {}),
     ...(textHeaders.length > 0
       ? { narration: 'announced' as const }

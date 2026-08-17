@@ -414,6 +414,66 @@ describe('shared activity model', () => {
     ).toBeUndefined();
   });
 
+  it('keeps live text outside the previous group until a tool call arrives', () => {
+    const previous = [
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Inspect the workspace',
+        titleKind: 'preamble' as const,
+      },
+      { kind: 'tool' as const, name: 'read', args: {} },
+    ];
+    const liveMessage = {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        __dashboardStreaming: true,
+        content: [
+          {
+            type: 'text',
+            text: 'Editing the shutdown path.\n\nThis needs a guarded cleanup.',
+          },
+        ],
+      },
+    };
+
+    const streaming = activityEntryFromRaw(liveMessage);
+    expect(streaming).toMatchObject({
+      kind: 'assistant',
+      speaks: true,
+      streaming: true,
+    });
+    expect(groupTranscript([...previous, streaming])).toEqual([
+      { start: 0, end: 1 },
+    ]);
+
+    const withTool = activityEntryFromRaw({
+      ...liveMessage,
+      message: {
+        ...liveMessage.message,
+        toolCallIds: ['edit-1'],
+      },
+    });
+    expect(withTool).toMatchObject({
+      kind: 'assistant',
+      speaks: false,
+      streaming: true,
+      title: 'Editing the shutdown path',
+      titleKind: 'preamble',
+    });
+    expect(
+      groupTranscript([
+        ...previous,
+        withTool,
+        { kind: 'tool', name: 'edit', args: {} },
+      ]),
+    ).toEqual([
+      { start: 0, end: 1 },
+      { start: 2, end: 3 },
+    ]);
+  });
+
   it('maps persisted preambles, narration, tools, and continuation events canonically', () => {
     const raw = [
       {
