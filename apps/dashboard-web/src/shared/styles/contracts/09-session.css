@@ -160,6 +160,9 @@
 .session-status.status-paused i {
   color: var(--orange);
 }
+.session-status.status-input i {
+  color: var(--cyan);
+}
 .session-status.status-failed i,
 .session-status.status-aborting i,
 .session-status.status-stopping i {

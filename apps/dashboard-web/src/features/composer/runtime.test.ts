@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  composerCommandType,
+  composerIsDisabled,
+  composerMode,
+  composerSubmissionPolicy,
   contextIndicatorData,
   formatContextTokens,
   resumeRuntimeRequest,
@@ -25,6 +29,30 @@ describe('composer runtime model', () => {
         percent: null,
       }),
     ).toEqual({ percent: undefined, text: '?% [?/272k]', level: 'normal' });
+  });
+
+  it('routes explicit settled background waiting as a prompt', () => {
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'working',
+      online: true,
+      pendingInteractions: [],
+      session: { id: 'session-1', entries: [] },
+      extensionSurfaces: [
+        {
+          id: 'runtime.settled-background',
+          rendererId: 'runtime.settled-background',
+          viewModel: { version: 1, count: 2 },
+        },
+      ],
+    } as never;
+    expect(composerMode(runtime)).toBe('prompt');
+    expect(composerCommandType(runtime, 'prompt')).toBe('prompt');
+    expect(composerSubmissionPolicy(runtime, 'prompt', false)).toEqual({
+      commandType: 'prompt',
+      queues: false,
+    });
+    expect(composerIsDisabled(runtime)).toBe(false);
   });
 
   it('builds resume requests and checks image capability explicitly', () => {

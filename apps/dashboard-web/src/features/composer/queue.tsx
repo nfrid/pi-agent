@@ -103,9 +103,11 @@ export function queueRemoveCommand(clientId: string): Record<string, unknown> {
 export function shouldShowQueuePanel(
   liveState: RuntimeSnapshot['liveState'],
   queuedCount: number,
+  settledBackground = false,
 ): boolean {
   return (
-    liveState === 'working' || liveState === 'compacting' || queuedCount > 0
+    !settledBackground &&
+    (liveState === 'working' || liveState === 'compacting' || queuedCount > 0)
   );
 }
 
@@ -113,8 +115,9 @@ export function shouldQueueComposerMessage(
   liveState: RuntimeSnapshot['liveState'],
   mode: 'prompt' | 'steer' | 'followUp',
   hasAttachments: boolean,
+  settledBackground = false,
 ): boolean {
-  if (hasAttachments) return false;
+  if (settledBackground || hasAttachments) return false;
   if (liveState === 'compacting') return true;
   return liveState === 'working' && mode !== 'followUp';
 }
