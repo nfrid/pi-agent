@@ -359,7 +359,7 @@ h2 {
   visibility: visible;
 }
 .interaction-dock .interaction {
-  width: min(720px, 100%);
+  width: min(1200px, 100%);
   min-width: 0;
   max-height: min(68vh, 620px);
   margin: 0;

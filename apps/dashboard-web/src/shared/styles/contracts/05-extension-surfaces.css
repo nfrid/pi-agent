@@ -526,7 +526,7 @@ ol.delegate-inspector-runs > li small {
 }
 @media (min-width: 700px) {
   .interaction-choice-layout.has-preview {
-    grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 2fr);
     align-items: start;
   }
 }
