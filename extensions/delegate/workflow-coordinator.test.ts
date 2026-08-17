@@ -1130,6 +1130,7 @@ describe('DelegateWorkflowCoordinator', () => {
       expect(coordinator.require(second.identity).state).toBe('success'),
     );
     expect(token).toBe('opaque-child-token');
+    expect(second.identity).toBe('lineage@2');
     expect(second.dependencies).toEqual(['lineage@1']);
     await coordinator.dispose();
   });

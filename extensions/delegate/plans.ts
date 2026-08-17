@@ -107,7 +107,7 @@ function normalizeHandoffFrom(
   return Array.isArray(input) ? input : [input];
 }
 
-function assertContinuationFields(
+export function assertContinuationFields(
   continuation: string | undefined,
   fields: {
     cwd?: unknown;

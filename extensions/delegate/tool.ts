@@ -19,7 +19,7 @@ import {
   runPreparedDelegateExecution,
 } from './orchestration';
 import { invalidParams } from './param-errors';
-import { buildDelegatePlans } from './plans';
+import { assertContinuationFields, buildDelegatePlans } from './plans';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { formatDelegateRoutingPrompt } from './routing';
 import { serializeDelegateRunForPublic } from './serialize';
@@ -352,7 +352,6 @@ export function registerDelegateTool(
         Array.isArray((rawParams as { tasks?: unknown }).tasks) ||
         (params.id === undefined && params.continue === undefined);
       if (activeWorkflow && activeStatuses && !legacySurface) {
-        backgroundRuntime?.ensureBranchOwner?.(ctx);
         if (Array.isArray(params.tasks))
           throw new Error(
             'A delegate call schedules one logical node at a time.',
@@ -369,8 +368,20 @@ export function registerDelegateTool(
           : params.id?.trim();
         if (!logicalId)
           throw new Error('Fresh delegate calls require a stable id.');
-        if (continuationReference)
+        if (continuationReference) {
+          // These replacements are pure input policy. Reject them before the
+          // coordinator admits a new lineage attempt; token, branch, and
+          // worktree-dependent checks remain lazy until preparation opens.
+          assertContinuationFields(
+            continuationReference,
+            params,
+            'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
+          );
           activeWorkflow.require(continuationReference);
+        }
+        // Do not write the branch owner marker until pure continuation input
+        // validation has passed; rejected calls must not persist workflow state.
+        backgroundRuntime?.ensureBranchOwner?.(ctx);
         const requestedRoute = params.route?.trim();
         const inheritedRouting = continuationReference
           ? activeWorkflow.getRouting(continuationReference)
