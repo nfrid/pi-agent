@@ -687,6 +687,110 @@ describe('delegate history adapter', () => {
     expect(allRuns[0]?.lineageId).toBe(allRuns[0]?.runId);
   });
 
+  it('reconciles workflow placeholders with actual runs by owner and identity', () => {
+    const workflowAttempt = (ownerBranchId: string, state: string) => ({
+      ownerBranchId,
+      logicalId: 'review',
+      attempt: 1,
+      identity: 'review@1',
+      state,
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...(state === 'success' ? { settledAt: 3 } : {}),
+    });
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'actual-run-entry',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'actual-run',
+                lineageId: 'actual-lineage',
+                name: 'Actual review worker',
+                task: 'actual task wins',
+                messages: [
+                  {
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'actual detail wins' }],
+                  },
+                ],
+                workflow: {
+                  ...workflowAttempt('owner-a', 'success'),
+                  route: 'actual-route',
+                },
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              workflowAttempt('owner-a', 'success'),
+              workflowAttempt('owner-b', 'scheduled'),
+            ],
+          },
+        },
+      },
+    ];
+
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(2);
+    const actual = response.groups.find(
+      (group) => group.workflow?.ownerBranchId === 'owner-a',
+    );
+    expect(actual).toMatchObject({
+      runId: 'actual-run',
+      lineageId: 'actual-lineage',
+      name: 'Actual review worker',
+      runCount: 1,
+      workflow: {
+        ownerBranchId: 'owner-a',
+        identity: 'review@1',
+        route: 'actual-route',
+      },
+      runs: [
+        {
+          runId: 'actual-run',
+          task: 'actual task wins',
+          name: 'Actual review worker',
+        },
+      ],
+    });
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      'actual-run',
+      'actual-lineage',
+    );
+    expect(detail.run.details).toMatchObject({
+      task: 'actual task wins',
+      response: 'actual detail wins',
+    });
+    expect(
+      response.groups.find(
+        (group) => group.workflow?.ownerBranchId === 'owner-b',
+      ),
+    ).toMatchObject({
+      state: 'scheduled',
+      workflow: { ownerBranchId: 'owner-b', identity: 'review@1' },
+    });
+  });
+
   it('projects durable workflow snapshots after reload without secret payloads', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },
