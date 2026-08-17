@@ -25,7 +25,8 @@ select {
 }
 
 button {
-  color: inherit;
+  color: var(--fg);
+  background: var(--pink);
 }
 
 button:focus-visible,
