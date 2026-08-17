@@ -160,6 +160,32 @@ describe('delegate widget', () => {
     expect(settled).toEqual([]);
   });
 
+  test('summarizes scheduled-only workflow rows as scheduled', () => {
+    const [line] = renderDelegateWidget(
+      [
+        status({
+          state: 'queued',
+          workflow: {
+            logicalId: 'review',
+            attempt: 1,
+            identity: 'review@1',
+            state: 'scheduled',
+            dependencies: [],
+            createdAt: 1_000,
+            scheduledAt: 1_000,
+          },
+        }),
+      ],
+      false,
+      100,
+      theme as never,
+      5_000,
+    );
+
+    expect(line).toContain('1 scheduled');
+    expect(line).not.toContain('finishing');
+  });
+
   test('shows a continuation lineage as one run count with aggregate runtime', () => {
     const [line] = renderDelegateWidget(
       [
