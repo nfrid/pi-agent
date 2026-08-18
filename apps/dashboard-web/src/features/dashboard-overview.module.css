@@ -30,6 +30,7 @@
 
 .dashboardEmptyWorkspace .homeHeading {
   padding-right: 0;
+  padding-top: 1em;
 }
 
 .emptyWorkspaceState {
