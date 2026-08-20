@@ -15,6 +15,7 @@ export function SessionRow({ session }: { session: SessionIndexEntry }) {
         <small>{session.cwd}</small>
       </span>
       <span className="muted">
+        {session.activeRuntimeId && 'Live · '}
         {new Date(session.updatedAt).toLocaleDateString()}
       </span>
     </button>
