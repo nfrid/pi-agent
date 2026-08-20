@@ -7,6 +7,10 @@ import {
   DashboardConnectionRuntime,
   SESSION_PROJECTION_CACHE_LIMIT,
 } from './connection-runtime.js';
+import {
+  InMemorySessionTranscriptCache,
+  type SessionTranscriptCache,
+} from './session-transcript-cache.js';
 import { DashboardLiveStore } from './store.js';
 
 const shellSnapshot = (
@@ -93,7 +97,7 @@ function lifecycleGlobals() {
   };
 }
 
-function fixture() {
+function fixture(sessionTranscriptCache?: SessionTranscriptCache) {
   let shellObserver: Observer | undefined;
   const shellHistory: Observer[] = [];
   const sessionObservers = new Map<string, Observer>();
@@ -138,6 +142,7 @@ function fixture() {
     client: client as never,
     store,
     isOnline: () => true,
+    ...(sessionTranscriptCache ? { sessionTranscriptCache } : {}),
   });
   return {
     client,
@@ -331,6 +336,75 @@ describe('DashboardConnectionRuntime', () => {
     );
     second.release();
     stop();
+  });
+
+  it('restores a settled transcript from persistent cache before network hydration', async () => {
+    const cache = new InMemorySessionTranscriptCache();
+    const firstFixture = fixture(cache);
+    const stopFirst = firstFixture.runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    firstFixture.shell({
+      id: 'shell-cache-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
+      },
+    });
+    const first = firstFixture.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    firstFixture.session('session-a', {
+      id: 'persistent-session-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 2,
+        snapshot: {
+          ...sessionSnapshot(2),
+          entries: [
+            {
+              type: 'message',
+              id: 'persistent-message',
+              message: { role: 'assistant', content: 'warm start' },
+            },
+          ],
+        },
+      },
+    });
+    firstFixture.session('session-a', {
+      id: 'persistent-session-live',
+      data: { type: 'caught-up', sequence: 2 },
+    });
+    first.release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stopFirst();
+
+    const secondFixture = fixture(cache);
+    const stopSecond = secondFixture.runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    secondFixture.shell({
+      id: 'shell-restore-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
+      },
+    });
+    const second = secondFixture.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      secondFixture.store.getSnapshot().transcriptsBySessionId['session-a']
+        ?.items['persistent-message'],
+    ).toBeDefined();
+    expect(
+      secondFixture.store.getSnapshot().sessionSyncById['session-a'],
+    ).toMatchObject({
+      status: 'cached',
+      sequence: 2,
+      sequenceKnown: true,
+    });
+    second.release();
+    stopSecond();
   });
 
   it('replaces a cached projection when resume falls back to a fresh snapshot', async () => {

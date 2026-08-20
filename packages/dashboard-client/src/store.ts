@@ -30,6 +30,7 @@ import {
   type ClientAuthoritativeSessionSnapshot,
   SESSION_REQUEST_ORDER,
 } from './http-client.js';
+import type { CachedSessionTranscript } from './session-transcript-cache.js';
 import {
   acceptTranscriptEventOrdering,
   acceptTranscriptSnapshotOrdering,
@@ -1794,6 +1795,83 @@ export class DashboardLiveStore {
 
   releaseSession(sessionId: string): void {
     this.connectionRuntime?.releaseSession(sessionId);
+  }
+
+  restoreCachedSessionTranscript(
+    cached: CachedSessionTranscript,
+    generation: number,
+  ): boolean {
+    if (
+      this.state.serverId === undefined ||
+      cached.serverId !== this.state.serverId ||
+      cached.snapshot.serverId !== this.state.serverId ||
+      cached.snapshot.metadata.id !== cached.sessionId ||
+      this.state.transcriptsBySessionId[cached.sessionId] !== undefined
+    )
+      return false;
+    const coverage = cached.coverage
+      ? { ...cached.coverage, generation }
+      : undefined;
+    let nextState = this.installSessionProjection(
+      this.state,
+      cached.snapshot.metadata,
+    );
+    nextState = this.installTranscriptProjection(
+      nextState,
+      cached.sessionId,
+      cached.projection,
+    );
+    nextState = this.withCoverage(nextState, cached.sessionId, coverage);
+    this.publish({
+      ...nextState,
+      sessionSnapshotsById: {
+        ...nextState.sessionSnapshotsById,
+        [cached.sessionId]: cached.snapshot,
+      },
+      sessionSyncById: {
+        ...nextState.sessionSyncById,
+        [cached.sessionId]: {
+          status: 'cached',
+          generation,
+          sequence: cached.acceptedSequence,
+          sequenceKnown: true,
+        },
+      },
+    });
+    return true;
+  }
+
+  cachedSessionTranscript(
+    sessionId: string,
+  ): CachedSessionTranscript | undefined {
+    const serverId = this.state.serverId;
+    const snapshot = this.state.sessionSnapshotsById[sessionId];
+    const projection = this.state.transcriptsBySessionId[sessionId];
+    const sync = this.state.sessionSyncById[sessionId];
+    if (!serverId || !snapshot || !projection || !sync?.sequenceKnown)
+      return undefined;
+    const runtime = Object.values(this.state.runtimesById).find(
+      (candidate) => candidate.session.id === sessionId,
+    );
+    if (
+      runtime &&
+      runtime.online !== false &&
+      runtime.liveState !== 'idle' &&
+      runtime.liveState !== 'failed'
+    )
+      return undefined;
+    return {
+      version: 1,
+      serverId,
+      sessionId,
+      savedAt: Date.now(),
+      acceptedSequence: sync.sequence,
+      snapshot,
+      projection,
+      ...(this.state.sessionHistoryCoverageById[sessionId] === undefined
+        ? {}
+        : { coverage: this.state.sessionHistoryCoverageById[sessionId] }),
+    };
   }
 
   markSessionCached(

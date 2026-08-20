@@ -2261,6 +2261,54 @@ describe('DashboardLiveStore', () => {
     );
   });
 
+  it('exports and restores a settled transcript cache at the current generation', () => {
+    const source = new DashboardLiveStore();
+    source.installSnapshot(snapshot('daemon-1', 1));
+    source.beginSessionSync('session-1', 1);
+    expect(
+      source.acceptSessionSnapshot(
+        {
+          ...sessionResponse(4),
+          entries: [
+            {
+              type: 'message',
+              id: 'cached-message',
+              message: { role: 'assistant', content: 'cached' },
+            },
+          ],
+          history: { version: 1, start: 0, end: 1, hasOlder: false },
+        },
+        4,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    source.completeSessionSync('session-1', 4);
+    const cached = source.cachedSessionTranscript('session-1');
+    expect(cached).toBeDefined();
+    if (!cached) throw new Error('Expected a cached transcript');
+
+    const restored = new DashboardLiveStore();
+    restored.installSnapshot(snapshot('daemon-1', 5));
+    expect(restored.restoreCachedSessionTranscript(cached, 9)).toBe(true);
+    expect(
+      restored.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['cached-message']);
+    expect(restored.getSnapshot().sessionSyncById['session-1']).toMatchObject({
+      status: 'cached',
+      generation: 9,
+      sequence: 4,
+      sequenceKnown: true,
+    });
+    expect(
+      restored.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({ generation: 9, coveredStart: 0, coveredEnd: 1 });
+
+    const otherServer = new DashboardLiveStore();
+    otherServer.installSnapshot(snapshot('daemon-2', 1));
+    expect(otherServer.restoreCachedSessionTranscript(cached, 1)).toBe(false);
+  });
+
   it('merges historical pages without replacing the authoritative active overlay', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

@@ -75,7 +75,11 @@ function validTranscriptItem(value: unknown): boolean {
       (value.deliveryMode === undefined ||
         value.deliveryMode === 'steer' ||
         value.deliveryMode === 'followUp') &&
-      (value.status === 'streaming' || value.status === 'finished')
+      (value.status === 'streaming' ||
+        value.status === 'pending' ||
+        value.status === 'running' ||
+        value.status === 'finished' ||
+        value.status === 'error')
     );
   }
   if (value.kind === 'tool') {
@@ -336,8 +340,14 @@ export class IndexedDbSessionTranscriptCache implements SessionTranscriptCache {
       expectedSessionId: sessionId,
       expectedServerId: this.serverId,
     });
-    if (!decoded && value !== undefined) await this.remove(sessionId);
-    return decoded;
+    if (!decoded) {
+      if (value !== undefined) await this.remove(sessionId);
+      return undefined;
+    }
+    const touched = { ...decoded, savedAt: Date.now() };
+    const write = database.transaction(this.storeName, 'readwrite');
+    await requestResult(write.objectStore(this.storeName).put(touched));
+    return touched;
   }
 
   async save(value: CachedSessionTranscript): Promise<void> {

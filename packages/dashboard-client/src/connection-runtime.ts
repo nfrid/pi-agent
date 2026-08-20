@@ -11,6 +11,10 @@ import {
   type DashboardHttpErrorKind,
   dashboardHttpErrorKind,
 } from './http-client.js';
+import {
+  createSessionTranscriptCache,
+  type SessionTranscriptCache,
+} from './session-transcript-cache.js';
 import type { DashboardLiveStore } from './store.js';
 import type { DashboardTrpcClient } from './trpc-client.js';
 
@@ -51,6 +55,7 @@ export interface DashboardConnectionRuntimeOptions {
   /** Primarily useful for deterministic browser lifecycle tests. */
   isOnline?: () => boolean;
   visibilityStaleMs?: number;
+  sessionTranscriptCache?: SessionTranscriptCache;
 }
 
 function trackedValue<T>(value: unknown): { id?: string; data: T } {
@@ -150,6 +155,7 @@ export class DashboardConnectionRuntime {
   private readonly store: DashboardLiveStore;
   private readonly isOnline: () => boolean;
   private readonly visibilityStaleMs: number;
+  private readonly sessionTranscriptCache: SessionTranscriptCache;
   private trpc?: DashboardTrpcClient;
   private started = false;
   private shellGeneration = 0;
@@ -205,6 +211,8 @@ export class DashboardConnectionRuntime {
       options.isOnline ??
       (() => typeof navigator === 'undefined' || navigator.onLine);
     this.visibilityStaleMs = options.visibilityStaleMs ?? 15_000;
+    this.sessionTranscriptCache =
+      options.sessionTranscriptCache ?? createSessionTranscriptCache();
   }
 
   /** Start is idempotent and always leaves at most one shell subscription. */
@@ -284,6 +292,7 @@ export class DashboardConnectionRuntime {
       };
       this.sessions.set(sessionId, entry);
       this.store.beginSessionSync(sessionId, entry.generation);
+      void this.restoreCachedSession(entry);
     } else if (entry.refs === 0) {
       this.inactiveSessions.delete(sessionId);
       entry.generation += 1;
@@ -325,6 +334,9 @@ export class DashboardConnectionRuntime {
       this.store.evictSessionProjection(sessionId);
       return;
     }
+    const cached = this.store.cachedSessionTranscript(sessionId);
+    if (cached)
+      void this.sessionTranscriptCache.save(cached).catch(() => undefined);
     this.inactiveSessions.delete(sessionId);
     this.inactiveSessions.set(sessionId, true);
     while (this.inactiveSessions.size > SESSION_PROJECTION_CACHE_LIMIT) {
@@ -333,6 +345,31 @@ export class DashboardConnectionRuntime {
       this.inactiveSessions.delete(oldest);
       this.sessions.delete(oldest);
       this.store.evictSessionProjection(oldest);
+    }
+  }
+
+  private async restoreCachedSession(entry: DomainEntry): Promise<void> {
+    try {
+      const cached = await this.sessionTranscriptCache.load(entry.id);
+      if (
+        !cached ||
+        this.sessions.get(entry.id) !== entry ||
+        entry.refs === 0 ||
+        this.store.getSnapshot().transcriptsBySessionId[entry.id] !== undefined
+      )
+        return;
+      const serverId = this.store.getSnapshot().serverId;
+      if (serverId === undefined) return;
+      if (cached.serverId !== serverId) {
+        await this.sessionTranscriptCache.remove(entry.id);
+        return;
+      }
+      if (this.store.restoreCachedSessionTranscript(cached, entry.generation)) {
+        entry.sequence = cached.acceptedSequence;
+        entry.sequenceKnown = true;
+      }
+    } catch {
+      // Browser persistence is an optional warm-start path.
     }
   }
 
@@ -466,6 +503,8 @@ export class DashboardConnectionRuntime {
         true,
       );
       if (serverChanged) this.reacquireSessions();
+      for (const entry of this.sessions.values())
+        if (entry.refs > 0) void this.restoreCachedSession(entry);
       return;
     }
     if (isCaughtUp(payload)) {
