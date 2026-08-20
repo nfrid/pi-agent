@@ -51,4 +51,24 @@ describe('delegate completion delivery while paused', () => {
     delivery.flushCompletions();
     expect(sendMessage).toHaveBeenCalledOnce();
   });
+
+  test('filters a drained automatic completion after its tree epoch expires', () => {
+    let epoch = 4;
+    const delivery = createCompletionDelivery({
+      pi: { sendMessage: vi.fn() } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getDeliveryEpoch: () => epoch,
+      getRunningCount: () => 0,
+      getStatuses: () => undefined,
+      getUi: () => undefined,
+    });
+    const message = {
+      customType: 'delegate-job-result',
+      details: { jobs: [{ id: 'dj-old', deliveryEpoch: 4 }] },
+    };
+
+    expect(delivery.filterContext([message])).toEqual([message]);
+    epoch = 5;
+    expect(delivery.filterContext([message])).toEqual([]);
+  });
 });

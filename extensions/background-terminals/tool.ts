@@ -32,6 +32,7 @@ function validateCwd(base: string, requested?: string): string {
 export function registerBackgroundTool(
   pi: ExtensionAPI,
   getManager: () => BackgroundManager,
+  cancelCompletion: (id: string) => boolean = () => false,
 ): void {
   pi.registerTool<typeof Parameters, BackgroundToolDetails>({
     name: 'background',
@@ -66,6 +67,7 @@ export function registerBackgroundTool(
           const id = requireText(params.id, 'id');
           const waited = params.wait_seconds ?? 0;
           const snapshot = await active.peek(id, waited * 1000, signal);
+          if (snapshot.status !== 'running') cancelCompletion(id);
           return {
             content: [
               {
@@ -102,6 +104,7 @@ export function registerBackgroundTool(
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
           const snapshots = await active.stop(ids, signal);
+          for (const snapshot of snapshots) cancelCompletion(snapshot.id);
           return {
             content: [
               { type: 'text', text: snapshots.map(formatSummary).join('\n') },

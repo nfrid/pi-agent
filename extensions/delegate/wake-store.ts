@@ -147,6 +147,7 @@ function sanitizeWakeSnapshot(
     condition,
     references: [...value.references],
     payload,
+    nonObstructive: value.nonObstructive === true,
     state: value.state,
     createdAt: value.createdAt,
     revision: value.revision,

@@ -49,10 +49,14 @@ export default defineExtension(
         ),
     });
 
+    const completionKey = (id: string) => `background-process:${id}`;
     const deliverCompletion = (snapshot: BackgroundSnapshot) => {
       try {
-        pi.sendMessage(
-          {
+        if (!scopedServices)
+          throw new Error('Background delivery scope is unavailable.');
+        scopedServices.backgroundDeliveries.publish({
+          key: completionKey(snapshot.id),
+          message: {
             customType: RESULT_MESSAGE_TYPE,
             content: formatCompletion(snapshot),
             display: true,
@@ -67,8 +71,7 @@ export default defineExtension(
               outcome: exitDescription(snapshot),
             },
           },
-          { deliverAs: 'steer', triggerTurn: true },
-        );
+        });
       } catch (error) {
         console.error(
           'background-terminals: failed to deliver completion',
@@ -79,6 +82,7 @@ export default defineExtension(
 
     const createManager = (scope?: SessionScopeId) => {
       const services = getScopedServices(scope);
+      services.backgroundDeliveries.bind(pi);
       scopedServices = services;
       return new BackgroundManager({
         scopeId: services.scopeId,
@@ -110,6 +114,9 @@ export default defineExtension(
     // the keyed widget at stable agent boundaries even when the count is unchanged.
     pi.on('agent_start', () => widget.reassert());
     pi.on('agent_settled', () => widget.reassert());
+    pi.on('context', (event) =>
+      scopedServices?.backgroundDeliveries.markEntered(event.messages),
+    );
 
     pi.on('session_shutdown', async (_event, ctx) => {
       const closingScope = getSessionScopeId(ctx);
@@ -125,8 +132,12 @@ export default defineExtension(
       if (closingScope) releaseScopedServices(closingScope, closingServices);
     });
 
-    registerBackgroundTool(pi, getManager);
+    const cancelCompletion = (id: string) =>
+      scopedServices?.backgroundDeliveries.cancel(completionKey(id)) ?? false;
+    registerBackgroundTool(pi, getManager, cancelCompletion);
     registerBackgroundMessageRenderer(pi);
-    registerBackgroundCommands(pi, getManager, () => widget.reassert());
+    registerBackgroundCommands(pi, getManager, cancelCompletion, () =>
+      widget.reassert(),
+    );
   },
 );

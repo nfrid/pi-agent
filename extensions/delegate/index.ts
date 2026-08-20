@@ -166,9 +166,15 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     pi,
     getRuntimeActive: () => runtimeActive,
     getActiveCoordinator: () => activeWake?.coordinator,
+    getDeliveryBroker: () => getScopedServices(scopeId).backgroundDeliveries,
     onEntered: (sources) => statuses?.markWorkflowDelivered(sources),
   });
-  registerDelegateWakeTool(pi, () => activeWake?.coordinator);
+  registerDelegateWakeTool(pi, () => activeWake?.coordinator, {
+    onCancelled: (wake) =>
+      getScopedServices(scopeId).backgroundDeliveries.cancel(
+        `delegate-wake:${wake.deliveryKey}`,
+      ),
+  });
   let scopeId: SessionScopeId = 'default';
   const sessionManagerGenerations = new WeakMap<object, number>();
   let runtimeGeneration = 0;
@@ -385,6 +391,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getRunningCount: () => jobs?.runningCount ?? 0,
     getStatuses: () => statuses,
     getUi: () => ui,
+    getDeliveryBroker: () => getScopedServices(scopeId).backgroundDeliveries,
     getPaused: () => getPauseCoordinator(scopeId).isActive(),
   });
 
@@ -524,6 +531,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     for (const runtime of closingRuntimes) await runtime.workflow.dispose();
     await closingJobs?.dispose();
     const previousServices = getScopedServices(previousScopeId);
+    previousServices.backgroundDeliveries.cancelPrefix('delegate-jobs:');
+    previousServices.backgroundDeliveries.cancelPrefix('delegate-wake:');
     if (previousServices.delegateWorkflow)
       previousServices.delegateWorkflow = undefined;
     if (previousScopeId !== 'default') clearDelegateSurface(previousScopeId);
@@ -564,6 +573,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
     });
     const scopedServices = getScopedServices(sessionScopeId);
+    scopedServices.backgroundDeliveries.bind(pi);
     jobs = new DelegateJobManager({
       scopeId: sessionScopeId,
       pendingProcesses: scopedServices.pendingProcesses,
@@ -635,6 +645,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     if (!runtimeActive) return;
     // Every tree transition invalidates legacy automatic completion delivery,
     // even when the event is stale or foreign. Wake activation remains strict.
+    getScopedServices(scopeId).backgroundDeliveries.cancelPrefix(
+      `delegate-jobs:${deliveryEpoch}:`,
+    );
     deliveryEpoch++;
     delivery.resetAutomaticDelivery();
     const eventGeneration = sessionManagerGenerations.get(ctx.sessionManager);
@@ -712,8 +725,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   pi.on('context', (event) => {
     // Keep the automatic-delivery marker through context entry so a later
     // peek does not replay the same settled completion.
-    delivery.markAutomaticDeliveriesEntered(event.messages);
-    return { messages: wakeDelivery.filterContext(event.messages) };
+    getScopedServices(scopeId).backgroundDeliveries.markEntered(event.messages);
+    const currentMessages = delivery.filterContext(event.messages);
+    delivery.markAutomaticDeliveriesEntered(currentMessages);
+    return { messages: wakeDelivery.filterContext(currentMessages) };
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component
@@ -777,6 +792,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     // Workflow coordinators use this shared manager but do not own it.
     await closing?.dispose();
     const scopedServices = getScopedServices(closingScopeId);
+    scopedServices.backgroundDeliveries.cancelPrefix('delegate-jobs:');
+    scopedServices.backgroundDeliveries.cancelPrefix('delegate-wake:');
     if (scopedServices.delegateWorkflow)
       scopedServices.delegateWorkflow = undefined;
     clearDelegateSurface(closingScopeId);

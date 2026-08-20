@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ThemeColor } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import type { BackgroundDeliveryBroker } from '../shared/runtime/background-delivery';
 import type {
   WakeAcknowledgement,
   WakeCoordinator,
@@ -111,14 +112,15 @@ export interface WakeDeliveryController {
 }
 
 /**
- * Bridges the explicit wake state machine to Pi's follow-up queue. Acceptance
- * of sendMessage is deliberately not treated as entry: context reconciliation
- * is the acknowledgement boundary.
+ * Bridges the explicit wake state machine to the shared keyed delivery queue.
+ * Scheduling is deliberately not treated as entry: context reconciliation is
+ * the acknowledgement boundary.
  */
 export function createWakeDelivery(options: {
   pi: ExtensionAPI;
   getActiveCoordinator: () => WakeCoordinator | undefined;
   getRuntimeActive: () => boolean;
+  getDeliveryBroker?: () => BackgroundDeliveryBroker | undefined;
   onEntered?: (sources: readonly string[], wake: WakeSnapshot) => void;
 }): WakeDeliveryController {
   const dispatch: WakeDispatchHandler = (value) => {
@@ -130,15 +132,25 @@ export function createWakeDelivery(options: {
       active.ownerEpoch !== value.ownerEpoch
     )
       throw new Error('Wake delivery branch is no longer active.');
-    options.pi.sendMessage(
-      {
-        customType: DELEGATE_WAKE_MESSAGE_TYPE,
-        content: formatWakeDispatch(value),
-        display: true,
-        details: deliveryDetails(value),
-      },
-      { deliverAs: 'followUp', triggerTurn: true },
-    );
+    const message = {
+      customType: DELEGATE_WAKE_MESSAGE_TYPE,
+      content: formatWakeDispatch(value),
+      display: true,
+      details: deliveryDetails(value),
+    };
+    const broker = options.getDeliveryBroker?.();
+    if (broker) {
+      broker.publish({
+        key: `delegate-wake:${value.deliveryKey}`,
+        message,
+        nonObstructive: value.wake.nonObstructive,
+      });
+      return;
+    }
+    options.pi.sendMessage(message, {
+      deliverAs: value.wake.nonObstructive ? 'followUp' : 'steer',
+      triggerTurn: true,
+    });
   };
 
   const filterContext = <T>(messages: readonly T[]): T[] => {

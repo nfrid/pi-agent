@@ -1005,14 +1005,18 @@ describe('async delegate extension', () => {
     finish(successfulRun());
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
     expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
-      customType: 'delegate-job-result',
-      content: expect.not.stringContaining('Delegated results: 1 run(s)'),
-      display: true,
+      customType: 'pi-keyed-turn-control',
+      details: {
+        timing: 'steer',
+        message: {
+          customType: 'delegate-job-result',
+          content: expect.not.stringContaining('Delegated results: 1 run(s)'),
+          display: true,
+        },
+      },
+      display: false,
     });
-    expect(sendMessage.mock.calls[0]?.[1]).toEqual({
-      deliverAs: 'steer',
-      triggerTurn: true,
-    });
+    expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: false });
     const widgetFactory = setWidget.mock.calls.find(
       (call) => typeof call[1] === 'function',
     )?.[1] as
@@ -1248,9 +1252,9 @@ describe('async delegate extension', () => {
 
     await vi.advanceTimersByTimeAsync(50);
     expect(sendMessage).toHaveBeenCalledOnce();
-    expect(sendMessage.mock.calls[0]?.[0].details).toMatchObject({
-      jobs: [{ id: 'dj-3' }],
-    });
+    expect(
+      sendMessage.mock.calls[0]?.[0].details?.message?.details,
+    ).toMatchObject({ jobs: [{ id: 'dj-3' }] });
 
     // sendMessage has accepted the steer, but its custom message has not yet
     // entered context. A terminal peek must not duplicate the handoff.
@@ -1292,7 +1296,7 @@ describe('async delegate extension', () => {
     );
 
     handlers.get('context')?.({
-      messages: [sendMessage.mock.calls[0]?.[0]],
+      messages: [sendMessage.mock.calls[0]?.[0].details?.message],
     });
     const deliveredPeek = await tools
       .get('delegate_jobs')
@@ -1420,9 +1424,9 @@ describe('async delegate extension', () => {
     });
     finish('first');
     await vi.advanceTimersByTimeAsync(50);
-    expect(sendMessage.mock.calls[0]?.[0].details).toMatchObject({
-      jobs: [{ id: 'dj-1' }],
-    });
+    expect(
+      sendMessage.mock.calls[0]?.[0].details?.message?.details,
+    ).toMatchObject({ jobs: [{ id: 'dj-1' }] });
 
     await tools.get('delegate')?.execute(
       'call-second',
@@ -1836,6 +1840,29 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
+  test('cleans delegate-owned deliveries across tree, replacement, and shutdown', async () => {
+    const f = await createAsyncHarness('delivery-cleanup-parent');
+    const broker = getScopedServices(
+      'delivery-cleanup-parent',
+    ).backgroundDeliveries;
+    const cancelPrefix = vi.spyOn(broker, 'cancelPrefix');
+
+    f.handlers.get('session_tree')?.(
+      { oldLeafId: 'root', newLeafId: 'root' },
+      f.ctx,
+    );
+    expect(cancelPrefix).toHaveBeenCalledWith('delegate-jobs:0:');
+
+    await f.handlers.get('session_start')?.({ reason: 'resume' }, f.ctx);
+    expect(cancelPrefix).toHaveBeenCalledWith('delegate-jobs:');
+    expect(cancelPrefix).toHaveBeenCalledWith('delegate-wake:');
+
+    cancelPrefix.mockClear();
+    await f.handlers.get('session_shutdown')?.({}, f.ctx);
+    expect(cancelPrefix).toHaveBeenCalledWith('delegate-jobs:');
+    expect(cancelPrefix).toHaveBeenCalledWith('delegate-wake:');
+  });
+
   test('admits one persisted queued wake after runtime recreation', async () => {
     const first = await createAsyncHarness('reload-parent');
     await first.tools
@@ -1876,7 +1903,10 @@ describe('async delegate extension', () => {
       first.ctx,
     );
     await vi.waitFor(() => expect(first.sendMessage).toHaveBeenCalledOnce());
-    const persistedMessage = first.sendMessage.mock.calls[0]?.[0];
+    const scheduled = first.sendMessage.mock.calls[0]?.[0] as
+      | { details?: { message?: unknown } }
+      | undefined;
+    const persistedMessage = scheduled?.details?.message;
     if (!persistedMessage) throw new Error('missing queued wake message');
     await first.handlers.get('session_shutdown')?.({}, first.ctx);
 

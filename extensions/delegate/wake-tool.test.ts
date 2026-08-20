@@ -49,6 +49,7 @@ describe('delegate_wake tool', () => {
         id: 'source-ready',
         condition: { node: attempt.identity },
         payload: ['handoff'],
+        nonObstructive: true,
       },
       undefined,
       undefined,
@@ -63,7 +64,10 @@ describe('delegate_wake tool', () => {
       undefined,
       {} as ExtensionContext,
     )) as { details: { wakes: Array<{ payload: unknown }> } };
-    expect(listed.details.wakes[0]?.payload).toEqual([{ kind: 'handoff' }]);
+    expect(listed.details.wakes[0]).toMatchObject({
+      payload: [{ kind: 'handoff' }],
+      nonObstructive: true,
+    });
     expect(JSON.stringify(listed)).not.toContain('secret evidence');
     await workflow.dispose();
   });

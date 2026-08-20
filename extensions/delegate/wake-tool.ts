@@ -82,12 +82,18 @@ const Parameters = Type.Object({
     Type.Array(WakePayloadSchema, { minItems: 1, maxItems: 8 }),
   ),
   reason: Type.Optional(Type.String({ maxLength: 256 })),
+  nonObstructive: Type.Optional(
+    Type.Boolean({
+      description:
+        'Deliver only after the parent would otherwise become idle instead of at the next safe model boundary.',
+    }),
+  ),
 });
 
 type WakeToolParams = Static<typeof Parameters>;
 
 const DESCRIPTION =
-  'Subscribe to exact delegate workflow attempts and receive a bounded follow-up when a node, all nodes, or any node settles. Registration returns immediately. list/status expose metadata only; payload evidence is delivered once as delegate-wake-result. Use retry for ready delivery failures and recover for an accepted-but-unentered queued delivery.';
+  'Subscribe to exact delegate workflow attempts and receive a bounded wake when a node, all nodes, or any node settles. Wakes reach the next safe model boundary by default; nonObstructive waits until the parent would otherwise become idle. Registration returns immediately. list/status expose metadata only; payload evidence is delivered once as delegate-wake-result. Use retry for ready delivery failures and recover for an accepted-but-unentered queued delivery.';
 
 function requireId(id: string | undefined): string {
   const value = id?.trim();
@@ -118,6 +124,7 @@ function metadata(wake: WakeSnapshot): Record<string, unknown> {
     condition: wake.condition,
     references: wake.references,
     payload: wake.payload,
+    nonObstructive: wake.nonObstructive,
     state: wake.state,
     createdAt: wake.createdAt,
     ...(wake.readyAt !== undefined ? { readyAt: wake.readyAt } : {}),
@@ -143,6 +150,7 @@ function textResult(text: string, details: Record<string, unknown>) {
 export function registerDelegateWakeTool(
   pi: ExtensionAPI,
   getCoordinator: () => WakeCoordinator | undefined,
+  options: { onCancelled?: (wake: WakeSnapshot) => void } = {},
 ): void {
   pi.registerTool<typeof Parameters, Record<string, unknown>>({
     name: 'delegate_wake',
@@ -169,6 +177,7 @@ export function registerDelegateWakeTool(
             ...(params.payload
               ? { payload: params.payload as WakePayloadSelector[] }
               : {}),
+            nonObstructive: params.nonObstructive === true,
           });
           return textResult(
             `Wake registered immediately: ${snapshotText(wake)}`,
@@ -196,6 +205,7 @@ export function registerDelegateWakeTool(
             requireId(params.id),
             params.reason ?? 'Wake subscription cancelled.',
           );
+          options.onCancelled?.(wake);
           return textResult(`Wake cancelled: ${snapshotText(wake)}`, {
             action: 'cancel',
             wake: metadata(wake),

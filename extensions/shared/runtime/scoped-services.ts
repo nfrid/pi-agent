@@ -1,4 +1,5 @@
 import type { DelegateWorkflowCoordinator } from '../../delegate/workflow-coordinator';
+import { BackgroundDeliveryBroker } from './background-delivery';
 import {
   CapabilityRegistry,
   seedCapabilityRegistry,
@@ -46,6 +47,7 @@ export class PendingProcessAccounting {
 export interface ScopedServices {
   readonly scopeId: SessionScopeId;
   readonly interactionBroker: InteractionBroker;
+  readonly backgroundDeliveries: BackgroundDeliveryBroker;
   readonly liveSurfaceHub: LiveSurfaceHub;
   readonly pendingProcesses: PendingProcessAccounting;
   readonly capabilities: CapabilityRegistry;
@@ -91,6 +93,7 @@ export function getScopedServices(
   const created: ScopedServices = {
     scopeId: id,
     interactionBroker: new InteractionBroker(),
+    backgroundDeliveries: new BackgroundDeliveryBroker(id),
     liveSurfaceHub: new LiveSurfaceHub(),
     pendingProcesses: new PendingProcessAccounting(),
     capabilities: seedCapabilityRegistry(new CapabilityRegistry()),
@@ -117,6 +120,7 @@ export function releaseScopedServices(
   const current = registry().get(id);
   if (!current || (expected && current !== expected)) return false;
   current.interactionBroker.cancelAll();
+  current.backgroundDeliveries.clear();
   current.liveSurfaceHub.clearAll();
   current.pendingProcesses.clear();
   registry().delete(id);

@@ -88,6 +88,8 @@ export interface WakeSubscriptionOptions {
   readonly id: string;
   readonly condition: WakeCondition;
   readonly payload?: readonly WakePayloadSelector[];
+  /** Delay delivery until the parent would otherwise become idle. */
+  readonly nonObstructive?: boolean;
   /** Alias accepted at the model boundary for callers that call these selectors. */
   readonly selectors?: readonly WakePayloadSelector[];
 }
@@ -112,6 +114,7 @@ export interface WakeSnapshot {
   /** Exact attempt identities captured when the subscription was registered. */
   readonly references: readonly AttemptIdentity[];
   readonly payload: readonly CanonicalWakePayloadSelector[];
+  readonly nonObstructive: boolean;
   readonly state: WakeState;
   readonly createdAt: number;
   readonly readyAt?: number;
@@ -170,6 +173,7 @@ interface WakeRecord {
   readonly condition: WakeCondition;
   readonly references: readonly AttemptIdentity[];
   readonly payloadSelectors: readonly CanonicalWakePayloadSelector[];
+  readonly nonObstructive: boolean;
   readonly createdAt: number;
   state: WakeState;
   readyAt?: number;
@@ -434,6 +438,7 @@ function copySnapshot(record: WakeRecord): WakeSnapshot {
     condition: copyCondition(record.condition),
     references: Object.freeze([...record.references]),
     payload: copyPayloadSelectors(record.payloadSelectors),
+    nonObstructive: record.nonObstructive,
     state: record.state,
     createdAt: record.createdAt,
     readyAt: record.readyAt,
@@ -604,6 +609,7 @@ export class WakeCoordinator {
       condition: boundCondition,
       references: Object.freeze([...references]),
       payloadSelectors,
+      nonObstructive: options.nonObstructive === true,
       createdAt: timestamp,
       state: 'pending',
       warnings: warnings.length > 0 ? Object.freeze(warnings) : undefined,
@@ -1275,7 +1281,12 @@ export class WakeCoordinator {
         condition: this.bindCondition(normalized.condition, references),
         references: Object.freeze(references),
       };
-      if (!Array.isArray(value.payload)) return undefined;
+      if (
+        !Array.isArray(value.payload) ||
+        (value.nonObstructive !== undefined &&
+          typeof value.nonObstructive !== 'boolean')
+      )
+        return undefined;
       const restoredSelectors = normalizePayload({
         id,
         condition: normalized.condition,
@@ -1398,6 +1409,7 @@ export class WakeCoordinator {
       condition: normalized.condition,
       references: normalized.references,
       payloadSelectors,
+      nonObstructive: value.nonObstructive === true,
       createdAt: value.createdAt,
       state: state as WakeState,
       readyAt: validTimestamp(value.readyAt) ? value.readyAt : undefined,

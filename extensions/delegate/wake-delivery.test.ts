@@ -17,7 +17,7 @@ function result(): { runs: ReturnType<typeof createRun>[]; handoff: string } {
 }
 
 describe('wake delivery', () => {
-  test('uses followUp and acknowledges only when the custom message enters context', async () => {
+  test('uses steer by default and acknowledges only when the custom message enters context', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const attempt = workflow.schedule({
       logicalId: 'source',
@@ -51,12 +51,48 @@ describe('wake delivery', () => {
           deliveryKey: 'session:3:ready',
         }),
       }),
-      { deliverAs: 'followUp', triggerTurn: true },
+      { deliverAs: 'steer', triggerTurn: true },
     );
     expect(active.require('ready').state).toBe('queued');
     const message = sendMessage.mock.calls[0]?.[0];
     delivery.markContextEntered([message, message]);
     expect(active.require('ready').state).toBe('entered');
+    await workflow.dispose();
+  });
+
+  test('uses followUp only for an explicitly non-obstructive wake', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const attempt = workflow.schedule({
+      logicalId: 'later-source',
+      mode: 'single',
+      tasks: ['later-source'],
+      execute: async () => result(),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require(attempt.identity).settledAt).toBeDefined(),
+    );
+    const sendMessage = vi.fn();
+    let active: WakeCoordinator | undefined;
+    const delivery = createWakeDelivery({
+      pi: { sendMessage } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getActiveCoordinator: () => active,
+    });
+    active = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'session-later',
+      dispatch: delivery.dispatch,
+    });
+    active.register({
+      id: 'later',
+      condition: { node: attempt.identity },
+      nonObstructive: true,
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ customType: DELEGATE_WAKE_MESSAGE_TYPE }),
+      { deliverAs: 'followUp', triggerTurn: true },
+    );
     await workflow.dispose();
   });
 

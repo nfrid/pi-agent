@@ -5,7 +5,7 @@
 - Parallelize independent work by making separate delegate calls with stable `id` values; every delegate call is asynchronous. Prefer several bounded cheap tasks over one expensive task only when coordination is low; do not create duplicate work or tasks that need constant synchronization.
 - Use `after` and symbolic `inputs` to compose downstream work without copying evidence.
 - Continue an existing child while the request belongs to the same line of work; send it new evidence, corrections, and review feedback. Start a fresh child for independent work or when a fresh perspective is the point.
-- Register `delegate_wake` before settling when outstanding work gates the next decision, emit one concise waiting status, and never poll.
+- Register `delegate_wake` when outstanding work gates the next decision. Wakes arrive at the next safe model boundary by default; use `nonObstructive: true` only when delivery should wait until the parent would otherwise become idle. When no independent work remains, emit one concise waiting status and never poll.
 - Keep final scope, branch integration, final verification, and user-facing decisions with the parent. Children may make bounded implementation decisions and recommend scope or acceptance criteria.
 - Compact recipes (choose the shape; do not build a declarative workflow graph):
 - **Fan-out/fan-in:** schedule two or more independent scans with exact routes; schedule `synthesis` after them with symbolic report `inputs`; register one wake for `synthesis` and settle.

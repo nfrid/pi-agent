@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ThemeColor } from '@earendil-works/pi-coding-agent';
+import type { BackgroundDeliveryBroker } from '../shared/runtime/background-delivery';
 import {
   type BackgroundCompletionCard,
   renderBackgroundCompletion,
@@ -128,6 +129,7 @@ export interface CompletionDeliveryController {
   readonly clearTimer: () => void;
   readonly resetAutomaticDelivery: () => void;
   readonly clearUnenteredAutomaticDeliveries: () => void;
+  readonly filterContext: <T>(messages: readonly T[]) => T[];
   readonly markAutomaticDeliveriesEntered: (
     messages: readonly unknown[],
   ) => void;
@@ -146,6 +148,7 @@ export function createCompletionDelivery(options: {
   getRunningCount: () => number;
   getStatuses: () => DelegateStatusStore | undefined;
   getUi: () => { notify(message: string, level: 'info'): void } | undefined;
+  getDeliveryBroker?: () => BackgroundDeliveryBroker | undefined;
   getPaused?: () => boolean;
 }): CompletionDeliveryController {
   let pendingCompletions: DelegateJobSnapshot[] = [];
@@ -227,15 +230,23 @@ export function createCompletionDelivery(options: {
       .join('\n\n---\n\n');
     queueAutomaticDelivery(completed);
     try {
-      options.pi.sendMessage(
-        {
-          customType: 'delegate-job-result',
-          content,
-          display: true,
-          details: { dedupeKey, jobs: detailJobs },
-        },
-        { deliverAs: 'steer', triggerTurn: true },
-      );
+      const message = {
+        customType: 'delegate-job-result',
+        content,
+        display: true,
+        details: { dedupeKey, jobs: detailJobs },
+      };
+      const broker = options.getDeliveryBroker?.();
+      if (broker)
+        broker.publish({
+          key: `delegate-jobs:${deliveryEpoch}:${dedupeKey}`,
+          message,
+        });
+      else
+        options.pi.sendMessage(message, {
+          deliverAs: 'steer',
+          triggerTurn: true,
+        });
       options.getStatuses()?.jobResultEntered(completed.map((job) => job.id));
     } catch (error) {
       rollbackAutomaticDelivery(completed);
@@ -289,6 +300,27 @@ export function createCompletionDelivery(options: {
         if (state === 'queued') automaticDeliveryStates.delete(id);
       }
     },
+    filterContext: <T>(messages: readonly T[]): T[] =>
+      messages.filter((message) => {
+        if (!message || typeof message !== 'object') return true;
+        const candidate = message as {
+          customType?: unknown;
+          details?: { jobs?: unknown };
+        };
+        if (candidate.customType !== 'delegate-job-result') return true;
+        const jobs = candidate.details?.jobs;
+        return (
+          Array.isArray(jobs) &&
+          jobs.length > 0 &&
+          jobs.every(
+            (job) =>
+              job &&
+              typeof job === 'object' &&
+              (job as { deliveryEpoch?: unknown }).deliveryEpoch ===
+                options.getDeliveryEpoch(),
+          )
+        );
+      }),
     markAutomaticDeliveriesEntered: (messages) => {
       for (const message of messages) {
         const candidate = message as {

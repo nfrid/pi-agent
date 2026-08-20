@@ -107,13 +107,18 @@ describe('background terminals extension', () => {
 
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
     expect(sendMessage.mock.calls[0][0]).toMatchObject({
-      customType: 'background-terminal-result',
-      details: { dedupeKey: expect.any(String), id: expect.any(String) },
+      customType: 'pi-keyed-turn-control',
+      details: {
+        operation: 'schedule',
+        timing: 'steer',
+        key: expect.stringContaining('background-process:'),
+        message: {
+          customType: 'background-terminal-result',
+          details: { dedupeKey: expect.any(String), id: expect.any(String) },
+        },
+      },
     });
-    expect(sendMessage.mock.calls[0][1]).toEqual({
-      deliverAs: 'steer',
-      triggerTurn: true,
-    });
+    expect(sendMessage.mock.calls[0][1]).toEqual({ triggerTurn: false });
 
     await handlers.get('session_shutdown')?.({});
   });
