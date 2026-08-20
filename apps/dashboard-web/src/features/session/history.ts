@@ -53,6 +53,8 @@ export function isContiguousOlderHistory(
 type ScrollAnchor = {
   scrollTop: number;
   scrollHeight: number;
+  rowKey?: string;
+  rowTop?: number;
 };
 
 type PrependAnchor = ScrollAnchor & { revision: number };
@@ -67,9 +69,21 @@ type HistoryRequest = {
 };
 
 function captureScrollOffset(element: HTMLDivElement): ScrollAnchor {
+  const viewportTop = element.getBoundingClientRect().top;
+  const row = Array.from(
+    element.querySelectorAll<HTMLElement>(
+      '[data-transcript-key], [data-transcript-row]',
+    ),
+  ).find(
+    (candidate) => candidate.getBoundingClientRect().bottom >= viewportTop,
+  );
+  const rowKey = row?.dataset.transcriptKey ?? row?.dataset.transcriptRow;
   return {
     scrollTop: element.scrollTop,
     scrollHeight: element.scrollHeight,
+    ...(row && rowKey
+      ? { rowKey, rowTop: row.getBoundingClientRect().top - viewportTop }
+      : {}),
   };
 }
 

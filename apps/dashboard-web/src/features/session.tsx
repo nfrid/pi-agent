@@ -118,6 +118,7 @@ export function SessionView({
     controlLayerRef,
     jumpToLatest,
     sessionPageRef,
+    stopFollowing,
     tailReadySessionId,
     tailScrollRequest,
   } = useSessionScroll({
@@ -132,6 +133,10 @@ export function SessionView({
     cancelScrollRestore();
     jumpToLatest();
   }, [cancelScrollRestore, jumpToLatest]);
+  const handleBeforeTranscriptNavigation = useCallback(() => {
+    cancelScrollRestore();
+    stopFollowing();
+  }, [cancelScrollRestore, stopFollowing]);
   useEffect(() => {
     if (replacementSessionId && replacementSessionId !== id)
       replaceSession(replacementSessionId);
@@ -240,7 +245,7 @@ export function SessionView({
             tailScrollRequest={tailScrollRequest}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}
-            onBeforeScroll={cancelScrollRestore}
+            onBeforeScroll={handleBeforeTranscriptNavigation}
             scrollElementRef={embedded ? undefined : transcriptScrollRef}
             leadingContinuation={
               history?.hasOlder ? history.leadingContinuation : undefined

@@ -1,6 +1,8 @@
 import type { RefObject } from 'react';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
+export const FOLLOW_REARM_DISTANCE_PX = 40;
+
 /** Virtual scroll offset helpers for the transcript list. */
 export function preserveVirtualScrollOffset(
   previousTop: number,
@@ -22,7 +24,7 @@ export function isNearPageBottom(
   scrollHeight: number,
   scrollY: number,
   innerHeight: number,
-  threshold = 120,
+  threshold = FOLLOW_REARM_DISTANCE_PX,
 ): boolean {
   return scrollHeight - scrollY - innerHeight <= threshold;
 }

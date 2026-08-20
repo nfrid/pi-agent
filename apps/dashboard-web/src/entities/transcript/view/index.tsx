@@ -51,6 +51,8 @@ export function Transcript({
   prependAnchor?: {
     scrollTop: number;
     scrollHeight: number;
+    rowKey?: string;
+    rowTop?: number;
     revision: number;
   };
   onPrependAnchorRestored?: (revision: number) => void;
@@ -89,11 +91,29 @@ export function Transcript({
       restoredRevisionRef.current === prependAnchor.revision
     )
       return;
-    const addedHeight = Math.max(
-      0,
-      element.scrollHeight - prependAnchor.scrollHeight,
-    );
-    element.scrollTop = prependAnchor.scrollTop + addedHeight;
+    const anchoredRow = prependAnchor.rowKey
+      ? Array.from(
+          element.querySelectorAll<HTMLElement>(
+            '[data-transcript-key], [data-transcript-row]',
+          ),
+        ).find(
+          (candidate) =>
+            (candidate.dataset.transcriptKey ??
+              candidate.dataset.transcriptRow) === prependAnchor.rowKey,
+        )
+      : undefined;
+    if (anchoredRow && prependAnchor.rowTop !== undefined) {
+      const nextTop =
+        anchoredRow.getBoundingClientRect().top -
+        element.getBoundingClientRect().top;
+      element.scrollTop += nextTop - prependAnchor.rowTop;
+    } else {
+      const addedHeight = Math.max(
+        0,
+        element.scrollHeight - prependAnchor.scrollHeight,
+      );
+      element.scrollTop = prependAnchor.scrollTop + addedHeight;
+    }
     restoredRevisionRef.current = prependAnchor.revision;
     onPrependAnchorRestored?.(prependAnchor.revision);
   }, [onPrependAnchorRestored, prependAnchor, transcriptScrollElementRef]);

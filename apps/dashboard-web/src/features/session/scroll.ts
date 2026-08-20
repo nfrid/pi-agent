@@ -7,9 +7,31 @@ import {
   useRef,
   useState,
 } from 'react';
-import { isNearPageBottom, shouldShowJumpToLatest } from '../../app-helpers';
+import { shouldShowJumpToLatest } from '../../app-helpers';
+import { FOLLOW_REARM_DISTANCE_PX } from '../../entities/transcript/virtual-scroll';
+
+export { FOLLOW_REARM_DISTANCE_PX } from '../../entities/transcript/virtual-scroll';
 
 const SESSION_TAIL_SETTLE_MS = 64;
+
+export type SessionFollowMode = 'following' | 'manual';
+
+export function distanceFromScrollEnd(
+  scrollHeight: number,
+  scrollTop: number,
+  clientHeight: number,
+): number {
+  return Math.max(0, scrollHeight - scrollTop - clientHeight);
+}
+
+export function nextFollowMode(
+  current: SessionFollowMode,
+  distanceFromEnd: number,
+  upwardIntent: boolean,
+): SessionFollowMode {
+  if (upwardIntent) return 'manual';
+  return distanceFromEnd <= FOLLOW_REARM_DISTANCE_PX ? 'following' : current;
+}
 
 type SessionScrollElement = HTMLDivElement;
 
@@ -33,93 +55,110 @@ export function useSessionScroll({
   const [tailReadySessionId, setTailReadySessionId] = useState<
     string | undefined
   >(undefined);
-  const scrolledSessionRef = useRef<string | undefined>(undefined);
-  const autoScrollFrameRef = useRef<number | undefined>(undefined);
-  const tailReadyTimerRef = useRef<number | undefined>(undefined);
-  const layoutScrollFrameRef = useRef<number | undefined>(undefined);
-  const explicitJumpFramesRef = useRef<number[]>([]);
+  const modeRef = useRef<SessionFollowMode>('following');
   const mountedSessionIdRef = useRef<string | undefined>(undefined);
-  const initialTailSessionRef = useRef<string | undefined>(undefined);
-  const initialTailSettleTimerRef = useRef<number | undefined>(undefined);
-  const userScrollIntentRef = useRef(false);
-  const stickToBottomRef = useRef(true);
+  const bottomFrameRef = useRef<number | undefined>(undefined);
+  const readyTimerRef = useRef<number | undefined>(undefined);
   const sessionPageRef = useRef<HTMLElement>(null);
   const controlLayerRef = useRef<HTMLDivElement>(null);
 
-  const cancelExplicitJumpFrames = useCallback(() => {
-    for (const frame of explicitJumpFramesRef.current)
-      window.cancelAnimationFrame(frame);
-    explicitJumpFramesRef.current = [];
+  const cancelBottomWrite = useCallback(() => {
+    if (bottomFrameRef.current === undefined) return;
+    window.cancelAnimationFrame(bottomFrameRef.current);
+    bottomFrameRef.current = undefined;
   }, []);
 
-  const clearTimers = useCallback(() => {
-    if (tailReadyTimerRef.current !== undefined) {
-      window.clearTimeout(tailReadyTimerRef.current);
-      tailReadyTimerRef.current = undefined;
-    }
-    if (initialTailSettleTimerRef.current !== undefined) {
-      window.clearTimeout(initialTailSettleTimerRef.current);
-      initialTailSettleTimerRef.current = undefined;
-    }
+  const cancelReadyTimer = useCallback(() => {
+    if (readyTimerRef.current === undefined) return;
+    window.clearTimeout(readyTimerRef.current);
+    readyTimerRef.current = undefined;
   }, []);
+
+  const enterManualMode = useCallback(() => {
+    modeRef.current = 'manual';
+    cancelBottomWrite();
+    cancelReadyTimer();
+    setTailReadySessionId(id);
+  }, [cancelBottomWrite, cancelReadyTimer, id]);
+
+  const requestBottomWrite = useCallback(
+    (markReady: boolean) => {
+      if (!enabled || mountedSessionIdRef.current !== id) return;
+      cancelBottomWrite();
+      bottomFrameRef.current = window.requestAnimationFrame(() => {
+        bottomFrameRef.current = undefined;
+        const element = scrollElementRef.current;
+        if (
+          !element ||
+          mountedSessionIdRef.current !== id ||
+          modeRef.current !== 'following'
+        )
+          return;
+        element.scrollTop = element.scrollHeight;
+        setAwayFromLatest(false);
+        if (!markReady) return;
+        cancelReadyTimer();
+        readyTimerRef.current = window.setTimeout(() => {
+          readyTimerRef.current = undefined;
+          setTailReadySessionId(id);
+        }, SESSION_TAIL_SETTLE_MS);
+      });
+    },
+    [cancelBottomWrite, cancelReadyTimer, enabled, id, scrollElementRef],
+  );
 
   useLayoutEffect(() => {
-    initialTailSessionRef.current = enabled ? id : undefined;
-    userScrollIntentRef.current = false;
-    stickToBottomRef.current = true;
-    setTailReadySessionId(enabled ? undefined : id);
+    modeRef.current = 'following';
     setAwayFromLatest(false);
-    clearTimers();
-  }, [clearTimers, enabled, id]);
+    setTailReadySessionId(enabled ? undefined : id);
+    cancelBottomWrite();
+    cancelReadyTimer();
+  }, [cancelBottomWrite, cancelReadyTimer, enabled, id]);
 
   useLayoutEffect(() => {
-    cancelExplicitJumpFrames();
     mountedSessionIdRef.current = enabled && sessionMounted ? id : undefined;
     return () => {
-      cancelExplicitJumpFrames();
       if (mountedSessionIdRef.current === id)
         mountedSessionIdRef.current = undefined;
     };
-  }, [cancelExplicitJumpFrames, enabled, id, sessionMounted]);
+  }, [enabled, id, sessionMounted]);
 
   useEffect(() => {
     if (!enabled || !sessionMounted) return;
-    const scrollElement = scrollElementRef.current;
-    if (!scrollElement) return;
-    const cancelPendingTailScroll = () => {
-      cancelExplicitJumpFrames();
-      userScrollIntentRef.current = true;
-      stickToBottomRef.current = false;
-      initialTailSessionRef.current = undefined;
-      setTailReadySessionId(id);
-      clearTimers();
-      if (autoScrollFrameRef.current !== undefined) {
-        window.cancelAnimationFrame(autoScrollFrameRef.current);
-        autoScrollFrameRef.current = undefined;
-      }
-      if (layoutScrollFrameRef.current !== undefined) {
-        window.cancelAnimationFrame(layoutScrollFrameRef.current);
-        layoutScrollFrameRef.current = undefined;
-      }
-    };
+    const element = scrollElementRef.current;
+    if (!element) return;
     let touchY: number | undefined;
-    let previousScrollTop = scrollElement.scrollTop;
-    const onPointerDown = () => {
-      // A native scrollbar drag does not reliably emit wheel/touch events.
-      // Pointer intent must cancel the initial tail curtain before its next
-      // forced layout frame writes scrollTop again.
-      cancelPendingTailScroll();
+    let previousScrollTop = element.scrollTop;
+    const update = () => {
+      const upward = element.scrollTop < previousScrollTop - 1;
+      previousScrollTop = element.scrollTop;
+      const distance = distanceFromScrollEnd(
+        element.scrollHeight,
+        element.scrollTop,
+        element.clientHeight,
+      );
+      modeRef.current = nextFollowMode(modeRef.current, distance, upward);
+      if (modeRef.current === 'following') setAwayFromLatest(false);
+      else
+        setAwayFromLatest(
+          shouldShowJumpToLatest(
+            element.scrollHeight,
+            element.scrollTop,
+            element.clientHeight,
+          ),
+        );
     };
     const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) cancelPendingTailScroll();
+      if (event.deltaY < 0) enterManualMode();
     };
+    const onPointerDown = () => enterManualMode();
     const onTouchStart = (event: TouchEvent) => {
       touchY = event.touches[0]?.clientY;
     };
     const onTouchMove = (event: TouchEvent) => {
       const nextY = event.touches[0]?.clientY;
       if (touchY !== undefined && nextY !== undefined && nextY > touchY)
-        cancelPendingTailScroll();
+        enterManualMode();
       touchY = nextY;
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -131,135 +170,37 @@ export function useSessionScroll({
         )
       )
         return;
-      if (['ArrowUp', 'PageUp', 'Home'].includes(event.code))
-        cancelPendingTailScroll();
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.code)) enterManualMode();
     };
-    const update = () => {
-      const scrolledUp = scrollElement.scrollTop < previousScrollTop - 1;
-      previousScrollTop = scrollElement.scrollTop;
-      if (scrolledUp && initialTailSessionRef.current !== id)
-        cancelPendingTailScroll();
-      const nearLatest = isNearPageBottom(
-        scrollElement.scrollHeight,
-        scrollElement.scrollTop,
-        scrollElement.clientHeight,
-      );
-      if (stickToBottomRef.current && !userScrollIntentRef.current) {
-        setAwayFromLatest(false);
-        if (!nearLatest && layoutScrollFrameRef.current === undefined) {
-          layoutScrollFrameRef.current = window.requestAnimationFrame(() => {
-            layoutScrollFrameRef.current = undefined;
-            if (stickToBottomRef.current && !userScrollIntentRef.current)
-              scrollElement.scrollTop = scrollElement.scrollHeight;
-          });
-        }
-        return;
-      }
-      if (nearLatest) {
-        userScrollIntentRef.current = false;
-        stickToBottomRef.current = true;
-      }
-      setAwayFromLatest(
-        shouldShowJumpToLatest(
-          scrollElement.scrollHeight,
-          scrollElement.scrollTop,
-          scrollElement.clientHeight,
-        ),
-      );
-    };
-    scrollElement.addEventListener('scroll', update, { passive: true });
-    scrollElement.addEventListener('pointerdown', onPointerDown, {
-      passive: true,
-    });
-    scrollElement.addEventListener('wheel', onWheel, { passive: true });
-    scrollElement.addEventListener('touchstart', onTouchStart, {
-      passive: true,
-    });
-    scrollElement.addEventListener('touchmove', onTouchMove, { passive: true });
+    element.addEventListener('scroll', update, { passive: true });
+    element.addEventListener('pointerdown', onPointerDown, { passive: true });
+    element.addEventListener('wheel', onWheel, { passive: true });
+    element.addEventListener('touchstart', onTouchStart, { passive: true });
+    element.addEventListener('touchmove', onTouchMove, { passive: true });
     window.addEventListener('keydown', onKeyDown);
     update();
     return () => {
-      scrollElement.removeEventListener('scroll', update);
-      scrollElement.removeEventListener('pointerdown', onPointerDown);
-      scrollElement.removeEventListener('wheel', onWheel);
-      scrollElement.removeEventListener('touchstart', onTouchStart);
-      scrollElement.removeEventListener('touchmove', onTouchMove);
+      element.removeEventListener('scroll', update);
+      element.removeEventListener('pointerdown', onPointerDown);
+      element.removeEventListener('wheel', onWheel);
+      element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [
-    cancelExplicitJumpFrames,
-    clearTimers,
-    id,
-    scrollElementRef,
-    sessionMounted,
-    enabled,
-  ]);
+  }, [enabled, enterManualMode, scrollElementRef, sessionMounted]);
 
   useLayoutEffect(() => {
-    if (!enabled) return;
-    const scrollElement = scrollElementRef.current;
-    if (!data || !projection || !scrollElement) return;
-    const enteringSession = scrolledSessionRef.current !== id;
-    if (enteringSession) {
-      userScrollIntentRef.current = false;
-      stickToBottomRef.current = true;
-      initialTailSessionRef.current = id;
-      clearTimers();
-      scrollElement.scrollTop = scrollElement.scrollHeight;
-    }
-    if (enteringSession && autoScrollFrameRef.current !== undefined) {
-      window.cancelAnimationFrame(autoScrollFrameRef.current);
-      autoScrollFrameRef.current = undefined;
-    }
-    if (!enteringSession && !stickToBottomRef.current) return;
-    scrolledSessionRef.current = id;
-    if (autoScrollFrameRef.current !== undefined) return;
-    const frame = window.requestAnimationFrame(() => {
-      if (autoScrollFrameRef.current === frame)
-        autoScrollFrameRef.current = undefined;
-      if (
-        userScrollIntentRef.current ||
-        (!enteringSession && !stickToBottomRef.current)
-      ) {
-        setTailReadySessionId(id);
-        return;
-      }
-      scrollElement.scrollTop = scrollElement.scrollHeight;
-      stickToBottomRef.current = true;
-      clearTimers();
-      tailReadyTimerRef.current = window.setTimeout(() => {
-        tailReadyTimerRef.current = undefined;
-        if (userScrollIntentRef.current) {
-          setTailReadySessionId(id);
-          return;
-        }
-        setTailReadySessionId(id);
-        initialTailSettleTimerRef.current = window.setTimeout(() => {
-          initialTailSettleTimerRef.current = undefined;
-          if (initialTailSessionRef.current === id)
-            initialTailSessionRef.current = undefined;
-        }, 400);
-      }, SESSION_TAIL_SETTLE_MS);
-    });
-    autoScrollFrameRef.current = frame;
-    return () => {
-      if (autoScrollFrameRef.current !== frame) return;
-      window.cancelAnimationFrame(frame);
-      autoScrollFrameRef.current = undefined;
-    };
-  }, [clearTimers, data, enabled, id, projection, scrollElementRef]);
-
-  useEffect(
-    () => () => {
-      cancelExplicitJumpFrames();
-      if (autoScrollFrameRef.current !== undefined)
-        window.cancelAnimationFrame(autoScrollFrameRef.current);
-      if (layoutScrollFrameRef.current !== undefined)
-        window.cancelAnimationFrame(layoutScrollFrameRef.current);
-      clearTimers();
-    },
-    [cancelExplicitJumpFrames, clearTimers],
-  );
+    if (!enabled || !data || !projection || !sessionMounted) return;
+    requestBottomWrite(tailReadySessionId !== id);
+  }, [
+    data,
+    enabled,
+    id,
+    projection,
+    requestBottomWrite,
+    sessionMounted,
+    tailReadySessionId,
+  ]);
 
   useLayoutEffect(() => {
     if (!enabled || !sessionMounted) return;
@@ -267,7 +208,7 @@ export function useSessionScroll({
     const controlLayer = controlLayerRef.current;
     const scrollElement = scrollElementRef.current;
     if (!page || !controlLayer || !scrollElement) return;
-    const update = (preserveLatest: boolean) => {
+    const updateViewport = (followResize: boolean) => {
       const viewport = window.visualViewport;
       const visibleBottom = viewport
         ? viewport.offsetTop + viewport.height
@@ -280,28 +221,11 @@ export function useSessionScroll({
         '--session-viewport-height',
         `${Math.ceil(availableHeight)}px`,
       );
-      const initialTailPending =
-        initialTailSessionRef.current === id && !userScrollIntentRef.current;
-      if (
-        !preserveLatest ||
-        (!stickToBottomRef.current && !initialTailPending) ||
-        userScrollIntentRef.current
-      )
-        return;
-      if (layoutScrollFrameRef.current !== undefined)
-        window.cancelAnimationFrame(layoutScrollFrameRef.current);
-      layoutScrollFrameRef.current = window.requestAnimationFrame(() => {
-        layoutScrollFrameRef.current = undefined;
-        if (
-          (!stickToBottomRef.current && initialTailSessionRef.current !== id) ||
-          userScrollIntentRef.current
-        )
-          return;
-        scrollElement.scrollTop = scrollElement.scrollHeight;
-      });
+      if (followResize && modeRef.current === 'following')
+        requestBottomWrite(false);
     };
-    const onResize = () => update(true);
-    const onViewportScroll = () => update(false);
+    const onResize = () => updateViewport(true);
+    const onViewportScroll = () => updateViewport(false);
     const observer =
       typeof ResizeObserver === 'undefined'
         ? undefined
@@ -312,70 +236,37 @@ export function useSessionScroll({
     window.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('scroll', onViewportScroll);
-    update(true);
+    updateViewport(true);
     return () => {
       observer?.disconnect();
       window.removeEventListener('resize', onResize);
       window.visualViewport?.removeEventListener('resize', onResize);
       window.visualViewport?.removeEventListener('scroll', onViewportScroll);
-      if (layoutScrollFrameRef.current !== undefined) {
-        window.cancelAnimationFrame(layoutScrollFrameRef.current);
-        layoutScrollFrameRef.current = undefined;
-      }
     };
-  }, [enabled, id, scrollElementRef, sessionMounted]);
+  }, [enabled, requestBottomWrite, scrollElementRef, sessionMounted]);
+
+  useEffect(
+    () => () => {
+      cancelBottomWrite();
+      cancelReadyTimer();
+    },
+    [cancelBottomWrite, cancelReadyTimer],
+  );
 
   const jumpToLatest = useCallback(() => {
-    if (!enabled) return;
-    const scrollElement = scrollElementRef.current;
-    if (mountedSessionIdRef.current !== id || !scrollElement) return;
-    cancelExplicitJumpFrames();
-    userScrollIntentRef.current = false;
-    stickToBottomRef.current = true;
-    initialTailSessionRef.current = id;
-    clearTimers();
-    initialTailSettleTimerRef.current = window.setTimeout(() => {
-      initialTailSettleTimerRef.current = undefined;
-      if (initialTailSessionRef.current === id)
-        initialTailSessionRef.current = undefined;
-    }, 400);
+    if (!enabled || mountedSessionIdRef.current !== id) return;
+    modeRef.current = 'following';
     setAwayFromLatest(false);
     setTailScrollRequest((current) => current + 1);
-    scrollElement.scrollTop = scrollElement.scrollHeight;
-    const scheduleExplicitJumpFrame = (callback: () => void) => {
-      let frame: number;
-      frame = window.requestAnimationFrame(() => {
-        explicitJumpFramesRef.current = explicitJumpFramesRef.current.filter(
-          (pending) => pending !== frame,
-        );
-        callback();
-      });
-      explicitJumpFramesRef.current.push(frame);
-    };
-    scheduleExplicitJumpFrame(() => {
-      if (
-        mountedSessionIdRef.current !== id ||
-        !stickToBottomRef.current ||
-        userScrollIntentRef.current
-      )
-        return;
-      scrollElement.scrollTop = scrollElement.scrollHeight;
-      scheduleExplicitJumpFrame(() => {
-        if (
-          mountedSessionIdRef.current === id &&
-          stickToBottomRef.current &&
-          !userScrollIntentRef.current
-        )
-          scrollElement.scrollTop = scrollElement.scrollHeight;
-      });
-    });
-  }, [cancelExplicitJumpFrames, clearTimers, enabled, id, scrollElementRef]);
+    requestBottomWrite(true);
+  }, [enabled, id, requestBottomWrite]);
 
   return {
     awayFromLatest: enabled ? awayFromLatest : false,
     controlLayerRef,
     jumpToLatest,
     sessionPageRef,
+    stopFollowing: enterManualMode,
     tailReadySessionId,
     tailScrollRequest,
   };
