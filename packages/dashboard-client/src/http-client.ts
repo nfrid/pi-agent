@@ -11,6 +11,7 @@ import {
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
+  type PinThreadCommand,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
@@ -21,6 +22,7 @@ import {
   parseStopRuntimeMutationOutput,
   type RenameSessionMutationOutput,
   type RestartRuntimeMutationOutput,
+  type RestoreThreadCommand,
   type RetryCommand,
   type Run,
   type SessionAdoptCommand,
@@ -40,6 +42,8 @@ import {
   tryParseRuntimeCommandOutput,
   tryParseSessionApiResponse,
   tryParseShellSnapshotResponse,
+  tryParseThread,
+  type UnpinThreadCommand,
 } from '@pi-dashboard/protocol';
 import {
   browserDashboardTokenStore,
@@ -681,6 +685,42 @@ export class DashboardHttpClient {
     );
   }
 
+  async listThreads(
+    projectId?: string,
+    signal?: AbortSignal,
+  ): Promise<Thread[]> {
+    const query = projectId
+      ? `?projectId=${encodeURIComponent(projectId)}`
+      : '';
+    const value = await this.request<unknown>(
+      `/api/threads${query}`,
+      signal ? { signal } : {},
+    );
+    if (!Array.isArray(value))
+      throw malformedOutput(
+        'Dashboard returned invalid thread list data.',
+        value,
+      );
+    const threads = value.map(tryParseThread);
+    if (threads.some((thread) => thread === undefined))
+      throw malformedOutput(
+        'Dashboard returned invalid thread list data.',
+        value,
+      );
+    return threads as Thread[];
+  }
+
+  async thread(threadId: string, signal?: AbortSignal): Promise<Thread> {
+    const value = await this.request<unknown>(
+      `/api/threads/${encodeURIComponent(threadId)}`,
+      signal ? { signal } : {},
+    );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput('Dashboard returned invalid thread data.', value);
+    return thread;
+  }
+
   async retryThread(
     threadId: string,
     command: RetryCommand,
@@ -736,10 +776,59 @@ export class DashboardHttpClient {
     command: { commandId: string } | string,
   ): Promise<Thread> {
     const body = typeof command === 'string' ? { commandId: command } : command;
-    return this.request(
+    const value = await this.request<unknown>(
       `/api/threads/${encodeURIComponent(threadId)}/archive`,
       { method: 'POST', body: JSON.stringify(body) },
     );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput('Invalid archived thread response.', value);
+    return thread;
+  }
+
+  async restoreThread(
+    threadId: string,
+    command: RestoreThreadCommand | string,
+  ): Promise<Thread> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
+    const value = await this.request<unknown>(
+      `/api/threads/${encodeURIComponent(threadId)}/restore`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput('Invalid restored thread response.', value);
+    return thread;
+  }
+
+  async pinThread(
+    threadId: string,
+    command: PinThreadCommand | string,
+  ): Promise<Thread> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
+    const value = await this.request<unknown>(
+      `/api/threads/${encodeURIComponent(threadId)}/pin`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput('Invalid pinned thread response.', value);
+    return thread;
+  }
+
+  async unpinThread(
+    threadId: string,
+    command: UnpinThreadCommand | string,
+  ): Promise<Thread> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
+    const value = await this.request<unknown>(
+      `/api/threads/${encodeURIComponent(threadId)}/unpin`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput('Invalid unpinned thread response.', value);
+    return thread;
   }
 
   async adoptSession(

@@ -43,7 +43,7 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8,
+      1, 2, 3, 4, 5, 6, 7, 8, 9,
     ]);
   });
 
@@ -191,6 +191,63 @@ describe('migration metadata', () => {
         `INSERT INTO project (id,title,root_path,repository_identity,default_isolation,max_parallel_runs,status,created_at,updated_at)
          VALUES ('identity-null','Null','/null',NULL,'worktree',1,'active',1,1)`,
       ).run();
+    } finally {
+      db.close();
+    }
+  });
+
+  it('upgrades v8 lifecycle rows, seeds one legacy snapshot, and preserves FKs', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('PRAGMA foreign_keys=ON');
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 8));
+      db.exec(`
+        INSERT INTO project (id,title,root_path,default_isolation,max_parallel_runs,status,created_at,updated_at)
+        VALUES ('legacy-project','Legacy','/legacy','worktree',1,'active',1,1);
+        INSERT INTO checkout (id,project_id,kind,path,status,created_at,updated_at)
+        VALUES ('legacy-checkout','legacy-project','main','/legacy','ready',2,2);
+        INSERT INTO thread (id,project_id,title,checkout_id,status,created_at,updated_at)
+        VALUES ('legacy-thread','legacy-project','Legacy thread','legacy-checkout','archived',3,30);
+        INSERT INTO orchestration_run
+          (id,thread_id,checkout_id,attempt,mode,runtime_provider,initial_prompt,status,created_at,finished_at)
+        VALUES ('legacy-run','legacy-thread','legacy-checkout',1,'write','extension-bridge','old prompt','settled',4,20);
+      `);
+      runMigrations(db);
+      expect(
+        db
+          .prepare(
+            'SELECT status,archived_at,pre_archive_status FROM thread WHERE id=?',
+          )
+          .get('legacy-thread'),
+      ).toEqual({
+        status: 'settled',
+        archived_at: 30,
+        pre_archive_status: 'settled',
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT event_type,thread_id,command_id,actor,reason FROM thread_event WHERE thread_id='legacy-thread'",
+          )
+          .all(),
+      ).toEqual([
+        {
+          event_type: 'legacy.snapshot',
+          thread_id: 'legacy-thread',
+          command_id: null,
+          actor: 'migration',
+          reason: 'legacy-snapshot',
+        },
+      ]);
+      runMigrations(db);
+      expect(
+        db
+          .prepare(
+            "SELECT count(*) AS count FROM thread_event WHERE thread_id='legacy-thread'",
+          )
+          .get(),
+      ).toEqual({ count: 1 });
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       db.close();
     }

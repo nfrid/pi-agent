@@ -13,6 +13,8 @@ import type {
   RuntimeProvider,
   SessionIndexEntry,
   Thread,
+  ThreadLifecycleCommandResult,
+  ThreadLifecycleEvent,
   ThreadSummary,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -97,6 +99,7 @@ export interface CreateThreadInput {
   title: string;
   checkoutId?: string;
   pinnedAt?: number;
+  archivedAt?: number;
   status?: Thread['status'];
   createdAt?: number;
   updatedAt?: number;
@@ -168,7 +171,7 @@ export type CheckoutPatch = Partial<
   Pick<Checkout, 'kind' | 'path' | 'branch' | 'baseSha'>
 >;
 export type ThreadPatch = Partial<
-  Pick<Thread, 'title' | 'checkoutId' | 'pinnedAt'>
+  Pick<Thread, 'title' | 'checkoutId' | 'pinnedAt' | 'archivedAt'>
 >;
 
 export interface BindRuntimeInput {
@@ -223,6 +226,29 @@ export interface OrchestrationRepository {
   /** Atomically claim a queued run while respecting its project's parallelism. */
   claimQueuedRun(id: string, now?: number): Run | undefined;
   transitionThread(id: string, status: Thread['status'], now?: number): Thread;
+  /** Atomic visibility/order commands; each accepted call appends one event. */
+  archiveThread(
+    commandId: string,
+    threadId: string,
+    now?: number,
+  ): ThreadLifecycleCommandResult;
+  restoreThread(
+    commandId: string,
+    threadId: string,
+    now?: number,
+  ): ThreadLifecycleCommandResult;
+  pinThread(
+    commandId: string,
+    threadId: string,
+    now?: number,
+  ): ThreadLifecycleCommandResult;
+  unpinThread(
+    commandId: string,
+    threadId: string,
+    now?: number,
+  ): ThreadLifecycleCommandResult;
+  /** Internal inspection seam; HTTP never exposes event history. */
+  listThreadEvents(threadId: string): ThreadLifecycleEvent[];
   transitionCheckout(
     id: string,
     status: Checkout['status'],

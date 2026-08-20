@@ -125,6 +125,59 @@ async function orchestrationFixture() {
   };
 }
 
+it('keeps lifecycle controls out of runtime and run execution', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    const before = fixture.metadata.orchestration.getRun(fixture.runId);
+    if (!before) throw new Error('Missing fixture run.');
+    await expect(
+      fixture.service.archiveThread(before.threadId, 'archive-active-service'),
+    ).rejects.toThrow('active run');
+    await fixture.service.cancelRun(fixture.runId, 'cancel-before-lifecycle');
+    const settled = fixture.metadata.orchestration.getRun(fixture.runId);
+    if (!settled) throw new Error('Missing settled fixture run.');
+    const managerCalls = {
+      launch: fixture.manager.launch.mock.calls.length,
+      stop: fixture.manager.stop.mock.calls.length,
+      stopRecovered: fixture.manager.stopRecovered.mock.calls.length,
+      send: fixture.registry.sendCommand.mock.calls.length,
+    };
+    const archived = await fixture.service.archiveThread(
+      settled.threadId,
+      'archive-service',
+    );
+    expect(archived).toMatchObject({ status: 'stopped' });
+    expect(archived.archivedAt).toBeUndefined();
+    expect(
+      fixture.metadata.orchestration.getThread(settled.threadId),
+    ).toMatchObject({
+      status: 'stopped',
+      archivedAt: expect.any(Number),
+      preArchiveStatus: 'stopped',
+    });
+    expect(
+      await fixture.service.restoreThread(settled.threadId, 'restore-service'),
+    ).toMatchObject({ status: 'stopped' });
+    expect(
+      await fixture.service.pinThread(settled.threadId, 'pin-service'),
+    ).toMatchObject({ pinnedAt: expect.any(Number) });
+    expect(
+      await fixture.service.unpinThread(settled.threadId, 'unpin-service'),
+    ).not.toHaveProperty('pinnedAt');
+    expect(fixture.metadata.orchestration.getRun(fixture.runId)).toEqual(
+      settled,
+    );
+    expect({
+      launch: fixture.manager.launch.mock.calls.length,
+      stop: fixture.manager.stop.mock.calls.length,
+      stopRecovered: fixture.manager.stopRecovered.mock.calls.length,
+      send: fixture.registry.sendCommand.mock.calls.length,
+    }).toEqual(managerCalls);
+  } finally {
+    await fixture.close();
+  }
+});
+
 it('adopts an inactive legacy session without launching or duplicating rows', async () => {
   const fixture = await orchestrationFixture();
   try {
@@ -1498,7 +1551,10 @@ describe('OrchestrationService', () => {
         merged.thread.id,
         'lifecycle-archive',
       );
-      expect(repository.getThread(merged.thread.id)?.status).toBe('archived');
+      expect(repository.getThread(merged.thread.id)).toMatchObject({
+        status: 'settled',
+        archivedAt: expect.any(Number),
+      });
       expect(repository.getRun(merged.run.id)).toBeDefined();
       expect(repository.getRuntime(merged.runtimeId)).toBeDefined();
 

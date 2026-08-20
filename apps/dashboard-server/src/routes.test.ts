@@ -566,6 +566,83 @@ describe('Fastify dashboard route plugin', () => {
       ).statusCode,
     ).toBe(200);
 
+    routeContext.restoreThread = vi.fn(async () => ({
+      id: 'thread-1',
+      projectId: 'project-1',
+      title: 'Thread',
+      status: 'settled',
+      createdAt: 1,
+      updatedAt: 2,
+    }));
+    routeContext.pinThread = vi.fn(async () => ({
+      id: 'thread-1',
+      projectId: 'project-1',
+      title: 'Thread',
+      status: 'settled',
+      pinnedAt: 2,
+      createdAt: 1,
+      updatedAt: 2,
+    }));
+    routeContext.unpinThread = vi.fn(async () => ({
+      id: 'thread-1',
+      projectId: 'project-1',
+      title: 'Thread',
+      status: 'settled',
+      createdAt: 1,
+      updatedAt: 2,
+    }));
+    const restore = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/restore',
+      headers,
+      payload: { commandId: 'restore-1' },
+    });
+    expect(restore.statusCode).toBe(200);
+    expect(routeContext.restoreThread).toHaveBeenCalledWith(
+      'thread-1',
+      'restore-1',
+    );
+    const invalidRestore = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/restore',
+      headers,
+      payload: { commandId: 'restore-extra', extra: true },
+    });
+    expect(invalidRestore.statusCode).toBe(400);
+    const pin = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/pin',
+      headers,
+      payload: { commandId: 'pin-1' },
+    });
+    expect(pin.statusCode).toBe(200);
+    expect(routeContext.pinThread).toHaveBeenCalledWith('thread-1', 'pin-1');
+    const invalidPin = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/pin',
+      headers,
+      payload: { commandId: 'pin-extra', extra: true },
+    });
+    expect(invalidPin.statusCode).toBe(400);
+    const unpin = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/unpin',
+      headers,
+      payload: { commandId: 'unpin-1' },
+    });
+    expect(unpin.statusCode).toBe(200);
+    expect(routeContext.unpinThread).toHaveBeenCalledWith(
+      'thread-1',
+      'unpin-1',
+    );
+    const invalidUnpin = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/unpin',
+      headers,
+      payload: { commandId: 'unpin-extra', extra: true },
+    });
+    expect(invalidUnpin.statusCode).toBe(400);
+
     routeContext.retryRun = vi.fn(async () => {
       throw new Error('Run missing.');
     });

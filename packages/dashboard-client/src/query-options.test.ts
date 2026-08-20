@@ -7,18 +7,22 @@ import {
 } from './http-client.js';
 import {
   activeDelegateTranscriptQueryOptions,
+  archiveThreadMutationOptions,
   commandMutationOptions,
   composerCommandsQueryOptions,
   createThreadMutationOptions,
   dashboardQueryKeys,
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
+  pinThreadMutationOptions,
   renameSessionMutationOptions,
   restartRuntimeMutationOptions,
+  restoreThreadMutationOptions,
   snapshotQueryOptions,
   snapshotRequestGeneration,
   startRuntimeMutationOptions,
   stopRuntimeMutationOptions,
+  unpinThreadMutationOptions,
 } from './query-options.js';
 import { DashboardLiveStore } from './store.js';
 
@@ -313,6 +317,39 @@ describe('dashboard query and mutation factories', () => {
     expect(renameCalls[1]?.[2]).toBe(renameCalls[0]?.[2]);
     expect(stopCalls[1]?.[2]).toBe(stopCalls[0]?.[2]);
     expect(restartCalls[1]?.[1]).toBe(restartCalls[0]?.[1]);
+  });
+
+  it('reuses lifecycle command IDs and honors explicit IDs for thread controls', async () => {
+    const archiveThread = vi.fn(async (...value: unknown[]) => value);
+    const restoreThread = vi.fn(async (...value: unknown[]) => value);
+    const pinThread = vi.fn(async (...value: unknown[]) => value);
+    const unpinThread = vi.fn(async (...value: unknown[]) => value);
+    const mutations = [
+      [archiveThreadMutationOptions({ archiveThread } as never), archiveThread],
+      [restoreThreadMutationOptions({ restoreThread } as never), restoreThread],
+      [pinThreadMutationOptions({ pinThread } as never), pinThread],
+      [unpinThreadMutationOptions({ unpinThread } as never), unpinThread],
+    ] as const;
+    const variables = { threadId: 'thread-1' };
+    for (const [options, calls] of mutations) {
+      if (!options.mutationFn) throw new Error('Mutation function is missing.');
+      const mutation = options.mutationFn as (
+        value: typeof variables,
+      ) => Promise<unknown>;
+      await mutation(variables);
+      await mutation(variables);
+      const first = calls.mock.calls[0]?.[1] as { commandId?: string };
+      const second = calls.mock.calls[1]?.[1] as { commandId?: string };
+      expect(first.commandId).toEqual(expect.any(String));
+      expect(second.commandId).toBe(first.commandId);
+      const explicit = { threadId: 'thread-1', commandId: 'caller-id' };
+      await (
+        options.mutationFn as (value: typeof explicit) => Promise<unknown>
+      )(explicit);
+      expect(
+        (calls.mock.calls[2]?.[1] as { commandId?: string }).commandId,
+      ).toBe('caller-id');
+    }
   });
 
   it('retries runtime commands only for network failures', () => {
