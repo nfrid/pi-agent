@@ -118,7 +118,7 @@ export function WorkspaceView({
       )}
 
       <div className={styles.listHeading}>
-        <h2>Live runtimes</h2>
+        <h2>Runtimes</h2>
         <span className={styles.listCount}>
           {runtimeCountLabel(runtimes.length)}
         </span>
