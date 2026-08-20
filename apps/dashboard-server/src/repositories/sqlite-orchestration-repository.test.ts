@@ -62,7 +62,11 @@ describe('SqliteOrchestrationRepository', () => {
       archivedAt: 10,
       preArchiveStatus: 'settled',
     });
-    expect(archived.event.type).toBe('thread.archive');
+    expect(archived.event).toMatchObject({
+      type: 'thread.archive',
+      actor: 'user',
+      reason: 'user-command',
+    });
     expect(value.repository.listThreadEvents(first.id)).toHaveLength(1);
     expect(value.repository.archiveThread('archive-1', first.id, 11)).toEqual(
       archived,
@@ -100,6 +104,35 @@ describe('SqliteOrchestrationRepository', () => {
       value.repository.archiveThread('archive-active', second.id),
     ).toThrow('active run');
     expect(value.repository.getRun(run.id)?.status).toBe('running');
+    value.db.close();
+  });
+
+  it('rolls back projection and receipt when event append fails', async () => {
+    const value = await fixture();
+    const thread = value.repository.createThread({
+      id: 'thread-atomicity',
+      projectId: value.project.id,
+      title: 'Atomicity',
+      checkoutId: value.checkout.id,
+      status: 'settled',
+    });
+    value.db.exec(`
+      CREATE TEMP TRIGGER abort_thread_event
+      BEFORE INSERT ON thread_event
+      BEGIN
+        SELECT RAISE(ABORT, 'deliberate event failure');
+      END;
+    `);
+    expect(() =>
+      value.repository.archiveThread('archive-atomicity', thread.id, 42),
+    ).toThrow('deliberate event failure');
+    expect(value.repository.getThread(thread.id)).toMatchObject({
+      status: 'settled',
+    });
+    expect(value.repository.getThread(thread.id)?.archivedAt).toBeUndefined();
+    expect(value.repository.getCommandReceipt('archive-atomicity')).toBeUndefined();
+    expect(value.repository.listThreadEvents(thread.id)).toHaveLength(0);
+    value.db.exec('DROP TRIGGER abort_thread_event');
     value.db.close();
   });
 

@@ -206,6 +206,16 @@ export async function createThread(
   return result;
 }
 
+function archiveResponseThread(thread: Thread): Thread {
+  // The archive endpoint historically returned a strict Thread shape. Keep
+  // newly-added lifecycle fields on the list/read projection instead of
+  // breaking older clients that reject unknown Thread properties.
+  const response = { ...thread };
+  delete response.archivedAt;
+  delete response.preArchiveStatus;
+  return response;
+}
+
 export async function archiveThread(
   host: OrchestrationHost,
   threadId: string,
@@ -213,7 +223,7 @@ export async function archiveThread(
 ): Promise<Thread> {
   const result = host.repository.archiveThread(commandId, threadId);
   host.changed();
-  return result.thread;
+  return archiveResponseThread(result.thread);
 }
 
 export async function restoreThread(

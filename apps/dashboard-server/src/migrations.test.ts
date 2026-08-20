@@ -227,7 +227,7 @@ describe('migration metadata', () => {
       expect(
         db
           .prepare(
-            "SELECT event_type,thread_id,command_id FROM thread_event WHERE thread_id='legacy-thread'",
+            "SELECT event_type,thread_id,command_id,actor,reason FROM thread_event WHERE thread_id='legacy-thread'",
           )
           .all(),
       ).toEqual([
@@ -235,6 +235,8 @@ describe('migration metadata', () => {
           event_type: 'legacy.snapshot',
           thread_id: 'legacy-thread',
           command_id: null,
+          actor: 'migration',
+          reason: 'legacy-snapshot',
         },
       ]);
       runMigrations(db);

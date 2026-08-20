@@ -15,6 +15,15 @@ const validSnapshot = {
   unread: [],
 };
 
+const validThread = {
+  id: 'thread-1',
+  projectId: 'project-1',
+  title: 'Thread',
+  status: 'settled',
+  createdAt: 1,
+  updatedAt: 2,
+};
+
 function trpcResponse(value: unknown): Response {
   return new Response(JSON.stringify({ result: { data: value } }), {
     status: 200,
@@ -63,6 +72,40 @@ function tokenStore() {
 }
 
 describe('DashboardHttpClient command requests', () => {
+  it('posts lifecycle controls to stable URLs and validates Thread responses', async () => {
+    const fetch = vi.fn(async () =>
+      new Response(JSON.stringify(validThread), { status: 200 }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    await client.archiveThread('thread-1', 'archive-1');
+    await client.restoreThread('thread-1', 'restore-1');
+    await client.pinThread('thread-1', 'pin-1');
+    await client.unpinThread('thread-1', 'unpin-1');
+    const calls = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
+    expect(calls.map(([input]) => input)).toEqual([
+      '/api/threads/thread-1/archive',
+      '/api/threads/thread-1/restore',
+      '/api/threads/thread-1/pin',
+      '/api/threads/thread-1/unpin',
+    ]);
+    expect(calls.map(([, init]) => JSON.parse(String(init.body)))).toEqual([
+      { commandId: 'archive-1' },
+      { commandId: 'restore-1' },
+      { commandId: 'pin-1' },
+      { commandId: 'unpin-1' },
+    ]);
+
+    fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 'not-a-thread' }), { status: 200 }),
+    );
+    await expect(client.restoreThread('thread-1', 'bad-response')).rejects.toMatchObject({
+      kind: 'malformed-output',
+    });
+  });
+
   it('fetches and validates workspace composer commands', async () => {
     const fetch = vi.fn(
       async () =>

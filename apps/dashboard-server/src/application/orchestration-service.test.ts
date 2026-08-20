@@ -146,8 +146,15 @@ it('keeps lifecycle controls out of runtime and run execution', async () => {
       settled.threadId,
       'archive-service',
     );
-    expect(archived.status).toBe('stopped');
-    expect(archived.archivedAt).toBeDefined();
+    expect(archived).toMatchObject({ status: 'stopped' });
+    expect(archived.archivedAt).toBeUndefined();
+    expect(
+      fixture.metadata.orchestration.getThread(settled.threadId),
+    ).toMatchObject({
+      status: 'stopped',
+      archivedAt: expect.any(Number),
+      preArchiveStatus: 'stopped',
+    });
     expect(
       await fixture.service.restoreThread(settled.threadId, 'restore-service'),
     ).toMatchObject({ status: 'stopped' });

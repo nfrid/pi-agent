@@ -70,6 +70,21 @@ export type ThreadLifecycleEventType = Static<
   typeof ThreadLifecycleEventTypeSchema
 >;
 
+export const ThreadLifecycleActorSchema = Type.Union([
+  Type.Literal('user'),
+  Type.Literal('migration'),
+]);
+export type ThreadLifecycleActor = Static<
+  typeof ThreadLifecycleActorSchema
+>;
+export const ThreadLifecycleReasonSchema = Type.Union([
+  Type.Literal('user-command'),
+  Type.Literal('legacy-snapshot'),
+]);
+export type ThreadLifecycleReason = Static<
+  typeof ThreadLifecycleReasonSchema
+>;
+
 /** Ordered durable lifecycle history. This is an internal projection contract. */
 export const ThreadLifecycleEventSchema = Type.Object(
   {
@@ -77,6 +92,8 @@ export const ThreadLifecycleEventSchema = Type.Object(
     threadId: IdentifierSchema,
     type: ThreadLifecycleEventTypeSchema,
     commandId: Type.Optional(IdentifierSchema),
+    actor: ThreadLifecycleActorSchema,
+    reason: ThreadLifecycleReasonSchema,
     data: Type.Unknown(),
     occurredAt: TimestampSchema,
   },

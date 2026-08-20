@@ -70,6 +70,8 @@ describe('dashboard protocol', () => {
       threadId: thread.id,
       type: 'thread.archive' as const,
       commandId: 'archive-1',
+      actor: 'user' as const,
+      reason: 'user-command' as const,
       data: { archivedAt: 2 },
       occurredAt: 2,
     };

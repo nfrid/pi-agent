@@ -348,6 +348,8 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
           event_type TEXT NOT NULL CHECK (event_type IN ('legacy.snapshot','thread.archive','thread.restore','thread.pin','thread.unpin')),
           command_id TEXT UNIQUE,
+          actor TEXT NOT NULL CHECK (actor IN ('user','migration')),
+          reason TEXT NOT NULL CHECK (reason IN ('user-command','legacy-snapshot')),
           payload_json TEXT NOT NULL,
           occurred_at INTEGER NOT NULL
         );
@@ -386,8 +388,8 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           WHERE status='archived';
 
           INSERT INTO thread_event
-            (thread_id,event_type,command_id,payload_json,occurred_at)
-          SELECT t.id,'legacy.snapshot',NULL,
+            (thread_id,event_type,command_id,actor,reason,payload_json,occurred_at)
+          SELECT t.id,'legacy.snapshot',NULL,'migration','legacy-snapshot',
                  json_object('status',t.status,'archivedAt',t.archived_at),
                  t.updated_at
           FROM thread t

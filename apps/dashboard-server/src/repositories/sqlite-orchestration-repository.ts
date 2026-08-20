@@ -1499,10 +1499,18 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       this.db
         .prepare(
           `INSERT INTO thread_event
-           (thread_id,event_type,command_id,payload_json,occurred_at)
-           VALUES (?,?,?,?,?)`,
+           (thread_id,event_type,command_id,actor,reason,payload_json,occurred_at)
+           VALUES (?,?,?,?,?,?,?)`,
         )
-        .run(threadId, eventType, commandId, JSON.stringify(eventPayload), now);
+        .run(
+          threadId,
+          eventType,
+          commandId,
+          'user',
+          'user-command',
+          JSON.stringify(eventPayload),
+          now,
+        );
       const row = this.db
         .prepare('SELECT * FROM thread_event WHERE command_id=?')
         .get(commandId) as Record<string, unknown> | undefined;
@@ -1654,6 +1662,8 @@ function threadEventFromRow(
     ...(optionalString(row, 'command_id') === undefined
       ? {}
       : { commandId: optionalString(row, 'command_id') }),
+    actor: stringValue(row, 'actor') as ThreadLifecycleEvent['actor'],
+    reason: stringValue(row, 'reason') as ThreadLifecycleEvent['reason'],
     data: payload,
     occurredAt: Number(row.occurred_at),
   };
