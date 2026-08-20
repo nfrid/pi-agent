@@ -15,11 +15,42 @@ import {
 } from './availability';
 import { useRuntimeLifecycleMenu } from './lifecycle-menu';
 
+type AgentThreadActionMenuProps = {
+  title: string;
+  rowClassName: string;
+  menuItems: (actions: { closeMenu: () => void }) => ReactNode;
+  children: (threadProps?: RuntimeLifecycleThreadProps) => ReactNode;
+};
+
+/** Shared context-menu wrapper for every sidebar thread, online or dormant. */
+export function AgentThreadActionMenu({
+  title,
+  rowClassName,
+  menuItems,
+  children,
+}: AgentThreadActionMenuProps) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const threadButtonRef = useRef<HTMLButtonElement>(null);
+  const { closeMenu, threadProps, renderMenu } = useRuntimeLifecycleMenu({
+    enabled: true,
+    title,
+    rowRef,
+    threadButtonRef,
+  });
+
+  return (
+    <div ref={rowRef} className={rowClassName}>
+      {children(threadProps)}
+      {renderMenu(menuItems({ closeMenu: () => closeMenu(true) }))}
+    </div>
+  );
+}
+
 type RuntimeLifecycleActionsProps = {
   runtime: RuntimeSnapshot;
   title: string;
   rowClassName: string;
-  rowActions?: ReactNode;
+  menuItems?: (actions: { closeMenu: () => void }) => ReactNode;
   children: (threadProps?: RuntimeLifecycleThreadProps) => ReactNode;
 };
 
@@ -27,12 +58,10 @@ export function RuntimeLifecycleActions({
   runtime,
   title,
   rowClassName,
-  rowActions,
+  menuItems,
   children,
 }: RuntimeLifecycleActionsProps) {
   const navigate = useNavigate();
-  const rowRef = useRef<HTMLDivElement>(null);
-  const threadButtonRef = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState<string>();
   const [gracefulStopFailed, setGracefulStopFailed] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -45,38 +74,18 @@ export function RuntimeLifecycleActions({
     gracefulStopFailed,
   );
   const busy = stop.isPending || restart.isPending || restarting;
-  const hasActions =
-    availability.canStop ||
-    availability.canRestart ||
-    availability.canForceStop;
-  const { closeMenu, threadProps, renderMenu } = useRuntimeLifecycleMenu({
-    enabled: hasActions,
-    title,
-    rowRef,
-    threadButtonRef,
-  });
-
-  if (!hasActions) {
-    return (
-      <div ref={rowRef} className={rowClassName}>
-        {children()}
-        {rowActions}
-      </div>
-    );
-  }
-
-  const runStop = async (force: boolean) => {
+  const runStop = async (force: boolean, closeMenu: () => void) => {
     setError(undefined);
     try {
       await stop.mutateAsync({ runtimeId: runtime.runtimeId, force });
       if (!force) setGracefulStopFailed(false);
-      closeMenu(true);
+      closeMenu();
     } catch (cause) {
       if (!force) setGracefulStopFailed(true);
       setError(errorMessage(cause));
     }
   };
-  const runRestart = async () => {
+  const runRestart = async (closeMenu: () => void) => {
     setError(undefined);
     setRestarting(true);
     try {
@@ -86,7 +95,7 @@ export function RuntimeLifecycleActions({
       const nextId = result.result.runtimeId;
       if (typeof nextId !== 'string')
         throw new Error('Restart did not return a runtime ID.');
-      closeMenu(true);
+      closeMenu();
       await navigate({ to: `/runtimes/${nextId}` });
     } catch (cause) {
       setError(errorMessage(cause));
@@ -96,11 +105,12 @@ export function RuntimeLifecycleActions({
   };
 
   return (
-    <div ref={rowRef} className={rowClassName}>
-      {children(threadProps)}
-      {rowActions}
-      {renderMenu(
+    <AgentThreadActionMenu
+      title={title}
+      rowClassName={rowClassName}
+      menuItems={({ closeMenu }) => (
         <>
+          {menuItems?.({ closeMenu })}
           {availability.canStop && (
             <button
               type="button"
@@ -108,7 +118,7 @@ export function RuntimeLifecycleActions({
               disabled={busy}
               onClick={(event) => {
                 event.stopPropagation();
-                void runStop(false);
+                void runStop(false, closeMenu);
               }}
             >
               Stop
@@ -122,7 +132,7 @@ export function RuntimeLifecycleActions({
               disabled={busy}
               onClick={(event) => {
                 event.stopPropagation();
-                void runStop(true);
+                void runStop(true, closeMenu);
               }}
             >
               Force stop
@@ -135,7 +145,7 @@ export function RuntimeLifecycleActions({
               disabled={busy}
               onClick={(event) => {
                 event.stopPropagation();
-                void runRestart();
+                void runRestart(closeMenu);
               }}
             >
               {restarting ? 'Restarting…' : 'Restart'}
@@ -146,9 +156,11 @@ export function RuntimeLifecycleActions({
               {error}
             </span>
           )}
-        </>,
+        </>
       )}
-    </div>
+    >
+      {children}
+    </AgentThreadActionMenu>
   );
 }
 

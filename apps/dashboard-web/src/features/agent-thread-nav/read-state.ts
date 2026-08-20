@@ -6,9 +6,18 @@ type ThreadReadRecord = {
   visited: boolean;
   visitedAt?: number;
   manuallyUnread?: boolean;
+  manuallyUnreadAt?: number;
 };
 
 export type ThreadReadState = Record<string, ThreadReadRecord>;
+export type ThreadVisitPair = { id: string; updatedAt?: number };
+
+export function shouldRecordThreadVisit(
+  last: ThreadVisitPair | undefined,
+  current: ThreadVisitPair,
+): boolean {
+  return last?.id !== current.id || last.updatedAt !== current.updatedAt;
+}
 
 function storage(): Storage | undefined {
   try {
@@ -34,6 +43,10 @@ export function readThreadReadState(): ThreadReadState {
         visitedAt:
           typeof record.visitedAt === 'number' ? record.visitedAt : undefined,
         manuallyUnread: record.manuallyUnread === true ? true : undefined,
+        manuallyUnreadAt:
+          typeof record.manuallyUnreadAt === 'number'
+            ? record.manuallyUnreadAt
+            : undefined,
       };
     }
     return result;
@@ -56,7 +69,13 @@ export function isThreadUnread(
 ): boolean {
   const record = state[row.id];
   if (!record) return false;
-  if (record.manuallyUnread) return true;
+  if (record.manuallyUnread) {
+    return (
+      row.updatedAt === undefined ||
+      record.manuallyUnreadAt === undefined ||
+      row.updatedAt <= record.manuallyUnreadAt
+    );
+  }
   return (
     record.visited &&
     row.updatedAt !== undefined &&
@@ -78,6 +97,7 @@ export function visitThread(
 export function markThreadUnread(
   state: ThreadReadState,
   id: string,
+  updatedAt?: number,
 ): ThreadReadState {
   return {
     ...state,
@@ -85,6 +105,7 @@ export function markThreadUnread(
       visited: state[id]?.visited ?? false,
       visitedAt: state[id]?.visitedAt,
       manuallyUnread: true,
+      manuallyUnreadAt: updatedAt,
     },
   };
 }

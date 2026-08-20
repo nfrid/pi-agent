@@ -3,7 +3,9 @@ import type { AgentThreadRow } from './model';
 import {
   markThreadUnread,
   readThreadReadState,
+  shouldRecordThreadVisit,
   type ThreadReadState,
+  type ThreadVisitPair,
   visitThread,
   writeThreadReadState,
 } from './read-state';
@@ -13,14 +15,16 @@ export {
   isThreadUnread,
   markThreadUnread,
   readThreadReadState,
+  shouldRecordThreadVisit,
   type ThreadReadState,
+  type ThreadVisitPair,
   visitThread,
   writeThreadReadState,
 } from './read-state';
 
 export function useAgentThreadUnread(currentSessionId?: string) {
   const [state, setState] = useState<ThreadReadState>(readThreadReadState);
-  const lastVisitedId = useRef<string | undefined>(undefined);
+  const lastVisited = useRef<ThreadVisitPair | undefined>(undefined);
   const visit = useCallback((id: string, updatedAt?: number) => {
     setState((current) => {
       const next = visitThread(current, id, updatedAt);
@@ -28,9 +32,9 @@ export function useAgentThreadUnread(currentSessionId?: string) {
       return next;
     });
   }, []);
-  const markUnread = useCallback((id: string) => {
+  const markUnread = useCallback((id: string, updatedAt?: number) => {
     setState((current) => {
-      const next = markThreadUnread(current, id);
+      const next = markThreadUnread(current, id, updatedAt);
       writeThreadReadState(next);
       return next;
     });
@@ -38,11 +42,17 @@ export function useAgentThreadUnread(currentSessionId?: string) {
 
   const visitCurrent = useCallback(
     (rows: readonly AgentThreadRow[]) => {
-      if (!currentSessionId || lastVisitedId.current === currentSessionId)
-        return;
+      if (!currentSessionId) return;
       const row = rows.find((item) => item.id === currentSessionId);
       if (!row) return;
-      lastVisitedId.current = currentSessionId;
+      if (
+        !shouldRecordThreadVisit(lastVisited.current, {
+          id: row.id,
+          updatedAt: row.updatedAt,
+        })
+      )
+        return;
+      lastVisited.current = { id: row.id, updatedAt: row.updatedAt };
       visit(row.id, row.updatedAt);
     },
     [currentSessionId, visit],

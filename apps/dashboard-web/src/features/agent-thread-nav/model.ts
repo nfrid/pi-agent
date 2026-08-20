@@ -144,6 +144,13 @@ export function hiddenAgentThreadRowCount(
   );
 }
 
+export function workspaceGroupIsExpanded(
+  collapsed: boolean,
+  searching: boolean,
+): boolean {
+  return !collapsed || searching;
+}
+
 export function groupAgentThreadRows(
   rows: readonly AgentThreadRow[],
 ): Array<[string, AgentThreadGroup]> {

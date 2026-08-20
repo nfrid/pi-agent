@@ -276,34 +276,6 @@
 .threadRow:global(.unread) .threadCopy strong {
   font-weight: 750;
 }
-.threadActions {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 1px;
-  padding-right: 5px;
-}
-.threadAction {
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--dim);
-  cursor: pointer;
-  font-size: 10px;
-}
-.threadAction:hover,
-.threadAction:focus-visible {
-  background: color-mix(in srgb, var(--purple) 14%, var(--bg-alt));
-  color: var(--fg);
-  outline: none;
-}
-.threadRow:global(.unread) .threadAction:first-child {
-  color: var(--orange);
-}
 .threadGlyph {
   width: 14px;
   flex: none;

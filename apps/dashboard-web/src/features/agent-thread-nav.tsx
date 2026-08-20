@@ -12,6 +12,7 @@ import {
   shortPath,
   statusGlyph,
   statusLabel,
+  workspaceGroupIsExpanded,
 } from './agent-thread-nav/model';
 import {
   isThreadUnread,
@@ -24,6 +25,7 @@ import {
 import styles from './agent-thread-nav.module.css';
 import { useDashboardUtility } from './dashboard-utility-context';
 import {
+  AgentThreadActionMenu,
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,
 } from './runtime-actions';
@@ -71,55 +73,7 @@ function writeCollapsedWorkspaces(state: CollapsedWorkspaces): void {
   }
 }
 
-function ThreadActions({
-  row,
-  unread,
-  copied,
-  onMarkUnread,
-  onCopyPath,
-}: {
-  row: AgentThreadRow;
-  unread: boolean;
-  copied: boolean;
-  onMarkUnread: () => void;
-  onCopyPath: () => void;
-}) {
-  return (
-    <span className={styles.threadActions}>
-      <button
-        type="button"
-        aria-label={
-          unread
-            ? `Thread ${row.title} is unread`
-            : `Mark ${row.title} as unread`
-        }
-        title={unread ? 'Unread' : 'Mark unread'}
-        className={styles.threadAction}
-        onPointerDownCapture={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (!unread) onMarkUnread();
-        }}
-      >
-        <span aria-hidden="true">●</span>
-      </button>
-      <button
-        type="button"
-        aria-label={`Copy path for ${row.title}`}
-        title={copied ? 'Copied path' : 'Copy path'}
-        className={styles.threadAction}
-        onPointerDownCapture={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onCopyPath();
-        }}
-      >
-        <span aria-hidden="true">{copied ? '✓' : '⧉'}</span>
-      </button>
-    </span>
-  );
-}
-
+// Per-row actions are rendered in the shared accessible context menu below.
 function AgentThreadLink({
   row,
   selected,
@@ -186,7 +140,6 @@ export function AgentThreadNav({
   const [historyLimit, setHistoryLimit] = useState(MAX_VISIBLE_HISTORY_THREADS);
   const [collapsedWorkspaces, setCollapsedWorkspaces] =
     useState<CollapsedWorkspaces>(readCollapsedWorkspaces);
-  const [copiedPath, setCopiedPath] = useState<string>();
   const {
     state: unreadState,
     visitCurrent,
@@ -239,8 +192,7 @@ export function AgentThreadNav({
         document.execCommand('copy');
         input.remove();
       }
-      setCopiedPath(row.id);
-      window.setTimeout(() => setCopiedPath(undefined), 1200);
+      return;
     } catch {
       // Clipboard permissions are optional; navigation should remain usable.
     }
@@ -297,10 +249,10 @@ export function AgentThreadNav({
         {!groups.length && <p className={styles.empty}>No matching threads.</p>}
         {groups.map(([key, group]) => {
           const collapsed = collapsedWorkspaces[key] === true;
-          const expanded =
-            !collapsed ||
-            Boolean(query.trim()) ||
-            group.rows.some((row) => row.id === currentSessionId);
+          const expanded = workspaceGroupIsExpanded(
+            collapsed,
+            Boolean(query.trim()),
+          );
           const groupId = `agent-thread-group-${encodeURIComponent(key)}`;
           return (
             <section className={styles.workspaceGroup} key={key}>
@@ -355,14 +307,37 @@ export function AgentThreadNav({
                     const selected = row.id === currentSessionId;
                     const unread = isThreadUnread(row, unreadState);
                     const rowClassName = `agent-thread-row ${styles.threadRow} ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} status-${row.status}`;
-                    const rowActions = (
-                      <ThreadActions
-                        row={row}
-                        unread={unread}
-                        copied={copiedPath === row.id}
-                        onMarkUnread={() => markUnread(row.id)}
-                        onCopyPath={() => void copyPath(row)}
-                      />
+                    const menuItems = ({
+                      closeMenu,
+                    }: {
+                      closeMenu: () => void;
+                    }) => (
+                      <>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          aria-label={`Mark ${row.title} as unread`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            markUnread(row.id, row.updatedAt);
+                            closeMenu();
+                          }}
+                        >
+                          Mark unread
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          aria-label={`Copy path for ${row.title}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void copyPath(row);
+                            closeMenu();
+                          }}
+                        >
+                          Copy path
+                        </button>
+                      </>
                     );
                     const renderThreadLink = (
                       lifecycleProps?: RuntimeLifecycleThreadProps,
@@ -378,10 +353,14 @@ export function AgentThreadNav({
 
                     if (!row.runtime) {
                       return (
-                        <div className={rowClassName} key={row.id}>
-                          {renderThreadLink()}
-                          {rowActions}
-                        </div>
+                        <AgentThreadActionMenu
+                          key={row.id}
+                          title={row.title}
+                          rowClassName={rowClassName}
+                          menuItems={menuItems}
+                        >
+                          {renderThreadLink}
+                        </AgentThreadActionMenu>
                       );
                     }
                     return (
@@ -390,7 +369,7 @@ export function AgentThreadNav({
                         runtime={row.runtime}
                         title={row.title}
                         rowClassName={rowClassName}
-                        rowActions={rowActions}
+                        menuItems={menuItems}
                       >
                         {renderThreadLink}
                       </RuntimeLifecycleActions>

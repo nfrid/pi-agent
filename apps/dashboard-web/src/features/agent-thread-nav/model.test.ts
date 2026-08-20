@@ -7,6 +7,7 @@ import {
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
   statusGlyph,
+  workspaceGroupIsExpanded,
 } from './model';
 
 function row(
@@ -145,6 +146,12 @@ describe('agent thread view model', () => {
     expect(
       boundedAgentThreadRows(history, 1, 'old-2').map(({ id }) => id),
     ).toEqual(['old-0', 'old-2']);
+  });
+
+  it('keeps collapsed groups closed unless actively searching', () => {
+    expect(workspaceGroupIsExpanded(true, false)).toBe(false);
+    expect(workspaceGroupIsExpanded(true, true)).toBe(true);
+    expect(workspaceGroupIsExpanded(false, false)).toBe(true);
   });
 
   it('groups rows by workspace identity and names other workspaces separately', () => {
