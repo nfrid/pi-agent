@@ -2324,6 +2324,126 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('reconciles persisted older rows with live fallback identities', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    const oldContent = [
+      { type: 'text', text: 'Old preamble' },
+      {
+        type: 'toolCall',
+        toolCallId: 'old-tool',
+        name: 'read',
+        arguments: { path: '/tmp/old' },
+      },
+    ];
+    const latest = {
+      ...sessionResponse(2),
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 2,
+      entries: [
+        {
+          type: 'message',
+          id: 'newer-prompt',
+          message: { role: 'user', content: 'New prompt', timestamp: 200 },
+        },
+      ],
+      history: {
+        version: 1 as const,
+        start: 2,
+        end: 3,
+        hasOlder: true,
+        nextBefore: 'older-page',
+      },
+      active: {
+        pendingInteractions: [],
+        messages: [
+          {
+            messageId: 'timestamp:100',
+            role: 'assistant',
+            content: oldContent,
+            timestamp: 100,
+            toolCallIds: ['old-tool'],
+          },
+        ],
+        tools: [
+          {
+            toolCallId: 'old-tool',
+            name: 'read',
+            arguments: { path: '/tmp/old' },
+            result: 'live result',
+            status: 'finished' as const,
+            timestamp: 100,
+          },
+        ],
+        delegates: [],
+        truncated: false,
+      },
+    } satisfies AuthoritativeSessionSnapshot;
+    expect(store.acceptSessionSnapshot(latest, 2, 1, true)).toBe(true);
+
+    // Once the terminal overlay disappears, latest-window recovery retains it
+    // as live-only state after the authoritative page. The older page must
+    // reconcile that fallback identity when its persisted twin arrives.
+    store.hydrateSession({
+      ...latest,
+      cursor: 3,
+      runtimeSeq: 3,
+      active: {
+        pendingInteractions: [],
+        messages: [],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+    });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['newer-prompt', 'timestamp:100', 'old-tool']);
+
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(3),
+        runtimeEpoch: 'epoch-a',
+        runtimeSeq: 3,
+        entries: [
+          {
+            type: 'message',
+            id: 'persisted-old',
+            message: {
+              role: 'assistant',
+              content: oldContent,
+              timestamp: 100,
+            },
+          },
+          {
+            type: 'message',
+            id: 'persisted-old-result',
+            message: {
+              role: 'toolResult',
+              toolCallId: 'old-tool',
+              toolName: 'read',
+              content: 'persisted result',
+              timestamp: 101,
+            },
+          },
+        ],
+        history: { version: 1, start: 0, end: 2, hasOlder: false },
+      }),
+    ).toBeDefined();
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual([
+      'persisted-old',
+      'old-tool',
+      'newer-prompt',
+    ]);
+    expect(projection?.items['timestamp:100']).toBeUndefined();
+    expect(projection?.items['old-tool']).toMatchObject({
+      result: 'live result',
+      status: 'finished',
+    });
+  });
+
   it('rejects prepending a page without history metadata', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

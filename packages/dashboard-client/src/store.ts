@@ -364,10 +364,20 @@ function mergePrependedTranscript(
   current: TranscriptProjection,
   older: TranscriptProjection,
 ): TranscriptProjection {
+  const duplicateLiveMessageIds = new Set<string>();
+  for (const id of current.order) {
+    const item = current.items[id];
+    if (
+      item?.kind === 'message' &&
+      persistedMessageIdForLive(older, item) !== undefined
+    )
+      duplicateLiveMessageIds.add(id);
+  }
   const items: Record<string, TranscriptProjection['items'][string]> = {
     ...older.items,
   };
   for (const [id, item] of Object.entries(current.items)) {
+    if (duplicateLiveMessageIds.has(id)) continue;
     const previous = items[id];
     if (previous?.kind === 'tool' && item.kind === 'tool') {
       items[id] = {
@@ -395,12 +405,17 @@ function mergePrependedTranscript(
       };
     } else items[id] = item;
   }
-  const currentIds = new Set(current.order);
+  const olderIds = new Set(older.order);
   return {
     ...current,
+    // Exact overlaps belong at the older page's authoritative position. This
+    // also moves live tool overlays beside the persisted assistant message
+    // that owns them instead of leaving them stranded at the current tail.
     order: [
-      ...older.order.filter((id) => !currentIds.has(id)),
-      ...current.order,
+      ...older.order,
+      ...current.order.filter(
+        (id) => !olderIds.has(id) && !duplicateLiveMessageIds.has(id),
+      ),
     ],
     items,
   };
