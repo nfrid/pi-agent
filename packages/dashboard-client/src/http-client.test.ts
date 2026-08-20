@@ -33,7 +33,7 @@ function trpcResponse(value: unknown): Response {
 
 function protocolInfoResponse(): Response {
   return trpcResponse({
-    protocolVersion: 2,
+    protocolVersion: 3,
     serverId: validSnapshot.serverId,
     capabilities: { shellSnapshot: true, sessionSnapshot: true },
   });
@@ -636,8 +636,8 @@ describe('DashboardHttpClient snapshot requests', () => {
     expect(calls[0]?.[1].body).toBe('null');
     expect(
       new Headers(calls[1]?.[1].headers).get('x-dashboard-protocol-version'),
-    ).toBe('2');
-    expect(calls[1]?.[1].body).toBe(JSON.stringify({ protocolVersion: 2 }));
+    ).toBe('3');
+    expect(calls[1]?.[1].body).toBe(JSON.stringify({ protocolVersion: 3 }));
 
     const invalid = new DashboardHttpClient({
       fetch: vi.fn(async () => trpcResponse({ snapshot: validSnapshot })),
@@ -905,7 +905,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       DashboardProtocolMismatchError,
     );
     await expect(client.snapshot()).rejects.toMatchObject({
-      expected: 2,
+      expected: 3,
       actual: 1,
       serverId: 'old-generation',
       code: 'protocol-mismatch',
@@ -933,7 +933,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     });
     const error = await client.snapshot().catch((cause) => cause);
     expect(error).toMatchObject({
-      expected: 2,
+      expected: 3,
       actual: 1,
       serverId: 'incompatible-generation',
       code: 'protocol-mismatch',

@@ -53,7 +53,7 @@ export function dashboardTrpcInput(request: Request): Record<string, unknown> {
   }
 }
 
-/** Install the same authenticated protocol-v2 shell read used by production. */
+/** Install the same authenticated protocol-v3 shell read used by production. */
 export async function installDashboardBootstrap(
   page: Page,
   snapshot: BrowserSnapshot,

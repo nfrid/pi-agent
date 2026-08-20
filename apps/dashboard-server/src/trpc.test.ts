@@ -30,7 +30,7 @@ const apps: ReturnType<typeof Fastify>[] = [];
 const TOKEN = 'trpc-test-token';
 const ORIGIN = 'http://dashboard.test';
 const RAW_SHELL_URL =
-  '/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D';
+  '/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A3%7D';
 
 function snapshot() {
   return {
@@ -124,7 +124,7 @@ function authHeaders(extra: Record<string, string> = {}) {
   return {
     origin: ORIGIN,
     'x-dashboard-token': TOKEN,
-    'x-dashboard-protocol-version': '2',
+    'x-dashboard-protocol-version': '3',
     ...extra,
   };
 }
@@ -214,7 +214,7 @@ describe('dashboard tRPC boundary', () => {
     );
   });
 
-  it('serves authenticated protocol-v2 info and the production shell shape', async () => {
+  it('serves authenticated protocol-v3 info and the production shell shape', async () => {
     const app = Fastify();
     apps.push(app);
     await app.register(dashboardRoutes, { context: context() });
@@ -323,7 +323,7 @@ describe('dashboard tRPC boundary', () => {
       method: 'POST',
       url: '/trpc/shellSnapshot',
       headers: authHeaders(),
-      payload: { protocolVersion: 2 },
+      payload: { protocolVersion: 3 },
     });
     expect(shell.statusCode).toBe(200);
     expect(shell.json().result.data.snapshot.runtimes).toEqual([]);
@@ -519,7 +519,7 @@ describe('dashboard tRPC boundary', () => {
 
     const mismatch = await app.inject({
       method: 'GET',
-      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 1 })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 2 })}`,
       headers: authHeaders(),
     });
     expect(mismatch.statusCode).toBe(400);
@@ -527,8 +527,8 @@ describe('dashboard tRPC boundary', () => {
     expect(error.data.code).toBe('BAD_REQUEST');
     expect(error.data.domainCode).toBe('protocol-mismatch');
     expect(error.data).toMatchObject({
-      expected: 2,
-      actual: 1,
+      expected: 3,
+      actual: 2,
       serverId: 'generation-1',
     });
     expect(JSON.stringify(error)).not.toContain('sqlite');
@@ -543,7 +543,7 @@ describe('dashboard tRPC boundary', () => {
     await malformedApp.ready();
     const malformed = await malformedApp.inject({
       method: 'GET',
-      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 2 })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 3 })}`,
       headers: authHeaders(),
     });
     expect(malformed.statusCode).toBe(500);
@@ -562,7 +562,7 @@ describe('dashboard tRPC boundary', () => {
     await conflictApp.ready();
     const conflict = await conflictApp.inject({
       method: 'GET',
-      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 2 })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 3 })}`,
       headers: authHeaders(),
     });
     expect(conflict.statusCode).toBe(409);
@@ -644,8 +644,8 @@ describe('dashboard tRPC boundary', () => {
   });
 
   it('parses the public request adapter with strict fields', () => {
-    expect(parseShellSnapshotRequest({ protocolVersion: 2 })).toEqual({
-      protocolVersion: 2,
+    expect(parseShellSnapshotRequest({ protocolVersion: 3 })).toEqual({
+      protocolVersion: 3,
     });
   });
 });

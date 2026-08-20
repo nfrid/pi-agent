@@ -28,7 +28,7 @@ describe('production tRPC feed procedures', () => {
     const feed = new ShellFeed({ generation: 'generation' });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
-      protocolVersion: 2,
+      protocolVersion: 3,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -71,7 +71,7 @@ describe('production tRPC feed procedures', () => {
             fetch: async (input, init) => {
               const headers = new Headers(init?.headers);
               headers.set('x-dashboard-token', 'test-token');
-              headers.set('x-dashboard-protocol-version', '2');
+              headers.set('x-dashboard-protocol-version', '3');
               requests.push({
                 url: String(input),
                 token: headers.get('x-dashboard-token') ?? undefined,
@@ -183,7 +183,7 @@ describe('production tRPC feed procedures', () => {
       expect(requests.every((request) => request.token === 'test-token')).toBe(
         true,
       );
-      expect(requests.every((request) => request.protocol === '2')).toBe(true);
+      expect(requests.every((request) => request.protocol === '3')).toBe(true);
       const reconnectInput = JSON.parse(
         new URL(requests[1]?.url ?? '').searchParams.get('input') ?? '{}',
       ) as { lastEventId?: string; json?: { lastEventId?: string } };
@@ -234,7 +234,7 @@ describe('production tRPC feed procedures', () => {
 
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
-      protocolVersion: 2,
+      protocolVersion: 3,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -269,7 +269,7 @@ describe('production tRPC feed procedures', () => {
     });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
-      protocolVersion: 2,
+      protocolVersion: 3,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -310,7 +310,7 @@ describe('production tRPC feed procedures', () => {
     });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
-      protocolVersion: 2,
+      protocolVersion: 3,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -361,7 +361,7 @@ describe('production tRPC feed procedures', () => {
     const feed = new ShellFeed({ generation: 'generation' });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
-      protocolVersion: 2,
+      protocolVersion: 3,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),

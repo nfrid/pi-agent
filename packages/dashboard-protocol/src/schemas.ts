@@ -78,7 +78,7 @@ export {
 /** Version of the extension/runtime bridge protocol. Keep stable for stored and running extensions. */
 export const PROTOCOL_VERSION = 1;
 /** Version of the browser HTTP/tRPC dashboard protocol. */
-export const DASHBOARD_PROTOCOL_VERSION = 2;
+export const DASHBOARD_PROTOCOL_VERSION = 3;
 export const MAX_FRAME_BYTES = 512 * 1024;
 
 /** Capabilities advertised by the authenticated dashboard HTTP boundary. */

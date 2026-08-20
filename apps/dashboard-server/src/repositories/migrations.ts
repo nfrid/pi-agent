@@ -84,6 +84,21 @@ function columns(db: DatabaseSync, table: string): Set<string> {
   );
 }
 
+function completedReceiptJson(serialized: string): string | undefined {
+  let changed = false;
+  const value = JSON.parse(serialized, (key, item) => {
+    if (
+      (key === 'status' || key === 'preArchiveStatus') &&
+      item === 'settled'
+    ) {
+      changed = true;
+      return 'completed';
+    }
+    return item;
+  });
+  return changed ? JSON.stringify(value) : undefined;
+}
+
 export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
   {
     version: 1,
@@ -609,6 +624,21 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         CREATE INDEX run_checkout_status
           ON orchestration_run(checkout_id,status);
       `);
+
+      // Receipts are replayed directly by idempotent command paths. Normalize
+      // their stored orchestration projections with the canonical rows so a
+      // pre-v11 replay cannot leak the removed wire literal.
+      const receipts = db
+        .prepare('SELECT idempotency_key,result_json FROM command_receipt')
+        .all() as Array<{ idempotency_key: string; result_json: string }>;
+      const updateReceipt = db.prepare(
+        'UPDATE command_receipt SET result_json=? WHERE idempotency_key=?',
+      );
+      for (const receipt of receipts) {
+        const resultJson = completedReceiptJson(receipt.result_json);
+        if (resultJson !== undefined)
+          updateReceipt.run(resultJson, receipt.idempotency_key);
+      }
     },
   },
 ];

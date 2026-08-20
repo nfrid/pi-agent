@@ -751,13 +751,13 @@ describe('dashboard HTTP boundary', () => {
     releaseWorkspaces();
     await startup;
     expect(http.listening).toBe(true);
-    const input = encodeURIComponent(JSON.stringify({ protocolVersion: 2 }));
+    const input = encodeURIComponent(JSON.stringify({ protocolVersion: 3 }));
     const response = await fetch(
       `http://127.0.0.1:${server.port}/trpc/shellSnapshot?input=${input}`,
       {
         headers: {
           authorization: 'Bearer test-token',
-          'x-dashboard-protocol-version': '2',
+          'x-dashboard-protocol-version': '3',
         },
       },
     );
@@ -1318,13 +1318,13 @@ describe('dashboard HTTP boundary', () => {
       sesh: { list: async () => [] },
     });
     await server.start();
-    const input = encodeURIComponent(JSON.stringify({ protocolVersion: 2 }));
+    const input = encodeURIComponent(JSON.stringify({ protocolVersion: 3 }));
     const response = await fetch(
       `http://127.0.0.1:${server.port}/trpc/shellSnapshot?input=${input}`,
       {
         headers: {
           authorization: 'Bearer test-token',
-          'x-dashboard-protocol-version': '2',
+          'x-dashboard-protocol-version': '3',
         },
       },
     );

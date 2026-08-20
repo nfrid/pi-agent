@@ -106,7 +106,7 @@ export async function reduceRegistryChange(
           host.failRun(
             run.id,
             'interrupted',
-            `Runtime exited before the run settled${change.event.reason ? ` (${change.event.reason})` : ''}.`,
+            `Runtime exited before the run completed${change.event.reason ? ` (${change.event.reason})` : ''}.`,
           );
       }
     } else {
@@ -115,7 +115,7 @@ export async function reduceRegistryChange(
         host.failRun(
           run.id,
           'interrupted',
-          'Runtime disconnected before the run settled.',
+          'Runtime disconnected before the run completed.',
         );
     }
   } catch (error) {

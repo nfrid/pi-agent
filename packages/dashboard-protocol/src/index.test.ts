@@ -261,7 +261,7 @@ describe('dashboard protocol', () => {
 
   it('negotiates strict protocol information and bootstrap requests', () => {
     const info = parseProtocolInfo({
-      protocolVersion: 2,
+      protocolVersion: 3,
       serverId: 'generation-1',
       capabilities: { shellSnapshot: true, sessionSnapshot: true },
     });
@@ -269,8 +269,8 @@ describe('dashboard protocol', () => {
       shellSnapshot: true,
       sessionSnapshot: true,
     });
-    expect(parseShellSnapshotRequest({ protocolVersion: 2 })).toEqual({
-      protocolVersion: 2,
+    expect(parseShellSnapshotRequest({ protocolVersion: 3 })).toEqual({
+      protocolVersion: 3,
     });
     expect(ProtocolInfoSchema).toBeDefined();
     expect(ShellSnapshotRequestSchema).toBeDefined();
@@ -284,9 +284,10 @@ describe('dashboard protocol', () => {
         },
       }),
     ).toThrow();
+    expect(() => parseProtocolInfo({ ...info, protocolVersion: 2 })).toThrow();
     expect(() => parseShellSnapshotRequest({ protocolVersion: '1' })).toThrow();
     expect(() =>
-      parseShellSnapshotRequest({ protocolVersion: 2, extra: true }),
+      parseShellSnapshotRequest({ protocolVersion: 3, extra: true }),
     ).toThrow();
   });
 

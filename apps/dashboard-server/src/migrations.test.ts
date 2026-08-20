@@ -7,6 +7,7 @@ import {
   DASHBOARD_MIGRATIONS,
   runMigrations,
 } from './repositories/migrations.js';
+import { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
 
 it('applies numbered dashboard migrations idempotently', async () => {
   const root = await mkdtemp(
@@ -76,7 +77,7 @@ describe('migration metadata', () => {
         VALUES (7,'rename-thread','legacy.snapshot',NULL,'migration','legacy-snapshot','{"status":"settled"}',15);
         INSERT INTO command_receipt
           (idempotency_key,command_type,resource_type,resource_id,runtime_id,command_fingerprint,result_json,created_at)
-        VALUES ('rename-command','run.create','run','rename-run','rename-runtime',NULL,'{"runId":"rename-run"}',16);
+        VALUES ('rename-command','thread.create','thread','rename-thread','rename-runtime',NULL,'{"thread":{"id":"rename-thread","projectId":"rename-project","title":"Rename thread","checkoutId":"rename-checkout","status":"settled","pinnedAt":5,"archivedAt":6,"preArchiveStatus":"settled","createdAt":3,"updatedAt":4},"run":{"id":"rename-run","threadId":"rename-thread","checkoutId":"rename-checkout","attempt":1,"mode":"write","runtimeProvider":"extension-bridge","runtimeId":"rename-runtime","piSessionId":"rename-session","initialPrompt":"Rename prompt","status":"settled","createdAt":7,"startedAt":8,"finishedAt":9}}',16);
       `);
       const indexesBefore = db
         .prepare(
@@ -147,15 +148,23 @@ describe('migration metadata', () => {
       expect(db.prepare('SELECT * FROM command_receipt').all()).toEqual([
         {
           idempotency_key: 'rename-command',
-          command_type: 'run.create',
-          resource_type: 'run',
-          resource_id: 'rename-run',
-          result_json: '{"runId":"rename-run"}',
+          command_type: 'thread.create',
+          resource_type: 'thread',
+          resource_id: 'rename-thread',
+          result_json:
+            '{"thread":{"id":"rename-thread","projectId":"rename-project","title":"Rename thread","checkoutId":"rename-checkout","status":"completed","pinnedAt":5,"archivedAt":6,"preArchiveStatus":"completed","createdAt":3,"updatedAt":4},"run":{"id":"rename-run","threadId":"rename-thread","checkoutId":"rename-checkout","attempt":1,"mode":"write","runtimeProvider":"extension-bridge","runtimeId":"rename-runtime","piSessionId":"rename-session","initialPrompt":"Rename prompt","status":"completed","createdAt":7,"startedAt":8,"finishedAt":9}}',
           created_at: 16,
           runtime_id: 'rename-runtime',
           command_fingerprint: null,
         },
       ]);
+      const replayed = new SqliteOrchestrationRepository(db).getCommandReceipt(
+        'rename-command',
+      );
+      expect(replayed?.result).toMatchObject({
+        thread: { status: 'completed', preArchiveStatus: 'completed' },
+        run: { status: 'completed' },
+      });
       expect(
         db
           .prepare(
