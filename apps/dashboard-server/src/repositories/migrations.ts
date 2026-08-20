@@ -469,8 +469,8 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
 
       // Backfill only an exact, file-backed run/session join. A session with
       // multiple thread identities (or a thread used by multiple sessions)
-      // remains deliberately unmapped; startup link creation will handle it
-      // as a fresh no-run session instead of guessing.
+      // remains deliberately unmapped. Startup adoption sees the same durable
+      // candidates and keeps that session quarantined instead of guessing.
       const candidates = db
         .prepare(
           `SELECT r.pi_session_id AS session_id,r.thread_id,si.file AS source_file

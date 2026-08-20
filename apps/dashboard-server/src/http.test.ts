@@ -24,6 +24,38 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('publishes exact durable links for indexed sessions before HTTP is ready', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-session-links-'));
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'ordinary.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'ordinary-session', cwd: '/tmp' })}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const origin = `http://127.0.0.1:${server.port}`;
+    const response = await fetch(`${origin}/api/session-threads`, {
+      headers: {
+        Origin: origin,
+        'x-dashboard-token': 'test-token',
+      },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual([
+      {
+        sessionId: 'ordinary-session',
+        threadId: expect.stringMatching(/^thread-session-/),
+      },
+    ]);
+  });
+
   it('publishes auxiliary JSONL appends as ordered normalized session events', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-aux-live-'));
     const sessionDir = path.join(root, 'sessions');

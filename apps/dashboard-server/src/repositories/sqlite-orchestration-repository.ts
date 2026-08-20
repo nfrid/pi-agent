@@ -708,6 +708,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
               WHERE r.thread_id=t.id AND r.status IN ${ACTIVE_RUN_SQL}
               ORDER BY r.created_at,r.id LIMIT 1) AS active_run_id
            FROM session_thread_link l
+           JOIN session_index s
+             ON s.id=l.session_id AND s.file=l.source_file
            JOIN thread t ON t.id=l.thread_id
            ORDER BY l.session_id`,
         )
@@ -744,6 +746,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       );
       for (const session of ordered) {
         const existing = this.getSessionThreadLink(session.id);
+        // Session IDs are not enough to prove identity when an index file was
+        // replaced or reused. Preserve the old durable record but quarantine
+        // it from the public exact-link projection.
         if (existing) continue;
         const candidateRows = this.db
           .prepare(
@@ -1179,16 +1184,31 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         });
       }
       const run = this.insertRun({ ...input.run, threadId: thread.id });
-      if (!link) {
+      const linkUpdatedAt = Date.now();
+      if (link) {
+        this.db
+          .prepare(
+            `UPDATE session_thread_link
+             SET source='adoption',updated_at=?
+             WHERE session_id=? AND thread_id=?`,
+          )
+          .run(linkUpdatedAt, piSessionId, thread.id);
+      } else {
         const sourceFile = input.sessionSourceFile ?? `adoption:${piSessionId}`;
-        const now = Date.now();
         this.db
           .prepare(
             `INSERT INTO session_thread_link
              (session_id,thread_id,source,source_file,created_at,updated_at)
              VALUES (?,?,?,?,?,?)`,
           )
-          .run(piSessionId, thread.id, 'adoption', sourceFile, now, now);
+          .run(
+            piSessionId,
+            thread.id,
+            'adoption',
+            sourceFile,
+            linkUpdatedAt,
+            linkUpdatedAt,
+          );
       }
       this.insertReceipt({
         idempotencyKey: `run-prompt:${run.id}`,

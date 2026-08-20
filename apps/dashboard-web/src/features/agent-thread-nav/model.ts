@@ -47,6 +47,20 @@ export type AgentThreadGroup = {
 export const MAX_VISIBLE_ACTIVE_THREADS = 40;
 export const MAX_VISIBLE_HISTORY_THREADS = 24;
 
+/** Stable exact identity set used to refresh persisted session links. */
+export function sessionThreadIdentityKey(
+  snapshot: Pick<BrowserSnapshot, 'sessions' | 'runtimes'>,
+): string {
+  return [
+    ...new Set([
+      ...snapshot.sessions.map((session) => session.id),
+      ...snapshot.runtimes.map((runtime) => runtime.session.id),
+    ]),
+  ]
+    .sort()
+    .join('\n');
+}
+
 // Runtime snapshots are live overlays, not session-index metadata. Keep their
 // chronology neutral until the authoritative index publishes a real timestamp.
 export function isArchivedThread(row: AgentThreadRow): boolean {

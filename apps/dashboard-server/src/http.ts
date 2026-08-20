@@ -1290,11 +1290,19 @@ export class DashboardServerImpl implements DashboardServer {
     auxiliary = false,
   ): void {
     if (this.lifecycle !== 'started') return;
-    // Persist the identity before publishing metadata. A client receiving this
-    // delta can therefore immediately use the link projection for controls.
-    this.application.orchestrationService?.ensureSessionThreadLinks(
-      this.sessions.list(),
-    );
+    // Persist the identity before publishing metadata. Scoped watcher events
+    // adopt only their exact session; unscoped refreshes retain the bounded
+    // full-index fallback used at startup.
+    const indexedSession = sessionId ? this.sessions.get(sessionId) : undefined;
+    const sessionsToLink = indexedSession
+      ? [indexedSession]
+      : sessionId
+        ? []
+        : this.sessions.list();
+    if (sessionsToLink.length > 0)
+      this.application.orchestrationService?.ensureSessionThreadLinks(
+        sessionsToLink,
+      );
     this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
     if (!sessionId || (!auxiliary && !this.sessions.isAuxiliary(sessionId)))
       return;

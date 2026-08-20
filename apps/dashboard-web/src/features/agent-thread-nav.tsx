@@ -5,7 +5,13 @@ import {
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
-import { type KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
 import {
   type AgentThreadRow,
@@ -20,6 +26,7 @@ import {
   isHistoryThread,
   MAX_VISIBLE_HISTORY_THREADS,
   searchAgentThreadRows,
+  sessionThreadIdentityKey,
   shortPath,
   statusGlyph,
   statusLabel,
@@ -249,6 +256,20 @@ export function AgentThreadNav({
   const directLinks = sessionThreadLinksQuery.isSuccess
     ? sessionThreadLinksQuery.data
     : [];
+  const sessionIdentityKey = useMemo(
+    () => sessionThreadIdentityKey(snapshot),
+    [snapshot],
+  );
+  const priorSessionIdentityKey = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (priorSessionIdentityKey.current === undefined) {
+      priorSessionIdentityKey.current = sessionIdentityKey;
+      return;
+    }
+    if (priorSessionIdentityKey.current === sessionIdentityKey) return;
+    priorSessionIdentityKey.current = sessionIdentityKey;
+    void sessionThreadLinksQuery.refetch();
+  }, [sessionIdentityKey, sessionThreadLinksQuery.refetch]);
   const rows = useMemo(
     () => agentThreadRows(snapshot, durableThreads, directLinks),
     [directLinks, durableThreads, snapshot],

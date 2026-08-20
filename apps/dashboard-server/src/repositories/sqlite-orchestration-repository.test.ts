@@ -19,6 +19,25 @@ async function database(): Promise<{
   return { db, repository: new SqliteOrchestrationRepository(db), file };
 }
 
+function persistSessionIndex(
+  db: DatabaseSync,
+  sessions: ReadonlyArray<{
+    id: string;
+    file: string;
+    cwd: string;
+    updatedAt: number;
+  }>,
+): void {
+  const insert = db.prepare(
+    `INSERT INTO session_index (id,file,cwd,updated_at)
+     VALUES (?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET
+       file=excluded.file,cwd=excluded.cwd,updated_at=excluded.updated_at`,
+  );
+  for (const session of sessions)
+    insert.run(session.id, session.file, session.cwd, session.updatedAt);
+}
+
 async function fixture() {
   const value = await database();
   const project = value.repository.createProject({
@@ -56,6 +75,7 @@ describe('SqliteOrchestrationRepository', () => {
         updatedAt: 10,
       },
     ];
+    persistSessionIndex(value.db, sessions);
     const first = value.repository.ensureSessionThreadLinks(sessions);
     expect(first.map((link) => link.sessionId)).toEqual([
       'session-a',
@@ -95,6 +115,36 @@ describe('SqliteOrchestrationRepository', () => {
     value.db.close();
   });
 
+  it('quarantines a reused session ID with a different source file', async () => {
+    const value = await fixture();
+    const original = {
+      id: 'reused-session',
+      file: '/sessions/original.jsonl',
+      cwd: '/repo',
+      updatedAt: 10,
+    };
+    persistSessionIndex(value.db, [original]);
+    const [link] = value.repository.ensureSessionThreadLinks([original]);
+    if (!link) throw new Error('Missing original link.');
+
+    const replacement = {
+      ...original,
+      file: '/sessions/replacement.jsonl',
+      updatedAt: 20,
+    };
+    persistSessionIndex(value.db, [replacement]);
+    expect(value.repository.ensureSessionThreadLinks([replacement])).toEqual(
+      [],
+    );
+    expect(value.repository.sessionThreadLinks()).toEqual([]);
+    expect(value.repository.getSessionThreadLink(original.id)).toMatchObject({
+      threadId: link.threadId,
+      sourceFile: original.file,
+    });
+    expect(value.repository.listSessionThreadLinkRecords()).toHaveLength(1);
+    value.db.close();
+  });
+
   it('uses one exact existing run mapping and never joins by session metadata', async () => {
     const value = await fixture();
     const thread = value.repository.createThread({
@@ -111,7 +161,7 @@ describe('SqliteOrchestrationRepository', () => {
       piSessionId: 'exact-existing-session',
       status: 'settled',
     });
-    const links = value.repository.ensureSessionThreadLinks([
+    const sessions = [
       {
         id: 'exact-existing-session',
         file: '/sessions/exact-existing.jsonl',
@@ -119,7 +169,9 @@ describe('SqliteOrchestrationRepository', () => {
         title: 'Unrelated title',
         updatedAt: 10,
       },
-    ]);
+    ];
+    persistSessionIndex(value.db, sessions);
+    const links = value.repository.ensureSessionThreadLinks(sessions);
     expect(links).toEqual([
       {
         sessionId: 'exact-existing-session',
@@ -134,14 +186,16 @@ describe('SqliteOrchestrationRepository', () => {
   it('promotes an auto-linked thread during adoption instead of duplicating it', async () => {
     const value = await fixture();
     const sourceFile = '/sessions/promote.jsonl';
-    const [link] = value.repository.ensureSessionThreadLinks([
+    const sessions = [
       {
         id: 'promote-session',
         file: sourceFile,
         cwd: '/repo',
         updatedAt: 10,
       },
-    ]);
+    ];
+    persistSessionIndex(value.db, sessions);
+    const [link] = value.repository.ensureSessionThreadLinks(sessions);
     if (!link) throw new Error('Missing auto link.');
     const result = value.repository.adoptSessionWithThreadAndRun(
       'promote-command',
@@ -167,6 +221,7 @@ describe('SqliteOrchestrationRepository', () => {
       value.repository.getSessionThreadLink('promote-session'),
     ).toMatchObject({
       threadId: link.threadId,
+      source: 'adoption',
       sourceFile,
     });
     expect(value.repository.listRuns()).toHaveLength(1);
@@ -176,14 +231,16 @@ describe('SqliteOrchestrationRepository', () => {
 
   it('rejects archive while a directly linked session runtime is online', async () => {
     const value = await fixture();
-    const [link] = value.repository.ensureSessionThreadLinks([
+    const sessions = [
       {
         id: 'online-session',
         file: '/sessions/online.jsonl',
         cwd: '/repo',
         updatedAt: 10,
       },
-    ]);
+    ];
+    persistSessionIndex(value.db, sessions);
+    const [link] = value.repository.ensureSessionThreadLinks(sessions);
     if (!link) throw new Error('Missing online link.');
     value.db
       .prepare(

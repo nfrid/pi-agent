@@ -12,6 +12,7 @@ import {
   isArchivedThread,
   isHistoryThread,
   searchAgentThreadRows,
+  sessionThreadIdentityKey,
   statusGlyph,
   workspaceGroupIsExpanded,
 } from './model';
@@ -35,6 +36,30 @@ function row(
 }
 
 describe('agent thread view model', () => {
+  it('keys persisted-link refreshes to the exact session identity set', () => {
+    const first = sessionThreadIdentityKey({
+      sessions: [{ id: 'session-b' }, { id: 'session-a' }],
+      runtimes: [{ session: { id: 'session-live' } }],
+    } as never);
+    expect(first).toBe('session-a\nsession-b\nsession-live');
+    expect(
+      sessionThreadIdentityKey({
+        sessions: [{ id: 'session-a' }, { id: 'session-b' }],
+        runtimes: [{ session: { id: 'session-live' } }],
+      } as never),
+    ).toBe(first);
+    expect(
+      sessionThreadIdentityKey({
+        sessions: [
+          { id: 'session-a' },
+          { id: 'session-b' },
+          { id: 'session-new' },
+        ],
+        runtimes: [{ session: { id: 'session-live' } }],
+      } as never),
+    ).not.toBe(first);
+  });
+
   it('keeps unindexed runtime chronology stable across live surface updates', () => {
     const snapshot = (surface: unknown) =>
       ({
