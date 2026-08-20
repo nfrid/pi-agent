@@ -215,6 +215,42 @@ it('adopts an inactive legacy session without launching or duplicating rows', as
   }
 });
 
+it('uses the live registry rather than stale persisted runtime state for archive guards', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    const adopted = await fixture.service.adoptSession(
+      fixture.projectId,
+      'archive-session',
+      { commandId: 'adopt-archive-session' },
+    );
+    const runtime = {
+      ...runtimeHello('archive-runtime'),
+      session: { id: 'archive-session', entries: [] },
+    };
+    fixture.metadata.saveRuntime(runtime as never);
+    fixture.setLive(runtime);
+    await expect(
+      fixture.service.archiveThread(
+        adopted.thread.id,
+        'archive-while-really-online',
+      ),
+    ).rejects.toThrow('online runtime');
+
+    fixture.setLive(undefined);
+    await expect(
+      fixture.service.archiveThread(
+        adopted.thread.id,
+        'archive-after-disconnect',
+      ),
+    ).resolves.toMatchObject({ status: 'stopped' });
+    expect(
+      fixture.metadata.orchestration.getThread(adopted.thread.id),
+    ).toMatchObject({ archivedAt: expect.any(Number) });
+  } finally {
+    await fixture.close();
+  }
+});
+
 it('rejects auxiliary sessions without an exact source file', async () => {
   const fixture = await orchestrationFixture();
   try {

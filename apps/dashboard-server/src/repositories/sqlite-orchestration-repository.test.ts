@@ -247,7 +247,7 @@ describe('SqliteOrchestrationRepository', () => {
     value.db.close();
   });
 
-  it('rejects archive while a directly linked session runtime is online', async () => {
+  it('ignores stale persisted runtime presence when archiving a session thread', async () => {
     const value = await fixture();
     const sessions = [
       {
@@ -277,12 +277,13 @@ describe('SqliteOrchestrationRepository', () => {
         10,
         '{}',
       );
-    expect(() =>
-      value.repository.archiveThread('archive-online', link.threadId),
-    ).toThrow('online runtime');
     expect(
-      value.repository.getThread(link.threadId)?.archivedAt,
-    ).toBeUndefined();
+      value.repository.archiveThread('archive-stale-runtime', link.threadId)
+        .thread.archivedAt,
+    ).toEqual(expect.any(Number));
+    expect(value.repository.getThread(link.threadId)?.archivedAt).toEqual(
+      expect.any(Number),
+    );
     value.db.close();
   });
 

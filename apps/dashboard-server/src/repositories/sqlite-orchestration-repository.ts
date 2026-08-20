@@ -1719,21 +1719,6 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           new Error('A thread with an active run cannot be archived.'),
           { code: 'orchestration-conflict' },
         );
-      if (
-        eventType === 'thread.archive' &&
-        this.db
-          .prepare(
-            `SELECT 1 FROM session_thread_link l
-             JOIN runtime r ON r.session_id=l.session_id AND r.online=1
-             WHERE l.thread_id=? LIMIT 1`,
-          )
-          .get(threadId)
-      )
-        throw Object.assign(
-          new Error('A session with an online runtime cannot be archived.'),
-          { code: 'orchestration-conflict' },
-        );
-
       let changed = false;
       if (eventType === 'thread.archive' && current.archivedAt === undefined) {
         const preArchiveStatus =
