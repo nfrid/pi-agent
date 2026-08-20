@@ -655,7 +655,7 @@ describe('DashboardLiveStore', () => {
           type: 'message',
           message: {
             role: 'user',
-            content: 'switch back to this session',
+            content: [{ type: 'text', text: 'switch back to this session' }],
             timestamp: 123,
           },
         },
@@ -666,8 +666,8 @@ describe('DashboardLiveStore', () => {
           {
             messageId: 'live-user-copy',
             role: 'user',
-            content: 'switch back to this session',
-            timestamp: 123,
+            content: [{ text: 'switch back to this session', type: 'text' }],
+            timestamp: '123',
           },
           {
             messageId: 'live-tail',
@@ -701,6 +701,78 @@ describe('DashboardLiveStore', () => {
         'live-user-copy'
       ],
     ).toBeUndefined();
+  });
+
+  it('retires a retained live overlay after the message becomes persisted', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    const content = [{ text: 'switch back while working', type: 'text' }];
+
+    store.hydrateSession({
+      ...sessionResponse(4),
+      entriesComplete: false,
+      history: { version: 1, start: 10, end: 11, hasOlder: true },
+      entries: [
+        {
+          type: 'message',
+          id: 'persisted-older',
+          message: { role: 'assistant', content: 'older', timestamp: 100 },
+        },
+      ],
+      active: {
+        pendingInteractions: [],
+        messages: [
+          {
+            messageId: 'live-user-copy',
+            role: 'user',
+            content,
+            timestamp: '123',
+          },
+        ],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: false,
+    } as AuthoritativeSessionSnapshot);
+
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['persisted-older', 'live-user-copy']);
+
+    store.hydrateSession({
+      ...sessionResponse(5),
+      entriesComplete: true,
+      history: { version: 1, start: 10, end: 12, hasOlder: true },
+      entries: [
+        {
+          type: 'message',
+          id: 'persisted-older',
+          message: { role: 'assistant', content: 'older', timestamp: 100 },
+        },
+        {
+          type: 'message',
+          id: 'persisted-user',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'switch back while working' }],
+            timestamp: 123,
+          },
+        },
+      ],
+      active: {
+        pendingInteractions: [],
+        messages: [],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: false,
+    } as AuthoritativeSessionSnapshot);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['persisted-older', 'persisted-user']);
+    expect(projection?.items['live-user-copy']).toBeUndefined();
   });
 
   it('hydrates older active messages and tools before newer persisted history', () => {
