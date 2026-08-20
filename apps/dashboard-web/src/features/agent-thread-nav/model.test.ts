@@ -137,6 +137,16 @@ describe('agent thread view model', () => {
     expect(hiddenAgentThreadRowCount([...active, ...history], visible)).toBe(1);
   });
 
+  it('keeps the selected dormant thread visible past the history bound', () => {
+    const history = Array.from({ length: 3 }, (_, index) =>
+      row(`old-${index}`, 'Dashboard', 'dormant'),
+    );
+
+    expect(
+      boundedAgentThreadRows(history, 1, 'old-2').map(({ id }) => id),
+    ).toEqual(['old-0', 'old-2']);
+  });
+
   it('groups rows by workspace identity and names other workspaces separately', () => {
     const rows = [
       row('one', 'Dashboard', 'working', 'workspace-1'),

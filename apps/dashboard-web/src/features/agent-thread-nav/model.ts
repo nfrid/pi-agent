@@ -119,13 +119,18 @@ export function filterAgentThreadRows(
 export function boundedAgentThreadRows(
   rows: readonly AgentThreadRow[],
   historyLimit = MAX_VISIBLE_HISTORY_THREADS,
+  selectedSessionId?: string,
 ): AgentThreadRow[] {
   const active = rows.filter((row) => !isInactiveThread(row));
   const history = rows.filter(isInactiveThread);
-  return [
-    ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
-    ...history.slice(0, Math.max(0, historyLimit)),
-  ];
+  const visibleHistory = history.slice(0, Math.max(0, historyLimit));
+  const selected = selectedSessionId
+    ? history.find((row) => row.id === selectedSessionId)
+    : undefined;
+  if (selected && !visibleHistory.some((row) => row.id === selected.id)) {
+    visibleHistory.push(selected);
+  }
+  return [...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS), ...visibleHistory];
 }
 
 export function hiddenAgentThreadRowCount(

@@ -19,6 +19,7 @@ type RuntimeLifecycleActionsProps = {
   runtime: RuntimeSnapshot;
   title: string;
   rowClassName: string;
+  rowActions?: ReactNode;
   children: (threadProps?: RuntimeLifecycleThreadProps) => ReactNode;
 };
 
@@ -26,6 +27,7 @@ export function RuntimeLifecycleActions({
   runtime,
   title,
   rowClassName,
+  rowActions,
   children,
 }: RuntimeLifecycleActionsProps) {
   const navigate = useNavigate();
@@ -58,6 +60,7 @@ export function RuntimeLifecycleActions({
     return (
       <div ref={rowRef} className={rowClassName}>
         {children()}
+        {rowActions}
       </div>
     );
   }
@@ -95,6 +98,7 @@ export function RuntimeLifecycleActions({
   return (
     <div ref={rowRef} className={rowClassName}>
       {children(threadProps)}
+      {rowActions}
       {renderMenu(
         <>
           {availability.canStop && (
