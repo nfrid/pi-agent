@@ -34,6 +34,7 @@ import {
   acceptTranscriptEventOrdering,
   acceptTranscriptSnapshotOrdering,
   coverageWithPages as buildHistoryCoverage,
+  classifyHistoryPageWatermark,
   historyFromPages,
   installAuthoritativeTranscript,
   liveMessageIdentity,
@@ -248,6 +249,13 @@ function withOptimisticSessionTitle(
   };
 }
 
+interface PendingSessionHistory {
+  responses: readonly AuthoritativeSessionSnapshot[];
+  expectedSessionId: string;
+  generation: number;
+  sequence: number;
+}
+
 /**
  * The sole normalized live-state owner. It has no rendering or route logic;
  * React consumes it through useSyncExternalStore selectors.
@@ -260,6 +268,8 @@ export class DashboardLiveStore {
   private latestSessionRequestOrders = new Map<string, number>();
   /** Runtime snapshots omit transport metadata; retain it outside the wire model. */
   private runtimeReducerStates = new Map<string, RuntimeReducerState>();
+  /** Older pages wait behind their exact session-feed cut, never timestamps. */
+  private pendingSessionHistory = new Map<string, PendingSessionHistory>();
   private connectionRuntime?: DashboardConnectionRuntime;
   private deferredNotification?: ReturnType<typeof setTimeout>;
 
@@ -525,6 +535,7 @@ export class DashboardLiveStore {
 
   /** Fail closed to the newest authoritative window for an expected session. */
   resetSessionHistoryToNewest(sessionId: string): void {
+    this.pendingSessionHistory.delete(sessionId);
     const coverage = this.state.sessionHistoryCoverageById[sessionId];
     const current = this.state.transcriptsBySessionId[sessionId];
     if (!coverage || !current) {
@@ -532,6 +543,25 @@ export class DashboardLiveStore {
       return;
     }
     this.publish(this.resetCoverageToNewest(sessionId, current, coverage));
+  }
+
+  private flushPendingSessionHistory(sessionId: string): void {
+    const pending = this.pendingSessionHistory.get(sessionId);
+    if (!pending) return;
+    const sync = this.state.sessionSyncById[sessionId];
+    if (!sync?.sequenceKnown || sync.sequence < pending.sequence) return;
+    this.pendingSessionHistory.delete(sessionId);
+    if (
+      sync.generation !== pending.generation ||
+      sync.sequence !== pending.sequence
+    ) {
+      this.resetSessionHistoryToNewest(sessionId);
+      return;
+    }
+    this.prependSessionHistoryPages(
+      pending.responses,
+      pending.expectedSessionId,
+    );
   }
 
   private resetCoverageToNewest(
@@ -669,6 +699,8 @@ export class DashboardLiveStore {
     preserveSequence = false,
   ): void {
     const current = this.state.sessionSyncById[sessionId];
+    if (current && current.generation !== generation)
+      this.pendingSessionHistory.delete(sessionId);
     this.updateDomain('session', sessionId, {
       status: cached && current ? 'cached' : 'synchronizing',
       generation,
@@ -711,6 +743,7 @@ export class DashboardLiveStore {
       sequenceKnown: true,
       error: undefined,
     });
+    this.flushPendingSessionHistory(sessionId);
   }
 
   failSessionSync(sessionId: string, error: string): void {
@@ -904,6 +937,7 @@ export class DashboardLiveStore {
       this.resetSessionHistoryToNewest(expectedSessionId);
       return false;
     }
+    this.pendingSessionHistory.delete(expectedSessionId);
     const projection = this.hydrateSession(response, {
       replace: true,
       expectedSessionId,
@@ -1277,7 +1311,7 @@ export class DashboardLiveStore {
       this.resetSessionHistoryToNewest(sessionId);
       return false;
     }
-    return this.applyEventEnvelope(
+    const accepted = this.applyEventEnvelope(
       {
         cursor: sequence,
         emittedAt: Date.now(),
@@ -1295,6 +1329,8 @@ export class DashboardLiveStore {
       },
       { sessionId, generation },
     );
+    if (accepted) this.flushPendingSessionHistory(sessionId);
+    return accepted;
   }
 
   /** Install an authoritative session-feed snapshot. */
@@ -1470,9 +1506,9 @@ export class DashboardLiveStore {
   }
 
   /**
-   * Validate and atomically prepend one or more pages. Callers may fetch a
-   * continuation chain, but no page is published until the whole chain is
-   * proven contiguous.
+   * Validate and atomically prepend one or more pages. A page ahead of the
+   * applied session-feed sequence is parked and published exactly when that
+   * watermark is reached. Continuation chains publish only as one unit.
    */
   prependSessionHistoryPages(
     responses: readonly AuthoritativeSessionSnapshot[],
@@ -1485,6 +1521,29 @@ export class DashboardLiveStore {
     const current = this.state.transcriptsBySessionId[sessionId];
     const coverage = this.state.sessionHistoryCoverageById[sessionId];
     if (!current || !coverage) return undefined;
+    const pending = this.pendingSessionHistory.get(sessionId);
+    const resumingPending = pending?.responses === responses;
+    if (resumingPending) this.pendingSessionHistory.delete(sessionId);
+    else {
+      const watermark = classifyHistoryPageWatermark(
+        this.state.sessionSyncById[sessionId],
+        responses,
+      );
+      if (watermark.status === 'ahead') {
+        const sync = this.state.sessionSyncById[sessionId];
+        this.pendingSessionHistory.set(sessionId, {
+          responses,
+          expectedSessionId: sessionId,
+          generation: sync?.generation ?? this.generation,
+          sequence: watermark.sequence,
+        });
+        return current;
+      }
+      if (watermark.status !== 'ready') {
+        this.resetSessionHistoryToNewest(sessionId);
+        return undefined;
+      }
+    }
     const serverId = this.state.serverId;
     const seenRanges = new Set(
       coverage.pages.map((page) => `${page.start}:${page.end}`),
@@ -1704,6 +1763,7 @@ export class DashboardLiveStore {
   clearServer(): void {
     this.generation += 1;
     this.latestSessionRequestOrders.clear();
+    this.pendingSessionHistory.clear();
     this.publish(emptyState());
   }
 
@@ -1758,6 +1818,7 @@ export class DashboardLiveStore {
   }
 
   evictSessionProjection(sessionId: string): void {
+    this.pendingSessionHistory.delete(sessionId);
     const sessionSnapshotsById = { ...this.state.sessionSnapshotsById };
     const sessionSyncById = { ...this.state.sessionSyncById };
     const transcriptsBySessionId = { ...this.state.transcriptsBySessionId };

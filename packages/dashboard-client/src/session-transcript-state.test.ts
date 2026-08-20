@@ -1,9 +1,13 @@
 import { hydrateTranscript } from '@pi-dashboard/domain';
-import type { DashboardEventEnvelope } from '@pi-dashboard/protocol';
+import type {
+  AuthoritativeSessionSnapshot,
+  DashboardEventEnvelope,
+} from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   acceptTranscriptEventOrdering,
   acceptTranscriptSnapshotOrdering,
+  classifyHistoryPageWatermark,
   mergePrependedTranscript,
   reduceSessionTranscriptEvent,
 } from './session-transcript-state.js';
@@ -27,6 +31,28 @@ describe('session transcript state', () => {
       accepted: false,
       reason: 'generation',
     });
+  });
+
+  it('classifies exact, ahead, stale, and incoherent history cuts', () => {
+    const current = { generation: 3, sequence: 7, sequenceKnown: true };
+    const response = (cursor: number) =>
+      ({ cursor }) as AuthoritativeSessionSnapshot;
+
+    expect(classifyHistoryPageWatermark(current, [response(7)])).toEqual({
+      status: 'ready',
+      sequence: 7,
+    });
+    expect(classifyHistoryPageWatermark(current, [response(8)])).toEqual({
+      status: 'ahead',
+      sequence: 8,
+    });
+    expect(classifyHistoryPageWatermark(current, [response(6)])).toEqual({
+      status: 'stale',
+      sequence: 6,
+    });
+    expect(
+      classifyHistoryPageWatermark(current, [response(7), response(8)]),
+    ).toEqual({ status: 'incoherent' });
   });
 
   it('allows an authoritative snapshot to establish a lower sequence', () => {

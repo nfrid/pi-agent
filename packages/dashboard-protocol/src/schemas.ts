@@ -1751,6 +1751,7 @@ export const AuthoritativeSessionSnapshotSchema = Type.Object(
     history: Type.Optional(SessionHistorySchema),
     entriesComplete: Type.Boolean(),
     serverId: IdentifierSchema,
+    /** Exact session-feed sequence at which history and the live overlay were read. */
     cursor: Type.Integer({ minimum: 0 }),
     runtimeEpoch: Type.Optional(IdentifierSchema),
     runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),

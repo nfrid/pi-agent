@@ -2399,6 +2399,7 @@ describe('DashboardLiveStore', () => {
     expect(
       store.getSnapshot().transcriptsBySessionId['session-1']?.order,
     ).toEqual(['newer-prompt', 'timestamp:100', 'old-tool']);
+    store.completeSessionSync('session-1', 3);
 
     expect(
       store.prependSessionHistory({
@@ -2538,6 +2539,179 @@ describe('DashboardLiveStore', () => {
         } as never),
       ).toBe(true);
     expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
+  });
+
+  it('parks an older page until its session-feed watermark is applied', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(5),
+          entries: [
+            {
+              type: 'message',
+              id: 'newer',
+              message: { role: 'assistant', content: 'newer' },
+            },
+          ],
+          history: {
+            version: 1,
+            start: 10,
+            end: 20,
+            hasOlder: true,
+            nextBefore: 'before-10',
+          },
+        },
+        5,
+        1,
+        true,
+      ),
+    ).toBe(true);
+
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(7),
+        entries: [
+          {
+            type: 'message',
+            id: 'older',
+            message: { role: 'user', content: 'older' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeDefined();
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['newer']);
+
+    expect(
+      store.acceptSessionEvent(
+        'session-1',
+        6,
+        {
+          event: { type: 'agent.settled', sessionId: 'session-1' },
+        },
+        1,
+      ),
+    ).toBe(true);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['newer']);
+    store.completeSessionSync('session-1', 7);
+
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['older', 'newer']);
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({ coveredStart: 0, coveredEnd: 20, pageCount: 2 });
+  });
+
+  it('discards a parked older page when an authoritative snapshot replaces it', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(5),
+          runtimeEpoch: 'epoch-1',
+          entries: [
+            {
+              type: 'message',
+              id: 'old-newest',
+              message: { role: 'assistant', content: 'old newest' },
+            },
+          ],
+          history: {
+            version: 1,
+            start: 10,
+            end: 20,
+            hasOlder: true,
+            nextBefore: 'before-10',
+          },
+        },
+        5,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(7),
+        entries: [
+          {
+            type: 'message',
+            id: 'parked-older',
+            message: { role: 'user', content: 'stale older branch' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeDefined();
+
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(8),
+          runtimeEpoch: 'epoch-2',
+          entries: [
+            {
+              type: 'message',
+              id: 'new-branch',
+              message: { role: 'assistant', content: 'new branch' },
+            },
+          ],
+          history: { version: 1, start: 0, end: 1, hasOlder: false },
+        },
+        8,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    store.completeSessionSync('session-1', 8);
+
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['new-branch']);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'parked-older'
+      ],
+    ).toBeUndefined();
+  });
+
+  it('rejects an older page behind the applied session-feed watermark', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(5),
+          history: {
+            version: 1,
+            start: 10,
+            end: 20,
+            hasOlder: true,
+            nextBefore: 'before-10',
+          },
+        },
+        5,
+        1,
+        true,
+      ),
+    ).toBe(true);
+
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(4),
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeUndefined();
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({ coveredStart: 10, coveredEnd: 20, pageCount: 1 });
   });
 
   it('rejects a gap in a known session-feed sequence', () => {

@@ -65,6 +65,29 @@ export interface TranscriptOrderingDecision {
   reason?: TranscriptOrderingRejection;
 }
 
+export type HistoryPageWatermarkDecision =
+  | { status: 'ready'; sequence: number }
+  | { status: 'ahead'; sequence: number }
+  | { status: 'stale'; sequence: number }
+  | { status: 'incoherent' };
+
+export function classifyHistoryPageWatermark(
+  current: TranscriptOrderingState | undefined,
+  responses: readonly AuthoritativeSessionSnapshot[],
+): HistoryPageWatermarkDecision {
+  const first = responses[0]?.cursor;
+  if (
+    first === undefined ||
+    responses.some((response) => response.cursor !== first)
+  )
+    return { status: 'incoherent' };
+  if (!current) return { status: 'ready', sequence: first };
+  if (!current.sequenceKnown || first > current.sequence)
+    return { status: 'ahead', sequence: first };
+  if (first < current.sequence) return { status: 'stale', sequence: first };
+  return { status: 'ready', sequence: first };
+}
+
 export function acceptTranscriptSnapshotOrdering(
   current: TranscriptOrderingState | undefined,
   sequence: number,
