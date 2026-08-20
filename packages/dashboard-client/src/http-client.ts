@@ -27,6 +27,7 @@ import {
   type Run,
   type SessionAdoptCommand,
   type SessionApiResponse,
+  type SessionThreadLink,
   type StartRuntimeMutationOutput,
   type StartRuntimeRequest,
   type StopRuntimeMutationOutput,
@@ -41,6 +42,7 @@ import {
   tryParseProtocolInfo,
   tryParseRuntimeCommandOutput,
   tryParseSessionApiResponse,
+  tryParseSessionThreadLinks,
   tryParseShellSnapshotResponse,
   tryParseThread,
   type UnpinThreadCommand,
@@ -683,6 +685,26 @@ export class DashboardHttpClient {
         body: JSON.stringify(command),
       },
     );
+  }
+
+  async listSessionThreadLinks(
+    signal?: AbortSignal,
+  ): Promise<SessionThreadLink[]> {
+    const value = await this.request<unknown>(
+      '/api/session-threads',
+      signal ? { signal } : {},
+    );
+    const links = tryParseSessionThreadLinks(value);
+    if (!links)
+      throw malformedOutput(
+        'Dashboard returned invalid session thread link data.',
+        value,
+      );
+    return links;
+  }
+
+  async sessionThreadLinks(signal?: AbortSignal): Promise<SessionThreadLink[]> {
+    return this.listSessionThreadLinks(signal);
   }
 
   async listThreads(

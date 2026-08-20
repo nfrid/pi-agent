@@ -232,6 +232,23 @@ export const ThreadSummarySchema = Type.Object(
 );
 export type ThreadSummary = Static<typeof ThreadSummarySchema>;
 
+/** Exact persisted identity join for an ordinary Pi session. */
+export const SessionThreadLinkSchema = Type.Object(
+  {
+    sessionId: IdentifierSchema,
+    threadId: IdentifierSchema,
+    archivedAt: Type.Optional(TimestampSchema),
+    pinnedAt: Type.Optional(TimestampSchema),
+    activeRunId: Type.Optional(IdentifierSchema),
+  },
+  { additionalProperties: false },
+);
+export type SessionThreadLink = Static<typeof SessionThreadLinkSchema>;
+export const SessionThreadLinksSchema = Type.Array(SessionThreadLinkSchema, {
+  maxItems: 4096,
+});
+export type SessionThreadLinks = Static<typeof SessionThreadLinksSchema>;
+
 /** Result returned by the repository/service lifecycle boundary. */
 export type ThreadLifecycleCommandResult = {
   readonly thread: Thread;

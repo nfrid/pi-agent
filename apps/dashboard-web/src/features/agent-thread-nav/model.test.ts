@@ -151,6 +151,55 @@ describe('agent thread view model', () => {
     ).toBeUndefined();
   });
 
+  it('uses exact links, rejects conflicting run identities, and treats online runtimes as active', () => {
+    const snapshot = {
+      runs: [
+        {
+          piSessionId: 'linked-session',
+          threadId: 'thread-linked',
+          status: 'settled',
+        },
+        {
+          piSessionId: 'conflict-session',
+          threadId: 'thread-old',
+          status: 'settled',
+        },
+      ],
+      runtimes: [
+        {
+          runtimeId: 'runtime-linked',
+          online: true,
+          liveState: 'working',
+          cwd: '/work/app',
+          session: { id: 'linked-session', entries: [] },
+        },
+      ],
+    } as never;
+    const links = [
+      {
+        sessionId: 'linked-session',
+        threadId: 'thread-linked',
+        archivedAt: 10,
+        pinnedAt: 20,
+      },
+      {
+        sessionId: 'conflict-session',
+        threadId: 'thread-new',
+      },
+    ];
+    expect(
+      durableThreadForSession(snapshot, 'linked-session', [], links),
+    ).toEqual({
+      threadId: 'thread-linked',
+      archivedAt: 10,
+      pinnedAt: 20,
+      hasActiveRun: true,
+    });
+    expect(
+      durableThreadForSession(snapshot, 'conflict-session', [], links),
+    ).toBeUndefined();
+  });
+
   it('keeps archived rows out of active/history and puts pinned rows first', () => {
     const pinned = {
       ...row('pinned', 'Dashboard'),

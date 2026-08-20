@@ -54,6 +54,7 @@ export const dashboardQueryKeys = {
   projects: () => ['dashboard', 'projects'] as const,
   checkouts: () => ['dashboard', 'checkouts'] as const,
   threads: () => ['dashboard', 'threads'] as const,
+  sessionThreadLinks: () => ['dashboard', 'session-threads'] as const,
   runs: () => ['dashboard', 'runs'] as const,
   project: (id: string) => ['dashboard', 'project', id] as const,
   checkout: (id: string) => ['dashboard', 'checkout', id] as const,
@@ -242,6 +243,17 @@ export function threadsQueryOptions(
 }
 
 export const threadListQueryOptions = threadsQueryOptions;
+
+export function sessionThreadLinksQueryOptions(client: DashboardHttpClient) {
+  return queryOptions({
+    queryKey: dashboardQueryKeys.sessionThreadLinks(),
+    queryFn: ({ signal }) => client.listSessionThreadLinks(signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+  });
+}
+
+export const sessionThreadsQueryOptions = sessionThreadLinksQueryOptions;
 
 export function threadQueryOptions(client: DashboardHttpClient, id: string) {
   return queryOptions({

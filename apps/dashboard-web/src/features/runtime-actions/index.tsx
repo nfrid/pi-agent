@@ -96,9 +96,16 @@ export function DurableThreadActions({
       else if (action === 'pin')
         await pin.mutateAsync({ threadId: thread.threadId });
       else await unpin.mutateAsync({ threadId: thread.threadId });
-      await queryClient
-        .invalidateQueries({ queryKey: dashboardQueryKeys.threads() })
-        .catch(() => undefined);
+      await Promise.all([
+        queryClient
+          .invalidateQueries({ queryKey: dashboardQueryKeys.threads() })
+          .catch(() => undefined),
+        queryClient
+          .invalidateQueries({
+            queryKey: dashboardQueryKeys.sessionThreadLinks(),
+          })
+          .catch(() => undefined),
+      ]);
       closeMenu();
     } catch (cause) {
       setError(`Unable to ${action} ${title}: ${errorMessage(cause)}`);

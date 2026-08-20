@@ -40,6 +40,176 @@ async function fixture() {
 }
 
 describe('SqliteOrchestrationRepository', () => {
+  it('creates sorted, idempotent no-run links without catalog bloat', async () => {
+    const value = await fixture();
+    const sessions = [
+      {
+        id: 'session-b',
+        file: '/sessions/b.jsonl',
+        cwd: '/repo',
+        updatedAt: 20,
+      },
+      {
+        id: 'session-a',
+        file: '/sessions/a.jsonl',
+        cwd: '/repo',
+        updatedAt: 10,
+      },
+    ];
+    const first = value.repository.ensureSessionThreadLinks(sessions);
+    expect(first.map((link) => link.sessionId)).toEqual([
+      'session-a',
+      'session-b',
+    ]);
+    expect(first).toEqual(
+      expect.arrayContaining([
+        {
+          sessionId: 'session-a',
+          threadId: expect.stringMatching(/^thread-session-/),
+        },
+        {
+          sessionId: 'session-b',
+          threadId: expect.stringMatching(/^thread-session-/),
+        },
+      ]),
+    );
+    expect(value.repository.listThreads()).toEqual([]);
+    expect(value.repository.threadSummaries()).toEqual([]);
+    expect(value.repository.listSessionThreadLinkRecords()).toMatchObject([
+      {
+        sessionId: 'session-a',
+        source: 'session-index',
+        sourceFile: '/sessions/a.jsonl',
+      },
+      {
+        sessionId: 'session-b',
+        source: 'session-index',
+        sourceFile: '/sessions/b.jsonl',
+      },
+    ]);
+    expect(value.repository.ensureSessionThreadLinks(sessions)).toEqual(first);
+    expect(value.repository.listRuns()).toEqual([]);
+    expect(
+      value.repository.listThreadEvents(first[0]?.threadId ?? ''),
+    ).toHaveLength(1);
+    value.db.close();
+  });
+
+  it('uses one exact existing run mapping and never joins by session metadata', async () => {
+    const value = await fixture();
+    const thread = value.repository.createThread({
+      id: 'exact-existing-thread',
+      projectId: value.project.id,
+      title: 'Existing durable thread',
+      checkoutId: value.checkout.id,
+      status: 'settled',
+    });
+    value.repository.createRun({
+      id: 'exact-existing-run',
+      threadId: thread.id,
+      initialPrompt: 'Existing prompt',
+      piSessionId: 'exact-existing-session',
+      status: 'settled',
+    });
+    const links = value.repository.ensureSessionThreadLinks([
+      {
+        id: 'exact-existing-session',
+        file: '/sessions/exact-existing.jsonl',
+        cwd: '/somewhere-with-a-similar-title',
+        title: 'Unrelated title',
+        updatedAt: 10,
+      },
+    ]);
+    expect(links).toEqual([
+      {
+        sessionId: 'exact-existing-session',
+        threadId: thread.id,
+      },
+    ]);
+    expect(value.repository.listThreads(value.project.id)).toHaveLength(1);
+    expect(value.repository.listRuns()).toHaveLength(1);
+    value.db.close();
+  });
+
+  it('promotes an auto-linked thread during adoption instead of duplicating it', async () => {
+    const value = await fixture();
+    const sourceFile = '/sessions/promote.jsonl';
+    const [link] = value.repository.ensureSessionThreadLinks([
+      {
+        id: 'promote-session',
+        file: sourceFile,
+        cwd: '/repo',
+        updatedAt: 10,
+      },
+    ]);
+    if (!link) throw new Error('Missing auto link.');
+    const result = value.repository.adoptSessionWithThreadAndRun(
+      'promote-command',
+      {
+        sessionSourceFile: sourceFile,
+        thread: {
+          id: 'new-thread-must-not-be-used',
+          projectId: value.project.id,
+          title: 'Promoted session',
+          checkoutId: value.checkout.id,
+        },
+        run: {
+          id: 'promoted-run',
+          initialPrompt: 'Imported prompt',
+          piSessionId: 'promote-session',
+          status: 'interrupted',
+        },
+      },
+    );
+    expect(result.thread.id).toBe(link.threadId);
+    expect(result.thread.projectId).toBe(value.project.id);
+    expect(
+      value.repository.getSessionThreadLink('promote-session'),
+    ).toMatchObject({
+      threadId: link.threadId,
+      sourceFile,
+    });
+    expect(value.repository.listRuns()).toHaveLength(1);
+    expect(value.repository.listThreads(value.project.id)).toHaveLength(1);
+    value.db.close();
+  });
+
+  it('rejects archive while a directly linked session runtime is online', async () => {
+    const value = await fixture();
+    const [link] = value.repository.ensureSessionThreadLinks([
+      {
+        id: 'online-session',
+        file: '/sessions/online.jsonl',
+        cwd: '/repo',
+        updatedAt: 10,
+      },
+    ]);
+    if (!link) throw new Error('Missing online link.');
+    value.db
+      .prepare(
+        `INSERT INTO runtime
+         (id,ownership,session_id,cwd,state,online,last_seen_at,snapshot_json)
+         VALUES (?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        'runtime-online',
+        'external',
+        'online-session',
+        '/repo',
+        'working',
+        1,
+        10,
+        '{}',
+      );
+    expect(() =>
+      value.repository.archiveThread('archive-online', link.threadId),
+    ).toThrow('online runtime');
+    expect(
+      value.repository.getThread(link.threadId)?.archivedAt,
+    ).toBeUndefined();
+    value.db.close();
+  });
+
   it('applies lifecycle controls atomically, orders pins, and replays receipts', async () => {
     const value = await fixture();
     const first = value.repository.createThread({

@@ -560,6 +560,8 @@ export class DashboardServerImpl implements DashboardServer {
       },
       listThreads: (projectId) =>
         this.application.orchestration.listThreads(projectId),
+      sessionThreadLinks: () =>
+        this.application.orchestration.sessionThreadLinks(),
       readThread: (threadId) => {
         const thread = this.application.orchestration.getThread(threadId);
         if (!thread) throw new Error(`Thread ${threadId} does not exist.`);
@@ -599,6 +601,11 @@ export class DashboardServerImpl implements DashboardServer {
       // scan before installing watchers, avoiding a scan-to-watcher gap.
       await this.refreshWorkspaces();
       await this.sessions.start(this.workspaces);
+      // Every indexed ordinary session gets its exact durable link before the
+      // HTTP listener opens. The repository sorts and makes this idempotent.
+      this.application.orchestrationService?.ensureSessionThreadLinks(
+        this.sessions.list(),
+      );
       if (this.httpHasStarted) await this.listenHttp();
       else {
         await this.app.listen({ port: this.port, host: this.host });
@@ -1283,6 +1290,11 @@ export class DashboardServerImpl implements DashboardServer {
     auxiliary = false,
   ): void {
     if (this.lifecycle !== 'started') return;
+    // Persist the identity before publishing metadata. A client receiving this
+    // delta can therefore immediately use the link projection for controls.
+    this.application.orchestrationService?.ensureSessionThreadLinks(
+      this.sessions.list(),
+    );
     this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
     if (!sessionId || (!auxiliary && !this.sessions.isAuxiliary(sessionId)))
       return;

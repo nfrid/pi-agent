@@ -38,6 +38,7 @@ import {
   parseSchema,
   parseSessionAdoptCommand,
   parseSessionApiResponse,
+  parseSessionThreadLinks,
   parseShellSnapshotRequest,
   parseShellSnapshotResponse,
   parseThreadLifecycleCommandResult,
@@ -56,6 +57,33 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates the exact session/thread projection without association fields elsewhere', () => {
+    expect(
+      parseSessionThreadLinks([
+        {
+          sessionId: 'session-1',
+          threadId: 'thread-1',
+          archivedAt: 10,
+          pinnedAt: 20,
+          activeRunId: 'run-1',
+        },
+      ]),
+    ).toEqual([
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        archivedAt: 10,
+        pinnedAt: 20,
+        activeRunId: 'run-1',
+      },
+    ]);
+    expect(() =>
+      parseSessionThreadLinks([
+        { sessionId: 'session-1', threadId: 'thread-1', extra: true },
+      ]),
+    ).toThrow();
+  });
+
   it('validates durable thread lifecycle commands and events strictly', () => {
     const thread = {
       id: 'thread-1',

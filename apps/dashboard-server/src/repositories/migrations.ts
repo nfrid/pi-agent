@@ -402,6 +402,142 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       }
     },
   },
+  {
+    version: 10,
+    name: 'durable-session-thread-links',
+    up(db) {
+      const projectExists = Boolean(
+        db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project'",
+          )
+          .get(),
+      );
+      const threadExists = Boolean(
+        db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='thread'",
+          )
+          .get(),
+      );
+      // A few test/repair ledgers record a migration as applied while
+      // omitting the orchestration foundation entirely. There is no safe
+      // link to create in that shape; let the ledger advance and retry only
+      // when the foundation exists.
+      if (!projectExists || !threadExists) return;
+      const projectColumns = columns(db, 'project');
+      if (!projectColumns.has('system_managed'))
+        db.exec(
+          'ALTER TABLE project ADD COLUMN system_managed INTEGER NOT NULL DEFAULT 0 CHECK (system_managed IN (0,1))',
+        );
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_thread_link (
+          session_id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL UNIQUE REFERENCES thread(id) ON DELETE RESTRICT,
+          source TEXT NOT NULL,
+          source_file TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS session_thread_link_thread
+          ON session_thread_link(thread_id);
+      `);
+
+      // One shared system project keeps ordinary session links valid without
+      // manufacturing a checkout or a run. It is omitted by all normal
+      // project/thread catalogues through `system_managed`.
+      const technicalProjectId = 'project-system-session-index';
+      const now = Date.now();
+      db.prepare(
+        `INSERT OR IGNORE INTO project
+         (id,title,root_path,repository_identity,default_base_branch,default_model_json,default_isolation,max_parallel_runs,status,created_at,updated_at,system_managed)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,1)`,
+      ).run(
+        technicalProjectId,
+        'System session links',
+        '/__pi_dashboard_session_links__',
+        null,
+        null,
+        null,
+        'main',
+        1,
+        'active',
+        now,
+        now,
+      );
+
+      // Backfill only an exact, file-backed run/session join. A session with
+      // multiple thread identities (or a thread used by multiple sessions)
+      // remains deliberately unmapped; startup link creation will handle it
+      // as a fresh no-run session instead of guessing.
+      const candidates = db
+        .prepare(
+          `SELECT r.pi_session_id AS session_id,r.thread_id,si.file AS source_file
+           FROM orchestration_run r
+           JOIN session_index si ON si.id=r.pi_session_id
+           WHERE r.pi_session_id IS NOT NULL
+           UNION
+           SELECT o.pi_session_id AS session_id,r.thread_id,si.file AS source_file
+           FROM orchestration_runtime o
+           JOIN orchestration_run r ON r.id=o.run_id
+           JOIN session_index si ON si.id=o.pi_session_id
+           WHERE o.pi_session_id IS NOT NULL`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      const bySession = new Map<
+        string,
+        { threadId: string; sourceFile: string }[]
+      >();
+      for (const row of candidates) {
+        const sessionId = String(row.session_id);
+        const value = {
+          threadId: String(row.thread_id),
+          sourceFile: String(row.source_file),
+        };
+        const list = bySession.get(sessionId) ?? [];
+        if (!list.some((item) => item.threadId === value.threadId))
+          list.push(value);
+        bySession.set(sessionId, list);
+      }
+      const byThread = new Map<string, string>();
+      const ambiguousThreads = new Set<string>();
+      for (const [sessionId, values] of bySession) {
+        if (values.length !== 1) continue;
+        const value = values[0];
+        if (!value) continue;
+        const prior = byThread.get(value.threadId);
+        if (prior !== undefined && prior !== sessionId) {
+          ambiguousThreads.add(value.threadId);
+          continue;
+        }
+        byThread.set(value.threadId, sessionId);
+      }
+      const insert = db.prepare(
+        `INSERT OR IGNORE INTO session_thread_link
+         (session_id,thread_id,source,source_file,created_at,updated_at)
+         VALUES (?,?,?,?,?,?)`,
+      );
+      for (const [sessionId, values] of bySession) {
+        if (values.length !== 1) continue;
+        const value = values[0];
+        if (
+          !value ||
+          ambiguousThreads.has(value.threadId) ||
+          byThread.get(value.threadId) !== sessionId
+        )
+          continue;
+        insert.run(
+          sessionId,
+          value.threadId,
+          'migration',
+          value.sourceFile,
+          now,
+          now,
+        );
+      }
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

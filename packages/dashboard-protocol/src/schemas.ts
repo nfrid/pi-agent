@@ -55,6 +55,8 @@ export type {
   ProjectSummary,
   Run,
   RunSummary,
+  SessionThreadLink,
+  SessionThreadLinks,
   Thread,
   ThreadSummary,
 } from './orchestration-contracts.js';
@@ -67,6 +69,8 @@ export {
   ProjectSummarySchema,
   RunSchema,
   RunSummarySchema,
+  SessionThreadLinkSchema,
+  SessionThreadLinksSchema,
   ThreadSchema,
   ThreadSummarySchema,
 } from './orchestration-contracts.js';

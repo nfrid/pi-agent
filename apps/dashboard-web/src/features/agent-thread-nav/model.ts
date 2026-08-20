@@ -3,6 +3,7 @@ import type {
   BrowserSnapshot,
   RuntimeSnapshot,
   SessionIndexEntry,
+  SessionThreadLink,
   Thread,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -60,23 +61,55 @@ export function isHistoryThread(row: AgentThreadRow): boolean {
 }
 
 /**
- * Join a Pi session to a durable thread only through the persisted run
- * identity. A session with conflicting durable thread identities is
- * deliberately left unmapped rather than guessed.
+ * Join a Pi session through the exact link projection, with the persisted run
+ * identity retained as a rollout fallback. Conflicting identities are left
+ * unmapped rather than guessed.
  */
 export function durableThreadForSession(
-  snapshot: Pick<BrowserSnapshot, 'runs'>,
+  snapshot: Pick<BrowserSnapshot, 'runs'> &
+    Partial<Pick<BrowserSnapshot, 'runtimes'>>,
   sessionId: string,
   threads: readonly Pick<Thread, 'id' | 'archivedAt' | 'pinnedAt'>[],
+  directLinks: readonly SessionThreadLink[] = [],
 ): DurableThreadMetadata | undefined {
   const runs = snapshot.runs ?? [];
-  const threadIds = new Set(
+  const runThreadIds = new Set(
     runs
       .filter((run) => run.piSessionId === sessionId)
       .map((run) => run.threadId),
   );
-  if (threadIds.size !== 1) return undefined;
-  const threadId = [...threadIds][0];
+  const direct = directLinks.filter((link) => link.sessionId === sessionId);
+  const directThreadIds = new Set(direct.map((link) => link.threadId));
+  if (directThreadIds.size > 1) return undefined;
+  const directLink = direct[0];
+  if (directLink) {
+    // Direct links are authoritative, but an old run projection that names a
+    // different thread is a conflict, never a reason to guess.
+    if ([...runThreadIds].some((threadId) => threadId !== directLink.threadId))
+      return undefined;
+    return {
+      threadId: directLink.threadId,
+      ...(directLink.archivedAt === undefined
+        ? {}
+        : { archivedAt: directLink.archivedAt }),
+      ...(directLink.pinnedAt === undefined
+        ? {}
+        : { pinnedAt: directLink.pinnedAt }),
+      hasActiveRun:
+        directLink.activeRunId !== undefined ||
+        runs.some(
+          (run) =>
+            run.threadId === directLink.threadId &&
+            ACTIVE_RUN_STATUSES.includes(run.status),
+        ) ||
+        (snapshot.runtimes ?? []).some(
+          (runtime) =>
+            runtime.session.id === sessionId && runtime.online !== false,
+        ),
+    };
+  }
+  if (runThreadIds.size !== 1) return undefined;
+  const threadId = [...runThreadIds][0];
   const thread = threads.find((candidate) => candidate.id === threadId);
   if (!thread) return undefined;
   return {
@@ -85,28 +118,40 @@ export function durableThreadForSession(
       ? {}
       : { archivedAt: thread.archivedAt }),
     ...(thread.pinnedAt === undefined ? {} : { pinnedAt: thread.pinnedAt }),
-    hasActiveRun: runs.some(
-      (run) =>
-        run.threadId === threadId && ACTIVE_RUN_STATUSES.includes(run.status),
-    ),
+    hasActiveRun:
+      runs.some(
+        (run) =>
+          run.threadId === threadId && ACTIVE_RUN_STATUSES.includes(run.status),
+      ) ||
+      (snapshot.runtimes ?? []).some(
+        (runtime) =>
+          runtime.session.id === sessionId && runtime.online !== false,
+      ),
   };
 }
 
 export function agentThreadRows(
   snapshot: BrowserSnapshot,
   durableThreads?: readonly Pick<Thread, 'id' | 'archivedAt' | 'pinnedAt'>[],
+  directLinks: readonly SessionThreadLink[] = [],
 ): AgentThreadRow[] {
-  const durableForSession = durableThreads
-    ? new Map(
-        [
-          ...snapshot.runtimes.map((runtime) => runtime.session.id),
-          ...snapshot.sessions.map((session) => session.id),
-        ].map((sessionId) => [
-          sessionId,
-          durableThreadForSession(snapshot, sessionId, durableThreads),
-        ]),
-      )
-    : undefined;
+  const durableForSession =
+    durableThreads !== undefined || directLinks.length > 0
+      ? new Map(
+          [
+            ...snapshot.runtimes.map((runtime) => runtime.session.id),
+            ...snapshot.sessions.map((session) => session.id),
+          ].map((sessionId) => [
+            sessionId,
+            durableThreadForSession(
+              snapshot,
+              sessionId,
+              durableThreads ?? [],
+              directLinks,
+            ),
+          ]),
+        )
+      : undefined;
   const workspaces = snapshot.workspaces;
   const sessionsById = new Map(
     snapshot.sessions.map((session) => [session.id, session]),

@@ -23,6 +23,14 @@ function context(): DashboardRouteContext {
       unread: [],
     }),
     workspaces: () => [],
+    sessionThreadLinks: () => [
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        pinnedAt: 20,
+        activeRunId: 'run-1',
+      },
+    ],
     refreshWorkspaces: async () => [],
     composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
@@ -67,6 +75,30 @@ function context(): DashboardRouteContext {
 }
 
 describe('Fastify dashboard route plugin', () => {
+  it('returns the exact persisted session/thread projection', async () => {
+    const app = Fastify();
+    apps.push(app);
+    await app.register(dashboardRoutes, { context: context() });
+    await app.ready();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/session-threads',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        pinnedAt: 20,
+        activeRunId: 'run-1',
+      },
+    ]);
+  });
+
   it('delegates restart IDs and workspace refresh through typed route boundaries', async () => {
     const app = Fastify();
     apps.push(app);

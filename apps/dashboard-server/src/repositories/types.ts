@@ -12,6 +12,7 @@ import type {
   RunSummary,
   RuntimeProvider,
   SessionIndexEntry,
+  SessionThreadLink,
   Thread,
   ThreadLifecycleCommandResult,
   ThreadLifecycleEvent,
@@ -130,9 +131,18 @@ export interface CreateThreadWithRunInput {
   run: Omit<CreateRunInput, 'threadId'> & { threadId?: string };
 }
 
+export interface SessionThreadLinkRecord extends SessionThreadLink {
+  source: string;
+  sourceFile: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface AdoptSessionWithThreadAndRunInput {
   thread: CreateThreadInput;
   run: Omit<CreateRunInput, 'threadId'> & { threadId?: string };
+  /** Exact SessionIndex file identity used by the link projection. */
+  sessionSourceFile?: string;
   runtime?: {
     runtimeId: string;
     piSessionId: string;
@@ -275,6 +285,16 @@ export interface OrchestrationRepository {
   clearRunError(id: string): Run;
   getRunByRuntimeId(runtimeId: string): Run | undefined;
   getRunByPiSessionId(piSessionId: string): Run | undefined;
+  getSessionThreadLink(sessionId: string): SessionThreadLinkRecord | undefined;
+  getSessionThreadLinkByThreadId(
+    threadId: string,
+  ): SessionThreadLinkRecord | undefined;
+  listSessionThreadLinkRecords(): SessionThreadLinkRecord[];
+  sessionThreadLinks(): SessionThreadLink[];
+  listSessionThreadLinks(): SessionThreadLink[];
+  ensureSessionThreadLinks(
+    sessions: readonly SessionIndexEntry[],
+  ): SessionThreadLink[];
   loadWorktreeRecord(checkoutId: string): WorktreeRecord | undefined;
   writeWorktreeRecord(checkoutId: string, record: WorktreeRecord): void;
   deleteWorktreeRecord(checkoutId: string): void;
