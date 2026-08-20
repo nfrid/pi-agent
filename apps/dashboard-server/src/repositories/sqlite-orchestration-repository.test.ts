@@ -76,7 +76,8 @@ describe('SqliteOrchestrationRepository', () => {
       },
     ];
     persistSessionIndex(value.db, sessions);
-    const first = value.repository.ensureSessionThreadLinks(sessions);
+    value.repository.ensureSessionThreadLinks(sessions);
+    const first = value.repository.sessionThreadLinks();
     expect(first.map((link) => link.sessionId)).toEqual([
       'session-a',
       'session-b',
@@ -107,11 +108,27 @@ describe('SqliteOrchestrationRepository', () => {
         sourceFile: '/sessions/b.jsonl',
       },
     ]);
-    expect(value.repository.ensureSessionThreadLinks(sessions)).toEqual(first);
+    value.repository.ensureSessionThreadLinks(sessions);
+    expect(value.repository.sessionThreadLinks()).toEqual(first);
     expect(value.repository.listRuns()).toEqual([]);
     expect(
       value.repository.listThreadEvents(first[0]?.threadId ?? ''),
     ).toHaveLength(1);
+    value.db.close();
+  });
+
+  it('ignores auxiliary session metadata without an exact source file', async () => {
+    const value = await fixture();
+    value.repository.ensureSessionThreadLinks([
+      {
+        id: 'auxiliary-session',
+        file: '',
+        cwd: '/repo',
+        updatedAt: 10,
+      },
+    ]);
+    expect(value.repository.listSessionThreadLinkRecords()).toEqual([]);
+    expect(value.repository.sessionThreadLinks()).toEqual([]);
     value.db.close();
   });
 
@@ -124,7 +141,8 @@ describe('SqliteOrchestrationRepository', () => {
       updatedAt: 10,
     };
     persistSessionIndex(value.db, [original]);
-    const [link] = value.repository.ensureSessionThreadLinks([original]);
+    value.repository.ensureSessionThreadLinks([original]);
+    const [link] = value.repository.sessionThreadLinks();
     if (!link) throw new Error('Missing original link.');
 
     const replacement = {
@@ -133,9 +151,7 @@ describe('SqliteOrchestrationRepository', () => {
       updatedAt: 20,
     };
     persistSessionIndex(value.db, [replacement]);
-    expect(value.repository.ensureSessionThreadLinks([replacement])).toEqual(
-      [],
-    );
+    value.repository.ensureSessionThreadLinks([replacement]);
     expect(value.repository.sessionThreadLinks()).toEqual([]);
     expect(value.repository.getSessionThreadLink(original.id)).toMatchObject({
       threadId: link.threadId,
@@ -171,7 +187,8 @@ describe('SqliteOrchestrationRepository', () => {
       },
     ];
     persistSessionIndex(value.db, sessions);
-    const links = value.repository.ensureSessionThreadLinks(sessions);
+    value.repository.ensureSessionThreadLinks(sessions);
+    const links = value.repository.sessionThreadLinks();
     expect(links).toEqual([
       {
         sessionId: 'exact-existing-session',
@@ -195,7 +212,8 @@ describe('SqliteOrchestrationRepository', () => {
       },
     ];
     persistSessionIndex(value.db, sessions);
-    const [link] = value.repository.ensureSessionThreadLinks(sessions);
+    value.repository.ensureSessionThreadLinks(sessions);
+    const [link] = value.repository.sessionThreadLinks();
     if (!link) throw new Error('Missing auto link.');
     const result = value.repository.adoptSessionWithThreadAndRun(
       'promote-command',
@@ -240,7 +258,8 @@ describe('SqliteOrchestrationRepository', () => {
       },
     ];
     persistSessionIndex(value.db, sessions);
-    const [link] = value.repository.ensureSessionThreadLinks(sessions);
+    value.repository.ensureSessionThreadLinks(sessions);
+    const [link] = value.repository.sessionThreadLinks();
     if (!link) throw new Error('Missing online link.');
     value.db
       .prepare(

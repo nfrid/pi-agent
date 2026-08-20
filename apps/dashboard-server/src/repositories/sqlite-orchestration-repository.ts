@@ -731,25 +731,28 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return this.sessionThreadLinks();
   }
 
-  ensureSessionThreadLinks(
-    sessions: readonly SessionIndexEntry[],
-  ): SessionThreadLink[] {
-    return this.withTransaction(() => {
-      const ordered = [...sessions].sort((left, right) =>
-        left.id.localeCompare(right.id),
-      );
+  ensureSessionThreadLinks(sessions: readonly SessionIndexEntry[]): void {
+    const ordered = [...sessions]
+      .filter((session) => session.file.length > 0)
+      .sort((left, right) => left.id.localeCompare(right.id));
+    // Appends to an already-linked session are the hot path. Avoid taking a
+    // write transaction or rebuilding the full public projection for them.
+    const pending = ordered.filter(
+      (session) => this.getSessionThreadLink(session.id) === undefined,
+    );
+    if (pending.length === 0) return;
+
+    this.withTransaction(() => {
       const now = Date.now();
       const insertLink = this.db.prepare(
         `INSERT INTO session_thread_link
          (session_id,thread_id,source,source_file,created_at,updated_at)
          VALUES (?,?,?,?,?,?)`,
       );
-      for (const session of ordered) {
-        const existing = this.getSessionThreadLink(session.id);
-        // Session IDs are not enough to prove identity when an index file was
-        // replaced or reused. Preserve the old durable record but quarantine
-        // it from the public exact-link projection.
-        if (existing) continue;
+      for (const session of pending) {
+        // Recheck after obtaining the write lock. A different callback may
+        // have admitted this exact identity while this call was waiting.
+        if (this.getSessionThreadLink(session.id)) continue;
         const candidateRows = this.db
           .prepare(
             `SELECT DISTINCT r.thread_id
@@ -846,7 +849,6 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           if (!String(error).toLowerCase().includes('constraint')) throw error;
         }
       }
-      return this.sessionThreadLinks();
     });
   }
 

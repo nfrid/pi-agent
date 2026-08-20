@@ -8,7 +8,6 @@ import type {
   Run,
   SessionAdoptCommand,
   SessionIndexEntry,
-  SessionThreadLink,
   Thread,
 } from '@pi-dashboard/protocol';
 import {
@@ -135,10 +134,8 @@ export class OrchestrationService implements OrchestrationHost {
     void drainLifecycle(this);
   }
 
-  ensureSessionThreadLinks(
-    sessions: readonly SessionIndexEntry[],
-  ): SessionThreadLink[] {
-    return this.repository.ensureSessionThreadLinks(sessions);
+  ensureSessionThreadLinks(sessions: readonly SessionIndexEntry[]): void {
+    this.repository.ensureSessionThreadLinks(sessions);
   }
 
   async stop(): Promise<void> {

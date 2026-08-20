@@ -560,8 +560,14 @@ export class DashboardServerImpl implements DashboardServer {
       },
       listThreads: (projectId) =>
         this.application.orchestration.listThreads(projectId),
-      sessionThreadLinks: () =>
-        this.application.orchestration.sessionThreadLinks(),
+      sessionThreadLinks: () => {
+        const indexedSessionIds = new Set(
+          this.sessions.list().map((session) => session.id),
+        );
+        return this.application.orchestration
+          .sessionThreadLinks()
+          .filter((link) => indexedSessionIds.has(link.sessionId));
+      },
       readThread: (threadId) => {
         const thread = this.application.orchestration.getThread(threadId);
         if (!thread) throw new Error(`Thread ${threadId} does not exist.`);
@@ -1293,10 +1299,11 @@ export class DashboardServerImpl implements DashboardServer {
     // Persist the identity before publishing metadata. Scoped watcher events
     // adopt only their exact session; unscoped refreshes retain the bounded
     // full-index fallback used at startup.
-    const indexedSession = sessionId ? this.sessions.get(sessionId) : undefined;
+    const indexedSession =
+      sessionId && !auxiliary ? this.sessions.get(sessionId) : undefined;
     const sessionsToLink = indexedSession
       ? [indexedSession]
-      : sessionId
+      : sessionId || auxiliary
         ? []
         : this.sessions.list();
     if (sessionsToLink.length > 0)

@@ -45,6 +45,11 @@ export async function adoptSession(
     metadata = loaded.metadata;
     entries = loaded.entries;
   }
+  if (!metadata.file)
+    throw Object.assign(
+      new Error('Auxiliary sessions cannot be adopted as durable threads.'),
+      { code: 'session-link-conflict' },
+    );
   const assigned = host.repository.getRunByPiSessionId(sessionId);
   if (assigned)
     throw Object.assign(new Error('The session is already assigned.'), {

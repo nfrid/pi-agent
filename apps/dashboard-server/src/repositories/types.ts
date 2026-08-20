@@ -292,9 +292,7 @@ export interface OrchestrationRepository {
   listSessionThreadLinkRecords(): SessionThreadLinkRecord[];
   sessionThreadLinks(): SessionThreadLink[];
   listSessionThreadLinks(): SessionThreadLink[];
-  ensureSessionThreadLinks(
-    sessions: readonly SessionIndexEntry[],
-  ): SessionThreadLink[];
+  ensureSessionThreadLinks(sessions: readonly SessionIndexEntry[]): void;
   loadWorktreeRecord(checkoutId: string): WorktreeRecord | undefined;
   writeWorktreeRecord(checkoutId: string, record: WorktreeRecord): void;
   deleteWorktreeRecord(checkoutId: string): void;

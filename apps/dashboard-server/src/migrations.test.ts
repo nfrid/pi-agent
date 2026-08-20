@@ -47,6 +47,38 @@ describe('migration metadata', () => {
     ]);
   });
 
+  it('does not record v10 when the orchestration foundation is missing', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec(`
+        CREATE TABLE schema_migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          applied_at INTEGER NOT NULL
+        );
+        INSERT INTO schema_migrations (version,name,applied_at)
+        VALUES
+          (1,'base-dashboard-metadata',1),
+          (2,'managed-launch-credentials',2),
+          (3,'durable-orchestration-foundation',3),
+          (4,'durable-worktree-records-and-project-identity',4),
+          (5,'project-scoped-checkout-branches',5),
+          (6,'managed-launch-mode',6),
+          (7,'worktree-owner-projection',7),
+          (8,'reconcile-worktree-owner-and-command-receipts',8),
+          (9,'durable-thread-lifecycle-projection',9);
+      `);
+      expect(() => runMigrations(db)).toThrow(
+        'Durable session links require the orchestration foundation.',
+      );
+      expect(
+        db.prepare('SELECT 1 FROM schema_migrations WHERE version=10').get(),
+      ).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it('creates the link ledger and backfills only exact run/session joins', () => {
     const db = new DatabaseSync(':memory:');
     try {
@@ -135,7 +167,7 @@ describe('migration metadata', () => {
           (runtime_id,workspace_id,tmux_session,tmux_window_id,tmux_pane_id,launched_at)
           VALUES ('old-runtime','workspace','sesh','@1','%1',1);
       `);
-      runMigrations(db);
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 6));
       expect(db.prepare('SELECT mode FROM managed_launch').get()).toEqual({
         mode: 'write',
       });

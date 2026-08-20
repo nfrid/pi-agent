@@ -420,11 +420,12 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           )
           .get(),
       );
-      // A few test/repair ledgers record a migration as applied while
-      // omitting the orchestration foundation entirely. There is no safe
-      // link to create in that shape; let the ledger advance and retry only
-      // when the foundation exists.
-      if (!projectExists || !threadExists) return;
+      // Never record a successful v10 migration without its required schema;
+      // a repaired foundation must be able to retry this migration later.
+      if (!projectExists || !threadExists)
+        throw new Error(
+          'Durable session links require the orchestration foundation.',
+        );
       const projectColumns = columns(db, 'project');
       if (!projectColumns.has('system_managed'))
         db.exec(
