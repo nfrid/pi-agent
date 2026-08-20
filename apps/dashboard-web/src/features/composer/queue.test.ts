@@ -25,7 +25,6 @@ function runtimeWithQueue(
     cwd: '/tmp',
     liveState: 'working',
     online: true,
-    pendingInteractions: [],
     session: { id: 'session-1', entries: [] },
     queueDrafts,
   } as RuntimeSnapshot;

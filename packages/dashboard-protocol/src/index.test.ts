@@ -511,7 +511,6 @@ describe('dashboard protocol', () => {
               cwd: '/tmp',
               liveState: 'working',
               session: { id: 'session-1', entries: [{ type: 'message' }] },
-              pendingInteractions: [],
             },
           ],
         },
@@ -524,7 +523,6 @@ describe('dashboard protocol', () => {
       serverId: 'server-1',
       cursor: 3,
       active: {
-        pendingInteractions: [],
         messages: [],
         tools: [],
         delegates: [],
@@ -685,7 +683,6 @@ describe('dashboard protocol', () => {
         cwd: '/tmp',
         liveState: 'idle',
         session: { id: 'session-1', entries: [] },
-        pendingInteractions: [],
         queueDrafts: Array.from(
           { length: MAX_QUEUE_DRAFTS + 1 },
           (_, index) => ({
@@ -822,7 +819,6 @@ describe('dashboard protocol', () => {
         cwd: '/tmp',
         liveState: 'compacting',
         session: { id: 'compacting-session', entries: [] },
-        pendingInteractions: [],
       }).liveState,
     ).toBe('compacting');
   });
@@ -844,7 +840,6 @@ describe('dashboard protocol', () => {
         cwd: '/tmp',
         liveState: 'idle',
         session: { id: 's', entries: [] },
-        pendingInteractions: [],
         capabilities: duplicate,
       }),
     ).toThrow('Duplicate capability ID');
@@ -878,7 +873,6 @@ describe('dashboard protocol', () => {
       cwd: '/tmp',
       liveState: 'idle',
       session: { id: 's', entries: [] },
-      pendingInteractions: [],
     };
     expect(
       isBridgeEvent({
@@ -936,12 +930,6 @@ describe('dashboard protocol', () => {
         entryId: 'compact-1',
       }),
     ).toBe(true);
-    expect(
-      isBridgeEvent({
-        type: 'interaction.resolved',
-        interactionId: 'i',
-      }),
-    ).toBe(false);
     expect(() =>
       parseFrame(
         JSON.stringify({
@@ -1042,7 +1030,6 @@ describe('dashboard protocol', () => {
         cwd: '/tmp',
         liveState: 'idle',
         session: { id: 'session-1', entries: [] },
-        pendingInteractions: [],
         extensionSurfaces: [surface],
       }),
     ).toMatchObject({ extensionSurfaces: [surface] });
@@ -1054,7 +1041,6 @@ describe('dashboard protocol', () => {
         cwd: '/tmp',
         liveState: 'idle',
         session: { id: 'session-1', entries: [] },
-        pendingInteractions: [],
         extensionSurfaces: Array.from(
           { length: MAX_RUNTIME_EXTENSION_SURFACES + 1 },
           (_, index) => ({
@@ -1087,7 +1073,6 @@ describe('dashboard protocol', () => {
         cwd: '/tmp',
         liveState: 'idle',
         session: { id: 'session-1', entries: [] },
-        pendingInteractions: [],
         composerCommands: commands,
       }).composerCommands,
     ).toEqual(commands);
@@ -1122,7 +1107,6 @@ describe('dashboard protocol', () => {
         cwd: '/tmp',
         liveState: 'idle',
         session: { id: 'session-1', entries: [] },
-        pendingInteractions: [],
         modelCatalog: [
           {
             provider: 'test',

@@ -275,7 +275,6 @@ export function DelegateHistorySurface({
     if (reconciliation.shouldInvalidate && unresolvedSettlements.length === 0)
       refreshCoordinator.refresh();
   }, [id, liveRows, historyQuery.data, refreshCoordinator]);
-  if (runtime?.pendingInteractions?.length) return null;
   const historyLoading = historyQuery.isPending && !historyQuery.data;
   const historyError = historyQuery.isError && !historyQuery.data;
   if (

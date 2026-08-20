@@ -68,7 +68,6 @@ function context(): DashboardRouteContext {
       serverId: 'generation-1',
       cursor: 8,
       active: {
-        pendingInteractions: [],
         messages: [],
         tools: [],
         delegates: [],
@@ -108,7 +107,6 @@ function context(): DashboardRouteContext {
     startRuntime: async () => ({}),
     commandRuntime: async () => ({}),
     stopRuntime: async () => undefined,
-    interaction: async () => ({}),
     markNotificationRead: () => undefined,
     markAllNotificationsRead: () => undefined,
     pushSubscribe: () => undefined,
@@ -185,7 +183,6 @@ async function realSessionSnapshotFixture() {
       entries: [],
       entriesComplete: false,
     },
-    pendingInteractions: [],
   };
   const socket = new PassThrough();
   registry.accept(socket as never);
@@ -266,11 +263,6 @@ describe('dashboard tRPC boundary', () => {
     const routeContext = context();
     const shellFeed = new ShellFeed();
     const sessionFeeds = new SessionFeedRegistry();
-    shellFeed.publishSemantic('interaction', 1, {
-      kind: 'remove',
-      runtimeId: 'runtime-1',
-      interactionId: 'interaction-1',
-    });
     routeContext.shellFeed = shellFeed;
     routeContext.sessionFeeds = sessionFeeds;
     sessionFeeds.setActive('session-1', true);
@@ -289,8 +281,8 @@ describe('dashboard tRPC boundary', () => {
     );
     expect(diagnostics.shell).toMatchObject({
       feed: 'shell',
-      sequence: 1,
-      replayCount: 1,
+      sequence: 0,
+      replayCount: 0,
       replayCountLimit: 256,
       queueCountLimit: 128,
       maxFrameBytes: 2 * 1024 * 1024,

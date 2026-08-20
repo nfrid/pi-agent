@@ -47,11 +47,7 @@ import {
   agentThreadRows,
   boundedAgentThreadRows,
 } from './features/agent-thread-nav';
-import {
-  interactionKeyAction,
-  selectedInteractionPreview,
-  visualViewportKeyboardInset,
-} from './features/session';
+import { visualViewportKeyboardInset } from './features/session';
 import { actionNeedsInput, paletteItems } from './routes/dashboard';
 
 describe('session control geometry', () => {
@@ -398,7 +394,6 @@ describe('command palette', () => {
       liveState: 'working',
       online: true,
       session: { id: `session-${runtimeId}`, title, entries: [] },
-      pendingInteractions: [],
       capabilities: {
         version: 1,
         capabilities: [],
@@ -730,42 +725,6 @@ describe('shared transcript projection web integration', () => {
       narration: 'announced',
     });
     expect(entries[0]?.text).toBeUndefined();
-  });
-});
-
-describe('ask-user keyboard contract', () => {
-  it('moves, numbers, submits, and cancels without submitting on navigation', () => {
-    expect(interactionKeyAction('ArrowDown', 0, 3)).toEqual({
-      type: 'move',
-      index: 1,
-    });
-    expect(interactionKeyAction('ArrowUp', 0, 3)).toEqual({
-      type: 'move',
-      index: 0,
-    });
-    expect(interactionKeyAction('2', 0, 3)).toEqual({
-      type: 'move',
-      index: 1,
-    });
-    expect(interactionKeyAction('Enter', 1, 3)).toEqual({
-      type: 'submit',
-      index: 1,
-    });
-    expect(interactionKeyAction('Escape', 1, 3)).toEqual({
-      type: 'cancel',
-    });
-    expect(interactionKeyAction('ArrowDown', 0, 0)).toBeUndefined();
-    expect(interactionKeyAction('Escape', 1, 3, true)).toBeUndefined();
-  });
-
-  it('uses the selected choice preview and ignores custom-answer rows', () => {
-    const choices = [
-      { label: 'Custom', value: 'custom', custom: true },
-      { label: 'First', value: 'first', preview: '# First' },
-      { label: 'Second', value: 'second', preview: '## Second' },
-    ];
-    expect(selectedInteractionPreview(choices, 0)).toBe('# First');
-    expect(selectedInteractionPreview(choices, 1)).toBe('## Second');
   });
 });
 

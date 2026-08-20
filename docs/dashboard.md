@@ -7,8 +7,8 @@ shell endpoint, or copy transcripts into its metadata database.
 
 ## Packages and applications
 
-- `extensions/remote-control` adapts Pi runtime events, commands, interactions,
-  capabilities, models, and thinking levels to the bounded Unix-socket protocol.
+- `extensions/remote-control` adapts Pi runtime events, commands, capabilities,
+  models, and thinking levels to the bounded Unix-socket protocol.
 - `packages/dashboard-protocol` owns the versioned wire schemas, parsers, limits,
   validation, and redaction rules.
 - `packages/dashboard-domain` owns framework-independent runtime and transcript
@@ -16,7 +16,7 @@ shell endpoint, or copy transcripts into its metadata database.
 - `packages/dashboard-client` owns authenticated HTTP, resumable SSE, token
   storage, query/mutation factories, and the browser live store.
 - `packages/extension-contributions` defines schema-first extension actions,
-  renderers, inspectors, and interactions. See
+  renderers, and inspectors. See
   [extension-contributions.md](extension-contributions.md).
 - `packages/activity-model` is the shared activity grouping/title model used by
   the Pi TUI and dashboard.
@@ -100,7 +100,7 @@ The application layer is split by responsibility:
 
 ```text
 application/
-  runtime-service       launch, restart, stop, commands, interactions, rename
+  runtime-service       launch, restart, stop, commands, rename
   session-service       session catalogue and transcript access
   workspace-service     Sesh catalogue and refresh persistence
   notification-service  runtime-derived notifications and push fan-out
@@ -167,7 +167,7 @@ The TanStack Router tree exposes:
 - `/new` — managed runtime launch.
 
 The UI supports launch/restart/stop, prompt/steer/follow-up input, image
-attachments, abort, model and thinking selection, session rename, interaction
+attachments, abort, model and thinking selection, and session rename.
 answer/cancel, workspace refresh, notifications, push subscription, capability
 actions, structured tool inspectors, and a keyboard-first command palette.
 Short transcripts retain normal document flow, while long transcripts are

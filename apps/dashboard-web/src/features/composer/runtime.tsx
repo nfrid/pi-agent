@@ -90,7 +90,6 @@ export function composerIsDisabled(
     !runtime ||
     runtime.online === false ||
     runtime.liveState === 'stopping' ||
-    (runtime.liveState === 'waiting' && !hasSettledBackground(runtime)) ||
-    runtime.pendingInteractions.length > 0
+    (runtime.liveState === 'waiting' && !hasSettledBackground(runtime))
   );
 }

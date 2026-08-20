@@ -145,7 +145,6 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
           title: 'A deliberately long session title that must wrap safely',
           entries: [],
         },
-        pendingInteractions: [],
       },
     ],
     workspaces: [
@@ -399,7 +398,6 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
           title: 'Durable session',
           entries: [],
         },
-        pendingInteractions: [],
       },
       {
         runtimeId: 'runtime-conflicting',
@@ -413,7 +411,6 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
           title: 'Conflicting session',
           entries: [],
         },
-        pendingInteractions: [],
       },
     ],
     workspaces: [],
@@ -600,7 +597,6 @@ test('runtime row lifecycle menu supports desktop, touch, and keyboard access', 
           title: 'Context menu session',
           entries: [],
         },
-        pendingInteractions: [],
       },
     ],
     workspaces: [],
@@ -818,7 +814,6 @@ test('session title supports reliable inline renaming', async ({ page }) => {
         liveState: 'idle',
         online: true,
         session: { id: session.id, title: session.title, entries: [] },
-        pendingInteractions: [],
       },
     ],
     workspaces: [],
@@ -926,7 +921,6 @@ test('command palette identifies the runtime before invoking repeated actions', 
     liveState: 'working' as const,
     online: true,
     session: { id: `session-${runtimeId}`, title, entries: [] },
-    pendingInteractions: [],
     capabilities: {
       version: 1 as const,
       capabilities: [],
@@ -1021,7 +1015,6 @@ test('session shell shows compaction progress', async ({ page }) => {
       entries: [],
       entriesComplete: true,
     },
-    pendingInteractions: [],
   } as const;
   const metadata = {
     id: 'session-compacting',
@@ -1110,7 +1103,6 @@ test('older active transcript events render before newer persisted history', asy
           liveState: 'working',
           online: true,
           session: { id: session.id, title: session.title, entries: [] },
-          pendingInteractions: [],
         },
       ],
       workspaces: [],
@@ -1139,7 +1131,6 @@ test('older active transcript events render before newer persisted history', asy
           runtimeId: 'runtime-active-chronology',
           runtimeEpoch: 'epoch-active-chronology',
           runtimeSeq: 2,
-          pendingInteractions: [],
           messages: [
             {
               messageId: 'active-older',
@@ -1212,7 +1203,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
             title: 'Loaded shell',
             entries: [],
           },
-          pendingInteractions: [],
         },
       ],
       workspaces: [
@@ -1506,7 +1496,6 @@ test('delayed command completion does not scroll a destination session', async (
             entries: [],
           },
           model: { provider: 'test', model: 'text', supportsImages: false },
-          pendingInteractions: [],
         },
       ],
       workspaces: [],
@@ -1525,7 +1514,6 @@ test('delayed command completion does not scroll a destination session', async (
           serverId: 'dashboard-delayed-command',
           cursor: 1,
           active: {
-            pendingInteractions: [],
             messages: [],
             tools: [],
             delegates: [],
@@ -1540,7 +1528,6 @@ test('delayed command completion does not scroll a destination session', async (
           serverId: 'dashboard-delayed-command',
           cursor: 1,
           active: {
-            pendingInteractions: [],
             messages: [],
             tools: [],
             delegates: [],
@@ -2035,7 +2022,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
           contextWindow: 272_000,
           percent: 50,
         },
-        pendingInteractions: [],
       },
     ],
     workspaces: [],
@@ -2232,7 +2218,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
             serverId: 'dashboard-dense-mobile',
             cursor: 1,
             active: {
-              pendingInteractions: [],
               messages: [],
               tools: [],
               delegates: [],
@@ -2835,7 +2820,6 @@ function phase6Capabilities() {
       },
       { id: 'activity-groups', version: '1', available: true },
       { id: 'runtime.pause-control', version: '1', available: true },
-      { id: 'interaction.ask_user', version: '1', available: true },
     ],
     manifests: [
       {
@@ -2919,77 +2903,7 @@ function phase6Capabilities() {
         ],
         renderers: [],
       },
-      {
-        id: 'ask-user',
-        version: '1',
-        actions: [
-          {
-            id: 'ask-user.answer',
-            title: 'Answer question',
-            inputSchema: {
-              type: 'object',
-              required: ['interactionId', 'answer'],
-              properties: {
-                interactionId: { type: 'string' },
-                answer: { type: 'string' },
-              },
-              additionalProperties: false,
-            },
-            availability: {
-              requires: ['interaction.ask_user'],
-              pendingInteraction: true,
-            },
-          },
-          {
-            id: 'ask-user.cancel',
-            title: 'Cancel question',
-            inputSchema: {
-              type: 'object',
-              required: ['interactionId'],
-              properties: { interactionId: { type: 'string' } },
-              additionalProperties: false,
-            },
-            availability: {
-              requires: ['interaction.ask_user'],
-              pendingInteraction: true,
-            },
-          },
-        ],
-        renderers: [],
-      },
     ],
-  };
-}
-
-function phase6Interaction(id: string, question: string) {
-  const choices = [
-    {
-      label: 'Yes',
-      value: 'yes',
-      preview: 'Use the **recommended** answer. [Preview docs](#preview-docs)',
-    },
-    {
-      label: 'No',
-      value: 'no',
-      preview: 'Keep the current behavior instead.',
-    },
-  ];
-  return {
-    id,
-    type: 'ask_user',
-    question,
-    choices,
-    allowCustom: false,
-    rendererId: 'ask-user.question',
-    viewModel: {
-      id,
-      question,
-      choices,
-      allowCustom: false,
-    },
-    answerActionId: 'ask-user.answer',
-    cancelActionId: 'ask-user.cancel',
-    createdAt: 1,
   };
 }
 
@@ -3041,7 +2955,6 @@ function phase6Entries() {
 function phase6Snapshot(
   overrides: {
     liveState?: string;
-    pendingInteractions?: unknown[];
     workspaces?: unknown[];
     unread?: unknown[];
     extensionSurfaces?: unknown[];
@@ -3058,7 +2971,7 @@ function phase6Snapshot(
         ownership: 'managed',
         pid: 42,
         cwd: '/tmp/project',
-        liveState: overrides.liveState ?? 'waiting',
+        liveState: overrides.liveState ?? 'working',
         online: true,
         session: { id: 's1', entries: [] },
         model: {
@@ -3082,10 +2995,6 @@ function phase6Snapshot(
           },
         ],
         thinkingLevels: ['off', 'low', 'medium', 'high'],
-        pendingInteractions: overrides.pendingInteractions ?? [
-          phase6Interaction('ask-1', 'Use the first answer?'),
-          phase6Interaction('ask-2', 'Use the second answer?'),
-        ],
         capabilities: phase6Capabilities(),
         ...(overrides.extensionSurfaces
           ? { extensionSurfaces: overrides.extensionSurfaces }
@@ -3292,18 +3201,14 @@ function phase6EditEntries(historyCount: number) {
 
 async function installPhase6Mocks(
   page: Page,
-  options: { entries?: unknown[]; pendingInteractions?: unknown[] } = {},
+  options: { entries?: unknown[] } = {},
 ) {
   const commands: Array<Record<string, unknown>> = [];
   const starts: Array<Record<string, unknown>> = [];
   const stops: Array<Record<string, unknown>> = [];
   const restarts: Array<Record<string, unknown>> = [];
   const initialFixture = {
-    snapshot: phase6Snapshot(
-      options.pendingInteractions === undefined
-        ? {}
-        : { pendingInteractions: options.pendingInteractions },
-    ),
+    snapshot: phase6Snapshot(),
     entries: options.entries ?? phase6Entries(),
   };
   await page.addInitScript((initial) => {
@@ -3344,18 +3249,21 @@ async function installPhase6Mocks(
           const sequence = nextSequence();
           let payload: Record<string, unknown>;
           if (value.type === 'snapshot') {
+            const suppliedSnapshot = value.snapshot as
+              | Record<string, unknown>
+              | undefined;
+            const snapshot =
+              suppliedSnapshot && Array.isArray(suppliedSnapshot.runtimes)
+                ? suppliedSnapshot
+                : (initial.snapshot as unknown as Record<string, unknown>);
             if (kind === 'shell')
-              latestSnapshot = value.snapshot as typeof initial.snapshot;
-            const snapshot = {
-              ...(value.snapshot as Record<string, unknown>),
-            };
+              latestSnapshot = snapshot as typeof initial.snapshot;
             const applicationCursor =
               typeof snapshot.cursor === 'number' ? snapshot.cursor : 1;
             const sessionRuntime = (
               (snapshot.runtimes as
                 | Array<{
                     session?: { id?: string };
-                    pendingInteractions?: unknown[];
                     extensionSurfaces?: Array<{
                       rendererId?: string;
                       viewModel?: { statuses?: Array<Record<string, unknown>> };
@@ -3443,8 +3351,6 @@ async function installPhase6Mocks(
                           : [],
                       entriesComplete: true,
                       active: {
-                        pendingInteractions:
-                          sessionRuntime?.pendingInteractions ?? [],
                         messages: [],
                         tools: [],
                         delegates: activeDelegates,
@@ -3596,8 +3502,6 @@ async function installPhase6Mocks(
             entries: initialFixture.entries,
             entriesComplete: true,
             active: {
-              pendingInteractions:
-                initialFixture.snapshot.runtimes[0]?.pendingInteractions ?? [],
               messages: [],
               tools: [],
               delegates: [],
@@ -3734,8 +3638,12 @@ async function installPhase6Mocks(
         undefined,
         { timeout: 5_000 },
       );
+      const record =
+        value.type === 'snapshot' && value.snapshot === undefined
+          ? { ...value, snapshot: phase6Snapshot() }
+          : value;
       return page.evaluate((record) => {
-        (
+        const phase6Stream = (
           window as unknown as {
             phase6Stream: {
               shell():
@@ -3752,27 +3660,10 @@ async function installPhase6Mocks(
         if (record.type === 'session-snapshot') {
           phase6Stream.sendSessionSnapshot({ ...record, type: 'snapshot' });
         } else if (record.type === 'snapshot') {
-          const runtimes = (
-            record.snapshot as { runtimes?: unknown[] } | undefined
-          )?.runtimes;
-          const pending = (
-            runtimes?.[0] as { pendingInteractions?: unknown[] } | undefined
-          )?.pendingInteractions;
-          if (pending?.length === 0) {
-            for (const interactionId of ['ask-1', 'ask-2'])
-              phase6Stream.session()?.send({
-                runtimeId: 'r1',
-                event: {
-                  type: 'interaction.resolved',
-                  interactionId,
-                  resolution: { kind: 'fixture' },
-                },
-              });
-          }
           phase6Stream.sendShellSnapshot(record);
           phase6Stream.sendSessionSnapshot(record);
         } else phase6Stream.session()?.send(record);
-      }, value);
+      }, record);
     },
     close: async () =>
       page.evaluate(() =>
@@ -3798,7 +3689,6 @@ test('activity header renders Markdown and proves float and sticky geometry @des
 }) => {
   await installPhase6Mocks(page, {
     entries: markdownActivityEntries(),
-    pendingInteractions: [],
   });
   await page.setViewportSize({ width: 960, height: 760 });
   await page.goto('/sessions/s1');
@@ -4104,7 +3994,6 @@ test('activity header preserves block-first Markdown semantics @desktop', async 
 }) => {
   await installPhase6Mocks(page, {
     entries: markdownActivityEntries({ blockFirst: true }),
-    pendingInteractions: [],
   });
   await page.setViewportSize({ width: 960, height: 760 });
   await page.goto('/sessions/s1');
@@ -4136,7 +4025,6 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
 }) => {
   const mocks = await installPhase6Mocks(page, {
     entries: repeatedActivityEntries(),
-    pendingInteractions: [],
   });
   await page.goto('/sessions/s1');
   const composer = page.locator('.composer');
@@ -4270,7 +4158,6 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
 async function assertLargeEditPreview(page: Page, historyCount: number) {
   const mocks = await installPhase6Mocks(page, {
     entries: phase6EditEntries(historyCount),
-    pendingInteractions: [],
   });
   await page.goto('/sessions/s1');
   const activity = page.getByRole('button', {
@@ -4439,7 +4326,8 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await page.keyboard.press('Control+K');
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
-  ).toHaveCount(0);
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.getByLabel('Thinking level').selectOption('high');
   await expect
     .poll(
@@ -4448,69 +4336,6 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
           .length,
     )
     .toBe(1);
-
-  const pendingDialog = page.getByRole('dialog', {
-    name: 'Pending questions',
-  });
-  await expect(pendingDialog).toHaveCount(1);
-  await expect(page.locator('.session-heading')).toBeVisible();
-  await expect(pendingDialog).toHaveAttribute('aria-modal', 'true');
-  const firstInteraction = page.getByRole('group', {
-    name: 'Use the first answer?',
-  });
-  await firstInteraction.focus();
-  await firstInteraction.press('ArrowDown');
-  await expect(
-    firstInteraction.getByText('Keep the current behavior instead.'),
-  ).toBeVisible();
-  await firstInteraction.press('ArrowUp');
-  const previewLink = firstInteraction.getByRole('link', {
-    name: 'Preview docs',
-  });
-  await previewLink.focus();
-  await expect(previewLink).toHaveAttribute('target', '_blank');
-  expect(
-    mocks.commands.filter(
-      (command) =>
-        command.type === 'action.invoke' &&
-        command.actionId === 'ask-user.answer',
-    ),
-  ).toHaveLength(0);
-  await firstInteraction.focus();
-  await firstInteraction.press('Enter');
-  await expect(
-    page.getByText('Answered from this dashboard.').first(),
-  ).toBeVisible();
-  await pendingDialog
-    .getByRole('button', { name: 'Cancel' })
-    .dispatchEvent('click');
-  await expect(page.getByText('Answered from this dashboard.')).toHaveCount(2);
-  await expect
-    .poll(
-      () =>
-        mocks.commands.filter(
-          (command) =>
-            command.type === 'action.invoke' &&
-            command.actionId === 'ask-user.answer',
-        ).length,
-    )
-    .toBe(1);
-  await expect
-    .poll(
-      () =>
-        mocks.commands.filter(
-          (command) =>
-            command.type === 'action.invoke' &&
-            command.actionId === 'ask-user.cancel',
-        ).length,
-    )
-    .toBe(1);
-  await mocks.emit({
-    type: 'snapshot',
-    snapshot: phase6Snapshot({ pendingInteractions: [] }),
-  });
-  await expect(pendingDialog.getByRole('group')).toHaveCount(0);
-  await expect(page.locator('.session-heading')).toBeVisible();
 
   const dockMarker = page.locator(
     '.transcript-minimap-marker[data-preview="Earlier history 1"]',
@@ -4606,7 +4431,6 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   await mocks.emit({
     type: 'snapshot',
-    snapshot: phase6Snapshot({ liveState: 'working', pendingInteractions: [] }),
   });
   const deliveryMode = page.getByRole('button', {
     name: 'Steer current work instead of following up later',
@@ -4649,7 +4473,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   ).toBe(false);
   await mocks.emit({
     type: 'snapshot',
-    snapshot: phase6Snapshot({ liveState: 'idle', pendingInteractions: [] }),
+    snapshot: phase6Snapshot({ liveState: 'idle' }),
   });
   const composerInput = page.getByLabel('Message Pi');
   await expect(composerInput).toBeEnabled();
@@ -4824,14 +4648,12 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     >),
     runtimeId: 'r-launched',
     liveState: 'working',
-    pendingInteractions: [],
     session: { id: 's-launched', entries: [] },
   };
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({
       runtimes: [launchedRuntime],
-      pendingInteractions: [],
     }),
   });
   await expect(page).toHaveURL(/\/sessions\/s-launched$/);
@@ -4840,7 +4662,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await page.goto('/sessions/s1');
   await mocks.emit({
     type: 'snapshot',
-    snapshot: phase6Snapshot({ runtimes: [], pendingInteractions: [] }),
+    snapshot: phase6Snapshot({ runtimes: [] }),
   });
   await page.getByRole('button', { name: 'Resume session' }).click();
   await expect(page.getByText('Starting agent…')).toBeVisible();
@@ -4853,7 +4675,6 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({
-      pendingInteractions: [],
       extensionSurfaces: [
         {
           id: 'tasks-1',

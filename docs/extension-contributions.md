@@ -7,9 +7,9 @@ host adapter; it is not a React component or a slash command.
 ## Adding a contribution
 
 1. Add a versioned `ExtensionManifest` next to the extension. Give every action,
-   renderer, inspector, and interaction a globally stable ID (`extension.id` is
-   a useful prefix). IDs must be unique within their dispatched category
-   (actions, renderers, inspectors, or interactions); the same ID in different
+   renderer, and inspector a globally stable ID (`extension.id` is a useful
+   prefix). IDs must be unique within their dispatched category (actions,
+   renderers, or inspectors); the same ID in different
    categories is intentional and allowed because dispatch namespaces are
    separate.
 2. Define every action input and every renderer view model with TypeBox. Set
@@ -42,12 +42,6 @@ capability/action/renderer IDs never execute or load code.
 
 These shims cover host APIs still missing as of Pi 0.84.1.
 
-* `extensions/ask-user/dialogs.ts` is the bounded RPC `select`/`input`
-  fallback. It loses previews because Pi RPC has no `custom()` payload;
-  remove it when Pi RPC exposes rich/custom dialog payloads. The separate
-  headless omission is removed only when Pi exposes a headless interaction API.
-  Broker answer and cancel do not require a shim and retain session scope,
-  timeout, and single-winner resolution.
 * `extensions/activity-groups/shim.ts` is used only after its exact installed
   component-method canary passes because Pi has no public
   `registerToolSequenceRenderer`. Remove the prototype patch and its canary

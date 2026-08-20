@@ -11,7 +11,6 @@ import {
   type BrowserSnapshot,
   type CheckoutSummary,
   type DelegateLiveRun,
-  type InteractionSnapshot,
   MAX_SHELL_INDEX_ITEMS,
   MAX_SHELL_SNAPSHOT_BYTES,
   MAX_TEXT,
@@ -214,40 +213,6 @@ export function projectShellUsage(value: unknown): ShellUsage | undefined {
   }
 }
 
-/** Project one interaction identically for shell snapshots and patches. */
-export function projectShellInteraction(
-  interaction: InteractionSnapshot,
-): InteractionSnapshot {
-  const bytes = (value: unknown) =>
-    Buffer.byteLength(JSON.stringify(value) ?? '');
-  const base = {
-    ...interaction,
-    choices: interaction.choices.slice(0, 128),
-  };
-  try {
-    if (bytes(base) <= MAX_SHELL_INTERACTION_BYTES) return base;
-  } catch {
-    // Fall through to the bounded representation.
-  }
-  const bounded = {
-    ...base,
-    question: interaction.question.slice(0, 4_096),
-    choices: base.choices.slice(0, 8).map((choice) => ({
-      ...choice,
-      label: choice.label.slice(0, 512),
-      value: choice.value.slice(0, 512),
-      ...(choice.description === undefined
-        ? {}
-        : { description: choice.description.slice(0, 256) }),
-      ...(choice.preview === undefined
-        ? {}
-        : { preview: choice.preview.slice(0, 512) }),
-    })),
-    viewModel: { truncated: true },
-  };
-  return bounded as InteractionSnapshot;
-}
-
 const MAX_SHELL_RUNTIME_BYTES = 256 * 1024;
 const MAX_SHELL_CATALOGUE_BYTES = 350_000;
 const SHELL_PROJECTION_DOMAINS = [
@@ -279,11 +244,6 @@ export function shellRuntime(
 ): RuntimeSnapshot {
   const compacted = compactPublicRuntime(runtime);
   let truncated = false;
-  let pendingInteractions = runtime.pendingInteractions
-    .slice(0, 128)
-    .map(projectShellInteraction);
-  if (runtime.pendingInteractions.length > pendingInteractions.length)
-    truncated = true;
   let extensionSurfaces = compacted.extensionSurfaces
     ?.slice(0, MAX_SHELL_SURFACES)
     .map((surface) => {
@@ -297,14 +257,11 @@ export function shellRuntime(
   const makeResult = (): RuntimeSnapshot =>
     ({
       ...compacted,
-      pendingInteractions,
       ...(extensionSurfaces === undefined ? {} : { extensionSurfaces }),
       ...(truncated ? { shellStateTruncated: true } : {}),
     }) as RuntimeSnapshot;
   while (Buffer.byteLength(JSON.stringify(makeResult()) ?? '') > maxBytes) {
-    if (pendingInteractions.length > 0)
-      pendingInteractions = pendingInteractions.slice(1);
-    else if (extensionSurfaces && extensionSurfaces.length > 0)
+    if (extensionSurfaces && extensionSurfaces.length > 0)
       extensionSurfaces = extensionSurfaces.slice(1);
     else {
       truncated = true;
@@ -334,7 +291,6 @@ export function projectShellArray<T>(
 
 const MAX_ACTIVE_ENTITIES = 256;
 const MAX_ACTIVE_BYTES = 512 * 1024;
-const MAX_SHELL_INTERACTION_BYTES = 32 * 1024;
 const MAX_SHELL_SURFACE_BYTES = 64 * 1024;
 const MAX_SHELL_SURFACES = 32;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,200}$/;
@@ -344,7 +300,6 @@ type ActiveTranscriptState = {
   runtimeEpoch: string;
   runtimeSeq: number;
   liveState: RuntimeSnapshot['liveState'];
-  pendingInteractions: readonly InteractionSnapshot[];
   projection: TranscriptProjection;
   truncated: boolean;
   /** Terminal lifecycle entities not yet observed in a persisted page. */
@@ -1052,7 +1007,6 @@ export class DashboardApplication {
         runtimeEpoch,
         runtimeSeq,
         liveState: change.snapshot.liveState,
-        pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
         projection: createTranscriptProjection(sessionId),
         truncated: false,
         unresolvedTerminalIds: [],
@@ -1067,7 +1021,6 @@ export class DashboardApplication {
       runtimeEpoch,
       runtimeSeq: runtimeSeq - 1,
       liveState: change.snapshot.liveState,
-      pendingInteractions: [],
       projection: createTranscriptProjection(sessionId),
       truncated: false,
       unresolvedTerminalIds: [],
@@ -1080,7 +1033,6 @@ export class DashboardApplication {
         runtimeEpoch,
         runtimeSeq,
         liveState: change.snapshot.liveState,
-        pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
         projection: createTranscriptProjection(sessionId),
         truncated: false,
         unresolvedTerminalIds: [],
@@ -1146,7 +1098,6 @@ export class DashboardApplication {
       runtimeEpoch,
       runtimeSeq,
       liveState: change.snapshot.liveState,
-      pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
       projection,
       truncated,
       unresolvedTerminalIds,
@@ -1193,16 +1144,6 @@ export class DashboardApplication {
         if (tool) tools.push(tool);
       }
     }
-    let pending = (
-      state?.pendingInteractions ??
-      runtime?.pendingInteractions ??
-      []
-    )
-      .slice(0, 128)
-      .map((interaction) => ({
-        ...interaction,
-        choices: [...interaction.choices],
-      }));
     const delegateProjection = runtime
       ? activeDelegateRuns(runtime)
       : { runs: [], truncated: false };
@@ -1212,25 +1153,10 @@ export class DashboardApplication {
       (state?.uncertain ?? false) ||
       unresolved.size > 0 ||
       delegateProjection.truncated;
-    if (
-      (state?.pendingInteractions.length ??
-        runtime?.pendingInteractions.length ??
-        0) > pending.length
-    )
-      truncated = true;
     const bytes = (value: unknown): number =>
       Buffer.byteLength(JSON.stringify(value) ?? '');
     while (
-      bytes({ messages, tools, delegates, pendingInteractions: pending }) >
-        MAX_ACTIVE_BYTES &&
-      pending.length > 0
-    ) {
-      pending = pending.slice(1);
-      truncated = true;
-    }
-    while (
-      bytes({ messages, tools, delegates, pendingInteractions: pending }) >
-        MAX_ACTIVE_BYTES &&
+      bytes({ messages, tools, delegates }) > MAX_ACTIVE_BYTES &&
       (delegates.length > 0 || tools.length > 0 || messages.length > 0)
     ) {
       if (delegates.length > 0) delegates = delegates.slice(1);
@@ -1247,7 +1173,6 @@ export class DashboardApplication {
         ? { runtimeSeq: state.runtimeSeq }
         : {}),
       ...(runtime ? { liveState: runtime.liveState } : {}),
-      pendingInteractions: pending,
       messages,
       tools,
       delegates,

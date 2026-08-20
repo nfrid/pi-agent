@@ -1000,32 +1000,6 @@ export class DashboardHttpClient {
     }
   }
 
-  async answerInteraction(
-    runtimeId: string,
-    interactionId: string,
-    answer: unknown,
-    commandId?: string,
-  ): Promise<unknown> {
-    return this.sendCommand(runtimeId, {
-      id: commandId ?? this.newCommandId('dashboard-interaction-answer'),
-      type: 'interaction.answer',
-      interactionId,
-      answer,
-    });
-  }
-
-  async cancelInteraction(
-    runtimeId: string,
-    interactionId: string,
-    commandId?: string,
-  ): Promise<unknown> {
-    return this.sendCommand(runtimeId, {
-      id: commandId ?? this.newCommandId('dashboard-interaction-cancel'),
-      type: 'interaction.cancel',
-      interactionId,
-    });
-  }
-
   async pushVapidPublicKey(): Promise<{ publicKey: string | null }> {
     return this.request('/api/push/vapid-public-key');
   }

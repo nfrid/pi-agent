@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InteractionBroker } from '../ask-user/broker';
 import {
   RUNTIME_ABORT_ACTION_ID,
   RUNTIME_SHUTDOWN_ACTION_ID,
@@ -46,7 +45,6 @@ describe('remote-control semantic lifecycle contribution', () => {
       dispatchDashboardCommand(
         {} as never,
         context,
-        new InteractionBroker(),
         {
           id: 'compact-1',
           type: 'action.invoke',
@@ -76,7 +74,6 @@ describe('remote-control semantic lifecycle contribution', () => {
       dispatchDashboardCommand(
         {} as never,
         context,
-        new InteractionBroker(),
         {
           id: 'compact-failure',
           type: 'action.invoke',

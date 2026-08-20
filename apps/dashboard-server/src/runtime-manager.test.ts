@@ -113,7 +113,6 @@ describe('runtime stopping', () => {
           cwd: '/tmp',
           liveState: 'idle',
           session: { id: 'ghost-session', entries: [] },
-          pendingInteractions: [],
         }),
         sendCommand: async () => {
           throw new Error('This extension ctx is stale.');
@@ -148,7 +147,6 @@ describe('managed runtime launch safety', () => {
     cwd: '/other',
     liveState: 'idle',
     session: { id: sessionId, entries: [] },
-    pendingInteractions: [],
   });
   const binding = (runtimeId: string) => ({
     runtimeId,
@@ -273,7 +271,6 @@ describe('managed runtime launch safety', () => {
       cwd: '/other',
       liveState: 'idle' as const,
       session: { id: 'opaque-session', entries: [] },
-      pendingInteractions: [],
     };
     const registry = {
       snapshots: () => [],

@@ -89,7 +89,6 @@ test('shows and inspects a persisted delegate in an offline session', async ({
     serverId: 'delegate-history-e2e',
     cursor: 0,
     active: {
-      pendingInteractions: [],
       messages: [],
       tools: [],
       delegates: [],

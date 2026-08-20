@@ -28,7 +28,6 @@ const snapshot = (): RuntimeSnapshot => ({
   cwd: '/tmp',
   liveState: 'idle',
   session: { id: 's', entries: [] },
-  pendingInteractions: [],
 });
 
 function envelope(

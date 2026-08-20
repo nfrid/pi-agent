@@ -78,28 +78,9 @@ describe('dashboard renderer registry', () => {
       'missing.renderer',
     );
     expect(unknown).toMatchObject({ props: { children: expect.anything() } });
-    const invalid = renderDashboardContribution('ask-user.question', {
-      question: 42,
-    });
-    expect(invalid).toMatchObject({
-      props: { children: expect.anything() },
-    });
   });
 
-  it('renders ask-user choices and activity group status chips', () => {
-    const askUser = renderToStaticMarkup(
-      renderDashboardContribution('ask-user.question', {
-        id: 'q1',
-        question: 'Continue?',
-        choices: ['Yes', 'No'],
-        allowCustom: true,
-        customLabel: 'Other',
-      }),
-    );
-    expect(askUser).toContain('Continue?');
-    expect(askUser).toContain('ask-user-choice');
-    expect(askUser).toContain('Other');
-
+  it('renders activity group status chips', () => {
     const activity = renderToStaticMarkup(
       renderDashboardContribution('activity-groups.activity', {
         id: 'group-1',

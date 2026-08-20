@@ -1,4 +1,4 @@
-/* Global shell contract: app chrome, forms, interaction dock, and markdown payloads. */
+/* Global shell contract: app chrome, forms, and markdown payloads. */
 .app {
   min-height: 100vh;
 }
@@ -71,8 +71,7 @@
   max-width: 500px;
   margin: 0 auto;
 }
-.auth-form input,
-.interaction input {
+.auth-form input {
   background: var(--bg-alt);
   color: var(--fg);
   border: 1px solid var(--line);
@@ -80,7 +79,6 @@
   width: 100%;
 }
 .auth-form button,
-.interaction form button,
 .composer > button {
   border: 1px solid var(--purple);
   background: var(--purple);
@@ -303,8 +301,7 @@ h2 {
   margin: 0 0 20px;
   font-size: 12px;
 }
-.notice,
-.interaction {
+.notice {
   padding: 16px;
   margin: 16px 0;
   border: 1px solid var(--orange);
@@ -326,48 +323,6 @@ h2 {
   box-shadow: 0 12px 36px #0008;
   font-size: 12px;
   pointer-events: none;
-}
-.interaction {
-  border-color: var(--orange);
-  background: #3b3028;
-  box-shadow: 0 0 22px #ffb86c18;
-}
-.interaction-dock {
-  position: fixed;
-  inset: 0;
-  z-index: 12;
-  display: grid;
-  place-items: end center;
-  padding: 72px 13px 202px;
-  overflow: hidden;
-  background: #18192399;
-  pointer-events: auto;
-}
-.session-page[data-tail-pending] .interaction-dock {
-  visibility: visible;
-}
-.interaction-dock .interaction {
-  width: min(1200px, 100%);
-  min-width: 0;
-  max-height: min(68vh, 620px);
-  margin: 0;
-  overflow-y: auto;
-  pointer-events: auto;
-  box-shadow:
-    0 16px 52px #000a,
-    0 0 28px #ffb86c26;
-}
-.interaction h2 {
-  color: var(--fg);
-  font-size: 19px;
-  margin: 5px 0 15px;
-}
-.interaction .eyebrow {
-  color: var(--orange);
-}
-.interaction-choice-layout {
-  display: grid;
-  gap: 14px;
 }
 .choices {
   display: grid;
@@ -410,29 +365,10 @@ h2 {
   margin-top: 3px;
   font-size: 11px;
 }
-.interaction-preview {
-  min-width: 0;
-  border: 1px solid #8f6d4d;
-  background: #28231f99;
-  padding: 11px;
-  overflow-wrap: anywhere;
-}
-.interaction-preview .eyebrow {
-  margin-bottom: 8px;
-}
-.interaction form,
 .composer {
   display: flex;
   gap: 8px;
   margin-top: 12px;
-}
-.interaction form input {
-  flex: 1;
-}
-.interaction .link-button {
-  color: var(--muted);
-  margin-top: 12px;
-  font-size: 11px;
 }
 .session-heading-actions {
   display: grid;

@@ -21,7 +21,6 @@ export const CUSTOM_TOOL_KIND_BY_NAME = {
   background: 'background',
   todo: 'todo',
   tasks: 'todo',
-  ask_user_question: 'ask_user',
 } as const;
 
 export type CustomToolName = keyof typeof CUSTOM_TOOL_KIND_BY_NAME;
@@ -286,36 +285,5 @@ export function delegateBranchesPresentation(
       typeof patchBudget === 'number' && Number.isFinite(patchBudget)
         ? patchBudget
         : undefined,
-  };
-}
-
-export type AskUserPresentation = {
-  question?: string;
-  choices: readonly string[];
-  allowCustom: boolean;
-  customLabel?: string;
-};
-
-export function askUserPresentation(args: unknown): AskUserPresentation {
-  const record = recordArgs(args);
-  const rawChoices = record?.choices;
-  const choices: string[] = [];
-  if (Array.isArray(rawChoices)) {
-    for (const choice of rawChoices) {
-      if (typeof choice === 'string' && choice.trim()) {
-        choices.push(choice.trim());
-        continue;
-      }
-      if (!choice || typeof choice !== 'object' || Array.isArray(choice))
-        continue;
-      const label = (choice as { label?: unknown }).label;
-      if (typeof label === 'string' && label.trim()) choices.push(label.trim());
-    }
-  }
-  return {
-    question: stringArg(args, 'question'),
-    choices,
-    allowCustom: record?.allowCustom !== false,
-    customLabel: stringArg(args, 'customLabel'),
   };
 }

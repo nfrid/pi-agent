@@ -566,10 +566,6 @@ describe('transcript payload inspection', () => {
     );
     expect(toolPresentationKind({ name: 'background' })).toBe('background');
     expect(toolPresentationKind({ name: 'todo' })).toBe('todo');
-    expect(toolPresentationKind({ name: 'ask_user_question' })).toBe(
-      'ask_user',
-    );
-
     const search = renderToStaticMarkup(
       <ToolInspector
         tool={{
@@ -615,22 +611,6 @@ describe('transcript payload inspection', () => {
     );
     expect(background).toContain('tool-background-presentation');
     expect(background).toContain('pnpm dev');
-
-    const asked = renderToStaticMarkup(
-      <ToolInspector
-        tool={{
-          name: 'ask_user_question',
-          arguments: {
-            question: 'Continue?',
-            choices: [{ label: 'Yes' }, { label: 'No' }],
-          },
-          result: 'User selected: Yes',
-        }}
-      />,
-    );
-    expect(asked).toContain('tool-ask_user-presentation');
-    expect(asked).toContain('Continue?');
-    expect(asked).toContain('ask-user-choice');
 
     const tasks = renderToStaticMarkup(
       <ToolInspector

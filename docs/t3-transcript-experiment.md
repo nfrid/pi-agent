@@ -205,7 +205,7 @@ interface SessionTranscriptCache {
 }
 ```
 
-Schema version starts at 1. Cache only JSON-safe projection fields and ordering metadata. Do not cache runtime control surfaces or pending interactions.
+Schema version starts at 1. Cache only JSON-safe projection fields and ordering metadata. Do not cache runtime control surfaces.
 
 Integrate cache restore into session acquisition before the first HTTP snapshot. A cached sequence may be used for feed resume only when its server ID and protocol version match the connected server.
 

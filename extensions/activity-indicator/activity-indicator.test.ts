@@ -49,9 +49,6 @@ describe('activity indicator', () => {
     batch.active.delete('write-1');
     batch.completed++;
     expect(activityLabel(batch)).toBe('Editing (1/2)...');
-
-    batch.active.set('question-1', { name: 'ask_user_question' });
-    expect(activityLabel(batch)).toBe('Waiting for you...');
   });
 
   it.each([

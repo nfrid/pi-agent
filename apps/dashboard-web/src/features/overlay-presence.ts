@@ -105,7 +105,8 @@ export function useOverlayFocusTrap(
       window.removeEventListener('keydown', onKeyDown);
       if (
         options.restoreFocusRef?.current &&
-        !document.querySelector(options.skipRestoreSelector ?? '')
+        (!options.skipRestoreSelector ||
+          !document.querySelector(options.skipRestoreSelector))
       ) {
         options.restoreFocusRef.current.focus({ preventScroll: true });
       }

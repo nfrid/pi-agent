@@ -46,11 +46,9 @@ import type {
 } from './composition.js';
 import { BridgeListener } from './http/bridge-listener.js';
 import {
-  compactShellEventData,
   MAX_SESSION_FEEDS,
   type SessionFeedRegistry,
   type ShellFeed,
-  shellDomainForEvent,
 } from './live-feeds.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
@@ -474,8 +472,6 @@ export class DashboardServerImpl implements DashboardServer {
         await this.application.runtime.stop(runtimeId, force);
         this.changed();
       },
-      interaction: (id, answer, cancel) =>
-        this.application.runtime.answerInteraction(id, answer, cancel),
       markNotificationRead: (id) => {
         this.application.markNotificationRead(id);
         this.changed();
@@ -1233,15 +1229,6 @@ export class DashboardServerImpl implements DashboardServer {
         );
       } catch {
         // The next reconnect receives an authoritative session snapshot.
-      }
-      const domain = shellDomainForEvent(event);
-      if (domain !== undefined) {
-        this.publishShellPatch(
-          domain,
-          compactShellEventData(event, change.snapshot.runtimeId),
-          sessionId,
-          `runtime:${sessionId}:${domain}`,
-        );
       }
     } else {
       const hello = projectPublicBridgeEvent({

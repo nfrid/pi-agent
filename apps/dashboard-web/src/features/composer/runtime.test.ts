@@ -36,7 +36,6 @@ describe('composer runtime model', () => {
       runtimeId: 'runtime-1',
       liveState: 'working',
       online: true,
-      pendingInteractions: [],
       session: { id: 'session-1', entries: [] },
       extensionSurfaces: [
         {

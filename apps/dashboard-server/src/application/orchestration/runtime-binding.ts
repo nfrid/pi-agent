@@ -2,7 +2,6 @@ import {
   ACTIVE_RUN_STATUSES,
   TERMINAL_RUN_STATUSES,
 } from '@pi-dashboard/domain';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { createWorktreeFinisher } from '@pi-dashboard/worktree-manager';
 import type { RegistryChange } from '../../runtime-registry.js';
 import { boundedErrorText, type OrchestrationHost } from './helpers.js';
@@ -65,7 +64,6 @@ export async function reduceRegistryChange(
         run.id,
         runtimeId,
         change.snapshot.session.id,
-        change.snapshot,
       );
     } else if (change.kind === 'event') {
       const current = host.repository.getRun(run.id);
@@ -79,24 +77,11 @@ export async function reduceRegistryChange(
       // settled event could complete work whose prompt was never durable.
       if (promptPending && change.event.type !== 'runtime.goodbye') return;
       if (change.event.type === 'agent.settled') await settle(host, run.id);
-      else if (change.event.type === 'interaction.requested') {
-        host.transitionIfPossible(run.id, 'waiting');
-      } else if (change.event.type === 'interaction.resolved') {
-        // The event itself only identifies the interaction. The reducer's
-        // post-event snapshot is authoritative when several questions are
-        // pending at once.
-        if (change.snapshot.pendingInteractions.length === 0)
-          host.transitionIfPossible(run.id, 'running');
-      } else if (change.event.type === 'runtime.stateChanged') {
+      else if (change.event.type === 'runtime.stateChanged') {
         const state = change.event.state;
-        // A working state cannot override an outstanding ask-user request.
-        if (change.snapshot.pendingInteractions.length > 0) {
-          host.transitionIfPossible(run.id, 'waiting');
-        } else if (state === 'waiting') {
-          host.transitionIfPossible(run.id, 'waiting');
-        } else if (state === 'working') {
+        if (state === 'waiting') host.transitionIfPossible(run.id, 'waiting');
+        else if (state === 'working')
           host.transitionIfPossible(run.id, 'running');
-        }
       } else if (
         change.event.type === 'runtime.goodbye' &&
         change.event.reason !== 'reload'
@@ -135,7 +120,6 @@ export async function bindAndDeliverPrompt(
   runId: string,
   runtimeId: string,
   piSessionId: string,
-  registeredSnapshot?: RuntimeSnapshot,
 ): Promise<void> {
   const run = host.repository.getRun(runId);
   if (!run || TERMINAL_RUN_STATUSES.includes(run.status)) return;
@@ -161,14 +145,7 @@ export async function bindAndDeliverPrompt(
   if (!current || TERMINAL_RUN_STATUSES.includes(current.status)) return;
   if (current.status === 'preparing')
     host.transitionIfPossible(runId, 'starting');
-  const authoritative = host.registry.get(runtimeId);
-  const pendingInteractions =
-    authoritative?.pendingInteractions ??
-    registeredSnapshot?.pendingInteractions ??
-    [];
-  if (pendingInteractions.length > 0)
-    host.transitionIfPossible(runId, 'waiting');
-  else if (host.repository.getRun(runId)?.status === 'starting')
+  if (host.repository.getRun(runId)?.status === 'starting')
     host.repository.transitionRun(runId, 'running');
   host.repository.transitionRuntime(runtimeId, 'running');
 }

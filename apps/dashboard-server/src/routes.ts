@@ -75,7 +75,6 @@ function parseJsonBody(
     const path = request.raw.url?.split('?', 1)[0];
     if (
       /^\/api\/runtimes\/[^/]+\/stop$/.test(path ?? '') ||
-      /^\/api\/interactions\/[^/]+\/cancel$/.test(path ?? '') ||
       /^\/api\/checkouts\/[^/]+\/review$/.test(path ?? '')
     ) {
       done(null, {});
@@ -141,11 +140,6 @@ export interface DashboardRouteContext {
   stopRuntimeMutation?(input: unknown): Promise<unknown>;
   renameSessionMutation?(input: unknown): Promise<unknown>;
   stopRuntime(runtimeId: string, force: boolean): Promise<void>;
-  interaction(
-    interactionId: string,
-    answer: unknown,
-    cancel: boolean,
-  ): Promise<unknown>;
   markNotificationRead(id: string): void;
   markAllNotificationsRead(): void;
   pushSubscribe(body: unknown): void;
@@ -728,50 +722,6 @@ export const dashboardRoutes: FastifyPluginAsync<{
           request.body?.force === true,
         );
         return { ok: true };
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
-  app.post<{
-    Params: { interactionId: string };
-    Body: { answer?: unknown };
-  }>(
-    '/api/interactions/:interactionId/answer',
-    { schema: { body: objectBody } },
-    async (request, reply) => {
-      try {
-        return {
-          ok: true,
-          result: await context.interaction(
-            request.params.interactionId,
-            request.body?.answer,
-            false,
-          ),
-        };
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
-  app.post<{ Params: { interactionId: string } }>(
-    '/api/interactions/:interactionId/cancel',
-    {
-      preValidation: async (request) => {
-        if (request.body === undefined) request.body = {};
-      },
-      schema: { body: objectBody },
-    },
-    async (request, reply) => {
-      try {
-        return {
-          ok: true,
-          result: await context.interaction(
-            request.params.interactionId,
-            undefined,
-            true,
-          ),
-        };
       } catch (error) {
         return sendError(reply, error);
       }

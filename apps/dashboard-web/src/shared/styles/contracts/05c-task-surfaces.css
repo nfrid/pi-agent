@@ -73,12 +73,6 @@
 .queue-followUp {
   color: var(--purple);
 }
-@media (min-width: 700px) {
-  .interaction-choice-layout.has-preview {
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 2fr);
-    align-items: start;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .activity-group.activity-pending .activity-icon,
   .surface-running .surface-state {

@@ -12,10 +12,6 @@ import {
   type RuntimeSnapshot,
   type RuntimeSnapshotPatch,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
-import {
-  getInteractionBroker,
-  type InteractionBroker,
-} from '../ask-user/broker';
 import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
 import { pendingProcessCount } from '../shared/runtime/pending-processes';
 import {
@@ -34,7 +30,6 @@ import { registerRemoteControlCapability } from './register-capability';
 import {
   composerCommandsSnapshot,
   getRuntimeCapabilities,
-  interactionSnapshot,
   liveState,
   modelCatalogSnapshot,
   modelSnapshot,
@@ -51,7 +46,6 @@ export interface RemoteControlRuntime {
   clearContext(ctx: ExtensionContext): void;
   isCurrent(ctx: ExtensionContext): boolean;
   setLiveState(state: RuntimeLiveState): void;
-  getInteractionBroker?(): InteractionBroker;
   /** Build a bounded runtime update without reading the session branch. */
   snapshotPatch?(
     ctx: ExtensionContext,
@@ -75,7 +69,6 @@ export function createRemoteControlRuntime(
     ? 'managed'
     : 'external';
   let scopedServices: ScopedServices = getScopedServices();
-  let broker = scopedServices.interactionBroker;
   let liveSurfaceHub = scopedServices.liveSurfaceHub;
   const eventNormalizer = new LiveEventNormalizer();
   let context: ExtensionContext | undefined;
@@ -92,7 +85,6 @@ export function createRemoteControlRuntime(
     cwd: process.cwd(),
     liveState: 'idle',
     session: { id: 'unknown', entries: [] },
-    pendingInteractions: broker.list().map(interactionSnapshot),
     queueDrafts: queueDrafts.list(),
     composerCommands: composerCommandsSnapshot(pi),
     capabilities: capabilitiesFor(),
@@ -102,7 +94,7 @@ export function createRemoteControlRuntime(
   let cachedSnapshot = unavailableSnapshot();
   const runtimePatchFrom = (
     ctx: ExtensionContext,
-    state = liveState(ctx, broker),
+    state = liveState(ctx),
   ): RuntimeSnapshotPatch => {
     const usage = ctx.getContextUsage();
     const sessionId = ctx.sessionManager.getSessionId();
@@ -155,7 +147,6 @@ export function createRemoteControlRuntime(
             percent: usage.percent,
           }
         : undefined,
-      pendingInteractions: broker.list().map(interactionSnapshot),
       queueDrafts: queueDrafts.list(),
       composerCommands: composerCommandsSnapshot(pi),
       capabilities: capabilitiesFor(),
@@ -172,8 +163,7 @@ export function createRemoteControlRuntime(
       pid: process.pid,
       ...patch,
       cwd: ctx.cwd,
-      liveState: liveState(ctx, broker),
-      pendingInteractions: patch.pendingInteractions ?? [],
+      liveState: liveState(ctx),
       session: sessionSnapshot(ctx),
     };
   };
@@ -183,7 +173,6 @@ export function createRemoteControlRuntime(
       process.env.PI_DASHBOARD_LAUNCH_TOKEN ?? process.env.PI_DASHBOARD_TOKEN,
     identityToken: process.env.PI_DASHBOARD_IDENTITY_TOKEN,
     runtimeId,
-    broker,
     commandScope: () => contextScope,
     liveSurfaces: liveSurfaceHub,
     onLiveSurfacesChanged: (surfaces) => {
@@ -200,7 +189,6 @@ export function createRemoteControlRuntime(
       const result = await dispatchDashboardCommand(
         pi,
         commandContext,
-        broker,
         command,
         capabilities,
         queueDrafts,
@@ -214,7 +202,7 @@ export function createRemoteControlRuntime(
         currentSessionId === commandSessionId
       ) {
         setContext(commandContext, false);
-        const state = liveState(commandContext, broker);
+        const state = liveState(commandContext);
         client.sendEvent({
           type: 'runtime.stateChanged',
           state,
@@ -236,11 +224,10 @@ export function createRemoteControlRuntime(
         previousScope !== undefined && previousScope !== nextScope;
       if (replacingScope) eventNormalizer.reset();
       scopedServices = nextServices;
-      broker = nextServices.interactionBroker;
       liveSurfaceHub = nextServices.liveSurfaceHub;
-      // Detach old observers before releasing the old hub/broker, so a late
-      // cleanup cannot publish an old session patch into the replacement.
-      client.bindServices(broker, liveSurfaceHub);
+      // Detach old observers before releasing the old hub, so a late cleanup
+      // cannot publish an old session patch into the replacement.
+      client.bindServices(liveSurfaceHub);
       if (replacingScope && previousScope)
         releaseScopedServices(previousScope, previousServices);
       queueDrafts.setSession(nextScope);
@@ -297,9 +284,8 @@ export function createRemoteControlRuntime(
     contextScope = undefined;
     currentSessionId = undefined;
     scopedServices = getScopedServices();
-    broker = scopedServices.interactionBroker;
     liveSurfaceHub = scopedServices.liveSurfaceHub;
-    client.bindServices(broker, liveSurfaceHub);
+    client.bindServices(liveSurfaceHub);
     if (closingScope) releaseScopedServices(closingScope, closingServices);
     eventNormalizer.reset();
     cachedSnapshot = unavailableSnapshot();
@@ -313,7 +299,6 @@ export function createRemoteControlRuntime(
     clearContext,
     isCurrent,
     setLiveState,
-    getInteractionBroker: () => broker,
     snapshotPatch,
     snapshot,
   };
@@ -360,11 +345,7 @@ export function flushQueueDrafts(
   if (runtime.isCurrent(ctx)) {
     runtime.setContext(ctx, false);
     if (runtime.isCurrent(ctx)) {
-      const state = liveState(
-        ctx,
-        runtime.getInteractionBroker?.() ??
-          getInteractionBroker(ctx.sessionManager.getSessionId()),
-      );
+      const state = liveState(ctx);
       runtime.client.sendEvent({
         type: 'runtime.stateChanged',
         state,
@@ -383,13 +364,7 @@ export function emitState(
   if (!runtime.isCurrent(ctx)) return;
   runtime.setContext(ctx, false);
   if (!runtime.isCurrent(ctx)) return;
-  const state =
-    forcedState ??
-    liveState(
-      ctx,
-      runtime.getInteractionBroker?.() ??
-        getInteractionBroker(ctx.sessionManager.getSessionId()),
-    );
+  const state = forcedState ?? liveState(ctx);
   if (forcedState) runtime.setLiveState(forcedState);
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',

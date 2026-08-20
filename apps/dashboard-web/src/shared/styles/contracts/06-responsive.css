@@ -1,8 +1,5 @@
 /* Global responsive contract: legacy breakpoint overrides kept in cascade order. */
 @media (max-width: 600px) {
-  .interaction-choice-layout.has-preview {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .push-button {
     display: none;
   }
@@ -103,22 +100,6 @@
   }
   .session-heading .actions button {
     flex: 1 1 auto;
-  }
-  .interaction-dock {
-    padding: 58px 13px 215px;
-  }
-  .interaction-dock .interaction {
-    max-height: min(62vh, 520px);
-  }
-  .interaction {
-    margin-left: -2px;
-    margin-right: -2px;
-  }
-  .interaction form {
-    flex-wrap: wrap;
-  }
-  .interaction form button {
-    width: 100%;
   }
   .auth-form {
     flex-direction: column;

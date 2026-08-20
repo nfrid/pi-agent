@@ -139,7 +139,6 @@ export async function installDashboardBootstrap(
             serverId: snapshot.serverId,
             cursor: snapshot.cursor,
             active: {
-              pendingInteractions: [],
               messages: [],
               tools: [],
               delegates: [],

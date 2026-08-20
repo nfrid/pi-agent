@@ -12,13 +12,11 @@ import {
   type RuntimeSnapshot,
   serializeFrame,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
-import type { InteractionBroker } from '../ask-user/broker';
 import { aggregateRuntimeCapabilities } from '../shared/runtime/capability-registry';
 import type { CommandHandler } from './command-dispatcher';
 import { jsonSafe } from './json-safe';
 import { withoutOpaqueData } from './live-event-normalizer';
 import { isQueueDraftCommand } from './queue-draft-store';
-import { interactionSnapshot } from './runtime-snapshot-adapter';
 
 const RECONNECT_MIN_MS = 250;
 const RECONNECT_MAX_MS = 10_000;
@@ -182,7 +180,6 @@ export interface BridgeClientOptions {
   /** Session generation captured when a browser command enters the bridge. */
   commandScope?: () => string | undefined;
   handleCommand: CommandHandler;
-  broker?: InteractionBroker;
   capabilities?: RuntimeCapabilitySnapshot;
   liveSurfaces?: {
     subscribe(
@@ -229,9 +226,7 @@ export class BridgeClient {
   }> = [];
   private outboundBytes = 0;
   private writeBlocked = false;
-  private unsubscribeBroker: (() => void) | undefined;
   private unsubscribeLiveSurfaces: (() => void) | undefined;
-  private broker: InteractionBroker | undefined;
   private liveSurfaces: BridgeClientOptions['liveSurfaces'];
   private delegateTranscriptEntries = new Map<
     string,
@@ -240,7 +235,7 @@ export class BridgeClient {
   private compactDelegateSurfaces: readonly RuntimeExtensionSurface[] = [];
 
   constructor(private readonly options: BridgeClientOptions) {
-    this.bindServices(options.broker, options.liveSurfaces);
+    this.bindServices(options.liveSurfaces);
   }
 
   private resolveCapabilities(): RuntimeCapabilitySnapshot {
@@ -251,34 +246,15 @@ export class BridgeClient {
   }
 
   /** Rebind transport observers when Pi replaces the active session scope. */
-  bindServices(
-    broker: InteractionBroker | undefined,
-    liveSurfaces: BridgeClientOptions['liveSurfaces'],
-  ): void {
-    this.unsubscribeBroker?.();
+  bindServices(liveSurfaces: BridgeClientOptions['liveSurfaces']): void {
     this.unsubscribeLiveSurfaces?.();
-    this.unsubscribeBroker = undefined;
     this.unsubscribeLiveSurfaces = undefined;
-    this.broker = broker;
+    this.unsubscribeLiveSurfaces = undefined;
     this.liveSurfaces = liveSurfaces;
     const currentSurfaces = liveSurfaces?.snapshot?.() ?? [];
     this.delegateTranscriptEntries = delegateTranscriptEntries(currentSurfaces);
     this.compactDelegateSurfaces =
       compactDelegateSurfaces(currentSurfaces) ?? [];
-    this.unsubscribeBroker = broker?.subscribe((event) => {
-      if (event.kind === 'requested') {
-        this.sendEvent({
-          type: 'interaction.requested',
-          interaction: interactionSnapshot(event.interaction),
-        });
-      } else {
-        this.sendEvent({
-          type: 'interaction.resolved',
-          interactionId: event.interaction.id,
-          resolution: event.result,
-        });
-      }
-    });
     this.unsubscribeLiveSurfaces = liveSurfaces?.subscribe((surfaces) => {
       try {
         const current = this.options.snapshot();
@@ -324,7 +300,7 @@ export class BridgeClient {
 
   start(): void {
     this.stopped = false;
-    this.bindServices(this.broker, this.liveSurfaces);
+    this.bindServices(this.liveSurfaces);
     this.connect();
   }
 
@@ -333,8 +309,6 @@ export class BridgeClient {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     this.stopHeartbeat();
-    this.unsubscribeBroker?.();
-    this.unsubscribeBroker = undefined;
     this.unsubscribeLiveSurfaces?.();
     this.unsubscribeLiveSurfaces = undefined;
     for (const item of this.commandQueue) this.discardSemanticCommand(item);
@@ -353,12 +327,7 @@ export class BridgeClient {
     // callback builds that authoritative snapshot from the latest context, so
     // events attempted before the handshake are safely covered by hello.
     if (socket.connecting) return false;
-    const wireEvent: BridgeEvent =
-      event.type === 'interaction.requested'
-        ? { ...event, interaction: interactionSnapshot(event.interaction) }
-        : event.type === 'interaction.resolved'
-          ? { ...event, resolution: jsonSafe(event.resolution) }
-          : withoutOpaqueData(event);
+    const wireEvent: BridgeEvent = withoutOpaqueData(event);
     let data: string;
     try {
       data = serializeFrame({
@@ -394,15 +363,11 @@ export class BridgeClient {
         socket.destroy();
         return;
       }
-      // The broker is authoritative at reconnect time. A cached snapshot can
-      // still contain a question resolved while this bridge was offline.
-      const interactions = this.broker?.list().map(interactionSnapshot) ?? [];
       snapshot = {
         ...snapshot,
         // One effective capability snapshot drives hello, runtime snapshot,
         // duplicate protection, and semantic dispatch.
         capabilities: this.resolveCapabilities(),
-        ...(this.broker ? { pendingInteractions: interactions } : undefined),
       };
       const fullSurfaces =
         this.liveSurfaces?.snapshot?.() ?? snapshot.extensionSurfaces;
@@ -438,10 +403,6 @@ export class BridgeClient {
           runId: entry.runId,
           entry: entry.entry,
         });
-      // A daemon restart gets a complete interaction set, not only events
-      // emitted after this connection was established.
-      for (const interaction of interactions)
-        this.sendEvent({ type: 'interaction.requested', interaction });
       this.startHeartbeat(socket);
     });
     socket.on('data', (chunk: string) => this.onData(socket, chunk));
@@ -830,7 +791,7 @@ export class BridgeClient {
       this.outboundQueue.length >= BRIDGE_WRITE_QUEUE_LIMIT ||
       this.outboundBytes + bytes > BRIDGE_WRITE_QUEUE_BYTES
     ) {
-      // State and interaction events are replayable on reconnect but cannot be
+      // State events are replayable on reconnect but cannot be
       // silently lost while a socket still appears healthy. Streaming deltas
       // may be dropped because the next update/session refresh supersedes them.
       if (!droppable) socket.destroy();

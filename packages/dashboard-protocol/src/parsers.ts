@@ -38,8 +38,6 @@ import {
   DelegateTranscriptEntrySchema,
   type FeedCursor,
   FeedCursorSchema,
-  type InteractionSnapshot,
-  InteractionSnapshotSchema,
   type LiveDiagnosticsRequest,
   LiveDiagnosticsRequestSchema,
   type LiveDiagnosticsResponse,
@@ -413,12 +411,6 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
       throw new Error('Invalid session name command.');
     return { ...command, name: validateSessionName(command.name) };
   }
-  if (
-    (command.type === 'interaction.answer' ||
-      command.type === 'interaction.cancel') &&
-    !safeIdentifier(command.interactionId, 128)
-  )
-    throw new Error('Invalid interaction id.');
   if (command.type === 'action.invoke') {
     if (
       !onlyKeys(
@@ -855,14 +847,6 @@ export function tryParseSessionSnapshotPatch(
   value: unknown,
 ): SessionSnapshotPatch | undefined {
   return tryParseSchema(SessionSnapshotPatchSchema, value);
-}
-export function parseInteractionSnapshot(value: unknown): InteractionSnapshot {
-  return parseSchema(InteractionSnapshotSchema, value, 'interaction');
-}
-export function tryParseInteractionSnapshot(
-  value: unknown,
-): InteractionSnapshot | undefined {
-  return tryParseSchema(InteractionSnapshotSchema, value);
 }
 function validateBrowserSnapshotCapabilities(snapshot: BrowserSnapshot): void {
   for (const runtime of snapshot.runtimes)

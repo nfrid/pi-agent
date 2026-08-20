@@ -62,26 +62,13 @@ describe('extension contribution contracts', () => {
       id: 'demo.inspector',
       inputSchema: Type.Object({}, { additionalProperties: false }),
     };
-    const interaction = {
-      id: 'demo.interaction',
-      rendererId: 'demo.view',
-      viewModelSchema: Type.Object({}, { additionalProperties: false }),
-      answerActionId: 'demo.run',
-      cancelActionId: 'demo.run',
-    };
     const cases: readonly [
       string,
-      Partial<
-        Pick<
-          ExtensionManifest,
-          'actions' | 'renderers' | 'inspectors' | 'interactions'
-        >
-      >,
+      Partial<Pick<ExtensionManifest, 'actions' | 'renderers' | 'inspectors'>>,
     ][] = [
       ['action', { actions: [action] }],
       ['renderer', { renderers: manifest.renderers }],
       ['inspector', { inspectors: [inspector] }],
-      ['interaction', { interactions: [interaction] }],
     ];
     for (const [label, contribution] of cases) {
       const duplicate: ExtensionManifest = {
@@ -92,17 +79,11 @@ describe('extension contribution contracts', () => {
         ...(contribution.inspectors
           ? { inspectors: contribution.inspectors }
           : {}),
-        ...(contribution.interactions
-          ? { interactions: contribution.interactions }
-          : {}),
       };
       const source: ExtensionManifest = {
         ...manifest,
         ...(contribution.inspectors
           ? { inspectors: contribution.inspectors }
-          : {}),
-        ...(contribution.interactions
-          ? { interactions: contribution.interactions }
           : {}),
       };
       expect(() =>

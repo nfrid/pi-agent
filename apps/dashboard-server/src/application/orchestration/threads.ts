@@ -90,10 +90,7 @@ export async function adoptSession(
   const runtime = host.registry
     .snapshots()
     .find((item) => item.session.id === sessionId && item.online !== false);
-  const waiting =
-    runtime !== undefined &&
-    (runtime.liveState === 'waiting' ||
-      (runtime.pendingInteractions?.length ?? 0) > 0);
+  const waiting = runtime !== undefined && runtime.liveState === 'waiting';
   const status = waiting ? 'waiting' : runtime ? 'running' : 'interrupted';
   const observedAt = Number.isFinite(metadata.updatedAt)
     ? metadata.updatedAt

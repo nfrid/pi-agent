@@ -12,7 +12,6 @@ const response: AuthoritativeSessionSnapshot = {
   entries: [],
   entriesComplete: true,
   active: {
-    pendingInteractions: [],
     messages: [],
     tools: [],
     delegates: [],

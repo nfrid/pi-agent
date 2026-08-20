@@ -236,9 +236,6 @@ function mergeRuntimeEvent(
         ...(update?.contextUsage === undefined
           ? {}
           : { contextUsage: update.contextUsage }),
-        ...(update?.pendingInteractions === undefined
-          ? {}
-          : { pendingInteractions: update.pendingInteractions }),
         ...(update?.queueDrafts === undefined
           ? {}
           : { queueDrafts: update.queueDrafts }),
@@ -269,28 +266,10 @@ function mergeRuntimeEvent(
     case 'session.changed':
     case 'session.snapshot':
       return { ...snapshot, session: event.session };
-    case 'interaction.requested':
-      return {
-        ...snapshot,
-        pendingInteractions: [
-          ...snapshot.pendingInteractions.filter(
-            (item) => item.id !== event.interaction.id,
-          ),
-          event.interaction,
-        ],
-        liveState: 'waiting',
-      };
-    case 'interaction.resolved':
-      return {
-        ...snapshot,
-        pendingInteractions: snapshot.pendingInteractions.filter(
-          (item) => item.id !== event.interactionId,
-        ),
-      };
     case 'agent.settled':
       return {
         ...snapshot,
-        liveState: snapshot.pendingInteractions.length > 0 ? 'waiting' : 'idle',
+        liveState: 'idle',
       };
     case 'delegate.transcript.updated':
       return mergeDelegateTranscriptUpdate(snapshot, event);

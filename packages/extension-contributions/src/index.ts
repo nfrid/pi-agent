@@ -54,8 +54,6 @@ export const AvailabilityRuleSchema = Type.Object(
         ),
       ),
     ),
-    /** Require at least one pending interaction, or require none. */
-    pendingInteraction: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -107,7 +105,6 @@ export interface ActionDescriptor {
 }
 
 export const RendererModeSchema = Type.Union([
-  Type.Literal('interaction'),
   Type.Literal('activity'),
   Type.Literal('inspector'),
   Type.Literal('generic'),
@@ -186,24 +183,6 @@ export interface InspectorDescriptor {
   readonly summary?: string;
 }
 
-export const InteractionDescriptorSchema = Type.Object(
-  {
-    id: IdentifierSchema,
-    rendererId: IdentifierSchema,
-    viewModelSchema: SchemaSchema,
-    answerActionId: IdentifierSchema,
-    cancelActionId: IdentifierSchema,
-  },
-  { additionalProperties: false },
-);
-export interface InteractionDescriptor {
-  readonly id: string;
-  readonly rendererId: string;
-  readonly viewModelSchema: TSchema;
-  readonly answerActionId: string;
-  readonly cancelActionId: string;
-}
-
 export const ExtensionManifestSummarySchema = Type.Object(
   {
     id: IdentifierSchema,
@@ -239,22 +218,6 @@ export const ExtensionManifestSummarySchema = Type.Object(
         ),
       ),
     ),
-    interactions: Type.Optional(
-      Type.Readonly(
-        Type.Array(
-          Type.Object(
-            {
-              id: IdentifierSchema,
-              rendererId: IdentifierSchema,
-              answerActionId: IdentifierSchema,
-              cancelActionId: IdentifierSchema,
-            },
-            { additionalProperties: false },
-          ),
-          { maxItems: 128 },
-        ),
-      ),
-    ),
   },
   { additionalProperties: false },
 );
@@ -276,9 +239,6 @@ export const ExtensionManifestSchema = Type.Object(
     inspectors: Type.Optional(
       Type.Readonly(Type.Array(InspectorDescriptorSchema, { maxItems: 128 })),
     ),
-    interactions: Type.Optional(
-      Type.Readonly(Type.Array(InteractionDescriptorSchema, { maxItems: 128 })),
-    ),
   },
   { additionalProperties: false },
 );
@@ -289,7 +249,6 @@ export interface ExtensionManifest {
   readonly actions: readonly ActionDescriptor[];
   readonly renderers: readonly RendererDescriptor[];
   readonly inspectors?: readonly InspectorDescriptor[];
-  readonly interactions?: readonly InteractionDescriptor[];
 }
 
 export const RuntimeCapabilitySnapshotSchema = Type.Object(
@@ -323,7 +282,6 @@ export type ActionInvocation = Static<typeof ActionInvocationSchema>;
 export type ContributionState = {
   readonly online?: boolean;
   readonly liveState?: string;
-  readonly pendingInteractions?: number;
 };
 
 export type ActionCommandReservation = 'reserved' | 'duplicate' | 'capacity';
@@ -426,12 +384,6 @@ function validateManifestCollection(manifests: ManifestCollection): void {
     ),
     'inspector across manifests',
   );
-  duplicateIds(
-    manifests.flatMap(
-      (manifest) => (manifest.interactions ?? []) as readonly { id: string }[],
-    ),
-    'interaction across manifests',
-  );
 }
 
 function validateManifestSchemas(manifest: ExtensionManifest): void {
@@ -462,12 +414,6 @@ function validateManifestSchemas(manifest: ExtensionManifest): void {
         'invalid-manifest',
         `Inspector ${inspector.id} has an invalid input schema.`,
       );
-  for (const interaction of manifest.interactions ?? [])
-    if (!isTypeBoxSchema(interaction.viewModelSchema))
-      throw new ContributionError(
-        'invalid-manifest',
-        `Interaction ${interaction.id} has an invalid view-model schema.`,
-      );
 }
 
 export function parseExtensionManifest(value: unknown): ExtensionManifest {
@@ -481,7 +427,6 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
     duplicateIds(manifest.actions, 'action');
     duplicateIds(manifest.renderers, 'renderer');
     duplicateIds(manifest.inspectors ?? [], 'inspector');
-    duplicateIds(manifest.interactions ?? [], 'interaction');
     validateManifestSchemas(manifest);
   } catch (error) {
     if (error instanceof ContributionError) throw error;
@@ -584,13 +529,6 @@ export function summarizeManifest(
       ? {
           inspectors: parsed.inspectors.map(
             ({ inputSchema: _input, ...inspector }) => inspector,
-          ),
-        }
-      : {}),
-    ...(parsed.interactions
-      ? {
-          interactions: parsed.interactions.map(
-            ({ viewModelSchema: _viewModel, ...interaction }) => interaction,
           ),
         }
       : {}),
@@ -697,11 +635,6 @@ export function isActionAvailable(
     rule.liveStates &&
     (state.liveState === undefined ||
       !rule.liveStates.includes(state.liveState as never))
-  )
-    return false;
-  if (
-    rule.pendingInteraction !== undefined &&
-    (state.pendingInteractions ?? 0) > 0 !== rule.pendingInteraction
   )
     return false;
   return true;

@@ -18,7 +18,6 @@ function runtime(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
     liveState: 'working',
     online: true,
     session: { id: 'session-1', entries: [] },
-    pendingInteractions: [],
     ...overrides,
   } as RuntimeSnapshot;
 }

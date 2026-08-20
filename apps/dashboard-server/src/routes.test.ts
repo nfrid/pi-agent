@@ -66,7 +66,6 @@ function context(): DashboardRouteContext {
     startRuntime: async () => ({ runtimeId: 'runtime' }),
     commandRuntime: async () => ({ accepted: true }),
     stopRuntime: async () => undefined,
-    interaction: async () => ({ accepted: true }),
     markNotificationRead: () => undefined,
     markAllNotificationsRead: () => undefined,
     pushSubscribe: () => undefined,
@@ -730,12 +729,11 @@ describe('Fastify dashboard route plugin', () => {
     expect(ownershipConflict.json().code).toBe('idempotency-conflict');
   });
 
-  it('accepts empty stop/cancel bodies but rejects malformed JSON bodies', async () => {
+  it('accepts empty stop bodies but rejects malformed JSON bodies', async () => {
     const app = Fastify();
     apps.push(app);
     const routeContext = context();
     routeContext.stopRuntime = vi.fn(async () => undefined);
-    routeContext.interaction = vi.fn(async () => ({ accepted: true }));
     await app.register(dashboardRoutes, { context: routeContext });
     await app.ready();
     const headers = {
@@ -743,10 +741,7 @@ describe('Fastify dashboard route plugin', () => {
       'x-dashboard-token': 'route-token',
     };
 
-    for (const url of [
-      '/api/runtimes/runtime/stop',
-      '/api/interactions/interaction/cancel',
-    ]) {
+    for (const url of ['/api/runtimes/runtime/stop']) {
       await expect(
         app.inject({ method: 'POST', url, headers }),
       ).resolves.toMatchObject({ statusCode: 200 });
@@ -768,7 +763,6 @@ describe('Fastify dashboard route plugin', () => {
       ).resolves.toMatchObject({ statusCode: 400 });
     }
     expect(routeContext.stopRuntime).toHaveBeenCalledTimes(2);
-    expect(routeContext.interaction).toHaveBeenCalledTimes(2);
   });
 
   it('rejects oversized JSON before a route handler while allowing larger multipart commands', async () => {

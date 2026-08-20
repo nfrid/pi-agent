@@ -6,7 +6,6 @@ import {
 import type { ReactNode } from 'react';
 import { Value } from 'typebox/value';
 import { activityGroupsRenderer } from '../../../extensions/activity-groups/contribution';
-import { askUserRenderer } from '../../../extensions/ask-user/contribution';
 import { delegateStatusRenderer } from '../../../extensions/delegate/contribution';
 import {
   type PauseStatusViewModel,
@@ -72,48 +71,6 @@ export function genericUnknownRenderer(
 }
 
 const explicitRenderers: readonly DashboardRenderer[] = [
-  {
-    descriptor: askUserRenderer,
-    render: (input) => {
-      const value = input as {
-        question?: unknown;
-        choices?: unknown;
-        allowCustom?: unknown;
-        customLabel?: unknown;
-      };
-      const choices = Array.isArray(value.choices)
-        ? value.choices.filter(
-            (choice): choice is string =>
-              typeof choice === 'string' && choice.trim().length > 0,
-          )
-        : [];
-      return (
-        <div className="ask-user-renderer">
-          <p>
-            {typeof value.question === 'string'
-              ? value.question
-              : 'Question unavailable.'}
-          </p>
-          {choices.length > 0 ? (
-            <ul className="ask-user-choices" aria-label="Suggested answers">
-              {choices.slice(0, 6).map((choice) => (
-                <li key={choice}>
-                  <span className="ask-user-choice">{choice}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {value.allowCustom === true ? (
-            <small className="ask-user-custom">
-              {typeof value.customLabel === 'string' && value.customLabel.trim()
-                ? value.customLabel
-                : 'Custom answer allowed'}
-            </small>
-          ) : null}
-        </div>
-      );
-    },
-  },
   {
     descriptor: activityGroupsRenderer,
     render: (input) => {

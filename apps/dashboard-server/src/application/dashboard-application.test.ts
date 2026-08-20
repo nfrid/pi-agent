@@ -32,7 +32,6 @@ const runtime: RuntimeSnapshot = {
   cwd: '/tmp/project',
   liveState: 'idle',
   session,
-  pendingInteractions: [],
 };
 
 describe('public runtime event projection', () => {

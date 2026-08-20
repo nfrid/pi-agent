@@ -4,7 +4,6 @@ import {
   CapabilityRegistry,
   seedCapabilityRegistry,
 } from './capability-registry-core';
-import { InteractionBroker } from './interaction-broker';
 import { LiveSurfaceHub } from './live-surfaces-core';
 
 export type SessionScopeId = string;
@@ -46,7 +45,6 @@ export class PendingProcessAccounting {
 
 export interface ScopedServices {
   readonly scopeId: SessionScopeId;
-  readonly interactionBroker: InteractionBroker;
   readonly backgroundDeliveries: BackgroundDeliveryBroker;
   readonly liveSurfaceHub: LiveSurfaceHub;
   readonly pendingProcesses: PendingProcessAccounting;
@@ -92,7 +90,6 @@ export function getScopedServices(
   if (services) return services;
   const created: ScopedServices = {
     scopeId: id,
-    interactionBroker: new InteractionBroker(),
     backgroundDeliveries: new BackgroundDeliveryBroker(id),
     liveSurfaceHub: new LiveSurfaceHub(),
     pendingProcesses: new PendingProcessAccounting(),
@@ -119,7 +116,6 @@ export function releaseScopedServices(
   const id = normalizedScope(scopeId);
   const current = registry().get(id);
   if (!current || (expected && current !== expected)) return false;
-  current.interactionBroker.cancelAll();
   current.backgroundDeliveries.clear();
   current.liveSurfaceHub.clearAll();
   current.pendingProcesses.clear();

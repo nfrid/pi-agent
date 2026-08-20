@@ -34,7 +34,6 @@ export function useAgentThreadDrawer({
   useOverlayFocusTrap(enabled && open, drawerRef, {
     mobile: isMobile,
     restoreFocusRef: handleRef,
-    skipRestoreSelector: '.interaction-dock',
   });
   const { onTouchStart, onTouchEnd } = useAgentNavSwipe({
     enabled,

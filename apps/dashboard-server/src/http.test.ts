@@ -740,7 +740,6 @@ describe('dashboard HTTP boundary', () => {
             cwd: '/tmp/project',
             liveState: 'idle',
             session: { id: 'startup-session', entries: [] },
-            pendingInteractions: [],
           },
         },
       }),
@@ -835,7 +834,6 @@ describe('dashboard HTTP boundary', () => {
               cwd: '/tmp/project',
               liveState: 'idle',
               session: { id: 'replacement-session', entries: [] },
-              pendingInteractions: [],
             },
           },
         }),
@@ -909,7 +907,6 @@ describe('dashboard HTTP boundary', () => {
       cwd: '/tmp/project',
       liveState: 'idle',
       session: { id: 'managed-transcript-session', entries: [] },
-      pendingInteractions: [],
     };
     bridge.write(
       serializeFrame({
@@ -1033,7 +1030,6 @@ describe('dashboard HTTP boundary', () => {
             cwd: '/tmp/project',
             liveState: 'idle',
             session: { id: 'stop-shell-session', entries: [] },
-            pendingInteractions: [],
           },
         },
       }),
@@ -1117,7 +1113,6 @@ describe('dashboard HTTP boundary', () => {
               cwd: '/tmp/project',
               liveState: 'idle',
               session: { id: 'shared-session', entries: [] },
-              pendingInteractions: [],
             },
           },
         }),
@@ -1200,7 +1195,6 @@ describe('dashboard HTTP boundary', () => {
             cwd: '/tmp',
             liveState: 'idle',
             session: { id: 'offline-session', entries: [] },
-            pendingInteractions: [],
           },
         },
       }),
@@ -1245,7 +1239,6 @@ describe('dashboard HTTP boundary', () => {
       cwd: '/tmp/project',
       liveState: 'idle' as const,
       session: { id: 'readd-session', entries: [] },
-      pendingInteractions: [],
     };
     bridge.write(
       serializeFrame({
@@ -1391,7 +1384,6 @@ describe('dashboard HTTP boundary', () => {
               model: 'vision',
               supportsImages: true,
             },
-            pendingInteractions: [],
           },
         },
       }),

@@ -20,33 +20,6 @@ afterEach(() => {
 });
 
 describe('scoped runtime services', () => {
-  test('does not list or answer another scope interaction', async () => {
-    const first = services(`scope-a-${randomUUID()}`);
-    const second = services(`scope-b-${randomUUID()}`);
-    const pending = first.interactionBroker.request(
-      {
-        type: 'ask_user',
-        question: 'Continue?',
-        choices: [{ label: 'Yes', value: 'yes' }],
-        allowCustom: false,
-      },
-      () => new Promise(() => {}),
-      undefined,
-      first.scopeId,
-      60_000,
-    );
-    const interaction = first.interactionBroker.list()[0];
-    expect(interaction).toBeDefined();
-    expect(second.interactionBroker.list()).toEqual([]);
-    expect(second.interactionBroker.answer(interaction?.id ?? '', 'yes')).toBe(
-      false,
-    );
-    expect(first.interactionBroker.answer(interaction?.id ?? '', 'yes')).toBe(
-      true,
-    );
-    await expect(pending).resolves.toMatchObject({ answer: 'yes' });
-  });
-
   test('keeps live surfaces and pending settlement accounting isolated', () => {
     const first = services(`surface-a-${randomUUID()}`);
     const second = services(`surface-b-${randomUUID()}`);

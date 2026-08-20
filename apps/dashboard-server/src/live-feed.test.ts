@@ -477,7 +477,6 @@ describe('feed registry routing', () => {
           active: {
             messages: [],
             tools: [],
-            interactions: [],
             delegateRuns: [],
           },
         }) as never,

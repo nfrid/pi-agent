@@ -45,7 +45,6 @@ const sessionResponse = (
     history: { version: 1, start: 0, end: 0, hasOlder: false },
     entriesComplete: true,
     active: {
-      pendingInteractions: [],
       messages: [],
       tools: [],
       delegates: [],
@@ -109,7 +108,6 @@ describe('DashboardLiveStore', () => {
           runtimeEpoch: 'epoch-1',
           runtimeSeq: 2,
           active: {
-            pendingInteractions: [],
             messages: [
               { messageId: 'old-live', role: 'assistant', content: 'old' },
             ],
@@ -246,7 +244,6 @@ describe('DashboardLiveStore', () => {
       cwd: '/tmp',
       liveState: 'idle',
       session: { id: first.id, name: 'Old name', entries: [] },
-      pendingInteractions: [],
     } as const;
     store.beginShellSync(1);
     expect(
@@ -306,7 +303,6 @@ describe('DashboardLiveStore', () => {
             {
               runtimeId: 'runtime-1',
               liveState: 'working',
-              pendingInteractions: [],
               session: { id: existing.id, entries: [] },
             } as never,
           ],
@@ -353,7 +349,6 @@ describe('DashboardLiveStore', () => {
             runtime: {
               runtimeId: 'runtime-1',
               liveState: 'working',
-              pendingInteractions: [],
               session: { id: 'replacement-session', entries: [] },
             },
           },
@@ -386,7 +381,6 @@ describe('DashboardLiveStore', () => {
       online: true,
       lastSeenAt: 1,
       session: { id: 'session-offline', entries: [] },
-      pendingInteractions: [],
     } as const;
     const offline = { ...online, online: false, lastSeenAt: 2 };
     store.beginShellSync(1);
@@ -429,7 +423,6 @@ describe('DashboardLiveStore', () => {
       online: true,
       liveState: 'working',
       session: { id: 'session-1', entries: [] },
-      pendingInteractions: [],
       extensionSurfaces: [],
     } as never;
     store.installSnapshot({
@@ -449,7 +442,6 @@ describe('DashboardLiveStore', () => {
         entriesComplete: true,
         active: {
           runtimeId: 'runtime-1',
-          pendingInteractions: [],
           messages: [{ messageId, role: 'assistant', content: messageId }],
           tools: [
             {
@@ -602,7 +594,6 @@ describe('DashboardLiveStore', () => {
         },
       ],
       active: {
-        pendingInteractions: [],
         messages: [
           {
             messageId: 'assistant-1',
@@ -661,7 +652,6 @@ describe('DashboardLiveStore', () => {
         },
       ],
       active: {
-        pendingInteractions: [],
         messages: [
           {
             messageId: 'live-user-copy',
@@ -720,7 +710,6 @@ describe('DashboardLiveStore', () => {
         },
       ],
       active: {
-        pendingInteractions: [],
         messages: [
           {
             messageId: 'live-user-copy',
@@ -761,7 +750,6 @@ describe('DashboardLiveStore', () => {
         },
       ],
       active: {
-        pendingInteractions: [],
         messages: [],
         tools: [],
         delegates: [],
@@ -792,7 +780,6 @@ describe('DashboardLiveStore', () => {
         },
       ],
       active: {
-        pendingInteractions: [],
         messages: [
           {
             messageId: 'active-older',
@@ -849,7 +836,6 @@ describe('DashboardLiveStore', () => {
         },
       ],
       active: {
-        pendingInteractions: [],
         messages: [
           {
             messageId: 'active-message',
@@ -973,7 +959,6 @@ describe('DashboardLiveStore', () => {
       extensionSurfaces: [
         { id: 'delegate.status', rendererId: 'delegate.status', viewModel: {} },
       ],
-      pendingInteractions: [],
     };
     store.beginShellSync(1);
     expect(
@@ -1072,7 +1057,6 @@ describe('DashboardLiveStore', () => {
         {
           runtimeId: 'runtime-1',
           liveState: 'working',
-          pendingInteractions: [],
           extensionSurfaces: [],
           session: { id: 'session-1', entries: [] },
         },
@@ -1104,7 +1088,6 @@ describe('DashboardLiveStore', () => {
       event: {
         type: 'runtime.stateChanged',
         state: 'working',
-        snapshot: { pendingInteractions: [] },
       },
     } as unknown as StreamRecord);
     expect(store.getSnapshot().optimisticSessionTitlesById['session-1']).toBe(
@@ -1119,7 +1102,6 @@ describe('DashboardLiveStore', () => {
         {
           runtimeId: 'runtime-1',
           liveState: 'working',
-          pendingInteractions: [],
           extensionSurfaces: [],
           session: { id: 'session-1', entries: [] },
         },
@@ -1146,7 +1128,6 @@ describe('DashboardLiveStore', () => {
         {
           runtimeId: 'runtime-1',
           liveState: 'idle',
-          pendingInteractions: [],
           extensionSurfaces: [],
           session: { id: 'session-1', entries: [] },
         },
@@ -1178,7 +1159,6 @@ describe('DashboardLiveStore', () => {
         {
           runtimeId: 'runtime-1',
           liveState: 'working',
-          pendingInteractions: [],
           extensionSurfaces: [],
           session: { id: 'session-1', entries: [] },
         },
@@ -1204,7 +1184,6 @@ describe('DashboardLiveStore', () => {
       event: {
         type: 'runtime.stateChanged',
         state: 'idle',
-        snapshot: { pendingInteractions: [] },
       },
     } as unknown as StreamRecord);
     expect(store.getSnapshot().runtimesById['runtime-1']?.session.title).toBe(
@@ -1279,7 +1258,6 @@ describe('DashboardLiveStore', () => {
         {
           runtimeId: 'runtime-1',
           liveState: 'working',
-          pendingInteractions: [],
           extensionSurfaces: [],
           session: {
             id: 'session-1',
@@ -1302,16 +1280,6 @@ describe('DashboardLiveStore', () => {
             entries: [],
             entriesComplete: false,
           },
-          pendingInteractions: [
-            {
-              id: 'question-1',
-              type: 'ask_user',
-              question: 'Continue?',
-              choices: [],
-              allowCustom: false,
-              createdAt: 2,
-            },
-          ],
           extensionSurfaces: [
             {
               id: 'delegate.status',
@@ -1325,11 +1293,9 @@ describe('DashboardLiveStore', () => {
 
     expect(selectSnapshot(store.getSnapshot())?.runtimes[0]).toMatchObject({
       liveState: 'waiting',
-      pendingInteractions: [{ id: 'question-1' }],
       extensionSurfaces: [{ id: 'delegate.status' }],
     });
     expect(store.getSnapshot().runtimesById['runtime-1']).toMatchObject({
-      pendingInteractions: [{ id: 'question-1' }],
       extensionSurfaces: [{ id: 'delegate.status' }],
       session: {
         id: 'session-1',
@@ -1348,7 +1314,6 @@ describe('DashboardLiveStore', () => {
       cwd: '/tmp/old',
       liveState: 'idle',
       online: true,
-      pendingInteractions: [],
       session: {
         id: 'session-1',
         entries: [{ type: 'message', id: 'existing' }],
@@ -1494,14 +1459,12 @@ describe('DashboardLiveStore', () => {
       runtimeId: 'runtime-old',
       online: false,
       liveState: 'idle',
-      pendingInteractions: [],
       session: { id: 'session-1', entries: [] },
     };
     const newRuntime = {
       runtimeId: 'runtime-new',
       online: true,
       liveState: 'working',
-      pendingInteractions: [],
       session: { id: 'session-1', entries: [] },
     };
     store.installSnapshot({
@@ -1539,7 +1502,6 @@ describe('DashboardLiveStore', () => {
       cwd: '/tmp',
       liveState: 'idle',
       online: false,
-      pendingInteractions: [],
       session: { id: 'session-1', entries: [] },
     };
     store.installSnapshot({
@@ -1586,7 +1548,6 @@ describe('DashboardLiveStore', () => {
     const runtime = {
       runtimeId: 'runtime-1',
       liveState: 'idle',
-      pendingInteractions: [],
       extensionSurfaces: [],
       session: { id: 'session-1', entries: [] },
     };
@@ -1625,7 +1586,6 @@ describe('DashboardLiveStore', () => {
     const runtime = {
       runtimeId: 'runtime-1',
       liveState: 'idle',
-      pendingInteractions: [],
       extensionSurfaces: [],
       session: { id: 'session-1', entries: [] },
     };
@@ -1690,7 +1650,6 @@ describe('DashboardLiveStore', () => {
     const runtime = {
       runtimeId: 'runtime-1',
       liveState: 'working',
-      pendingInteractions: [],
       extensionSurfaces: [],
       session: { id: 'session-1', entries: [] },
     };
@@ -1713,7 +1672,6 @@ describe('DashboardLiveStore', () => {
       event: {
         type: 'runtime.stateChanged',
         state: 'waiting',
-        snapshot: { pendingInteractions: [] },
       },
     } as unknown as StreamRecord);
     const afterEvent = store.getSnapshot();
@@ -2475,7 +2433,6 @@ describe('DashboardLiveStore', () => {
         nextBefore: 'older-page',
       },
       active: {
-        pendingInteractions: [],
         messages: [
           {
             messageId: 'timestamp:100',
@@ -2509,7 +2466,6 @@ describe('DashboardLiveStore', () => {
       cursor: 3,
       runtimeSeq: 3,
       active: {
-        pendingInteractions: [],
         messages: [],
         tools: [],
         delegates: [],
@@ -3033,7 +2989,6 @@ describe('DashboardLiveStore', () => {
       online: true,
       cwd: '/tmp',
       session: { id: 'session-1', entries: [], entriesComplete: false },
-      pendingInteractions: [],
       extensionSurfaces: [
         {
           id: 'delegate.status',

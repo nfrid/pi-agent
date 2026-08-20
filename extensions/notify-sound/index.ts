@@ -93,10 +93,6 @@ export default defineExtension('notify-sound', (pi: ExtensionAPI) => {
     process.stdin.on('data', onData);
   });
 
-  pi.on('tool_execution_start', (event) => {
-    if (event.toolName === 'ask_user_question') playIfOutOfFocus();
-  });
-
   pi.on('agent_settled', (_event, ctx) => {
     if (shouldNotifyAgentSettled(getSessionScopeId(ctx))) playIfOutOfFocus();
   });

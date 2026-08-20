@@ -8,7 +8,6 @@ import type {
   ShellFeedEvent,
   ShellSnapshotResponse,
 } from '@pi-dashboard/protocol';
-import { projectShellInteraction } from './application/dashboard-application.js';
 import { BoundedFeed, type FeedBounds, type FeedMetrics } from './live-feed.js';
 
 export interface LiveFeedOptions extends FeedBounds {
@@ -217,42 +216,5 @@ export function sessionFeedKey(event: BridgeEvent): string | undefined {
       return `session:${event.session.id}`;
     default:
       return undefined;
-  }
-}
-
-/** Only compact semantic state may cross the shell feed. */
-export function shellDomainForEvent(
-  event: BridgeEvent,
-): 'interaction' | undefined {
-  switch (event.type) {
-    case 'interaction.requested':
-    case 'interaction.resolved':
-      return 'interaction';
-    default:
-      // Message, tool, and delegate transcript activity is session-feed only.
-      // Runtime shell changes are detected from the compact runtime snapshot.
-      return undefined;
-  }
-}
-
-export function compactShellEventData(
-  event: BridgeEvent,
-  runtimeId: string,
-): Extract<ShellFeedData, { kind: string }> {
-  switch (event.type) {
-    case 'interaction.requested':
-      return {
-        kind: 'upsert',
-        runtimeId,
-        interaction: projectShellInteraction(event.interaction),
-      } as Extract<ShellFeedData, { kind: 'upsert'; interaction: unknown }>;
-    case 'interaction.resolved':
-      return {
-        kind: 'remove',
-        runtimeId,
-        interactionId: event.interactionId,
-      };
-    default:
-      throw new Error(`Event ${event.type} has no shell patch.`);
   }
 }

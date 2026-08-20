@@ -148,7 +148,6 @@ function runtime(
       entries: [],
       entriesComplete: false,
     },
-    pendingInteractions: [],
     ...overrides,
   };
 }
@@ -674,16 +673,6 @@ describe('authoritative application snapshot lifecycle', () => {
     );
     await startedPromise;
     const newer = runtime(f.file, {
-      pendingInteractions: [
-        {
-          id: 'new-interaction',
-          type: 'ask_user',
-          question: 'continue?',
-          choices: [{ label: 'yes', value: 'yes' }],
-          allowCustom: false,
-          createdAt: 2,
-        },
-      ],
       extensionSurfaces: [
         {
           id: 'delegate-surface',
@@ -761,9 +750,6 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(current.active.tools).toMatchObject([
       { toolCallId: 'new-tool', status: 'running' },
     ]);
-    expect(current.active.pendingInteractions).toMatchObject([
-      { id: 'new-interaction' },
-    ]);
     expect(current.active.delegates).toMatchObject([{ runId: 'run-new' }]);
   });
 
@@ -835,14 +821,6 @@ describe('authoritative application snapshot lifecycle', () => {
 
     const waiting = runtime(f.file, {
       liveState: 'waiting',
-      pendingInteractions: Array.from({ length: 200 }, () => ({
-        id: 'interaction-1',
-        type: 'ask_user',
-        question: 'q',
-        choices: [{ label: 'yes', value: 'yes' }],
-        allowCustom: false,
-        createdAt: 1,
-      })),
       extensionSurfaces: [
         {
           id: 'surface-1',
@@ -860,9 +838,6 @@ describe('authoritative application snapshot lifecycle', () => {
     });
     expect(parsed.snapshot.cursor).toBe(0);
     expect(parsed.snapshot.runtimes[0]?.session.entries).toEqual([]);
-    expect(
-      parsed.snapshot.runtimes[0]?.pendingInteractions.length,
-    ).toBeLessThanOrEqual(128);
     expect(parsed.snapshot.runtimes[0]?.shellStateTruncated).toBe(true);
   });
 });

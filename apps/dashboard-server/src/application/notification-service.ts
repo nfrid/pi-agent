@@ -54,39 +54,22 @@ export class NotificationService {
     }
     if (change.kind !== 'event') return;
     const event = change.event;
-    if (event.type === 'interaction.resolved') {
-      this.metadata.clearWaitingNotifications(change.snapshot.runtimeId);
-      void this.push
-        .clearWaiting?.(change.snapshot.runtimeId)
-        .catch(() => undefined);
-    }
     const shouldNotify =
-      event.type === 'interaction.requested' ||
       (event.type === 'runtime.goodbye' &&
         !isSessionReplacementGoodbye(change)) ||
       (event.type === 'agent.settled' &&
         process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1');
     if (!shouldNotify) return;
     this.publish({
-      id: `${event.type}-${change.snapshot.runtimeId}-${event.type === 'interaction.requested' ? event.interaction.id : Date.now()}`,
-      kind:
-        event.type === 'interaction.requested'
-          ? 'waiting'
-          : event.type === 'agent.settled'
-            ? 'settled'
-            : 'runtime-exited',
+      id: `${event.type}-${change.snapshot.runtimeId}-${Date.now()}`,
+      kind: event.type === 'agent.settled' ? 'settled' : 'runtime-exited',
       runtimeId: change.snapshot.runtimeId,
       sessionId: change.snapshot.session.id,
       title:
-        event.type === 'interaction.requested'
-          ? 'Pi is waiting for an answer'
-          : event.type === 'agent.settled'
-            ? 'Pi finished a turn'
-            : 'Pi runtime exited',
-      body:
-        event.type === 'interaction.requested'
-          ? event.interaction.question
-          : (change.snapshot.session.name ?? change.snapshot.cwd),
+        event.type === 'agent.settled'
+          ? 'Pi finished a turn'
+          : 'Pi runtime exited',
+      body: change.snapshot.session.name ?? change.snapshot.cwd,
       createdAt: Date.now(),
     });
   }

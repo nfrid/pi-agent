@@ -56,7 +56,6 @@ function snapshotActions(snapshot: BrowserSnapshot) {
                 {
                   online: runtime.online !== false,
                   liveState: runtime.liveState,
-                  pendingInteractions: runtime.pendingInteractions.length,
                 },
               ),
             )

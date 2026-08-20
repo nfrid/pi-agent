@@ -391,38 +391,6 @@ export function restartRuntimeMutationOptions(client: DashboardHttpClient) {
   });
 }
 
-export function interactionAnswerMutationOptions(client: DashboardHttpClient) {
-  return mutationOptions({
-    mutationFn: ({
-      runtimeId,
-      id,
-      answer,
-      commandId,
-    }: {
-      runtimeId: string;
-      id: string;
-      answer: unknown;
-      commandId?: string;
-    }) => client.answerInteraction(runtimeId, id, answer, commandId),
-    retry: false,
-  });
-}
-
-export function interactionCancelMutationOptions(client: DashboardHttpClient) {
-  return mutationOptions({
-    mutationFn: ({
-      runtimeId,
-      id,
-      commandId,
-    }: {
-      runtimeId: string;
-      id: string;
-      commandId?: string;
-    }) => client.cancelInteraction(runtimeId, id, commandId),
-    retry: false,
-  });
-}
-
 export function pushSubscribeMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
     mutationFn: (subscription: unknown) => client.subscribePush(subscription),

@@ -24,7 +24,7 @@ snapshots and prompt, steer, abort, model, and thinking commands to the
 existing bounded `RuntimeRegistry` protocol. Protocol v1 requires a positive
 `pid`, but pi-server does not expose one; the compatibility snapshot uses the
 daemon PID and the manager never signals it. It advertises no extension
-capabilities or ask-user support. PiClient has no automatic reconnect, so a
+capabilities. PiClient has no automatic reconnect, so a
 native disconnect interrupts the run. Daemon restart recovery is unsupported:
 the daemon does not relaunch a Pi session or duplicate its prompt.
 

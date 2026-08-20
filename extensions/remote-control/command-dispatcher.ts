@@ -10,7 +10,6 @@ import {
   type RuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';
 import type { BridgeCommand } from '@pi-dashboard/protocol/pi-runtime-protocol';
-import type { InteractionBroker } from '../ask-user/broker';
 import type { CapabilityActionHost } from '../shared/runtime/capability-action-host';
 import {
   aggregateRuntimeCapabilities,
@@ -33,7 +32,6 @@ export type CommandHandler = (
 async function dispatchSemanticAction(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  broker: InteractionBroker,
   command: Extract<BridgeCommand, { type: 'action.invoke' }>,
   capabilities: RuntimeCapabilitySnapshot,
 ): Promise<unknown> {
@@ -56,9 +54,7 @@ async function dispatchSemanticAction(
     );
   const available = isActionAvailable(advertisedAction, capabilities, {
     online: true,
-    liveState:
-      broker.list().length > 0 ? 'waiting' : ctx.isIdle() ? 'idle' : 'working',
-    pendingInteractions: broker.list().length,
+    liveState: ctx.isIdle() ? 'idle' : 'working',
   });
   if (!available)
     throw Object.assign(
@@ -68,7 +64,6 @@ async function dispatchSemanticAction(
   parseActionInput(advertisedAction, invocation.input);
   const host: CapabilityActionHost = {
     scopeId: getSessionScopeId(ctx),
-    broker,
     ctx,
     pi,
   };
@@ -78,13 +73,12 @@ async function dispatchSemanticAction(
 export async function dispatchDashboardCommand(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  broker: InteractionBroker,
   command: BridgeCommand,
   capabilities = aggregateRuntimeCapabilities(getSessionScopeId(ctx)),
   queueDrafts?: QueueDraftStore,
 ): Promise<unknown> {
   if (command.type === 'action.invoke')
-    return dispatchSemanticAction(pi, ctx, broker, command, capabilities);
+    return dispatchSemanticAction(pi, ctx, command, capabilities);
   if (isQueueDraftCommand(command)) {
     if (!queueDrafts)
       throw queueDraftError(
@@ -146,16 +140,6 @@ export async function dispatchDashboardCommand(
       return { accepted: true };
     case 'setSessionName':
       pi.setSessionName(command.name);
-      return { accepted: true };
-    case 'interaction.answer':
-      if (!broker.answer(command.interactionId, command.answer))
-        throw new Error(
-          'Interaction is already resolved or the answer is invalid.',
-        );
-      return { accepted: true };
-    case 'interaction.cancel':
-      if (!broker.cancel(command.interactionId))
-        throw new Error('Interaction is already resolved.');
       return { accepted: true };
   }
 }

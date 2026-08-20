@@ -15,7 +15,6 @@ import { Transcript } from '../entities/transcript';
 import { useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav, workspaceNameForSession } from './agent-thread-nav';
 import { runtimePauseStatus } from './extension-surfaces';
-import { PendingInteractions } from './pending-interaction';
 import { dashboardStatus } from './presentation-status';
 import { useOlderSessionHistory } from './session/history';
 import { useSessionHydration } from './session/hydration';
@@ -29,11 +28,6 @@ import {
   SessionLoadingHeader,
 } from './session/views';
 
-export type { InteractionKeyAction } from './pending-interaction';
-export {
-  interactionKeyAction,
-  selectedInteractionPreview,
-} from './pending-interaction';
 export { visualViewportKeyboardInset } from './session/viewport';
 
 export function SessionView({
@@ -105,14 +99,6 @@ export function SessionView({
       outlineTriggerRef.current?.focus({ preventScroll: true });
     }
   }, [outlineOpen]);
-  useEffect(() => {
-    // A pending question is a higher-priority modal than the optional
-    // transcript surfaces; never leave fixed surfaces competing for the viewport.
-    if (runtime?.pendingInteractions.length) {
-      setAgentNavOpen(false);
-      setOutlineOpen(false);
-    }
-  }, [runtime?.pendingInteractions.length]);
   const {
     awayFromLatest,
     controlLayerRef,
@@ -171,7 +157,6 @@ export function SessionView({
             status={status}
             statusLabel={statusLabel}
           />
-          <PendingInteractions runtime={runtime} />
         </section>
         {!embedded && (
           <SessionLoadingCurtain
@@ -184,7 +169,6 @@ export function SessionView({
     );
   }
 
-  const hasPendingInteraction = Boolean(runtime?.pendingInteractions.length);
   const workspaceName = workspaceNameForSession(
     snapshot,
     data.metadata,
@@ -213,7 +197,7 @@ export function SessionView({
           !embedded && tailReadySessionId !== id ? '' : undefined
         }
         data-runtime-paused={pauseStatus ? '' : undefined}
-        className={`session-page${embedded ? ' session-page-embedded' : ''}${hasPendingInteraction ? ' has-pending-interaction' : ''}${agentNavOpen ? ' modal-open' : ''}`}
+        className={`session-page${embedded ? ' session-page-embedded' : ''}${agentNavOpen ? ' modal-open' : ''}`}
       >
         <SessionHeader
           id={id}
@@ -272,7 +256,6 @@ export function SessionView({
             store.optimisticallyTitleSession(id, text);
           }}
         />
-        <PendingInteractions runtime={runtime} />
       </section>
       {!embedded && tailReadySessionId !== id && (
         <SessionLoadingCurtain

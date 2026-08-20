@@ -38,14 +38,7 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   const activeSessionId = pathname.startsWith('/sessions/')
     ? decodeURIComponent(pathname.split('/')[2] ?? '')
     : undefined;
-  const paletteDisabled = Boolean(
-    activeSessionId &&
-      snapshot.runtimes.some(
-        (runtime) =>
-          runtime.session?.id === activeSessionId &&
-          runtime.pendingInteractions.length > 0,
-      ),
-  );
+  const paletteDisabled = false;
   return (
     <header className="navigation-shell">
       <div className="global-tools">

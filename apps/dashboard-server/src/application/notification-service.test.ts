@@ -12,7 +12,6 @@ const snapshot: RuntimeSnapshot = {
   cwd: '/tmp/project',
   liveState: 'idle',
   session: { id: 'session-replaced', entries: [] },
-  pendingInteractions: [],
 };
 
 function goodbye(reason: string): RegistryChange {

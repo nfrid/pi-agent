@@ -227,7 +227,6 @@ const IdentifierSchema = Type.String({
   maxLength: MAX_ID,
   pattern: '^[^\\u0000-\\u001F\\u007F]*$',
 });
-const NonEmptyTextSchema = Type.String({ minLength: 1, maxLength: MAX_TEXT });
 const FiniteNumberSchema = Type.Number();
 const UnknownSchema = Type.Unknown();
 
@@ -348,46 +347,6 @@ export const parseRuntimeExtensionSurface = parseExtensionSurface;
 export const tryParseRuntimeExtensionSurface = tryParseExtensionSurface;
 export const parseRuntimeExtensionSurfaceList = parseExtensionSurfaceList;
 export const tryParseRuntimeExtensionSurfaceList = tryParseExtensionSurfaceList;
-
-const InteractionChoiceSchema = Type.Object(
-  {
-    label: Type.String({ minLength: 1, maxLength: 512 }),
-    value: Type.String({ minLength: 1, maxLength: 512 }),
-    description: Type.Optional(
-      Type.String({ minLength: 1, maxLength: 10_000 }),
-    ),
-    preview: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_TEXT })),
-    custom: Type.Optional(Type.Boolean()),
-  },
-  { additionalProperties: false },
-);
-export type InteractionChoice = Static<typeof InteractionChoiceSchema>;
-
-export const InteractionSnapshotSchema = Type.Object(
-  {
-    id: IdentifierSchema,
-    type: Type.Literal('ask_user'),
-    question: NonEmptyTextSchema,
-    choices: Type.Readonly(
-      Type.Array(InteractionChoiceSchema, { maxItems: 128 }),
-    ),
-    allowCustom: Type.Boolean(),
-    customLabel: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    /** Known contribution renderer; absent means generic interaction fallback. */
-    rendererId: Type.Optional(IdentifierSchema),
-    /** Validated renderer view model, retained opaque at protocol v1. */
-    viewModel: Type.Optional(UnknownSchema),
-    answerActionId: Type.Optional(IdentifierSchema),
-    cancelActionId: Type.Optional(IdentifierSchema),
-    createdAt: FiniteNumberSchema,
-  },
-  { additionalProperties: false },
-);
-type InteractionSnapshotStatic = Static<typeof InteractionSnapshotSchema>;
-/** Keep the public snapshot assignable from readonly runtime broker choices. */
-export type InteractionSnapshot = Omit<InteractionSnapshotStatic, 'choices'> & {
-  readonly choices: readonly InteractionChoice[];
-};
 
 const SessionSnapshotProperties = {
   id: IdentifierSchema,
@@ -518,7 +477,6 @@ const RuntimeSnapshotProperties = {
       { additionalProperties: false },
     ),
   ),
-  pendingInteractions: Type.Readonly(Type.Array(InteractionSnapshotSchema)),
   /** Dashboard-owned text drafts, before they are handed to Pi's queue. */
   queueDrafts: Type.Optional(
     Type.Readonly(Type.Array(QueueDraftSchema, { maxItems: MAX_QUEUE_DRAFTS })),
@@ -544,14 +502,9 @@ export const RuntimeSnapshotSchema = Type.Object(RuntimeSnapshotProperties, {
 type RuntimeSnapshotStatic = Static<typeof RuntimeSnapshotSchema>;
 export type RuntimeSnapshot = Omit<
   RuntimeSnapshotStatic,
-  | 'session'
-  | 'pendingInteractions'
-  | 'queueDrafts'
-  | 'extensionSurfaces'
-  | 'composerCommands'
+  'session' | 'queueDrafts' | 'extensionSurfaces' | 'composerCommands'
 > & {
   session: SessionSnapshot;
-  readonly pendingInteractions: readonly InteractionSnapshot[];
   readonly queueDrafts?: readonly QueueDraft[];
   readonly extensionSurfaces?: readonly RuntimeExtensionSurface[];
   readonly composerCommands?: readonly ComposerCommandEntry[];
@@ -565,14 +518,9 @@ export const RuntimeSnapshotPatchSchema = Type.Partial(RuntimeSnapshotSchema, {
 type RuntimeSnapshotPatchStatic = Static<typeof RuntimeSnapshotPatchSchema>;
 export type RuntimeSnapshotPatch = Omit<
   RuntimeSnapshotPatchStatic,
-  | 'session'
-  | 'pendingInteractions'
-  | 'queueDrafts'
-  | 'extensionSurfaces'
-  | 'composerCommands'
+  'session' | 'queueDrafts' | 'extensionSurfaces' | 'composerCommands'
 > & {
   session?: SessionSnapshot;
-  pendingInteractions?: readonly InteractionSnapshot[];
   queueDrafts?: readonly QueueDraft[];
   extensionSurfaces?: readonly RuntimeExtensionSurface[];
   composerCommands?: readonly ComposerCommandEntry[];
@@ -1054,21 +1002,6 @@ const AgentSettledEventSchema = Type.Object(
   { type: Type.Literal('agent.settled'), sessionId: IdentifierSchema },
   { additionalProperties: false },
 );
-const InteractionRequestedEventSchema = Type.Object(
-  {
-    type: Type.Literal('interaction.requested'),
-    interaction: InteractionSnapshotSchema,
-  },
-  { additionalProperties: false },
-);
-const InteractionResolvedEventSchema = Type.Object(
-  {
-    type: Type.Literal('interaction.resolved'),
-    interactionId: IdentifierSchema,
-    resolution: UnknownSchema,
-  },
-  { additionalProperties: false },
-);
 const GoodbyeEventSchema = Type.Object(
   {
     type: Type.Literal('runtime.goodbye'),
@@ -1118,8 +1051,6 @@ export const BridgeEventSchema = Type.Union([
   ToolEventSchema,
   DelegateTranscriptUpdatedEventSchema,
   AgentSettledEventSchema,
-  InteractionRequestedEventSchema,
-  InteractionResolvedEventSchema,
   GoodbyeEventSchema,
 ]);
 type BridgeEventStatic = Static<typeof BridgeEventSchema>;
@@ -1143,10 +1074,6 @@ export type BridgeEvent =
   | Static<typeof ToolEventSchema>
   | Static<typeof DelegateTranscriptUpdatedEventSchema>
   | Static<typeof AgentSettledEventSchema>
-  | (Omit<Static<typeof InteractionRequestedEventSchema>, 'interaction'> & {
-      interaction: InteractionSnapshot;
-    })
-  | Static<typeof InteractionResolvedEventSchema>
   | Static<typeof GoodbyeEventSchema>;
 /** Exact schema-derived union retained for schema consumers. */
 export type BridgeEventSchemaValue = BridgeEventStatic;
@@ -1256,23 +1183,6 @@ const SetSessionNameCommandSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-const AnswerCommandSchema = Type.Object(
-  {
-    ...BridgeCommandBaseProperties,
-    type: Type.Literal('interaction.answer'),
-    interactionId: IdentifierSchema,
-    answer: UnknownSchema,
-  },
-  { additionalProperties: false },
-);
-const CancelCommandSchema = Type.Object(
-  {
-    ...BridgeCommandBaseProperties,
-    type: Type.Literal('interaction.cancel'),
-    interactionId: IdentifierSchema,
-  },
-  { additionalProperties: false },
-);
 /** Semantic contribution invocation. It is intentionally not a slash command. */
 export const SemanticActionCommandSchema = Type.Object(
   {
@@ -1293,8 +1203,6 @@ export const BridgeCommandSchema = Type.Union([
   SetModelCommandSchema,
   SetThinkingCommandSchema,
   SetSessionNameCommandSchema,
-  AnswerCommandSchema,
-  CancelCommandSchema,
   SemanticActionCommandSchema,
 ]);
 export type BridgeCommand = Static<typeof BridgeCommandSchema>;
@@ -1529,9 +1437,6 @@ export const ShellRuntimeSnapshotSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
-    pendingInteractions: Type.Readonly(
-      Type.Array(InteractionSnapshotSchema, { maxItems: 128 }),
-    ),
     extensionSurfaces: Type.Optional(
       Type.Readonly(
         Type.Array(RuntimeExtensionSurfaceSchema, { maxItems: 32 }),
@@ -1724,9 +1629,6 @@ export const SessionActiveOverlaySchema = Type.Object(
     runtimeEpoch: Type.Optional(IdentifierSchema),
     runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
     liveState: Type.Optional(RuntimeLiveStateSchema),
-    pendingInteractions: Type.Readonly(
-      Type.Array(InteractionSnapshotSchema, { maxItems: 128 }),
-    ),
     /** Only in-flight entities are included; terminal history stays in JSONL. */
     messages: Type.Readonly(
       Type.Array(NormalizedMessagePayloadSchema, { maxItems: 256 }),
@@ -2074,7 +1976,6 @@ export type FeedCaughtUp = Static<typeof FeedCaughtUpSchema>;
 export const ShellFeedDomainSchema = Type.Union([
   Type.Literal('runtime'),
   Type.Literal('session-index'),
-  Type.Literal('interaction'),
   Type.Literal('notification'),
   Type.Literal('workspace'),
   Type.Literal('orchestration'),
@@ -2100,24 +2001,6 @@ const ShellRuntimePatchSchema = Type.Union([
     {
       kind: Type.Literal('remove'),
       runtimeId: IdentifierSchema,
-    },
-    { additionalProperties: false },
-  ),
-]);
-const ShellInteractionPatchSchema = Type.Union([
-  Type.Object(
-    {
-      kind: Type.Literal('upsert'),
-      runtimeId: IdentifierSchema,
-      interaction: InteractionSnapshotSchema,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      kind: Type.Literal('remove'),
-      runtimeId: IdentifierSchema,
-      interactionId: IdentifierSchema,
     },
     { additionalProperties: false },
   ),
@@ -2197,7 +2080,6 @@ const ShellUsagePatchSchema = Type.Object(
 
 export const ShellFeedDataSchema = Type.Union([
   ShellRuntimePatchSchema,
-  ShellInteractionPatchSchema,
   ShellSessionIndexPatchSchema,
   ShellWorkspacePatchSchema,
   ShellOrchestrationPatchSchema,
@@ -2210,14 +2092,6 @@ export const ShellFeedEventSchema = Type.Union([
       ...ShellFeedEventProperties,
       domain: Type.Literal('runtime'),
       data: ShellRuntimePatchSchema,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      ...ShellFeedEventProperties,
-      domain: Type.Literal('interaction'),
-      data: ShellInteractionPatchSchema,
     },
     { additionalProperties: false },
   ),

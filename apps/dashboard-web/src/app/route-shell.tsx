@@ -26,21 +26,10 @@ export function RouteShell() {
     }),
   });
   if (!dashboard.snapshot) return null;
-  const activeSessionId = routeState.pathname.startsWith('/sessions/')
-    ? decodeURIComponent(routeState.pathname.split('/')[2] ?? '')
-    : undefined;
-  const pendingQuestions = Boolean(
-    activeSessionId &&
-      dashboard.snapshot.runtimes.some(
-        (runtime) =>
-          runtime.session?.id === activeSessionId &&
-          runtime.pendingInteractions.length > 0,
-      ),
-  );
   return (
     <div className="app">
       <DashboardUtilityProvider
-        blocked={pendingQuestions}
+        blocked={false}
         locationKey={routeState.pathname}
       >
         <Header snapshot={dashboard.snapshot} />

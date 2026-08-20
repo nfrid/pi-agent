@@ -18,7 +18,6 @@ function snapshot(
     history: { version: 1, start: 0, end: 0, hasOlder: false },
     entriesComplete: true,
     active: {
-      pendingInteractions: [],
       messages: [],
       tools: [],
       delegates: [],

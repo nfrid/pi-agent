@@ -816,29 +816,6 @@ export class DashboardLiveStore {
         }
         break;
       }
-      case 'interaction': {
-        const data = event.data;
-        const runtime = nextState.runtimesById[data.runtimeId];
-        if (!runtime) return false;
-        const pending = [...runtime.pendingInteractions];
-        if (data.kind === 'remove') {
-          const index = pending.findIndex(
-            (item) => item.id === data.interactionId,
-          );
-          if (index >= 0) pending.splice(index, 1);
-        } else {
-          const index = pending.findIndex(
-            (item) => item.id === data.interaction.id,
-          );
-          if (index >= 0) pending[index] = data.interaction;
-          else pending.push(data.interaction);
-        }
-        nextState = this.installRuntimeProjection(nextState, {
-          ...runtime,
-          pendingInteractions: pending,
-        });
-        break;
-      }
       case 'session-index': {
         if (event.data.kind === 'replace')
           nextState = this.installSessionReplacementProjection(
@@ -1489,7 +1466,6 @@ export class DashboardLiveStore {
             : undefined;
       const projectedRuntime = {
         ...activeRuntime,
-        pendingInteractions: [...active.pendingInteractions],
         ...(extensionSurfaces === undefined ? {} : { extensionSurfaces }),
       };
       nextState = {

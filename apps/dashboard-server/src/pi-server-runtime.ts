@@ -257,12 +257,6 @@ function runtimeSnapshot(
           contextUsage:
             optional.contextUsage as RuntimeSnapshot['contextUsage'],
         }),
-    ...(Array.isArray(optional.pendingInteractions)
-      ? {
-          pendingInteractions:
-            optional.pendingInteractions as RuntimeSnapshot['pendingInteractions'],
-        }
-      : { pendingInteractions: [] }),
     ...(Array.isArray(optional.queueDrafts)
       ? { queueDrafts: optional.queueDrafts as RuntimeSnapshot['queueDrafts'] }
       : {}),

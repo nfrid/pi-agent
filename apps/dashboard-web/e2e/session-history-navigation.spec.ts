@@ -99,7 +99,6 @@ test('aborts older history when navigating away from a session', async ({
           }
         : {}),
       active: {
-        pendingInteractions: [],
         messages: [],
         tools: [],
         delegates: [],
@@ -144,7 +143,6 @@ test('aborts older history when navigating away from a session', async ({
               cursor: 1,
               history: { version: 1, start: 0, end: 2, hasOlder: false },
               active: {
-                pendingInteractions: [],
                 messages: [],
                 tools: [],
                 delegates: [],
@@ -179,7 +177,6 @@ test('aborts older history when navigating away from a session', async ({
                 }
               : {}),
             active: {
-              pendingInteractions: [],
               messages: [],
               tools: [],
               delegates: [],
@@ -260,7 +257,6 @@ test('switching chats establishes the new transcript tail', async ({
             serverId: snapshot.serverId,
             cursor: 1,
             active: {
-              pendingInteractions: [],
               messages: [],
               tools: [],
               delegates: [],
@@ -376,7 +372,6 @@ test('renders retained and persisted cached sessions immediately', async ({
             serverId: snapshot.serverId,
             cursor: count,
             active: {
-              pendingInteractions: [],
               messages: [],
               tools: [],
               delegates: [],
@@ -439,7 +434,6 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
     cwd: '/tmp',
     liveState: 'working',
     session: { id: 'session-1', entries: [], entriesComplete: false },
-    pendingInteractions: [],
     online: true,
   };
   const activeSnapshot = { ...snapshot, runtimes: [runtime] };
@@ -495,7 +489,6 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
               id === 'session-1'
                 ? {
                     runtimeId: 'runtime-1',
-                    pendingInteractions: [],
                     messages: [
                       {
                         messageId,
@@ -522,7 +515,6 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
                     truncated: false,
                   }
                 : {
-                    pendingInteractions: [],
                     messages: [],
                     tools: [],
                     delegates: [],

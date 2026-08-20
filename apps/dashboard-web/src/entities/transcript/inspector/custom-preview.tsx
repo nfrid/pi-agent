@@ -1,7 +1,6 @@
 import {
   actionIdPresentation,
   artifactRetrievePresentation,
-  askUserPresentation,
   backgroundPresentation,
   type CustomToolKind,
   delegateBranchesPresentation,
@@ -50,8 +49,7 @@ function ResultBody({
     kind === 'fetch_content' ||
     kind === 'get_search_content' ||
     kind === 'artifact_retrieve' ||
-    kind === 'delegate' ||
-    kind === 'ask_user';
+    kind === 'delegate';
   return (
     <>
       {markdown ? (
@@ -362,27 +360,6 @@ function TodoSummary({ args }: { args: unknown }) {
   );
 }
 
-function AskUserSummary({ args }: { args: unknown }) {
-  const model = askUserPresentation(args);
-  return (
-    <>
-      <Summary
-        detail={model.question ? compact(model.question, 200) : undefined}
-        title="Ask user"
-      />
-      {model.choices.length > 0 ? (
-        <ul className="ask-user-choices" aria-label="Suggested answers">
-          {model.choices.slice(0, 6).map((choice) => (
-            <li key={choice}>
-              <span className="ask-user-choice">{choice}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </>
-  );
-}
-
 const SUMMARIES: Record<CustomToolKind, (args: unknown) => ReactNode> = {
   web_search: (args) => <WebSearchSummary args={args} />,
   fetch_content: (args) => <FetchSummary args={args} />,
@@ -394,7 +371,6 @@ const SUMMARIES: Record<CustomToolKind, (args: unknown) => ReactNode> = {
   delegate_wake: (args) => <ActionSummary args={args} title="Delegate wake" />,
   background: (args) => <BackgroundSummary args={args} />,
   todo: (args) => <TodoSummary args={args} />,
-  ask_user: (args) => <AskUserSummary args={args} />,
 };
 
 export function CustomToolInspector({

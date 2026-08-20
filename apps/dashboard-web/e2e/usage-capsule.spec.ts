@@ -50,7 +50,6 @@ async function openSession(page: Page, path = '/sessions/session-usage') {
           title: 'Usage session',
           entries: [],
         },
-        pendingInteractions: [],
       },
     ],
     workspaces: [],

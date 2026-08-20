@@ -70,7 +70,6 @@ async function verifyEarlierHistoryAnchor(page: Page) {
               nextBefore: 'token-1',
             },
             active: {
-              pendingInteractions: [],
               messages: [],
               tools: [],
               delegates: [],
@@ -134,7 +133,6 @@ async function verifyEarlierHistoryAnchor(page: Page) {
                   nextBefore: 'token-1',
                 },
             active: {
-              pendingInteractions: [],
               messages: [],
               tools: [],
               delegates: [],

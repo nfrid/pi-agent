@@ -146,7 +146,6 @@ describe('useOlderSessionHistory', () => {
       updatedAt: 1,
     };
     const active: AuthoritativeSessionSnapshot['active'] = {
-      pendingInteractions: [],
       messages: [],
       tools: [],
       delegates: [],
@@ -252,7 +251,6 @@ describe('useOlderSessionHistory', () => {
       updatedAt: 1,
     };
     const active: AuthoritativeSessionSnapshot['active'] = {
-      pendingInteractions: [],
       messages: [],
       tools: [],
       delegates: [],
@@ -347,7 +345,6 @@ describe('useOlderSessionHistory', () => {
       updatedAt: 1,
     };
     const active: AuthoritativeSessionSnapshot['active'] = {
-      pendingInteractions: [],
       messages: [],
       tools: [],
       delegates: [],
@@ -500,7 +497,6 @@ describe('useOlderSessionHistory', () => {
       },
       entriesComplete: true,
       active: {
-        pendingInteractions: [],
         messages: [],
         tools: [],
         delegates: [],
@@ -613,7 +609,6 @@ describe('useOlderSessionHistory', () => {
       },
       entriesComplete: true,
       active: {
-        pendingInteractions: [],
         messages: [],
         tools: [],
         delegates: [],

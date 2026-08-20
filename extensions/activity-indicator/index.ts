@@ -5,8 +5,6 @@ import type {
 import { defineExtension } from '../shared/runtime/extension';
 
 export const THINKING_LABEL = 'Thinking...';
-const ASK_USER_TOOL = 'ask_user_question';
-
 type ModelPhase = 'thinking' | 'responding' | 'preparing-tools';
 
 type ActiveTool = {
@@ -71,10 +69,6 @@ export function activityLabel(batch: ToolBatch): string {
   if (batch.active.size === 0) return modelPhaseLabel(batch);
 
   const active = [...batch.active.values()];
-  if (active.some((tool) => tool.name === ASK_USER_TOOL)) {
-    return 'Waiting for you...';
-  }
-
   const total = batch.completed + batch.active.size;
   if (batch.active.size === 1) {
     const action = toolAction(active[0].name);

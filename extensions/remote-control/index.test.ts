@@ -12,15 +12,11 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import {
   type BridgeCommand,
-  parseFrame,
   type RuntimeSnapshot,
   serializeFrame,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { registerActivityGroupsCapability } from '../activity-groups/register-capability';
-import { InteractionBroker } from '../ask-user/broker';
-import { askUserCapabilitySnapshot } from '../ask-user/contribution';
-import { registerAskUserCapability } from '../ask-user/register-capability';
 import { registerDelegateCapability } from '../delegate/register-capability';
 import { beginsFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import {
@@ -50,7 +46,6 @@ import {
 } from './index';
 import { emitTurnEnd } from './runtime';
 
-registerAskUserCapability();
 registerActivityGroupsCapability();
 registerDelegateCapability();
 registerTasksCapability();
@@ -62,7 +57,6 @@ const snapshot: RuntimeSnapshot = {
   cwd: '/tmp',
   liveState: 'idle',
   session: { id: 'session-test', entries: [] },
-  pendingInteractions: [],
 };
 
 function waitFor(predicate: () => boolean): Promise<void> {
@@ -81,12 +75,10 @@ function waitFor(predicate: () => boolean): Promise<void> {
 describe('remote-control session lifecycle', () => {
   it('publishes compaction progress and the saved completion entry', () => {
     const events: unknown[] = [];
-    const broker = new InteractionBroker();
     const runtime = {
       isCurrent: () => true,
       setContext: vi.fn(),
       setLiveState: vi.fn(),
-      getInteractionBroker: () => broker,
       snapshotPatch: (
         _ctx: ExtensionContext,
         state: RuntimeSnapshot['liveState'],
@@ -275,7 +267,7 @@ describe('dashboard input dispatch', () => {
     await dispatchDashboardInput(pi, context, '/name Dashboard session');
     expect(setSessionName).toHaveBeenCalledWith('Dashboard session');
     await expect(
-      dispatchDashboardCommand(pi, context, new InteractionBroker(), {
+      dispatchDashboardCommand(pi, context, {
         id: 'rename-1',
         type: 'setSessionName',
         name: 'Bridge name',
@@ -1206,7 +1198,6 @@ describe('dashboard-owned queue drafts', () => {
       dispatchDashboardCommand(
         {} as ExtensionAPI,
         commandContext,
-        new InteractionBroker(),
         {
           id: 'add-1',
           type: 'queue.add',
@@ -1225,7 +1216,6 @@ describe('dashboard-owned queue drafts', () => {
       dispatchDashboardCommand(
         {} as ExtensionAPI,
         commandContext,
-        new InteractionBroker(),
         {
           id: 'update-1',
           type: 'queue.update',
@@ -1241,7 +1231,6 @@ describe('dashboard-owned queue drafts', () => {
       dispatchDashboardCommand(
         {} as ExtensionAPI,
         commandContext,
-        new InteractionBroker(),
         { id: 'remove-1', type: 'queue.remove', clientId: 'client-1' },
         undefined,
         store,
@@ -2004,7 +1993,6 @@ describe('remote-control bridge', () => {
       socketPath: '/unused',
       runtimeId: 'runtime-test',
       snapshot: () => snapshot,
-      capabilities: askUserCapabilitySnapshot,
       handleCommand: async () => new Promise(() => undefined),
     });
     const socket = new net.Socket();
@@ -2019,8 +2007,8 @@ describe('remote-control bridge', () => {
     const command = {
       id: 'answer-once',
       type: 'action.invoke',
-      actionId: 'ask-user.answer',
-      input: { interactionId: 'i', answer: 'yes' },
+      actionId: 'runtime.abort',
+      input: {},
     };
     enqueue(command, socket);
     enqueue(command, socket);
@@ -2052,162 +2040,6 @@ describe('remote-control bridge', () => {
       'action-command-capacity',
     ]);
     expect(guard.has('answer-once')).toBe(true);
-    client.stop();
-  });
-
-  it('rebuilds reconnect hello interactions from the live broker', async () => {
-    const directory = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-bridge-reconnect-state-'),
-    );
-    const socketPath = path.join(directory, 'bridge.sock');
-    const broker = new InteractionBroker();
-    const helloSnapshots: Array<RuntimeSnapshot> = [];
-    let connections = 0;
-    const server = net.createServer((socket) => {
-      connections += 1;
-      socket.setEncoding('utf8');
-      socket.on('data', (chunk) => {
-        for (const line of String(chunk).split('\n').filter(Boolean)) {
-          const frame = JSON.parse(line) as {
-            event?: { type?: string; snapshot?: RuntimeSnapshot };
-          };
-          if (frame.event?.type !== 'runtime.hello' || !frame.event.snapshot)
-            continue;
-          helloSnapshots.push(frame.event.snapshot);
-          if (connections === 1) socket.destroy();
-        }
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-    const pendingPromise = broker.request(
-      {
-        type: 'ask_user',
-        question: 'Continue?',
-        choices: [{ label: 'Yes', value: 'yes' }],
-        allowCustom: false,
-      },
-      () => new Promise<null>(() => undefined),
-    );
-    const interaction = broker.list()[0];
-    if (!interaction) throw new Error('interaction was not created');
-    const client = new BridgeClient({
-      socketPath,
-      runtimeId: 'runtime-test',
-      snapshot: () => ({ ...snapshot, pendingInteractions: [interaction] }),
-      broker,
-      handleCommand: async () => ({ accepted: true }),
-    });
-    client.start();
-    await waitFor(() => helloSnapshots.length >= 1);
-    broker.cancel(interaction.id);
-    await expect(pendingPromise).resolves.toBeNull();
-    await waitFor(() => helloSnapshots.length >= 2);
-    expect(helloSnapshots[1]?.pendingInteractions).toEqual([]);
-    client.stop();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(directory, { recursive: true, force: true });
-  });
-
-  it('bounds an oversized valid interaction instead of silently dropping it', () => {
-    const client = new BridgeClient({
-      socketPath: '/unused',
-      runtimeId: 'runtime-test',
-      snapshot: () => snapshot,
-      handleCommand: async () => ({ accepted: true }),
-    });
-    const socket = new net.Socket();
-    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
-    Reflect.set(client, 'socket', socket);
-    expect(
-      client.sendEvent({
-        type: 'interaction.requested',
-        interaction: {
-          id: 'oversized-interaction',
-          type: 'ask_user',
-          question: 'q'.repeat(600_000),
-          choices: [],
-          allowCustom: true,
-          createdAt: Date.now(),
-        },
-      }),
-    ).toBe(true);
-    const frame = JSON.parse(String(write.mock.calls[0]?.[0])) as {
-      event: { interaction: { question: string } };
-    };
-    expect(frame.event.interaction.question).toHaveLength(20_000);
-    client.stop();
-  });
-
-  it('normalizes oversized interactions to values accepted by the shared schema', () => {
-    const client = new BridgeClient({
-      socketPath: '/unused',
-      runtimeId: 'runtime-test',
-      snapshot: () => snapshot,
-      handleCommand: async () => ({ accepted: true }),
-    });
-    const socket = new net.Socket();
-    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
-    Reflect.set(client, 'socket', socket);
-    expect(
-      client.sendEvent({
-        type: 'interaction.requested',
-        interaction: {
-          id: 'i'.repeat(400),
-          type: 'ask_user',
-          question: 'q'.repeat(150_000),
-          choices: Array.from({ length: 200 }, (_, index) => ({
-            label: `l${index}`.repeat(1_000),
-            value: `v${index}`.repeat(1_000),
-            description: 'd'.repeat(20_000),
-            preview: 'p'.repeat(150_000),
-          })),
-          allowCustom: true,
-          customLabel: 'c'.repeat(2_000),
-          createdAt: Date.now(),
-        },
-      }),
-    ).toBe(true);
-    const frame = parseFrame(String(write.mock.calls[0]?.[0]));
-    if (frame.kind !== 'event' || frame.event.type !== 'interaction.requested')
-      throw new Error('expected interaction event');
-    expect(frame.event.interaction.question).toHaveLength(20_000);
-    expect(frame.event.interaction.choices).toHaveLength(50);
-    expect(frame.event.interaction.choices[0]?.description).toHaveLength(2_000);
-    expect(frame.event.interaction.choices[0]?.preview).toHaveLength(4_000);
-    client.stop();
-  });
-
-  it('reconnects rather than silently dropping an interaction on backpressure', () => {
-    const client = new BridgeClient({
-      socketPath: '/unused',
-      runtimeId: 'runtime-test',
-      snapshot: () => snapshot,
-      handleCommand: async () => ({ accepted: true }),
-    });
-    const socket = new net.Socket();
-    const write = vi.spyOn(socket, 'write').mockReturnValue(false);
-    const destroy = vi.spyOn(socket, 'destroy');
-    Reflect.set(client, 'socket', socket);
-    expect(client.sendEvent({ type: 'runtime.heartbeat', state: 'idle' })).toBe(
-      true,
-    );
-    expect(write).toHaveBeenCalledOnce();
-    for (let index = 0; index < 128; index += 1)
-      client.sendEvent({ type: 'runtime.stateChanged', state: 'idle' });
-    expect(
-      client.sendEvent({
-        type: 'interaction.requested',
-        interaction: {
-          id: 'interaction-backpressure',
-          type: 'ask_user',
-          question: 'Still there?',
-          choices: [],
-          allowCustom: true,
-          createdAt: Date.now(),
-        },
-      }),
-    ).toBe(false);
-    expect(destroy).toHaveBeenCalled();
     client.stop();
   });
 
@@ -2277,79 +2109,6 @@ describe('remote-control bridge', () => {
     );
     expect(nonHello).toHaveLength(1);
     expect(JSON.stringify(nonHello)).not.toContain('self');
-    client.stop();
-    connection?.destroy();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(directory, { recursive: true, force: true });
-  });
-
-  it('announces broker questions and resolves them through a daemon command', async () => {
-    const directory = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-bridge-broker-'),
-    );
-    const socketPath = path.join(directory, 'bridge.sock');
-    const broker = new InteractionBroker();
-    let connection: net.Socket | undefined;
-    const seen: Array<Record<string, unknown>> = [];
-    const server = net.createServer((socket) => {
-      connection = socket;
-      socket.setEncoding('utf8');
-      socket.on('data', (chunk) => {
-        for (const line of String(chunk).split('\n').filter(Boolean)) {
-          const frame = JSON.parse(line) as Record<string, unknown>;
-          seen.push(frame);
-          const event = frame.event as
-            | { type?: string; interaction?: { id: string } }
-            | undefined;
-          if (event?.type === 'interaction.requested' && event.interaction)
-            socket.write(
-              serializeFrame({
-                kind: 'command',
-                command: {
-                  id: 'answer-1',
-                  type: 'interaction.answer',
-                  interactionId: event.interaction.id,
-                  answer: 'yes',
-                },
-              }),
-            );
-        }
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-    const client = new BridgeClient({
-      socketPath,
-      runtimeId: 'runtime-test',
-      snapshot: () => snapshot,
-      broker,
-      handleCommand: async (command) => {
-        if (command.type === 'interaction.answer')
-          broker.answer(command.interactionId, command.answer);
-        return { accepted: true };
-      },
-    });
-    client.start();
-    await waitFor(() => Boolean(connection));
-    const pending = broker.request(
-      {
-        type: 'ask_user',
-        question: 'Continue?',
-        choices: [{ label: 'Yes', value: 'yes' }],
-        allowCustom: false,
-      },
-      () => new Promise<null>(() => undefined),
-    );
-    await expect(pending).resolves.toMatchObject({
-      answer: 'yes',
-      choiceLabel: 'Yes',
-    });
-    await waitFor(() =>
-      seen.some(
-        (frame) =>
-          (frame.event as { type?: string } | undefined)?.type ===
-          'interaction.resolved',
-      ),
-    );
     client.stop();
     connection?.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));

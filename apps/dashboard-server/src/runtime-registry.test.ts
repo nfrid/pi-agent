@@ -34,7 +34,6 @@ const snapshot: RuntimeSnapshot = {
   cwd: '/tmp/project',
   liveState: 'idle',
   session: { id: 'session-1', entries: [] },
-  pendingInteractions: [],
 };
 
 function eventually<T>(read: () => T | undefined): Promise<T> {

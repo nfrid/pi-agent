@@ -278,64 +278,6 @@ it('rejects auxiliary sessions without an exact source file', async () => {
   }
 });
 
-it('maps a live legacy runtime with pending interaction to waiting and binds it', async () => {
-  const fixture = await orchestrationFixture();
-  try {
-    await fixture.service.cancelRun(fixture.runId, 'cancel-before-live-adopt');
-    const checkout = fixture.metadata.orchestration
-      .listCheckouts(fixture.projectId)
-      .find((item) => item.kind === 'main');
-    if (!checkout) throw new Error('Missing fixture checkout.');
-    fixture.setLive({
-      runtimeId: 'legacy-runtime',
-      session: { id: 'active-legacy-session' },
-      liveState: 'working',
-      pendingInteractions: [{}],
-      online: true,
-    });
-    const adopted = await fixture.service.adoptSession(
-      fixture.projectId,
-      'active-legacy-session',
-      { commandId: 'adopt-live', checkoutId: checkout.id },
-    );
-    fixture.service.onRegistryChange({
-      kind: 'registered',
-      snapshot: {
-        runtimeId: 'legacy-runtime',
-        session: { id: 'active-legacy-session' },
-        liveState: 'working',
-        pendingInteractions: [{}],
-        online: true,
-      } as never,
-    } as never);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(adopted.run.status).toBe('waiting');
-    expect(adopted.run.runtimeId).toBe('legacy-runtime');
-    expect(fixture.registry.sendCommand).not.toHaveBeenCalled();
-    expect(
-      fixture.metadata.orchestration.getCommandReceipt('adopt-live'),
-    ).toMatchObject({ commandType: 'session.adopt' });
-    expect(
-      fixture.metadata.orchestration.getCommandReceipt(
-        `run-prompt:${adopted.run.id}`,
-      ),
-    ).toMatchObject({
-      commandType: 'run.prompt',
-      result: { runId: adopted.run.id },
-    });
-    expect(
-      fixture.metadata.orchestration.getRuntime('legacy-runtime'),
-    ).toMatchObject({
-      piSessionId: 'active-legacy-session',
-      runId: adopted.run.id,
-      status: 'running',
-    });
-    expect(fixture.manager.launch).not.toHaveBeenCalled();
-  } finally {
-    await fixture.close();
-  }
-});
-
 async function reconcile(service: OrchestrationService): Promise<void> {
   await (service as unknown as { reconcile: () => Promise<void> }).reconcile();
 }
@@ -348,7 +290,6 @@ function runtimeHello(runtimeId: string): Record<string, unknown> {
     cwd: '/tmp',
     liveState: 'working',
     session: { id: `${runtimeId}-session`, entries: [] },
-    pendingInteractions: [],
     online: true,
   };
 }
@@ -666,63 +607,6 @@ describe('OrchestrationService', () => {
     }
   });
 
-  it('serializes hello prompt ACK before consecutive interaction and settled events', async () => {
-    const fixture = await orchestrationFixture();
-    try {
-      const repository = fixture.metadata.orchestration;
-      repository.transitionRun(fixture.runId, 'preparing');
-      repository.transitionRun(fixture.runId, 'starting');
-      repository.setRunRuntime(fixture.runId, 'runtime-ordered');
-      let releasePrompt!: () => void;
-      const prompt = new Promise<{ accepted: boolean }>((resolve) => {
-        releasePrompt = () => resolve({ accepted: true });
-      });
-      fixture.registry.sendCommand.mockImplementationOnce(async () => prompt);
-      const handle = (
-        fixture.service as unknown as {
-          handleRegistryChange: (value: never) => Promise<void>;
-        }
-      ).handleRegistryChange.bind(fixture.service);
-      const interaction = { id: 'ordered-question', type: 'ask_user' };
-      const registered = handle({
-        kind: 'registered',
-        snapshot: {
-          ...runtimeHello('runtime-ordered'),
-          pendingInteractions: [interaction],
-        },
-      } as never);
-      const requested = handle({
-        kind: 'event',
-        runtimeId: 'runtime-ordered',
-        event: { type: 'interaction.requested', interaction },
-        snapshot: {
-          ...runtimeHello('runtime-ordered'),
-          pendingInteractions: [interaction],
-        },
-      } as never);
-      const settled = handle({
-        kind: 'event',
-        runtimeId: 'runtime-ordered',
-        event: { type: 'agent.settled', sessionId: 'ordered-session' },
-        snapshot: {
-          ...runtimeHello('runtime-ordered'),
-          pendingInteractions: [],
-        },
-      } as never);
-      await Promise.resolve();
-      expect(repository.getRun(fixture.runId)?.status).toBe('starting');
-      releasePrompt();
-      await Promise.all([registered, requested, settled]);
-      expect(repository.getRun(fixture.runId)?.status).toBe('completed');
-      expect(
-        repository.getThread(repository.getRun(fixture.runId)?.threadId ?? '')
-          ?.status,
-      ).toBe('completed');
-    } finally {
-      await fixture.close();
-    }
-  });
-
   it('stops durable runtime on goodbye but preserves reload reconnect intent', async () => {
     const fixture = await orchestrationFixture();
     try {
@@ -910,86 +794,6 @@ describe('OrchestrationService', () => {
       ).toBeDefined();
       expect(repository.getRun(fixture.runId)?.status).toBe('running');
       expect(repository.getRun(fixture.runId)?.error).toBeUndefined();
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it('projects interaction requests and resolutions from authoritative snapshots', async () => {
-    const fixture = await orchestrationFixture();
-    try {
-      const repository = fixture.metadata.orchestration;
-      repository.transitionRun(fixture.runId, 'preparing');
-      repository.transitionRun(fixture.runId, 'starting');
-      repository.setRunRuntime(fixture.runId, 'runtime-attention');
-      repository.transitionRun(fixture.runId, 'running');
-      const handle = (
-        fixture.service as unknown as {
-          handleRegistryChange: (value: never) => Promise<void>;
-        }
-      ).handleRegistryChange.bind(fixture.service);
-      const interaction = { id: 'question-1', type: 'ask_user' };
-      const secondInteraction = { id: 'question-2', type: 'ask_user' };
-      const change = (event: unknown, pendingInteractions: unknown[]) =>
-        ({
-          kind: 'event',
-          runtimeId: 'runtime-attention',
-          event,
-          snapshot: {
-            ...runtimeHello('runtime-attention'),
-            pendingInteractions,
-          },
-        }) as never;
-
-      await handle(
-        change({ type: 'interaction.requested', interaction }, [interaction]),
-      );
-      expect(repository.getRun(fixture.runId)?.status).toBe('waiting');
-      expect(
-        repository.getThread(repository.getRun(fixture.runId)?.threadId ?? '')
-          ?.status,
-      ).toBe('needs-input');
-
-      await handle(
-        change(
-          { type: 'interaction.requested', interaction: secondInteraction },
-          [interaction, secondInteraction],
-        ),
-      );
-      await handle(
-        change(
-          {
-            type: 'interaction.resolved',
-            interactionId: 'question-1',
-            resolution: 'yes',
-          },
-          [secondInteraction],
-        ),
-      );
-      expect(repository.getRun(fixture.runId)?.status).toBe('waiting');
-
-      await handle(
-        change({ type: 'runtime.stateChanged', state: 'working' }, [
-          secondInteraction,
-        ]),
-      );
-      expect(repository.getRun(fixture.runId)?.status).toBe('waiting');
-
-      await handle(
-        change(
-          {
-            type: 'interaction.resolved',
-            interactionId: 'question-2',
-            resolution: 'no',
-          },
-          [],
-        ),
-      );
-      expect(repository.getRun(fixture.runId)?.status).toBe('running');
-      expect(
-        repository.getThread(repository.getRun(fixture.runId)?.threadId ?? '')
-          ?.status,
-      ).toBe('active');
     } finally {
       await fixture.close();
     }
@@ -1768,7 +1572,6 @@ describe('OrchestrationService', () => {
           cwd: paths[0] as string,
           liveState: 'working',
           session: { id: 'pi-session-1', entries: [] },
-          pendingInteractions: [],
           online: true,
         } as never,
       });
@@ -1958,7 +1761,6 @@ describe('OrchestrationService', () => {
           cwd: firstPath,
           liveState: 'working',
           session: { id: 'retry-session-1', entries: [] },
-          pendingInteractions: [],
           online: true,
         } as never,
       });
@@ -2015,7 +1817,6 @@ describe('OrchestrationService', () => {
           cwd: firstPath,
           liveState: 'working',
           session: { id: 'retry-session-2', entries: [] },
-          pendingInteractions: [],
           online: true,
         } as never,
       });

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   artifactRetrievePresentation,
-  askUserPresentation,
   backgroundPresentation,
   customToolKind,
   delegateBranchesPresentation,
@@ -28,7 +27,6 @@ describe('custom tool presentation kinds', () => {
     expect(customToolKind('background')).toBe('background');
     expect(customToolKind('todo')).toBe('todo');
     expect(customToolKind('tasks')).toBe('todo');
-    expect(customToolKind('ask_user_question')).toBe('ask_user');
     expect(customToolKind('read')).toBeUndefined();
     expect(customToolKind('bash')).toBeUndefined();
   });
@@ -196,17 +194,6 @@ describe('custom tool presentation kinds', () => {
       incremental: true,
       paths: ['src/a.ts'],
       patchBudget: 4000,
-    });
-    expect(
-      askUserPresentation({
-        question: 'Continue?',
-        choices: [{ label: 'Yes' }, { label: 'No' }],
-      }),
-    ).toEqual({
-      question: 'Continue?',
-      choices: ['Yes', 'No'],
-      allowCustom: true,
-      customLabel: undefined,
     });
   });
 });

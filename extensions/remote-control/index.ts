@@ -95,7 +95,6 @@ export function shutdownRemoteControlRuntime(
       state: 'idle',
       snapshot: {
         liveState: 'idle',
-        pendingInteractions: [],
         queueDrafts: [],
         extensionSurfaces: [],
       },

@@ -229,7 +229,6 @@ describe('DashboardHttpClient command requests', () => {
         serverId: 'server-1',
         cursor: 1,
         active: {
-          pendingInteractions: [],
           messages: [],
           tools: [],
           delegates: [],
@@ -292,7 +291,6 @@ describe('DashboardHttpClient command requests', () => {
         serverId: 'server-1',
         cursor: 1,
         active: {
-          pendingInteractions: [],
           messages: [],
           tools: [],
           delegates: [],
@@ -313,7 +311,6 @@ describe('DashboardHttpClient command requests', () => {
     releaseFirst();
     const [a, b, older] = await Promise.all([first, second, historical]);
     expect(a).toMatchObject({
-      active: { messages: [], tools: [], pendingInteractions: [] },
       completeThroughCursor: true,
     });
     expect(

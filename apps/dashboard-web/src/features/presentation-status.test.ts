@@ -8,7 +8,6 @@ function runtime(overrides: Record<string, unknown> = {}) {
     online: true,
     cwd: '/tmp',
     session: { id: 'session-1', entries: [] },
-    pendingInteractions: [],
     ...overrides,
   } as never;
 }
@@ -20,17 +19,6 @@ const waitingSurface = (count: number) => ({
 });
 
 describe('dashboard presentation status', () => {
-  it('prioritizes input over explicit settled background waiting', () => {
-    expect(
-      dashboardStatus(
-        runtime({
-          pendingInteractions: [{ id: 'question-1' }],
-          extensionSurfaces: [waitingSurface(2)],
-        }),
-      ),
-    ).toEqual({ status: 'input', label: 'input' });
-  });
-
   it('shows compact singular and plural waiting labels over raw working state', () => {
     expect(
       dashboardStatus(runtime({ extensionSurfaces: [waitingSurface(1)] })),

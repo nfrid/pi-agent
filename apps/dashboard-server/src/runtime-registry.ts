@@ -488,7 +488,6 @@ export class RuntimeRegistry {
         !isActionAvailable(action, capabilities, {
           online: true,
           liveState: record.snapshot.liveState,
-          pendingInteractions: record.snapshot.pendingInteractions.length,
         })
       )
         return Promise.reject(

@@ -52,7 +52,6 @@ export function ExtensionSurfaceStack({
         .sort((left, right) => surfaceOrder(left) - surfaceOrder(right)),
     [excludeDelegate, runtime, placement],
   );
-  if (runtime?.pendingInteractions?.length) return null;
   if (!surfaces.length) return null;
   return (
     <section

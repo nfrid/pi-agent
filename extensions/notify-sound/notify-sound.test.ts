@@ -27,15 +27,10 @@ describe('notify sound lifecycle', () => {
     notifySound(pi);
     notifySound(pi);
 
-    expect(registrations).toHaveLength(4);
+    expect(registrations).toHaveLength(3);
     expect(handlers.has('agent_settled')).toBe(true);
     expect(handlers.has('agent_end')).toBe(false);
     handlers.get('session_start')?.({} as never, { mode: 'print' } as never);
     expect(() => handlers.get('agent_settled')?.()).not.toThrow();
-    expect(() =>
-      handlers.get('tool_execution_start')?.({
-        toolName: 'ask_user_question',
-      } as never),
-    ).not.toThrow();
   });
 });
