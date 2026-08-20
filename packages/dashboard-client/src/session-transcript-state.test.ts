@@ -8,6 +8,7 @@ import {
   acceptTranscriptEventOrdering,
   acceptTranscriptSnapshotOrdering,
   classifyHistoryPageWatermark,
+  mergeLatestTranscript,
   mergePrependedTranscript,
   reduceSessionTranscriptEvent,
 } from './session-transcript-state.js';
@@ -89,6 +90,105 @@ describe('session transcript state', () => {
     } as DashboardEventEnvelope);
 
     expect(projection?.order).toEqual(['seeded']);
+  });
+
+  it('retires persisted live overlays one-for-one', () => {
+    const retained = hydrateTranscript(
+      [
+        {
+          type: 'message',
+          id: 'persisted-older',
+          message: { role: 'assistant', content: 'older', timestamp: 100 },
+        },
+        {
+          type: 'message',
+          id: 'live-a',
+          message: {
+            role: 'user',
+            content: [{ text: 'repeat', type: 'text' }],
+            timestamp: '123',
+          },
+        },
+        {
+          type: 'message',
+          id: 'live-b',
+          message: {
+            role: 'user',
+            content: [{ text: 'repeat', type: 'text' }],
+            timestamp: '123',
+          },
+        },
+        {
+          type: 'message',
+          id: 'persisted-existing',
+          message: { role: 'user', content: 'existing', timestamp: 124 },
+        },
+        {
+          type: 'message',
+          id: 'live-c',
+          message: { role: 'user', content: 'existing', timestamp: 124 },
+        },
+      ],
+      'session-1',
+    );
+    const latest = hydrateTranscript(
+      [
+        {
+          type: 'message',
+          id: 'persisted-older',
+          message: { role: 'assistant', content: 'older', timestamp: 100 },
+        },
+        {
+          type: 'message',
+          id: 'persisted-user',
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'repeat' }],
+            timestamp: 123,
+          },
+        },
+        {
+          type: 'message',
+          id: 'persisted-existing',
+          message: { role: 'user', content: 'existing', timestamp: 124 },
+        },
+      ],
+      'session-1',
+    );
+
+    const merged = mergeLatestTranscript(
+      retained,
+      latest,
+      {
+        generation: 1,
+        version: 1,
+        coveredStart: 0,
+        coveredEnd: 2,
+        hasOlder: false,
+        pages: [
+          {
+            start: 0,
+            end: 2,
+            hasOlder: false,
+            entryIds: ['persisted-older', 'persisted-existing'],
+            entryCount: 2,
+            byteCount: 1,
+          },
+        ],
+        pageCount: 1,
+        entryCount: 2,
+        byteCount: 1,
+      },
+      ['persisted-older', 'persisted-user', 'persisted-existing'],
+    );
+
+    expect(merged.order).toEqual([
+      'persisted-older',
+      'persisted-user',
+      'persisted-existing',
+      'live-b',
+      'live-c',
+    ]);
   });
 
   it('uses older-page order while retaining newer tool data', () => {

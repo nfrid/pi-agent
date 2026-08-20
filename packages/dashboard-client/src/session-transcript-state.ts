@@ -424,6 +424,7 @@ export function installAuthoritativeTranscript({
       previousProjection,
       projection,
       previousCoverage,
+      responsePage?.entryIds ?? [],
     );
 
   return {
@@ -437,6 +438,7 @@ export function mergeLatestTranscript(
   retained: TranscriptProjection,
   latest: TranscriptProjection,
   coverage: SessionHistoryCoverage,
+  latestPersistedIds: readonly string[],
 ): TranscriptProjection {
   const newestPageIds = new Set(coverage.pages.at(-1)?.entryIds ?? []);
   const allHistoryIds = new Set(
@@ -447,9 +449,30 @@ export function mergeLatestTranscript(
     (id) =>
       allHistoryIds.has(id) && !newestPageIds.has(id) && !latestIds.has(id),
   );
-  const retainedLive = retained.order.filter(
-    (id) => !allHistoryIds.has(id) && !latestIds.has(id),
-  );
+  const retainedIds = new Set(retained.order);
+  const persistedMessageCounts = new Map<string, number>();
+  for (const id of latestPersistedIds) {
+    if (retainedIds.has(id)) continue;
+    const item = latest.items[id];
+    if (item?.kind !== 'message') continue;
+    const key = messageSemanticKey(item);
+    if (key !== undefined)
+      persistedMessageCounts.set(
+        key,
+        (persistedMessageCounts.get(key) ?? 0) + 1,
+      );
+  }
+  const retainedLive = retained.order.filter((id) => {
+    if (allHistoryIds.has(id) || latestIds.has(id)) return false;
+    const item = retained.items[id];
+    if (item?.kind !== 'message') return true;
+    const key = messageSemanticKey(item);
+    if (key === undefined) return true;
+    const count = persistedMessageCounts.get(key) ?? 0;
+    if (count === 0) return true;
+    persistedMessageCounts.set(key, count - 1);
+    return false;
+  });
   const retainedOrder = [...retainedHistory, ...retainedLive];
   const items: Record<string, TranscriptProjection['items'][string]> = {};
   for (const id of retainedOrder) {
@@ -569,30 +592,46 @@ export function liveMessageIdentity(
 }
 
 function messageContentKey(value: unknown): string | undefined {
+  const normalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(normalize);
+    if (input && typeof input === 'object')
+      return Object.fromEntries(
+        Object.entries(input as Record<string, unknown>)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, item]) => [key, normalize(item)]),
+      );
+    return input;
+  };
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(normalize(value));
   } catch {
     return undefined;
   }
+}
+
+function messageSemanticKey(
+  message: Pick<LiveMessageIdentity, 'role' | 'content' | 'timestamp'>,
+): string | undefined {
+  if (message.timestamp === undefined) return undefined;
+  const content = messageContentKey(message.content);
+  return content === undefined
+    ? undefined
+    : JSON.stringify([message.role, String(message.timestamp), content]);
 }
 
 export function persistedMessageIdForLive(
   projection: TranscriptProjection,
   live: LiveMessageIdentity | undefined,
 ): string | undefined {
-  if (!live || live.timestamp === undefined) return undefined;
-  const liveContent = messageContentKey(live.content);
-  if (liveContent === undefined) return undefined;
+  if (!live) return undefined;
+  const liveKey = messageSemanticKey(live);
+  if (liveKey === undefined) return undefined;
   let matchedId: string | undefined;
   for (const item of Object.values(projection.items)) {
     if (
       item.kind !== 'message' ||
       item.messageId === live.messageId ||
-      item.role !== live.role ||
-      item.timestamp === undefined ||
-      typeof item.timestamp !== typeof live.timestamp ||
-      item.timestamp !== live.timestamp ||
-      messageContentKey(item.content) !== liveContent
+      messageSemanticKey(item) !== liveKey
     )
       continue;
     if (matchedId !== undefined) return undefined;

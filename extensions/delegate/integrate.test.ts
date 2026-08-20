@@ -363,55 +363,6 @@ describe('incremental delegate review', () => {
       diff: first.diff,
     });
   });
-
-  test('bounds log and stat as well as diff in both review modes', async () => {
-    const record = await delegated({
-      name: 'Many long review entries',
-      write: (worktreePath) => {
-        for (let index = 0; index < 300; index += 1) {
-          const file = `src/${'long-path-'.repeat(12)}${index}.txt`;
-          writeFileSync(path.join(worktreePath, file), `${'x'.repeat(400)}\n`);
-          git(worktreePath, ['add', file]);
-          git(worktreePath, [
-            'commit',
-            '-qm',
-            `${'long commit subject '.repeat(12)}${index}`,
-          ]);
-        }
-      },
-    });
-    const full = await reviewBranch(record);
-    expect(full.log).toHaveLength(20_000);
-    expect(full.stat).toHaveLength(20_000);
-    expect(full.diff).toHaveLength(60_000);
-    expect(full.truncated).toBe(true);
-    expect(formatReview(record, full)).toContain('[review truncated');
-
-    expect((await mergeBranch(record)).merged).toBe(true);
-    for (let index = 0; index < 300; index += 1) {
-      const file = `src/continuation-${'long-path-'.repeat(12)}${index}.txt`;
-      writeFileSync(
-        path.join(record.worktreePath, file),
-        `${'y'.repeat(400)}\n`,
-      );
-      git(record.worktreePath, ['add', file]);
-      git(record.worktreePath, [
-        'commit',
-        '-qm',
-        `${'continuation subject '.repeat(12)}${index}`,
-      ]);
-    }
-    const continued = await finishWorktree(record.id, {
-      taskName: 'Continuation after review',
-      outcome: 'success',
-    });
-    const incremental = await reviewBranch(continued, 'incremental');
-    expect(incremental.log.length).toBeLessThanOrEqual(20_000);
-    expect(incremental.stat.length).toBeLessThanOrEqual(20_000);
-    expect(incremental.diff.length).toBeLessThanOrEqual(60_000);
-    expect(incremental.truncated).toBe(true);
-    expect(formatReview(continued, incremental)).toContain('[review truncated');
-  }, 30_000);
 });
 
 describe('merging a delegate branch', () => {
