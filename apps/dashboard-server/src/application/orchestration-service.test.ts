@@ -215,6 +215,33 @@ it('adopts an inactive legacy session without launching or duplicating rows', as
   }
 });
 
+it('rejects auxiliary sessions without an exact source file', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    Object.defineProperty(fixture.service, 'readSession', {
+      value: async (id: string) => ({
+        metadata: { id, file: '', cwd: '/tmp', updatedAt: Date.now() },
+        entries: [
+          {
+            type: 'message',
+            message: { role: 'user', content: 'Delegate-only prompt' },
+          },
+        ],
+      }),
+    });
+    await expect(
+      fixture.service.adoptSession(fixture.projectId, 'auxiliary-session', {
+        commandId: 'adopt-auxiliary',
+      }),
+    ).rejects.toThrow('Auxiliary sessions cannot be adopted');
+    expect(
+      fixture.metadata.orchestration.getSessionThreadLink('auxiliary-session'),
+    ).toBeUndefined();
+  } finally {
+    await fixture.close();
+  }
+});
+
 it('maps a live legacy runtime with pending interaction to waiting and binds it', async () => {
   const fixture = await orchestrationFixture();
   try {
