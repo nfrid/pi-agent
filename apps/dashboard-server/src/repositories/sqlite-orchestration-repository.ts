@@ -48,7 +48,7 @@ import type {
 
 const ACTIVE_RUN_SQL = "('queued','preparing','starting','running','waiting')";
 const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
-  'settled',
+  'completed',
   'failed',
   'cancelled',
   'interrupted',
@@ -1634,7 +1634,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       );
     if (
       requestedStatus === 'queued' &&
-      (thread.status === 'settled' ||
+      (thread.status === 'completed' ||
         thread.status === 'failed' ||
         thread.status === 'stopped')
     ) {
@@ -1819,8 +1819,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     const status = String(row.status);
     return status === 'waiting'
       ? 'needs-input'
-      : status === 'settled'
-        ? 'settled'
+      : status === 'completed'
+        ? 'completed'
         : status === 'failed'
           ? 'failed'
           : status === 'cancelled' || status === 'interrupted'

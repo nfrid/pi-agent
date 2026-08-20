@@ -713,11 +713,11 @@ describe('OrchestrationService', () => {
       expect(repository.getRun(fixture.runId)?.status).toBe('starting');
       releasePrompt();
       await Promise.all([registered, requested, settled]);
-      expect(repository.getRun(fixture.runId)?.status).toBe('settled');
+      expect(repository.getRun(fixture.runId)?.status).toBe('completed');
       expect(
         repository.getThread(repository.getRun(fixture.runId)?.threadId ?? '')
           ?.status,
-      ).toBe('settled');
+      ).toBe('completed');
     } finally {
       await fixture.close();
     }
@@ -854,7 +854,7 @@ describe('OrchestrationService', () => {
       await waitFor(() => enteredFinish);
       expect(
         fixture.metadata.orchestration.getRun(created.run.id)?.status,
-      ).toBe('settled');
+      ).toBe('completed');
       fixture.service.onRegistryChange({
         kind: 'event',
         runtimeId,
@@ -865,7 +865,7 @@ describe('OrchestrationService', () => {
       await fixture.service.stop();
       expect(
         fixture.metadata.orchestration.getRun(created.run.id)?.status,
-      ).toBe('settled');
+      ).toBe('completed');
       expect(fixture.metadata.orchestration.getRuntime(runtimeId)?.status).toBe(
         'stopped',
       );
@@ -1416,7 +1416,7 @@ describe('OrchestrationService', () => {
         snapshot: {} as never,
       });
       await waitFor(
-        () => repository.getRun(first.run.id)?.status === 'settled',
+        () => repository.getRun(first.run.id)?.status === 'completed',
       );
       await waitFor(() => fixture.launches.length === 2);
       expect(repository.getRun(second.run.id)?.status).toBe('starting');
@@ -1502,7 +1502,7 @@ describe('OrchestrationService', () => {
         snapshot: {} as never,
       });
       await waitFor(
-        () => repository.getRun(created.run.id)?.status === 'settled',
+        () => repository.getRun(created.run.id)?.status === 'completed',
       );
       const mainHead = await gitOutput(fixture.root, 'rev-parse', 'HEAD');
       fixture.manager.stopRecovered.mockRejectedValueOnce(
@@ -1576,7 +1576,7 @@ describe('OrchestrationService', () => {
           snapshot: {} as never,
         });
         await waitFor(
-          () => repository.getRun(created.run.id)?.status === 'settled',
+          () => repository.getRun(created.run.id)?.status === 'completed',
         );
         return { ...created, checkoutPath, runtimeId };
       };
@@ -1615,7 +1615,7 @@ describe('OrchestrationService', () => {
         'lifecycle-archive',
       );
       expect(repository.getThread(merged.thread.id)).toMatchObject({
-        status: 'settled',
+        status: 'completed',
         archivedAt: expect.any(Number),
       });
       expect(repository.getRun(merged.run.id)).toBeDefined();
@@ -1803,12 +1803,12 @@ describe('OrchestrationService', () => {
         snapshot: {} as never,
       });
       for (let i = 0; i < 100; i += 1) {
-        if (metadata.orchestration.getRun(first.run.id)?.status === 'settled')
+        if (metadata.orchestration.getRun(first.run.id)?.status === 'completed')
           break;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       expect(metadata.orchestration.getRun(first.run.id)?.status).toBe(
-        'settled',
+        'completed',
       );
       await service.stop();
     } finally {
@@ -1974,7 +1974,9 @@ describe('OrchestrationService', () => {
         snapshot: {} as never,
       });
       for (let i = 0; i < 100; i += 1) {
-        if (metadata.orchestration.getRun(created.run.id)?.status === 'settled')
+        if (
+          metadata.orchestration.getRun(created.run.id)?.status === 'completed'
+        )
           break;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
@@ -2029,7 +2031,9 @@ describe('OrchestrationService', () => {
         snapshot: {} as never,
       });
       for (let i = 0; i < 100; i += 1) {
-        if (metadata.orchestration.getRun(retried.run.id)?.status === 'settled')
+        if (
+          metadata.orchestration.getRun(retried.run.id)?.status === 'completed'
+        )
           break;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }

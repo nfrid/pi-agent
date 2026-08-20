@@ -12,8 +12,8 @@ import type { OrchestrationRuntime } from '@pi-dashboard/protocol';
 export function threadStatusForRun(runStatus: RunStatus): ThreadStatus {
   return runStatus === 'waiting'
     ? 'needs-input'
-    : runStatus === 'settled'
-      ? 'settled'
+    : runStatus === 'completed'
+      ? 'completed'
       : runStatus === 'failed'
         ? 'failed'
         : runStatus === 'cancelled' || runStatus === 'interrupted'

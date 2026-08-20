@@ -168,14 +168,14 @@ describe('SqliteOrchestrationRepository', () => {
       projectId: value.project.id,
       title: 'Existing durable thread',
       checkoutId: value.checkout.id,
-      status: 'settled',
+      status: 'completed',
     });
     value.repository.createRun({
       id: 'exact-existing-run',
       threadId: thread.id,
       initialPrompt: 'Existing prompt',
       piSessionId: 'exact-existing-session',
-      status: 'settled',
+      status: 'completed',
     });
     const sessions = [
       {
@@ -294,7 +294,7 @@ describe('SqliteOrchestrationRepository', () => {
       projectId: value.project.id,
       title: 'Lifecycle one',
       checkoutId: value.checkout.id,
-      status: 'settled',
+      status: 'completed',
     });
     const second = value.repository.createThread({
       id: 'thread-lifecycle-2',
@@ -305,9 +305,9 @@ describe('SqliteOrchestrationRepository', () => {
     });
     const archived = value.repository.archiveThread('archive-1', first.id, 10);
     expect(archived.thread).toMatchObject({
-      status: 'settled',
+      status: 'completed',
       archivedAt: 10,
-      preArchiveStatus: 'settled',
+      preArchiveStatus: 'completed',
     });
     expect(archived.event).toMatchObject({
       type: 'thread.archive',
@@ -336,7 +336,7 @@ describe('SqliteOrchestrationRepository', () => {
     expect(
       value.repository.restoreThread('restore-1', first.id, 23).thread,
     ).toMatchObject({
-      status: 'settled',
+      status: 'completed',
     });
     expect(value.repository.getThread(first.id)).not.toMatchObject({
       archivedAt: expect.anything(),
@@ -361,7 +361,7 @@ describe('SqliteOrchestrationRepository', () => {
       projectId: value.project.id,
       title: 'Atomicity',
       checkoutId: value.checkout.id,
-      status: 'settled',
+      status: 'completed',
     });
     value.db.exec(`
       CREATE TEMP TRIGGER abort_thread_event
@@ -374,7 +374,7 @@ describe('SqliteOrchestrationRepository', () => {
       value.repository.archiveThread('archive-atomicity', thread.id, 42),
     ).toThrow('deliberate event failure');
     expect(value.repository.getThread(thread.id)).toMatchObject({
-      status: 'settled',
+      status: 'completed',
     });
     expect(value.repository.getThread(thread.id)?.archivedAt).toBeUndefined();
     expect(
@@ -741,7 +741,7 @@ describe('SqliteOrchestrationRepository', () => {
     expect(value.repository.claimQueuedRun(second.id)).toBeUndefined();
     value.repository.transitionRun(first.id, 'starting');
     value.repository.transitionRun(first.id, 'running');
-    value.repository.transitionRun(first.id, 'settled');
+    value.repository.transitionRun(first.id, 'completed');
     expect(value.repository.claimQueuedRun(second.id)?.status).toBe(
       'preparing',
     );
@@ -772,8 +772,8 @@ describe('SqliteOrchestrationRepository', () => {
     expect(() => value.repository.transitionRun(run.id, 'queued')).toThrow(
       'Illegal run transition',
     );
-    expect(value.repository.transitionRun(run.id, 'settled').status).toBe(
-      'settled',
+    expect(value.repository.transitionRun(run.id, 'completed').status).toBe(
+      'completed',
     );
     expect(() => value.repository.transitionRun(run.id, 'failed')).toThrow(
       'Illegal run transition',
@@ -924,7 +924,7 @@ describe('SqliteOrchestrationRepository', () => {
       projectId: value.project.id,
       title: 'Queued retry',
       checkoutId: value.checkout.id,
-      status: 'settled',
+      status: 'completed',
     });
     const first = value.repository.createRunIdempotent('retry-command', {
       threadId: thread.id,
@@ -970,7 +970,7 @@ describe('SqliteOrchestrationRepository', () => {
     value.repository.transitionRun(first.id, 'preparing');
     value.repository.transitionRun(first.id, 'starting');
     value.repository.transitionRun(first.id, 'running');
-    value.repository.transitionRun(first.id, 'settled');
+    value.repository.transitionRun(first.id, 'completed');
 
     const result = value.repository.retryRunIdempotent('atomic-retry', {
       threadId: thread.id,
@@ -998,7 +998,7 @@ describe('SqliteOrchestrationRepository', () => {
     value.repository.transitionRun(result.run.id, 'preparing');
     value.repository.transitionRun(result.run.id, 'starting');
     value.repository.transitionRun(result.run.id, 'running');
-    value.repository.transitionRun(result.run.id, 'settled');
+    value.repository.transitionRun(result.run.id, 'completed');
     value.repository.transitionCheckout(value.checkout.id, 'retired');
     expect(() =>
       value.repository.retryRunIdempotent('retired-retry', {
@@ -1059,7 +1059,7 @@ describe('SqliteOrchestrationRepository', () => {
     value.repository.transitionRun(first.id, 'preparing');
     value.repository.transitionRun(first.id, 'starting');
     value.repository.transitionRun(first.id, 'running');
-    value.repository.transitionRun(first.id, 'settled');
+    value.repository.transitionRun(first.id, 'completed');
     expect(() =>
       value.repository.createRun({
         id: 'run-lineage-bad-attempt',
@@ -1106,7 +1106,7 @@ describe('SqliteOrchestrationRepository', () => {
     value.repository.transitionRun(retry.id, 'preparing');
     value.repository.transitionRun(retry.id, 'starting');
     value.repository.transitionRun(retry.id, 'running');
-    value.repository.transitionRun(retry.id, 'settled');
+    value.repository.transitionRun(retry.id, 'completed');
     expect(() =>
       value.repository.createRun({
         id: 'run-lineage-non-immediate-parent',

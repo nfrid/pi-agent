@@ -137,8 +137,8 @@ describe('agent thread view model', () => {
     const snapshot = {
       runs: [
         { piSessionId: 'session-1', threadId: 'thread-1', status: 'running' },
-        { piSessionId: 'session-2', threadId: 'thread-2', status: 'settled' },
-        { piSessionId: 'session-2', threadId: 'thread-3', status: 'settled' },
+        { piSessionId: 'session-2', threadId: 'thread-2', status: 'completed' },
+        { piSessionId: 'session-2', threadId: 'thread-3', status: 'completed' },
       ],
     } as never;
     const threads = [
@@ -166,7 +166,7 @@ describe('agent thread view model', () => {
             {
               piSessionId: 'session-1',
               threadId: 'missing',
-              status: 'settled',
+              status: 'completed',
             },
           ],
         } as never,
@@ -182,12 +182,12 @@ describe('agent thread view model', () => {
         {
           piSessionId: 'linked-session',
           threadId: 'thread-linked',
-          status: 'settled',
+          status: 'completed',
         },
         {
           piSessionId: 'conflict-session',
           threadId: 'thread-old',
-          status: 'settled',
+          status: 'completed',
         },
       ],
       runtimes: [
