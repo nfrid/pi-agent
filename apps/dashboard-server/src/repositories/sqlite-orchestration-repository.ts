@@ -1407,10 +1407,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         if (existing.commandType !== eventType)
           throw idempotencyConflict(commandId, existing.commandType);
         const stored = existing.result as
-          | { thread?: Thread; event?: ThreadLifecycleEvent }
+          | { thread: Thread; event?: ThreadLifecycleEvent }
           | Thread;
-        const storedThread =
-          'thread' in stored && stored.thread ? stored.thread : stored;
+        const wrapped = 'thread' in stored ? stored : undefined;
+        const storedThread: Thread = wrapped
+          ? wrapped.thread
+          : (stored as Thread);
         if (
           (existing.resourceType !== undefined &&
             (existing.resourceType !== 'thread' ||
@@ -1419,9 +1421,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         )
           throw idempotencyConflict(commandId, existing.commandType);
         const storedEvent =
-          'event' in stored && stored.event
-            ? stored.event
-            : this.listThreadEvents(threadId).at(-1);
+          wrapped?.event ?? this.listThreadEvents(threadId).at(-1);
         if (!storedEvent)
           throw new Error('Lifecycle command receipt has no event.');
         return { thread: storedThread, event: storedEvent, receipt: existing };
