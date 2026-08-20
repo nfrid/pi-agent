@@ -52,6 +52,9 @@ import {
   adoptSession as adoptSessionLifecycle,
   archiveThread as archiveThreadLifecycle,
   createThread as createThreadLifecycle,
+  pinThread as pinThreadLifecycle,
+  restoreThread as restoreThreadLifecycle,
+  unpinThread as unpinThreadLifecycle,
 } from './threads.js';
 
 /**
@@ -197,6 +200,18 @@ export class OrchestrationService implements OrchestrationHost {
 
   async archiveThread(threadId: string, commandId: string): Promise<Thread> {
     return archiveThreadLifecycle(this, threadId, commandId);
+  }
+
+  async restoreThread(threadId: string, commandId: string): Promise<Thread> {
+    return restoreThreadLifecycle(this, threadId, commandId);
+  }
+
+  async pinThread(threadId: string, commandId: string): Promise<Thread> {
+    return pinThreadLifecycle(this, threadId, commandId);
+  }
+
+  async unpinThread(threadId: string, commandId: string): Promise<Thread> {
+    return unpinThreadLifecycle(this, threadId, commandId);
   }
 
   async reviewCheckout(checkoutId: string): Promise<unknown> {

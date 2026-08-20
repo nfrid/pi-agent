@@ -40,6 +40,69 @@ async function fixture() {
 }
 
 describe('SqliteOrchestrationRepository', () => {
+  it('applies lifecycle controls atomically, orders pins, and replays receipts', async () => {
+    const value = await fixture();
+    const first = value.repository.createThread({
+      id: 'thread-lifecycle-1',
+      projectId: value.project.id,
+      title: 'Lifecycle one',
+      checkoutId: value.checkout.id,
+      status: 'settled',
+    });
+    const second = value.repository.createThread({
+      id: 'thread-lifecycle-2',
+      projectId: value.project.id,
+      title: 'Lifecycle two',
+      checkoutId: value.checkout.id,
+      status: 'failed',
+    });
+    const archived = value.repository.archiveThread('archive-1', first.id, 10);
+    expect(archived.thread).toMatchObject({
+      status: 'settled',
+      archivedAt: 10,
+      preArchiveStatus: 'settled',
+    });
+    expect(archived.event.type).toBe('thread.archive');
+    expect(value.repository.listThreadEvents(first.id)).toHaveLength(1);
+    expect(value.repository.archiveThread('archive-1', first.id, 11)).toEqual(
+      archived,
+    );
+    expect(value.repository.listThreadEvents(first.id)).toHaveLength(1);
+    expect(() =>
+      value.repository.pinThread('archive-1', second.id, 12),
+    ).toThrow('belongs to thread.archive');
+    const pinnedSecond = value.repository.pinThread('pin-2', second.id, 20);
+    const pinnedFirst = value.repository.pinThread('pin-1', first.id, 21);
+    expect(
+      value.repository
+        .threadSummaries()
+        .slice(0, 2)
+        .map((t) => t.id),
+    ).toEqual([pinnedFirst.thread.id, pinnedSecond.thread.id]);
+    expect(
+      value.repository.unpinThread('unpin-1', first.id, 22).thread.pinnedAt,
+    ).toBeUndefined();
+    expect(
+      value.repository.restoreThread('restore-1', first.id, 23).thread,
+    ).toMatchObject({
+      status: 'settled',
+    });
+    expect(value.repository.getThread(first.id)).not.toMatchObject({
+      archivedAt: expect.anything(),
+    });
+    const run = value.repository.createRun({
+      id: 'active-run-for-archive',
+      threadId: second.id,
+      initialPrompt: 'active',
+      status: 'running',
+    });
+    expect(() =>
+      value.repository.archiveThread('archive-active', second.id),
+    ).toThrow('active run');
+    expect(value.repository.getRun(run.id)?.status).toBe('running');
+    value.db.close();
+  });
+
   it('projects changed file count from the persisted worktree record', async () => {
     const value = await fixture();
     value.db

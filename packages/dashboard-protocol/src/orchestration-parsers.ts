@@ -7,16 +7,22 @@ import {
   CheckoutActionCommandSchema,
   type CheckoutReviewCommand,
   CheckoutReviewCommandSchema,
+  type PinThreadCommand,
+  PinThreadCommandSchema,
   type ProjectAdoptCommand,
   ProjectAdoptCommandSchema,
   type ProjectCreateCommand,
   ProjectCreateCommandSchema,
+  type RestoreThreadCommand,
+  RestoreThreadCommandSchema,
   type RetryCommand,
   RetryCommandSchema,
   type SessionAdoptCommand,
   SessionAdoptCommandSchema,
   type ThreadCreateCommand,
   ThreadCreateCommandSchema,
+  type UnpinThreadCommand,
+  UnpinThreadCommandSchema,
 } from './orchestration-commands.js';
 import {
   type Checkout,
@@ -26,6 +32,10 @@ import {
   type Run,
   RunSchema,
   type Thread,
+  type ThreadLifecycleCommandResult,
+  ThreadLifecycleCommandResultSchema,
+  type ThreadLifecycleEvent,
+  ThreadLifecycleEventSchema,
   ThreadSchema,
 } from './orchestration-contracts.js';
 import { parseSchema, tryParseSchema } from './utils.js';
@@ -47,6 +57,34 @@ export function parseThread(value: unknown): Thread {
 }
 export function tryParseThread(value: unknown): Thread | undefined {
   return tryParseSchema(ThreadSchema, value);
+}
+export function parseThreadLifecycleEvent(
+  value: unknown,
+): ThreadLifecycleEvent {
+  return parseSchema(
+    ThreadLifecycleEventSchema,
+    value,
+    'thread lifecycle event',
+  );
+}
+export function tryParseThreadLifecycleEvent(
+  value: unknown,
+): ThreadLifecycleEvent | undefined {
+  return tryParseSchema(ThreadLifecycleEventSchema, value);
+}
+export function parseThreadLifecycleCommandResult(
+  value: unknown,
+): ThreadLifecycleCommandResult {
+  return parseSchema(
+    ThreadLifecycleCommandResultSchema,
+    value,
+    'thread lifecycle command result',
+  );
+}
+export function tryParseThreadLifecycleCommandResult(
+  value: unknown,
+): ThreadLifecycleCommandResult | undefined {
+  return tryParseSchema(ThreadLifecycleCommandResultSchema, value);
 }
 export function parseRun(value: unknown): Run {
   return parseSchema(RunSchema, value, 'run');
@@ -115,3 +153,23 @@ export const tryParseArchiveThreadCommand = (
   value: unknown,
 ): ArchiveThreadCommand | undefined =>
   tryParseSchema(ArchiveThreadCommandSchema, value);
+export const parseRestoreThreadCommand = (
+  value: unknown,
+): RestoreThreadCommand =>
+  parseSchema(RestoreThreadCommandSchema, value, 'thread restore command');
+export const tryParseRestoreThreadCommand = (
+  value: unknown,
+): RestoreThreadCommand | undefined =>
+  tryParseSchema(RestoreThreadCommandSchema, value);
+export const parsePinThreadCommand = (value: unknown): PinThreadCommand =>
+  parseSchema(PinThreadCommandSchema, value, 'thread pin command');
+export const tryParsePinThreadCommand = (
+  value: unknown,
+): PinThreadCommand | undefined =>
+  tryParseSchema(PinThreadCommandSchema, value);
+export const parseUnpinThreadCommand = (value: unknown): UnpinThreadCommand =>
+  parseSchema(UnpinThreadCommandSchema, value, 'thread unpin command');
+export const tryParseUnpinThreadCommand = (
+  value: unknown,
+): UnpinThreadCommand | undefined =>
+  tryParseSchema(UnpinThreadCommandSchema, value);

@@ -320,6 +320,86 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       }
     },
   },
+  {
+    version: 9,
+    name: 'durable-thread-lifecycle-projection',
+    up(db) {
+      // Adding nullable columns is safe on SQLite databases created by every
+      // earlier migration. The old `archived` status is normalized below
+      // before new lifecycle commands can observe the projection.
+      const threadExists = Boolean(
+        db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='thread'",
+          )
+          .get(),
+      );
+      if (threadExists) {
+        const threadColumns = columns(db, 'thread');
+        if (!threadColumns.has('archived_at'))
+          db.exec('ALTER TABLE thread ADD COLUMN archived_at INTEGER');
+        if (!threadColumns.has('pre_archive_status'))
+          db.exec('ALTER TABLE thread ADD COLUMN pre_archive_status TEXT');
+      }
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS thread_event (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL CHECK (event_type IN ('legacy.snapshot','thread.archive','thread.restore','thread.pin','thread.unpin')),
+          command_id TEXT UNIQUE,
+          payload_json TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS thread_event_thread_order
+          ON thread_event(thread_id,id);
+      `);
+
+      if (threadExists) {
+        // Older releases encoded visibility by replacing execution status with
+        // `archived`. Recover the latest durable run projection when possible;
+        // otherwise draft is the conservative restore target.
+        db.exec(`
+          UPDATE thread
+          SET pre_archive_status = COALESCE(
+                pre_archive_status,
+                (SELECT CASE r.status
+                  WHEN 'waiting' THEN 'needs-input'
+                  WHEN 'settled' THEN 'settled'
+                  WHEN 'failed' THEN 'failed'
+                  WHEN 'cancelled' THEN 'stopped'
+                  WHEN 'interrupted' THEN 'stopped'
+                  WHEN 'queued' THEN 'queued'
+                  WHEN 'preparing' THEN 'active'
+                  WHEN 'starting' THEN 'active'
+                  WHEN 'running' THEN 'active'
+                  ELSE 'draft' END
+                 FROM orchestration_run r
+                 WHERE r.thread_id=thread.id
+                 ORDER BY r.attempt DESC,r.id DESC LIMIT 1),
+                'draft'
+              ),
+              archived_at = COALESCE(archived_at, updated_at)
+          WHERE status='archived';
+          UPDATE thread
+          SET status=COALESCE(pre_archive_status,'draft')
+          WHERE status='archived';
+
+          INSERT INTO thread_event
+            (thread_id,event_type,command_id,payload_json,occurred_at)
+          SELECT t.id,'legacy.snapshot',NULL,
+                 json_object('status',t.status,'archivedAt',t.archived_at),
+                 t.updated_at
+          FROM thread t
+          WHERE NOT EXISTS (
+            SELECT 1 FROM thread_event e
+            WHERE e.thread_id=t.id AND e.event_type='legacy.snapshot'
+          )
+          ORDER BY t.id;
+        `);
+      }
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

@@ -543,6 +543,28 @@ export class DashboardServerImpl implements DashboardServer {
         if (!service) throw new Error('Orchestration is unavailable.');
         return service.archiveThread(threadId, commandId);
       },
+      restoreThread: (threadId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.restoreThread(threadId, commandId);
+      },
+      pinThread: (threadId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.pinThread(threadId, commandId);
+      },
+      unpinThread: (threadId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.unpinThread(threadId, commandId);
+      },
+      listThreads: (projectId) =>
+        this.application.orchestration.listThreads(projectId),
+      readThread: (threadId) => {
+        const thread = this.application.orchestration.getThread(threadId);
+        if (!thread) throw new Error(`Thread ${threadId} does not exist.`);
+        return thread;
+      },
     };
   }
 

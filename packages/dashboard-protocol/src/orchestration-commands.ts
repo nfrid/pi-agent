@@ -114,3 +114,21 @@ export const ArchiveThreadCommandSchema = Type.Object(
   { additionalProperties: false },
 );
 export type ArchiveThreadCommand = Static<typeof ArchiveThreadCommandSchema>;
+
+export const RestoreThreadCommandSchema = Type.Object(
+  { commandId: CommandIdSchema },
+  { additionalProperties: false },
+);
+export type RestoreThreadCommand = Static<typeof RestoreThreadCommandSchema>;
+
+export const PinThreadCommandSchema = Type.Object(
+  { commandId: CommandIdSchema },
+  { additionalProperties: false },
+);
+export type PinThreadCommand = Static<typeof PinThreadCommandSchema>;
+
+export const UnpinThreadCommandSchema = Type.Object(
+  { commandId: CommandIdSchema },
+  { additionalProperties: false },
+);
+export type UnpinThreadCommand = Static<typeof UnpinThreadCommandSchema>;

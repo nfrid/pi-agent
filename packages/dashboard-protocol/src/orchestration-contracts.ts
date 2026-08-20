@@ -1,6 +1,14 @@
 import { type Static, Type } from 'typebox';
 import { MAX_ID, MAX_PATH, MAX_TEXT } from './limits.js';
 
+const IdentifierSchema = Type.String({
+  minLength: 1,
+  maxLength: MAX_ID,
+  pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+});
+const PathSchema = Type.String({ minLength: 1, maxLength: MAX_PATH });
+const TimestampSchema = Type.Number();
+
 /** Bounded provider/model identity used by durable runs and project defaults. */
 export const ModelSelectionSchema = Type.Object(
   {
@@ -34,6 +42,11 @@ export const CheckoutStatusSchema = Type.Union([
 ]);
 export type CheckoutStatus = Static<typeof CheckoutStatusSchema>;
 
+/**
+ * Execution status is deliberately independent from archive visibility. The
+ * `archived` literal is retained only so old stored rows and old consumers can
+ * still be decoded; new lifecycle writes leave this projection unchanged.
+ */
 export const ThreadStatusSchema = Type.Union([
   Type.Literal('draft'),
   Type.Literal('queued'),
@@ -45,6 +58,31 @@ export const ThreadStatusSchema = Type.Union([
   Type.Literal('archived'),
 ]);
 export type ThreadStatus = Static<typeof ThreadStatusSchema>;
+
+export const ThreadLifecycleEventTypeSchema = Type.Union([
+  Type.Literal('legacy.snapshot'),
+  Type.Literal('thread.archive'),
+  Type.Literal('thread.restore'),
+  Type.Literal('thread.pin'),
+  Type.Literal('thread.unpin'),
+]);
+export type ThreadLifecycleEventType = Static<
+  typeof ThreadLifecycleEventTypeSchema
+>;
+
+/** Ordered durable lifecycle history. This is an internal projection contract. */
+export const ThreadLifecycleEventSchema = Type.Object(
+  {
+    id: Type.Integer({ minimum: 1 }),
+    threadId: IdentifierSchema,
+    type: ThreadLifecycleEventTypeSchema,
+    commandId: Type.Optional(IdentifierSchema),
+    data: Type.Unknown(),
+    occurredAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type ThreadLifecycleEvent = Static<typeof ThreadLifecycleEventSchema>;
 
 export const RunStatusSchema = Type.Union([
   Type.Literal('queued'),
@@ -71,14 +109,6 @@ export const RuntimeProviderSchema = Type.Union([
   Type.Literal('pi-server'),
 ]);
 export type RuntimeProvider = Static<typeof RuntimeProviderSchema>;
-
-const IdentifierSchema = Type.String({
-  minLength: 1,
-  maxLength: MAX_ID,
-  pattern: '^[^\\u0000-\\u001F\\u007F]*$',
-});
-const PathSchema = Type.String({ minLength: 1, maxLength: MAX_PATH });
-const TimestampSchema = Type.Number();
 
 export const ProjectSchema = Type.Object(
   {
@@ -163,6 +193,10 @@ export const ThreadSchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
     status: ThreadStatusSchema,
+    /** Independent visibility state; execution status is never replaced by archive. */
+    archivedAt: Type.Optional(TimestampSchema),
+    /** Execution projection remembered while archived; omitted for visible threads. */
+    preArchiveStatus: Type.Optional(ThreadStatusSchema),
     pinnedAt: Type.Optional(TimestampSchema),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
@@ -184,6 +218,13 @@ export const ThreadSummarySchema = Type.Object(
   { additionalProperties: false },
 );
 export type ThreadSummary = Static<typeof ThreadSummarySchema>;
+
+/** Result returned by the repository/service lifecycle boundary. */
+export type ThreadLifecycleCommandResult = {
+  readonly thread: Thread;
+  readonly event: ThreadLifecycleEvent;
+  readonly receipt?: CommandReceipt;
+};
 
 export const RunSchema = Type.Object(
   {
@@ -253,6 +294,15 @@ export const CommandReceiptSchema = Type.Object(
   { additionalProperties: false },
 );
 export type CommandReceipt = Static<typeof CommandReceiptSchema>;
+
+export const ThreadLifecycleCommandResultSchema = Type.Object(
+  {
+    thread: ThreadSchema,
+    event: ThreadLifecycleEventSchema,
+    receipt: Type.Optional(CommandReceiptSchema),
+  },
+  { additionalProperties: false },
+);
 
 /** A runtime binding is a shell concern, not a transcript or browser entity. */
 export const OrchestrationRuntimeSchema = Type.Object(

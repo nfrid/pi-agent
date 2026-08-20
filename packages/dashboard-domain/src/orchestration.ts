@@ -39,13 +39,13 @@ const checkoutTransitions: Readonly<
 const threadTransitions: Readonly<
   Record<ThreadStatus, readonly ThreadStatus[]>
 > = {
-  draft: ['queued', 'active', 'archived'],
-  queued: ['active', 'needs-input', 'failed', 'stopped', 'archived'],
-  active: ['needs-input', 'settled', 'failed', 'stopped', 'archived'],
-  'needs-input': ['active', 'settled', 'failed', 'stopped', 'archived'],
-  settled: ['queued', 'active', 'archived'],
-  failed: ['queued', 'active', 'archived'],
-  stopped: ['queued', 'archived'],
+  draft: ['queued', 'active'],
+  queued: ['active', 'needs-input', 'failed', 'stopped'],
+  active: ['needs-input', 'settled', 'failed', 'stopped'],
+  'needs-input': ['active', 'settled', 'failed', 'stopped'],
+  settled: ['queued', 'active'],
+  failed: ['queued', 'active'],
+  stopped: ['queued'],
   archived: [],
 };
 const runTransitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
@@ -80,6 +80,31 @@ export function canTransitionThread(
 }
 export function canTransitionRun(from: RunStatus, to: RunStatus): boolean {
   return from === to || runTransitions[from].includes(to);
+}
+
+/** Archive is a visibility operation and is forbidden while any run is live. */
+export function canArchiveThread(runStatuses: readonly RunStatus[]): boolean {
+  return runStatuses.every((status) => TERMINAL_RUN_STATUSES.includes(status));
+}
+
+/** Restore never changes a run; it only chooses the remembered projection. */
+export function restoreThreadStatus(
+  remembered: ThreadStatus | undefined,
+  latestRunStatus?: RunStatus,
+): Exclude<ThreadStatus, 'archived'> {
+  if (remembered && remembered !== 'archived') return remembered;
+  if (latestRunStatus === undefined) return 'draft';
+  return latestRunStatus === 'waiting'
+    ? 'needs-input'
+    : latestRunStatus === 'settled'
+      ? 'settled'
+      : latestRunStatus === 'failed'
+        ? 'failed'
+        : latestRunStatus === 'cancelled' || latestRunStatus === 'interrupted'
+          ? 'stopped'
+          : latestRunStatus === 'queued'
+            ? 'queued'
+            : 'active';
 }
 
 export class InvalidTransitionError extends Error {

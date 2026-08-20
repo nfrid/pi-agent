@@ -229,6 +229,30 @@ export function composerCommandsQueryOptions(
   });
 }
 
+export function threadsQueryOptions(
+  client: DashboardHttpClient,
+  projectId?: string,
+) {
+  return queryOptions({
+    queryKey: [...dashboardQueryKeys.threads(), projectId ?? ''] as const,
+    queryFn: ({ signal }) => client.listThreads(projectId, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+  });
+}
+
+export const threadListQueryOptions = threadsQueryOptions;
+
+export function threadQueryOptions(client: DashboardHttpClient, id: string) {
+  return queryOptions({
+    queryKey: dashboardQueryKeys.thread(id),
+    queryFn: ({ signal }) => client.thread(id, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+    enabled: Boolean(id),
+  });
+}
+
 export function workspaceQueryOptions(client: DashboardHttpClient, id: string) {
   return queryOptions({
     queryKey: dashboardQueryKeys.workspace(id),
@@ -548,15 +572,39 @@ export function retireCheckoutMutationOptions(client: DashboardHttpClient) {
 
 export function archiveThreadMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: ({
-      threadId,
-      commandId,
-    }: {
-      threadId: string;
-      commandId?: string;
-    }) =>
-      client.archiveThread(threadId, {
-        commandId: commandId ?? mutationCommandId('thread-archive'),
+    mutationFn: (variables: { threadId: string; commandId?: string }) =>
+      client.archiveThread(variables.threadId, {
+        commandId: lifecycleCommandId('thread-archive', variables),
+      }),
+    retry: false,
+  });
+}
+
+export function restoreThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (variables: { threadId: string; commandId?: string }) =>
+      client.restoreThread(variables.threadId, {
+        commandId: lifecycleCommandId('thread-restore', variables),
+      }),
+    retry: false,
+  });
+}
+
+export function pinThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (variables: { threadId: string; commandId?: string }) =>
+      client.pinThread(variables.threadId, {
+        commandId: lifecycleCommandId('thread-pin', variables),
+      }),
+    retry: false,
+  });
+}
+
+export function unpinThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (variables: { threadId: string; commandId?: string }) =>
+      client.unpinThread(variables.threadId, {
+        commandId: lifecycleCommandId('thread-unpin', variables),
       }),
     retry: false,
   });

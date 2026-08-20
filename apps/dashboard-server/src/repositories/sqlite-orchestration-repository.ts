@@ -17,6 +17,8 @@ import type {
   RunStatus,
   RunSummary,
   Thread,
+  ThreadLifecycleCommandResult,
+  ThreadLifecycleEvent,
   ThreadSummary,
 } from '@pi-dashboard/protocol';
 import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
@@ -48,6 +50,13 @@ const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
   'cancelled',
   'interrupted',
 ];
+const LIFECYCLE_EVENT_TYPES = new Set([
+  'legacy.snapshot',
+  'thread.archive',
+  'thread.restore',
+  'thread.pin',
+  'thread.unpin',
+]);
 
 function idempotencyConflict(
   key: string,
@@ -424,6 +433,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.checkoutId === undefined
         ? {}
         : { checkoutId: input.checkoutId }),
+      ...(input.archivedAt === undefined
+        ? {}
+        : { archivedAt: input.archivedAt }),
       ...(input.pinnedAt === undefined ? {} : { pinnedAt: input.pinnedAt }),
       status: input.status ?? 'draft',
       createdAt: input.createdAt ?? now,
@@ -431,8 +443,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,status,pinned_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,status,archived_at,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
@@ -440,6 +452,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         thread.title,
         thread.checkoutId ?? null,
         thread.status,
+        thread.archivedAt ?? null,
         thread.pinnedAt ?? null,
         thread.createdAt,
         thread.updatedAt,
@@ -457,9 +470,11 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   listThreads(projectId?: string): Thread[] {
     const query = projectId
       ? this.db.prepare(
-          'SELECT * FROM thread WHERE project_id=? ORDER BY updated_at DESC,id',
+          'SELECT * FROM thread WHERE project_id=? ORDER BY (pinned_at IS NULL),pinned_at DESC,updated_at DESC,id',
         )
-      : this.db.prepare('SELECT * FROM thread ORDER BY updated_at DESC,id');
+      : this.db.prepare(
+          'SELECT * FROM thread ORDER BY (pinned_at IS NULL),pinned_at DESC,updated_at DESC,id',
+        );
     return rows<Record<string, unknown>>(
       projectId ? query.all(projectId) : query.all(),
     ).map(threadFromRow);
@@ -477,6 +492,11 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
             ? {}
             : { checkoutId: current.checkoutId }
           : { checkoutId: patch.checkoutId }),
+        ...(patch.archivedAt === undefined
+          ? current.archivedAt === undefined
+            ? {}
+            : { archivedAt: current.archivedAt }
+          : { archivedAt: patch.archivedAt }),
         ...(patch.pinnedAt === undefined
           ? current.pinnedAt === undefined
             ? {}
@@ -486,11 +506,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       };
       this.db
         .prepare(
-          'UPDATE thread SET title=?,checkout_id=?,pinned_at=?,updated_at=? WHERE id=?',
+          'UPDATE thread SET title=?,checkout_id=?,archived_at=?,pinned_at=?,updated_at=? WHERE id=?',
         )
         .run(
           thread.title,
           thread.checkoutId ?? null,
+          thread.archivedAt ?? null,
           thread.pinnedAt ?? null,
           thread.updatedAt,
           id,
@@ -513,7 +534,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
              (SELECT r.id FROM orchestration_run r
               WHERE r.thread_id=t.id AND r.status IN ${ACTIVE_RUN_SQL}
               ORDER BY r.created_at LIMIT 1) AS active_run_id
-           FROM thread t ORDER BY t.updated_at DESC,t.id`,
+           FROM thread t ORDER BY (t.pinned_at IS NULL),t.pinned_at DESC,t.updated_at DESC,t.id`,
         )
         .all(),
     ).map((row) => ({
@@ -571,7 +592,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       }
       const thread = this.getThread(input.threadId);
       if (!thread) throw new Error(`Thread ${input.threadId} does not exist.`);
-      if (thread.status === 'archived')
+      if (thread.status === 'archived' || thread.archivedAt !== undefined)
         throw new Error('An archived thread cannot be retried.');
       const previous = this.listRuns(thread.id).at(-1);
       if (!previous || !TERMINAL_RUN_STATUSES.includes(previous.status))
@@ -753,6 +774,56 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         throw new Error(`Thread ${id} changed concurrently.`);
       return this.getThread(id) as Thread;
     });
+  }
+
+  archiveThread(
+    commandId: string,
+    threadId: string,
+    now = Date.now(),
+  ): ThreadLifecycleCommandResult {
+    return this.applyThreadLifecycle(
+      commandId,
+      threadId,
+      'thread.archive',
+      now,
+    );
+  }
+
+  restoreThread(
+    commandId: string,
+    threadId: string,
+    now = Date.now(),
+  ): ThreadLifecycleCommandResult {
+    return this.applyThreadLifecycle(
+      commandId,
+      threadId,
+      'thread.restore',
+      now,
+    );
+  }
+
+  pinThread(
+    commandId: string,
+    threadId: string,
+    now = Date.now(),
+  ): ThreadLifecycleCommandResult {
+    return this.applyThreadLifecycle(commandId, threadId, 'thread.pin', now);
+  }
+
+  unpinThread(
+    commandId: string,
+    threadId: string,
+    now = Date.now(),
+  ): ThreadLifecycleCommandResult {
+    return this.applyThreadLifecycle(commandId, threadId, 'thread.unpin', now);
+  }
+
+  listThreadEvents(threadId: string): ThreadLifecycleEvent[] {
+    return rows<Record<string, unknown>>(
+      this.db
+        .prepare('SELECT * FROM thread_event WHERE thread_id=? ORDER BY id')
+        .all(threadId),
+    ).map(threadEventFromRow);
   }
 
   transitionCheckout(
@@ -1172,6 +1243,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.checkoutId === undefined
         ? {}
         : { checkoutId: input.checkoutId }),
+      ...(input.archivedAt === undefined
+        ? {}
+        : { archivedAt: input.archivedAt }),
       ...(input.pinnedAt === undefined ? {} : { pinnedAt: input.pinnedAt }),
       status: input.status ?? 'draft',
       createdAt: input.createdAt ?? now,
@@ -1179,8 +1253,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,status,pinned_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,status,archived_at,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
@@ -1188,6 +1262,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         thread.title,
         thread.checkoutId ?? null,
         thread.status,
+        thread.archivedAt ?? null,
         thread.pinnedAt ?? null,
         thread.createdAt,
         thread.updatedAt,
@@ -1198,6 +1273,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   private insertRun(input: CreateRunInput): Run {
     const thread = this.getThread(input.threadId);
     if (!thread) throw new Error(`Thread ${input.threadId} does not exist.`);
+    if (thread.status === 'archived' || thread.archivedAt !== undefined)
+      throw new Error('An archived thread cannot receive a run.');
     const checkoutId = input.checkoutId ?? thread.checkoutId;
     if (!checkoutId) throw new Error('A run requires a checkout.');
     const checkout = this.getCheckout(checkoutId);
@@ -1314,6 +1391,161 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       );
   }
 
+  private applyThreadLifecycle(
+    commandId: string,
+    threadId: string,
+    eventType:
+      | 'thread.archive'
+      | 'thread.restore'
+      | 'thread.pin'
+      | 'thread.unpin',
+    now: number,
+  ): ThreadLifecycleCommandResult {
+    return this.withTransaction(() => {
+      const existing = this.getCommandReceipt(commandId);
+      if (existing) {
+        if (existing.commandType !== eventType)
+          throw idempotencyConflict(commandId, existing.commandType);
+        const stored = existing.result as
+          | { thread?: Thread; event?: ThreadLifecycleEvent }
+          | Thread;
+        const storedThread =
+          'thread' in stored && stored.thread ? stored.thread : stored;
+        if (
+          (existing.resourceType !== undefined &&
+            (existing.resourceType !== 'thread' ||
+              existing.resourceId !== threadId)) ||
+          storedThread.id !== threadId
+        )
+          throw idempotencyConflict(commandId, existing.commandType);
+        const storedEvent =
+          'event' in stored && stored.event
+            ? stored.event
+            : this.listThreadEvents(threadId).at(-1);
+        if (!storedEvent)
+          throw new Error('Lifecycle command receipt has no event.');
+        return { thread: storedThread, event: storedEvent, receipt: existing };
+      }
+
+      const current = this.getThread(threadId);
+      if (!current) throw new Error(`Thread ${threadId} does not exist.`);
+      if (
+        eventType === 'thread.archive' &&
+        this.db
+          .prepare(
+            `SELECT 1 FROM orchestration_run
+             WHERE thread_id=? AND status IN ${ACTIVE_RUN_SQL} LIMIT 1`,
+          )
+          .get(threadId)
+      )
+        throw Object.assign(
+          new Error('A thread with an active run cannot be archived.'),
+          { code: 'orchestration-conflict' },
+        );
+
+      let changed = false;
+      if (eventType === 'thread.archive' && current.archivedAt === undefined) {
+        const preArchiveStatus =
+          current.status === 'archived'
+            ? this.latestThreadStatus(threadId)
+            : current.status;
+        const result = this.db
+          .prepare(
+            `UPDATE thread SET status=?,archived_at=?,pre_archive_status=?,updated_at=?
+             WHERE id=? AND archived_at IS NULL`,
+          )
+          .run(preArchiveStatus, now, preArchiveStatus, now, threadId);
+        changed = Number(result.changes) === 1;
+      } else if (
+        eventType === 'thread.restore' &&
+        current.archivedAt !== undefined
+      ) {
+        const status =
+          current.preArchiveStatus ?? this.latestThreadStatus(threadId);
+        const result = this.db
+          .prepare(
+            `UPDATE thread SET status=?,archived_at=NULL,pre_archive_status=NULL,updated_at=?
+             WHERE id=? AND archived_at IS NOT NULL`,
+          )
+          .run(status, now, threadId);
+        changed = Number(result.changes) === 1;
+      } else if (eventType === 'thread.pin') {
+        const result = this.db
+          .prepare('UPDATE thread SET pinned_at=?,updated_at=? WHERE id=?')
+          .run(now, now, threadId);
+        changed = Number(result.changes) === 1;
+      } else if (eventType === 'thread.unpin') {
+        const result = this.db
+          .prepare('UPDATE thread SET pinned_at=NULL,updated_at=? WHERE id=?')
+          .run(now, threadId);
+        changed = Number(result.changes) === 1;
+      }
+      if (
+        !changed &&
+        eventType !== 'thread.archive' &&
+        eventType !== 'thread.restore'
+      )
+        throw new Error(`Thread ${threadId} changed concurrently.`);
+
+      const thread = this.getThread(threadId);
+      if (!thread) throw new Error(`Thread ${threadId} disappeared.`);
+      const eventPayload = {
+        status: thread.status,
+        ...(thread.archivedAt === undefined
+          ? {}
+          : { archivedAt: thread.archivedAt }),
+        ...(thread.pinnedAt === undefined ? {} : { pinnedAt: thread.pinnedAt }),
+      };
+      this.db
+        .prepare(
+          `INSERT INTO thread_event
+           (thread_id,event_type,command_id,payload_json,occurred_at)
+           VALUES (?,?,?,?,?)`,
+        )
+        .run(threadId, eventType, commandId, JSON.stringify(eventPayload), now);
+      const row = this.db
+        .prepare('SELECT * FROM thread_event WHERE command_id=?')
+        .get(commandId) as Record<string, unknown> | undefined;
+      if (!row) throw new Error('Lifecycle event was not persisted.');
+      const event = threadEventFromRow(row);
+      const result = { thread, event };
+      const receipt: CommandReceipt = {
+        idempotencyKey: commandId,
+        commandType: eventType,
+        resourceType: 'thread',
+        resourceId: threadId,
+        result,
+        createdAt: now,
+      };
+      this.insertReceipt(receipt);
+      return { ...result, receipt };
+    });
+  }
+
+  private latestThreadStatus(
+    threadId: string,
+  ): Exclude<Thread['status'], 'archived'> {
+    const row = this.db
+      .prepare(
+        `SELECT status FROM orchestration_run
+         WHERE thread_id=? ORDER BY attempt DESC,id DESC LIMIT 1`,
+      )
+      .get(threadId) as Record<string, unknown> | undefined;
+    if (!row) return 'draft';
+    const status = String(row.status);
+    return status === 'waiting'
+      ? 'needs-input'
+      : status === 'settled'
+        ? 'settled'
+        : status === 'failed'
+          ? 'failed'
+          : status === 'cancelled' || status === 'interrupted'
+            ? 'stopped'
+            : status === 'queued'
+              ? 'queued'
+              : 'active';
+  }
+
   private syncThreadStatus(
     threadId: string,
     runStatus: RunStatus,
@@ -1394,9 +1626,36 @@ function threadFromRow(row: Record<string, unknown>): Thread {
       ? {}
       : { checkoutId: optionalString(row, 'checkout_id') }),
     status: stringValue(row, 'status') as Thread['status'],
+    ...(row.archived_at == null ? {} : { archivedAt: Number(row.archived_at) }),
+    ...(optionalString(row, 'pre_archive_status') === undefined
+      ? {}
+      : {
+          preArchiveStatus: optionalString(
+            row,
+            'pre_archive_status',
+          ) as Thread['status'],
+        }),
     ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+  };
+}
+function threadEventFromRow(
+  row: Record<string, unknown>,
+): ThreadLifecycleEvent {
+  const eventType = stringValue(row, 'event_type');
+  if (!LIFECYCLE_EVENT_TYPES.has(eventType))
+    throw new Error(`Unknown thread lifecycle event: ${eventType}.`);
+  const payload = JSON.parse(stringValue(row, 'payload_json')) as unknown;
+  return {
+    id: Number(row.id),
+    threadId: stringValue(row, 'thread_id'),
+    type: eventType as ThreadLifecycleEvent['type'],
+    ...(optionalString(row, 'command_id') === undefined
+      ? {}
+      : { commandId: optionalString(row, 'command_id') }),
+    data: payload,
+    occurredAt: Number(row.occurred_at),
   };
 }
 function runFromRow(row: Record<string, unknown>): Run {

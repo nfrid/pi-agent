@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
 import {
   type CommandReceipt,
   deriveSessionTitle,
@@ -212,17 +211,37 @@ export async function archiveThread(
   threadId: string,
   commandId: string,
 ): Promise<Thread> {
-  const prior = host.receipt(commandId, 'thread.archive');
-  if (prior) return prior.result as Thread;
-  host.requireThread(threadId);
-  if (
-    host.repository
-      .listRuns(threadId)
-      .some((run) => !TERMINAL_RUN_STATUSES.includes(run.status))
-  )
-    throw new Error('A thread with an active run cannot be archived.');
-  const archived = host.repository.transitionThread(threadId, 'archived');
-  host.saveReceipt(commandId, 'thread.archive', archived);
+  const result = host.repository.archiveThread(commandId, threadId);
   host.changed();
-  return archived;
+  return result.thread;
+}
+
+export async function restoreThread(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const result = host.repository.restoreThread(commandId, threadId);
+  host.changed();
+  return result.thread;
+}
+
+export async function pinThread(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const result = host.repository.pinThread(commandId, threadId);
+  host.changed();
+  return result.thread;
+}
+
+export async function unpinThread(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const result = host.repository.unpinThread(commandId, threadId);
+  host.changed();
+  return result.thread;
 }

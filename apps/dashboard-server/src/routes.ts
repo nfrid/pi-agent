@@ -12,11 +12,14 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   DelegateHistoryRunQuerySchema,
+  PinThreadCommandSchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
+  RestoreThreadCommandSchema,
   RetryCommandSchema,
   SessionAdoptCommandSchema,
   ThreadCreateCommandSchema,
+  UnpinThreadCommandSchema,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type {
@@ -34,6 +37,12 @@ const MAX_JSON_BODY = 512 * 1024;
 const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
 const objectBody = Type.Object({}, { additionalProperties: true });
 const anyBody = Type.Any();
+const ThreadListQuerySchema = Type.Object(
+  {
+    projectId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  },
+  { additionalProperties: false },
+);
 
 function validCommandId(value: unknown): value is string {
   return (
@@ -153,6 +162,11 @@ export interface DashboardRouteContext {
   mergeCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
   retireCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
   archiveThread?(threadId: string, commandId: string): Promise<unknown>;
+  restoreThread?(threadId: string, commandId: string): Promise<unknown>;
+  pinThread?(threadId: string, commandId: string): Promise<unknown>;
+  unpinThread?(threadId: string, commandId: string): Promise<unknown>;
+  listThreads?(projectId?: string): Promise<unknown> | unknown;
+  readThread?(threadId: string): Promise<unknown> | unknown;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -510,6 +524,31 @@ export const dashboardRoutes: FastifyPluginAsync<{
       }
     },
   );
+  app.get<{ Querystring: { projectId?: string } }>(
+    '/api/threads',
+    { schema: { querystring: ThreadListQuerySchema } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.listThreads)(
+          request.query.projectId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{ Params: { threadId: string } }>(
+    '/api/threads/:threadId',
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.readThread)(
+          request.params.threadId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.post<{ Params: { threadId: string } }>(
     '/api/threads/:threadId/archive',
     { schema: { body: ArchiveThreadCommandSchema } },
@@ -524,6 +563,27 @@ export const dashboardRoutes: FastifyPluginAsync<{
       }
     },
   );
+
+  for (const [suffix, operation, schema] of [
+    ['restore', 'restoreThread', RestoreThreadCommandSchema],
+    ['pin', 'pinThread', PinThreadCommandSchema],
+    ['unpin', 'unpinThread', UnpinThreadCommandSchema],
+  ] as const) {
+    app.post<{ Params: { threadId: string } }>(
+      `/api/threads/:threadId/${suffix}`,
+      { schema: { body: schema } },
+      async (request, reply) => {
+        try {
+          return await requireOperation(context[operation])(
+            request.params.threadId,
+            (request.body as { commandId: string }).commandId,
+          );
+        } catch (error) {
+          return sendError(reply, error);
+        }
+      },
+    );
+  }
 
   app.get<{ Params: { id: string } }>(
     '/api/sessions/:id/delegate-transcripts/active',
