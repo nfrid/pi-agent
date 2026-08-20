@@ -69,8 +69,24 @@
   font-size: 11px;
   white-space: nowrap;
 }
-.session-breadcrumb > span {
+.session-breadcrumb > span,
+.session-breadcrumb > a {
   flex: none;
+}
+.session-workspace-link {
+  color: inherit;
+  text-decoration: none;
+}
+.session-workspace-link:hover,
+.session-workspace-link:focus-visible {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.session-workspace-link:focus-visible {
+  border-radius: 2px;
+  outline: 1px solid var(--purple);
+  outline-offset: 2px;
 }
 .session-identity h1 {
   max-width: min(40vw, 470px);

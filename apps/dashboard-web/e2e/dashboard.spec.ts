@@ -187,19 +187,50 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(
     agentNav.getByRole('button', { name: 'New chat in Demo', exact: true }),
   ).toBeVisible();
-  await agentNav.getByRole('button', { name: 'Collapse Demo' }).click();
+  await expect(agentNav.getByText('Active', { exact: true })).toBeVisible();
+  const historyHeading = agentNav.getByRole('button', {
+    name: 'Collapse History in Demo',
+  });
+  await historyHeading.click();
+  await expect(historyHeading).toHaveAttribute('aria-expanded', 'false');
   await expect(
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
     }),
   ).toHaveCount(0);
-  await agentNav.getByPlaceholder('Search threads').fill('deliberately long');
+  const workspaceHeading = agentNav.getByRole('button', {
+    name: 'Collapse Demo',
+  });
+  await workspaceHeading.getByText('Demo', { exact: true }).click();
   await expect(
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
     }),
+  ).toHaveCount(0);
+  const threadSearch = agentNav.getByPlaceholder('Search threads');
+  await threadSearch.fill('deliberately long');
+  await threadSearch.press('ArrowDown');
+  await expect(agentNav.locator('[data-search-active=""]')).toContainText(
+    'A deliberately long session title that must wrap safely',
+  );
+  await threadSearch.press('Enter');
+  await expect(page).toHaveURL(/\/sessions\/ghost-session$/u);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const reopenedAgentNav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  await reopenedAgentNav
+    .getByPlaceholder('Search threads')
+    .fill('deliberately long');
+  await expect(
+    reopenedAgentNav.getByRole('button', {
+      name: 'A deliberately long session title that must wrap safely offline',
+    }),
   ).toBeVisible();
-  await agentNav.getByRole('button', { name: 'Clear thread search' }).click();
+  await reopenedAgentNav
+    .getByRole('button', { name: 'Clear thread search' })
+    .click();
   await expect(
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
@@ -964,12 +995,19 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           pendingInteractions: [],
         },
       ],
-      workspaces: [],
+      workspaces: [
+        {
+          id: 'tmp-workspace',
+          name: 'Tmp workspace',
+          canonicalPath: '/tmp',
+        },
+      ],
       sessions: [
         {
           id: 'session-loading',
           file: '',
           cwd: '/tmp',
+          workspaceId: 'tmp-workspace',
           title: 'Loaded shell',
           updatedAt: Date.parse('2026-08-05T18:42:00.000Z'),
         },
@@ -1024,6 +1062,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
             id: 'session-loading',
             file: '',
             cwd: '/tmp',
+            workspaceId: 'tmp-workspace',
             title: 'Loaded shell',
             updatedAt: 1,
           },
@@ -1054,6 +1093,9 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
 
   await page.goto('/sessions/session-loading');
   await expect(page.locator('.session-heading h1')).toHaveText('Loaded shell');
+  await expect(
+    page.getByRole('link', { name: 'Tmp workspace' }),
+  ).toHaveAttribute('href', '/workspaces/tmp-workspace');
   await expect(page.locator('.session-transcript-loading')).toContainText(
     'Loading session…',
   );

@@ -38,7 +38,7 @@ export const MAX_VISIBLE_HISTORY_THREADS = 24;
 
 // Runtime snapshots are live overlays, not session-index metadata. Keep their
 // chronology neutral until the authoritative index publishes a real timestamp.
-function isInactiveThread(row: AgentThreadRow): boolean {
+export function isHistoryThread(row: AgentThreadRow): boolean {
   return row.status === 'offline' || row.status === 'dormant';
 }
 
@@ -97,9 +97,7 @@ function inactiveRank(status: AgentThreadRow['status']): number {
 }
 
 function activeUnindexedRank(row: AgentThreadRow): number {
-  return !isInactiveThread(row) && row.session?.startedAt === undefined
-    ? -1
-    : 0;
+  return !isHistoryThread(row) && row.session?.startedAt === undefined ? -1 : 0;
 }
 
 export function filterAgentThreadRows(
@@ -116,13 +114,33 @@ export function filterAgentThreadRows(
     : [...rows];
 }
 
+export function searchAgentThreadRows(
+  rows: readonly AgentThreadRow[],
+): AgentThreadRow[] {
+  const active = rows.filter((row) => !isHistoryThread(row));
+  return [
+    ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
+    ...rows.filter(isHistoryThread),
+  ];
+}
+
+export function historyRowsForShelf(
+  rows: readonly AgentThreadRow[],
+  expanded: boolean,
+  selectedSessionId?: string,
+): AgentThreadRow[] {
+  return expanded
+    ? [...rows]
+    : rows.filter((row) => row.id === selectedSessionId);
+}
+
 export function boundedAgentThreadRows(
   rows: readonly AgentThreadRow[],
   historyLimit = MAX_VISIBLE_HISTORY_THREADS,
   selectedSessionId?: string,
 ): AgentThreadRow[] {
-  const active = rows.filter((row) => !isInactiveThread(row));
-  const history = rows.filter(isInactiveThread);
+  const active = rows.filter((row) => !isHistoryThread(row));
+  const history = rows.filter(isHistoryThread);
   const visibleHistory = history.slice(0, Math.max(0, historyLimit));
   const selected = selectedSessionId
     ? history.find((row) => row.id === selectedSessionId)
@@ -139,8 +157,8 @@ export function hiddenAgentThreadRowCount(
 ): number {
   return Math.max(
     0,
-    rows.filter(isInactiveThread).length -
-      visibleRows.filter(isInactiveThread).length,
+    rows.filter(isHistoryThread).length -
+      visibleRows.filter(isHistoryThread).length,
   );
 }
 

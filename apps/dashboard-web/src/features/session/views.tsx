@@ -2,6 +2,7 @@ import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import type { ComponentType, ReactNode, RefObject } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
+import { useDashboardNavigate } from '../../routes/navigation';
 import {
   DelegateHistorySurface,
   ExtensionSurfaceStack,
@@ -17,14 +18,39 @@ export type SessionComposerProps = {
   onPromptSubmitted?: (text: string) => void;
 };
 
+function SessionWorkspaceLink({
+  workspaceId,
+  workspaceLabel,
+}: {
+  workspaceId: string;
+  workspaceLabel: string;
+}) {
+  const go = useDashboardNavigate();
+  const href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  return (
+    <a
+      className="session-workspace session-workspace-link"
+      href={href}
+      onClick={(event) => {
+        event.preventDefault();
+        go(href);
+      }}
+    >
+      {workspaceLabel}
+    </a>
+  );
+}
+
 function SessionHeaderFrame({
   workspaceLabel,
+  workspaceId,
   title,
   status,
   statusLabel,
   actions,
 }: {
   workspaceLabel: string;
+  workspaceId?: string;
   title: ReactNode;
   status: string;
   statusLabel: string;
@@ -36,7 +62,14 @@ function SessionHeaderFrame({
         <div className="session-context-main">
           <div className="session-identity">
             <div className="session-breadcrumb">
-              <span className="session-workspace">{workspaceLabel}</span>
+              {workspaceId ? (
+                <SessionWorkspaceLink
+                  workspaceId={workspaceId}
+                  workspaceLabel={workspaceLabel}
+                />
+              ) : (
+                <span className="session-workspace">{workspaceLabel}</span>
+              )}
               <span className="session-breadcrumb-separator" aria-hidden="true">
                 /
               </span>
@@ -88,6 +121,7 @@ export function SessionLoadingCurtain({
 export function SessionHeader({
   id,
   workspaceName,
+  workspaceId,
   data,
   entries,
   status,
@@ -98,6 +132,7 @@ export function SessionHeader({
 }: {
   id: string;
   workspaceName: string;
+  workspaceId?: string;
   data: Parameters<typeof sessionDisplayTitle>[0];
   entries: readonly unknown[];
   status: string;
@@ -110,6 +145,7 @@ export function SessionHeader({
   return (
     <SessionHeaderFrame
       workspaceLabel={workspaceName}
+      workspaceId={workspaceId}
       title={
         <InlineSessionRename
           id={id}

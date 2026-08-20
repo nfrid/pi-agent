@@ -6,6 +6,9 @@ import {
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
+  historyRowsForShelf,
+  isHistoryThread,
+  searchAgentThreadRows,
   statusGlyph,
   workspaceGroupIsExpanded,
 } from './model';
@@ -117,6 +120,31 @@ describe('agent thread view model', () => {
     expect(filterAgentThreadRows(rows, '/work/frontend')).toEqual([rows[1]]);
     expect(filterAgentThreadRows(rows, 'offline')).toEqual([rows[1]]);
     expect(filterAgentThreadRows(rows, '   ')).toEqual(rows);
+  });
+
+  it('partitions dormant and offline rows into history', () => {
+    expect(isHistoryThread(row('live', 'Dashboard', 'idle'))).toBe(false);
+    expect(isHistoryThread(row('offline', 'Dashboard', 'offline'))).toBe(true);
+    expect(isHistoryThread(row('dormant', 'Dashboard', 'dormant'))).toBe(true);
+  });
+
+  it('shows all matching history rows while searching', () => {
+    const history = Array.from({ length: 25 }, (_, index) =>
+      row(`old-${index}`, 'Dashboard', 'dormant'),
+    );
+
+    expect(searchAgentThreadRows(history)).toHaveLength(25);
+  });
+
+  it('keeps only the selected history row as a collapsed-shelf exception', () => {
+    const history = [
+      row('old-1', 'Dashboard', 'dormant'),
+      row('old-2', 'Dashboard', 'offline'),
+    ];
+
+    expect(historyRowsForShelf(history, false, 'old-2')).toEqual([history[1]]);
+    expect(historyRowsForShelf(history, false, 'missing')).toEqual([]);
+    expect(historyRowsForShelf(history, true, 'old-2')).toEqual(history);
   });
 
   it('bounds active and history rows independently', () => {
