@@ -18,6 +18,7 @@ import {
   RestoreThreadCommandSchema,
   RetryCommandSchema,
   SessionAdoptCommandSchema,
+  SessionThreadLinksSchema,
   ThreadCreateCommandSchema,
   UnpinThreadCommandSchema,
   type WorkspaceTarget,
@@ -166,6 +167,7 @@ export interface DashboardRouteContext {
   pinThread?(threadId: string, commandId: string): Promise<unknown>;
   unpinThread?(threadId: string, commandId: string): Promise<unknown>;
   listThreads?(projectId?: string): Promise<unknown> | unknown;
+  sessionThreadLinks?(): unknown;
   readThread?(threadId: string): Promise<unknown> | unknown;
 }
 
@@ -188,7 +190,8 @@ function errorStatus(error: unknown): number {
     code === 'active-writer' ||
     code === 'sqlite-constraint' ||
     code === 'orchestration-conflict' ||
-    code === 'session-assigned'
+    code === 'session-assigned' ||
+    code === 'session-link-conflict'
     ? 409
     : code === 'unknown-workspace'
       ? 404
@@ -346,6 +349,11 @@ export const dashboardRoutes: FastifyPluginAsync<{
   app.get('/api/workspaces', async () => ({
     workspaces: context.workspaces(),
   }));
+  app.get(
+    '/api/session-threads',
+    { schema: { response: { 200: SessionThreadLinksSchema } } },
+    async () => context.sessionThreadLinks?.() ?? [],
+  );
   app.post('/api/workspaces/refresh', async (_request, reply) => {
     try {
       return { workspaces: await context.refreshWorkspaces() };

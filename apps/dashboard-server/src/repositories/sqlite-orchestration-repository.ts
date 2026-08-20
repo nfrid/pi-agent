@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   assertRunTransition,
@@ -16,6 +16,8 @@ import type {
   Run,
   RunStatus,
   RunSummary,
+  SessionIndexEntry,
+  SessionThreadLink,
   Thread,
   ThreadLifecycleCommandResult,
   ThreadLifecycleEvent,
@@ -40,6 +42,7 @@ import type {
   OrchestrationRepository,
   ProjectPatch,
   RetryRunInput,
+  SessionThreadLinkRecord,
   ThreadPatch,
 } from './types.js';
 
@@ -57,6 +60,11 @@ const LIFECYCLE_EVENT_TYPES = new Set([
   'thread.pin',
   'thread.unpin',
 ]);
+export const SESSION_LINK_TECHNICAL_PROJECT_ID = 'project-system-session-index';
+
+function sessionLinkThreadId(sessionId: string): string {
+  return `thread-session-${createHash('sha256').update(sessionId).digest('hex')}`;
+}
 
 function idempotencyConflict(
   key: string,
@@ -187,7 +195,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   listProjects(): Project[] {
     return rows<Record<string, unknown>>(
       this.db
-        .prepare('SELECT * FROM project ORDER BY updated_at DESC,id')
+        .prepare(
+          'SELECT * FROM project WHERE system_managed=0 ORDER BY updated_at DESC,id',
+        )
         .all(),
     ).map(projectFromRow);
   }
@@ -255,7 +265,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           `SELECT p.*, (SELECT count(*) FROM orchestration_run r
              JOIN thread t ON t.id=r.thread_id
              WHERE t.project_id=p.id AND r.status IN ${ACTIVE_RUN_SQL}) AS active_run_count
-           FROM project p ORDER BY p.updated_at DESC,p.id`,
+           FROM project p
+           WHERE p.system_managed=0
+           ORDER BY p.updated_at DESC,p.id`,
         )
         .all(),
     ).map((row) => ({
@@ -470,10 +482,14 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   listThreads(projectId?: string): Thread[] {
     const query = projectId
       ? this.db.prepare(
-          'SELECT * FROM thread WHERE project_id=? ORDER BY (pinned_at IS NULL),pinned_at DESC,updated_at DESC,id',
+          `SELECT t.* FROM thread t JOIN project p ON p.id=t.project_id
+           WHERE t.project_id=? AND p.system_managed=0
+           ORDER BY (t.pinned_at IS NULL),t.pinned_at DESC,t.updated_at DESC,t.id`,
         )
       : this.db.prepare(
-          'SELECT * FROM thread ORDER BY (pinned_at IS NULL),pinned_at DESC,updated_at DESC,id',
+          `SELECT t.* FROM thread t JOIN project p ON p.id=t.project_id
+           WHERE p.system_managed=0
+           ORDER BY (t.pinned_at IS NULL),t.pinned_at DESC,t.updated_at DESC,t.id`,
         );
     return rows<Record<string, unknown>>(
       projectId ? query.all(projectId) : query.all(),
@@ -534,7 +550,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
              (SELECT r.id FROM orchestration_run r
               WHERE r.thread_id=t.id AND r.status IN ${ACTIVE_RUN_SQL}
               ORDER BY r.created_at LIMIT 1) AS active_run_id
-           FROM thread t ORDER BY (t.pinned_at IS NULL),t.pinned_at DESC,t.updated_at DESC,t.id`,
+           FROM thread t JOIN project p ON p.id=t.project_id
+           WHERE p.system_managed=0
+           ORDER BY (t.pinned_at IS NULL),t.pinned_at DESC,t.updated_at DESC,t.id`,
         )
         .all(),
     ).map((row) => ({
@@ -655,6 +673,176 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       )
       .get(piSessionId, piSessionId) as Record<string, unknown> | undefined;
     return row === undefined ? undefined : runFromRow(row);
+  }
+
+  getSessionThreadLink(sessionId: string): SessionThreadLinkRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM session_thread_link WHERE session_id=?')
+      .get(sessionId) as Record<string, unknown> | undefined;
+    return row === undefined ? undefined : sessionThreadLinkFromRow(row);
+  }
+
+  getSessionThreadLinkByThreadId(
+    threadId: string,
+  ): SessionThreadLinkRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM session_thread_link WHERE thread_id=?')
+      .get(threadId) as Record<string, unknown> | undefined;
+    return row === undefined ? undefined : sessionThreadLinkFromRow(row);
+  }
+
+  listSessionThreadLinkRecords(): SessionThreadLinkRecord[] {
+    return rows<Record<string, unknown>>(
+      this.db
+        .prepare('SELECT * FROM session_thread_link ORDER BY session_id')
+        .all(),
+    ).map(sessionThreadLinkFromRow);
+  }
+
+  sessionThreadLinks(): SessionThreadLink[] {
+    return rows<Record<string, unknown>>(
+      this.db
+        .prepare(
+          `SELECT l.session_id,l.thread_id,t.archived_at,t.pinned_at,
+             (SELECT r.id FROM orchestration_run r
+              WHERE r.thread_id=t.id AND r.status IN ${ACTIVE_RUN_SQL}
+              ORDER BY r.created_at,r.id LIMIT 1) AS active_run_id
+           FROM session_thread_link l
+           JOIN thread t ON t.id=l.thread_id
+           ORDER BY l.session_id`,
+        )
+        .all(),
+    ).map((row) => ({
+      sessionId: stringValue(row, 'session_id'),
+      threadId: stringValue(row, 'thread_id'),
+      ...(row.archived_at == null
+        ? {}
+        : { archivedAt: Number(row.archived_at) }),
+      ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
+      ...(optionalString(row, 'active_run_id') === undefined
+        ? {}
+        : { activeRunId: optionalString(row, 'active_run_id') }),
+    }));
+  }
+
+  listSessionThreadLinks(): SessionThreadLink[] {
+    return this.sessionThreadLinks();
+  }
+
+  ensureSessionThreadLinks(
+    sessions: readonly SessionIndexEntry[],
+  ): SessionThreadLink[] {
+    return this.withTransaction(() => {
+      const ordered = [...sessions].sort((left, right) =>
+        left.id.localeCompare(right.id),
+      );
+      const now = Date.now();
+      const insertLink = this.db.prepare(
+        `INSERT INTO session_thread_link
+         (session_id,thread_id,source,source_file,created_at,updated_at)
+         VALUES (?,?,?,?,?,?)`,
+      );
+      for (const session of ordered) {
+        const existing = this.getSessionThreadLink(session.id);
+        if (existing) continue;
+        const candidateRows = this.db
+          .prepare(
+            `SELECT DISTINCT r.thread_id
+             FROM orchestration_run r
+             LEFT JOIN orchestration_runtime o ON o.run_id=r.id
+             WHERE r.pi_session_id=? OR o.pi_session_id=?
+             ORDER BY r.thread_id`,
+          )
+          .all(session.id, session.id) as Array<Record<string, unknown>>;
+        const candidates = candidateRows.map((row) => String(row.thread_id));
+        if (candidates.length > 1) continue;
+
+        let threadId = candidates[0];
+        if (threadId) {
+          const inverseRows = this.db
+            .prepare(
+              `SELECT DISTINCT session_id FROM (
+                 SELECT pi_session_id AS session_id
+                 FROM orchestration_run WHERE thread_id=? AND pi_session_id IS NOT NULL
+                 UNION
+                 SELECT o.pi_session_id AS session_id
+                 FROM orchestration_runtime o
+                 JOIN orchestration_run r ON r.id=o.run_id
+                 WHERE r.thread_id=? AND o.pi_session_id IS NOT NULL
+               ) ORDER BY session_id`,
+            )
+            .all(threadId, threadId) as Array<Record<string, unknown>>;
+          if (
+            inverseRows.length !== 1 ||
+            String(inverseRows[0]?.session_id) !== session.id
+          )
+            continue;
+          const linked = this.getSessionThreadLinkByThreadId(threadId);
+          if (linked && linked.sessionId !== session.id) continue;
+          if (!this.getThread(threadId)) continue;
+        } else {
+          threadId = sessionLinkThreadId(session.id);
+          const existingTechnicalThread = this.getThread(threadId);
+          if (existingTechnicalThread) {
+            const projectRow = this.db
+              .prepare('SELECT system_managed FROM project WHERE id=?')
+              .get(existingTechnicalThread.projectId) as
+              | Record<string, unknown>
+              | undefined;
+            if (!projectRow || Number(projectRow.system_managed) !== 1)
+              continue;
+          } else {
+            const observedAt = Number.isFinite(session.updatedAt)
+              ? session.updatedAt
+              : now;
+            this.insertThread({
+              id: threadId,
+              projectId: SESSION_LINK_TECHNICAL_PROJECT_ID,
+              title: session.name ?? session.title ?? `Session ${session.id}`,
+              status: 'stopped',
+              createdAt: observedAt,
+              updatedAt: observedAt,
+            });
+            this.db
+              .prepare(
+                `INSERT INTO thread_event
+                 (thread_id,event_type,command_id,actor,reason,payload_json,occurred_at)
+                 VALUES (?,?,?,?,?,?,?)`,
+              )
+              .run(
+                threadId,
+                'legacy.snapshot',
+                null,
+                'migration',
+                'legacy-snapshot',
+                JSON.stringify({
+                  status: 'stopped',
+                  source: 'session-index',
+                  sessionId: session.id,
+                  sourceFile: session.file,
+                }),
+                observedAt,
+              );
+          }
+        }
+        const observedAt = Number.isFinite(session.updatedAt)
+          ? session.updatedAt
+          : now;
+        try {
+          insertLink.run(
+            session.id,
+            threadId,
+            'session-index',
+            session.file,
+            observedAt,
+            now,
+          );
+        } catch (error) {
+          if (!String(error).toLowerCase().includes('constraint')) throw error;
+        }
+      }
+      return this.sessionThreadLinks();
+    });
   }
 
   listRuns(threadId?: string): Run[] {
@@ -926,15 +1114,82 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         );
       const piSessionId = input.run.piSessionId;
       if (!piSessionId) throw new Error('Adoption requires a Pi session ID.');
-      if (this.getRunByPiSessionId(piSessionId))
+      const assigned = this.db
+        .prepare(
+          `SELECT 1 FROM orchestration_run r
+           LEFT JOIN orchestration_runtime o ON o.run_id=r.id
+           WHERE r.pi_session_id=? OR o.pi_session_id=? LIMIT 1`,
+        )
+        .get(piSessionId, piSessionId);
+      if (assigned)
         throw Object.assign(new Error('The session is already assigned.'), {
           code: 'session-assigned',
         });
-      const thread = this.insertThread({
-        ...input.thread,
-        status: input.thread.status ?? 'stopped',
-      });
+
+      const link = this.getSessionThreadLink(piSessionId);
+      if (
+        link &&
+        input.sessionSourceFile !== undefined &&
+        link.sourceFile !== input.sessionSourceFile
+      )
+        throw Object.assign(
+          new Error('The session link belongs to another source file.'),
+          { code: 'session-link-conflict' },
+        );
+      let thread: Thread;
+      if (link) {
+        const linkedThread = this.getThread(link.threadId);
+        const projectRow = linkedThread
+          ? (this.db
+              .prepare('SELECT system_managed FROM project WHERE id=?')
+              .get(linkedThread.projectId) as
+              | Record<string, unknown>
+              | undefined)
+          : undefined;
+        if (
+          !linkedThread ||
+          !projectRow ||
+          Number(projectRow.system_managed) !== 1 ||
+          linkedThread.archivedAt !== undefined ||
+          this.listRuns(linkedThread.id).length > 0
+        )
+          throw Object.assign(
+            new Error(
+              'The session link conflicts with existing orchestration.',
+            ),
+            { code: 'session-link-conflict' },
+          );
+        this.db
+          .prepare(
+            'UPDATE thread SET project_id=?,title=?,checkout_id=?,status=?,updated_at=? WHERE id=?',
+          )
+          .run(
+            input.thread.projectId,
+            input.thread.title,
+            checkout.id,
+            input.thread.status ?? 'stopped',
+            Date.now(),
+            linkedThread.id,
+          );
+        thread = this.getThread(linkedThread.id) as Thread;
+      } else {
+        thread = this.insertThread({
+          ...input.thread,
+          status: input.thread.status ?? 'stopped',
+        });
+      }
       const run = this.insertRun({ ...input.run, threadId: thread.id });
+      if (!link) {
+        const sourceFile = input.sessionSourceFile ?? `adoption:${piSessionId}`;
+        const now = Date.now();
+        this.db
+          .prepare(
+            `INSERT INTO session_thread_link
+             (session_id,thread_id,source,source_file,created_at,updated_at)
+             VALUES (?,?,?,?,?,?)`,
+          )
+          .run(piSessionId, thread.id, 'adoption', sourceFile, now, now);
+      }
       this.insertReceipt({
         idempotencyKey: `run-prompt:${run.id}`,
         commandType: 'run.prompt',
@@ -1442,6 +1697,20 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           new Error('A thread with an active run cannot be archived.'),
           { code: 'orchestration-conflict' },
         );
+      if (
+        eventType === 'thread.archive' &&
+        this.db
+          .prepare(
+            `SELECT 1 FROM session_thread_link l
+             JOIN runtime r ON r.session_id=l.session_id AND r.online=1
+             WHERE l.thread_id=? LIMIT 1`,
+          )
+          .get(threadId)
+      )
+        throw Object.assign(
+          new Error('A session with an online runtime cannot be archived.'),
+          { code: 'orchestration-conflict' },
+        );
 
       let changed = false;
       if (eventType === 'thread.archive' && current.archivedAt === undefined) {
@@ -1625,6 +1894,19 @@ function checkoutFromRow(row: Record<string, unknown>): Checkout {
     updatedAt: Number(row.updated_at),
   };
 }
+function sessionThreadLinkFromRow(
+  row: Record<string, unknown>,
+): SessionThreadLinkRecord {
+  return {
+    sessionId: stringValue(row, 'session_id'),
+    threadId: stringValue(row, 'thread_id'),
+    source: stringValue(row, 'source'),
+    sourceFile: stringValue(row, 'source_file'),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
 function threadFromRow(row: Record<string, unknown>): Thread {
   return {
     id: stringValue(row, 'id'),

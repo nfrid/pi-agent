@@ -81,6 +81,8 @@ import {
   SessionSnapshotPatchSchema,
   type SessionSnapshotRequest,
   SessionSnapshotRequestSchema,
+  type SessionThreadLinks,
+  SessionThreadLinksSchema,
   type ShellFeedInput,
   ShellFeedInputSchema,
   type ShellFeedMessage,
@@ -969,6 +971,16 @@ export function tryParseComposerCommandCatalogue(
 
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {
   return parseSchema(SessionApiResponseSchema, value, 'session API response');
+}
+
+export function parseSessionThreadLinks(value: unknown): SessionThreadLinks {
+  return parseSchema(SessionThreadLinksSchema, value, 'session thread links');
+}
+
+export function tryParseSessionThreadLinks(
+  value: unknown,
+): SessionThreadLinks | undefined {
+  return tryParseSchema(SessionThreadLinksSchema, value);
 }
 
 export function parseSessionSnapshotRequest(

@@ -115,6 +115,7 @@ export async function adoptSession(
         checkoutId: checkout.id,
         status: threadStatus,
       },
+      sessionSourceFile: metadata.file,
       run: {
         id: `run-${randomUUID()}`,
         checkoutId: checkout.id,
@@ -221,6 +222,22 @@ export async function archiveThread(
   threadId: string,
   commandId: string,
 ): Promise<Thread> {
+  const prior = host.receipt(commandId, 'thread.archive');
+  const link = host.repository.getSessionThreadLinkByThreadId(threadId);
+  if (
+    !prior &&
+    link &&
+    host.registry
+      .snapshots()
+      .some(
+        (runtime) =>
+          runtime.session.id === link.sessionId && runtime.online !== false,
+      )
+  )
+    throw Object.assign(
+      new Error('A session with an online runtime cannot be archived.'),
+      { code: 'orchestration-conflict' },
+    );
   const result = host.repository.archiveThread(commandId, threadId);
   host.changed();
   return archiveResponseThread(result.thread);

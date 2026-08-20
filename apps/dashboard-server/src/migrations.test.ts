@@ -43,8 +43,69 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
     ]);
+  });
+
+  it('creates the link ledger and backfills only exact run/session joins', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('PRAGMA foreign_keys=ON');
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 9));
+      db.exec(`
+        INSERT INTO project
+          (id,title,root_path,default_isolation,max_parallel_runs,status,created_at,updated_at)
+        VALUES ('migration-project','Migration','/migration','main',1,'active',1,1);
+        INSERT INTO checkout
+          (id,project_id,kind,path,status,created_at,updated_at)
+        VALUES ('migration-checkout','migration-project','main','/migration','ready',1,1);
+        INSERT INTO thread
+          (id,project_id,title,checkout_id,status,created_at,updated_at)
+        VALUES ('exact-thread','migration-project','Exact','migration-checkout','stopped',1,1),
+               ('ambiguous-thread','migration-project','Ambiguous','migration-checkout','stopped',1,1);
+        INSERT INTO orchestration_run
+          (id,thread_id,checkout_id,attempt,mode,runtime_provider,pi_session_id,initial_prompt,status,created_at)
+        VALUES ('exact-run','exact-thread','migration-checkout',1,'write','extension-bridge','exact-session','prompt','interrupted',1),
+               ('ambiguous-run','ambiguous-thread','migration-checkout',1,'write','extension-bridge','ambiguous-session','prompt','interrupted',1);
+        INSERT INTO session_index (id,file,cwd,updated_at)
+        VALUES ('exact-session','/sessions/exact.jsonl','/migration',10),
+               ('ambiguous-session','/sessions/ambiguous.jsonl','/migration',10);
+      `);
+      // A second durable thread with the same session identity makes the
+      // mapping ambiguous and must not get a guessed link.
+      db.exec(`
+        INSERT INTO thread
+          (id,project_id,title,checkout_id,status,created_at,updated_at)
+        VALUES ('ambiguous-thread-2','migration-project','Ambiguous 2','migration-checkout','stopped',1,1);
+        INSERT INTO orchestration_run
+          (id,thread_id,checkout_id,attempt,mode,runtime_provider,pi_session_id,initial_prompt,status,created_at)
+        VALUES ('ambiguous-run-2','ambiguous-thread-2','migration-checkout',1,'write','extension-bridge','ambiguous-session','prompt','interrupted',1);
+      `);
+      runMigrations(db);
+      expect(
+        db
+          .prepare('SELECT system_managed FROM project WHERE id=?')
+          .get('project-system-session-index'),
+      ).toEqual({
+        system_managed: 1,
+      });
+      expect(
+        db
+          .prepare(
+            'SELECT session_id,thread_id,source,source_file FROM session_thread_link',
+          )
+          .all(),
+      ).toEqual([
+        {
+          session_id: 'exact-session',
+          thread_id: 'exact-thread',
+          source: 'migration',
+          source_file: '/sessions/exact.jsonl',
+        },
+      ]);
+    } finally {
+      db.close();
+    }
   });
 
   it('adds writable mode to an old managed-launch table', () => {

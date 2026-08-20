@@ -1,4 +1,8 @@
-import { dashboardHttpClient, threadsQueryOptions } from '@pi-dashboard/client';
+import {
+  dashboardHttpClient,
+  sessionThreadLinksQueryOptions,
+  threadsQueryOptions,
+} from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
 import { type KeyboardEvent, useEffect, useMemo, useState } from 'react';
@@ -236,12 +240,18 @@ export function AgentThreadNav({
   const durableThreadsQuery = useQuery(
     threadsQueryOptions(dashboardHttpClient),
   );
+  const sessionThreadLinksQuery = useQuery(
+    sessionThreadLinksQueryOptions(dashboardHttpClient),
+  );
   const durableThreads = durableThreadsQuery.isSuccess
     ? durableThreadsQuery.data
     : undefined;
+  const directLinks = sessionThreadLinksQuery.isSuccess
+    ? sessionThreadLinksQuery.data
+    : [];
   const rows = useMemo(
-    () => agentThreadRows(snapshot, durableThreads),
-    [durableThreads, snapshot],
+    () => agentThreadRows(snapshot, durableThreads, directLinks),
+    [directLinks, durableThreads, snapshot],
   );
   const filtered = useMemo(
     () => filterAgentThreadRows(rows, query),

@@ -108,6 +108,39 @@ describe('DashboardHttpClient command requests', () => {
     });
   });
 
+  it('fetches and validates exact session thread links', async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              sessionId: 'session-1',
+              threadId: 'thread-1',
+              pinnedAt: 20,
+              activeRunId: 'run-1',
+            },
+          ]),
+          { status: 200 },
+        ),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    await expect(client.listSessionThreadLinks()).resolves.toEqual([
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        pinnedAt: 20,
+        activeRunId: 'run-1',
+      },
+    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/session-threads',
+      expect.objectContaining({ headers: expect.anything() }),
+    );
+  });
+
   it('fetches and validates workspace composer commands', async () => {
     const fetch = vi.fn(
       async () =>
