@@ -58,6 +58,7 @@ export function useSessionScroll({
   const modeRef = useRef<SessionFollowMode>('following');
   const mountedSessionIdRef = useRef<string | undefined>(undefined);
   const bottomFrameRef = useRef<number | undefined>(undefined);
+  const bottomWriteMarksReadyRef = useRef(false);
   const readyTimerRef = useRef<number | undefined>(undefined);
   const sessionPageRef = useRef<HTMLElement>(null);
   const controlLayerRef = useRef<HTMLDivElement>(null);
@@ -66,6 +67,7 @@ export function useSessionScroll({
     if (bottomFrameRef.current === undefined) return;
     window.cancelAnimationFrame(bottomFrameRef.current);
     bottomFrameRef.current = undefined;
+    bottomWriteMarksReadyRef.current = false;
   }, []);
 
   const cancelReadyTimer = useCallback(() => {
@@ -84,9 +86,13 @@ export function useSessionScroll({
   const requestBottomWrite = useCallback(
     (markReady: boolean) => {
       if (!enabled || mountedSessionIdRef.current !== id) return;
-      cancelBottomWrite();
+      bottomWriteMarksReadyRef.current ||= markReady;
+      if (bottomFrameRef.current !== undefined)
+        window.cancelAnimationFrame(bottomFrameRef.current);
       bottomFrameRef.current = window.requestAnimationFrame(() => {
         bottomFrameRef.current = undefined;
+        const shouldMarkReady = bottomWriteMarksReadyRef.current;
+        bottomWriteMarksReadyRef.current = false;
         const element = scrollElementRef.current;
         if (
           !element ||
@@ -96,7 +102,7 @@ export function useSessionScroll({
           return;
         element.scrollTop = element.scrollHeight;
         setAwayFromLatest(false);
-        if (!markReady) return;
+        if (!shouldMarkReady) return;
         cancelReadyTimer();
         readyTimerRef.current = window.setTimeout(() => {
           readyTimerRef.current = undefined;
@@ -104,7 +110,7 @@ export function useSessionScroll({
         }, SESSION_TAIL_SETTLE_MS);
       });
     },
-    [cancelBottomWrite, cancelReadyTimer, enabled, id, scrollElementRef],
+    [cancelReadyTimer, enabled, id, scrollElementRef],
   );
 
   useLayoutEffect(() => {

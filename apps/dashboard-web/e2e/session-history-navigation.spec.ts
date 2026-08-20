@@ -307,7 +307,7 @@ test('switching chats establishes the new transcript tail', async ({
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
 });
 
-test('renders retained sessions immediately and loads evicted sessions fresh', async ({
+test('renders retained and persisted cached sessions immediately', async ({
   page,
 }) => {
   const sessions = Array.from({ length: 4 }, (_, index) => ({
@@ -411,11 +411,14 @@ test('renders retained sessions immediately and loads evicted sessions fresh', a
   }
   await navigateInDashboard(page, '/sessions/cache-session-1');
   await evictedRequest;
+  // IndexedDB warm state has no opaque SSE event ID, so the feed starts with
+  // a fresh authoritative snapshot while the settled transcript stays visible.
   expect(evictedResumeCursor).toBeUndefined();
-  await expect(page.locator('.session-page-loading')).toBeVisible();
-  await expect(page.getByText('session one refreshed')).toHaveCount(0);
+  await expect(page.locator('.session-page-loading')).toHaveCount(0);
+  await expect(page.getByText('session one refreshed')).toBeVisible();
   releaseEvicted();
   await expect(page.getByText('session 1 cached content')).toBeVisible();
+  await expect(page.getByText('session one refreshed')).toHaveCount(0);
 });
 
 test('active to old to active ignores a delayed stale latest snapshot', async ({
