@@ -43,8 +43,206 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
     ]);
+  });
+
+  it('converts v10 settled durable rows without losing dependent data or indexes', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('PRAGMA foreign_keys=ON');
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 10));
+      db.exec(`
+        INSERT INTO project (id,title,root_path,default_isolation,max_parallel_runs,status,created_at,updated_at)
+        VALUES ('rename-project','Rename','/rename','main',1,'active',1,1);
+        INSERT INTO checkout (id,project_id,kind,path,status,created_at,updated_at)
+        VALUES ('rename-checkout','rename-project','main','/rename','ready',2,2);
+        INSERT INTO thread
+          (id,project_id,title,checkout_id,status,pinned_at,created_at,updated_at,archived_at,pre_archive_status)
+        VALUES ('rename-thread','rename-project','Rename thread','rename-checkout','settled',3,4,5,6,'settled');
+        INSERT INTO orchestration_run
+          (id,thread_id,checkout_id,attempt,mode,runtime_provider,runtime_id,pi_session_id,initial_prompt,status,created_at,started_at,finished_at,error)
+        VALUES ('rename-run','rename-thread','rename-checkout',1,'write','extension-bridge','rename-runtime','rename-session','Rename prompt','settled',7,8,9,NULL);
+        INSERT INTO orchestration_runtime
+          (runtime_id,pi_session_id,run_id,status,created_at,updated_at)
+        VALUES ('rename-runtime','rename-session','rename-run','stopped',10,11);
+        INSERT INTO session_index (id,file,cwd,updated_at)
+        VALUES ('rename-session','/rename/session.jsonl','/rename',12);
+        INSERT INTO session_thread_link
+          (session_id,thread_id,source,source_file,created_at,updated_at)
+        VALUES ('rename-session','rename-thread','migration','/rename/session.jsonl',13,14);
+        INSERT INTO thread_event
+          (id,thread_id,event_type,command_id,actor,reason,payload_json,occurred_at)
+        VALUES (7,'rename-thread','legacy.snapshot',NULL,'migration','legacy-snapshot','{"status":"settled"}',15);
+        INSERT INTO command_receipt
+          (idempotency_key,command_type,resource_type,resource_id,runtime_id,command_fingerprint,result_json,created_at)
+        VALUES ('rename-command','run.create','run','rename-run','rename-runtime',NULL,'{"runId":"rename-run"}',16);
+      `);
+      const indexesBefore = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('active_run_per_thread','active_runtime_per_pi_session','active_runtime_per_run','active_writer_per_checkout','orchestration_run_thread_attempt_unique','run_checkout_status','session_thread_link_thread','thread_event_thread_order') ORDER BY name",
+        )
+        .all();
+
+      runMigrations(db);
+      expect(
+        db
+          .prepare(
+            'SELECT status,archived_at,pre_archive_status FROM thread WHERE id=?',
+          )
+          .get('rename-thread'),
+      ).toEqual({
+        status: 'completed',
+        archived_at: 6,
+        pre_archive_status: 'completed',
+      });
+      expect(
+        db
+          .prepare(
+            'SELECT id,thread_id,runtime_id,pi_session_id,status,created_at,started_at,finished_at FROM orchestration_run WHERE id=?',
+          )
+          .get('rename-run'),
+      ).toEqual({
+        id: 'rename-run',
+        thread_id: 'rename-thread',
+        runtime_id: 'rename-runtime',
+        pi_session_id: 'rename-session',
+        status: 'completed',
+        created_at: 7,
+        started_at: 8,
+        finished_at: 9,
+      });
+      expect(db.prepare('SELECT * FROM orchestration_runtime').all()).toEqual([
+        {
+          runtime_id: 'rename-runtime',
+          pi_session_id: 'rename-session',
+          run_id: 'rename-run',
+          status: 'stopped',
+          created_at: 10,
+          updated_at: 11,
+        },
+      ]);
+      expect(db.prepare('SELECT * FROM session_thread_link').all()).toEqual([
+        {
+          session_id: 'rename-session',
+          thread_id: 'rename-thread',
+          source: 'migration',
+          source_file: '/rename/session.jsonl',
+          created_at: 13,
+          updated_at: 14,
+        },
+      ]);
+      expect(db.prepare('SELECT * FROM thread_event').all()).toEqual([
+        {
+          id: 7,
+          thread_id: 'rename-thread',
+          event_type: 'legacy.snapshot',
+          command_id: null,
+          actor: 'migration',
+          reason: 'legacy-snapshot',
+          payload_json: '{"status":"settled"}',
+          occurred_at: 15,
+        },
+      ]);
+      expect(db.prepare('SELECT * FROM command_receipt').all()).toEqual([
+        {
+          idempotency_key: 'rename-command',
+          command_type: 'run.create',
+          resource_type: 'run',
+          resource_id: 'rename-run',
+          result_json: '{"runId":"rename-run"}',
+          created_at: 16,
+          runtime_id: 'rename-runtime',
+          command_fingerprint: null,
+        },
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('active_run_per_thread','active_runtime_per_pi_session','active_runtime_per_run','active_writer_per_checkout','orchestration_run_thread_attempt_unique','run_checkout_status','session_thread_link_thread','thread_event_thread_order') ORDER BY name",
+          )
+          .all(),
+      ).toEqual(indexesBefore);
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(
+        db
+          .prepare('SELECT seq FROM sqlite_sequence WHERE name=?')
+          .get('thread_event'),
+      ).toEqual({ seq: 7 });
+      db.prepare(
+        `INSERT INTO thread_event
+         (thread_id,event_type,command_id,actor,reason,payload_json,occurred_at)
+         VALUES (?,?,?,?,?,?,?)`,
+      ).run(
+        'rename-thread',
+        'thread.pin',
+        'rename-event-2',
+        'user',
+        'user-command',
+        '{}',
+        17,
+      );
+      expect(
+        db
+          .prepare('SELECT id FROM thread_event WHERE command_id=?')
+          .get('rename-event-2'),
+      ).toEqual({ id: 8 });
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO thread (id,project_id,title,checkout_id,status,created_at,updated_at)
+             VALUES ('rejected-thread','rename-project','Rejected','rename-checkout','settled',20,20)`,
+          )
+          .run(),
+      ).toThrow();
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO orchestration_run
+             (id,thread_id,checkout_id,attempt,mode,runtime_provider,initial_prompt,status,created_at)
+             VALUES ('rejected-run','rename-thread','rename-checkout',2,'write','extension-bridge','Rejected','settled',20)`,
+          )
+          .run(),
+      ).toThrow();
+      expect(() =>
+        db
+          .prepare('UPDATE thread SET pre_archive_status=? WHERE id=?')
+          .run('settled', 'rename-thread'),
+      ).toThrow();
+      db.exec(`
+        INSERT INTO thread (id,project_id,title,checkout_id,status,created_at,updated_at)
+        VALUES ('accepted-thread','rename-project','Accepted','rename-checkout','completed',21,21);
+        INSERT INTO orchestration_run
+          (id,thread_id,checkout_id,attempt,mode,runtime_provider,initial_prompt,status,created_at)
+        VALUES ('accepted-run','accepted-thread','rename-checkout',1,'read','extension-bridge','Accepted','completed',21);
+      `);
+      expect(
+        db
+          .prepare('SELECT status FROM orchestration_run WHERE id=?')
+          .get('accepted-run'),
+      ).toEqual({ status: 'completed' });
+      expect(
+        db
+          .prepare(
+            'SELECT version,name FROM schema_migrations WHERE version=11',
+          )
+          .get(),
+      ).toEqual({
+        version: 11,
+        name: 'rename-settled-orchestration-status-to-completed',
+      });
+      runMigrations(db);
+      expect(
+        db
+          .prepare(
+            'SELECT count(*) AS count FROM schema_migrations WHERE version=11',
+          )
+          .get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
   });
 
   it('does not record v10 when the orchestration foundation is missing', () => {
@@ -313,9 +511,9 @@ describe('migration metadata', () => {
           )
           .get('legacy-thread'),
       ).toEqual({
-        status: 'settled',
+        status: 'completed',
         archived_at: 30,
-        pre_archive_status: 'settled',
+        pre_archive_status: 'completed',
       });
       expect(
         db

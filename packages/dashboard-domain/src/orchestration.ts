@@ -14,7 +14,7 @@ export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = [
 ];
 
 export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
-  'settled',
+  'completed',
   'failed',
   'cancelled',
   'interrupted',
@@ -41,9 +41,9 @@ const threadTransitions: Readonly<
 > = {
   draft: ['queued', 'active'],
   queued: ['active', 'needs-input', 'failed', 'stopped'],
-  active: ['needs-input', 'settled', 'failed', 'stopped'],
-  'needs-input': ['active', 'settled', 'failed', 'stopped'],
-  settled: ['queued', 'active'],
+  active: ['needs-input', 'completed', 'failed', 'stopped'],
+  'needs-input': ['active', 'completed', 'failed', 'stopped'],
+  completed: ['queued', 'active'],
   failed: ['queued', 'active'],
   stopped: ['queued'],
   archived: [],
@@ -52,9 +52,9 @@ const runTransitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   queued: ['preparing', 'cancelled', 'interrupted'],
   preparing: ['queued', 'starting', 'failed', 'cancelled', 'interrupted'],
   starting: ['queued', 'running', 'failed', 'cancelled', 'interrupted'],
-  running: ['waiting', 'settled', 'failed', 'cancelled', 'interrupted'],
-  waiting: ['running', 'settled', 'failed', 'cancelled', 'interrupted'],
-  settled: [],
+  running: ['waiting', 'completed', 'failed', 'cancelled', 'interrupted'],
+  waiting: ['running', 'completed', 'failed', 'cancelled', 'interrupted'],
+  completed: [],
   failed: [],
   cancelled: [],
   interrupted: [],
@@ -96,8 +96,8 @@ export function restoreThreadStatus(
   if (latestRunStatus === undefined) return 'draft';
   return latestRunStatus === 'waiting'
     ? 'needs-input'
-    : latestRunStatus === 'settled'
-      ? 'settled'
+    : latestRunStatus === 'completed'
+      ? 'completed'
       : latestRunStatus === 'failed'
         ? 'failed'
         : latestRunStatus === 'cancelled' || latestRunStatus === 'interrupted'

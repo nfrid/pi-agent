@@ -186,7 +186,7 @@ export async function settle(
     host.requireRun(runId).status === 'waiting' ||
     host.requireRun(runId).status === 'running'
   )
-    host.transitionIfPossible(runId, 'settled');
+    host.transitionIfPossible(runId, 'completed');
   const checkout = host.requireCheckout(run.checkoutId);
   if (checkout.kind === 'worktree') {
     const record = host.worktreeRecord(checkout);

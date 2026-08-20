@@ -602,7 +602,7 @@ describe('Fastify dashboard route plugin', () => {
       id: 'thread-1',
       projectId: 'project-1',
       title: 'Thread',
-      status: 'settled',
+      status: 'completed',
       createdAt: 1,
       updatedAt: 2,
     }));
@@ -610,7 +610,7 @@ describe('Fastify dashboard route plugin', () => {
       id: 'thread-1',
       projectId: 'project-1',
       title: 'Thread',
-      status: 'settled',
+      status: 'completed',
       pinnedAt: 2,
       createdAt: 1,
       updatedAt: 2,
@@ -619,7 +619,7 @@ describe('Fastify dashboard route plugin', () => {
       id: 'thread-1',
       projectId: 'project-1',
       title: 'Thread',
-      status: 'settled',
+      status: 'completed',
       createdAt: 1,
       updatedAt: 2,
     }));

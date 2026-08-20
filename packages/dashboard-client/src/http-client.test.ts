@@ -19,7 +19,7 @@ const validThread = {
   id: 'thread-1',
   projectId: 'project-1',
   title: 'Thread',
-  status: 'settled',
+  status: 'completed',
   createdAt: 1,
   updatedAt: 2,
 };

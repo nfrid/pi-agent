@@ -89,7 +89,7 @@ describe('dashboard protocol', () => {
       id: 'thread-1',
       projectId: 'project-1',
       title: 'Lifecycle',
-      status: 'settled' as const,
+      status: 'completed' as const,
       createdAt: 1,
       updatedAt: 1,
     };

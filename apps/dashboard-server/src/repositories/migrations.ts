@@ -539,6 +539,78 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       }
     },
   },
+  {
+    version: 11,
+    name: 'rename-settled-orchestration-status-to-completed',
+    foreignKeysOff: true,
+    up(db) {
+      // SQLite cannot alter a CHECK constraint in place. Rebuild only the two
+      // durable status tables, retaining their column order and every row;
+      // dependent tables and their data are left untouched while FK checks are
+      // temporarily disabled by the migration runner.
+      db.exec(`
+        CREATE TABLE thread_v11 (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES project(id),
+          title TEXT NOT NULL,
+          checkout_id TEXT REFERENCES checkout(id),
+          status TEXT NOT NULL CHECK (status IN ('draft','queued','active','needs-input','completed','failed','stopped','archived')),
+          pinned_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          archived_at INTEGER,
+          pre_archive_status TEXT CHECK (pre_archive_status IS NULL OR pre_archive_status IN ('draft','queued','active','needs-input','completed','failed','stopped','archived'))
+        );
+        INSERT INTO thread_v11
+          (id,project_id,title,checkout_id,status,pinned_at,created_at,updated_at,archived_at,pre_archive_status)
+          SELECT id,project_id,title,checkout_id,
+                 CASE status WHEN 'settled' THEN 'completed' ELSE status END,
+                 pinned_at,created_at,updated_at,archived_at,
+                 CASE pre_archive_status WHEN 'settled' THEN 'completed' ELSE pre_archive_status END
+          FROM thread;
+        DROP TABLE thread;
+        ALTER TABLE thread_v11 RENAME TO thread;
+
+        CREATE TABLE orchestration_run_v11 (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES thread(id),
+          checkout_id TEXT NOT NULL REFERENCES checkout(id),
+          attempt INTEGER NOT NULL CHECK (attempt >= 1),
+          parent_run_id TEXT REFERENCES orchestration_run(id),
+          mode TEXT NOT NULL CHECK (mode IN ('read','write')),
+          runtime_provider TEXT NOT NULL CHECK (runtime_provider IN ('extension-bridge','pi-server')),
+          runtime_id TEXT,
+          pi_session_id TEXT,
+          initial_prompt TEXT NOT NULL CHECK (length(initial_prompt) BETWEEN 1 AND 100000),
+          model_json TEXT,
+          status TEXT NOT NULL CHECK (status IN ('queued','preparing','starting','running','waiting','completed','failed','cancelled','interrupted')),
+          created_at INTEGER NOT NULL,
+          started_at INTEGER,
+          finished_at INTEGER,
+          error TEXT
+        );
+        INSERT INTO orchestration_run_v11
+          (id,thread_id,checkout_id,attempt,parent_run_id,mode,runtime_provider,runtime_id,pi_session_id,initial_prompt,model_json,status,created_at,started_at,finished_at,error)
+          SELECT id,thread_id,checkout_id,attempt,parent_run_id,mode,runtime_provider,runtime_id,pi_session_id,initial_prompt,model_json,
+                 CASE status WHEN 'settled' THEN 'completed' ELSE status END,
+                 created_at,started_at,finished_at,error
+          FROM orchestration_run;
+        DROP TABLE orchestration_run;
+        ALTER TABLE orchestration_run_v11 RENAME TO orchestration_run;
+
+        CREATE UNIQUE INDEX active_run_per_thread
+          ON orchestration_run(thread_id)
+          WHERE status IN ('queued','preparing','starting','running','waiting');
+        CREATE UNIQUE INDEX active_writer_per_checkout
+          ON orchestration_run(checkout_id)
+          WHERE mode = 'write' AND status IN ('queued','preparing','starting','running','waiting');
+        CREATE UNIQUE INDEX orchestration_run_thread_attempt_unique
+          ON orchestration_run(thread_id,attempt);
+        CREATE INDEX run_checkout_status
+          ON orchestration_run(checkout_id,status);
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */
