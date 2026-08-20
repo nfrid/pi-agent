@@ -6,7 +6,18 @@ Branch: `experiment/t3-transcript-state`
 
 Base: `e73f9b3` on `main`, including the verified fix for persisted/live fallback rows appearing after newer history.
 
-This document is the durable handoff for implementation after context compaction.
+Implementation completed on this branch:
+
+- `37d832d` extracts the pure transcript snapshot/event reducer.
+- `7772d70` adds exact session-feed watermarks for older pages.
+- `fd8eb93` replaces implicit scroll stickiness with explicit follow/manual mode.
+- `5774350`, `9dad550`, and `9b2d1fa` add safe settled transcript persistence, lifecycle restore, and cache-first tail settlement.
+
+Verification completed:
+
+- `pnpm run check` passes with 1,789 root tests and every workspace suite.
+- The isolated-port Playwright transcript/history/scroll selection passes 10/10, including desktop virtual anchoring, chronology regression, and persisted-cache convergence.
+- Production was not deployed from the experiment branch.
 
 ## Objective
 
