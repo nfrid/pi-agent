@@ -6,16 +6,21 @@ This is a pnpm workspace; use `pnpm` for workspace tasks (installing, adding
 dependencies, running package scripts). Root scripts also work through
 `npm run <script>` — they delegate to pnpm internally.
 
-Run the relevant checks before finishing code changes:
+Run checks scoped to the code you changed. Prefer focused validation during
+implementation and before finishing a local change; do not default to the full
+repository check when a narrower command proves the same thing.
 
-- `pnpm run check` — full validation: Node/SDK version guards, root and
-  workspace typecheck, Biome lint and format, root (extensions) tests, and
-  workspace package tests (most times just run this)
-- `pnpm run typecheck` — root tsconfig only (extensions, most `packages/*`,
-  dashboard-server); `pnpm run workspace:typecheck` covers every workspace
-  package including `@pi-dashboard/web`
-- `pnpm run lint` — Biome lint/check
-- `pnpm run format` — Biome formatting check
+- `pnpm run typecheck:extensions` — extensions and their imported dependencies
+- `pnpm run typecheck:packages` — every package under `packages/*`
+- `pnpm run typecheck:apps` — every app under `apps/*`
+- `pnpm run typecheck` — all three typecheck scopes; `workspace:typecheck`
+  remains a compatibility alias for packages plus apps
+- `pnpm exec vitest run <path>` — focused root/extension tests
+- `pnpm --filter <workspace> test` — one package or app test suite
+- `pnpm exec biome check <path...>` — focused lint and formatting validation
+- `pnpm run lint` and `pnpm run format` — repository-wide Biome checks
+- `pnpm run check` — full validation, reserved for cross-cutting changes,
+  validation infrastructure, release/deployment work, or an explicit request
 
 Use fix scripts when appropriate:
 

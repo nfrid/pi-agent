@@ -27,6 +27,33 @@ When unrelated changes appear during a task:
 
 Do not use destructive cleanup (`git reset --hard`, broad checkout/restore commands, or deleting untracked files) to obtain a clean tree.
 
+## Validate the smallest relevant scope
+
+Start with checks that match the files and subsystem you changed. This shortens
+the feedback loop and avoids repeatedly typechecking and testing unrelated apps
+or packages.
+
+```sh
+# TypeScript scopes
+pnpm run typecheck:extensions
+pnpm run typecheck:packages
+pnpm run typecheck:apps
+
+# One root or extension test file
+pnpm exec vitest run extensions/example/example.test.ts
+
+# One workspace and focused Biome paths
+pnpm --filter <workspace-name> test
+pnpm exec biome check path/to/changed-file.ts
+```
+
+Combine scopes only when the change crosses them. `pnpm run typecheck` runs all
+three TypeScript categories. Use `pnpm run check` for changes to shared validation
+configuration, cross-cutting interfaces, release or deployment work, or when a
+full repository result is explicitly required. A narrow change does not need a
+full check when its scoped typecheck, tests, and Biome check cover the affected
+behavior.
+
 ## Staging and committing
 
 Inspect the staged result rather than relying on the working-tree diff:

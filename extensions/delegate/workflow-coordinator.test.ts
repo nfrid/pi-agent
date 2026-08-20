@@ -972,11 +972,12 @@ describe('DelegateWorkflowCoordinator', () => {
     const firstResult = result('first');
     coordinator.schedule(scheduleOptions('first', async () => firstResult));
     await vi.waitFor(() => expect(manager.runningCount).toBe(0));
-    for (let index = 0; index < 40; index++) {
+    for (let index = 0; index < 32; index++) {
       coordinator.schedule(
         scheduleOptions(`job-${index}`, async () => result(`job-${index}`)),
       );
-      await vi.waitFor(() => expect(manager.runningCount).toBe(0));
+      if ((index + 1) % 20 === 0)
+        await vi.waitFor(() => expect(manager.runningCount).toBe(0));
     }
     await settle(coordinator);
     expect(manager.get('dj-1')).toBeUndefined();

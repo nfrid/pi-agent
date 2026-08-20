@@ -2337,10 +2337,7 @@ describe('remote-control bridge', () => {
         choices: [{ label: 'Yes', value: 'yes' }],
         allowCustom: false,
       },
-      async () => {
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
-        return null;
-      },
+      () => new Promise<null>(() => undefined),
     );
     await expect(pending).resolves.toMatchObject({
       answer: 'yes',

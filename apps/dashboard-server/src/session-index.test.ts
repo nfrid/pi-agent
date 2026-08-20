@@ -164,7 +164,7 @@ describe('session index', () => {
         message: {
           role: 'assistant',
           content:
-            index === 2 || index === 8 ? 'delegate' : 'x'.repeat(1_100_000),
+            index === 2 || index === 8 ? 'delegate' : 'x'.repeat(600_000),
         },
       });
       parentId = id;
@@ -306,7 +306,10 @@ describe('session index', () => {
       ...Array.from({ length: 10 }, (_, index) => ({
         type: 'message',
         id: `message-${index}`,
-        message: { role: 'assistant', content: 'x'.repeat(1024 * 1024) },
+        message: {
+          role: 'assistant',
+          content: 'x'.repeat(HISTORY_PAGE_BYTES + 1),
+        },
       })),
     ];
     await writeFile(
@@ -350,7 +353,10 @@ describe('session index', () => {
       ...Array.from({ length: 10 }, (_, index) => ({
         type: 'message',
         id: `large-${index}`,
-        message: { role: 'assistant', content: 'x'.repeat(1024 * 1024) },
+        message: {
+          role: 'assistant',
+          content: 'x'.repeat(HISTORY_PAGE_BYTES + 1),
+        },
       })),
     ];
     await writeFile(
@@ -429,12 +435,18 @@ describe('session index', () => {
       ...oversizedIds.map((id) => ({
         type: 'message',
         id,
-        message: { role: 'user', content: 'x'.repeat(9 * 1024 * 1024) },
+        message: {
+          role: 'user',
+          content: 'x'.repeat(HISTORY_PAGE_BYTES + 1),
+        },
       })),
       ...Array.from({ length: 16 }, (_, index) => ({
         type: 'message',
         id: `later-${index}`,
-        message: { role: 'assistant', content: 'y'.repeat(1024 * 1024) },
+        message: {
+          role: 'assistant',
+          content: 'y'.repeat(HISTORY_PAGE_BYTES + 1),
+        },
       })),
     ];
     await writeFile(

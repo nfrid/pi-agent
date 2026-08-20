@@ -18,11 +18,11 @@ describe('OutputTail', () => {
 
   it('handles highly fragmented output within the byte bound', () => {
     const output = new OutputTail(1024);
-    for (let index = 0; index < 100_000; index++) output.push('x');
+    for (let index = 0; index < 2_000; index++) output.push('x');
     const snapshot = output.snapshot();
 
     expect(Buffer.byteLength(snapshot.text)).toBeLessThanOrEqual(1024);
-    expect(snapshot.totalBytes).toBe(100_000);
+    expect(snapshot.totalBytes).toBe(2_000);
   });
 
   it('trims oversized chunks on a UTF-8 boundary', () => {

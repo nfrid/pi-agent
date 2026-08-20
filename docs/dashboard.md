@@ -217,12 +217,19 @@ conditions of installed host-API shims.
 
 ## Validation
 
-Run the relevant checks from the repository root:
+Start with the dashboard scopes relevant to the change:
+
+```sh
+pnpm run typecheck:packages
+pnpm run typecheck:apps
+pnpm --filter <changed-dashboard-workspace> test
+```
+
+Before deployment or after a cross-cutting dashboard change, run the combined
+validation and build:
 
 ```sh
 pnpm run check
-pnpm run workspace:typecheck
-pnpm run workspace:test
 pnpm run workspace:build
 ```
 

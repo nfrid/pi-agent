@@ -119,9 +119,7 @@ describe('dashboard startup', () => {
     await act(async () => {
       renderer = create(createElement(DashboardBootstrap));
     });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    });
+    await act(async () => {});
     return renderer;
   }
 
