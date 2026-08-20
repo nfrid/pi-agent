@@ -181,11 +181,31 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
       name: 'A deliberately long session title that must wrap safely offline',
     }),
   ).toBeVisible();
+  const agentNav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
   await expect(
-    page
-      .getByRole('complementary', { name: 'Agents and threads' })
-      .getByRole('button', { name: 'New chat in Demo', exact: true }),
+    agentNav.getByRole('button', { name: 'New chat in Demo', exact: true }),
   ).toBeVisible();
+  await agentNav.getByRole('button', { name: 'Collapse Demo' }).click();
+  await expect(
+    agentNav.getByRole('button', {
+      name: 'A deliberately long session title that must wrap safely offline',
+    }),
+  ).toHaveCount(0);
+  await agentNav.getByPlaceholder('Search threads').fill('deliberately long');
+  await expect(
+    agentNav.getByRole('button', {
+      name: 'A deliberately long session title that must wrap safely offline',
+    }),
+  ).toBeVisible();
+  await agentNav.getByRole('button', { name: 'Clear thread search' }).click();
+  await expect(
+    agentNav.getByRole('button', {
+      name: 'A deliberately long session title that must wrap safely offline',
+    }),
+  ).toHaveCount(0);
+  await agentNav.getByRole('button', { name: 'Expand Demo' }).click();
   await page.locator('.agent-nav-backdrop').click();
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
   const paletteTrigger = page.getByRole('button', {
@@ -235,6 +255,12 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(workspaceDialog).toBeVisible();
   await workspaceDialog.getByRole('button', { name: /Demo/ }).click();
   await expect(page).toHaveURL(/\/workspaces\/w$/u);
+  const workspaceSummary = page.getByRole('region', {
+    name: 'Workspace summary',
+  });
+  await expect(workspaceSummary).toContainText(/dormant/i);
+  await expect(workspaceSummary).toContainText('1 runtime · 1 offline');
+  await expect(page.getByRole('heading', { name: 'Runtimes' })).toBeVisible();
   await page
     .locator('.section-heading')
     .getByRole('button', { name: 'New chat', exact: true })
@@ -383,6 +409,17 @@ test('runtime row lifecycle menu supports desktop, touch, and keyboard access', 
   };
   await page.mouse.click(cursorPoint.x, cursorPoint.y, { button: 'right' });
   await expect(menu).toBeVisible();
+  await expect(
+    menu.getByRole('menuitem', {
+      name: 'Mark Context menu session as unread',
+    }),
+  ).toBeVisible();
+  await expect(
+    menu.getByRole('menuitem', {
+      name: 'Copy path for Context menu session',
+    }),
+  ).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Stop' })).toBeVisible();
   const cursorMenuBox = await menu.boundingBox();
   if (!cursorMenuBox) throw new Error('Context menu is not laid out.');
   expect(Math.abs(cursorMenuBox.x - cursorPoint.x)).toBeLessThan(2);
