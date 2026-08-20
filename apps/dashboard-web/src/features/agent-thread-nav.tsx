@@ -1,14 +1,18 @@
+import { dashboardHttpClient, threadsQueryOptions } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import { useQuery } from '@tanstack/react-query';
 import { type KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
 import {
   type AgentThreadRow,
   agentThreadRows,
+  archivedRowsForShelf,
   boundedAgentThreadRows,
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
   historyRowsForShelf,
+  isArchivedThread,
   isHistoryThread,
   MAX_VISIBLE_HISTORY_THREADS,
   searchAgentThreadRows,
@@ -29,6 +33,7 @@ import styles from './agent-thread-nav.module.css';
 import { useDashboardUtility } from './dashboard-utility-context';
 import {
   AgentThreadActionMenu,
+  DurableThreadActions,
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,
 } from './runtime-actions';
@@ -45,10 +50,12 @@ export {
 
 const COLLAPSED_WORKSPACES_KEY = 'pi-dashboard-collapsed-workspaces-v1';
 const COLLAPSED_HISTORY_KEY = 'pi-dashboard-collapsed-history-v1';
+const EXPANDED_ARCHIVED_KEY = 'pi-dashboard-expanded-archived-v1';
 
 type CollapsedWorkspaces = Record<string, boolean>;
 
 type CollapsedHistory = Record<string, boolean>;
+type ExpandedArchived = Record<string, boolean>;
 
 function readCollapsedWorkspaces(): CollapsedWorkspaces {
   try {
@@ -101,6 +108,35 @@ function writeCollapsedHistory(state: CollapsedHistory): void {
   try {
     globalThis.localStorage?.setItem(
       COLLAPSED_HISTORY_KEY,
+      JSON.stringify(state),
+    );
+  } catch {
+    // Storage can be unavailable in private browsing; expansion remains local.
+  }
+}
+
+function readExpandedArchived(): ExpandedArchived {
+  try {
+    const raw = globalThis.localStorage?.getItem(EXPANDED_ARCHIVED_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, boolean] =>
+          typeof entry[0] === 'string' && entry[1] === true,
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeExpandedArchived(state: ExpandedArchived): void {
+  try {
+    globalThis.localStorage?.setItem(
+      EXPANDED_ARCHIVED_KEY,
       JSON.stringify(state),
     );
   } catch {
@@ -180,6 +216,8 @@ export function AgentThreadNav({
     useState<CollapsedWorkspaces>(readCollapsedWorkspaces);
   const [collapsedHistory, setCollapsedHistory] =
     useState<CollapsedHistory>(readCollapsedHistory);
+  const [expandedArchived, setExpandedArchived] =
+    useState<ExpandedArchived>(readExpandedArchived);
   const [activeResultId, setActiveResultId] = useState<string>();
   const {
     state: unreadState,
@@ -195,7 +233,16 @@ export function AgentThreadNav({
     onTouchStart,
     onTouchEnd,
   } = useAgentThreadDrawer({ mode, open, onOpenChange });
-  const rows = useMemo(() => agentThreadRows(snapshot), [snapshot]);
+  const durableThreadsQuery = useQuery(
+    threadsQueryOptions(dashboardHttpClient),
+  );
+  const durableThreads = durableThreadsQuery.isSuccess
+    ? durableThreadsQuery.data
+    : undefined;
+  const rows = useMemo(
+    () => agentThreadRows(snapshot, durableThreads),
+    [durableThreads, snapshot],
+  );
   const filtered = useMemo(
     () => filterAgentThreadRows(rows, query),
     [query, rows],
@@ -236,6 +283,14 @@ export function AgentThreadNav({
       const next = { ...current, [key]: !current[key] };
       if (!next[key]) delete next[key];
       writeCollapsedHistory(next);
+      return next;
+    });
+  };
+  const toggleArchived = (key: string) => {
+    setExpandedArchived((current) => {
+      const next = { ...current, [key]: !current[key] };
+      if (!next[key]) delete next[key];
+      writeExpandedArchived(next);
       return next;
     });
   };
@@ -345,16 +400,26 @@ export function AgentThreadNav({
           const collapsed = collapsedWorkspaces[key] === true;
           const searching = Boolean(query.trim());
           const expanded = workspaceGroupIsExpanded(collapsed, searching);
-          const activeRows = group.rows.filter((row) => !isHistoryThread(row));
+          const activeRows = group.rows.filter(
+            (row) => !isHistoryThread(row) && !isArchivedThread(row),
+          );
           const historyRows = group.rows.filter(isHistoryThread);
+          const archivedRows = group.rows.filter(isArchivedThread);
           const historyExpanded = !collapsedHistory[key] || searching;
+          const archivedExpanded = expandedArchived[key] === true || searching;
           const visibleHistoryRows = historyRowsForShelf(
             historyRows,
             historyExpanded,
             currentSessionId,
           );
+          const visibleArchivedRows = archivedRowsForShelf(
+            archivedRows,
+            archivedExpanded,
+            currentSessionId,
+          );
           const groupId = `agent-thread-group-${encodeURIComponent(key)}`;
           const historyId = `${groupId}-history`;
+          const archivedId = `${groupId}-archived`;
           const renderThreadRow = (row: AgentThreadRow) => {
             const selected = row.id === currentSessionId;
             const unread = isThreadUnread(row, unreadState);
@@ -362,6 +427,13 @@ export function AgentThreadNav({
             const rowClassName = `agent-thread-row ${styles.threadRow} ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} ${activeResult ? 'active-result' : ''} status-${row.status}`;
             const menuItems = ({ closeMenu }: { closeMenu: () => void }) => (
               <>
+                {row.durableThread && (
+                  <DurableThreadActions
+                    thread={row.durableThread}
+                    title={row.title}
+                    closeMenu={closeMenu}
+                  />
+                )}
                 <button
                   type="button"
                   role="menuitem"
@@ -461,11 +533,15 @@ export function AgentThreadNav({
               </div>
               {expanded && (
                 <div id={groupId}>
-                  <div className={styles.shelfHeading}>
+                  <h3 className={styles.shelfHeading}>
                     <span>Active</span>
                     <small>{activeRows.length}</small>
-                  </div>
-                  {activeRows.map(renderThreadRow)}
+                  </h3>
+                  <section
+                    aria-label={`Active threads in ${group.workspaceName}`}
+                  >
+                    {activeRows.map(renderThreadRow)}
+                  </section>
                   <button
                     type="button"
                     className={styles.shelfHeading}
@@ -480,9 +556,36 @@ export function AgentThreadNav({
                       {historyExpanded ? '▾' : '▸'}
                     </span>
                   </button>
-                  <div id={historyId}>
+                  <section
+                    id={historyId}
+                    aria-label={`History threads in ${group.workspaceName}`}
+                  >
                     {visibleHistoryRows.map(renderThreadRow)}
-                  </div>
+                  </section>
+                  {archivedRows.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.shelfHeading}
+                        aria-expanded={archivedExpanded}
+                        aria-controls={archivedId}
+                        aria-label={`${archivedExpanded ? 'Collapse' : 'Expand'} Archived in ${group.workspaceName}`}
+                        onClick={() => toggleArchived(key)}
+                      >
+                        <span>Archived</span>
+                        <small>{archivedRows.length}</small>
+                        <span aria-hidden="true">
+                          {archivedExpanded ? '▾' : '▸'}
+                        </span>
+                      </button>
+                      <section
+                        id={archivedId}
+                        aria-label={`Archived threads in ${group.workspaceName}`}
+                      >
+                        {visibleArchivedRows.map(renderThreadRow)}
+                      </section>
+                    </>
+                  )}
                 </div>
               )}
             </section>

@@ -1,6 +1,13 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { describe, expect, it } from 'vitest';
-import { runtimeLifecycleActionAvailability } from './runtime-actions';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, create } from 'react-test-renderer';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  DurableThreadActions,
+  runtimeLifecycleActionAvailability,
+} from './runtime-actions';
+
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
 function runtime(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
   return {
@@ -17,6 +24,34 @@ function runtime(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
 }
 
 describe('runtime lifecycle action availability', () => {
+  it('renders durable lifecycle controls and disables archive for active runs', () => {
+    const client = new QueryClient();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <QueryClientProvider client={client}>
+          <DurableThreadActions
+            title="Durable thread"
+            closeMenu={vi.fn()}
+            thread={{
+              threadId: 'thread-1',
+              pinnedAt: 10,
+              hasActiveRun: true,
+            }}
+          />
+        </QueryClientProvider>,
+      );
+    });
+
+    const buttons = tree.root.findAllByType('button');
+    expect(buttons.map((button) => button.children.join(' '))).toEqual([
+      'Unpin',
+      'Archive',
+    ]);
+    expect(buttons[1]?.props.disabled).toBe(true);
+    act(() => tree.unmount());
+  });
+
   it('offers graceful stop without exposing force stop initially', () => {
     expect(runtimeLifecycleActionAvailability(runtime())).toEqual({
       canStop: true,

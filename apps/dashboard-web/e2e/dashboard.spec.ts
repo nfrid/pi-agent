@@ -358,6 +358,181 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
 });
 
+test('durable lifecycle controls require an exact persisted run mapping', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  const durableThread = {
+    id: 'thread-durable',
+    projectId: 'project-durable',
+    title: 'Durable session',
+    status: 'settled',
+    createdAt: 1,
+    updatedAt: 2,
+  };
+  const conflictingThread = {
+    id: 'thread-conflicting',
+    projectId: 'project-durable',
+    title: 'Conflicting session',
+    status: 'settled',
+    createdAt: 1,
+    updatedAt: 2,
+  };
+  let listedThreads = [durableThread, conflictingThread];
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-durable-controls',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      {
+        runtimeId: 'runtime-durable',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp/durable-controls',
+        liveState: 'working',
+        online: true,
+        session: {
+          id: 'session-durable',
+          title: 'Durable session',
+          entries: [],
+        },
+        pendingInteractions: [],
+      },
+      {
+        runtimeId: 'runtime-conflicting',
+        ownership: 'external',
+        pid: 2,
+        cwd: '/tmp/durable-controls',
+        liveState: 'working',
+        online: true,
+        session: {
+          id: 'session-conflicting',
+          title: 'Conflicting session',
+          entries: [],
+        },
+        pendingInteractions: [],
+      },
+    ],
+    workspaces: [],
+    sessions: [],
+    runs: [
+      {
+        id: 'run-durable',
+        threadId: 'thread-durable',
+        checkoutId: 'checkout-durable',
+        attempt: 1,
+        mode: 'write',
+        runtimeProvider: 'pi-server',
+        piSessionId: 'session-durable',
+        initialPrompt: 'Run durable',
+        status: 'settled',
+        createdAt: 1,
+        finishedAt: 2,
+      },
+      {
+        id: 'run-conflicting-a',
+        threadId: 'thread-durable',
+        checkoutId: 'checkout-durable',
+        attempt: 1,
+        mode: 'write',
+        runtimeProvider: 'pi-server',
+        piSessionId: 'session-conflicting',
+        initialPrompt: 'Run conflicting A',
+        status: 'settled',
+        createdAt: 1,
+        finishedAt: 2,
+      },
+      {
+        id: 'run-conflicting-b',
+        threadId: 'thread-conflicting',
+        checkoutId: 'checkout-durable',
+        attempt: 1,
+        mode: 'write',
+        runtimeProvider: 'pi-server',
+        piSessionId: 'session-conflicting',
+        initialPrompt: 'Run conflicting B',
+        status: 'settled',
+        createdAt: 1,
+        finishedAt: 2,
+      },
+    ],
+    unread: [],
+  } as never);
+  await page.route('**/api/threads**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(listedThreads),
+      });
+      return;
+    }
+    if (pathname.endsWith('/pin')) {
+      listedThreads = listedThreads.map((thread) =>
+        thread.id === 'thread-durable' ? { ...thread, pinnedAt: 3 } : thread,
+      );
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(listedThreads[0]),
+      });
+      return;
+    }
+    throw new Error(`Unexpected durable thread request: ${pathname}`);
+  });
+
+  await page.goto('/');
+  const nav = page.getByRole('complementary', { name: 'Agents and threads' });
+  const durableRow = nav.locator('.agent-thread-row').filter({
+    hasText: 'Durable session',
+  });
+  const conflictingRow = nav.locator('.agent-thread-row').filter({
+    hasText: 'Conflicting session',
+  });
+  await expect(durableRow).toBeVisible();
+  await expect(conflictingRow).toBeVisible();
+
+  await durableRow.getByRole('button').click({ button: 'right' });
+  const durableMenu = page.getByRole('menu', {
+    name: 'Actions for Durable session',
+  });
+  await expect(
+    durableMenu.getByRole('menuitem', { name: 'Pin' }),
+  ).toBeVisible();
+  await expect(
+    durableMenu.getByRole('menuitem', { name: 'Archive' }),
+  ).toBeVisible();
+  await durableMenu.getByRole('menuitem', { name: 'Pin' }).click();
+  await expect(durableMenu).toHaveCount(0);
+
+  await durableRow.getByRole('button').press('ContextMenu');
+  await expect(
+    page
+      .getByRole('menu', { name: 'Actions for Durable session' })
+      .getByRole('menuitem', { name: 'Unpin' }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await conflictingRow.getByRole('button').click({ button: 'right' });
+  const conflictingMenu = page.getByRole('menu', {
+    name: 'Actions for Conflicting session',
+  });
+  await expect(
+    conflictingMenu.getByRole('menuitem', {
+      name: 'Mark Conflicting session as unread',
+    }),
+  ).toBeVisible();
+  await expect(
+    conflictingMenu.getByRole('menuitem', { name: 'Pin' }),
+  ).toHaveCount(0);
+  await expect(
+    conflictingMenu.getByRole('menuitem', { name: 'Archive' }),
+  ).toHaveCount(0);
+});
+
 test('runtime row lifecycle menu supports desktop, touch, and keyboard access', async ({
   page,
 }) => {
