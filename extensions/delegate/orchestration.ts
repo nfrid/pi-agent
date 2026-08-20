@@ -64,6 +64,119 @@ export interface PreparedDelegateExecution {
   tasks: PreparedDelegateTask[];
 }
 
+const MAX_DISPLAYED_PLAN_VALUE_LENGTH = 24;
+
+function displayedPlanValue(value: string | undefined): string {
+  if (value === undefined) return 'omitted';
+  const displayed = JSON.stringify(value);
+  return displayed.length <= MAX_DISPLAYED_PLAN_VALUE_LENGTH
+    ? displayed
+    : `${displayed.slice(0, MAX_DISPLAYED_PLAN_VALUE_LENGTH - 2)}…"`;
+}
+
+export interface SymbolicBranchRequestPreflight {
+  continuation: boolean;
+  cwd?: string;
+  isolation?: 'shared' | 'worktree';
+  from?: 'wip' | 'head';
+  worktreePath?: string;
+  allowWrites?: boolean;
+}
+
+/** Validate model-facing branch workspace fields without creating a plan. */
+export function preflightSymbolicBranchRequest(
+  request: SymbolicBranchRequestPreflight,
+): void {
+  const unmet: string[] = [];
+  if (request.continuation)
+    unmet.push('the delegate must be fresh, not a continuation');
+  if (request.cwd !== undefined)
+    unmet.push(
+      'cwd must be omitted because the source branch supplies its repository',
+    );
+  if (request.isolation !== undefined && request.isolation !== 'worktree')
+    unmet.push('explicit isolation must be "worktree" or omitted');
+  if (request.from !== undefined)
+    unmet.push(
+      'from must be omitted because the source branch supplies the exact base',
+    );
+  if (request.worktreePath !== undefined)
+    unmet.push(
+      'worktreePath must be omitted because the harness creates the checkout',
+    );
+  if (unmet.length === 0) return;
+
+  const requestedIsolation =
+    request.isolation !== undefined
+      ? `${request.isolation}(explicit)`
+      : request.continuation
+        ? 'inherited(continuation)'
+        : request.allowWrites || request.worktreePath
+          ? 'worktree(implicit)'
+          : 'shared(implicit)';
+  const effectiveIsolation =
+    request.continuation || request.isolation === 'shared'
+      ? 'unavailable'
+      : 'worktree(symbolic-branch)';
+  const allowWrites =
+    request.allowWrites ??
+    (request.continuation ? 'inherited(continuation)' : false);
+  throw new Error(
+    `Symbolic branch input preflight failed. Unmet constraints: ${unmet.join('; ')}. Effective configuration: mode=${request.continuation ? 'continuation' : 'fresh'},cwd=${displayedPlanValue(request.cwd)},requestedIsolation=${requestedIsolation},effectiveIsolation=${effectiveIsolation},from=${request.from ?? 'omitted'},worktreePath=${displayedPlanValue(request.worktreePath)},allowWrites=${allowWrites}.`,
+  );
+}
+
+export function effectiveDelegatePlanConfiguration(
+  plan: import('./task-lifecycle').DelegateTaskPlan,
+): string {
+  return `mode=${plan.resumed ? 'continuation' : 'fresh'}, cwd=${displayedPlanValue(plan.requestedCwd)} (${plan.cwdExplicit ? 'explicit' : 'derived'}), isolation=${plan.isolation} (${plan.isolationExplicit ? 'explicit' : 'derived'}), from=${displayedPlanValue(plan.base)}, worktreePath=${displayedPlanValue(plan.worktreePath)}, allowWrites=${plan.writeRequested}`;
+}
+
+/**
+ * Validate the static workspace contract for a symbolic branch input before a
+ * workflow identity is admitted. Branch evidence and Git state remain lazy.
+ */
+export function preflightSymbolicBranchPlan(
+  plan: import('./task-lifecycle').DelegateTaskPlan,
+): import('./task-lifecycle').DelegateTaskPlan {
+  const unmet: string[] = [];
+  if (plan.resumed)
+    unmet.push('the delegate must be fresh, not a continuation');
+  if (plan.cwdExplicit)
+    unmet.push(
+      'cwd must be omitted because the source branch supplies its repository',
+    );
+  if (plan.isolationExplicit && plan.isolation !== 'worktree')
+    unmet.push('explicit isolation must be "worktree" or omitted');
+  if (plan.base !== undefined)
+    unmet.push(
+      'from must be omitted because the source branch supplies the exact base',
+    );
+  if (plan.worktreePath !== undefined)
+    unmet.push(
+      'worktreePath must be omitted because the harness creates the checkout',
+    );
+  if (plan.baseRef !== undefined)
+    unmet.push(
+      'an internal baseRef cannot be combined with a symbolic branch source',
+    );
+
+  if (unmet.length > 0) {
+    const requestedIsolation = `${plan.isolation} (${plan.isolationExplicit ? 'explicit' : 'implicit'})`;
+    const effectiveIsolation =
+      plan.resumed || (plan.isolationExplicit && plan.isolation !== 'worktree')
+        ? 'unavailable until the workspace conflict is fixed'
+        : 'worktree (symbolic branch)';
+    throw new Error(
+      `Symbolic branch input preflight failed. Unmet constraints: ${unmet.join('; ')}. Effective configuration: mode=${plan.resumed ? 'continuation' : 'fresh'}, cwd=${displayedPlanValue(plan.requestedCwd)} (${plan.cwdExplicit ? 'explicit' : 'inherited; replaced by source repository'}), requested isolation=${requestedIsolation}, effective isolation=${effectiveIsolation}, from=${displayedPlanValue(plan.base)}, worktreePath=${displayedPlanValue(plan.worktreePath)}, allowWrites=${plan.writeRequested}.`,
+    );
+  }
+
+  return plan.isolation === 'worktree'
+    ? plan
+    : { ...plan, isolation: 'worktree' };
+}
+
 export function pendingRuns(
   execution: PreparedDelegateExecution,
 ): DelegatedRun[] {
@@ -435,19 +548,9 @@ export async function prepareDelegateWorkflowLaunch(
     (input) => input.kind === 'branch',
   )?.branch;
   if (branch) {
-    if (
-      plan.resumed ||
-      plan.cwdExplicit ||
-      (plan.isolationExplicit && plan.isolation !== 'worktree') ||
-      plan.base !== undefined ||
-      plan.worktreePath !== undefined ||
-      plan.baseRef !== undefined
-    )
-      throw new Error(
-        'A symbolic branch input requires a fresh worktree delegate without from or worktreePath.',
-      );
+    const preflightPlan = preflightSymbolicBranchPlan(plan);
     launchPlan = {
-      ...plan,
+      ...preflightPlan,
       requestedCwd: branch.repositoryRoot,
       isolation: 'worktree',
       base: undefined,
@@ -479,12 +582,19 @@ export async function prepareDelegateWorkflowLaunch(
     ...resolvedTask.plan,
     ...(handoffParts.length ? { handoffText: handoffParts.join('\n\n') } : {}),
   };
-  const prepared = await prepareDelegateTask(
-    finalPlan,
-    preflightDelegateContinuation(finalPlan),
-    launchSessionId,
-    workflow.signal,
-  );
+  let prepared: PreparedDelegateTask;
+  try {
+    prepared = await prepareDelegateTask(
+      finalPlan,
+      preflightDelegateContinuation(finalPlan),
+      launchSessionId,
+      workflow.signal,
+    );
+  } catch (error) {
+    throw new Error(
+      `Delegate setup failed with effective configuration: ${effectiveDelegatePlanConfiguration(finalPlan)}. Cause: ${errorText(error)}`,
+    );
+  }
   const pending = pendingRuns({ mode: 'single', tasks: [prepared] })[0];
   if (pending) hooks.onRunUpdate?.(pending);
   const ownerSessionId = launchSessionId;

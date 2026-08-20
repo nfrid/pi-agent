@@ -5,7 +5,12 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DelegateConfig } from './config';
-import { executeSingleDelegate, pendingRuns } from './orchestration';
+import {
+  executeSingleDelegate,
+  pendingRuns,
+  preflightSymbolicBranchPlan,
+  preflightSymbolicBranchRequest,
+} from './orchestration';
 import {
   buildDelegatePlans,
   DELEGATE_HANDOFF_CAPS,
@@ -94,6 +99,75 @@ function prepared(
     isolation: overrides.isolation ?? 'shared',
   };
 }
+
+describe('symbolic branch preflight', () => {
+  const plan = (params: Record<string, unknown> = {}) => {
+    const task = buildDelegatePlans(
+      {
+        name: 'Branch consumer',
+        task: 'inspect upstream branch',
+        route: 'quick',
+        ...params,
+      },
+      ctx,
+      config,
+      () => null,
+    ).tasks[0];
+    if (!task) throw new Error('Expected one delegate plan.');
+    return task.plan;
+  };
+
+  test('projects an implicit read-only shared default to a fresh worktree', () => {
+    const candidate = plan();
+    expect(candidate).toMatchObject({
+      isolation: 'shared',
+      isolationExplicit: false,
+      writeRequested: false,
+    });
+    expect(preflightSymbolicBranchPlan(candidate)).toMatchObject({
+      isolation: 'worktree',
+      isolationExplicit: false,
+      writeRequested: false,
+    });
+  });
+
+  test('accepts an explicit fresh worktree configuration unchanged', () => {
+    const candidate = plan({ isolation: 'worktree' });
+    expect(preflightSymbolicBranchPlan(candidate)).toBe(candidate);
+  });
+
+  test('reports writable default isolation and inherited continuation values truthfully', () => {
+    expect(() =>
+      preflightSymbolicBranchRequest({
+        continuation: false,
+        cwd: '/tmp/explicit',
+        allowWrites: true,
+      }),
+    ).toThrow(/requestedIsolation=worktree\(implicit\).*allowWrites=true/);
+    expect(() =>
+      preflightSymbolicBranchRequest({
+        continuation: true,
+      }),
+    ).toThrow(
+      /requestedIsolation=inherited\(continuation\).*allowWrites=inherited\(continuation\)/,
+    );
+  });
+
+  test('reports every unmet constraint with the effective configuration', () => {
+    const candidate = {
+      ...plan({ cwd: '/tmp/other', isolation: 'shared' }),
+      base: 'head' as const,
+      worktreePath: '/tmp/caller-worktree',
+    };
+    expect(() => preflightSymbolicBranchPlan(candidate)).toThrowError(
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /cwd must be omitted.*explicit isolation must be "worktree".*from must be omitted.*worktreePath must be omitted.*mode=fresh.*requested isolation=shared \(explicit\).*effective isolation=unavailable/s,
+        ),
+      }),
+    );
+  });
+});
 
 describe('buildDelegatePlans', () => {
   test('builds a single fresh task plan', () => {

@@ -14,6 +14,8 @@ import { createDelegateControlChannel } from './control';
 import type { DelegateJobManager } from './jobs';
 import {
   pendingRuns,
+  preflightSymbolicBranchPlan,
+  preflightSymbolicBranchRequest,
   prepareDelegateExecution,
   prepareDelegateWorkflowLaunch,
   runPreparedDelegateExecution,
@@ -359,10 +361,22 @@ export function registerDelegateTool(
         const task = params.task?.trim();
         if (!task) throw new Error('Delegate task is required.');
         const continuationReference = params.continue?.trim();
+        const symbolicBranchSource =
+          params.inputs?.some((input) => input.include?.includes('branch')) ??
+          false;
         if (continuationReference && params.id !== undefined)
           throw new Error(
             'Use either id for a fresh node or continue, not both.',
           );
+        if (symbolicBranchSource)
+          preflightSymbolicBranchRequest({
+            continuation: Boolean(continuationReference),
+            cwd: params.cwd,
+            isolation: params.isolation,
+            from: params.from,
+            worktreePath: params.worktreePath,
+            allowWrites: params.allowWrites,
+          });
         const logicalId = continuationReference
           ? parseWorkflowReference(continuationReference).logicalId
           : params.id?.trim();
@@ -379,9 +393,6 @@ export function registerDelegateTool(
           );
           activeWorkflow.require(continuationReference);
         }
-        // Do not write the branch owner marker until pure continuation input
-        // validation has passed; rejected calls must not persist workflow state.
-        backgroundRuntime?.ensureBranchOwner?.(ctx);
         const requestedRoute = params.route?.trim();
         const inheritedRouting = continuationReference
           ? activeWorkflow.getRouting(continuationReference)
@@ -396,6 +407,9 @@ export function registerDelegateTool(
               'The predecessor has no persisted route; provide route explicitly.',
           );
         const routing = routeResult.routing;
+        // The owner marker must precede branch-context snapshot capture, but
+        // only after all pure model-facing validation has passed.
+        backgroundRuntime?.ensureBranchOwner?.(ctx);
         let initialPlan:
           | import('./task-lifecycle').DelegateTaskPlan
           | undefined;
@@ -418,9 +432,8 @@ export function registerDelegateTool(
           initialPlan = built.tasks[0]?.plan;
           if (!initialPlan) throw new Error('Delegate plan was not created.');
         }
-        const symbolicBranchSource =
-          params.inputs?.some((input) => input.include?.includes('branch')) ??
-          false;
+        if (symbolicBranchSource && initialPlan)
+          initialPlan = preflightSymbolicBranchPlan(initialPlan);
         let capturedWip:
           | Awaited<ReturnType<typeof captureWorkInProgress>>
           | undefined;

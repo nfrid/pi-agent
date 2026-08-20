@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { Value } from 'typebox/value';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { buildSystemPrompt } from '../system-prompt';
 import { acquireSession } from './concurrency';
 import {
@@ -144,6 +144,122 @@ describe('delegate', () => {
     expect(prompt).not.toContain('## Machine-readable completion');
     expect(prompt).not.toContain('800 words');
     expect(prompt).not.toMatch(/Use this exact structure/);
+  });
+
+  test('rejects invalid symbolic branch workspace config before identity admission', async () => {
+    let execute:
+      | ((
+          toolCallId: string,
+          params: Record<string, unknown>,
+          signal: AbortSignal | undefined,
+          onUpdate: unknown,
+          ctx: unknown,
+        ) => Promise<unknown>)
+      | undefined;
+    const schedule = vi.fn();
+    const ensureBranchOwner = vi.fn();
+    registerDelegateTool(
+      {
+        registerTool(definition: { execute: typeof execute }) {
+          execute = definition.execute;
+        },
+      } as never,
+      process.cwd(),
+      {
+        workflow: { schedule } as never,
+        manager: {} as never,
+        statuses: {} as never,
+        ensureBranchOwner,
+        getDeliveryEpoch: () => 0,
+      },
+    );
+    if (!execute) throw new Error('Delegate tool was not registered.');
+
+    await expect(
+      execute(
+        'tool-call',
+        {
+          id: 'branch-review',
+          name: 'Branch review',
+          task: 'Review the implementation',
+          route: 'luna-low',
+          inputs: [{ node: 'implementation', include: ['branch'] }],
+          cwd: '/tmp/explicit-cwd',
+          isolation: 'shared',
+        },
+        undefined,
+        undefined,
+        {
+          cwd: process.cwd(),
+          sessionManager: { getSessionId: () => 'parent-session' },
+        },
+      ),
+    ).rejects.toThrow(
+      /Symbolic branch input preflight failed.*cwd must be omitted.*explicit isolation must be "worktree".*Effective configuration/s,
+    );
+    expect(schedule).not.toHaveBeenCalled();
+    expect(ensureBranchOwner).not.toHaveBeenCalled();
+  });
+
+  test('persists branch ownership before admitting a valid symbolic branch attempt', async () => {
+    let execute:
+      | ((
+          toolCallId: string,
+          params: Record<string, unknown>,
+          signal: AbortSignal | undefined,
+          onUpdate: unknown,
+          ctx: unknown,
+        ) => Promise<unknown>)
+      | undefined;
+    const ordering: string[] = [];
+    const schedule = vi.fn(() => {
+      ordering.push('schedule');
+      return {
+        logicalId: 'branch-review',
+        ordinal: 1,
+        identity: 'branch-review@1',
+        dependencies: [],
+        inputs: [],
+        state: 'scheduled',
+      };
+    });
+    registerDelegateTool(
+      {
+        registerTool(definition: { execute: typeof execute }) {
+          execute = definition.execute;
+        },
+      } as never,
+      process.cwd(),
+      {
+        workflow: {
+          schedule,
+          subscribeTerminal: () => () => {},
+        } as never,
+        manager: {} as never,
+        statuses: { start: () => [], finish: () => {} } as never,
+        ensureBranchOwner: () => ordering.push('owner'),
+        getDeliveryEpoch: () => 0,
+      },
+    );
+    if (!execute) throw new Error('Delegate tool was not registered.');
+
+    await execute(
+      'tool-call',
+      {
+        id: 'branch-review',
+        name: 'Branch review',
+        task: 'Review the implementation',
+        route: 'luna-low',
+        inputs: [{ node: 'implementation', include: ['branch'] }],
+      },
+      undefined,
+      undefined,
+      {
+        cwd: process.cwd(),
+        sessionManager: { getSessionId: () => 'parent-session' },
+      },
+    );
+    expect(ordering).toEqual(['owner', 'schedule']);
   });
 
   test('keeps the serialized delegate schema compact', () => {
