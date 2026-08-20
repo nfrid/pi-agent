@@ -1,13 +1,19 @@
 import {
+  archiveThreadMutationOptions,
   dashboardHttpClient,
+  dashboardQueryKeys,
+  pinThreadMutationOptions,
   restartRuntimeMutationOptions,
+  restoreThreadMutationOptions,
   stopRuntimeMutationOptions,
+  unpinThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { type ReactNode, useRef, useState } from 'react';
 import { errorMessage } from '../../shared/lib/error-message';
+import type { DurableThreadMetadata } from '../agent-thread-nav/model';
 import navStyles from '../agent-thread-nav.module.css';
 import {
   type RuntimeLifecycleThreadProps,
@@ -53,6 +59,89 @@ type RuntimeLifecycleActionsProps = {
   menuItems?: (actions: { closeMenu: () => void }) => ReactNode;
   children: (threadProps?: RuntimeLifecycleThreadProps) => ReactNode;
 };
+
+export function DurableThreadActions({
+  thread,
+  title,
+  closeMenu,
+}: {
+  thread: DurableThreadMetadata;
+  title: string;
+  closeMenu: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string>();
+  const archive = useMutation(
+    archiveThreadMutationOptions(dashboardHttpClient),
+  );
+  const restore = useMutation(
+    restoreThreadMutationOptions(dashboardHttpClient),
+  );
+  const pin = useMutation(pinThreadMutationOptions(dashboardHttpClient));
+  const unpin = useMutation(unpinThreadMutationOptions(dashboardHttpClient));
+  const archived = thread.archivedAt !== undefined;
+  const pinned = thread.pinnedAt !== undefined;
+  const busy =
+    archive.isPending || restore.isPending || pin.isPending || unpin.isPending;
+
+  const run = async (
+    action: 'archive' | 'restore' | 'pin' | 'unpin',
+  ): Promise<void> => {
+    setError(undefined);
+    try {
+      if (action === 'archive')
+        await archive.mutateAsync({ threadId: thread.threadId });
+      else if (action === 'restore')
+        await restore.mutateAsync({ threadId: thread.threadId });
+      else if (action === 'pin')
+        await pin.mutateAsync({ threadId: thread.threadId });
+      else await unpin.mutateAsync({ threadId: thread.threadId });
+      await queryClient
+        .invalidateQueries({ queryKey: dashboardQueryKeys.threads() })
+        .catch(() => undefined);
+      closeMenu();
+    } catch (cause) {
+      setError(`Unable to ${action} ${title}: ${errorMessage(cause)}`);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={busy}
+        onClick={(event) => {
+          event.stopPropagation();
+          void run(pinned ? 'unpin' : 'pin');
+        }}
+      >
+        {pinned ? 'Unpin' : 'Pin'}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={busy || (!archived && thread.hasActiveRun)}
+        title={
+          !archived && thread.hasActiveRun
+            ? 'Archive is unavailable while a durable run is active.'
+            : undefined
+        }
+        onClick={(event) => {
+          event.stopPropagation();
+          void run(archived ? 'restore' : 'archive');
+        }}
+      >
+        {archived ? 'Restore' : 'Archive'}
+      </button>
+      {error && (
+        <span className="error" role="alert">
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
 
 export function RuntimeLifecycleActions({
   runtime,

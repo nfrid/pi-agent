@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentThreadRow } from './model';
 import {
   agentThreadRows,
+  archivedRowsForShelf,
   boundedAgentThreadRows,
+  durableThreadForSession,
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
   historyRowsForShelf,
+  isArchivedThread,
   isHistoryThread,
   searchAgentThreadRows,
   statusGlyph,
@@ -103,6 +106,81 @@ describe('agent thread view model', () => {
       updatedAt: undefined,
     });
     expect(after).toMatchObject({ startedAt: 100, updatedAt: 200 });
+  });
+
+  it('joins durable metadata only through an unambiguous persisted run mapping', () => {
+    const snapshot = {
+      runs: [
+        { piSessionId: 'session-1', threadId: 'thread-1', status: 'running' },
+        { piSessionId: 'session-2', threadId: 'thread-2', status: 'settled' },
+        { piSessionId: 'session-2', threadId: 'thread-3', status: 'settled' },
+      ],
+    } as never;
+    const threads = [
+      { id: 'thread-1', archivedAt: 10, pinnedAt: 20 },
+      { id: 'thread-2' },
+      { id: 'thread-3' },
+    ];
+
+    expect(durableThreadForSession(snapshot, 'session-1', threads)).toEqual({
+      threadId: 'thread-1',
+      archivedAt: 10,
+      pinnedAt: 20,
+      hasActiveRun: true,
+    });
+    expect(
+      durableThreadForSession(snapshot, 'session-2', threads),
+    ).toBeUndefined();
+    expect(
+      durableThreadForSession(snapshot, 'missing', threads),
+    ).toBeUndefined();
+    expect(
+      durableThreadForSession(
+        {
+          runs: [
+            {
+              piSessionId: 'session-1',
+              threadId: 'missing',
+              status: 'settled',
+            },
+          ],
+        } as never,
+        'session-1',
+        threads,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('keeps archived rows out of active/history and puts pinned rows first', () => {
+    const pinned = {
+      ...row('pinned', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-pinned',
+        pinnedAt: 10,
+        hasActiveRun: false,
+      },
+    };
+    const archived = {
+      ...row('archived', 'Dashboard', 'dormant'),
+      durableThread: {
+        threadId: 'thread-archived',
+        archivedAt: 20,
+        hasActiveRun: false,
+      },
+    };
+    const rows = [row('normal', 'Dashboard'), pinned, archived];
+
+    expect(isArchivedThread(archived)).toBe(true);
+    expect(isHistoryThread(archived)).toBe(false);
+    expect(boundedAgentThreadRows(rows).map(({ id }) => id)).toEqual([
+      'pinned',
+      'normal',
+      'archived',
+    ]);
+    expect(archivedRowsForShelf([archived], false, 'missing')).toEqual([]);
+    expect(archivedRowsForShelf([archived], false, 'archived')).toEqual([
+      archived,
+    ]);
   });
 
   it('uses compact distinct glyphs for passive waiting and input', () => {
