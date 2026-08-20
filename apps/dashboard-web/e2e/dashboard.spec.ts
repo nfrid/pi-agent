@@ -393,7 +393,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
         pid: 1,
         cwd: '/tmp/durable-controls',
         liveState: 'working',
-        online: true,
+        online: false,
         session: {
           id: 'session-durable',
           title: 'Durable session',
@@ -461,6 +461,9 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
     ],
     unread: [],
   } as never);
+  await page.route('**/api/session-threads', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
   await page.route('**/api/threads**', async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
