@@ -4,7 +4,7 @@ The delegate extension runs focused child agents using user-owned model routes. 
 
 ## Always-async workflow scheduling
 
-Normal model-facing delegation always schedules work and returns immediately. A fresh node supplies one stable logical `id` and an exact `route`; a continuation supplies `continue` and creates the next immutable attempt (`impl@1`, `impl@2`, …). Use `after` to bind exact dependency attempts and `inputs` to pipe symbolic reports, handoffs, metadata, or branch/snapshot references without copying them through the parent. A missing or invalid required input becomes a terminal `blocked` attempt with a bounded reason.
+Delegate any useful, independently describable chunk when briefing, verification, and integration cost less than doing it directly. Default fresh tasks to fresh context. Normal model-facing delegation always schedules work and returns immediately. A fresh node supplies one stable logical `id` and an exact `route`; a continuation supplies `continue` and creates the next immutable attempt (`impl@1`, `impl@2`, …). Use `after` to bind exact dependency attempts and `inputs` to pipe symbolic reports, handoffs, metadata, or branch/snapshot references without copying them through the parent. A missing or invalid required input becomes a terminal `blocked` attempt with a bounded reason.
 
 Register `delegate_wake` as a one-shot subscription before settling when work gates the next decision. It binds exact attempts and returns immediately. Select only the compact evidence the parent needs; the runtime queues delivery while the parent is busy and wakes an idle parent once. Send one concise waiting status and settle—do not poll with `delegate_jobs`. `delegate_jobs` is metadata-only status plus bounded feedback and cancellation; it never waits, consumes a report, or replaces a wake rule.
 
@@ -12,19 +12,19 @@ A fresh node must choose an exact configured route. A continuation inherits the 
 
 ### Compact recipes
 
-- **Fan-out/fan-in:** schedule `scan-a`, `scan-b`, and `scan-c`; schedule `synthesis` with `after: ["scan-a", "scan-b", "scan-c"]` and symbolic report `inputs`; wake only on `synthesis`.
+- **Fan-out/fan-in:** schedule two or more independent scans, then schedule `synthesis` after them with symbolic report `inputs`; wake only on `synthesis`. Prefer bounded cheap tasks only when coordination is low; do not create duplicate work or tasks that need constant synchronization.
 - **Implementation → review:** schedule writable `impl`; schedule `review` after `impl` with `inputs: [{"node":"impl","include":["report","branch"]}]`, referring to the exact symbolic branch; wake on review and branch availability.
-- **Hidden exploration:** schedule broad `explore`, pipe its symbolic report into focused `plan`/`impl`, and deliver only that conclusion to the parent—never dump the exploration into parent context.
-- **Continuation:** after review feedback, `continue: "impl"`, pipe the reviewer report, and let the runtime preserve the original route and worktree.
+- **Hidden exploration:** give `explore` a named question or repository area, pipe its symbolic report into focused `plan`/`impl`, and deliver only that conclusion to the parent. Never dump the exploration into parent context.
+- **Continuation:** continue an existing child while work remains on the same line; send it new evidence, corrections, and review feedback. Start fresh for independent work or a fresh perspective.
 - **Do not delegate:** keep short edits, obvious check loops, and tasks needing repeated parent judgement in the parent.
 
 ## Route selection
 
 Every fresh delegated task supplies one exact `route` key from `delegate.modelCatalog`. A continuation reuses its persisted route when omitted and may switch only by supplying another complete route key. Parallel tasks may share a top-level route or select routes independently.
 
-Each route binds one provider, model, and thinking level. Selection is prose-driven: the orchestrator matches the task against each route's `useFor` and `avoid`, both required. `relativeCost` is the only number. It is a usage-drain prior rather than a quality score, and it orders the displayed catalog cheapest-first; it is not a global escalation ladder. Unknown routes fail rather than silently substituting.
+Each route binds one provider, model, and thinking level. Selection is prose-driven: the orchestrator matches the task against each route's `useFor` and `avoid`, both required. Optional top-level `routingGuidance` gives a compact catalog-wide summary without hard-coding model families in the extension instructions. `relativeCost` is benchmark-relative total task cost, including typical token usage for comparable work. It is not a token-price ratio or quality score, and it orders the displayed catalog cheapest-first rather than defining a global escalation ladder. Unknown routes fail rather than silently substituting.
 
-Choose a service class before an effort level. The configured catalog uses Luna for bounded value work, Terra for interactive work with an explicit wall-clock objective, and Sol for maintainer judgement. Escalate effort within that class. Crossing from Luna to Terra is a latency decision, not the automatic next step after a difficult Luna task; crossing to Sol means the task needs judgement about what good work is, not merely more compute.
+Choose a service class before an effort level. The configured catalog uses Luna for bounded background work, Terra for interactive work where lower latency justifies higher cost, and Sol for maintainer judgement. Escalate effort within that class. Crossing from Luna to Terra is a latency decision, not the automatic next step after a difficult Luna task; crossing to Sol means the task needs judgement about what good work is, not merely more compute.
 
 Configured relative costs are workload-shaped priors, not universal constants. Replace them with comparable local usage or credit measurements when enough routed tasks have accumulated; provider-reported actual cost remains the authoritative session metric.
 
@@ -33,6 +33,7 @@ There is deliberately no quality metric. One scalar cannot separate competences 
 ```json
 {
   "delegate": {
+    "routingGuidance": "Luna routes handle bounded background work; Terra routes trade higher cost for lower latency; Sol routes handle maintainer judgement.",
     "modelCatalog": {
       "luna-medium": {
         "provider": "openai-codex",

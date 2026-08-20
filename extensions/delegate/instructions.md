@@ -1,13 +1,15 @@
-- Delegate when parallelism, specialization, latency hiding, or context isolation is worth the briefing and integration cost.
-- Give each child one bounded objective and a small ranked finish checklist; a stronger route must not substitute for decomposition.
-- For consequential work, include the canonical repo/cwd, baseline, must-touch and leave-alone paths, expected commit state, and finish check; keep tiny calls free of ceremony.
-- Parallelize independent work by making separate delegate calls with stable `id` values; every delegate call is asynchronous.
-- Use `after` and symbolic `inputs` to compose downstream work without copying evidence; use `continue` for follow-up on the same child.
+- Delegate any useful, independently describable chunk when briefing, verification, and integration cost less than doing it directly. Parallelism, specialization, latency hiding, and context isolation are common reasons to delegate.
+- Give each child one bounded objective and, when useful, a small ranked finish checklist; a stronger route must not substitute for decomposition.
+- Default to fresh context.
+- For consequential work, include the objective, non-discoverable constraints, scope boundaries, expected output, and finish checks; do not copy repository facts the child can cheaply recover. Keep tiny calls free of ceremony.
+- Parallelize independent work by making separate delegate calls with stable `id` values; every delegate call is asynchronous. Prefer several bounded cheap tasks over one expensive task only when coordination is low; do not create duplicate work or tasks that need constant synchronization.
+- Use `after` and symbolic `inputs` to compose downstream work without copying evidence.
+- Continue an existing child while the request belongs to the same line of work; send it new evidence, corrections, and review feedback. Start a fresh child for independent work or when a fresh perspective is the point.
 - Register `delegate_wake` before settling when outstanding work gates the next decision, emit one concise waiting status, and never poll.
-- Keep task decomposition, decisions, branch integration, final verification, and user-facing synthesis with the parent.
+- Keep final scope, branch integration, final verification, and user-facing decisions with the parent. Children may make bounded implementation decisions and recommend scope or acceptance criteria.
 - Compact recipes (choose the shape; do not build a declarative workflow graph):
-- **Fan-out/fan-in:** schedule `scan-a`, `scan-b`, and `scan-c` with exact routes; schedule `synthesis` with `after: ["scan-a", "scan-b", "scan-c"]` and symbolic `inputs` for their reports; register one wake for `synthesis` and settle.
+- **Fan-out/fan-in:** schedule two or more independent scans with exact routes; schedule `synthesis` after them with symbolic report `inputs`; register one wake for `synthesis` and settle.
 - **Implementation → review:** schedule writable `impl`; schedule `review` after `impl` with `inputs: [{ "node": "impl", "include": ["report", "branch"] }]` and the exact symbolic branch reference; wake on `review` and the branch decision.
-- **Hidden exploration:** schedule broad `explore`; pipe its symbolic report to a focused `plan` or `impl`; wake only on the focused conclusion. Do not dump exploration into the parent context.
+- **Hidden exploration:** give `explore` a named question or repository area; pipe its symbolic report to a focused `plan` or `impl`; wake only on the focused conclusion. Do not dump exploration into the parent context.
 - **Continuation:** use `continue: "impl"` after review feedback, pipe the reviewer report with `inputs`, and let the runtime preserve the original route, scope, worktree, and write access.
 - **Do not delegate:** keep short edits, obvious check loops, and tasks requiring repeated parent judgement in the parent.

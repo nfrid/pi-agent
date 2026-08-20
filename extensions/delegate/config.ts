@@ -40,6 +40,7 @@ export interface DelegateRuntimeConfig {
 
 export interface DelegateConfig extends DelegateRuntimeConfig {
   provider?: string;
+  routingGuidance?: string;
   modelCatalog?: Record<string, DelegateModelCatalogEntry>;
   error?: string;
 }
@@ -190,6 +191,7 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
   const record = raw as Record<string, unknown>;
   const allowedFields = new Set([
     'provider',
+    'routingGuidance',
     'modelCatalog',
     'timeoutMs',
     'maxParallelTasks',
@@ -216,6 +218,11 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
     (typeof record.provider !== 'string' || !record.provider.trim())
       ? 'delegate.provider must be a non-empty provider ID when provided.'
       : undefined,
+    record.routingGuidance !== undefined &&
+    (typeof record.routingGuidance !== 'string' ||
+      !record.routingGuidance.trim())
+      ? 'delegate.routingGuidance must be non-empty text when provided.'
+      : undefined,
     parsedCatalog.error,
   ]
     .filter(Boolean)
@@ -223,6 +230,11 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
   if (errors) config.error = errors;
   if (typeof record.provider === 'string' && record.provider.trim())
     config.provider = record.provider.trim();
+  if (
+    typeof record.routingGuidance === 'string' &&
+    record.routingGuidance.trim()
+  )
+    config.routingGuidance = record.routingGuidance.trim().slice(0, 1200);
   if (parsedCatalog.catalog) config.modelCatalog = parsedCatalog.catalog;
   return config;
 }
@@ -284,6 +296,7 @@ export function fingerprintDelegateConfig(config: DelegateConfig): string {
       : { valid: true },
     defaults: DEFAULT_DELEGATE_RUNTIME,
     provider: config.provider ?? null,
+    routingGuidance: config.routingGuidance ?? null,
     catalog: config.modelCatalog ?? null,
     runtime: {
       timeoutMs: config.timeoutMs,

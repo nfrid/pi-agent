@@ -24,7 +24,7 @@ Use fix scripts when appropriate:
 
 Use Conventional Commits for every commit message (for example, `fix(delegate): deduplicate queued completions` or `docs(feedback): record ticket decision`).
 
-For consequential multi-file implementation with explicit acceptance criteria, prefer a writable delegate once the design is settled. Keep direct parent edits for trivial or local changes, urgent feedback loops, branch integration, and fixes discovered during final verification.
+Delegate any useful, independently describable chunk when briefing, verification, and integration cost less than doing it directly. For consequential multi-file implementation with explicit acceptance criteria, prefer a writable delegate once the design is settled. Keep direct parent edits for trivial or local changes, urgent feedback loops, branch integration, and fixes discovered during final verification.
 
 For shared-checkout and commit hygiene, follow `docs/development-workflow.md`.
 

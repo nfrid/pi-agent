@@ -280,6 +280,9 @@ describe('delegate', () => {
     expect(parseDelegateConfig({ maxRelativeCost: 3 }).error).toMatch(
       /maxRelativeCost is not supported/,
     );
+    expect(parseDelegateConfig({ routingGuidance: ' ' }).error).toMatch(
+      /routingGuidance must be non-empty text/,
+    );
     expect(
       parseDelegateConfig({
         modelCatalog: {
@@ -412,6 +415,24 @@ describe('delegate', () => {
     expect(fingerprintDelegateConfig(first)).toBe(
       fingerprintDelegateConfig(reordered),
     );
+    expect(
+      fingerprintDelegateConfig(
+        parseDelegateConfig({
+          provider: 'provider',
+          timeoutMs: 60_000,
+          routingGuidance: 'Prefer quick routes.',
+          modelCatalog: {
+            quick: {
+              model: 'model',
+              thinking: 'low',
+              relativeCost: 1,
+              useFor: 'scoped checks',
+              avoid: 'judgement calls',
+            },
+          },
+        }),
+      ),
+    ).not.toBe(fingerprintDelegateConfig(first));
     expect(
       fingerprintDelegateConfig(
         parseDelegateConfig({
@@ -664,21 +685,26 @@ describe('delegate', () => {
     const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
     expect(guidelines).toContain(
-      'Delegate when parallelism, specialization, latency hiding, or context isolation',
+      'Delegate any useful, independently describable chunk',
+    );
+    expect(guidelines).toContain('Default to fresh context');
+    expect(guidelines).toContain(
+      'Continue an existing child while the request belongs to the same line of work',
     );
     expect(guidelines).toContain(
-      'final verification, and user-facing synthesis with the parent',
+      'Keep final scope, branch integration, final verification',
     );
     expect(guidelines).toContain(
-      'one bounded objective and a small ranked finish checklist',
+      'one bounded objective and, when useful, a small ranked finish checklist',
     );
     expect(guidelines).toContain(
       'a stronger route must not substitute for decomposition',
     );
     expect(guidelines).toContain(
-      'canonical repo/cwd, baseline, must-touch and leave-alone paths',
+      'objective, non-discoverable constraints, scope boundaries',
     );
     expect(guidelines).toContain('<delegate_routing>');
+    expect(guidelines).toContain('Luna routes are for bounded background work');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
   });
 
@@ -686,6 +712,7 @@ describe('delegate', () => {
     const prompt = formatDelegateRoutingConfig(
       parseDelegateConfig({
         provider: 'provider',
+        routingGuidance: 'Prefer the quick family for checks.',
         modelCatalog: {
           'quick-low': {
             model: 'quick',
@@ -706,13 +733,17 @@ describe('delegate', () => {
     );
     expect(prompt).toContain('quick-low: model=quick');
     expect(prompt).toContain('smart-high: model=smart');
-    expect(prompt).toContain('use for: scoped checks');
+    expect(prompt).toContain('useFor: scoped checks');
     expect(prompt).toContain('avoid: judgement calls');
+    expect(prompt).toContain('Prefer the quick family for checks.');
     expect(prompt).toContain(
-      'Choose the cheapest route whose stated `use for` fits the task',
+      'Choose the cheapest route whose stated `useFor` fits',
     );
     expect(prompt).toContain(
-      'stronger reasoning for ambiguous, cross-cutting, or consequential work',
+      'Explicit criteria may justify a cheaper route within that fit',
+    );
+    expect(prompt).toContain(
+      'relativeCost is benchmark-relative total task cost',
     );
     expect(prompt).toContain(
       'Continuations reuse their persisted route unless explicitly overridden',

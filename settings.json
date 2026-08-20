@@ -9,6 +9,7 @@
   "theme": "dracula",
   "delegate": {
     "provider": "openai-codex",
+    "routingGuidance": "Luna routes are for bounded background work, Terra routes trade higher cost for lower latency when the parent is blocked, and Sol routes are for maintainer judgement rather than harder implementation. Escalate thinking only within a matching task shape.",
     "timeoutMs": 1800000,
     "modelCatalog": {
       "luna-low": {
@@ -16,7 +17,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "low",
         "relativeCost": 1,
-        "useFor": "Value/background work that is fully mechanical with one deterministic answer: a named-file lookup, exact rename, generated fixture, or command-and-report task with an exact verifier.",
+        "useFor": "Bounded background work that is fully mechanical with one deterministic answer: a named-file lookup, exact rename, generated fixture, or command-and-report task with an exact verifier.",
         "avoid": "Discovery, judgement, or any task whose finish line is not already decided."
       },
       "luna-medium": {
@@ -24,7 +25,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "medium",
         "relativeCost": 3,
-        "useFor": "Value/background work with a failing test or exact specification: check one named invariant, confirm a fix, or implement a localized change inside one subsystem and a few files.",
+        "useFor": "Bounded background work with a failing test or exact specification: check one named invariant, confirm a fix, or implement a localized change inside one subsystem and a few files.",
         "avoid": "Open-ended review, cross-subsystem work, security reasoning, or choosing the design and finish line."
       },
       "luna-high": {
@@ -32,7 +33,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "high",
         "relativeCost": 11,
-        "useFor": "Default bounded value/background implementation or review where the architecture, scope, acceptance criteria, and relevant files are known; established-pattern multi-file work fits here.",
+        "useFor": "Default bounded background implementation or review where the architecture, scope, acceptance criteria, and relevant files are known; established-pattern multi-file work fits here.",
         "avoid": "A short wall-clock deadline, open-ended judgement, broad high-stakes review, or work likely to require sustained exploration across subsystems."
       },
       "luna-xhigh": {
@@ -40,7 +41,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "xhigh",
         "relativeCost": 21,
-        "useFor": "Difficult value/background implementation, diagnosis, or regression review spanning multiple files or subsystems, with explicit acceptance criteria and no sub-ten-minute requirement.",
+        "useFor": "Difficult bounded background implementation, diagnosis, regression review, or security verification spanning multiple files or subsystems, with explicit acceptance criteria or named security invariants.",
         "avoid": "Foreground work blocking the parent on a deadline, unclear criteria that require maintainer judgement, or unbounded repository-wide review."
       },
       "terra-medium": {
@@ -48,7 +49,7 @@
         "model": "gpt-5.6-terra",
         "thinking": "medium",
         "relativeCost": 32,
-        "useFor": "Interactive bounded multi-file work with an explicit roughly five-minute objective, especially when a foreground delegate blocks the parent.",
+        "useFor": "Interactive bounded multi-file work where lower latency justifies higher cost, especially when a foreground delegate blocks the parent.",
         "avoid": "Background or parallel work without urgency, mechanical tasks, quality-first work with no deadline, or broad difficult analysis."
       },
       "luna-max": {
@@ -56,7 +57,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "max",
         "relativeCost": 42,
-        "useFor": "Quality-first value/background work after Luna xhigh is insufficient, or difficult bounded tasks where extra exploration and verification justify a substantially longer run.",
+        "useFor": "Difficult bounded background work expected to need unusually deep exploration or verification; select it directly when that depth is predictable.",
         "avoid": "Short deadlines, interactive foreground work, tasks without a bounded finish line, or assuming more reasoning replaces Sol-style judgement."
       },
       "terra-high": {
@@ -64,23 +65,23 @@
         "model": "gpt-5.6-terra",
         "thinking": "high",
         "relativeCost": 63,
-        "useFor": "Interactive hard repository work with explicit criteria when the parent needs an actionable result in roughly six to eight minutes; use it as the deadline alternative to Luna xhigh.",
-        "avoid": "Background value optimization, rote edits, open-ended maintainer judgement, or choosing it merely because Luna high was insufficient."
+        "useFor": "Interactive hard repository work with explicit criteria when lower latency justifies higher cost and the parent is blocked on the result.",
+        "avoid": "Background work without urgency, rote edits, open-ended maintainer judgement, or choosing it merely because Luna high was insufficient."
       },
       "sol-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-sol",
         "thinking": "medium",
         "relativeCost": 75,
-        "useFor": "Judgement about the work rather than a generic strength escalation: decide whether a diff overclaims, whether complexity is earned, or what completion should mean when criteria are unclear. Strict maintainer-style review.",
-        "avoid": "Mechanical correctness sweeps, implementation against explicit acceptance criteria, or any task adequately served by a Luna value route or Terra deadline route."
+        "useFor": "Judgement about the work rather than a generic strength escalation: decide whether a diff overclaims, whether complexity is earned, what completion should mean when criteria are unclear, or assess ambiguous or high-stakes security concerns. Strict maintainer-style review.",
+        "avoid": "Mechanical correctness sweeps, implementation against explicit acceptance criteria, or any task adequately served by a Luna background route or Terra latency route."
       },
       "terra-xhigh": {
         "provider": "openai-codex",
         "model": "gpt-5.6-terra",
         "thinking": "xhigh",
         "relativeCost": 118,
-        "useFor": "Difficult interactive work with explicit criteria and a roughly ten-to-twelve-minute objective; also use for a specifically requested experimental comparison on React or TypeScript semantic/refactoring work.",
+        "useFor": "Difficult interactive work with explicit criteria when the parent needs the deepest latency-oriented route and the higher cost is justified.",
         "avoid": "Generic background quality escalation, claiming a proven React specialization, broad security or race review without a local evaluation, or work where Luna max latency is acceptable."
       },
       "sol-high": {
