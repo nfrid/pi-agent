@@ -7,13 +7,13 @@ import {
 } from './http-client.js';
 import {
   activeDelegateTranscriptQueryOptions,
+  archiveThreadMutationOptions,
   commandMutationOptions,
   composerCommandsQueryOptions,
   createThreadMutationOptions,
   dashboardQueryKeys,
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
-  archiveThreadMutationOptions,
   pinThreadMutationOptions,
   renameSessionMutationOptions,
   restartRuntimeMutationOptions,
@@ -325,14 +325,8 @@ describe('dashboard query and mutation factories', () => {
     const pinThread = vi.fn(async (...value: unknown[]) => value);
     const unpinThread = vi.fn(async (...value: unknown[]) => value);
     const mutations = [
-      [
-        archiveThreadMutationOptions({ archiveThread } as never),
-        archiveThread,
-      ],
-      [
-        restoreThreadMutationOptions({ restoreThread } as never),
-        restoreThread,
-      ],
+      [archiveThreadMutationOptions({ archiveThread } as never), archiveThread],
+      [restoreThreadMutationOptions({ restoreThread } as never), restoreThread],
       [pinThreadMutationOptions({ pinThread } as never), pinThread],
       [unpinThreadMutationOptions({ unpinThread } as never), unpinThread],
     ] as const;
@@ -349,9 +343,9 @@ describe('dashboard query and mutation factories', () => {
       expect(first.commandId).toEqual(expect.any(String));
       expect(second.commandId).toBe(first.commandId);
       const explicit = { threadId: 'thread-1', commandId: 'caller-id' };
-      await (options.mutationFn as (value: typeof explicit) => Promise<unknown>)(
-        explicit,
-      );
+      await (
+        options.mutationFn as (value: typeof explicit) => Promise<unknown>
+      )(explicit);
       expect(
         (calls.mock.calls[2]?.[1] as { commandId?: string }).commandId,
       ).toBe('caller-id');

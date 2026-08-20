@@ -130,7 +130,9 @@ describe('SqliteOrchestrationRepository', () => {
       status: 'settled',
     });
     expect(value.repository.getThread(thread.id)?.archivedAt).toBeUndefined();
-    expect(value.repository.getCommandReceipt('archive-atomicity')).toBeUndefined();
+    expect(
+      value.repository.getCommandReceipt('archive-atomicity'),
+    ).toBeUndefined();
     expect(value.repository.listThreadEvents(thread.id)).toHaveLength(0);
     value.db.exec('DROP TRIGGER abort_thread_event');
     value.db.close();

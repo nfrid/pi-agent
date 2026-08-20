@@ -73,8 +73,8 @@ function tokenStore() {
 
 describe('DashboardHttpClient command requests', () => {
   it('posts lifecycle controls to stable URLs and validates Thread responses', async () => {
-    const fetch = vi.fn(async () =>
-      new Response(JSON.stringify(validThread), { status: 200 }),
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify(validThread), { status: 200 }),
     );
     const client = new DashboardHttpClient({
       fetch,
@@ -101,7 +101,9 @@ describe('DashboardHttpClient command requests', () => {
     fetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ id: 'not-a-thread' }), { status: 200 }),
     );
-    await expect(client.restoreThread('thread-1', 'bad-response')).rejects.toMatchObject({
+    await expect(
+      client.restoreThread('thread-1', 'bad-response'),
+    ).rejects.toMatchObject({
       kind: 'malformed-output',
     });
   });
