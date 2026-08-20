@@ -6,6 +6,7 @@ import {
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
+  isHistoryThread,
   statusGlyph,
   workspaceGroupIsExpanded,
 } from './model';
@@ -117,6 +118,12 @@ describe('agent thread view model', () => {
     expect(filterAgentThreadRows(rows, '/work/frontend')).toEqual([rows[1]]);
     expect(filterAgentThreadRows(rows, 'offline')).toEqual([rows[1]]);
     expect(filterAgentThreadRows(rows, '   ')).toEqual(rows);
+  });
+
+  it('partitions dormant and offline rows into history', () => {
+    expect(isHistoryThread(row('live', 'Dashboard', 'idle'))).toBe(false);
+    expect(isHistoryThread(row('offline', 'Dashboard', 'offline'))).toBe(true);
+    expect(isHistoryThread(row('dormant', 'Dashboard', 'dormant'))).toBe(true);
   });
 
   it('bounds active and history rows independently', () => {

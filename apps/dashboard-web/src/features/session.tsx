@@ -218,6 +218,7 @@ export function SessionView({
         <SessionHeader
           id={id}
           workspaceName={workspaceName}
+          workspaceId={workspaceId}
           data={data.metadata}
           entries={data.entries}
           status={status}
