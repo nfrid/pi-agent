@@ -481,6 +481,24 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
       });
       return;
     }
+    if (pathname.endsWith('/archive')) {
+      listedThreads = listedThreads.map((thread) =>
+        thread.id === 'thread-durable' ? { ...thread, archivedAt: 4 } : thread,
+      );
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(listedThreads[0]),
+      });
+      return;
+    }
+    if (pathname.endsWith('/restore')) {
+      listedThreads = listedThreads.map(({ archivedAt, ...thread }) => thread);
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(listedThreads[0]),
+      });
+      return;
+    }
     throw new Error(`Unexpected durable thread request: ${pathname}`);
   });
 
@@ -515,6 +533,28 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
       .getByRole('menuitem', { name: 'Unpin' }),
   ).toBeVisible();
   await page.keyboard.press('Escape');
+
+  await durableRow.getByRole('button').click({ button: 'right' });
+  await page
+    .getByRole('menu', { name: 'Actions for Durable session' })
+    .getByRole('menuitem', { name: 'Archive' })
+    .click();
+  const archivedShelf = nav.getByRole('button', {
+    name: 'Expand Archived in Other workspace',
+  });
+  await expect(archivedShelf).toHaveAttribute('aria-expanded', 'false');
+  await expect(durableRow).toHaveCount(0);
+  await archivedShelf.click();
+  await expect(durableRow).toBeVisible();
+  await durableRow.getByRole('button').click({ button: 'right' });
+  await page
+    .getByRole('menu', { name: 'Actions for Durable session' })
+    .getByRole('menuitem', { name: 'Restore' })
+    .click();
+  await expect(
+    nav.getByRole('button', { name: /Archived in Other workspace/u }),
+  ).toHaveCount(0);
+  await expect(durableRow).toBeVisible();
 
   await conflictingRow.getByRole('button').click({ button: 'right' });
   const conflictingMenu = page.getByRole('menu', {
