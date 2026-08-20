@@ -32,6 +32,14 @@ function SessionWorkspaceLink({
       className="session-workspace session-workspace-link"
       href={href}
       onClick={(event) => {
+        if (
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
         event.preventDefault();
         go(href);
       }}

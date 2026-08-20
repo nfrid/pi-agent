@@ -192,7 +192,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     name: 'Collapse History in Demo',
   });
   await historyHeading.click();
-  await expect(historyHeading).toHaveAttribute('aria-expanded', 'false');
+  await expect(
+    agentNav.getByRole('button', { name: 'Expand History in Demo' }),
+  ).toHaveAttribute('aria-expanded', 'false');
   await expect(
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
@@ -1093,9 +1095,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
 
   await page.goto('/sessions/session-loading');
   await expect(page.locator('.session-heading h1')).toHaveText('Loaded shell');
-  await expect(
-    page.getByRole('link', { name: 'Tmp workspace' }),
-  ).toHaveAttribute('href', '/workspaces/tmp-workspace');
   await expect(page.locator('.session-transcript-loading')).toContainText(
     'Loading session…',
   );
@@ -1108,6 +1107,9 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.locator('.transcript-virtualized')).toContainText(
     'Prior history',
   );
+  await expect(
+    page.getByRole('link', { name: 'Tmp workspace' }),
+  ).toHaveAttribute('href', '/workspaces/tmp-workspace');
   await expect(page.locator('.transcript-virtualized')).toHaveCount(1);
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await expect(
