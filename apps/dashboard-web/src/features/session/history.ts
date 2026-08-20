@@ -328,9 +328,12 @@ export function useOlderSessionHistory({
     };
   }, [clearAnchor, prependAnchor, scrollElementRef, sessionMounted]);
 
+  const historyIsCurrent = historySessionRef.current === id;
+  const currentHistory = historyIsCurrent ? history : undefined;
+
   const loadEarlierHistory = useCallback(async () => {
-    if (historyRequestRef.current) return;
-    const initialHistory = historyRef.current ?? history;
+    if (historyRequestRef.current || historySessionRef.current !== id) return;
+    const initialHistory = historyRef.current ?? currentHistory;
     if (!initialHistory?.hasOlder || !initialHistory.nextBefore) return;
     const capturedAnchor = scrollElementRef?.current
       ? captureScrollOffset(scrollElementRef.current)
@@ -491,7 +494,7 @@ export function useOlderSessionHistory({
         setHistoryLoading(false);
       }
     }
-  }, [history, id, scrollElementRef, store]);
+  }, [currentHistory, id, scrollElementRef, store]);
   loadEarlierHistoryRef.current = loadEarlierHistory;
 
   // A partial head is never rendered as a hanging activity. Resolve its owner
@@ -501,21 +504,21 @@ export function useOlderSessionHistory({
   useEffect(() => {
     if (!sessionMounted || historyRequestRef.current) return;
     const shouldAutoload =
-      Boolean(history?.leadingContinuation) ||
+      Boolean(currentHistory?.leadingContinuation) ||
       (autoloadAll &&
-        history?.hasOlder === true &&
-        Boolean(history.nextBefore));
+        currentHistory?.hasOlder === true &&
+        Boolean(currentHistory.nextBefore));
     if (!shouldAutoload) return;
     void loadEarlierHistory();
-  }, [autoloadAll, history, loadEarlierHistory, sessionMounted]);
+  }, [autoloadAll, currentHistory, loadEarlierHistory, sessionMounted]);
 
   return {
-    history,
-    historyLoading,
-    historyError,
+    history: currentHistory,
+    historyLoading: historyIsCurrent && historyLoading,
+    historyError: historyIsCurrent ? historyError : undefined,
     loadEarlierHistory,
     cancelScrollRestore,
     completePrependRestore,
-    prependAnchor,
+    prependAnchor: historyIsCurrent ? prependAnchor : undefined,
   };
 }

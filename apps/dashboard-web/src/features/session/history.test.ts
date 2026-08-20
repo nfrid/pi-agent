@@ -46,6 +46,96 @@ describe('sessionHistoryWindowKey', () => {
 });
 
 describe('useOlderSessionHistory', () => {
+  it('does not carry paginated history into the next session render', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const store = new DashboardLiveStore();
+    const paginated = {
+      metadata: {
+        id: 'session-b',
+        file: '/tmp/session-b.jsonl',
+        cwd: '/tmp',
+        updatedAt: 2,
+      },
+      entries: [],
+      history: {
+        version: 1 as const,
+        start: 20,
+        end: 40,
+        hasOlder: true,
+        nextBefore: 'before-session-b',
+        leadingContinuation: true,
+      },
+      entriesComplete: false,
+      cursor: 1,
+    } as SessionApiResponse;
+    const active = {
+      metadata: {
+        id: 'session-a',
+        file: '/tmp/session-a.jsonl',
+        cwd: '/tmp',
+        updatedAt: 1,
+        activeRuntimeId: 'runtime-a',
+      },
+      entries: [],
+      entriesComplete: false,
+      cursor: 1,
+    } as SessionApiResponse;
+    const sessionBefore = vi
+      .spyOn(dashboardHttpClient, 'sessionBefore')
+      .mockRejectedValue(new Error('stale pagination request'));
+    let controls!: ReturnType<typeof useOlderSessionHistory>;
+    function Probe({
+      id,
+      data,
+      sessionMounted,
+    }: {
+      id: string;
+      data: SessionApiResponse;
+      sessionMounted: boolean;
+    }) {
+      controls = useOlderSessionHistory({
+        id,
+        data,
+        store,
+        sessionMounted,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(Probe, {
+            id: 'session-b',
+            data: paginated,
+            sessionMounted: false,
+          }),
+        );
+      });
+      expect(controls.history?.nextBefore).toBe('before-session-b');
+
+      await act(async () => {
+        renderer?.update(
+          createElement(Probe, {
+            id: 'session-a',
+            data: active,
+            sessionMounted: true,
+          }),
+        );
+      });
+
+      expect(sessionBefore).not.toHaveBeenCalled();
+      expect(controls.history).toBeUndefined();
+      expect(controls.historyLoading).toBe(false);
+      expect(controls.historyError).toBeUndefined();
+      expect(controls.prependAnchor).toBeUndefined();
+    } finally {
+      sessionBefore.mockRestore();
+      renderer?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('buffers a continuation chain and publishes it atomically', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const store = new DashboardLiveStore();

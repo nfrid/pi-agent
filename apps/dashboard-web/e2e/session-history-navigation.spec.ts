@@ -421,7 +421,7 @@ test('renders retained and persisted cached sessions immediately', async ({
   await expect(page.getByText('session one refreshed')).toHaveCount(0);
 });
 
-test('active to old to active ignores a delayed stale latest snapshot', async ({
+test('active to paginated to active ignores a delayed stale latest snapshot', async ({
   page,
 }) => {
   let releaseStale!: () => void;
@@ -480,6 +480,17 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
             entriesComplete: true,
             serverId: snapshot.serverId,
             cursor: 1,
+            ...(id === 'session-2'
+              ? {
+                  history: {
+                    version: 1,
+                    start: 20,
+                    end: 40,
+                    hasOlder: true,
+                    nextBefore: 'before-session-2',
+                  },
+                }
+              : {}),
             active:
               id === 'session-1'
                 ? {
@@ -531,6 +542,9 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
   await expect(page).toHaveURL(/\/sessions\/session-2$/u);
   await expect(
     page.getByLabel('Transcript', { exact: true }).getByText('second session'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Load earlier history' }),
   ).toBeVisible();
   await page.goto('/sessions/session-1');
   await expect.poll(() => activeRequests).toBe(2);
