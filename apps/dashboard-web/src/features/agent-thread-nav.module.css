@@ -91,11 +91,32 @@
   font-size: 10px;
   font-weight: 700;
 }
+.workspaceHeadingTitle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+}
 .workspaceHeadingActions {
   display: inline-flex;
   align-items: center;
   flex: none;
   gap: 5px;
+}
+.workspaceHeading .workspaceToggle {
+  display: inline-grid;
+  width: 15px;
+  height: 19px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 0;
+}
+.workspaceHeading .workspaceToggle:hover {
+  color: var(--fg);
 }
 .workspaceHeading .workspaceNew {
   display: inline-grid;
@@ -235,12 +256,25 @@
 }
 .threadRow:hover,
 .threadRow:global(.selected) {
+  opacity: 1;
   border-color: var(--line-soft);
   background: color-mix(in srgb, var(--purple) 10%, var(--bg));
   color: var(--fg);
 }
 .threadRow:global(.selected) {
   box-shadow: inset 2px 0 var(--purple);
+}
+.threadRow:global(.status-working):not(:global(.selected)),
+.threadRow:global(.status-compacting):not(:global(.selected)) {
+  opacity: 0.68;
+}
+.threadRow:global(.status-input),
+.threadRow:global(.status-failed),
+.threadRow:global(.unread) {
+  color: var(--fg);
+}
+.threadRow:global(.unread) .threadCopy strong {
+  font-weight: 750;
 }
 .threadGlyph {
   width: 14px;
