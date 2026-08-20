@@ -192,6 +192,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     name: 'Collapse History in Demo',
   });
   await historyHeading.click();
+  await expect(historyHeading).toHaveAttribute('aria-expanded', 'false');
   await expect(
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',

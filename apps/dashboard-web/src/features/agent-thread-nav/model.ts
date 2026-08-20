@@ -114,6 +114,26 @@ export function filterAgentThreadRows(
     : [...rows];
 }
 
+export function searchAgentThreadRows(
+  rows: readonly AgentThreadRow[],
+): AgentThreadRow[] {
+  const active = rows.filter((row) => !isHistoryThread(row));
+  return [
+    ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
+    ...rows.filter(isHistoryThread),
+  ];
+}
+
+export function historyRowsForShelf(
+  rows: readonly AgentThreadRow[],
+  expanded: boolean,
+  selectedSessionId?: string,
+): AgentThreadRow[] {
+  return expanded
+    ? [...rows]
+    : rows.filter((row) => row.id === selectedSessionId);
+}
+
 export function boundedAgentThreadRows(
   rows: readonly AgentThreadRow[],
   historyLimit = MAX_VISIBLE_HISTORY_THREADS,

@@ -8,8 +8,10 @@ import {
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
+  historyRowsForShelf,
   isHistoryThread,
   MAX_VISIBLE_HISTORY_THREADS,
+  searchAgentThreadRows,
   shortPath,
   statusGlyph,
   statusLabel,
@@ -199,8 +201,11 @@ export function AgentThreadNav({
     [query, rows],
   );
   const visibleRows = useMemo(
-    () => boundedAgentThreadRows(filtered, historyLimit, currentSessionId),
-    [currentSessionId, filtered, historyLimit],
+    () =>
+      query.trim()
+        ? searchAgentThreadRows(filtered)
+        : boundedAgentThreadRows(filtered, historyLimit, currentSessionId),
+    [currentSessionId, filtered, historyLimit, query],
   );
   const hiddenRowCount = hiddenAgentThreadRowCount(filtered, visibleRows);
   const groups = useMemo(
@@ -342,11 +347,12 @@ export function AgentThreadNav({
           const expanded = workspaceGroupIsExpanded(collapsed, searching);
           const activeRows = group.rows.filter((row) => !isHistoryThread(row));
           const historyRows = group.rows.filter(isHistoryThread);
-          const selectedHistory = historyRows.some(
-            (row) => row.id === currentSessionId,
+          const historyExpanded = !collapsedHistory[key] || searching;
+          const visibleHistoryRows = historyRowsForShelf(
+            historyRows,
+            historyExpanded,
+            currentSessionId,
           );
-          const historyExpanded =
-            !collapsedHistory[key] || searching || selectedHistory;
           const groupId = `agent-thread-group-${encodeURIComponent(key)}`;
           const historyId = `${groupId}-history`;
           const renderThreadRow = (row: AgentThreadRow) => {
@@ -474,16 +480,16 @@ export function AgentThreadNav({
                       {historyExpanded ? '▾' : '▸'}
                     </span>
                   </button>
-                  {historyExpanded && (
-                    <div id={historyId}>{historyRows.map(renderThreadRow)}</div>
-                  )}
+                  <div id={historyId}>
+                    {visibleHistoryRows.map(renderThreadRow)}
+                  </div>
                 </div>
               )}
             </section>
           );
         })}
       </div>
-      {hiddenRowCount > 0 && (
+      {hiddenRowCount > 0 && !query.trim() && (
         <button
           type="button"
           className={styles.more}

@@ -2,6 +2,7 @@ import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import type { ComponentType, ReactNode, RefObject } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
+import { useDashboardNavigate } from '../../routes/navigation';
 import {
   DelegateHistorySurface,
   ExtensionSurfaceStack,
@@ -16,6 +17,29 @@ export type SessionComposerProps = {
   onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 };
+
+function SessionWorkspaceLink({
+  workspaceId,
+  workspaceLabel,
+}: {
+  workspaceId: string;
+  workspaceLabel: string;
+}) {
+  const go = useDashboardNavigate();
+  const href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  return (
+    <a
+      className="session-workspace session-workspace-link"
+      href={href}
+      onClick={(event) => {
+        event.preventDefault();
+        go(href);
+      }}
+    >
+      {workspaceLabel}
+    </a>
+  );
+}
 
 function SessionHeaderFrame({
   workspaceLabel,
@@ -39,12 +63,10 @@ function SessionHeaderFrame({
           <div className="session-identity">
             <div className="session-breadcrumb">
               {workspaceId ? (
-                <a
-                  className="session-workspace session-workspace-link"
-                  href={`/workspaces/${encodeURIComponent(workspaceId)}`}
-                >
-                  {workspaceLabel}
-                </a>
+                <SessionWorkspaceLink
+                  workspaceId={workspaceId}
+                  workspaceLabel={workspaceLabel}
+                />
               ) : (
                 <span className="session-workspace">{workspaceLabel}</span>
               )}
