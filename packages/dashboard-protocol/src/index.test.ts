@@ -28,7 +28,9 @@ import {
   parseLiveDiagnosticsRequest,
   parseLiveDiagnosticsResponse,
   parseNormalizedMessagePayload,
+  parsePinThreadCommand,
   parseProtocolInfo,
+  parseRestoreThreadCommand,
   parseRuntimeCommandInput,
   parseRuntimeCommandOutput,
   parseRuntimeExtensionSurface,
@@ -38,6 +40,9 @@ import {
   parseSessionApiResponse,
   parseShellSnapshotRequest,
   parseShellSnapshotResponse,
+  parseThreadLifecycleCommandResult,
+  parseThreadLifecycleEvent,
+  parseUnpinThreadCommand,
   RuntimeExtensionSurfaceSchema,
   redactImageData,
   ShellSnapshotRequestSchema,
@@ -51,6 +56,45 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates durable thread lifecycle commands and events strictly', () => {
+    const thread = {
+      id: 'thread-1',
+      projectId: 'project-1',
+      title: 'Lifecycle',
+      status: 'settled' as const,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const event = {
+      id: 1,
+      threadId: thread.id,
+      type: 'thread.archive' as const,
+      commandId: 'archive-1',
+      data: { archivedAt: 2 },
+      occurredAt: 2,
+    };
+    expect(parseRestoreThreadCommand({ commandId: 'restore-1' })).toEqual({
+      commandId: 'restore-1',
+    });
+    expect(parsePinThreadCommand({ commandId: 'pin-1' })).toEqual({
+      commandId: 'pin-1',
+    });
+    expect(parseUnpinThreadCommand({ commandId: 'unpin-1' })).toEqual({
+      commandId: 'unpin-1',
+    });
+    expect(parseThreadLifecycleEvent(event)).toEqual(event);
+    expect(parseThreadLifecycleCommandResult({ thread, event })).toEqual({
+      thread,
+      event,
+    });
+    expect(() =>
+      parseRestoreThreadCommand({ commandId: 'restore-1', extra: true }),
+    ).toThrow();
+    expect(() =>
+      parseThreadLifecycleEvent({ ...event, type: 'thread.unknown' }),
+    ).toThrow();
+  });
+
   it('enforces canonical workflow identity and reference shapes', () => {
     const valid = {
       logicalId: 'foo-bar',
