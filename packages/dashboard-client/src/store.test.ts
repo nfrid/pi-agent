@@ -2540,6 +2540,43 @@ describe('DashboardLiveStore', () => {
     expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
   });
 
+  it('rejects a gap in a known session-feed sequence', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    expect(store.acceptSessionSnapshot(sessionResponse(5), 5, 1, true)).toBe(
+      true,
+    );
+
+    expect(
+      store.acceptSessionEvent(
+        'session-1',
+        7,
+        {
+          event: {
+            type: 'message.finished',
+            sessionId: 'session-1',
+            message: {
+              messageId: 'after-gap',
+              role: 'assistant',
+              content: 'must arrive through recovery',
+              phase: 'finished',
+            },
+          },
+        },
+        1,
+      ),
+    ).toBe(false);
+    expect(store.getSnapshot().sessionSyncById['session-1']).toMatchObject({
+      sequence: 5,
+      sequenceKnown: true,
+    });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'after-gap'
+      ],
+    ).toBeUndefined();
+  });
+
   it('attributes reconnect hydration to the response runtime epoch', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

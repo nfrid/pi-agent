@@ -2,6 +2,7 @@ export * from './authentication.js';
 export * from './connection-runtime.js';
 export * from './http-client.js';
 export * from './query-options.js';
+export * from './session-transcript-state.js';
 export * from './store.js';
 export * from './trpc-client.js';
 
