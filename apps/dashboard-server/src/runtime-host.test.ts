@@ -79,7 +79,9 @@ describe('runtime host', () => {
     );
     const socket = path.join(root, 'host.sock');
     const executable = path.join(root, 'exit-pi.sh');
-    await writeFile(executable, '#!/bin/sh\nexit 7\n');
+    // The descendant inherits stdout. The watchdog must terminate the whole
+    // process group after the leader exits or Node will never observe close.
+    await writeFile(executable, '#!/bin/sh\nsleep 60 &\nexit 7\n');
     await chmod(executable, 0o700);
     const service = new RuntimeHostService(socket);
     await service.listen();

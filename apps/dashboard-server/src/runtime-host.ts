@@ -394,7 +394,7 @@ export class RuntimeHostService {
     // The shell remains the process-group leader after exec. Its background
     // watchdog exits when Pi exits, or kills the group if the host disappears.
     const watchdog =
-      'host="$PPID"; leader="$$"; (while kill -0 "$host" 2>/dev/null && kill -0 "$leader" 2>/dev/null; do sleep 0.2; done; if ! kill -0 "$host" 2>/dev/null; then kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null; fi) & exec "$0" "$@"';
+      'host="$PPID"; leader="$$"; (while kill -0 "$host" 2>/dev/null && kill -0 "$leader" 2>/dev/null; do sleep 0.2; done; if ! kill -0 "$host" 2>/dev/null; then kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null; else kill -TERM -"$leader" 2>/dev/null; fi) & exec "$0" "$@"';
     const child = spawn('/bin/sh', ['-c', watchdog, piExecutable, ...args], {
       cwd: input.cwd,
       detached: true,
