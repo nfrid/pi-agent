@@ -183,6 +183,7 @@ function validWakeState(
   )
     return false;
   const ids = new Set<string>();
+  let activeWakes = 0;
   for (const wake of value.wakes) {
     const sanitized = sanitizeWakeSnapshot(wake);
     if (
@@ -196,8 +197,11 @@ function validWakeState(
     )
       return false;
     ids.add(sanitized.id);
+    if (!isTerminal(sanitized.state as string)) activeWakes++;
   }
-  return true;
+  return (
+    value.wakes.length <= maximumWakes && activeWakes <= WAKE_MAX_SUBSCRIPTIONS
+  );
 }
 
 function canonicalState(
@@ -215,7 +219,7 @@ function parseWakeStoreEntry(value: unknown): WakeStoreEntry | undefined {
   if (!isRecord(value) || value.version !== 1) return undefined;
   const kind = value.kind;
   const maximum =
-    kind === 'snapshot' ? WAKE_MAX_SUBSCRIPTIONS : MAX_WAKE_DELTA_WAKES;
+    kind === 'snapshot' ? Number.MAX_SAFE_INTEGER : MAX_WAKE_DELTA_WAKES;
   if (
     (kind !== 'snapshot' && kind !== 'delta') ||
     !validWakeState(value.state, maximum)

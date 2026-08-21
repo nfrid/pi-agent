@@ -538,6 +538,71 @@ describe('wake store', () => {
     await workflow.dispose();
   });
 
+  test('reload retains terminal tombstones against stale persisted state', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const attempt = workflow.schedule({
+      logicalId: 'tombstone-history',
+      mode: 'single',
+      tasks: ['tombstone-history'],
+      execute: async () => ({ runs: [], handoff: 'not persisted' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require(attempt.identity).settledAt).toBeDefined(),
+    );
+    let source!: WakeCoordinator;
+    source = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        source.markEntered(dispatch.wake.id, dispatch.acknowledgement);
+      },
+    });
+    source.register({
+      id: 'terminal-history',
+      condition: { node: attempt.identity },
+    });
+    const terminalSnapshot = source.snapshot();
+    const terminal = terminalSnapshot.wakes[0];
+    if (!terminal) throw new Error('missing terminal wake');
+    const staleSnapshot = {
+      ...terminalSnapshot,
+      wakes: [
+        {
+          ...terminal,
+          state: 'pending' as const,
+          revision: terminal.revision + 100,
+          readyAt: undefined,
+          readyReferences: undefined,
+          queuedAt: undefined,
+          enteredAt: undefined,
+          enteredAcknowledgement: undefined,
+          dispatchGeneration: 0,
+          dispatchAttempts: 0,
+        },
+      ],
+    };
+    const entries: unknown[] = [];
+    persistWakeState(source, {
+      appendEntry(type: string, data: unknown) {
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+    entries.push({
+      type: 'custom',
+      customType: WAKE_ENTRY_TYPE,
+      data: { version: 1, kind: 'snapshot', state: staleSnapshot },
+    });
+    const dispatch = vi.fn();
+    const restored = new WakeCoordinator({ workflow, dispatch });
+    restoreWakeState(restored, branch(entries));
+    expect(restored.list()).toEqual([]);
+    expect(restored.require('terminal-history')).toMatchObject({
+      state: 'entered',
+    });
+    expect(restored.snapshot().wakes).toHaveLength(1);
+    expect(dispatch).not.toHaveBeenCalled();
+    await workflow.dispose();
+  });
+
   test('history keeps entered state over a later stale high-revision pending snapshot', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     workflow.schedule({
