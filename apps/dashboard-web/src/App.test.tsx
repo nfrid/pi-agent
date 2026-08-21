@@ -247,10 +247,30 @@ describe('workspace presentation ordering', () => {
         workspace('unused'),
       ],
       sessions: [
-        { id: 's1', cwd: '/work/first', updatedAt: 10 },
-        { id: 's2', cwd: '/work/second', updatedAt: 20 },
-        { id: 's3', cwd: '/work/third', updatedAt: 20 },
-        { id: 's4', cwd: '/work/second', updatedAt: 20 },
+        {
+          id: 's1',
+          file: '/sessions/s1.jsonl',
+          cwd: '/work/first',
+          updatedAt: 10,
+        },
+        {
+          id: 's2',
+          file: '/sessions/s2.jsonl',
+          cwd: '/work/second',
+          updatedAt: 20,
+        },
+        {
+          id: 's3',
+          file: '/sessions/s3.jsonl',
+          cwd: '/work/third',
+          updatedAt: 20,
+        },
+        {
+          id: 's4',
+          file: '/sessions/s4.jsonl',
+          cwd: '/work/second',
+          updatedAt: 20,
+        },
       ],
     } as never;
     expect(sortWorkspacesByRecency(snapshot).map((item) => item.id)).toEqual([
@@ -297,7 +317,14 @@ describe('project-scoped new chat', () => {
     expect(
       newChatPath({
         workspaces: snapshot.workspaces,
-        sessions: [{ id: 'recent', cwd: '/active', updatedAt: 99 }],
+        sessions: [
+          {
+            id: 'recent',
+            file: '/sessions/recent.jsonl',
+            cwd: '/active',
+            updatedAt: 99,
+          },
+        ],
       } as never),
     ).toBe('/workspaces/active/new');
     expect(newChatPath({ workspaces: [] })).toBe('/workspaces');
@@ -464,7 +491,14 @@ describe('command palette', () => {
           canonicalPath: '/work/second',
         },
       ],
-      sessions: [{ id: 'recent', cwd: '/work/second', updatedAt: 10 }],
+      sessions: [
+        {
+          id: 'recent',
+          file: '/sessions/recent.jsonl',
+          cwd: '/work/second',
+          updatedAt: 10,
+        },
+      ],
     } as never).filter((item) => item.title.startsWith('Workspace:'));
     expect(items.map((item) => item.title)).toEqual([
       'Workspace: Second',
