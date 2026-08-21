@@ -76,6 +76,7 @@ For production build and restart instructions, see
 | `PI_DASHBOARD_VAPID_PUBLIC_KEY`, `PI_DASHBOARD_VAPID_PRIVATE_KEY`, `PI_DASHBOARD_VAPID_SUBJECT` | Optional Web Push configuration. |
 | `PI_DASHBOARD_NOTIFY_SETTLED=1` | Opt in to settled-run notifications. |
 | `PI_DASHBOARD_RUNTIME_HOST_SOCKET` | Owner-private Unix socket for the stable headless runtime-host sidecar. |
+| `PI_EXECUTABLE` | Optional Pi executable override for the runtime host; the launchd template pins `/opt/homebrew/bin/pi`. |
 
 ## Architecture
 

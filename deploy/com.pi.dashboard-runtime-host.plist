@@ -13,6 +13,7 @@
   <dict>
     <key>PI_DASHBOARD_STATE_DIR</key><string>/Users/REPLACE_ME/.pi/agent/dashboard</string>
     <key>PI_DASHBOARD_RUNTIME_HOST_SOCKET</key><string>/Users/REPLACE_ME/.pi/agent/dashboard/runtime-host.sock</string>
+    <key>PI_EXECUTABLE</key><string>/opt/homebrew/bin/pi</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
