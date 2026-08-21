@@ -241,7 +241,6 @@ function WorkspaceChooser({
           {filtered.map((workspace, index) => (
             <button
               type="button"
-              role="option"
               aria-label={workspace.name}
               aria-selected={index === activeIndex}
               key={workspace.id}
