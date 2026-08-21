@@ -54,12 +54,12 @@ export function DashboardTime({
   className,
 }: {
   timestamp: DashboardTimestamp | undefined;
-  context?: 'transcript' | 'sidebar';
+  context?: 'transcript' | 'sidebar' | 'sidebar-relative';
   className?: string;
 }) {
   const date = timestampDate(timestamp);
   const text =
-    context === 'sidebar'
+    context === 'sidebar-relative'
       ? formatRelativeDashboardTimestamp(timestamp)
       : formatDashboardTimestamp(timestamp, context);
   if (!date || !text) return null;

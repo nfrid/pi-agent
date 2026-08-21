@@ -300,7 +300,7 @@ describe('project-scoped new chat', () => {
           name: 'Dormant',
           path: '/dormant',
           canonicalPath: '/dormant',
-          source: 'directory',
+          source: 'directory' as const,
           active: false,
         },
         {
@@ -308,11 +308,11 @@ describe('project-scoped new chat', () => {
           name: 'Active',
           path: '/active',
           canonicalPath: '/active',
-          source: 'directory',
+          source: 'directory' as const,
           active: true,
         },
       ],
-    } as never;
+    };
     expect(newChatPath(snapshot)).toBe('/workspaces/dormant/new');
     expect(
       newChatPath({

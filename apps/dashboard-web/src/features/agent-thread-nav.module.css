@@ -132,7 +132,7 @@
   display: grid;
   gap: 2px;
 }
-.workspaceChooserOptions button small {
+.workspaceChooserPath {
   overflow: hidden;
   color: var(--dim);
   font-size: 10px;

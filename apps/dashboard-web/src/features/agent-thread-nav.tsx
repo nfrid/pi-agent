@@ -247,7 +247,9 @@ function WorkspaceChooser({
               onClick={() => onChoose(workspace.id)}
             >
               <span>{workspace.name}</span>
-              <small>{workspace.canonicalPath}</small>
+              <small className={styles.workspaceChooserPath}>
+                {workspace.canonicalPath}
+              </small>
             </button>
           ))}
           {!filtered.length && (
@@ -324,7 +326,7 @@ function AgentThreadLink({
                 <DashboardTime
                   className={`agent-thread-time ${styles.threadTime}`}
                   timestamp={row.updatedAt}
-                  context="sidebar"
+                  context="sidebar-relative"
                 />
               )}
             </span>
@@ -353,7 +355,7 @@ function AgentThreadLink({
             <DashboardTime
               className={`agent-thread-time ${styles.threadTime}`}
               timestamp={row.updatedAt}
-              context="sidebar"
+              context="sidebar-relative"
             />
           ))}
       </span>

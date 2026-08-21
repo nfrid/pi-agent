@@ -144,6 +144,13 @@
   .global-notifications span {
     font-size: 13px;
   }
+  body:has(.agent-nav-drawer.open) .navigation-shell {
+    z-index: 33;
+  }
+  body:has(.agent-nav-drawer.open) .global-tools {
+    visibility: hidden;
+    pointer-events: none;
+  }
   .shell {
     padding: 1px 13px 80px;
   }

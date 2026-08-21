@@ -1677,16 +1677,16 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const dormantSlim = dormantRow.locator('[data-row-density="slim"]');
   await expect(loadedCard).toHaveCount(1);
   await expect(dormantSlim).toHaveCount(1);
-  await expect(loadedCard.locator('[data-row-content="workspace"]')).toHaveText(
-    'Tmp workspace',
-  );
   await expect(
-    loadedCard.locator('[data-row-content="context"]'),
-  ).toContainText('idle');
+    loadedCard.locator('[data-row-content="workspace"] > span').first(),
+  ).toHaveText('Tmp workspace');
+  await expect(loadedCard.locator('[data-row-content="context"]')).toHaveCount(
+    0,
+  );
   await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
-    dormantSlim.locator('[data-row-content="workspace"]'),
-  ).toHaveCount(0);
+    dormantSlim.locator('[data-row-content="workspace"] > span').first(),
+  ).toHaveText('Tmp workspace');
   await expect(dormantSlim.locator('[data-row-content="context"]')).toHaveCount(
     0,
   );
