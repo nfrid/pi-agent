@@ -280,6 +280,18 @@ function WorkspaceChooser({
   );
 }
 
+function activeThreadDetails(row: AgentThreadRow): string[] {
+  const details: string[] = [];
+  if (row.runtime?.model?.model) details.push(row.runtime.model.model);
+  if (row.runtime?.model?.thinking) details.push(row.runtime.model.thinking);
+  const contextPercent = row.runtime?.contextUsage?.percent;
+  if (typeof contextPercent === 'number' && Number.isFinite(contextPercent))
+    details.push(`${Math.round(contextPercent)}% ctx`);
+  const queued = row.runtime?.queueDrafts?.length ?? 0;
+  if (queued > 0) details.push(`${queued} queued`);
+  return details;
+}
+
 // Per-row actions are rendered in the shared accessible context menu below.
 function AgentThreadLink({
   row,
@@ -298,6 +310,9 @@ function AgentThreadLink({
   onSelect: () => void;
   lifecycleProps?: RuntimeLifecycleThreadProps;
 }) {
+  const details = density === 'card' ? activeThreadDetails(row) : [];
+  const showDetails =
+    density === 'card' && (details.length > 0 || row.updatedAt !== undefined);
   return (
     <button
       {...lifecycleProps}
@@ -309,64 +324,58 @@ function AgentThreadLink({
       aria-label={`${row.title} ${statusLabel(row)}${unread ? ' unread' : ''}`}
       onClick={onSelect}
     >
-      <span
-        className={`agent-thread-glyph ${styles.threadGlyph}`}
-        aria-hidden="true"
-      >
-        {statusGlyph(row.status)}
-      </span>
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
-        {density === 'card' && (
-          <span className={styles.threadWorkspace} data-row-content="workspace">
-            <span>{row.workspaceName}</span>
-            <span className={styles.threadMeta}>
-              {[
-                'working',
-                'compacting',
-                'waiting',
-                'input',
-                'failed',
-                'paused',
-              ].includes(row.status) ? (
-                statusLabel(row)
-              ) : row.updatedAt === undefined ? (
-                statusLabel(row)
-              ) : (
-                <DashboardTime
-                  className={`agent-thread-time ${styles.threadTime}`}
-                  timestamp={row.updatedAt}
-                  context="sidebar-relative"
-                />
-              )}
+        <span className={styles.threadWorkspace} data-row-content="workspace">
+          <span className={styles.threadWorkspaceName}>
+            {row.workspaceName}
+          </span>
+          {density === 'card' && row.durableThread?.pinnedAt !== undefined && (
+            <span
+              className={styles.threadPin}
+              title="Pinned"
+              role="img"
+              aria-label="Pinned"
+            >
+              •
             </span>
-            {row.durableThread?.pinnedAt !== undefined && (
-              <span
-                className={styles.threadPin}
-                title="Pinned"
-                role="img"
-                aria-label="Pinned"
-              >
-                •
+          )}
+          <span className={styles.threadMeta}>
+            {density === 'card' ? (
+              statusLabel(row)
+            ) : row.updatedAt === undefined ? (
+              statusLabel(row)
+            ) : (
+              <DashboardTime
+                className={`agent-thread-time ${styles.threadTime}`}
+                timestamp={row.updatedAt}
+                context="sidebar-relative"
+              />
+            )}
+            <span
+              className={`agent-thread-glyph ${styles.threadGlyph}`}
+              aria-hidden="true"
+            >
+              {statusGlyph(row.status)}
+            </span>
+          </span>
+        </span>
+        <strong>{row.title}</strong>
+        {showDetails && (
+          <small className={styles.threadDetails} data-row-content="details">
+            {details.length > 0 && (
+              <span className={styles.threadContext}>
+                {details.join(' · ')}
               </span>
             )}
-          </span>
+            {row.updatedAt !== undefined && (
+              <DashboardTime
+                className={`agent-thread-time ${styles.threadTime}`}
+                timestamp={row.updatedAt}
+                context="sidebar-relative"
+              />
+            )}
+          </small>
         )}
-        {density === 'slim' && (
-          <span className={styles.threadWorkspace} data-row-content="workspace">
-            <span>{row.workspaceName}</span>
-          </span>
-        )}
-        <strong>{row.title}</strong>
-        {density === 'slim' &&
-          (row.updatedAt === undefined ? (
-            <span className={styles.threadTime}>{statusLabel(row)}</span>
-          ) : (
-            <DashboardTime
-              className={`agent-thread-time ${styles.threadTime}`}
-              timestamp={row.updatedAt}
-              context="sidebar-relative"
-            />
-          ))}
       </span>
     </button>
   );

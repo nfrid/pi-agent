@@ -1524,6 +1524,23 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           cwd: '/tmp',
           liveState: 'idle',
           online: true,
+          model: {
+            provider: 'test',
+            model: 'careful',
+            thinking: 'high',
+          },
+          contextUsage: {
+            tokens: 32,
+            contextWindow: 100,
+            percent: 32,
+          },
+          queueDrafts: [
+            {
+              clientId: 'queued-draft',
+              mode: 'followUp',
+              text: 'Queued follow-up',
+            },
+          ],
           session: {
             id: 'session-loading',
             title: 'Loaded shell',
@@ -1704,7 +1721,13 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(loadedCard.locator('[data-row-content="context"]')).toHaveCount(
     0,
   );
+  await expect(
+    loadedCard.locator('[data-row-content="details"]'),
+  ).toContainText('careful · high · 32% ctx · 1 queued');
   await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
+  await expect(
+    loadedCard.locator('[data-row-content="workspace"] .agent-thread-glyph'),
+  ).toHaveCount(1);
   await expect(
     dormantSlim.locator('[data-row-content="workspace"] > span').first(),
   ).toHaveText('Tmp workspace');

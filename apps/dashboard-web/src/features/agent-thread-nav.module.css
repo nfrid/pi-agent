@@ -545,12 +545,8 @@ button.shelfHeading:focus-visible {
   font-size: 10px;
 }
 .threadRow:global(.agent-thread-card) .threadLink {
-  min-height: 57px;
   align-items: flex-start;
-  padding: 7px 8px;
-}
-.threadRow:global(.agent-thread-card) .threadGlyph {
-  margin-top: 7px;
+  padding: 6px 8px;
 }
 .threadWorkspace {
   display: flex;
@@ -567,19 +563,25 @@ button.shelfHeading:focus-visible {
   text-transform: none;
   white-space: nowrap;
 }
-.threadWorkspace > span:first-child {
+.threadWorkspaceName {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .threadMeta {
+  display: inline-flex;
   min-width: 0;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
   color: var(--muted);
   font-size: 10px;
   font-weight: 500;
   letter-spacing: normal;
   text-transform: none;
+}
+.threadMeta .threadGlyph {
+  width: 8px;
 }
 .threadPin {
   flex: none;
@@ -588,28 +590,25 @@ button.shelfHeading:focus-visible {
   letter-spacing: normal;
 }
 .threadRow:global(.agent-thread-slim) .threadLink {
-  min-height: 30px;
-  padding: 3px 7px;
+  min-height: 38px;
+  padding: 5px 7px;
 }
 .threadRow:global(.agent-thread-slim) .threadCopy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 2px;
 }
 .threadRow:global(.agent-thread-slim) .threadWorkspace {
-  width: 28%;
-  max-width: 64px;
-  flex: none;
   font-size: 9px;
   font-weight: 550;
-  letter-spacing: normal;
-  text-transform: none;
 }
 .threadRow:global(.agent-thread-slim) .threadCopy strong {
-  min-width: 0;
-  flex: 1 1 auto;
   font-size: 11px;
   font-weight: 550;
+}
+.threadDetails {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 .threadContext {
   min-width: 0;
