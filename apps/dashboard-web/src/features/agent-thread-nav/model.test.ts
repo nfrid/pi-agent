@@ -285,6 +285,50 @@ describe('agent thread view model', () => {
     expect(sections.archived.map(({ id }) => id)).toEqual(['archived']);
   });
 
+  it('gives archived and pinned rows precedence over Settled and Active', () => {
+    const archived = {
+      ...row('archived-settled', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-archived-settled',
+        archivedAt: 30,
+        settledAt: 20,
+        hasActiveRun: false,
+      },
+    };
+    const pinnedSettled = {
+      ...row('pinned-settled', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-pinned-settled',
+        pinnedAt: 10,
+        settledAt: 20,
+        hasActiveRun: false,
+      },
+    };
+    const settled = {
+      ...row('settled', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-settled',
+        settledAt: 20,
+        hasActiveRun: false,
+      },
+    };
+    const active = row('active', 'Dashboard');
+    const sections = sectionAgentThreadRows(
+      [archived, pinnedSettled, settled, active],
+      1,
+    );
+    expect(sections.archived.map(({ id }) => id)).toEqual(['archived-settled']);
+    expect(sections.pinned.map(({ id }) => id)).toEqual(['pinned-settled']);
+    expect(sections.settled.map(({ id }) => id)).toEqual(['settled']);
+    expect(sections.active.map(({ id }) => id)).toEqual(['active']);
+    expect(
+      hiddenAgentThreadRowCount(
+        [archived, pinnedSettled, settled, active],
+        sections.active,
+      ),
+    ).toBe(0);
+  });
+
   it('keeps archived rows out of active and puts pinned rows first', () => {
     const pinned = {
       ...row('pinned', 'Dashboard'),

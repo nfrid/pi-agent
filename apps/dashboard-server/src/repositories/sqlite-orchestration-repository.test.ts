@@ -315,15 +315,51 @@ describe('SqliteOrchestrationRepository', () => {
       reason: 'user-command',
     });
     expect(value.repository.listThreadEvents(first.id)).toHaveLength(1);
-    expect(value.repository.archiveThread('archive-1', first.id, 11)).toEqual(
+    const settledArchived = value.repository.settleThread(
+      'settle-archived',
+      first.id,
+      11,
+    );
+    expect(settledArchived.thread).toMatchObject({
+      status: 'completed',
+      archivedAt: 10,
+      settledAt: 11,
+    });
+    expect(
+      value.repository.settleThread('settle-archived', first.id, 12),
+    ).toEqual(settledArchived);
+    expect(value.repository.archiveThread('archive-1', first.id, 13)).toEqual(
       archived,
     );
-    expect(value.repository.listThreadEvents(first.id)).toHaveLength(1);
+    expect(value.repository.listThreadEvents(first.id)).toHaveLength(2);
     expect(() =>
       value.repository.pinThread('archive-1', second.id, 12),
     ).toThrow('belongs to thread.archive');
     const pinnedSecond = value.repository.pinThread('pin-2', second.id, 20);
-    const pinnedFirst = value.repository.pinThread('pin-1', first.id, 21);
+    const settledSecond = value.repository.settleThread(
+      'settle-2',
+      second.id,
+      21,
+    );
+    expect(settledSecond.thread).toMatchObject({
+      status: 'failed',
+      pinnedAt: 20,
+      settledAt: 21,
+    });
+    expect(value.repository.settleThread('settle-2', second.id, 22)).toEqual(
+      settledSecond,
+    );
+    const unsettledSecond = value.repository.unsettleThread(
+      'unsettle-2',
+      second.id,
+      23,
+    );
+    expect(unsettledSecond.thread).toMatchObject({
+      status: 'failed',
+      pinnedAt: 20,
+    });
+    expect(unsettledSecond.thread).not.toHaveProperty('settledAt');
+    const pinnedFirst = value.repository.pinThread('pin-1', first.id, 24);
     expect(
       value.repository
         .threadSummaries()
@@ -337,6 +373,7 @@ describe('SqliteOrchestrationRepository', () => {
       value.repository.restoreThread('restore-1', first.id, 23).thread,
     ).toMatchObject({
       status: 'completed',
+      settledAt: 11,
     });
     expect(value.repository.getThread(first.id)).not.toMatchObject({
       archivedAt: expect.anything(),

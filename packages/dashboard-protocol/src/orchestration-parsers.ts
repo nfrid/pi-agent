@@ -1,10 +1,6 @@
 import {
   type ArchiveThreadCommand,
   ArchiveThreadCommandSchema,
-  type SettleThreadCommand,
-  SettleThreadCommandSchema,
-  type UnsettleThreadCommand,
-  UnsettleThreadCommandSchema,
   type CancelCommand,
   CancelCommandSchema,
   type CheckoutActionCommand,
@@ -23,10 +19,14 @@ import {
   RetryCommandSchema,
   type SessionAdoptCommand,
   SessionAdoptCommandSchema,
+  type SettleThreadCommand,
+  SettleThreadCommandSchema,
   type ThreadCreateCommand,
   ThreadCreateCommandSchema,
   type UnpinThreadCommand,
   UnpinThreadCommandSchema,
+  type UnsettleThreadCommand,
+  UnsettleThreadCommandSchema,
 } from './orchestration-commands.js';
 import {
   type Checkout,
@@ -179,7 +179,9 @@ export const tryParseSettleThreadCommand = (
   value: unknown,
 ): SettleThreadCommand | undefined =>
   tryParseSchema(SettleThreadCommandSchema, value);
-export const parseUnsettleThreadCommand = (value: unknown): UnsettleThreadCommand =>
+export const parseUnsettleThreadCommand = (
+  value: unknown,
+): UnsettleThreadCommand =>
   parseSchema(UnsettleThreadCommandSchema, value, 'thread unsettle command');
 export const tryParseUnsettleThreadCommand = (
   value: unknown,

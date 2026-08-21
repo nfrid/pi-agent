@@ -216,6 +216,7 @@ function archiveResponseThread(thread: Thread): Thread {
   const response = { ...thread };
   delete response.archivedAt;
   delete response.preArchiveStatus;
+  delete response.settledAt;
   return response;
 }
 

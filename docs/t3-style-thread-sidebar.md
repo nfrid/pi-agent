@@ -45,11 +45,11 @@ Session rename already exists in the transcript header. This project will not du
 4. Render globally pinned threads first as full rows/cards.
 5. Render active threads as full rows/cards with Pi's existing status vocabulary.
 6. Render unpinned settled threads in a Settled shelf between Active and Archived; archived and pinned rows retain precedence.
-6. Render dormant and offline threads in **Active**, retaining status ordering and the bounded Show-next disclosure for large lists.
-7. Keep archived threads reachable in a compact collapsed shelf until a dedicated archived view exists.
-8. Keep existing context-menu actions, unread state, runtime controls, timestamps, and keyboard search behavior.
-9. Make the new-thread route look like an empty real thread: normal workspace header, blank transcript area, and the same composer at the bottom. Remove the centered onboarding illustration and copy.
-10. Preserve the current server contracts. This slice is primarily component structure, presentation, and client-side grouping.
+7. Render dormant and offline threads in **Active**, retaining status ordering and the bounded Show-next disclosure for large lists.
+8. Keep archived threads reachable in a compact collapsed shelf until a dedicated archived view exists.
+9. Keep existing context-menu actions, unread state, runtime controls, timestamps, and keyboard search behavior.
+10. Make the new-thread route look like an empty real thread: normal workspace header, blank transcript area, and the same composer at the bottom. Remove the centered onboarding illustration and copy.
+11. Preserve the current server contracts. This slice is primarily component structure, presentation, and client-side grouping.
 
 ### Follow-up lifecycle work
 

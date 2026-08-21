@@ -84,18 +84,24 @@ describe('DashboardHttpClient command requests', () => {
     await client.restoreThread('thread-1', 'restore-1');
     await client.pinThread('thread-1', 'pin-1');
     await client.unpinThread('thread-1', 'unpin-1');
+    await client.settleThread('thread-1', 'settle-1');
+    await client.unsettleThread('thread-1', 'unsettle-1');
     const calls = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
     expect(calls.map(([input]) => input)).toEqual([
       '/api/threads/thread-1/archive',
       '/api/threads/thread-1/restore',
       '/api/threads/thread-1/pin',
       '/api/threads/thread-1/unpin',
+      '/api/threads/thread-1/settle',
+      '/api/threads/thread-1/unsettle',
     ]);
     expect(calls.map(([, init]) => JSON.parse(String(init.body)))).toEqual([
       { commandId: 'archive-1' },
       { commandId: 'restore-1' },
       { commandId: 'pin-1' },
       { commandId: 'unpin-1' },
+      { commandId: 'settle-1' },
+      { commandId: 'unsettle-1' },
     ]);
 
     fetch.mockResolvedValueOnce(
