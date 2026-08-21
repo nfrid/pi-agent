@@ -557,7 +557,7 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
     ),
   ).toBe(true);
   const chooserGeometry = await workspaceChooser.evaluate((element) => {
-    const options = element.querySelector('fieldset');
+    const options = element.querySelector('[data-workspace-options-scroll]');
     return {
       dialogHeight: element.getBoundingClientRect().height,
       viewportHeight: window.innerHeight,

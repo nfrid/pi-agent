@@ -82,16 +82,18 @@
   color: var(--muted);
   font-size: 11px;
 }
+.workspaceChooserScroll {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
 .workspaceChooserOptions {
   display: grid;
   min-width: 0;
-  min-height: 0;
   gap: 5px;
-  overflow-y: auto;
   border: 0;
   margin: 0;
   padding: 0;
-  scrollbar-gutter: stable;
 }
 .workspaceChooserLegend {
   color: var(--muted);

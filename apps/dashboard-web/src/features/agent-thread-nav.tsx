@@ -236,28 +236,37 @@ function WorkspaceChooser({
             setActiveIndex(0);
           }}
         />
-        <fieldset className={styles.workspaceChooserOptions}>
-          <legend className={styles.workspaceChooserLegend}>Workspaces</legend>
-          {filtered.map((workspace, index) => (
-            <button
-              type="button"
-              aria-label={workspace.name}
-              data-workspace-active={index === activeIndex ? 'true' : undefined}
-              key={workspace.id}
-              onClick={() => onChoose(workspace.id)}
-            >
-              <span>{workspace.name}</span>
-              <small className={styles.workspaceChooserPath}>
-                {workspace.canonicalPath}
-              </small>
-            </button>
-          ))}
-          {!filtered.length && (
-            <span className={styles.workspaceChooserEmpty}>
-              No matching workspaces.
-            </span>
-          )}
-        </fieldset>
+        <div
+          className={styles.workspaceChooserScroll}
+          data-workspace-options-scroll=""
+        >
+          <fieldset className={styles.workspaceChooserOptions}>
+            <legend className={styles.workspaceChooserLegend}>
+              Workspaces
+            </legend>
+            {filtered.map((workspace, index) => (
+              <button
+                type="button"
+                aria-label={workspace.name}
+                data-workspace-active={
+                  index === activeIndex ? 'true' : undefined
+                }
+                key={workspace.id}
+                onClick={() => onChoose(workspace.id)}
+              >
+                <span>{workspace.name}</span>
+                <small className={styles.workspaceChooserPath}>
+                  {workspace.canonicalPath}
+                </small>
+              </button>
+            ))}
+            {!filtered.length && (
+              <span className={styles.workspaceChooserEmpty}>
+                No matching workspaces.
+              </span>
+            )}
+          </fieldset>
+        </div>
         <button
           type="button"
           className={styles.workspaceChooserCancel}
