@@ -69,6 +69,32 @@ describe('delegate_wake tool', () => {
       nonObstructive: true,
     });
     expect(JSON.stringify(listed)).not.toContain('secret evidence');
+    await tool.execute(
+      'call',
+      { action: 'cancel', id: 'source-ready' },
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    );
+    const activeOnly = (await tool.execute(
+      'call',
+      { action: 'list' },
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    )) as { details: { wakes: Array<{ id: string }> } };
+    expect(activeOnly.details.wakes).toEqual([]);
+    const status = (await tool.execute(
+      'call',
+      { action: 'status', id: 'source-ready' },
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    )) as { details: { wake: { id: string; state: string } } };
+    expect(status.details.wake).toMatchObject({
+      id: 'source-ready',
+      state: 'cancelled',
+    });
     await workflow.dispose();
   });
 
