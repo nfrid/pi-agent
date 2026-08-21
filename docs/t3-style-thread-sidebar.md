@@ -27,7 +27,7 @@ These cases should remain usable in the sidebar, but lifecycle actions may be ab
 
 `dormant` describes current execution availability: the session is indexed but has no live runtime. `settled` is a user decision to park work while retaining it in the sidebar. A settled thread could still have runtime activity, and a dormant thread may still need attention.
 
-For the first UI pass, dormant sessions continue to populate a compact **History** shelf. We must not rename that shelf to **Settled** or persist settlement inferred from runtime absence. Explicit settle and unsettle can be added later as durable lifecycle commands.
+Dormant sessions are unavailable runtimes, not a lifecycle decision. Every unarchived, unpinned session—including dormant and offline sessions—renders in **Active**. There is no inferred **History** or **Settled** shelf. Explicit settle and unsettle can be added later as durable lifecycle commands.
 
 ### Existing lifecycle coverage
 
@@ -44,7 +44,7 @@ Session rename already exists in the transcript header. This project will not du
 3. Replace expanded workspace blocks with a workspace scope control. Keep an "All workspaces" option.
 4. Render globally pinned threads first as full rows/cards.
 5. Render active threads as full rows/cards with Pi's existing status vocabulary.
-6. Render dormant threads as compact rows in a collapsible **History** shelf.
+6. Render dormant and offline threads in **Active**, retaining status ordering and the bounded Show-next disclosure for large lists.
 7. Keep archived threads reachable in a compact collapsed shelf until a dedicated archived view exists.
 8. Keep existing context-menu actions, unread state, runtime controls, timestamps, and keyboard search behavior.
 9. Make the new-thread route look like an empty real thread: normal workspace header, blank transcript area, and the same composer at the bottom. Remove the centered onboarding illustration and copy.
@@ -69,7 +69,7 @@ Add only when requested or when the copied UX requires it:
 - No title regeneration.
 - No sidebar rename control.
 - No complete deletion.
-- No inferred settlement.
+- No inferred settlement; runtime absence only makes a thread dormant/offline.
 - No new lifecycle database tables or protocol commands.
 - No T3 dependency stack, Tailwind migration, or wholesale component copy.
 - No project favicon, pull-request, terminal-process, or environment artwork work.
@@ -85,6 +85,10 @@ Add only when requested or when the copied UX requires it:
 - The selected thread remains reachable when it falls beyond the initial history page.
 - Unsupported lifecycle actions stay hidden. The UI must not offer an action that will fail because the session lacks an exact durable link.
 - Desktop and mobile render the same semantic sidebar content.
+
+## Dormant active-thread slice
+
+The accepted follow-up keeps the normal composer shell for dormant sessions and attaches a compact notice: **This session is dormant** / **Sending a message will resume Pi in this workspace.** A text submission starts the existing runtime with `workspaceId`, `sessionId`, and `initialPrompt` exactly once; the draft is retained on failure and cleared only after a successful start mutation. Image attachment selection remains disabled while dormant because model capability is not available until a runtime exists. Missing workspace association remains a disabled error case. Explicit durable Settled state remains a later slice; this change adds no settle commands, storage, or protocol fields.
 
 ## First-slice acceptance checks
 

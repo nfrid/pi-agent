@@ -107,8 +107,13 @@ export function Composer({
   const settledBackground = hasSettledBackground(runtime);
   const defaultMode = composerMode(runtime);
   const disabled = composerIsDisabled(runtime);
-  const submissionDisabled = disabled;
+  const submissionDisabled = runtime
+    ? disabled
+    : !workspaceId || resumeMutation.isPending || resumePending;
+  // Dormant sessions cannot safely advertise image support until a runtime
+  // reports its model capability, so attachment selection stays disabled.
   const attachmentsEnabled =
+    Boolean(runtime) &&
     runtime?.liveState !== 'compacting' &&
     (runtime ? runtimeSupportsImages(runtime) : false);
   const {
@@ -125,7 +130,7 @@ export function Composer({
     onPasteCapture,
   } = useImageAttachments({
     enabled: attachmentsEnabled,
-    busy: busy || disabled,
+    busy: busy || disabled || resumePending,
     onError: setError,
   });
   const submissionPolicy = runtime
@@ -141,65 +146,6 @@ export function Composer({
   useEffect(() => {
     setMode(defaultMode);
   }, [defaultMode]);
-  const resume = async () => {
-    const request = resumeRuntimeRequest(workspaceId, sessionId);
-    if (!request || resumeMutation.isPending) {
-      if (!request)
-        setResumeError('This session has no workspace association.');
-      return;
-    }
-    setResumeError(undefined);
-    try {
-      await resumeMutation.mutateAsync(request);
-      if (!mountedRef.current) return;
-      setResumePending(true);
-    } catch (cause) {
-      if (!mountedRef.current) return;
-      const details =
-        cause instanceof Error
-          ? (cause as Error & { code?: unknown })
-          : { message: String(cause) };
-      setResumeError(details.message);
-    }
-  };
-  if (!runtime && resumePending)
-    return (
-      <div className="composer disabled" role="status" aria-live="polite">
-        <p>Starting agent…</p>
-      </div>
-    );
-  if (!runtime)
-    return (
-      <div className="composer disabled">
-        <p>This session is dormant.</p>
-        <button
-          type="button"
-          disabled={resumeMutation.isPending}
-          onClick={() => void resume()}
-        >
-          {resumeMutation.isPending ? 'Starting agent…' : 'Resume session'}
-        </button>
-        {resumeError && (
-          <div className="composer-error" role="alert">
-            <p className="error">{resumeError}</p>
-          </div>
-        )}
-      </div>
-    );
-  if (runtime.online === false)
-    return (
-      <div className="composer disabled">
-        <p>Runtime offline; controls are unavailable.</p>
-        <button
-          type="button"
-          onClick={() =>
-            go(`/runtimes/${encodeURIComponent(runtime.runtimeId)}`)
-          }
-        >
-          View diagnostics
-        </button>
-      </div>
-    );
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedText = text.trim();
@@ -211,6 +157,30 @@ export function Composer({
     }
     setBusy(true);
     setError(undefined);
+    if (!runtime) {
+      const request = resumeRuntimeRequest(workspaceId, sessionId, trimmedText);
+      if (!request) {
+        setResumeError('This session has no workspace association.');
+        setBusy(false);
+        return;
+      }
+      setResumeError(undefined);
+      try {
+        // The initial prompt belongs to the start mutation. Do not echo it as
+        // a runtime command after the dormant session comes online.
+        await resumeMutation.mutateAsync(request);
+        if (!mountedRef.current) return;
+        setResumePending(true);
+        clearDraft();
+        editorRef.current?.setMarkdown('');
+        onPromptSubmitted?.(trimmedText);
+      } catch (cause) {
+        if (mountedRef.current) setResumeError(errorMessage(cause));
+      } finally {
+        if (mountedRef.current) setBusy(false);
+      }
+      return;
+    }
     const commandType = submissionPolicy.commandType;
     const command = {
       type: commandType,
@@ -266,6 +236,68 @@ export function Composer({
       if (mountedRef.current) setBusy(false);
     }
   };
+  if (!runtime)
+    return (
+      <ComposerShell
+        ariaLabel="Send a message"
+        onSubmit={(event) => void submit(event)}
+        dragging={dragging}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        attachmentsEnabled={false}
+        attachmentsBusy={submissionDisabled || busy}
+        fileInputRef={fileInputRef}
+        attachments={attachments}
+        onSelectImages={selectImages}
+        onRemoveImage={removeImage}
+        onPasteCapture={onPasteCapture}
+        editorRef={editorRef}
+        initialMarkdown={initialDraft}
+        commands={composerCommands}
+        onChange={updateText}
+        placeholder="Message Pi…"
+        readOnly={submissionDisabled || busy}
+        submissionDisabled={submissionDisabled || busy}
+        sendDisabled={submissionDisabled || busy || !text.trim()}
+        sendAriaLabel="Send message"
+        mode={<span>Prompt</span>}
+        controls={null}
+        notice={
+          <div className="composer-notice" role="note">
+            <strong>This session is dormant</strong>
+            <p>Sending a message will resume Pi in this workspace.</p>
+            {resumePending && <output>Resuming…</output>}
+          </div>
+        }
+        footer={
+          !workspaceId ? (
+            <p className="error composer-error" role="alert">
+              This session has no workspace association.
+            </p>
+          ) : resumeError ? (
+            <p className="error composer-error" role="alert">
+              {resumeError}
+            </p>
+          ) : undefined
+        }
+      />
+    );
+  if (runtime.online === false)
+    return (
+      <div className="composer disabled">
+        <p>Runtime offline; controls are unavailable.</p>
+        <button
+          type="button"
+          onClick={() =>
+            go(`/runtimes/${encodeURIComponent(runtime.runtimeId)}`)
+          }
+        >
+          View diagnostics
+        </button>
+      </div>
+    );
   const abortTurn = async () => {
     if (busy || commandMutation.isPending) return;
     setError(undefined);

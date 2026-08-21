@@ -897,7 +897,7 @@ describe('workspace-first agent navigation', () => {
     });
   });
 
-  it('keeps offline and dormant threads below everything else', () => {
+  it('keeps offline and dormant threads in Active after live statuses', () => {
     const snapshot = {
       runtimes: [
         {
@@ -1021,17 +1021,17 @@ describe('workspace-first agent navigation', () => {
     }));
     expect(
       boundedAgentThreadRows([...rows.slice(0, 4), ...history]),
-    ).toHaveLength(28);
+    ).toHaveLength(40);
     expect(
       boundedAgentThreadRows([...rows.slice(0, 4), ...history], 48),
-    ).toHaveLength(52);
+    ).toHaveLength(48);
     const active = Array.from({ length: 60 }, (_, index) => ({
       ...rows[0],
       id: `active-${index}`,
       status: 'working' as const,
     }));
     expect(boundedAgentThreadRows([...active, ...history], 48)).toHaveLength(
-      88,
+      48,
     );
   });
 });

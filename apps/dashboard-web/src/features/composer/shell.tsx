@@ -79,6 +79,7 @@ export function ComposerShell({
   mode,
   controls,
   footer,
+  notice,
 }: {
   className?: string;
   ariaLabel: string;
@@ -109,6 +110,7 @@ export function ComposerShell({
   mode: ReactNode;
   controls: ReactNode;
   footer?: ReactNode;
+  notice?: ReactNode;
 }) {
   return (
     <form
@@ -131,15 +133,14 @@ export function ComposerShell({
         busy={attachmentsBusy}
         onRemove={onRemoveImage}
       />
+      {notice}
       <ComposerRichSurface
         onPasteCapture={onPasteCapture}
         submissionDisabled={submissionDisabled}
       >
         <Suspense
           fallback={
-            <div className="composer-editor-loading" role="status">
-              Loading editor…
-            </div>
+            <output className="composer-editor-loading">Loading editor…</output>
           }
         >
           <MarkdownComposerEditor

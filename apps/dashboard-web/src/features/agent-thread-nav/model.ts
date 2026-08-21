@@ -270,35 +270,30 @@ function isPinnedThread(row: AgentThreadRow): boolean {
 /** Partition the sidebar into the T3-style hierarchy without duplicating rows. */
 export function sectionAgentThreadRows(
   rows: readonly AgentThreadRow[],
-  historyLimit = MAX_VISIBLE_HISTORY_THREADS,
+  historyLimit = MAX_VISIBLE_ACTIVE_THREADS,
   selectedSessionId?: string,
 ): AgentThreadSections {
   const pinned = pinnedFirst(
     rows.filter((row) => isPinnedThread(row) && !isArchivedThread(row)),
   );
-  const activeRows = pinnedFirst(
-    rows.filter(
-      (row) =>
-        !isPinnedThread(row) && !isHistoryThread(row) && !isArchivedThread(row),
-    ),
+  // Runtime absence is availability, not a lifecycle shelf. Dormant and
+  // offline sessions therefore remain in Active until explicitly archived.
+  const allActive = pinnedFirst(
+    rows.filter((row) => !isPinnedThread(row) && !isArchivedThread(row)),
   );
-  const active = activeRows.slice(
+  const active = allActive.slice(
     0,
-    Number.isFinite(historyLimit) ? MAX_VISIBLE_ACTIVE_THREADS : undefined,
+    Number.isFinite(historyLimit) ? Math.max(0, historyLimit) : undefined,
   );
-  const allHistory = pinnedFirst(
-    rows.filter((row) => isHistoryThread(row) && !isPinnedThread(row)),
-  );
-  const history = allHistory.slice(0, Math.max(0, historyLimit));
   const selected = selectedSessionId
-    ? allHistory.find((row) => row.id === selectedSessionId)
+    ? allActive.find((row) => row.id === selectedSessionId)
     : undefined;
-  if (selected && !history.some((row) => row.id === selected.id))
-    history.push(selected);
+  if (selected && !active.some((row) => row.id === selected.id))
+    active.push(selected);
   return {
     pinned,
     active,
-    history,
+    history: [],
     archived: pinnedFirst(rows.filter(isArchivedThread)),
   };
 }
@@ -337,7 +332,7 @@ export function archivedRowsForShelf(
 
 export function boundedAgentThreadRows(
   rows: readonly AgentThreadRow[],
-  historyLimit = MAX_VISIBLE_HISTORY_THREADS,
+  historyLimit = MAX_VISIBLE_ACTIVE_THREADS,
   selectedSessionId?: string,
 ): AgentThreadRow[] {
   const sections = sectionAgentThreadRows(
@@ -359,8 +354,11 @@ export function hiddenAgentThreadRowCount(
 ): number {
   return Math.max(
     0,
-    rows.filter(isHistoryThread).length -
-      visibleRows.filter(isHistoryThread).length,
+    rows.filter((row) => !isPinnedThread(row) && !isArchivedThread(row))
+      .length -
+      visibleRows.filter(
+        (row) => !isPinnedThread(row) && !isArchivedThread(row),
+      ).length,
   );
 }
 
