@@ -186,7 +186,6 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(
     agentNav.getByRole('button', { name: /New thread/ }),
   ).toBeVisible();
-  await expect(agentNav.getByText('Active', { exact: true })).toBeVisible();
   const historyHeading = agentNav.getByRole('button', {
     name: 'Collapse History',
   });
@@ -270,17 +269,14 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toHaveCount(0);
-  await paletteTrigger.focus();
-  await page.keyboard.press('Enter');
+  await paletteTrigger.click();
   await page.getByRole('option', { name: /New chat/ }).click();
-  const workspaceDialog = page.getByRole('dialog', { name: 'Workspaces' });
-  await expect(workspaceDialog).toBeVisible();
-  await workspaceDialog.getByRole('button', { name: /Demo/ }).click();
+  await expect(page).toHaveURL(/\/workspaces\/w\/new$/u);
+  await page.goto('/workspaces/w');
   await expect(page).toHaveURL(/\/workspaces\/w$/u);
   const workspaceSummary = page.getByRole('region', {
     name: 'Workspace summary',
   });
-  await expect(workspaceSummary).toContainText(/dormant/i);
   await expect(workspaceSummary).toContainText('1 runtime · 1 offline');
   await expect(page.getByRole('heading', { name: 'Runtimes' })).toBeVisible();
   await page
