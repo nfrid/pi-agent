@@ -16,6 +16,7 @@ export {
   sessionNavigationTarget,
   shouldApplySessionMetadata,
   shouldShowJumpToLatest,
+  sortWorkspacesByRecency,
 } from './app-helpers';
 export {
   buildTranscriptLandmarks,

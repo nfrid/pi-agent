@@ -25,6 +25,29 @@ export function formatDashboardTimestamp(
   }).format(date);
 }
 
+export function formatRelativeDashboardTimestamp(
+  timestamp: DashboardTimestamp | undefined,
+  now = Date.now(),
+): string | undefined {
+  const date = timestampDate(timestamp);
+  if (!date) return undefined;
+  const delta = Math.max(0, now - date.getTime());
+  const minutes = Math.floor(delta / 60_000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(date.getFullYear() === new Date(now).getFullYear()
+      ? {}
+      : { year: 'numeric' }),
+  }).format(date);
+}
+
 export function DashboardTime({
   timestamp,
   context = 'transcript',
@@ -35,7 +58,10 @@ export function DashboardTime({
   className?: string;
 }) {
   const date = timestampDate(timestamp);
-  const text = formatDashboardTimestamp(timestamp, context);
+  const text =
+    context === 'sidebar'
+      ? formatRelativeDashboardTimestamp(timestamp)
+      : formatDashboardTimestamp(timestamp, context);
   if (!date || !text) return null;
   return (
     <time

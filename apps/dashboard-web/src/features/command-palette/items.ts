@@ -3,7 +3,10 @@ import {
   type RuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';
 import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { sessionDisplayTitle } from '../../app-helpers';
+import {
+  sessionDisplayTitle,
+  sortWorkspacesByRecency,
+} from '../../app-helpers';
 import { newChatPath } from '../../routes/navigation';
 
 export function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
@@ -126,14 +129,16 @@ export function paletteItems(
       path: `/sessions/${encodeURIComponent(session.id)}`,
     }),
   );
-  const workspaces = snapshot.workspaces.slice(0, MAX_PALETTE_WORKSPACES).map(
-    (workspace): PaletteItem => ({
-      kind: 'navigate',
-      id: `workspace:${workspace.id}`,
-      title: `Workspace: ${workspace.name}`,
-      description: workspace.canonicalPath,
-      path: `/workspaces/${encodeURIComponent(workspace.id)}`,
-    }),
-  );
+  const workspaces = sortWorkspacesByRecency(snapshot)
+    .slice(0, MAX_PALETTE_WORKSPACES)
+    .map(
+      (workspace): PaletteItem => ({
+        kind: 'navigate',
+        id: `workspace:${workspace.id}`,
+        title: `Workspace: ${workspace.name}`,
+        description: workspace.canonicalPath,
+        path: `/workspaces/${encodeURIComponent(workspace.id)}`,
+      }),
+    );
   return [...primary, ...actions, ...sessions, ...workspaces];
 }
