@@ -22,7 +22,7 @@ export function RuntimeView({
           <p>PID: {runtime.pid}</p>
           <p>Bridge: {runtime.online === false ? 'offline' : 'connected'}</p>
           <p>Session: {runtime.session.id}</p>
-          <p>tmux: {runtime.tmux?.displayTarget ?? 'not reported'}</p>
+          <p>Host process: {runtime.pid}</p>
           <button
             type="button"
             onClick={() =>

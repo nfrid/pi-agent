@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type {
+  RuntimeLocation,
   RuntimeSnapshot,
   SessionIndexEntry,
   WorkspaceTarget,
@@ -65,9 +66,7 @@ export class SqliteMetadataRepository implements MetadataRepository {
   recordManagedLaunch(
     runtimeId: string,
     workspaceId: string,
-    placement: Omit<ManagedLaunchRecord['placement'], 'displayTarget'> & {
-      displayTarget?: string;
-    },
+    location: RuntimeLocation,
     credentials: {
       identityToken: string;
       launchToken: string;
@@ -77,14 +76,12 @@ export class SqliteMetadataRepository implements MetadataRepository {
   ): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,tmux_session,tmux_window_id,tmux_pane_id,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode) VALUES (?,?,?,?,?,?,NULL,?,?,?,?)`,
+        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,runtime_location_json,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode) VALUES (?,?,?,?,NULL,?,?,?,?)`,
       )
       .run(
         runtimeId,
         workspaceId,
-        placement.tmuxSession,
-        placement.tmuxWindowId,
-        placement.tmuxPaneId,
+        JSON.stringify(location),
         Date.now(),
         credentialHash(credentials.identityToken),
         credentialHash(credentials.launchToken),
@@ -97,18 +94,22 @@ export class SqliteMetadataRepository implements MetadataRepository {
     return (
       this.db
         .prepare(
-          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,tmux_session as tmuxSession,tmux_window_id as tmuxWindowId,tmux_pane_id as tmuxPaneId,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch WHERE stopped_at IS NULL',
+          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,runtime_location_json as locationJson,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch WHERE stopped_at IS NULL AND runtime_location_json IS NOT NULL',
         )
         .all() as Array<Record<string, unknown>>
     ).map((row) => ({
       runtimeId: String(row.runtimeId),
       workspaceId: String(row.workspaceId),
-      placement: {
-        tmuxSession: String(row.tmuxSession),
-        tmuxWindowId: String(row.tmuxWindowId),
-        tmuxPaneId: String(row.tmuxPaneId),
-        displayTarget: `${row.tmuxSession}:${row.tmuxWindowId}`,
-      },
+      location: (() => {
+        try {
+          const value: unknown = JSON.parse(String(row.locationJson));
+          if (value && typeof value === 'object' && !Array.isArray(value))
+            return value as RuntimeLocation;
+        } catch {
+          /* malformed legacy rows are not recoverable */
+        }
+        return { id: `unrecoverable:${row.runtimeId}` };
+      })(),
       identityTokenHash: String(row.identityTokenHash ?? ''),
       launchTokenHash: String(row.launchTokenHash ?? ''),
       launchConsumed: Number(row.launchConsumed) === 1,

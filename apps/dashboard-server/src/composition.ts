@@ -10,7 +10,6 @@ import type { RuntimeManager } from './runtime-manager.js';
 import type { RuntimeRegistry } from './runtime-registry.js';
 import type { SeshAdapter } from './sesh.js';
 import type { SessionIndex } from './session-index.js';
-import type { TmuxAdapter } from './tmux.js';
 import type { UsageProvider } from './usage.js';
 
 export interface DashboardServerOptions {
@@ -24,13 +23,9 @@ export interface DashboardServerOptions {
   /** Hidden Pi child sessions addressable by ID but omitted from shell listings. */
   delegateSessionDir?: string;
   sesh?: SeshAdapter;
-  /** Legacy tmux runner seam retained for callers that customize launch. */
-  tmux?: TmuxAdapter;
   runtimeProvider?: AgentRuntimeProvider;
-  /** Explicit opt-in for the externally supervised Pi server experiment. */
-  experimentalPiServer?: boolean;
-  /** Unix socket supplied by the external @earendil-works/pi-server host. */
-  piServerSocketPath?: string;
+  /** Stable sidecar socket; defaults below the dashboard state directory. */
+  runtimeHostSocketPath?: string;
   metadata?: MetadataStore;
   sessions?: SessionIndex;
   registry?: RuntimeRegistry;
@@ -51,8 +46,7 @@ export interface DashboardConfiguration {
   readonly stateDir: string;
   readonly token: string;
   readonly socketPath: string;
-  readonly experimentalPiServer: boolean;
-  readonly piServerSocketPath?: string;
+  readonly runtimeHostSocketPath: string;
   readonly origins: string[];
   readonly feedReplayCount: number;
   readonly feedReplayBytes: number;
@@ -68,7 +62,6 @@ export interface DashboardDependencies {
   readonly orchestration: SqliteOrchestrationRepository;
   readonly sessions: SessionIndex;
   readonly sesh: SeshAdapter;
-  readonly tmux: TmuxAdapter;
   readonly runtimeProvider: AgentRuntimeProvider;
   readonly usage: UsageProvider;
   push: PushSender;

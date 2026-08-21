@@ -3,6 +3,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type {
   NotificationEvent,
+  RuntimeLocation,
   RuntimeSnapshot,
   SessionIndexEntry,
   WorkspaceTarget,
@@ -75,9 +76,7 @@ export class MetadataStore {
   recordManagedLaunch(
     runtimeId: string,
     workspaceId: string,
-    placement: Omit<ManagedLaunchRecord['placement'], 'displayTarget'> & {
-      displayTarget?: string;
-    },
+    location: RuntimeLocation,
     credentials: {
       identityToken: string;
       launchToken: string;
@@ -88,7 +87,7 @@ export class MetadataStore {
     this.metadata.recordManagedLaunch(
       runtimeId,
       workspaceId,
-      placement,
+      location,
       credentials,
     );
   }

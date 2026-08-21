@@ -80,7 +80,7 @@ export function paletteItems(
       kind: 'navigate',
       id: 'new-chat',
       title: 'New chat',
-      description: 'Start a chat in the active workspace',
+      description: 'Start a chat in a workspace',
       path: newChatPath(snapshot, workspaceId),
     },
     {

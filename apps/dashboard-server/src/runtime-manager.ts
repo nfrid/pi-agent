@@ -3,6 +3,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import type {
   AgentRuntimeProvider,
   RuntimeBinding,
+  RuntimeLocation,
   RuntimeProvider,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -15,7 +16,6 @@ import {
 import type { RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { sanitizeDisplayName } from './security.js';
 import type { SessionIndex } from './session-index.js';
-import type { ManagedPlacement } from './tmux.js';
 
 interface LaunchRecord {
   runtimeId: string;
@@ -26,8 +26,6 @@ interface LaunchRecord {
   workspace: WorkspaceTarget;
   /** The provider-owned binding must remain opaque to the manager. */
   binding: RuntimeBinding;
-  /** Tmux placement is an optional compatibility projection of the binding. */
-  placement?: ManagedPlacement;
   /** Preserve the launch capability when restarting within this daemon. */
   mode: 'read' | 'write';
   /** Preserve requested provider routing when restarting within this daemon. */
@@ -36,35 +34,11 @@ interface LaunchRecord {
   createdAt: number;
 }
 
-function placementFromBinding(
-  binding: RuntimeBinding,
-): ManagedPlacement | undefined {
-  const location = binding.location;
-  if (!location?.sessionId || !location.windowId || !location.paneId)
-    return undefined;
-  return {
-    tmuxSession: location.sessionId,
-    tmuxWindowId: location.windowId,
-    tmuxPaneId: location.paneId,
-    displayTarget:
-      location.displayTarget ?? `${location.sessionId}:${location.windowId}`,
-  };
-}
-
-function bindingFromPlacement(
+function bindingFromLocation(
   runtimeId: string,
-  placement: ManagedPlacement,
+  location: RuntimeLocation,
 ): RuntimeBinding {
-  return {
-    runtimeId,
-    location: {
-      id: `${runtimeId}:location`,
-      sessionId: placement.tmuxSession,
-      windowId: placement.tmuxWindowId,
-      paneId: placement.tmuxPaneId,
-      displayTarget: placement.displayTarget,
-    },
-  };
+  return { runtimeId, location };
 }
 
 export class RuntimeManager {
@@ -86,7 +60,7 @@ export class RuntimeManager {
     private readonly metadata: MetadataStore,
     private readonly socketPath: string,
   ) {
-    // Recover ownership and placement before accepting a reconnect. Raw
+    // Recover host ownership before accepting a reconnect. Raw
     // credentials are never restored; only their hashes live in SQLite.
     for (const record of metadata.managedLaunches()) {
       this.launches.set(record.runtimeId, this.restoreLaunch(record));
@@ -108,8 +82,10 @@ export class RuntimeManager {
         source: 'directory',
         active: false,
       },
-      binding: bindingFromPlacement(record.runtimeId, record.placement),
-      placement: record.placement,
+      binding: bindingFromLocation(
+        record.runtimeId,
+        record.location ?? { id: `${record.runtimeId}:unrecoverable` },
+      ),
       // Older persisted launches have no mode/provider provenance and remain
       // writable on the legacy extension-bridge path.
       mode: record.mode ?? 'write',
@@ -178,19 +154,16 @@ export class RuntimeManager {
     initialPrompt?: string;
     model?: { provider: string; model: string; thinking?: string };
     mode?: 'read' | 'write';
-  }): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
+  }): Promise<{ runtimeId: string }> {
     return this.launch(input);
   }
 
-  async launch(
-    input: unknown,
-  ): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
+  async launch(input: unknown): Promise<{ runtimeId: string }> {
     const raw =
       input && typeof input === 'object'
         ? (input as Record<string, unknown>)
         : undefined;
     const runtimeProvider =
-      raw?.runtimeProvider === 'pi-server' ||
       raw?.runtimeProvider === 'extension-bridge'
         ? (raw.runtimeProvider as RuntimeProvider)
         : undefined;
@@ -203,9 +176,8 @@ export class RuntimeManager {
     const workspace = this.workspaces.get(request.workspaceId);
     if (!workspace)
       throw new Error('Workspace is not in the current Sesh catalogue.');
-    // The discovered workspace remains the tmux/session launch anchor. A
-    // durable orchestration run may supply an isolated checkout cwd; never
-    // silently substitute the shared project checkout when it does not.
+    // Sesh supplies workspace discovery. Launch uses the validated canonical
+    // directory and does not require a live terminal/session.
     const cwd = realpathSync.native(
       request.checkoutCwd ?? workspace.canonicalPath,
     );
@@ -255,15 +227,13 @@ export class RuntimeManager {
         sent: false,
       });
     let binding: RuntimeBinding | undefined;
-    let placement: ManagedPlacement | undefined;
     let metadataRecorded = false;
     try {
       binding = await this.provider.start({
         workspace: {
           id: workspace.id,
           name: workspace.name,
-          sessionId: workspace.tmuxSession,
-          active: workspace.active,
+          active: true,
         },
         cwd,
         name: sanitizeDisplayName(
@@ -280,32 +250,33 @@ export class RuntimeManager {
         model: request.model,
         mode: request.mode,
       });
-      placement = placementFromBinding(binding);
       const launch: LaunchRecord = {
         runtimeId,
         launchToken,
         identityToken,
         workspace,
         binding,
-        ...(placement ? { placement } : {}),
         mode: request.mode ?? 'write',
         runtimeProvider: runtimeProvider ?? 'extension-bridge',
         metadataRecorded: false,
         createdAt: Date.now(),
       };
       this.launches.set(runtimeId, launch);
-      if (placement) {
-        this.metadata.recordManagedLaunch(runtimeId, workspace.id, placement, {
+      this.metadata.recordManagedLaunch(
+        runtimeId,
+        workspace.id,
+        binding.location ?? { id: `${runtimeId}:location` },
+        {
           identityToken,
           launchToken,
           launchConsumed: !this.tokens.has(launchToken),
           mode: request.mode ?? 'write',
-        });
-        metadataRecorded = true;
-        launch.metadataRecorded = true;
-      }
+        },
+      );
+      metadataRecorded = true;
+      launch.metadataRecorded = true;
       this.dispatchInitialPrompt(runtimeId);
-      return { runtimeId, ...(placement ? { placement } : {}) };
+      return { runtimeId };
     } catch (error) {
       this.tokens.delete(launchToken);
       if (binding) {
@@ -327,20 +298,17 @@ export class RuntimeManager {
     );
   }
 
-  /** Reattach a restored managed placement after a daemon restart. */
+  /** Reattach a host-owned child after a dashboard daemon restart. */
   async recover(runtimeId: string): Promise<boolean> {
     const launch = this.launches.get(runtimeId);
     const location = launch?.binding.location;
     if (!launch || !location) return false;
     try {
       launch.binding = await this.provider.attach({ runtimeId, location });
-      launch.placement =
-        placementFromBinding(launch.binding) ?? launch.placement;
       return true;
     } catch {
-      // A restored placement that cannot be attached is unrecoverable. Remove
-      // the managed side effect rather than letting reconciliation relaunch a
-      // second runtime against an unknown tmux window.
+      // A location that cannot be attached is unrecoverable. Remove the
+      // managed side effect rather than relaunching against unknown ownership.
       await this.provider.stop(launch.binding);
       if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
       this.launches.delete(runtimeId);
@@ -349,7 +317,7 @@ export class RuntimeManager {
   }
 
   /**
-   * Stop a provider placement that was reattached during startup but never
+   * Stop a provider runtime that was reattached during startup but never
    * produced a hello. There is no registry snapshot to pass through stop(),
    * so this path closes the restored side effect directly and tombstones the
    * runtime identity for this daemon lifetime.
@@ -372,9 +340,7 @@ export class RuntimeManager {
     this.dispatchInitialPrompt(runtimeId);
   }
 
-  async restart(
-    runtimeId: string,
-  ): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
+  async restart(runtimeId: string): Promise<{ runtimeId: string }> {
     const snapshot = this.registry.get(runtimeId);
     const launch = this.launches.get(runtimeId);
     if (!snapshot || !launch)
@@ -432,13 +398,6 @@ export class RuntimeManager {
       while (this.registry.isOnline(runtimeId) && Date.now() < gracefulDeadline)
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    if (
-      snapshot &&
-      launch?.placement &&
-      this.registry.isOnline(runtimeId) &&
-      this.safePid(snapshot.pid)
-    )
-      this.signalManagedProcess(snapshot.pid, 'SIGTERM');
     const termDeadline = Date.now() + (force ? 500 : 2_000);
     while (
       snapshot &&
@@ -446,35 +405,19 @@ export class RuntimeManager {
       Date.now() < termDeadline
     )
       await new Promise((resolve) => setTimeout(resolve, 100));
-    if (
-      snapshot &&
-      launch?.placement &&
-      this.registry.isOnline(runtimeId) &&
-      this.safePid(snapshot.pid)
-    )
-      this.signalManagedProcess(snapshot.pid, 'SIGKILL');
     // Provider failure is intentionally allowed to reject. In that case the
     // launch, metadata, and registry snapshot remain available for retry.
     if (launch) {
-      await this.provider.stop(launch.binding);
+      await (
+        this.provider as AgentRuntimeProvider & {
+          stop(binding: RuntimeBinding, force?: boolean): Promise<void>;
+        }
+      ).stop(launch.binding, ...(force ? [true] : []));
       if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
     }
     this.initialPrompts.delete(runtimeId);
     if (launch) this.launches.delete(runtimeId);
     this.registry.forget(runtimeId);
-  }
-
-  private signalManagedProcess(pid: number, signal: NodeJS.Signals): void {
-    if (!this.safePid(pid)) return;
-    try {
-      process.kill(-pid, signal);
-    } catch {
-      try {
-        process.kill(pid, signal);
-      } catch {
-        /* already exited */
-      }
-    }
   }
 
   onRegistryChange(change: RegistryChange): void {
@@ -485,7 +428,7 @@ export class RuntimeManager {
   private dispatchInitialPrompt(runtimeId: string): void {
     const pending = this.initialPrompts.get(runtimeId);
     if (!pending || pending.sent) return;
-    // Do not consume the prompt merely because tmux launch completed before
+    // Do not consume the prompt merely because host start completed before
     // the bridge hello. The registry callback will retry this unsent prompt
     // once the runtime is actually online.
     const isOnline = (
@@ -516,16 +459,13 @@ export class RuntimeManager {
       });
   }
 
-  placement(runtimeId: string): ManagedPlacement | undefined {
-    return this.launches.get(runtimeId)?.placement;
+  /** Inspect the opaque provider location for startup reconciliation. */
+  location(runtimeId: string): RuntimeLocation | undefined {
+    return this.launches.get(runtimeId)?.binding.location;
   }
 
   /** Whether a provider launch remains owned and retryable by this manager. */
   hasLaunch(runtimeId: string): boolean {
     return this.launches.has(runtimeId);
-  }
-
-  private safePid(pid: number): boolean {
-    return Number.isSafeInteger(pid) && pid > 0;
   }
 }

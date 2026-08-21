@@ -11,14 +11,15 @@ export type {
   DashboardServerOptions,
 } from './create-daemon.js';
 export { createDaemon } from './create-daemon.js';
+export * from './headless-runtime-provider.js';
 export { createDashboardServer } from './http.js';
 export * from './metadata.js';
+export * from './runtime-host.js';
 export * from './runtime-manager.js';
 export * from './runtime-registry.js';
 export * from './security.js';
 export * from './sesh.js';
 export * from './session-index.js';
-export * from './tmux.js';
 
 /** Production/launchd entrypoint shared by dist/index.js and the dev wrapper. */
 export async function runDashboard(): Promise<void> {

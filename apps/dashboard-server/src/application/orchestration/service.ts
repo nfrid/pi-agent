@@ -364,10 +364,10 @@ export class OrchestrationService implements OrchestrationHost {
   async recoverManagedRuntime(runtimeId: string): Promise<boolean> {
     const manager = this.manager as RuntimeManager & {
       recover?: (id: string) => Promise<boolean>;
-      placement?: (id: string) => unknown;
+      location?: (id: string) => unknown;
     };
     if (manager.recover) return manager.recover(runtimeId);
-    return Boolean(manager.placement?.(runtimeId));
+    return Boolean(manager.location?.(runtimeId));
   }
 
   async waitForRuntimeHello(runtimeId: string): Promise<boolean> {

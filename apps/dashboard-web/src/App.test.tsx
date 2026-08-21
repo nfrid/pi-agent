@@ -228,14 +228,14 @@ describe('image attachments', () => {
 });
 
 describe('project-scoped new chat', () => {
-  it('uses the active workspace for context-free new chat entries', () => {
+  it('uses the first usable workspace for context-free new chat entries', () => {
     const snapshot = {
       workspaces: [
         { id: 'dormant', active: false },
         { id: 'active', active: true },
       ],
     } as never;
-    expect(newChatPath(snapshot)).toBe('/workspaces/active/new');
+    expect(newChatPath(snapshot)).toBe('/workspaces/dormant/new');
     expect(newChatPath({ workspaces: [] } as never)).toBe('/workspaces');
     expect(newChatPath(snapshot, 'dormant')).toBe('/workspaces/dormant/new');
     expect(pendingChatPath('workspace-1', 'runtime/1')).toBe(

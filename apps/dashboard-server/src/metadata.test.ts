@@ -37,12 +37,11 @@ describe('dashboard metadata wire boundaries', () => {
     );
     const store = new MetadataStore(path.join(root, 'dashboard.sqlite'));
     try {
-      const placement = {
-        tmuxSession: 'sesh',
-        tmuxWindowId: '@1',
-        tmuxPaneId: '%1',
+      const location = {
+        id: 'host:read-runtime',
+        displayTarget: 'runtime-host://read-runtime',
       };
-      store.recordManagedLaunch('read-runtime', 'workspace', placement, {
+      store.recordManagedLaunch('read-runtime', 'workspace', location, {
         identityToken: 'identity-read',
         launchToken: 'launch-read',
         mode: 'read',
@@ -51,9 +50,8 @@ describe('dashboard metadata wire boundaries', () => {
         'write-runtime',
         'workspace',
         {
-          ...placement,
-          tmuxWindowId: '@2',
-          tmuxPaneId: '%2',
+          id: 'host:write-runtime',
+          displayTarget: 'runtime-host://write-runtime',
         },
         {
           identityToken: 'identity-write',
@@ -62,7 +60,11 @@ describe('dashboard metadata wire boundaries', () => {
       );
       expect(store.managedLaunches()).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ runtimeId: 'read-runtime', mode: 'read' }),
+          expect.objectContaining({
+            runtimeId: 'read-runtime',
+            mode: 'read',
+            location,
+          }),
           expect.objectContaining({
             runtimeId: 'write-runtime',
             mode: 'write',

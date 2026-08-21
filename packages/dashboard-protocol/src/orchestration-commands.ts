@@ -72,9 +72,7 @@ export const ThreadCreateCommandSchema = Type.Object(
       Type.Union([Type.Literal('read'), Type.Literal('write')]),
     ),
     model: Type.Optional(ModelSelectionSchema),
-    runtimeProvider: Type.Optional(
-      Type.Union([Type.Literal('extension-bridge'), Type.Literal('pi-server')]),
-    ),
+    runtimeProvider: Type.Optional(Type.Literal('extension-bridge')),
   },
   { additionalProperties: false },
 );

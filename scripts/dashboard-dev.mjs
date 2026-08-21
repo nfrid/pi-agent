@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] ?? 'all';
-if (!['all', 'daemon', 'web', 'serve'].includes(mode)) {
+if (!['all', 'daemon', 'web', 'serve', 'runtime-host'].includes(mode)) {
   process.stderr.write(
-    'Usage: node scripts/dashboard-dev.mjs [all|daemon|web|serve]\n',
+    'Usage: node scripts/dashboard-dev.mjs [all|daemon|web|serve|runtime-host]\n',
   );
   process.exit(2);
 }
@@ -110,6 +110,13 @@ async function main() {
 
   if (mode === 'all' || mode === 'daemon')
     run('daemon', ['--filter', '@pi-dashboard/server', 'dev']);
+  if (
+    mode === 'all' ||
+    mode === 'daemon' ||
+    mode === 'serve' ||
+    mode === 'runtime-host'
+  )
+    run('runtime-host', ['--filter', '@pi-dashboard/server', 'runtime-host']);
   if (mode === 'all' || mode === 'web')
     run('web', ['--filter', '@pi-dashboard/web', 'dev']);
   if (mode === 'serve') {

@@ -20,12 +20,12 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/index.js",
+    "runtime-host": "tsx src/runtime-host-main.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@earendil-works/pi-client": "0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",
     "@pi-dashboard/activity-model": "workspace:*",
     "@pi-dashboard/codex-usage": "workspace:*",

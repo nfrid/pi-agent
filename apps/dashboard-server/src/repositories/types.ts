@@ -10,6 +10,7 @@ import type {
   Run,
   RunStatus,
   RunSummary,
+  RuntimeLocation,
   RuntimeProvider,
   SessionIndexEntry,
   SessionThreadLink,
@@ -31,12 +32,8 @@ export interface PushSubscriptionRecord {
 export interface ManagedLaunchRecord {
   runtimeId: string;
   workspaceId: string;
-  placement: {
-    tmuxSession: string;
-    tmuxWindowId: string;
-    tmuxPaneId: string;
-    displayTarget: string;
-  };
+  /** Opaque location owned by the runtime provider/host. */
+  location: RuntimeLocation;
   /** Managed Pi tool capability; old rows are treated as writable. */
   mode: 'read' | 'write';
   identityTokenHash: string;
@@ -53,9 +50,7 @@ export interface MetadataRepository {
   recordManagedLaunch(
     runtimeId: string,
     workspaceId: string,
-    placement: Omit<ManagedLaunchRecord['placement'], 'displayTarget'> & {
-      displayTarget?: string;
-    },
+    location: RuntimeLocation,
     credentials: {
       identityToken: string;
       launchToken: string;

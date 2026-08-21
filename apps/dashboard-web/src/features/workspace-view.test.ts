@@ -78,7 +78,7 @@ describe('workspace detail projections', () => {
     });
     expect(
       summarizeWorkspace({ ...workspace, active: false }, [], []).readiness,
-    ).toBe('dormant');
+    ).toBe('offline');
     expect(
       summarizeWorkspace(workspace, [runtime('offline', { online: false })], [])
         .readiness,

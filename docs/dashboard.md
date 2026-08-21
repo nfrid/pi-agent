@@ -1,9 +1,10 @@
 # Remote Pi dashboard
 
-The dashboard is a self-hosted web interface for local Pi runtimes. Pi remains a
-normal interactive process inside tmux; the dashboard consumes structured Pi
-events and persisted session JSONL. It does not scrape terminal output, expose a
-shell endpoint, or copy transcripts into its metadata database.
+The dashboard is a self-hosted web interface for local Pi runtimes. Managed Pi
+runtimes are headless `pi --mode rpc` children owned by the stable runtime-host
+sidecar; the dashboard consumes bridge events and persisted session JSONL. It
+does not scrape terminal output, expose a shell endpoint, or copy transcripts
+into its metadata database.
 
 ## Packages and applications
 
@@ -52,10 +53,11 @@ bridge socket is configured:
 PI_DASHBOARD_SOCKET="$HOME/.pi/agent/dashboard/bridge.sock" pi
 ```
 
-Dashboard launches use a fixed `pi` argv in a new tmux window, an absolute
-validated workspace, and one window per managed runtime. The workspace must
-belong to an active tmux session discovered by Sesh; dormant Sesh entries are
-not launch targets.
+Dashboard launches use a fixed headless RPC `pi` argv, an absolute validated
+workspace, and one child per managed runtime. Sesh remains workspace discovery
+only; a usable canonical directory is launchable. Existing managed tmux windows
+should be stopped before this cutover because legacy active rows are not
+recoverable.
 
 For production build and restart instructions, see
 [dashboard-deployment.md](dashboard-deployment.md).
@@ -73,7 +75,7 @@ For production build and restart instructions, see
 | `PI_SESSION_DIR` | Optional Pi session-root override. |
 | `PI_DASHBOARD_VAPID_PUBLIC_KEY`, `PI_DASHBOARD_VAPID_PRIVATE_KEY`, `PI_DASHBOARD_VAPID_SUBJECT` | Optional Web Push configuration. |
 | `PI_DASHBOARD_NOTIFY_SETTLED=1` | Opt in to settled-run notifications. |
-| `PI_DASHBOARD_EXPERIMENTAL_PI_SERVER=1` + `PI_DASHBOARD_PI_SERVER_SOCKET` | Explicitly enable the bounded external Pi server experiment; see [pi-server-experiment.md](pi-server-experiment.md). |
+| `PI_DASHBOARD_RUNTIME_HOST_SOCKET` | Owner-private Unix socket for the stable headless runtime-host sidecar. |
 
 ## Architecture
 
@@ -151,10 +153,10 @@ provider payloads.
 - forgotten runtimes cannot reconnect during the same daemon lifetime;
 - the Unix socket and persisted credentials are owner-only.
 
-Managed runtime placement and hashed credentials persist in SQLite so reconnects
-survive socket churn and daemon restart. External runtimes can be controlled,
-but the dashboard never removes their tmux windows. Force-stop is available only
-for managed runtimes.
+Opaque runtime locations and hashed credentials persist in SQLite so reconnects
+survive dashboard socket churn and daemon restart. The runtime host owns child
+process groups, drains RPC pipes, and force-closes them on shutdown or crash;
+children are never adopted. The dashboard never becomes a second agent protocol.
 
 ## Browser surface
 
@@ -204,7 +206,7 @@ configuration is isolated from runtime control and in-app notifications.
 ## Intentional limits
 
 The dashboard has no terminal emulator, arbitrary command route, cold-start Sesh
-path, multi-user authentication, public exposure,
+launch requirement, multi-user authentication, public exposure,
 delegate-child control, offline command queue, or transcript database. Pi's
 native extensions and TUI remain the source of truth for local terminal
 behavior.
@@ -240,6 +242,6 @@ the dashboard and launch routes:
 pnpm --filter @pi-dashboard/web test:e2e
 ```
 
-Real Pi/tmux/Sesh lifecycle and browser-device push delivery remain opt-in
-integration checks because they require a user's tmux server, credentials, and
-an HTTPS secure context.
+Real Pi/Sesh discovery and browser-device push delivery remain opt-in
+integration checks because they require local credentials and an HTTPS secure
+context.

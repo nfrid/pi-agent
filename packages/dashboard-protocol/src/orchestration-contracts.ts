@@ -117,10 +117,7 @@ export const RunModeSchema = Type.Union([
 ]);
 export type RunMode = Static<typeof RunModeSchema>;
 
-export const RuntimeProviderSchema = Type.Union([
-  Type.Literal('extension-bridge'),
-  Type.Literal('pi-server'),
-]);
+export const RuntimeProviderSchema = Type.Literal('extension-bridge');
 export type RuntimeProvider = Static<typeof RuntimeProviderSchema>;
 
 export const ProjectSchema = Type.Object(
@@ -355,10 +352,8 @@ export type OrchestrationRuntime = Static<typeof OrchestrationRuntimeSchema>;
 
 /** Provider-neutral runtime lifecycle contracts retained for existing adapters. */
 export interface RuntimeLocation {
+  /** Provider-defined, opaque identity persisted for daemon restart recovery. */
   readonly id: string;
-  readonly sessionId?: string;
-  readonly windowId?: string;
-  readonly paneId?: string;
   readonly displayTarget?: string;
 }
 

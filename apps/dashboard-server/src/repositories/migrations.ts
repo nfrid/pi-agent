@@ -625,6 +625,12 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           ON orchestration_run(checkout_id,status);
       `);
 
+      // The old PiServer experiment is not recoverable. Preserve the durable
+      // run record but route its provider through the sole bridge path.
+      db.prepare(
+        "UPDATE orchestration_run SET runtime_provider='extension-bridge' WHERE runtime_provider='pi-server'",
+      ).run();
+
       // Receipts are replayed directly by idempotent command paths. Normalize
       // their stored orchestration projections with the canonical rows so a
       // pre-v11 replay cannot leak the removed wire literal.
@@ -639,6 +645,37 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         if (resultJson !== undefined)
           updateReceipt.run(resultJson, receipt.idempotency_key);
       }
+    },
+  },
+  {
+    version: 12,
+    name: 'headless-runtime-location-and-retire-tmux-launches',
+    foreignKeysOff: true,
+    up(db) {
+      // Existing managed tmux windows are deliberately not adoptable. Users
+      // should stop them before cutover; dropping their active placement is
+      // safer than allowing a daemon restart to guess ownership.
+      db.exec(`
+        CREATE TABLE managed_launch_v12 (
+          runtime_id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          runtime_location_json TEXT,
+          launched_at INTEGER NOT NULL,
+          stopped_at INTEGER,
+          identity_token_hash TEXT,
+          launch_token_hash TEXT,
+          launch_consumed INTEGER NOT NULL DEFAULT 0,
+          mode TEXT NOT NULL DEFAULT 'write' CHECK (mode IN ('read','write'))
+        );
+        INSERT INTO managed_launch_v12
+          (runtime_id,workspace_id,runtime_location_json,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode)
+          SELECT runtime_id,workspace_id,NULL,launched_at,
+                 COALESCE(stopped_at, strftime('%s','now') * 1000),
+                 identity_token_hash,launch_token_hash,launch_consumed,mode
+          FROM managed_launch;
+        DROP TABLE managed_launch;
+        ALTER TABLE managed_launch_v12 RENAME TO managed_launch;
+      `);
     },
   },
 ];

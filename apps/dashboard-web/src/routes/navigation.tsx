@@ -8,9 +8,7 @@ export function newChatPath(
   snapshot: BrowserSnapshot,
   workspaceId?: string,
 ): string {
-  const id =
-    workspaceId ??
-    snapshot.workspaces.find((workspace) => workspace.active)?.id;
+  const id = workspaceId ?? snapshot.workspaces[0]?.id;
   return id ? `/workspaces/${encodeURIComponent(id)}/new` : '/workspaces';
 }
 

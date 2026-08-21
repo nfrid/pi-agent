@@ -76,9 +76,7 @@ export function WorkspaceView({
           <span className={styles.summaryMeta}>
             {!workspace
               ? 'Workspace unavailable'
-              : workspace.active
-                ? 'Sesh workspace is active'
-                : 'Not active in Sesh'}
+              : 'Canonical workspace directory is available'}
           </span>
         </div>
         <div className={styles.summaryCard}>
@@ -105,12 +103,6 @@ export function WorkspaceView({
         </div>
       </section>
 
-      {workspace && !workspace.active && (
-        <div className={`notice ${styles.dormantNotice}`} role="status">
-          This workspace is dormant. Open it through Sesh on the Mac before
-          starting a chat.
-        </div>
-      )}
       {!workspace && (
         <p className={styles.emptyState} role="status">
           This workspace is no longer in the current catalogue.
@@ -130,9 +122,7 @@ export function WorkspaceView({
         {!runtimes.length && (
           <p className={styles.emptyState}>
             <strong>No live runtimes</strong>
-            {workspace?.active
-              ? 'Start a chat to connect a runtime to this workspace.'
-              : 'A runtime will appear here after the Sesh workspace is active.'}
+            Start a chat to connect a runtime to this workspace.
           </p>
         )}
       </div>

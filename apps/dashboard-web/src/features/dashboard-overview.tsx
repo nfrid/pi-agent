@@ -173,11 +173,8 @@ export function WorkspacesView({
                 <strong>{workspace.name}</strong>
                 <small className="path">{workspace.canonicalPath}</small>
               </span>
-              <span
-                className={`workspace-state ${workspace.active ? 'active' : ''}`}
-              >
-                <i aria-hidden="true">●</i>{' '}
-                {workspace.active ? 'ready' : 'dormant'}
+              <span className="workspace-state active">
+                <i aria-hidden="true">●</i> ready
               </span>
               <span className="workspace-card-meta">
                 {runtimes.length} runtime{runtimes.length === 1 ? '' : 's'} ·{' '}
@@ -188,7 +185,7 @@ export function WorkspacesView({
         })}
       </div>
       {!snapshot.workspaces.length && (
-        <p className="empty">No Sesh workspaces discovered.</p>
+        <p className="empty">No workspaces discovered.</p>
       )}
     </section>
   );
@@ -263,7 +260,7 @@ export function RuntimeCard({
         </small>
       </span>
       <span className="runtime-owner">
-        {runtime.tmux?.displayTarget ?? 'session'}
+        {runtime.ownership === 'managed' ? 'headless host' : 'bridge'}
       </span>
     </button>
   );

@@ -30,7 +30,7 @@ export interface OrchestrationServiceOptions {
   beforeWorktreePreparation?: () => Promise<void>;
   /** Test seam for deterministically racing goodbye with worktree settlement. */
   beforeWorktreeFinish?: () => Promise<void>;
-  /** Experimental default applies only to durable managed orchestration runs. */
+  /** Default provider label for durable managed orchestration runs. */
   defaultRuntimeProvider?: Run['runtimeProvider'];
   /** Legacy transcript access used by session adoption. */
   readSession?: (id: string) => Promise<{

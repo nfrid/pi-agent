@@ -38,7 +38,7 @@ export function sortWorkspaceSessions(
   );
 }
 
-export type WorkspaceReadiness = 'ready' | 'offline' | 'dormant' | 'unknown';
+export type WorkspaceReadiness = 'ready' | 'offline' | 'unknown';
 
 export type WorkspaceSummary = {
   readiness: WorkspaceReadiness;
@@ -58,11 +58,9 @@ export function summarizeWorkspace(
   ).length;
   const readiness: WorkspaceReadiness = !workspace
     ? 'unknown'
-    : !workspace.active
-      ? 'dormant'
-      : liveRuntimeCount > 0
-        ? 'ready'
-        : 'offline';
+    : liveRuntimeCount > 0
+      ? 'ready'
+      : 'offline';
   return {
     readiness,
     runtimeCount: runtimes.length,

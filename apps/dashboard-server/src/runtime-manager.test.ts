@@ -27,12 +27,7 @@ describe('runtime stopping', () => {
           {
             runtimeId: restoredBinding.runtimeId,
             workspaceId: 'workspace-restored',
-            placement: {
-              tmuxSession: 'sesh',
-              tmuxWindowId: '@restored',
-              tmuxPaneId: '%restored',
-              displayTarget: 'sesh:@restored',
-            },
+            location: { id: 'provider:opaque-restored-location' },
             identityTokenHash: 'identity-hash',
             launchTokenHash: 'launch-hash',
             launchConsumed: true,
@@ -76,11 +71,7 @@ describe('runtime stopping', () => {
           {
             runtimeId: restoredBinding.runtimeId,
             workspaceId: 'workspace-retry',
-            placement: {
-              tmuxSession: 'sesh',
-              tmuxWindowId: '@retry',
-              tmuxPaneId: '%retry',
-            },
+            location: { id: 'provider:opaque-retry-location' },
             identityTokenHash: 'identity-hash',
             launchTokenHash: 'launch-hash',
             launchConsumed: true,
@@ -95,7 +86,7 @@ describe('runtime stopping', () => {
     await expect(
       manager.stopRecovered(restoredBinding.runtimeId),
     ).rejects.toThrow('provider stop failed');
-    expect(manager.placement(restoredBinding.runtimeId)).toBeDefined();
+    expect(manager.location(restoredBinding.runtimeId)).toBeDefined();
     expect(forget).not.toHaveBeenCalled();
     await manager.stopRecovered(restoredBinding.runtimeId);
     expect(stop).toHaveBeenCalledTimes(2);
@@ -152,10 +143,7 @@ describe('managed runtime launch safety', () => {
     runtimeId,
     location: {
       id: `${runtimeId}:location`,
-      sessionId: 'sesh',
-      windowId: '@1',
-      paneId: '%1',
-      displayTarget: 'sesh:@1',
+      displayTarget: `runtime://${runtimeId}`,
     },
   });
 
@@ -295,6 +283,7 @@ describe('managed runtime launch safety', () => {
       {
         managedLaunches: () => [],
         recordManagedLaunch,
+        markManagedStopped: vi.fn(),
       } as never,
       '/tmp/bridge.sock',
     );
@@ -308,8 +297,7 @@ describe('managed runtime launch safety', () => {
 
     const result = await manager.launch({ workspaceId: 'workspace-1' });
     expect(result).toEqual({ runtimeId: expect.any(String) });
-    expect(result.placement).toBeUndefined();
-    expect(recordManagedLaunch).not.toHaveBeenCalled();
+    expect(recordManagedLaunch).toHaveBeenCalledOnce();
 
     await manager.stop(result.runtimeId);
     expect(stop).toHaveBeenCalledOnce();
@@ -390,11 +378,9 @@ describe('managed runtime launch safety', () => {
           {
             runtimeId,
             workspaceId: 'workspace-1',
-            placement: {
-              tmuxSession: 'sesh',
-              tmuxWindowId: '@1',
-              tmuxPaneId: '%1',
-              displayTarget: 'sesh:@1',
+            location: {
+              id: 'runtime:location',
+              displayTarget: 'runtime://location',
             },
             mode: 'read',
             identityTokenHash: 'identity-hash',
@@ -422,12 +408,7 @@ describe('managed runtime launch safety', () => {
 
   it('rolls back the tmux window if metadata persistence fails', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-rollback-'));
-    const placement = {
-      tmuxSession: 'sesh',
-      tmuxWindowId: '@1',
-      tmuxPaneId: '%1',
-      displayTarget: 'sesh:@1',
-    };
+    const location = { displayTarget: 'runtime://location' };
     const stop = vi.fn().mockResolvedValue(undefined);
     const metadata = {
       managedLaunches: () => [],
@@ -442,10 +423,7 @@ describe('managed runtime launch safety', () => {
           runtimeId,
           location: {
             id: `${runtimeId}:location`,
-            sessionId: placement.tmuxSession,
-            windowId: placement.tmuxWindowId,
-            paneId: placement.tmuxPaneId,
-            displayTarget: placement.displayTarget,
+            ...location,
           },
         }),
         stop,
@@ -460,11 +438,7 @@ describe('managed runtime launch safety', () => {
     ).rejects.toThrow('disk full');
     expect(stop).toHaveBeenCalledOnce();
     expect(stop.mock.calls[0]?.[0]).toMatchObject({
-      location: {
-        sessionId: placement.tmuxSession,
-        windowId: placement.tmuxWindowId,
-        paneId: placement.tmuxPaneId,
-      },
+      location,
     });
     await rm(root, { recursive: true, force: true });
   });
@@ -477,7 +451,7 @@ describe('managed runtime credentials', () => {
     metadata.recordManagedLaunch(
       'runtime-1',
       'workspace-1',
-      { tmuxSession: 's', tmuxWindowId: '@1', tmuxPaneId: '%1' },
+      { id: 'host:runtime-1', displayTarget: 'runtime-host://runtime-1' },
       { launchToken: 'launch-secret', identityToken: 'identity-secret' },
     );
     const manager = new RuntimeManager(
@@ -487,8 +461,8 @@ describe('managed runtime credentials', () => {
       metadata,
       '/tmp/bridge.sock',
     );
-    expect(manager.placement('runtime-1')).toMatchObject({
-      tmuxWindowId: '@1',
+    expect(manager.location('runtime-1')).toMatchObject({
+      id: 'host:runtime-1',
     });
     expect(manager.expectedToken('runtime-1', 'launch-secret', undefined)).toBe(
       true,

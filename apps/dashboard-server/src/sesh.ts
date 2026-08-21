@@ -49,9 +49,7 @@ function workspaceId(pathValue: string, gitRoot?: string): string {
 
 export function normalizeSeshEntries(
   entries: readonly SeshEntryLike[],
-  activeTmuxSessions: readonly string[] = [],
 ): WorkspaceTarget[] {
-  const active = new Set(activeTmuxSessions);
   const merged = new Map<string, WorkspaceTarget>();
   for (const entry of entries) {
     const rawPath = stringValue(entry.Path, entry.path);
@@ -78,8 +76,10 @@ export function normalizeSeshEntries(
       canonicalPath,
       gitRoot,
       source,
-      tmuxSession: source === 'tmux' && active.has(name) ? name : undefined,
-      active: active.has(name),
+      // `active` is launch readiness, not terminal liveness. Sesh is only a
+      // workspace catalogue now; every existing canonical directory is usable.
+      tmuxSession: source === 'tmux' ? name : undefined,
+      active: true,
     };
     const preferred =
       existing &&
@@ -115,30 +115,12 @@ export class CliSeshAdapter implements SeshAdapter {
     const parsed: unknown = JSON.parse(result.stdout);
     if (!Array.isArray(parsed))
       throw new Error('Sesh returned a non-list response.');
-    const tmux = await this.activeTmuxSessions();
     return normalizeSeshEntries(
       parsed.filter(
         (entry): entry is SeshEntryLike =>
           typeof entry === 'object' && entry !== null,
       ),
-      tmux,
     );
-  }
-
-  private async activeTmuxSessions(): Promise<string[]> {
-    try {
-      const result = await execFileAsync(
-        'tmux',
-        ['list-sessions', '-F', '#{session_name}'],
-        { maxBuffer: 128 * 1024 },
-      );
-      return result.stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-    } catch {
-      return [];
-    }
   }
 }
 
