@@ -120,12 +120,98 @@ function writeExpandedArchived(state: ExpandedArchived): void {
   }
 }
 
+function WorkspaceChooser({
+  workspaces,
+  onChoose,
+  onClose,
+}: {
+  workspaces: BrowserSnapshot['workspaces'];
+  onChoose: (workspaceId: string) => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    firstButtonRef.current?.focus();
+  }, []);
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: The backdrop closes the modal on outside clicks.
+    <div
+      className={styles.workspaceChooserBackdrop}
+      data-workspace-chooser-backdrop=""
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        className={styles.workspaceChooser}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agent-thread-workspace-chooser-heading"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          event.stopPropagation();
+          const focusable = Array.from(
+            dialogRef.current?.querySelectorAll<HTMLElement>(
+              'button:not(:disabled)',
+            ) ?? [],
+          );
+          const first = focusable[0];
+          const last = focusable.at(-1);
+          if (!first || !last) return;
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <h2 id="agent-thread-workspace-chooser-heading">Choose a workspace</h2>
+        <p>Where should the new thread start?</p>
+        <div className={styles.workspaceChooserOptions}>
+          {workspaces.map((workspace, index) => (
+            <button
+              ref={index === 0 ? firstButtonRef : undefined}
+              type="button"
+              key={workspace.id}
+              onClick={() => onChoose(workspace.id)}
+            >
+              {workspace.name}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className={styles.workspaceChooserCancel}
+          onClick={onClose}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Per-row actions are rendered in the shared accessible context menu below.
 function AgentThreadLink({
   row,
   selected,
   unread,
   activeResult,
+  density,
   onSelect,
   lifecycleProps,
 }: {
@@ -133,6 +219,7 @@ function AgentThreadLink({
   selected: boolean;
   unread: boolean;
   activeResult: boolean;
+  density: 'card' | 'slim';
   onSelect: () => void;
   lifecycleProps?: RuntimeLifecycleThreadProps;
 }) {
@@ -142,6 +229,7 @@ function AgentThreadLink({
       type="button"
       className={styles.threadLink}
       aria-current={selected ? 'page' : undefined}
+      data-row-density={density}
       data-search-active={activeResult ? '' : undefined}
       aria-label={`${row.title} ${statusLabel(row)}${unread ? ' unread' : ''}`}
       onClick={onSelect}
@@ -153,19 +241,42 @@ function AgentThreadLink({
         {statusGlyph(row.status)}
       </span>
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
-        <strong>{row.title}</strong>
-        <small>
-          <span className={styles.threadContext}>
-            <span>{statusLabel(row)}</span>
-            <span aria-hidden="true"> · </span>
-            <span>{shortPath(row.cwd)}</span>
+        {density === 'card' && (
+          <span className={styles.threadWorkspace} data-row-content="workspace">
+            <span>{row.workspaceName}</span>
+            {row.durableThread?.pinnedAt !== undefined && (
+              <span
+                className={styles.threadPin}
+                title="Pinned"
+                role="img"
+                aria-label="Pinned"
+              >
+                📌
+              </span>
+            )}
           </span>
+        )}
+        <strong>{row.title}</strong>
+        {density === 'card' ? (
+          <small>
+            <span className={styles.threadContext} data-row-content="context">
+              <span>{statusLabel(row)}</span>
+              <span aria-hidden="true"> · </span>
+              <span>{shortPath(row.cwd)}</span>
+            </span>
+            <DashboardTime
+              className={`agent-thread-time ${styles.threadTime}`}
+              timestamp={row.updatedAt}
+              context="sidebar"
+            />
+          </small>
+        ) : (
           <DashboardTime
             className={`agent-thread-time ${styles.threadTime}`}
             timestamp={row.updatedAt}
             context="sidebar"
           />
-        </small>
+        )}
       </span>
     </button>
   );
@@ -189,6 +300,8 @@ export function AgentThreadNav({
   const [query, setQuery] = useState('');
   const [historyLimit, setHistoryLimit] = useState(MAX_VISIBLE_HISTORY_THREADS);
   const [workspaceScope, setWorkspaceScope] = useState('all');
+  const [workspaceChooserOpen, setWorkspaceChooserOpen] = useState(false);
+  const newThreadButtonRef = useRef<HTMLButtonElement>(null);
   const [historyCollapsed, setHistoryCollapsed] = useState(() =>
     Boolean(readCollapsedHistory().all),
   );
@@ -347,11 +460,38 @@ export function AgentThreadNav({
     if (utility) utility.openPanel(panel);
     else go(fallbackPath);
   };
-  const renderThreadRow = (row: AgentThreadRow) => {
+  const openNewThread = () => {
+    if (workspaceScope !== 'all') {
+      go(newChatPath(snapshot, workspaceScope));
+      if (mode === 'session') onOpenChange?.(false);
+      return;
+    }
+    if (snapshot.workspaces.length === 0) {
+      go('/workspaces');
+      if (mode === 'session') onOpenChange?.(false);
+      return;
+    }
+    if (snapshot.workspaces.length === 1) {
+      go(newChatPath(snapshot, snapshot.workspaces[0].id));
+      if (mode === 'session') onOpenChange?.(false);
+      return;
+    }
+    setWorkspaceChooserOpen(true);
+  };
+  const closeWorkspaceChooser = () => {
+    setWorkspaceChooserOpen(false);
+    newThreadButtonRef.current?.focus();
+  };
+  const chooseWorkspace = (workspaceId: string) => {
+    setWorkspaceChooserOpen(false);
+    go(newChatPath(snapshot, workspaceId));
+    if (mode === 'session') onOpenChange?.(false);
+  };
+  const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
     const selected = row.id === currentSessionId;
     const unread = isThreadUnread(row, unreadState);
     const activeResult = row.id === activeResultId;
-    const rowClassName = `agent-thread-row ${styles.threadRow} ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} ${activeResult ? 'active-result' : ''} status-${row.status}`;
+    const rowClassName = `agent-thread-row ${density === 'card' ? 'agent-thread-card' : 'agent-thread-slim'} ${styles.threadRow} ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} ${activeResult ? 'active-result' : ''} status-${row.status}`;
     const menuItems = ({ closeMenu }: { closeMenu: () => void }) => (
       <>
         {row.durableThread && (
@@ -393,6 +533,7 @@ export function AgentThreadNav({
         selected={selected}
         unread={unread}
         activeResult={activeResult}
+        density={density}
         onSelect={() => select(row.id)}
         lifecycleProps={lifecycleProps}
       />
@@ -435,20 +576,21 @@ export function AgentThreadNav({
           <strong>Agents</strong>
         </div>
         <button
+          ref={newThreadButtonRef}
           type="button"
           className={styles.newThread}
-          onClick={() => {
-            go(
-              workspaceScope === 'all'
-                ? newChatPath(snapshot)
-                : `/workspaces/${encodeURIComponent(workspaceScope)}/new`,
-            );
-            if (mode === 'session') onOpenChange?.(false);
-          }}
+          onClick={openNewThread}
         >
           <span aria-hidden="true">+</span> New thread
         </button>
       </div>
+      {workspaceChooserOpen && (
+        <WorkspaceChooser
+          workspaces={snapshot.workspaces}
+          onChoose={chooseWorkspace}
+          onClose={closeWorkspaceChooser}
+        />
+      )}
       <div className={styles.search}>
         <span aria-hidden="true">⌕</span>
         <input
@@ -504,7 +646,7 @@ export function AgentThreadNav({
               <span>Pinned</span>
               <small>{sections.pinned.length}</small>
             </h3>
-            {sections.pinned.map(renderThreadRow)}
+            {sections.pinned.map((row) => renderThreadRow(row, 'card'))}
           </section>
         )}
         {sections.active.length > 0 && (
@@ -513,7 +655,7 @@ export function AgentThreadNav({
               <span>Active</span>
               <small>{sections.active.length}</small>
             </h3>
-            {sections.active.map(renderThreadRow)}
+            {sections.active.map((row) => renderThreadRow(row, 'card'))}
           </section>
         )}
         {(sections.history.length > 0 || filtered.some(isHistoryThread)) && (
@@ -540,7 +682,7 @@ export function AgentThreadNav({
               {(historyCollapsed && !query.trim()
                 ? sections.history.filter((row) => row.id === currentSessionId)
                 : sections.history
-              ).map(renderThreadRow)}
+              ).map((row) => renderThreadRow(row, 'slim'))}
             </section>
           </>
         )}
@@ -568,7 +710,7 @@ export function AgentThreadNav({
               {(archivedExpanded || query.trim()
                 ? sections.archived
                 : sections.archived.filter((row) => row.id === currentSessionId)
-              ).map(renderThreadRow)}
+              ).map((row) => renderThreadRow(row, 'slim'))}
             </section>
           </>
         )}
