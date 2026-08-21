@@ -1321,6 +1321,20 @@ export const SessionIndexEntrySchema = Type.Object(
     workspaceId: Type.Optional(IdentifierSchema),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
+    /** Compact resume hints derived from the latest indexed leaf ancestry. */
+    lastKnownModel: Type.Optional(
+      Type.Object(
+        {
+          provider: Type.String({ minLength: 1, maxLength: 200 }),
+          model: Type.String({ minLength: 1, maxLength: 300 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    lastKnownThinking: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 64 }),
+    ),
+    lastKnownContextTokens: Type.Optional(Type.Number({ minimum: 0 })),
     /** Session header timestamp, used for stable chronological ordering. */
     startedAt: Type.Optional(FiniteNumberSchema),
     updatedAt: FiniteNumberSchema,

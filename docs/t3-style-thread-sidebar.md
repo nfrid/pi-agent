@@ -88,7 +88,9 @@ Add only when requested or when the copied UX requires it:
 
 ## Dormant active-thread slice
 
-The accepted follow-up keeps the normal composer shell for dormant sessions and attaches a compact notice: **This session is dormant** / **Sending a message will resume Pi in this workspace.** A text submission starts the existing runtime with `workspaceId`, `sessionId`, and `initialPrompt` exactly once; the draft is retained on failure and cleared only after a successful start mutation. Image attachment selection remains disabled while dormant because model capability is not available until a runtime exists. Missing workspace association remains a disabled error case. Explicit durable Settled state remains a later slice; this change adds no settle commands, storage, or protocol fields.
+The accepted follow-up keeps the normal composer shell for dormant sessions and attaches a compact notice: **This session is dormant** / **Sending a message will resume Pi in this workspace.** Indexed sessions may expose optional last-known provider/model, thinking effort, and assistant context-token hints from the latest leaf ancestry. Runtime values remain authoritative; dormant rows prefer these hints, then the same configured/default model choices used by New Chat. Missing values remain honest (`? effort`, `? ctx`, or a resume fallback), and CWD is never restored.
+
+A text submission starts the existing runtime with `workspaceId`, `sessionId`, and `initialPrompt` exactly once. For an explicitly image-capable indexed model, the dashboard starts without an initial prompt, waits for the connected runtime through `DashboardLiveStore`, verifies that runtime's image capability, and sends the prompt plus attachments once. Drafts and attachments stay intact on any failure and clear only after success. Image support fails closed unless the indexed model matches a current runtime model/catalog entry marked `supportsImages: true`. Missing workspace association remains a disabled error case. Explicit durable Settled state remains a later slice; this change adds no settle commands, storage, endpoints, or tables.
 
 ## First-slice acceptance checks
 

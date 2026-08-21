@@ -1720,7 +1720,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   );
   await expect(
     loadedCard.locator('[data-row-content="details"]'),
-  ).toContainText('careful · high · 32% ctx · 1 queued');
+  ).toContainText('test/careful · high · 32 ctx · 1 queued');
   await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     loadedCard.locator('[data-row-content="workspace"] .agent-thread-glyph'),

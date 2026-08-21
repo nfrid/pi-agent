@@ -239,6 +239,91 @@ describe('session index', () => {
     ]);
   });
 
+  it('extracts resume metadata only from the latest leaf ancestry', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-resume-meta-'),
+    );
+    const file = path.join(root, 'resume.jsonl');
+    await writeFile(
+      file,
+      `${[
+        { type: 'session', id: 'resume-id', cwd: '/tmp' },
+        {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          message: { role: 'user', content: 'Start' },
+        },
+        {
+          type: 'model_change',
+          id: 'old-model',
+          parentId: 'root',
+          provider: 'old-provider',
+          modelId: 'old-model',
+        },
+        {
+          type: 'thinking_level_change',
+          id: 'old-thinking',
+          parentId: 'old-model',
+          thinkingLevel: 'high',
+        },
+        {
+          type: 'message',
+          id: 'old-answer',
+          parentId: 'old-thinking',
+          message: {
+            role: 'assistant',
+            provider: 'old-provider',
+            model: 'old-model',
+            usage: { totalTokens: 12 },
+          },
+        },
+        {
+          type: 'model_change',
+          id: 'unselected-branch',
+          parentId: 'root',
+          provider: 'branch-provider',
+          modelId: 'branch-model',
+        },
+        {
+          type: 'message',
+          id: 'latest-leaf',
+          parentId: 'old-answer',
+          message: {
+            role: 'assistant',
+            provider: 'latest-provider',
+            model: 'latest-model',
+            usage: { totalTokens: 3456 },
+          },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    expect(index.get('resume-id')).toMatchObject({
+      lastKnownModel: { provider: 'latest-provider', model: 'latest-model' },
+      lastKnownThinking: 'high',
+      lastKnownContextTokens: 3456,
+    });
+  });
+
+  it('omits missing resume metadata instead of inferring it', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-resume-empty-'),
+    );
+    await writeFile(
+      path.join(root, 'empty.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'empty-id', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    expect(index.get('empty-id')).not.toHaveProperty('lastKnownModel');
+    expect(index.get('empty-id')).not.toHaveProperty('lastKnownThinking');
+    expect(index.get('empty-id')).not.toHaveProperty('lastKnownContextTokens');
+  });
+
   it('retries latest-leaf reads when the file is appended between passes', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-latest-leaf-race-'),

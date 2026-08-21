@@ -5,6 +5,7 @@ import {
   composerMode,
   composerSubmissionPolicy,
   contextIndicatorData,
+  dormantResumeMetadata,
   formatContextTokens,
   resumeRuntimeRequest,
   runtimeSupportsImages,
@@ -52,6 +53,37 @@ describe('composer runtime model', () => {
       queues: false,
     });
     expect(composerIsDisabled(runtime)).toBe(false);
+  });
+
+  it('resolves indexed metadata before configured defaults and fails closed for images', () => {
+    const runtime = {
+      modelCatalog: [
+        { provider: 'test', model: 'vision', supportsImages: true },
+        { provider: 'test', model: 'text', supportsImages: false },
+      ],
+      thinkingLevels: ['low'],
+    } as never;
+    expect(
+      dormantResumeMetadata(
+        {
+          lastKnownModel: { provider: 'test', model: 'vision' },
+          lastKnownThinking: 'high',
+          lastKnownContextTokens: 4200,
+        } as never,
+        [runtime],
+      ),
+    ).toMatchObject({
+      model: { provider: 'test', model: 'vision' },
+      thinking: 'high',
+      contextTokens: 4200,
+      supportsImages: true,
+    });
+    expect(
+      dormantResumeMetadata(
+        { lastKnownModel: { provider: 'unknown', model: 'vision' } } as never,
+        [runtime],
+      ).supportsImages,
+    ).toBe(false);
   });
 
   it('builds resume requests and checks image capability explicitly', () => {

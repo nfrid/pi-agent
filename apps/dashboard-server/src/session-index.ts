@@ -34,6 +34,11 @@ interface SessionLineDescriptor {
   readonly id?: string;
   readonly parentId?: unknown;
   readonly type?: string;
+  readonly resume?: {
+    readonly model?: { readonly provider: string; readonly model: string };
+    readonly thinking?: string;
+    readonly contextTokens?: number;
+  };
   readonly activity: TranscriptEntry;
 }
 
@@ -418,6 +423,76 @@ function workspaceFor(
 ): string | undefined {
   const normalized = path.resolve(cwd);
   return workspaceForPath(normalized, workspaces)?.id;
+}
+
+function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
+  if (!isRecord(value)) return undefined;
+  if (value.type === 'model_change') {
+    const provider = value.provider;
+    const model = value.modelId;
+    return typeof provider === 'string' && typeof model === 'string'
+      ? { model: { provider, model } }
+      : undefined;
+  }
+  if (value.type === 'thinking_level_change') {
+    return typeof value.thinkingLevel === 'string'
+      ? { thinking: value.thinkingLevel }
+      : undefined;
+  }
+  if (value.type !== 'message' || !isRecord(value.message)) return undefined;
+  if (value.message.role !== 'assistant') return undefined;
+  const provider = value.message.provider;
+  const model = value.message.model;
+  const usage = isRecord(value.message.usage) ? value.message.usage : undefined;
+  const totalTokens = usage?.totalTokens;
+  return {
+    ...(typeof provider === 'string' && typeof model === 'string'
+      ? { model: { provider, model } }
+      : {}),
+    ...(typeof totalTokens === 'number' &&
+    Number.isFinite(totalTokens) &&
+    totalTokens >= 0
+      ? { contextTokens: totalTokens }
+      : {}),
+  };
+}
+
+function resumeMetadataFromDescriptors(
+  descriptors: readonly SessionLineDescriptor[],
+  leafId: string | undefined,
+): Pick<
+  SessionIndexEntry,
+  'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
+> {
+  if (!leafId) return {};
+  const byId = new Map(
+    descriptors.flatMap((descriptor) =>
+      descriptor.id ? [[descriptor.id, descriptor] as const] : [],
+    ),
+  );
+  const chain: SessionLineDescriptor[] = [];
+  const seen = new Set<string>();
+  let current = byId.get(leafId);
+  while (current?.id && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.push(current);
+    if (current.parentId === undefined || current.parentId === null) break;
+    if (typeof current.parentId !== 'string') break;
+    current = byId.get(current.parentId);
+  }
+  const result: Pick<
+    SessionIndexEntry,
+    'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
+  > = {};
+  for (const descriptor of chain.reverse()) {
+    if (descriptor.resume?.model)
+      result.lastKnownModel = descriptor.resume.model;
+    if (descriptor.resume?.thinking)
+      result.lastKnownThinking = descriptor.resume.thinking;
+    if (descriptor.resume?.contextTokens !== undefined)
+      result.lastKnownContextTokens = descriptor.resume.contextTokens;
+  }
+  return result;
 }
 
 export class SessionIndex {
@@ -2308,6 +2383,9 @@ export class SessionIndex {
               ...(isRecord(parsed) && typeof parsed.type === 'string'
                 ? { type: parsed.type }
                 : {}),
+              ...(resumeFromRawEntry(parsed)
+                ? { resume: resumeFromRawEntry(parsed) }
+                : {}),
               activity: activityEntryFromRaw(parsed),
             };
             descriptors.push(descriptor);
@@ -2444,6 +2522,7 @@ export class SessionIndex {
               ? Date.parse(header.timestamp)
               : endStat.birthtimeMs,
           updatedAt: endStat.mtimeMs,
+          ...resumeMetadataFromDescriptors(descriptors, latestEntryId),
           header,
           lastEntryId,
           historyIndex,

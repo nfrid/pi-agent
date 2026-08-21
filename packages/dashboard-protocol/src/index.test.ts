@@ -456,7 +456,15 @@ describe('dashboard protocol', () => {
 
   it('validates optional paginated session history metadata', () => {
     const response = {
-      metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+      metadata: {
+        id: 'session-1',
+        file: '',
+        cwd: '/tmp',
+        updatedAt: 1,
+        lastKnownModel: { provider: 'test', model: 'vision' },
+        lastKnownThinking: 'medium',
+        lastKnownContextTokens: 1234,
+      },
       entries: [],
       history: {
         version: 1,

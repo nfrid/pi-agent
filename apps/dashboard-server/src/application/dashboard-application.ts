@@ -88,6 +88,9 @@ const SESSION_METADATA_FIELDS = [
   'workspaceId',
   'name',
   'title',
+  'lastKnownModel',
+  'lastKnownThinking',
+  'lastKnownContextTokens',
   'startedAt',
   'updatedAt',
   'activeRuntimeId',
@@ -98,7 +101,13 @@ function sameSessionMetadata(
   left: SessionIndexEntry,
   right: SessionIndexEntry,
 ): boolean {
-  return SESSION_METADATA_FIELDS.every((field) => left[field] === right[field]);
+  return SESSION_METADATA_FIELDS.every((field) => {
+    if (field !== 'lastKnownModel') return left[field] === right[field];
+    return (
+      left.lastKnownModel?.provider === right.lastKnownModel?.provider &&
+      left.lastKnownModel?.model === right.lastKnownModel?.model
+    );
+  });
 }
 
 /** Remove transcript payloads before an event crosses the browser boundary. */
