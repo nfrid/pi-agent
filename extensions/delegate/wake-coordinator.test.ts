@@ -3,6 +3,7 @@ import { DelegateJobManager, type DelegateJobResult } from './jobs';
 import { createRun } from './types';
 import {
   cloneAndFreezeWakeJson,
+  WAKE_MAX_SUBSCRIPTIONS,
   WakeCoordinator,
   type WakeDispatch,
 } from './wake-coordinator';
@@ -225,6 +226,55 @@ describe('WakeCoordinator', () => {
     release();
     await Promise.resolve();
     expect(wake.require('cancel-me').state).toBe('cancelled');
+    await workflow.dispose();
+  });
+
+  test('lists active wakes while retaining terminal tombstones and capacity', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const gate = workflow.schedule({
+      logicalId: 'capacity-gate',
+      mode: 'single',
+      tasks: ['capacity-gate'],
+      execute: (signal) =>
+        new Promise<DelegateJobResult>((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => resolve(result('capacity-gate')),
+            {
+              once: true,
+            },
+          ),
+        ),
+    });
+    const settledAttempt = workflow.schedule(
+      options('terminal', async () => result('terminal')),
+    );
+    await settled(workflow, settledAttempt.identity);
+    let wake!: WakeCoordinator;
+    wake = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        wake.markEntered(dispatch.wake.id, dispatch.acknowledgement);
+      },
+    });
+    expect(
+      wake.register({
+        id: 'terminal-wake',
+        condition: { node: settledAttempt.identity },
+      }).state,
+    ).toBe('entered');
+    expect(wake.list()).toEqual([]);
+    expect(wake.get('terminal-wake')).toMatchObject({ state: 'entered' });
+
+    for (let index = 0; index < WAKE_MAX_SUBSCRIPTIONS; index++)
+      wake.register({
+        id: `active-${index}`,
+        condition: { node: gate.identity },
+      });
+    expect(wake.list()).toHaveLength(WAKE_MAX_SUBSCRIPTIONS);
+    expect(() =>
+      wake.register({ id: 'overflow', condition: { node: gate.identity } }),
+    ).toThrow('Too many wake subscriptions');
     await workflow.dispose();
   });
 

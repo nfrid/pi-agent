@@ -470,6 +470,12 @@ function isWakeTerminal(state: WakeState): boolean {
   return state === 'entered' || state === 'cancelled' || state === 'blocked';
 }
 
+function activeWakeCount(records: Iterable<WakeRecord>): number {
+  let count = 0;
+  for (const record of records) if (!isWakeTerminal(record.state)) count++;
+  return count;
+}
+
 function wakeStateProgress(state: WakeState): number {
   if (state === 'pending') return 0;
   if (state === 'ready') return 1;
@@ -575,7 +581,7 @@ export class WakeCoordinator {
     this.validateId(options.id);
     if (this.records.has(options.id))
       throw new Error(`Wake ID "${options.id}" is already registered.`);
-    if (this.records.size >= WAKE_MAX_SUBSCRIPTIONS)
+    if (activeWakeCount(this.records.values()) >= WAKE_MAX_SUBSCRIPTIONS)
       throw new Error('Too many wake subscriptions.');
     const normalized = normalizeCondition(options.condition);
     const references = normalized.references.map((reference) => {
@@ -648,7 +654,9 @@ export class WakeCoordinator {
   }
 
   list(): WakeSnapshot[] {
-    return [...this.records.values()].map(copySnapshot);
+    return [...this.records.values()]
+      .filter((record) => !isWakeTerminal(record.state))
+      .map(copySnapshot);
   }
 
   snapshot(): WakeCoordinatorSnapshot {
@@ -656,7 +664,9 @@ export class WakeCoordinator {
       version: WAKE_COORDINATOR_VERSION,
       ownerSessionId: this.ownerSessionId,
       ownerEpoch: this.ownerEpoch,
-      wakes: Object.freeze(this.list()),
+      // list() is intentionally active-only; snapshots retain terminal
+      // tombstones so stale history cannot resurrect one-shot wakes.
+      wakes: Object.freeze([...this.records.values()].map(copySnapshot)),
     });
   }
 
@@ -681,7 +691,8 @@ export class WakeCoordinator {
         const prior = ledger.get(record.id);
         if (prior && shouldKeepLiveRecord(prior, record)) continue;
         ledger.set(record.id, record);
-        if (ledger.size > WAKE_MAX_SUBSCRIPTIONS) return false;
+        if (activeWakeCount(ledger.values()) > WAKE_MAX_SUBSCRIPTIONS)
+          return false;
       }
     }
     return this.applyIncoming(ledger);
@@ -693,8 +704,7 @@ export class WakeCoordinator {
       candidate?.version !== WAKE_COORDINATOR_VERSION ||
       candidate.ownerSessionId !== this.ownerSessionId ||
       candidate.ownerEpoch !== this.ownerEpoch ||
-      !Array.isArray(candidate.wakes) ||
-      candidate.wakes.length > WAKE_MAX_SUBSCRIPTIONS
+      !Array.isArray(candidate.wakes)
     )
       return undefined;
     const incoming = new Map<string, WakeRecord>();
@@ -703,7 +713,9 @@ export class WakeCoordinator {
       if (!record || incoming.has(record.id)) return undefined;
       incoming.set(record.id, record);
     }
-    return incoming;
+    return activeWakeCount(incoming.values()) <= WAKE_MAX_SUBSCRIPTIONS
+      ? incoming
+      : undefined;
   }
 
   private applyIncoming(incoming: Map<string, WakeRecord>): boolean {
@@ -715,7 +727,7 @@ export class WakeCoordinator {
       next.set(record.id, record);
       accepted.push(record);
     }
-    if (next.size > WAKE_MAX_SUBSCRIPTIONS) return false;
+    if (activeWakeCount(next.values()) > WAKE_MAX_SUBSCRIPTIONS) return false;
     this.records.clear();
     for (const [id, record] of next) this.records.set(id, record);
     for (const record of accepted) {
@@ -897,6 +909,7 @@ export class WakeCoordinator {
     );
     const warnings: string[] = [];
     for (const existing of this.records.values()) {
+      if (isWakeTerminal(existing.state)) continue;
       const existingChannels = this.effectivePayloadChannels(
         existing.condition,
         existing.references,
