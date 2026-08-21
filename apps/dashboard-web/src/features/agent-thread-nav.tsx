@@ -449,10 +449,10 @@ export function AgentThreadNav({
           <span aria-hidden="true">+</span> New thread
         </button>
       </div>
-      <label className={styles.search}>
-        <span className="sr-only">Search agents and threads</span>
+      <div className={styles.search}>
         <span aria-hidden="true">⌕</span>
         <input
+          aria-label="Search agents and threads"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -475,7 +475,7 @@ export function AgentThreadNav({
             ×
           </button>
         )}
-      </label>
+      </div>
       <label className={styles.scope}>
         <span>Workspace</span>
         <select
@@ -573,7 +573,7 @@ export function AgentThreadNav({
           </>
         )}
       </div>
-      {hiddenRowCount > 0 && !query.trim() && (
+      {hiddenRowCount > 0 && !query.trim() && !historyCollapsed && (
         <button
           type="button"
           className={styles.more}

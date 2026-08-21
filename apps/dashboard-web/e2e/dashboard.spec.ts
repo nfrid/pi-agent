@@ -347,6 +347,147 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
 });
 
+test('desktop workspace scope filters threads and scopes New thread navigation @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route('**/api/threads*', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/session-threads', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/workspaces/*/composer-commands', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ commands: [] }),
+    }),
+  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-sidebar-scope',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    workspaces: [
+      {
+        id: 'one',
+        name: 'One',
+        canonicalPath: '/work/one',
+        active: true,
+      },
+      {
+        id: 'two',
+        name: 'Two',
+        canonicalPath: '/work/two',
+        active: true,
+      },
+    ],
+    sessions: [
+      {
+        id: 'one-session',
+        cwd: '/work/one',
+        title: 'One thread',
+        updatedAt: 2,
+      },
+      {
+        id: 'two-session',
+        cwd: '/work/two',
+        title: 'Two thread',
+        updatedAt: 1,
+      },
+    ],
+    unread: [],
+  } as never);
+
+  await page.goto('/');
+  const nav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  await expect(
+    nav.getByRole('button', { name: /One thread dormant/ }),
+  ).toBeVisible();
+  await expect(
+    nav.getByRole('button', { name: /Two thread dormant/ }),
+  ).toBeVisible();
+  await nav
+    .getByRole('combobox', { name: 'Workspace scope' })
+    .selectOption('two');
+  await expect(
+    nav.getByRole('button', { name: /One thread dormant/ }),
+  ).toHaveCount(0);
+  await expect(
+    nav.getByRole('button', { name: /Two thread dormant/ }),
+  ).toBeVisible();
+  await nav.getByRole('button', { name: /New thread/ }).click();
+  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+});
+
+test('desktop sidebar and new chat fill the tall session surface @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route('**/api/threads*', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/session-threads', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/workspaces/*/composer-commands', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ commands: [] }),
+    }),
+  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-sidebar-geometry',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    workspaces: [
+      {
+        id: 'one',
+        name: 'One',
+        canonicalPath: '/work/one',
+        active: true,
+      },
+    ],
+    sessions: [],
+    unread: [],
+  } as never);
+
+  await page.goto('/workspaces/one/new');
+  const nav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  const main = page.locator('.new-chat-page');
+  const composer = page.locator('.new-chat-composer');
+  await expect(main).toBeVisible();
+  await expect(composer).toBeVisible();
+  await expect
+    .poll(async () => (await nav.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(850);
+  const geometry = await page.evaluate(() => {
+    const main = document
+      .querySelector('.new-chat-page')
+      ?.getBoundingClientRect();
+    const composer = document
+      .querySelector('.new-chat-composer')
+      ?.getBoundingClientRect();
+    if (!main || !composer) return undefined;
+    return {
+      centerOffset: Math.abs(
+        composer.left + composer.width / 2 - (main.left + main.width / 2),
+      ),
+      bottomGap: main.bottom - composer.bottom,
+      width: composer.width,
+    };
+  });
+  expect(geometry).toBeDefined();
+  expect(geometry?.centerOffset).toBeLessThan(2);
+  expect(geometry?.bottomGap).toBeLessThan(32);
+  expect(geometry?.width).toBeLessThanOrEqual(660);
+});
+
 test('durable lifecycle controls require an exact persisted run mapping', async ({
   page,
 }) => {
