@@ -14,13 +14,7 @@ import {
   formatContextTokens,
   isNearPageBottom,
   mergeQueuedMessages,
-  newChatModelOptions,
-  newChatPath,
-  newChatRequest,
-  newChatThinkingLevels,
   newProjectThreadPath,
-  pendingChatPath,
-  preferredNewChatRuntime,
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
@@ -29,12 +23,10 @@ import {
   runtimeSupportsImages,
   sessionDisplayTitle,
   sessionNavigationTarget,
-  sessionPathForRuntime,
   shouldApplySessionMetadata,
   shouldShowActivityLead,
   shouldShowJumpToLatest,
   shouldShowQueuePanel,
-  sortWorkspacesByRecency,
   toTranscriptEntries,
   upsertQueuedMessage,
   writeComposerDraft,
@@ -229,223 +221,30 @@ describe('image attachments', () => {
   });
 });
 
-describe('workspace presentation ordering', () => {
-  const workspace = (id: string, name = id, canonicalPath = `/work/${id}`) => ({
-    id,
-    name,
-    canonicalPath,
-    path: canonicalPath,
-    source: 'directory',
-    active: true,
-  });
-
-  it('orders by latest indexed session, falls back to cwd, and keeps stable ties', () => {
-    const snapshot = {
-      workspaces: [
-        workspace('first'),
-        workspace('second'),
-        workspace('third'),
-        workspace('unused'),
-      ],
-      sessions: [
-        {
-          id: 's1',
-          file: '/sessions/s1.jsonl',
-          cwd: '/work/first',
-          updatedAt: 10,
-        },
-        {
-          id: 's2',
-          file: '/sessions/s2.jsonl',
-          cwd: '/work/second',
-          updatedAt: 20,
-        },
-        {
-          id: 's3',
-          file: '/sessions/s3.jsonl',
-          cwd: '/work/third',
-          updatedAt: 20,
-        },
-        {
-          id: 's4',
-          file: '/sessions/s4.jsonl',
-          cwd: '/work/second',
-          updatedAt: 20,
-        },
-      ],
-    } as never;
-    expect(sortWorkspacesByRecency(snapshot).map((item) => item.id)).toEqual([
-      'second',
-      'third',
-      'first',
-      'unused',
-    ]);
-  });
-
-  it('accepts workspaces-only partial snapshots without mutating order', () => {
-    const snapshot = { workspaces: [workspace('a'), workspace('b')] } as never;
-    expect(sortWorkspacesByRecency({ workspaces: [] })).toEqual([]);
-    expect(sortWorkspacesByRecency(snapshot).map((item) => item.id)).toEqual([
-      'a',
-      'b',
-    ]);
-  });
-});
-
-describe('project-scoped new chat', () => {
-  it('uses the first usable workspace for context-free new chat entries', () => {
-    const snapshot = {
-      workspaces: [
-        {
-          id: 'dormant',
-          name: 'Dormant',
-          path: '/dormant',
-          canonicalPath: '/dormant',
-          source: 'directory' as const,
-          active: false,
-        },
-        {
-          id: 'active',
-          name: 'Active',
-          path: '/active',
-          canonicalPath: '/active',
-          source: 'directory' as const,
-          active: true,
-        },
-      ],
-    };
-    expect(newChatPath(snapshot)).toBe('/workspaces/dormant/new');
-    expect(newChatPath({ workspaces: [] })).toBe('/workspaces');
-    expect(newChatPath(snapshot, 'dormant')).toBe('/workspaces/dormant/new');
+describe('project thread navigation', () => {
+  it('uses the first active persisted project', () => {
     expect(
       newProjectThreadPath({
         projects: [
-          {
-            id: 'archived-project',
-            status: 'archived',
-          },
-          {
-            id: 'active-project',
-            status: 'active',
-          },
+          { id: 'archived-project', status: 'archived' },
+          { id: 'active-project', status: 'active' },
         ],
       } as unknown as Parameters<typeof newProjectThreadPath>[0]),
     ).toBe('/projects/active-project/new');
     expect(newProjectThreadPath({ projects: [] })).toBe('/projects');
-    expect(pendingChatPath('workspace-1', 'runtime/1')).toBe(
-      '/workspaces/workspace-1/new/pending/runtime%2F1',
-    );
   });
 
-  it('builds the first-message start request with optional model settings', () => {
-    expect(newChatRequest('workspace-1', '  inspect this  ')).toEqual({
-      workspaceId: 'workspace-1',
-      initialPrompt: '  inspect this  ',
-    });
+  it('builds a resume request for the existing project checkout', () => {
     expect(
-      newChatRequest('workspace-1', 'use luna', {
-        provider: 'openai-codex',
-        model: 'gpt-5.6-luna',
-        thinking: 'high',
-      }),
+      resumeRuntimeRequest('project-1', 'checkout-1', 'session-1'),
     ).toEqual({
-      workspaceId: 'workspace-1',
-      initialPrompt: 'use luna',
-      model: {
-        provider: 'openai-codex',
-        model: 'gpt-5.6-luna',
-        thinking: 'high',
-      },
-    });
-  });
-
-  it('prefers the most recently used active workspace model and effort', () => {
-    const older = {
-      cwd: '/workspace',
-      online: true,
-      lastSeenAt: 10,
-      model: {
-        provider: 'openai-codex',
-        model: 'gpt-5.6-luna',
-        thinking: 'medium',
-      },
-      modelCatalog: [
-        { provider: 'anthropic', model: 'claude-opus-4-6' },
-        { provider: 'openai-codex', model: 'gpt-5.6-luna' },
-      ],
-      thinkingLevels: ['off', 'medium', 'high'],
-    } as RuntimeSnapshot;
-    const latest = {
-      ...older,
-      lastSeenAt: 20,
-      model: {
-        provider: 'anthropic',
-        model: 'claude-opus-4-6',
-        thinking: 'high',
-      },
-    } as RuntimeSnapshot;
-    const foreign = {
-      ...latest,
-      cwd: '/other',
-      lastSeenAt: 30,
-    } as RuntimeSnapshot;
-
-    expect(
-      preferredNewChatRuntime('/workspace', [older, foreign, latest]),
-    ).toBe(latest);
-    expect(
-      newChatModelOptions([older, latest], latest).map(
-        (model) => `${model.provider}/${model.model}`,
-      ),
-    ).toEqual(['anthropic/claude-opus-4-6', 'openai-codex/gpt-5.6-luna']);
-    expect(latest.model).toMatchObject({
-      provider: 'anthropic',
-      model: 'claude-opus-4-6',
-      thinking: 'high',
-    });
-    expect(newChatThinkingLevels([older, latest], latest)).toEqual([
-      'off',
-      'medium',
-      'high',
-    ]);
-  });
-
-  it('deduplicates model options exposed by connected runtimes', () => {
-    expect(
-      newChatModelOptions([
-        {
-          model: { provider: 'openai-codex', model: 'gpt-5.6-luna' },
-          modelCatalog: [
-            {
-              provider: 'openai-codex',
-              model: 'gpt-5.6-luna',
-              name: 'Luna',
-            },
-            { provider: 'anthropic', model: 'claude-opus-4-6' },
-          ],
-        } as RuntimeSnapshot,
-        {
-          modelCatalog: [{ provider: 'anthropic', model: 'claude-opus-4-6' }],
-        } as RuntimeSnapshot,
-      ]).map((model) => `${model.provider}/${model.model}`),
-    ).toEqual(['openai-codex/gpt-5.6-luna', 'anthropic/claude-opus-4-6']);
-  });
-
-  it('builds a resume request for the existing session', () => {
-    expect(resumeRuntimeRequest('workspace-1', 'session-1')).toEqual({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       sessionId: 'session-1',
     });
-    expect(resumeRuntimeRequest(undefined, 'session-1')).toBeUndefined();
-  });
-
-  it('waits for a runtime session identity before choosing the session route', () => {
-    expect(sessionPathForRuntime(undefined)).toBeUndefined();
     expect(
-      sessionPathForRuntime({
-        session: { id: 'session/1' },
-      } as RuntimeSnapshot),
-    ).toBe('/sessions/session%2F1');
+      resumeRuntimeRequest('project-1', undefined, 'session-1'),
+    ).toBeUndefined();
   });
 });
 
@@ -453,13 +252,6 @@ describe('command palette', () => {
   it('keeps navigation available without runtime capabilities and bounds sessions', () => {
     const snapshot = {
       runtimes: [],
-      workspaces: [
-        {
-          id: 'workspace-1',
-          name: 'Workspace',
-          canonicalPath: '/workspace',
-        },
-      ],
       sessions: Array.from({ length: 437 }, (_, index) => ({
         id: `session-${index}`,
         cwd: '/workspace',
@@ -471,9 +263,9 @@ describe('command palette', () => {
       'Dashboard',
       'New thread',
     ]);
-    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(31);
-    expect(items[6]?.title).toBe('Session: Untitled session');
-    expect(items.at(-1)?.title).toBe('Workspace: Workspace');
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(29);
+    expect(items[5]?.title).toBe('Session: Untitled session');
+    expect(items.at(-1)?.id).toBe('session:session-23');
     expect(items.some((item) => item.title === 'Session: session-436')).toBe(
       false,
     );

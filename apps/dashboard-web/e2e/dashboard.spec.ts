@@ -85,32 +85,6 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/workspaces/w/composer-commands', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        commands: [
-          {
-            name: 'review',
-            description: 'Review changes',
-            argumentHint: '[scope]',
-            source: 'prompt',
-          },
-          {
-            name: 'skill:browser',
-            description: 'Automate a browser',
-            source: 'skill',
-          },
-          {
-            name: 'skill:harness-feedback',
-            description:
-              'Capture actionable feedback about the Pi harness and its developer experience.',
-            source: 'skill',
-          },
-        ],
-      }),
-    }),
-  );
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-mobile',
     revision: 1,
@@ -119,6 +93,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
       {
         runtimeId: 'ghost',
         ownership: 'external',
+        projectId: 'p',
         pid: 1,
         cwd: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
         liveState: 'idle',
@@ -154,17 +129,6 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         rootPath:
           '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
         status: 'active',
-      },
-    ],
-    workspaces: [
-      {
-        id: 'w',
-        name: 'Demo',
-        path: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
-        canonicalPath:
-          '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
-        source: 'directory',
-        active: false,
       },
     ],
     sessions: [],
@@ -252,7 +216,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(page.getByRole('option', { name: /Dashboard/ })).toBeVisible();
   await expect(page.getByRole('option', { name: /New thread/ })).toBeVisible();
   await expect(
-    page.getByRole('option', { name: /Workspace: Demo/ }),
+    page.getByRole('option', { name: /Project: Demo project/ }),
   ).toBeVisible();
   await expect(
     page.getByText('No actions available from connected runtimes.'),
@@ -284,78 +248,16 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await paletteTrigger.click();
   await page.getByRole('option', { name: /New thread/ }).click();
   await expect(page).toHaveURL(/\/projects\/p\/new$/u);
-  await page.goto('/workspaces/w');
-  await expect(page).toHaveURL(/\/workspaces\/w$/u);
-  const workspaceSummary = page.getByRole('region', {
-    name: 'Workspace summary',
-  });
-  await expect(workspaceSummary).toContainText('1 runtime · 1 offline');
-  await expect(page.getByRole('heading', { name: 'Runtimes' })).toBeVisible();
-  await page
-    .locator('.section-heading')
-    .getByRole('button', { name: 'New chat', exact: true })
-    .click();
+  await expect(page.getByRole('heading', { name: 'New thread' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Task' })).toBeVisible();
   expect(
     await page
       .locator('body')
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
-  await expect(page).toHaveURL(/\/workspaces\/w\/new$/u);
-  await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
-  const newChatComposer = page.getByRole('textbox', {
-    name: 'Message Pi',
-    exact: true,
-  });
-  await expect(newChatComposer).toBeVisible();
-  await newChatComposer.fill('/rev');
-  await expect(
-    page.getByRole('listbox', { name: 'Available commands' }),
-  ).toBeVisible();
-  await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
-  await newChatComposer.press('Control+Enter');
-  await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
-  await expect(newChatComposer).toContainText('/rev');
-  await newChatComposer.press('Enter');
-  await expect(newChatComposer).toContainText('/review');
-  await expect(
-    page.getByRole('listbox', { name: 'Available commands' }),
-  ).toHaveCount(0);
-  await newChatComposer.fill('');
-  await expect(
-    page.getByRole('listbox', { name: 'Available commands' }),
-  ).toHaveCount(0);
-  await newChatComposer.fill('/fee');
-  const fuzzyMenu = page.getByRole('listbox', { name: 'Available commands' });
-  await expect(
-    page.getByRole('option', { name: /\/skill:harness-feedback/ }),
-  ).toBeVisible();
-  const fuzzyMenuWidth = await fuzzyMenu.evaluate(
-    (element) => element.getBoundingClientRect().width,
-  );
-  const viewportWidth = await page.evaluate(() => window.innerWidth);
-  expect(fuzzyMenuWidth / viewportWidth).toBeGreaterThan(0.9);
-  await newChatComposer.fill('');
-  const composerWidth = await page
-    .locator('.new-chat-composer')
-    .evaluate((element) => element.getBoundingClientRect().width);
-  expect(composerWidth / viewportWidth).toBeGreaterThan(0.8);
-  await expect(page.getByLabel('Model', { exact: true })).toHaveValue(
-    'test/careful',
-  );
-  await expect(page.getByLabel('Thinking level')).toHaveValue('high');
-  await expect(
-    page.getByRole('button', { name: 'Attach images' }),
-  ).toBeVisible();
-  await page.getByLabel('Model', { exact: true }).selectOption('test/fast');
-  await expect(page.getByLabel('Model', { exact: true })).toHaveValue(
-    'test/fast',
-  );
-  await expect(
-    page.getByRole('button', { name: 'Send first message' }),
-  ).toBeVisible();
 });
 
-test('mobile workspace picker dismisses without closing the agent drawer', async ({
+test('mobile project picker dismisses without closing the agent drawer', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 720 });
@@ -365,12 +267,6 @@ test('mobile workspace picker dismisses without closing the agent drawer', async
   await page.route('**/api/session-threads', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '[]' }),
   );
-  await page.route('**/api/workspaces/*/composer-commands', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ commands: [] }),
-    }),
-  );
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-mobile-picker',
     revision: 1,
@@ -379,10 +275,6 @@ test('mobile workspace picker dismisses without closing the agent drawer', async
     projects: [
       { id: 'one', title: 'One', rootPath: '/work/one', status: 'active' },
       { id: 'two', title: 'Two', rootPath: '/work/two', status: 'active' },
-    ],
-    workspaces: [
-      { id: 'one', name: 'One', canonicalPath: '/work/one', active: true },
-      { id: 'two', name: 'Two', canonicalPath: '/work/two', active: true },
     ],
     sessions: [],
     unread: [],
@@ -432,12 +324,6 @@ test('sidebar New thread handles one and zero project fallbacks @desktop', async
     await target.route('**/api/session-threads', async (route) =>
       route.fulfill({ contentType: 'application/json', body: '[]' }),
     );
-    await target.route('**/api/workspaces/*/composer-commands', async (route) =>
-      route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({ commands: [] }),
-      }),
-    );
   };
   await routeSidebarData(page);
   await installDashboardBootstrap(page, {
@@ -447,9 +333,6 @@ test('sidebar New thread handles one and zero project fallbacks @desktop', async
     runtimes: [],
     projects: [
       { id: 'only', title: 'Only', rootPath: '/work/only', status: 'active' },
-    ],
-    workspaces: [
-      { id: 'only', name: 'Only', canonicalPath: '/work/only', active: true },
     ],
     sessions: [],
     unread: [],
@@ -469,7 +352,6 @@ test('sidebar New thread handles one and zero project fallbacks @desktop', async
     cursor: 1,
     runtimes: [],
     projects: [],
-    workspaces: [],
     sessions: [],
     unread: [],
   } as never);
@@ -482,7 +364,7 @@ test('sidebar New thread handles one and zero project fallbacks @desktop', async
   await zeroPage.close();
 });
 
-test('desktop workspace scope filters threads while New thread uses projects @desktop', async ({
+test('desktop project scope filters threads and starts project threads @desktop', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -491,12 +373,6 @@ test('desktop workspace scope filters threads while New thread uses projects @de
   );
   await page.route('**/api/session-threads', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '[]' }),
-  );
-  await page.route('**/api/workspaces/*/composer-commands', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ commands: [] }),
-    }),
   );
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-sidebar-scope',
@@ -513,36 +389,18 @@ test('desktop workspace scope filters threads while New thread uses projects @de
         status: 'active',
       })),
     ],
-    workspaces: [
-      {
-        id: 'one',
-        name: 'One',
-        canonicalPath: '/work/one',
-        active: true,
-      },
-      {
-        id: 'two',
-        name: 'Two',
-        canonicalPath: '/work/two',
-        active: true,
-      },
-      ...Array.from({ length: 30 }, (_, index) => ({
-        id: `extra-${index}`,
-        name: `Extra ${index}`,
-        canonicalPath: `/work/extra-${index}`,
-        active: true,
-      })),
-    ],
     sessions: [
       {
         id: 'one-session',
         cwd: '/work/one',
+        projectId: 'one',
         title: 'One thread',
         updatedAt: 2,
       },
       {
         id: 'two-session',
         cwd: '/work/two',
+        projectId: 'two',
         title: 'Two thread',
         updatedAt: 1,
       },
@@ -617,7 +475,7 @@ test('desktop workspace scope filters threads while New thread uses projects @de
   await expect(nav.getByRole('button', { name: /New thread/ })).toBeFocused();
   await page.goto('/');
   await nav
-    .getByRole('combobox', { name: 'Workspace scope' })
+    .getByRole('combobox', { name: 'Project scope' })
     .selectOption('two');
   await expect(
     nav.getByRole('button', { name: /One thread dormant/ }),
@@ -629,81 +487,46 @@ test('desktop workspace scope filters threads while New thread uses projects @de
   await expect(projectChooser).toBeVisible();
   await projectChooser.getByRole('button', { name: 'Two' }).click();
   await expect(page).toHaveURL(/\/projects\/two\/new$/u);
-  await page.goto('/workspaces');
-  const workspaceCards = page.locator('.workspace-card');
-  await expect(workspaceCards.first()).toContainText('One');
+  await page.goto('/projects');
+  const projectCards = page.locator('.workspace-card');
+  await expect(projectCards.first()).toContainText('One');
   await page.getByRole('button', { name: 'Open command palette' }).click();
-  const paletteWorkspaceItems = page
+  const paletteProjectItems = page
     .locator('.command-palette .palette-list button')
-    .filter({ hasText: 'Workspace:' });
-  await expect(paletteWorkspaceItems.first()).toContainText('Workspace: One');
-  await expect(paletteWorkspaceItems.nth(1)).toContainText('Workspace: Two');
+    .filter({ hasText: 'Project:' });
+  await expect(paletteProjectItems.first()).toContainText('Project: One');
+  await expect(paletteProjectItems.nth(1)).toContainText('Project: Two');
 });
 
-test('desktop sidebar and new chat fill the tall session surface @desktop', async ({
+test('desktop project thread form stays readable @desktop', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.route('**/api/threads*', async (route) =>
-    route.fulfill({ contentType: 'application/json', body: '[]' }),
-  );
-  await page.route('**/api/session-threads', async (route) =>
-    route.fulfill({ contentType: 'application/json', body: '[]' }),
-  );
-  await page.route('**/api/workspaces/*/composer-commands', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ commands: [] }),
-    }),
-  );
   await installDashboardBootstrap(page, {
-    serverId: 'dashboard-sidebar-geometry',
+    serverId: 'dashboard-project-thread-geometry',
     revision: 1,
     cursor: 1,
     runtimes: [],
-    workspaces: [
-      {
-        id: 'one',
-        name: 'One',
-        canonicalPath: '/work/one',
-        active: true,
-      },
+    projects: [
+      { id: 'one', title: 'One', rootPath: '/work/one', status: 'active' },
     ],
     sessions: [],
     unread: [],
   } as never);
 
-  await page.goto('/workspaces/one/new');
-  const nav = page.getByRole('complementary', {
-    name: 'Agents and threads',
-  });
-  const main = page.locator('.new-chat-page');
-  const composer = page.locator('.new-chat-composer');
-  await expect(main).toBeVisible();
-  await expect(composer).toBeVisible();
-  await expect
-    .poll(async () => (await nav.boundingBox())?.height ?? 0)
-    .toBeGreaterThan(850);
-  const geometry = await page.evaluate(() => {
-    const main = document
-      .querySelector('.new-chat-page')
-      ?.getBoundingClientRect();
-    const composer = document
-      .querySelector('.new-chat-composer')
-      ?.getBoundingClientRect();
-    if (!main || !composer) return undefined;
+  await page.goto('/projects/one/new');
+  const form = page.getByRole('textbox', { name: 'Task' });
+  await expect(form).toBeVisible();
+  const geometry = await form.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
     return {
-      centerOffset: Math.abs(
-        composer.left + composer.width / 2 - (main.left + main.width / 2),
-      ),
-      bottomGap: main.bottom - composer.bottom,
-      width: composer.width,
+      width: rect.width,
+      right: rect.right,
+      viewport: window.innerWidth,
     };
   });
-  expect(geometry).toBeDefined();
-  expect(geometry?.centerOffset).toBeLessThan(2);
-  expect(geometry?.bottomGap).toBeLessThan(32);
-  expect(geometry?.width).toBeLessThanOrEqual(660);
+  expect(geometry.width).toBeLessThanOrEqual(832);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
 });
 
 test('durable lifecycle controls require an exact persisted run mapping', async ({
@@ -1611,6 +1434,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
         {
           runtimeId: 'runtime-loading',
           ownership: 'external',
+          projectId: 'tmp-project',
+          checkoutId: 'tmp-checkout',
           pid: 1,
           cwd: '/tmp',
           liveState: 'idle',
@@ -1632,11 +1457,21 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           },
         },
       ],
-      workspaces: [
+      projects: [
         {
-          id: 'tmp-workspace',
-          name: 'Tmp workspace',
-          canonicalPath: '/tmp',
+          id: 'tmp-project',
+          title: 'Tmp project',
+          rootPath: '/tmp',
+          status: 'active',
+        },
+      ],
+      checkouts: [
+        {
+          id: 'tmp-checkout',
+          projectId: 'tmp-project',
+          path: '/tmp',
+          kind: 'main',
+          status: 'ready',
         },
       ],
       sessions: [
@@ -1644,7 +1479,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           id: 'session-loading',
           file: '',
           cwd: '/tmp',
-          workspaceId: 'tmp-workspace',
+          projectId: 'tmp-project',
+          checkoutId: 'tmp-checkout',
           title: 'Loaded shell',
           updatedAt: Date.parse('2026-08-05T18:42:00.000Z'),
         },
@@ -1652,6 +1488,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           id: 'session-dormant',
           file: '',
           cwd: '/tmp/archive',
+          projectId: 'tmp-project',
+          checkoutId: 'tmp-checkout',
           title: 'Dormant thread',
           updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
         },
@@ -1668,6 +1506,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
             id: 'session-dormant',
             file: '',
             cwd: '/tmp/archive',
+            projectId: 'tmp-project',
+            checkoutId: 'tmp-checkout',
             title: 'Dormant thread',
             updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
           },
@@ -1699,7 +1539,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
             id: 'session-loading',
             file: '',
             cwd: '/tmp',
-            workspaceId: 'tmp-workspace',
+            projectId: 'tmp-project',
+            checkoutId: 'tmp-checkout',
             title: 'Loaded shell',
             updatedAt: 1,
           },
@@ -1742,9 +1583,10 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.locator('.transcript-virtualized')).toContainText(
     'Prior history',
   );
-  await expect(
-    page.getByRole('link', { name: 'Tmp workspace' }),
-  ).toHaveAttribute('href', '/workspaces/tmp-workspace');
+  await expect(page.getByRole('link', { name: 'Tmp project' })).toHaveAttribute(
+    'href',
+    '/projects/tmp-project',
+  );
   await expect(page.locator('.transcript-virtualized')).toHaveCount(1);
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await expect(
@@ -1800,8 +1642,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(loadedCard).toHaveCount(1);
   await expect(dormantCard).toHaveCount(1);
   await expect(
-    loadedCard.locator('[data-row-content="workspace"] > span').first(),
-  ).toHaveText('Tmp workspace');
+    loadedCard.locator('[data-row-content="project"] > span').first(),
+  ).toHaveText('Tmp project');
   await expect(loadedCard.locator('[data-row-content="context"]')).toHaveCount(
     0,
   );
@@ -1810,11 +1652,11 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   ).toContainText('test/careful · high · 32 ctx');
   await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
-    loadedCard.locator('[data-row-content="workspace"] .agent-thread-glyph'),
+    loadedCard.locator('[data-row-content="project"] .agent-thread-glyph'),
   ).toHaveCount(1);
   await expect(
-    dormantCard.locator('[data-row-content="workspace"] > span').first(),
-  ).toHaveText('Tmp workspace');
+    dormantCard.locator('[data-row-content="project"] > span').first(),
+  ).toHaveText('Tmp project');
   await expect(dormantCard.locator('[data-row-content="context"]')).toHaveCount(
     0,
   );
@@ -2326,7 +2168,7 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
   await expect(page.getByRole('status')).toHaveCount(0);
   expect(usageRequests).toBe(initialUsageRequests);
   await page.waitForTimeout(200);
-  await page.goto('/workspaces');
+  await page.goto('/projects');
   await expect(page.getByText(/Live generation \d+/)).toBeVisible();
   const streamsBeforeReplayGap = await page.evaluate(() =>
     (
@@ -2347,7 +2189,7 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
       ),
     )
     .toBeGreaterThan(streamsBeforeReplayGap);
-  await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
   await page.evaluate(() => {
     (
       window as unknown as {
@@ -2361,14 +2203,15 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
           serverId: 'server-1',
           revision: 99,
           runtimes: [],
-          workspaces: [
+          projects: [
             {
               id: 'stale',
-              name: 'ROLLED BACK',
-              path: '/tmp',
-              canonicalPath: '/tmp',
-              source: 'directory',
-              active: false,
+              title: 'ROLLED BACK',
+              rootPath: '/tmp',
+              maxParallelRuns: 1,
+              status: 'active',
+              updatedAt: 99,
+              activeRunCount: 0,
             },
           ],
           sessions: [],
@@ -2384,7 +2227,7 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
         },
       });
   });
-  await page.goto('/workspaces');
+  await page.goto('/projects');
   await expect(page.getByText(/Live generation \d+/)).toBeVisible();
   await expect(page.getByText('ROLLED BACK')).toHaveCount(0);
   await page.goto('/');
@@ -5023,296 +4866,4 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(page.locator('.session-heading h1')).toHaveText(
     'Existing session request',
   );
-});
-
-test('phase six mocked workspace flow covers refresh, fallback notification, agent launch, and runtime lifecycle', async ({
-  page,
-}) => {
-  test.setTimeout(30_000);
-  await page.context().grantPermissions(['notifications']);
-  const mocks = await installPhase6Mocks(page);
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Open agent list' }).click();
-  const agentNav = page.getByRole('complementary', {
-    name: 'Agents and threads',
-  });
-  const lifecycleMenuTrigger = agentNav
-    .getByRole('button', { name: /Existing session request waiting/ })
-    .first();
-  await lifecycleMenuTrigger.focus();
-  await lifecycleMenuTrigger.press('Shift+F10');
-  const lifecycleMenu = page.getByRole('menu');
-  await expect(
-    lifecycleMenu.getByRole('menuitem', { name: 'Stop' }),
-  ).toBeVisible();
-  await expect(
-    lifecycleMenu.getByRole('menuitem', { name: 'Restart' }),
-  ).toBeVisible();
-  await expect(
-    lifecycleMenu.getByRole('menuitem', { name: 'Force stop' }),
-  ).toHaveCount(0);
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await expect(page).toHaveURL(/\/$/);
-  await page
-    .getByRole('dialog', { name: 'Workspaces' })
-    .getByRole('button', { name: 'Refresh workspaces' })
-    .click();
-  await expect(page.getByText('Refreshed project')).toBeVisible();
-  const workspaceDialog = page.getByRole('dialog', { name: 'Workspaces' });
-  await page.keyboard.press('Escape');
-  await expect(workspaceDialog).toHaveCount(0);
-  await page.getByRole('button', { name: 'Open agent list' }).click();
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await expect(workspaceDialog).toBeVisible();
-  await workspaceDialog
-    .getByRole('button', { name: 'Close Workspaces' })
-    .click();
-  // The panel stays mounted for its visual exit but leaves the accessibility tree.
-  const exitingUtility = page.locator('.surface-drawer-layer.is-exiting');
-  await expect(exitingUtility.locator('> div')).toHaveAttribute(
-    'aria-hidden',
-    'true',
-  );
-  await expect(page.locator('.utility-drawer')).toHaveCount(1);
-  await expect(page.locator('.utility-drawer')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Open agent list' }).click();
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Workspaces' })).toBeVisible();
-  await page.locator('.surface-drawer-layer').evaluate((element) => {
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  });
-  await expect(page.getByRole('dialog', { name: 'Workspaces' })).toHaveCount(0);
-  await page.goto('/inbox');
-  await page.getByRole('button', { name: 'Browser alerts' }).click();
-  await expect(
-    page.getByRole('button', { name: /Browser alerts on|Alerts unavailable/ }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'New chat', exact: true }).click();
-  await expect(page).toHaveURL(/\/workspaces\/w1\/new$/);
-  await page.getByLabel('Model').selectOption('test/text');
-  await page
-    .getByRole('textbox', { name: 'Message Pi', exact: true })
-    .fill('Inspect the project setup');
-  await page.getByRole('button', { name: 'Send first message' }).click();
-  await expect(page.getByText('Starting agent…')).toBeVisible();
-  await expect(page).not.toHaveURL(/\/runtimes\//u);
-  expect(mocks.starts[0]).toEqual({
-    workspaceId: 'w1',
-    initialPrompt: 'Inspect the project setup',
-    model: { provider: 'test', model: 'text', thinking: 'medium' },
-    commandId: expect.any(String),
-  });
-  await page.reload();
-  await expect(page.getByText('Starting agent…')).toBeVisible();
-  await expect(page).not.toHaveURL(/\/runtimes\//u);
-  const launchedRuntime = {
-    ...((phase6Snapshot({}).runtimes as unknown[])[0] as Record<
-      string,
-      unknown
-    >),
-    runtimeId: 'r-launched',
-    liveState: 'working',
-    session: { id: 's-launched', entries: [] },
-  };
-  await mocks.emit({
-    type: 'snapshot',
-    snapshot: phase6Snapshot({
-      runtimes: [launchedRuntime],
-    }),
-  });
-  await expect(page).toHaveURL(/\/sessions\/s-launched$/);
-  await expect(page).not.toHaveURL(/\/runtimes\//u);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/sessions/s1');
-  await mocks.emit({
-    type: 'snapshot',
-    snapshot: phase6Snapshot({ runtimes: [] }),
-  });
-  await page.getByRole('button', { name: 'Resume session' }).click();
-  await expect(page.getByText('Starting agent…')).toBeVisible();
-  expect(mocks.starts[1]).toEqual({
-    workspaceId: 'w1',
-    sessionId: 's1',
-    commandId: expect.any(String),
-  });
-  const delegateStartedAt = Date.now();
-  await mocks.emit({
-    type: 'snapshot',
-    snapshot: phase6Snapshot({
-      extensionSurfaces: [
-        {
-          id: 'tasks-1',
-          rendererId: 'tasks.current',
-          placement: 'composer',
-          viewModel: {
-            version: 1,
-            tasks: Array.from({ length: 18 }, (_, index) => ({
-              id: `T${index + 1}`,
-              text:
-                index === 0
-                  ? 'Inspect the new drawer'
-                  : `Dashboard task ${index + 1}`,
-              status: index === 0 ? 'doing' : 'todo',
-              dependsOn: [],
-              createdAt: 1,
-              updatedAt: 1,
-            })),
-            stats: { total: 18, active: 1, done: 0, blocked: 0, ready: 17 },
-          },
-        },
-        {
-          id: 'pause-1',
-          rendererId: 'runtime.pause-status',
-          placement: 'composer',
-          viewModel: {
-            version: 1,
-            phase: 'paused',
-            delegateCount: 2,
-            pausedAt: delegateStartedAt + 2_000,
-            label: 'Paused (with 2 delegates)',
-          },
-        },
-        {
-          id: 'delegates-1',
-          rendererId: 'delegate.status',
-          placement: 'composer',
-          viewModel: {
-            version: 1,
-            statuses: Array.from({ length: 18 }, (_, index) => ({
-              id: `d${index + 1}`,
-              name: `Dashboard delegate ${index + 1}`,
-              kind: 'background',
-              state: index === 0 ? 'running' : 'queued',
-              pauseState: index === 0 ? 'paused' : 'pausing',
-              ...(index === 0 ? { pausedAt: delegateStartedAt + 2_000 } : {}),
-              createdAt: delegateStartedAt,
-              allowWrites: index === 0,
-              ...(index === 0
-                ? {
-                    startedAt: delegateStartedAt,
-                    jobId: 'dj-dashboard',
-                    route: 'luna-high',
-                    context: 'fresh',
-                    runCount: 2,
-                    runs: [
-                      {
-                        state: 'success',
-                        startedAt: delegateStartedAt - 30_000,
-                        finishedAt: delegateStartedAt - 10_000,
-                      },
-                      { state: 'running', startedAt: delegateStartedAt },
-                    ],
-                    lifecycle: {
-                      reason: 'timeout',
-                      diagnostic:
-                        'The child runner timed out after the final check.',
-                      diagnosticArtifact: { handle: 'artifact-dashboard' },
-                      continuationUsable: true,
-                      writableBranchRetained: false,
-                      readOnlySnapshotRetained: true,
-                    },
-                    transcript: [
-                      ...Array.from({ length: 14 }, (_, entryIndex) => ({
-                        id: `d1:tool:${entryIndex + 1}`,
-                        type: 'tool',
-                        label: `Validation command ${entryIndex + 1}`,
-                        name: 'bash',
-                        arguments: {
-                          command: `pnpm test --filter validation-${entryIndex + 1}`,
-                        },
-                        result: {
-                          output: `Command output line ${entryIndex + 1}`,
-                        },
-                        status: 'completed',
-                        run: 1,
-                      })),
-                      {
-                        id: 'd1:error',
-                        type: 'error',
-                        label: 'Error',
-                        text: 'A child command failed.',
-                        status: 'error',
-                        run: 1,
-                      },
-                    ],
-                  }
-                : {}),
-            })),
-          },
-        },
-      ],
-    }),
-  });
-  await expect(page.locator('.session-status')).toContainText(
-    'Paused (with 2 delegates)',
-  );
-  await expect(page.locator('.pause-status')).toHaveCount(0);
-  const pauseEvent = page.locator('.live-pause-event');
-  await expect(pauseEvent).toHaveCount(1);
-  await expect(pauseEvent).toContainText('Paused (with 2 delegates)');
-  const continueButton = pauseEvent.getByRole('button', {
-    name: 'Continue paused runtime',
-  });
-  await expect(continueButton).toBeEnabled();
-  await continueButton.click();
-  await expect
-    .poll(() =>
-      mocks.commands.some((command) => command.actionId === 'runtime.continue'),
-    )
-    .toBe(true);
-  const tasksLauncher = page.getByRole('button', {
-    name: /Inspect the new drawer/,
-  });
-  await expect(tasksLauncher).toContainText('0/18');
-  await tasksLauncher.click();
-  const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
-  await expect(tasksPanel).toBeVisible();
-  await expect(tasksPanel).toHaveClass(/work-surface-drawer/);
-  await expect(tasksPanel.locator('h2')).toHaveCount(0);
-  await expect(tasksPanel.locator('.eyebrow')).toHaveText('Tasks');
-  await expect(tasksPanel.locator('.surface-drawer-summary')).toContainText(
-    'Inspect the new drawer',
-  );
-  await expect(tasksPanel.locator('.surface-stats')).toContainText('1 active');
-  await expect(tasksPanel.locator('.surface-stats')).toContainText(
-    '0 finished',
-  );
-  expect(
-    await tasksPanel
-      .locator('.surface-drawer-body')
-      .evaluate((element) => getComputedStyle(element).padding),
-  ).toBe('0px');
-  await expect(tasksPanel).toContainText('0 of 18 complete');
-  const taskScroll = await tasksPanel
-    .locator('.surface-scroll-region')
-    .evaluate((element) => ({
-      clientHeight: element.clientHeight,
-      scrollHeight: element.scrollHeight,
-    }));
-  expect(taskScroll.clientHeight).toBeGreaterThan(0);
-  expect(taskScroll.scrollHeight).toBeGreaterThan(taskScroll.clientHeight);
-  const taskRowHeights = await tasksPanel
-    .locator('.task-row')
-    .evaluateAll((rows) =>
-      rows.map((row) => row.getBoundingClientRect().height),
-    );
-  expect(Math.max(...taskRowHeights)).toBeLessThan(80);
-  expect(
-    await tasksPanel.locator('.surface-scroll-region').evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      return element.scrollTop;
-    }),
-  ).toBeGreaterThan(0);
-  await tasksPanel.getByRole('button', { name: 'Close Tasks' }).click();
-  await expect(tasksPanel).toHaveCount(0);
-  const sessionHeading = page.locator('.session-heading');
-  await expect
-    .poll(() =>
-      sessionHeading.evaluate((element) => {
-        const style = getComputedStyle(element);
-        return { opacity: style.opacity, transform: style.transform };
-      }),
-    )
-    .toEqual({ opacity: '1', transform: 'none' });
 });

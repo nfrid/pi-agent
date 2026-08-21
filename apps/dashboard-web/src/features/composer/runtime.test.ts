@@ -91,17 +91,23 @@ describe('composer runtime model', () => {
 
   it('builds resume requests and checks image capability explicitly', () => {
     expect(
-      resumeRuntimeRequest('workspace-1', 'session-1', 'resume me'),
+      resumeRuntimeRequest('project-1', 'checkout-1', 'session-1', 'resume me'),
     ).toEqual({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       sessionId: 'session-1',
       initialPrompt: 'resume me',
     });
-    expect(resumeRuntimeRequest('workspace-1', 'session-1')).toEqual({
-      workspaceId: 'workspace-1',
+    expect(
+      resumeRuntimeRequest('project-1', 'checkout-1', 'session-1'),
+    ).toEqual({
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       sessionId: 'session-1',
     });
-    expect(resumeRuntimeRequest(undefined, 'session-1')).toBeUndefined();
+    expect(
+      resumeRuntimeRequest(undefined, 'checkout-1', 'session-1'),
+    ).toBeUndefined();
     expect(
       runtimeSupportsImages({
         model: { provider: 'test', model: 'vision', supportsImages: true },

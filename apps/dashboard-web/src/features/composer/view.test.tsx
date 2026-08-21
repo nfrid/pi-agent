@@ -114,7 +114,8 @@ describe('Composer dormant resume transition', () => {
         <Composer
           runtime={undefined}
           sessionId="session-1"
-          workspaceId="workspace-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
         />,
       );
     });
@@ -134,7 +135,8 @@ describe('Composer dormant resume transition', () => {
         <Composer
           runtime={runtime}
           sessionId="session-1"
-          workspaceId="workspace-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
         />,
       );
       resolveStart({ result: { runtimeId: 'runtime-1' } });
@@ -151,7 +153,8 @@ describe('Composer dormant resume transition', () => {
       <Composer
         runtime={undefined}
         sessionId="session-1"
-        workspaceId="workspace-1"
+        projectId="project-1"
+        checkoutId="checkout-1"
       />
     );
     let renderer!: ReactTestRenderer;
@@ -166,7 +169,8 @@ describe('Composer dormant resume transition', () => {
     });
     expect(mutateAsync).toHaveBeenCalledOnce();
     expect(mutateAsync).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       sessionId: 'session-1',
       initialPrompt: 'resume me',
     });
@@ -184,7 +188,8 @@ describe('Composer dormant resume transition', () => {
         <Composer
           runtime={runtime}
           sessionId="session-1"
-          workspaceId="workspace-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
         />,
       );
     });
@@ -228,7 +233,8 @@ describe('Composer dormant resume transition', () => {
           }}
           store={store}
           sessionId="session-1"
-          workspaceId="workspace-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
         />,
       );
     });
@@ -240,7 +246,8 @@ describe('Composer dormant resume transition', () => {
       await Promise.resolve();
     });
     expect(mutateAsync).toHaveBeenCalledWith({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       sessionId: 'session-1',
     });
     expect(sendCommandWithImages).toHaveBeenCalledOnce();
@@ -283,7 +290,8 @@ describe('Composer dormant resume transition', () => {
           }}
           store={store}
           sessionId="session-1"
-          workspaceId="workspace-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
         />,
       );
     });

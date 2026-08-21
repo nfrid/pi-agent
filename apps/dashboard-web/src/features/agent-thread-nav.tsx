@@ -13,7 +13,6 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { sortWorkspacesByRecency } from '../app-helpers';
 import {
   newProjectThreadPath,
   useDashboardNavigate,
@@ -55,8 +54,8 @@ import { UsageCapsule } from './usage-indicator';
 export type { AgentThreadRow } from './agent-thread-nav/model';
 export {
   agentThreadRows,
+  projectNameForSession,
   sectionAgentThreadRows,
-  workspaceNameForSession,
 } from './agent-thread-nav/model';
 
 const EXPANDED_ARCHIVED_KEY = 'pi-dashboard-expanded-archived-v1';
@@ -315,10 +314,8 @@ function AgentThreadLink({
       onClick={onSelect}
     >
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
-        <span className={styles.threadWorkspace} data-row-content="workspace">
-          <span className={styles.threadWorkspaceName}>
-            {row.workspaceName}
-          </span>
+        <span className={styles.threadWorkspace} data-row-content="project">
+          <span className={styles.threadWorkspaceName}>{row.projectName}</span>
           {density === 'card' && row.durableThread?.pinnedAt !== undefined && (
             <span
               className={styles.threadPin}
@@ -388,7 +385,7 @@ export function AgentThreadNav({
   const utility = useDashboardUtility();
   const [query, setQuery] = useState('');
   const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
-  const [workspaceScope, setWorkspaceScope] = useState('all');
+  const [projectScope, setProjectScope] = useState('all');
   const [projectChooserOpen, setProjectChooserOpen] = useState(false);
   const newThreadButtonRef = useRef<HTMLButtonElement>(null);
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
@@ -435,10 +432,6 @@ export function AgentThreadNav({
     priorSessionIdentityKey.current = sessionIdentityKey;
     void sessionThreadLinksQuery.refetch();
   }, [sessionIdentityKey, sessionThreadLinksQuery]);
-  const workspaces = useMemo(
-    () => sortWorkspacesByRecency(snapshot),
-    [snapshot],
-  );
   const projects = useMemo(
     () =>
       (snapshot.projects ?? []).filter(
@@ -452,10 +445,12 @@ export function AgentThreadNav({
   );
   const scopedRows = useMemo(
     () =>
-      workspaceScope === 'all'
+      projectScope === 'all'
         ? rows
-        : rows.filter((row) => row.workspaceId === workspaceScope),
-    [rows, workspaceScope],
+        : projectScope === 'unassigned'
+          ? rows.filter((row) => !row.projectId)
+          : rows.filter((row) => row.projectId === projectScope),
+    [projectScope, rows],
   );
   const filtered = useMemo(
     () => filterAgentThreadRows(scopedRows, query),
@@ -549,10 +544,7 @@ export function AgentThreadNav({
       select(activeResultId);
     }
   };
-  const openUtility = (
-    panel: 'workspaces' | 'sessions' | 'inbox',
-    fallbackPath: string,
-  ) => {
+  const openUtility = (panel: 'sessions' | 'inbox', fallbackPath: string) => {
     onOpenChange?.(false);
     if (utility) utility.openPanel(panel);
     else go(fallbackPath);
@@ -712,21 +704,22 @@ export function AgentThreadNav({
         )}
       </div>
       <label className={styles.scope}>
-        <span>Workspace</span>
+        <span>Project</span>
         <select
-          aria-label="Workspace scope"
-          value={workspaceScope}
+          aria-label="Project scope"
+          value={projectScope}
           onChange={(event) => {
-            setWorkspaceScope(event.target.value);
+            setProjectScope(event.target.value);
             setActiveLimit(MAX_VISIBLE_ACTIVE_THREADS);
           }}
         >
-          <option value="all">All workspaces</option>
-          {workspaces.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>
-              {workspace.name}
+          <option value="all">All projects</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.title}
             </option>
           ))}
+          <option value="unassigned">Unassigned</option>
         </select>
       </label>
       <div className={styles.list}>

@@ -74,7 +74,7 @@ export function configuredModelOptions(
     )
     .sort((left, right) => left.catalog.length - right.catalog.length);
   const compatible = compatibleCatalogs[0]?.catalog;
-  // Same-workspace runtimes share Pi's configured registry. Anything else
+  // Connected runtimes share Pi's configured registry. Anything else
   // fails closed to the current model rather than exposing foreign choices.
   return withCurrentModel(compatible ?? [], preferred);
 }

@@ -5,9 +5,7 @@ import type {
   SessionIndexEntry,
   SessionThreadLink,
   Thread,
-  WorkspaceTarget,
 } from '@pi-dashboard/protocol';
-import { workspaceForPath } from '@pi-dashboard/protocol';
 import { sessionDisplayTitle } from '../../app-helpers';
 import { dashboardStatus } from '../presentation-status';
 
@@ -22,8 +20,8 @@ export type DurableThreadMetadata = {
 export type AgentThreadRow = {
   id: string;
   title: string;
-  workspaceId?: string;
-  workspaceName: string;
+  projectId?: string;
+  projectName: string;
   cwd: string;
   durableThread?: DurableThreadMetadata;
   status:
@@ -182,20 +180,24 @@ export function agentThreadRows(
           ]),
         )
       : undefined;
-  const workspaces = snapshot.workspaces;
+  const projectsById = new Map(
+    (snapshot.projects ?? []).map((project) => [project.id, project]),
+  );
   const sessionsById = new Map(
     snapshot.sessions.map((session) => [session.id, session]),
   );
   const rows = new Map<string, AgentThreadRow>();
   for (const runtime of snapshot.runtimes) {
     const session = sessionsById.get(runtime.session.id);
-    const workspace = workspaceForPath(runtime.cwd, workspaces);
+    const projectId = runtime.projectId ?? session?.projectId;
     const presentation = dashboardStatus(runtime);
     rows.set(runtime.session.id, {
       id: runtime.session.id,
       title: sessionDisplayTitle(runtime.session, runtime.session.entries),
-      workspaceId: session?.workspaceId ?? workspace?.id,
-      workspaceName: workspace?.name ?? 'Other workspace',
+      ...(projectId ? { projectId } : {}),
+      projectName: projectId
+        ? (projectsById.get(projectId)?.title ?? 'Unknown project')
+        : 'Unassigned',
       cwd: runtime.cwd,
       durableThread: durableForSession?.get(runtime.session.id),
       status: presentation.status,
@@ -208,14 +210,14 @@ export function agentThreadRows(
   }
   for (const session of snapshot.sessions) {
     if (rows.has(session.id)) continue;
-    const workspace =
-      workspaces.find((item) => item.id === session.workspaceId) ??
-      workspaceForPath(session.cwd, workspaces);
+    const projectId = session.projectId;
     rows.set(session.id, {
       id: session.id,
       title: sessionDisplayTitle(session),
-      workspaceId: session.workspaceId ?? workspace?.id,
-      workspaceName: workspace?.name ?? 'Other workspace',
+      ...(projectId ? { projectId } : {}),
+      projectName: projectId
+        ? (projectsById.get(projectId)?.title ?? 'Unknown project')
+        : 'Unassigned',
       cwd: session.cwd,
       durableThread: durableForSession?.get(session.id),
       status: 'dormant',
@@ -250,7 +252,7 @@ export function filterAgentThreadRows(
   const needle = query.trim().toLowerCase();
   return needle
     ? rows.filter((row) =>
-        `${row.title} ${row.workspaceName} ${row.cwd} ${row.status} ${
+        `${row.title} ${row.projectName} ${row.cwd} ${row.status} ${
           isArchivedThread(row) ? 'archived' : ''
         } ${row.durableThread?.settledAt !== undefined ? 'settled' : ''}`
           .toLowerCase()
@@ -357,14 +359,15 @@ export function shortPath(path: string): string {
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path;
 }
 
-export function workspaceNameForSession(
+export function projectNameForSession(
   snapshot: BrowserSnapshot,
   session: SessionIndexEntry,
   runtime?: RuntimeSnapshot,
 ): string {
-  const workspace =
-    snapshot.workspaces.find(
-      (item: WorkspaceTarget) => item.id === session.workspaceId,
-    ) ?? workspaceForPath(runtime?.cwd ?? session.cwd, snapshot.workspaces);
-  return workspace?.name ?? 'Other workspace';
+  const projectId = runtime?.projectId ?? session.projectId;
+  if (!projectId) return 'Unassigned';
+  return (
+    (snapshot.projects ?? []).find((project) => project.id === projectId)
+      ?.title ?? 'Unknown project'
+  );
 }

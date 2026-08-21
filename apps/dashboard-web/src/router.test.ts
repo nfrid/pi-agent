@@ -7,17 +7,12 @@ describe('dashboard route tree', () => {
     const router = createRouter({
       routeTree: dashboardRouteTree,
       history: createMemoryHistory({
-        initialEntries: ['/workspaces/workspace-1/new'],
+        initialEntries: ['/projects/project-1/new'],
       }),
     });
     await router.load();
-    expect(router.state.location.pathname).toBe('/workspaces/workspace-1/new');
-    for (const path of [
-      '/projects',
-      '/workspaces',
-      '/sessions',
-      '/inbox',
-    ] as const) {
+    expect(router.state.location.pathname).toBe('/projects/project-1/new');
+    for (const path of ['/projects', '/sessions', '/inbox'] as const) {
       await router.navigate({ to: path });
       expect(router.state.location.pathname).toBe(path);
     }
@@ -37,18 +32,6 @@ describe('dashboard route tree', () => {
     });
     expect(router.state.location.pathname).toBe(
       '/projects/project-1/new/pending/thread-1',
-    );
-    await router.navigate({
-      to: '/workspaces/$workspaceId/new',
-      params: { workspaceId: 'workspace-1' },
-    });
-    expect(router.state.location.pathname).toBe('/workspaces/workspace-1/new');
-    await router.navigate({
-      to: '/workspaces/$workspaceId/new/pending/$runtimeId',
-      params: { workspaceId: 'workspace-1', runtimeId: 'runtime-1' },
-    });
-    expect(router.state.location.pathname).toBe(
-      '/workspaces/workspace-1/new/pending/runtime-1',
     );
     await router.navigate({
       to: '/sessions/$sessionId',

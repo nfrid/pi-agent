@@ -2,7 +2,6 @@ import type { MDXEditorMethods } from '@mdxeditor/editor';
 import type { DashboardLiveStore } from '@pi-dashboard/client';
 import {
   commandMutationOptions,
-  composerCommandsQueryOptions,
   dashboardHttpClient,
   startRuntimeMutationOptions,
 } from '@pi-dashboard/client';
@@ -10,7 +9,7 @@ import type {
   RuntimeSnapshot,
   SessionIndexEntry,
 } from '@pi-dashboard/protocol';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../../routes/navigation';
@@ -78,7 +77,8 @@ export function Composer({
   session,
   store,
   sessionId,
-  workspaceId,
+  projectId,
+  checkoutId,
   onMessageSubmitted,
   onPromptSubmitted,
 }: {
@@ -87,7 +87,8 @@ export function Composer({
   session?: SessionIndexEntry;
   store?: DashboardLiveStore;
   sessionId: string;
-  workspaceId?: string;
+  projectId?: string;
+  checkoutId?: string;
   onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 }) {
@@ -110,11 +111,7 @@ export function Composer({
   const resumeMutation = useMutation(
     startRuntimeMutationOptions(dashboardHttpClient),
   );
-  const commandCatalogue = useQuery(
-    composerCommandsQueryOptions(dashboardHttpClient, workspaceId ?? ''),
-  );
-  const composerCommands =
-    runtime?.composerCommands ?? commandCatalogue.data?.commands;
+  const composerCommands = runtime?.composerCommands;
   const { queue, setQueue, addOptimistic, rejectOptimistic } =
     useComposerQueue(runtime);
   const settledBackground = hasSettledBackground(runtime);
@@ -122,7 +119,7 @@ export function Composer({
   const disabled = composerIsDisabled(runtime);
   const submissionDisabled = runtime
     ? disabled
-    : !workspaceId || resumeMutation.isPending || resumePending;
+    : !projectId || !checkoutId || resumeMutation.isPending || resumePending;
   const dormantMetadata = dormantResumeMetadata(session, runtimes);
   const attachmentsEnabled = runtime
     ? runtime.liveState !== 'compacting' && runtimeSupportsImages(runtime)
@@ -179,12 +176,13 @@ export function Composer({
     if (!runtime) {
       const hasImages = attachments.length > 0;
       const request = resumeRuntimeRequest(
-        workspaceId,
+        projectId,
+        checkoutId,
         sessionId,
         hasImages ? undefined : trimmedText,
       );
       if (!request) {
-        setResumeError('This session has no workspace association.');
+        setResumeError('This session has no project checkout association.');
         setBusy(false);
         return;
       }
@@ -324,14 +322,14 @@ export function Composer({
         notice={
           <div className="composer-notice" role="note">
             <strong>This session is dormant</strong>
-            <p>Sending a message will resume Pi in this workspace.</p>
+            <p>Sending a message will resume Pi in this project checkout.</p>
             {resumePending && <output>Resuming…</output>}
           </div>
         }
         footer={
-          !workspaceId ? (
+          !projectId || !checkoutId ? (
             <p className="error composer-error" role="alert">
-              This session has no workspace association.
+              This session has no project checkout association.
             </p>
           ) : resumeError ? (
             <p className="error composer-error" role="alert">

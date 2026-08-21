@@ -9,7 +9,7 @@ import { Back, useDashboardNavigate } from '../routes/navigation';
 import { errorMessage } from '../shared/lib/error-message';
 import { RuntimeCard } from './dashboard-overview';
 import styles from './project-catalogue.module.css';
-import { SessionRow } from './workspace-session';
+import { SessionRow } from './session-row';
 
 export interface ProjectCounts {
   checkouts: number;

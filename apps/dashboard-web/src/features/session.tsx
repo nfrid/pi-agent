@@ -3,7 +3,7 @@ import {
   selectSessionReplacement,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import { type BrowserSnapshot, workspaceForPath } from '@pi-dashboard/protocol';
+import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import {
   type ComponentType,
   useCallback,
@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { Transcript } from '../entities/transcript';
 import { useDashboardNavigate } from '../routes/navigation';
-import { AgentThreadNav, workspaceNameForSession } from './agent-thread-nav';
+import { AgentThreadNav, projectNameForSession } from './agent-thread-nav';
 import { runtimePauseStatus } from './extension-surfaces';
 import { dashboardStatus } from './presentation-status';
 import { useOlderSessionHistory } from './session/history';
@@ -169,15 +169,10 @@ export function SessionView({
     );
   }
 
-  const workspaceName = workspaceNameForSession(
-    snapshot,
-    data.metadata,
-    runtime,
-  );
-  const workspaceId =
-    data.metadata.workspaceId ??
-    workspaceForPath(runtime?.cwd ?? data.metadata.cwd, snapshot.workspaces)
-      ?.id;
+  const projectName = projectNameForSession(snapshot, data.metadata, runtime);
+  const projectId = runtime?.projectId ?? data.metadata.projectId ?? undefined;
+  const checkoutId =
+    runtime?.checkoutId ?? data.metadata.checkoutId ?? undefined;
   return (
     <div
       className={`session-layout${embedded ? ' embedded-session-layout' : ''}`}
@@ -201,8 +196,8 @@ export function SessionView({
       >
         <SessionHeader
           id={id}
-          workspaceName={workspaceName}
-          workspaceId={workspaceId}
+          projectName={projectName}
+          projectId={projectId}
           data={data.metadata}
           entries={data.entries}
           status={status}
@@ -251,7 +246,8 @@ export function SessionView({
           runtimes={snapshot.runtimes}
           session={data.metadata}
           sessionId={id}
-          workspaceId={workspaceId}
+          projectId={projectId}
+          checkoutId={checkoutId}
           onPromptSubmitted={(text) => {
             cancelScrollRestore();
             store.optimisticallyTitleSession(id, text);

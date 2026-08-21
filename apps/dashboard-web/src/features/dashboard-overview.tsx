@@ -1,11 +1,4 @@
-import {
-  type DashboardLiveStore,
-  dashboardHttpClient,
-  workspaceRefreshMutationOptions,
-} from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { workspaceForPath } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import {
@@ -15,55 +8,10 @@ import {
 import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
 import styles from './dashboard-overview.module.css';
 import { runtimePauseStatus } from './extension-surfaces';
-import { SessionRow } from './workspace-session';
-
-function WorkspaceRefresh({
-  snapshot,
-  store,
-}: {
-  snapshot: BrowserSnapshot;
-  store?: DashboardLiveStore;
-}) {
-  const mutation = useMutation(
-    workspaceRefreshMutationOptions(dashboardHttpClient),
-  );
-  const refresh = async () => {
-    try {
-      const result = (await mutation.mutateAsync()) as {
-        workspaces?: BrowserSnapshot['workspaces'];
-      };
-      if (store && result.workspaces) {
-        store.installSnapshot(
-          { ...snapshot, workspaces: result.workspaces },
-          { source: 'http', requestGeneration: store.getGeneration() },
-        );
-      }
-    } catch {
-      // The live catalogue remains usable; the button exposes failure state.
-    }
-  };
-  return (
-    <button
-      type="button"
-      className="secondary-button"
-      onClick={() => void refresh()}
-      disabled={mutation.isPending}
-      aria-label="Refresh workspaces"
-    >
-      {mutation.isPending ? 'Refreshing…' : 'Refresh'}
-    </button>
-  );
-}
+import { SessionRow } from './session-row';
 
 /** Home is intentionally a thread browser, not a dashboard of duplicate cards. */
-export function Dashboard({
-  snapshot,
-  store,
-}: {
-  snapshot: BrowserSnapshot;
-  usageError?: string;
-  store?: DashboardLiveStore;
-}) {
+export function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
   const go = useDashboardNavigate();
   const [agentNavOpen, setAgentNavOpen] = useState(false);
   const latestSession = snapshot.sessions.reduce<
@@ -93,10 +41,10 @@ export function Dashboard({
       >
         <div className={`home-heading ${styles.homeHeading}`}>
           <div>
-            <p className="eyebrow">Pi workspace</p>
+            <p className="eyebrow">Pi projects</p>
             <h1>No thread selected</h1>
             <p className="muted">
-              Choose an agent thread from the workspace nav to resume its
+              Choose an agent thread from the project nav to resume its
               transcript.
             </p>
           </div>
@@ -107,8 +55,8 @@ export function Dashboard({
           </span>
           <strong>Ready for the next task</strong>
           <p>
-            Start a new agent, or choose an existing thread from the workspace
-            nav to open its transcript.
+            Start a new agent, or choose an existing thread from the project nav
+            to open its transcript.
           </p>
           <div
             className={`empty-workspace-actions ${styles.emptyWorkspaceActions}`}
@@ -128,72 +76,16 @@ export function Dashboard({
                 Resume latest
               </button>
             )}
-            <WorkspaceRefresh snapshot={snapshot} store={store} />
           </div>
         </div>
         {snapshot.runtimes.length > 0 && onlineCount === 0 && (
           <div className="notice quiet-notice" role="status">
             No runtimes are connected. Offline and failed threads remain in the
-            workspace nav for diagnosis.
+            project nav for diagnosis.
           </div>
         )}
       </section>
     </div>
-  );
-}
-
-export function WorkspacesView({
-  snapshot,
-  store,
-}: {
-  snapshot: BrowserSnapshot;
-  store?: DashboardLiveStore;
-}) {
-  const go = useDashboardNavigate();
-  return (
-    <section>
-      <div className="section-heading page-heading">
-        <div>
-          <h1>Workspaces</h1>
-          <p className="muted">Projects available to agents and sessions.</p>
-        </div>
-        <WorkspaceRefresh snapshot={snapshot} store={store} />
-      </div>
-      <div className="workspace-list">
-        {snapshot.workspaces.map((workspace) => {
-          const runtimes = snapshot.runtimes.filter(
-            (runtime) =>
-              workspaceForPath(runtime.cwd, [workspace])?.id === workspace.id,
-          );
-          const sessions = snapshot.sessions.filter(
-            (session) => session.workspaceId === workspace.id,
-          );
-          return (
-            <button
-              type="button"
-              className="workspace-card"
-              key={workspace.id}
-              onClick={() => go(`/workspaces/${workspace.id}`)}
-            >
-              <span className="workspace-card-main">
-                <strong>{workspace.name}</strong>
-                <small className="path">{workspace.canonicalPath}</small>
-              </span>
-              <span className="workspace-state active">
-                <i aria-hidden="true">●</i> ready
-              </span>
-              <span className="workspace-card-meta">
-                {runtimes.length} runtime{runtimes.length === 1 ? '' : 's'} ·{' '}
-                {sessions.length} session{sessions.length === 1 ? '' : 's'}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      {!snapshot.workspaces.length && (
-        <p className="empty">No workspaces discovered.</p>
-      )}
-    </section>
   );
 }
 
@@ -203,7 +95,7 @@ export function SessionsView({ snapshot }: { snapshot: BrowserSnapshot }) {
       <div className="section-heading page-heading">
         <div>
           <h1>Sessions</h1>
-          <p className="muted">History across every workspace.</p>
+          <p className="muted">History across every project.</p>
         </div>
       </div>
       <div className="session-list">

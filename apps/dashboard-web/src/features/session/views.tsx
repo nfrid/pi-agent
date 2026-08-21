@@ -18,20 +18,21 @@ export type SessionComposerProps = {
   session?: SessionIndexEntry;
   store?: DashboardLiveStore;
   sessionId: string;
-  workspaceId?: string;
+  projectId?: string;
+  checkoutId?: string;
   onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 };
 
-function SessionWorkspaceLink({
-  workspaceId,
-  workspaceLabel,
+function SessionProjectLink({
+  projectId,
+  projectLabel,
 }: {
-  workspaceId: string;
-  workspaceLabel: string;
+  projectId: string;
+  projectLabel: string;
 }) {
   const go = useDashboardNavigate();
-  const href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+  const href = `/projects/${encodeURIComponent(projectId)}`;
   return (
     <a
       className="session-workspace session-workspace-link"
@@ -49,21 +50,21 @@ function SessionWorkspaceLink({
         go(href);
       }}
     >
-      {workspaceLabel}
+      {projectLabel}
     </a>
   );
 }
 
 function SessionHeaderFrame({
-  workspaceLabel,
-  workspaceId,
+  projectLabel,
+  projectId,
   title,
   status,
   statusLabel,
   actions,
 }: {
-  workspaceLabel: string;
-  workspaceId?: string;
+  projectLabel: string;
+  projectId?: string;
   title: ReactNode;
   status: string;
   statusLabel: string;
@@ -75,13 +76,13 @@ function SessionHeaderFrame({
         <div className="session-context-main">
           <div className="session-identity">
             <div className="session-breadcrumb">
-              {workspaceId ? (
-                <SessionWorkspaceLink
-                  workspaceId={workspaceId}
-                  workspaceLabel={workspaceLabel}
+              {projectId ? (
+                <SessionProjectLink
+                  projectId={projectId}
+                  projectLabel={projectLabel}
                 />
               ) : (
-                <span className="session-workspace">{workspaceLabel}</span>
+                <span className="session-workspace">{projectLabel}</span>
               )}
               <span className="session-breadcrumb-separator" aria-hidden="true">
                 /
@@ -133,8 +134,8 @@ export function SessionLoadingCurtain({
 
 export function SessionHeader({
   id,
-  workspaceName,
-  workspaceId,
+  projectName,
+  projectId,
   data,
   entries,
   status,
@@ -144,8 +145,8 @@ export function SessionHeader({
   store,
 }: {
   id: string;
-  workspaceName: string;
-  workspaceId?: string;
+  projectName: string;
+  projectId?: string;
   data: Parameters<typeof sessionDisplayTitle>[0];
   entries: readonly unknown[];
   status: string;
@@ -157,8 +158,8 @@ export function SessionHeader({
   const title = sessionDisplayTitle(data, entries);
   return (
     <SessionHeaderFrame
-      workspaceLabel={workspaceName}
-      workspaceId={workspaceId}
+      projectLabel={projectName}
+      projectId={projectId}
       title={
         <InlineSessionRename
           id={id}
@@ -230,7 +231,8 @@ export function SessionControlLayer({
   runtimes,
   session,
   sessionId,
-  workspaceId,
+  projectId,
+  checkoutId,
   onPromptSubmitted,
 }: {
   controlLayerRef: RefObject<HTMLDivElement | null>;
@@ -243,7 +245,8 @@ export function SessionControlLayer({
   runtimes: readonly RuntimeSnapshot[];
   session?: SessionIndexEntry;
   sessionId: string;
-  workspaceId: string | undefined;
+  projectId: string | undefined;
+  checkoutId: string | undefined;
   onPromptSubmitted: (text: string) => void;
 }) {
   return (
@@ -276,7 +279,8 @@ export function SessionControlLayer({
         session={session}
         store={store}
         sessionId={sessionId}
-        workspaceId={workspaceId}
+        projectId={projectId}
+        checkoutId={checkoutId}
         onMessageSubmitted={onJumpToLatest}
         onPromptSubmitted={onPromptSubmitted}
       />
@@ -299,7 +303,7 @@ export function SessionLoadingHeader({
 }) {
   return (
     <SessionHeaderFrame
-      workspaceLabel="Session"
+      projectLabel="Session"
       title={
         <h1>
           {metadata

@@ -16,7 +16,6 @@ export {
   sessionNavigationTarget,
   shouldApplySessionMetadata,
   shouldShowJumpToLatest,
-  sortWorkspacesByRecency,
 } from './app-helpers';
 export {
   buildTranscriptLandmarks,
@@ -48,15 +47,7 @@ export {
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
 } from './features/extension-surfaces';
-export {
-  newChatModelOptions,
-  newChatRequest,
-  newChatThinkingLevels,
-  pendingChatPath,
-  preferredNewChatRuntime,
-  sessionPathForRuntime,
-} from './features/new-chat';
-export { newChatPath, newProjectThreadPath } from './routes/navigation';
+export { newProjectThreadPath } from './routes/navigation';
 export { dashboardRouterInstance, dashboardRouteTree } from './routes/tree';
 export { toTranscriptEntries } from './transcript';
 

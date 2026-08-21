@@ -5,7 +5,7 @@ describe('dashboard view transition navigation policy', () => {
   it('enables transitions for eligible in-app navigation', () => {
     expect(
       shouldUseDashboardViewTransition({
-        currentPath: '/workspaces/workspace-1',
+        currentPath: '/projects/project-1',
         targetPath: '/runtimes/runtime-1',
         reducedMotion: false,
       }),
@@ -13,7 +13,7 @@ describe('dashboard view transition navigation policy', () => {
   });
 
   it.each([
-    ['reduced motion', '/workspaces/workspace-1', '/runtimes/runtime-1', true],
+    ['reduced motion', '/projects/project-1', '/runtimes/runtime-1', true],
     ['same path', '/sessions/one', '/sessions/one', false],
     [
       'same pathname with a search string',
@@ -21,17 +21,12 @@ describe('dashboard view transition navigation policy', () => {
       '/sessions/one?tab=details',
       false,
     ],
-    [
-      'legacy new current redirect',
-      '/new',
-      '/workspaces/workspace-1/new',
-      false,
-    ],
-    ['legacy new target redirect', '/workspaces', '/new', false],
-    ['current sessions route', '/sessions', '/workspaces', false],
-    ['current session surface', '/sessions/one', '/workspaces', false],
-    ['target sessions route', '/workspaces', '/sessions', false],
-    ['target session surface', '/workspaces', '/sessions/one', false],
+    ['legacy new current redirect', '/new', '/projects/project-1/new', false],
+    ['legacy new target redirect', '/projects', '/new', false],
+    ['current sessions route', '/sessions', '/projects', false],
+    ['current session surface', '/sessions/one', '/projects', false],
+    ['target sessions route', '/projects', '/sessions', false],
+    ['target session surface', '/projects', '/sessions/one', false],
   ])('opts out for %s', (_reason, currentPath, targetPath, reducedMotion) => {
     expect(
       shouldUseDashboardViewTransition({

@@ -8,8 +8,6 @@ import {
   HomeRoute,
   InboxRoute,
   LegacyNewRoute,
-  NewChatRoute,
-  PendingNewChatRoute,
   ProjectNewThreadRoute,
   ProjectPendingThreadRoute,
   ProjectRoute,
@@ -17,8 +15,6 @@ import {
   RuntimeRoute,
   SessionRoute,
   SessionsRoute,
-  WorkspaceRoute,
-  WorkspacesRoute,
 } from './components';
 
 const rootRoute = createRootRoute({ component: RouteShell });
@@ -57,26 +53,6 @@ const projectPendingThreadRoute = createRoute({
   path: '/projects/$projectId/new/pending/$threadId',
   component: ProjectPendingThreadRoute,
 });
-const workspacesRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/workspaces',
-  component: WorkspacesRoute,
-});
-const workspaceRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/workspaces/$workspaceId',
-  component: WorkspaceRoute,
-});
-const newChatRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/workspaces/$workspaceId/new',
-  component: NewChatRoute,
-});
-const pendingNewChatRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/workspaces/$workspaceId/new/pending/$runtimeId',
-  component: PendingNewChatRoute,
-});
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
@@ -101,10 +77,6 @@ export const dashboardRouteTree = rootRoute.addChildren([
   projectRoute,
   projectNewThreadRoute,
   projectPendingThreadRoute,
-  workspacesRoute,
-  workspaceRoute,
-  newChatRoute,
-  pendingNewChatRoute,
   inboxRoute,
   runtimeRoute,
   legacyNewRoute,

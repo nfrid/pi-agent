@@ -14,15 +14,15 @@ import {
 
 function row(
   id: string,
-  workspaceName: string,
+  projectName: string,
   status: AgentThreadRow['status'] = 'working',
-  workspaceId?: string,
+  projectId?: string,
 ): AgentThreadRow {
   return {
     id,
     title: `Thread ${id}`,
-    workspaceId,
-    workspaceName,
+    projectId,
+    projectName,
     cwd: `/work/${id}`,
     status,
     startedAt: 0,
@@ -67,14 +67,15 @@ describe('agent thread view model', () => {
     ).not.toBe(first);
   });
 
-  it('assigns indexed sessions to a known workspace by cwd when workspaceId is absent', () => {
+  it('uses the server-owned project association for indexed sessions', () => {
     const rows = agentThreadRows({
       runtimes: [],
-      workspaces: [{ id: 'app', name: 'App', canonicalPath: '/work/app' }],
+      projects: [{ id: 'app', title: 'App', status: 'active' }],
       sessions: [
         {
           id: 'dormant-session',
           cwd: '/work/app/packages/dashboard',
+          projectId: 'app',
           updatedAt: 10,
         },
       ],
@@ -82,8 +83,8 @@ describe('agent thread view model', () => {
 
     expect(rows[0]).toMatchObject({
       id: 'dormant-session',
-      workspaceId: 'app',
-      workspaceName: 'App',
+      projectId: 'app',
+      projectName: 'App',
       status: 'dormant',
     });
   });

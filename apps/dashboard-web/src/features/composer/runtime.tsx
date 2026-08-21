@@ -36,13 +36,15 @@ export async function waitForStartedRuntime(
 }
 
 export function resumeRuntimeRequest(
-  workspaceId: string | undefined,
+  projectId: string | undefined,
+  checkoutId: string | undefined,
   sessionId: string,
   initialPrompt?: string,
 ): StartRuntimeRequest | undefined {
-  if (!workspaceId) return undefined;
+  if (!projectId || !checkoutId) return undefined;
   return {
-    workspaceId,
+    projectId,
+    checkoutId,
     sessionId,
     ...(initialPrompt ? { initialPrompt } : {}),
   };

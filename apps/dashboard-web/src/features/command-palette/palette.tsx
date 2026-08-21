@@ -102,13 +102,11 @@ export function CommandPalette({
     setError(undefined);
     if (item.kind === 'navigate') {
       const utilityPanel =
-        item.path === '/workspaces'
-          ? 'workspaces'
-          : item.path === '/sessions'
-            ? 'sessions'
-            : item.path === '/inbox'
-              ? 'inbox'
-              : undefined;
+        item.path === '/sessions'
+          ? 'sessions'
+          : item.path === '/inbox'
+            ? 'inbox'
+            : undefined;
       close();
       if (utility && utilityPanel) {
         if (utilityTimerRef.current !== undefined)
@@ -211,7 +209,7 @@ export function CommandPalette({
                   void invoke(selected);
                 }
               }}
-              placeholder="Search actions, sessions, and workspaces…"
+              placeholder="Search actions, sessions, and projects…"
             />
             <div
               className="palette-list"
