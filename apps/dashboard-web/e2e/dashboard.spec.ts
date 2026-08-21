@@ -1531,13 +1531,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
             contextWindow: 100,
             percent: 32,
           },
-          queueDrafts: [
-            {
-              clientId: 'queued-draft',
-              mode: 'followUp',
-              text: 'Queued follow-up',
-            },
-          ],
           session: {
             id: 'session-loading',
             title: 'Loaded shell',
@@ -1720,7 +1713,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   );
   await expect(
     loadedCard.locator('[data-row-content="details"]'),
-  ).toContainText('test/careful · high · 32 ctx · 1 queued');
+  ).toContainText('test/careful · high · 32 ctx');
   await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     loadedCard.locator('[data-row-content="workspace"] .agent-thread-glyph'),
@@ -1794,6 +1787,45 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       exact: true,
     }),
   ).toBeVisible();
+  const dormantNotice = page.locator('.composer-notice');
+  const dormantComposer = page.locator('form.composer');
+  await expect(dormantNotice).toBeVisible();
+  await expect(dormantComposer).toBeVisible();
+  const dormantStack = await dormantNotice.evaluate((notice) => {
+    const composer = notice.nextElementSibling;
+    const noticeRect = notice.getBoundingClientRect();
+    const composerRect = composer?.getBoundingClientRect();
+    return {
+      composerIsNext: composer?.matches('form.composer') ?? false,
+      noticeBottom: noticeRect.bottom,
+      composerTop: composerRect?.top,
+      leftGap: Math.abs(noticeRect.left - (composerRect?.left ?? 0)),
+      rightGap: Math.abs(noticeRect.right - (composerRect?.right ?? 0)),
+    };
+  });
+  expect(dormantStack.composerIsNext).toBe(true);
+  expect(dormantStack.noticeBottom).toBeLessThanOrEqual(
+    dormantStack.composerTop ?? 0,
+  );
+  expect(dormantStack.leftGap).toBeLessThanOrEqual(1);
+  expect(dormantStack.rightGap).toBeLessThanOrEqual(1);
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  const dormantJumpLatest = page.getByRole('button', {
+    name: 'Jump to latest transcript activity',
+  });
+  await expect(dormantJumpLatest).toBeVisible();
+  const dormantJumpBottom = await dormantJumpLatest.evaluate(
+    (button) => button.getBoundingClientRect().bottom,
+  );
+  const dormantNoticeTop = await dormantNotice.evaluate(
+    (notice) => notice.getBoundingClientRect().top,
+  );
+  expect(dormantJumpBottom).toBeLessThanOrEqual(dormantNoticeTop);
+  await dormantJumpLatest.click();
   await expect(page.getByText('Dormant latest')).toBeVisible();
   await expect(page.locator('.session-page')).not.toHaveAttribute(
     'data-tail-pending',
