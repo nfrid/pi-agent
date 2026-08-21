@@ -142,8 +142,8 @@ describe('managed runtime launch safety', () => {
   const binding = (runtimeId: string) => ({
     runtimeId,
     location: {
-      id: `${runtimeId}:location`,
-      displayTarget: `runtime://${runtimeId}`,
+      id: `runtime-host:${runtimeId}`,
+      displayTarget: `runtime-host://${runtimeId}`,
     },
   });
 
@@ -200,7 +200,7 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it('delivers an initial prompt even if hello races tmux launch completion', async () => {
+  it('delivers an initial prompt even if hello races host launch completion', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-prompt-'));
     const sendCommand = vi.fn().mockResolvedValue({ accepted: true });
     let manager!: RuntimeManager;
@@ -243,7 +243,7 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it('launches and stops a provider with an opaque location', async () => {
+  it('launches and stops the headless provider with its deterministic location', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-opaque-'));
     let launchedBinding!: {
       runtimeId: string;
@@ -271,7 +271,10 @@ describe('managed runtime launch safety', () => {
     const provider = {
       start: async ({ runtimeId: id }: { runtimeId: string }) => {
         launchedRuntimeId = id;
-        launchedBinding = { runtimeId: id, location: { id: 'opaque:abc' } };
+        launchedBinding = {
+          runtimeId: id,
+          location: { id: `runtime-host:${id}` },
+        };
         return launchedBinding;
       },
       stop,
@@ -406,40 +409,55 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it('rolls back the tmux window if metadata persistence fails', async () => {
+  it('does not spawn when metadata persistence fails', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-rollback-'));
-    const location = { displayTarget: 'runtime://location' };
-    const stop = vi.fn().mockResolvedValue(undefined);
-    const metadata = {
-      managedLaunches: () => [],
-      recordManagedLaunch: () => {
-        throw new Error('disk full');
-      },
-    };
+    const start = vi.fn();
     const manager = new RuntimeManager(
       { snapshots: () => [] } as never,
-      {
-        start: async ({ runtimeId }: { runtimeId: string }) => ({
-          runtimeId,
-          location: {
-            id: `${runtimeId}:location`,
-            ...location,
-          },
-        }),
-        stop,
-      } as never,
+      { start } as never,
       {} as never,
-      metadata as never,
+      {
+        managedLaunches: () => [],
+        recordManagedLaunch: () => {
+          throw new Error('disk full');
+        },
+      } as never,
       '/tmp/bridge.sock',
     );
     manager.setWorkspaces([workspace(root)]);
     await expect(
       manager.launch({ workspaceId: 'workspace-1' }),
     ).rejects.toThrow('disk full');
-    expect(stop).toHaveBeenCalledOnce();
-    expect(stop.mock.calls[0]?.[0]).toMatchObject({
-      location,
-    });
+    expect(start).not.toHaveBeenCalled();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('persists ownership before spawn and tombstones a failed start', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-order-'));
+    const events: string[] = [];
+    const markManagedStopped = vi.fn(() => events.push('stopped'));
+    const manager = new RuntimeManager(
+      { snapshots: () => [] } as never,
+      {
+        start: vi.fn(async () => {
+          events.push('start');
+          throw new Error('spawn failed');
+        }),
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [],
+        recordManagedLaunch: vi.fn(() => events.push('record')),
+        markManagedStopped,
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([workspace(root)]);
+    await expect(
+      manager.launch({ workspaceId: 'workspace-1' }),
+    ).rejects.toThrow('spawn failed');
+    expect(events).toEqual(['record', 'start', 'stopped']);
+    expect(markManagedStopped).toHaveBeenCalledOnce();
     await rm(root, { recursive: true, force: true });
   });
 });

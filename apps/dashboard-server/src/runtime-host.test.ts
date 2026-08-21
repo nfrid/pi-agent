@@ -48,7 +48,7 @@ describe('runtime host', () => {
         'rpc',
         '--approve',
         '--tools',
-        'read',
+        'read,grep,find,ls',
         '--name',
         'managed',
       ]);
@@ -67,6 +67,69 @@ describe('runtime host', () => {
       await client.stop('runtime-1');
       await client.stop('runtime-1');
       expect((await client.inspect('runtime-1'))?.status).toBe('stopped');
+    } finally {
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports natural child exit without stopping the host', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'dashboard-runtime-host-exit-'),
+    );
+    const socket = path.join(root, 'host.sock');
+    const executable = path.join(root, 'exit-pi.sh');
+    await writeFile(executable, '#!/bin/sh\nexit 7\n');
+    await chmod(executable, 0o700);
+    const service = new RuntimeHostService(socket);
+    await service.listen();
+    const client = new RuntimeHostClient(socket);
+    try {
+      await client.start({
+        runtimeId: 'runtime-exit',
+        cwd: root,
+        socketPath: path.join(root, 'bridge.sock'),
+        launchToken: 'launch',
+        identityToken: 'identity',
+        piExecutable: executable,
+      });
+      await eventually(
+        async () =>
+          (await client.inspect('runtime-exit'))?.status === 'stopped',
+      );
+      expect(await client.list()).toHaveLength(1);
+      expect(await client.inspect('runtime-exit')).toMatchObject({
+        status: 'stopped',
+        exitCode: 7,
+      });
+    } finally {
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a second host and rejects an executable that cannot spawn', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'dashboard-runtime-host-owner-'),
+    );
+    const socket = path.join(root, 'host.sock');
+    const service = new RuntimeHostService(socket);
+    const second = new RuntimeHostService(socket);
+    await service.listen();
+    try {
+      await expect(second.listen()).rejects.toThrow('already running');
+      const client = new RuntimeHostClient(socket);
+      await expect(
+        client.start({
+          runtimeId: 'runtime-missing',
+          cwd: root,
+          socketPath: path.join(root, 'bridge.sock'),
+          launchToken: 'launch',
+          identityToken: 'identity',
+          piExecutable: path.join(root, 'missing-pi'),
+        }),
+      ).rejects.toThrow();
+      expect(await client.inspect('runtime-missing')).toBeUndefined();
     } finally {
       await service.close();
       await rm(root, { recursive: true, force: true });

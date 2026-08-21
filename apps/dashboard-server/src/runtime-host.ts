@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { chmod, mkdir, unlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, chmod, mkdir, unlink } from 'node:fs/promises';
 import {
   createConnection,
   createServer,
@@ -20,7 +21,7 @@ export const RUNTIME_HOST_MAX_DIAGNOSTICS_BYTES = 32 * 1024;
 const TERM_WAIT_MS = 2_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
-const READ_ONLY_TOOLS = 'read';
+const READ_ONLY_TOOLS = 'read,grep,find,ls';
 
 type HostStartInput = Pick<
   RuntimeStartInput,
@@ -188,6 +189,13 @@ function drainStdout(runtime: HostRuntime, chunk: Buffer | string): void {
   }
 }
 
+export function runtimeHostLocation(runtimeId: string): RuntimeLocation {
+  return {
+    id: `runtime-host:${runtimeId}`,
+    displayTarget: `runtime-host://${runtimeId}`,
+  };
+}
+
 function signalGroup(runtime: HostRuntime, signal: NodeJS.Signals): void {
   try {
     process.kill(-runtime.pid, signal);
@@ -212,6 +220,43 @@ function waitForClose(runtime: HostRuntime, timeoutMs: number): Promise<void> {
   });
 }
 
+async function ensureExecutable(
+  executable: string,
+  cwd: string,
+): Promise<void> {
+  const candidates = executable.includes('/')
+    ? [path.resolve(cwd, executable)]
+    : (process.env.PATH ?? '')
+        .split(path.delimiter)
+        .map((directory) => path.resolve(directory || cwd, executable));
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK);
+      return;
+    } catch {
+      /* try the next PATH entry */
+    }
+  }
+  throw Object.assign(new Error(`Executable not found: ${executable}`), {
+    code: 'ENOENT',
+  });
+}
+
+async function socketAcceptsConnections(socketPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection(socketPath);
+    const finish = (connected: boolean) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(connected);
+    };
+    socket.setTimeout(250);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
+}
+
 /** Stable owner of headless Pi processes. One instance is intended per user. */
 export class RuntimeHostService {
   private readonly runtimes = new Map<string, HostRuntime>();
@@ -226,11 +271,11 @@ export class RuntimeHostService {
       recursive: true,
       mode: 0o700,
     });
-    try {
-      await unlink(this.socketPath);
-    } catch {
-      /* no stale socket */
-    }
+    if (await socketAcceptsConnections(this.socketPath))
+      throw Object.assign(new Error('Runtime host is already running.'), {
+        code: 'EADDRINUSE',
+      });
+    await unlink(this.socketPath).catch(() => undefined);
     this.server = createServer((socket) => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
       const server = this.server as Server;
@@ -311,7 +356,7 @@ export class RuntimeHostService {
           return { ok: true, runtime: summary(existing) };
         }
         if (existing) this.runtimes.delete(request.input.runtimeId);
-        const runtime = this.startRuntime(request.input);
+        const runtime = await this.startRuntime(request.input);
         this.runtimes.set(runtime.runtimeId, runtime);
         return { ok: true, runtime: summary(runtime) };
       }
@@ -341,15 +386,15 @@ export class RuntimeHostService {
     }
   }
 
-  private startRuntime(input: HostStartInput): HostRuntime {
+  private async startRuntime(input: HostStartInput): Promise<HostRuntime> {
     const piExecutable =
       input.piExecutable ?? process.env.PI_EXECUTABLE ?? 'pi';
     const args = buildPiArgs(input);
-    // Keep a tiny parent-death watchdog in the same process group. A normal
-    // host shutdown signals this group directly; a crash/SIGKILL is noticed by
-    // the watchdog and the child group is killed instead of becoming adoptable.
+    await ensureExecutable(piExecutable, input.cwd);
+    // The shell remains the process-group leader after exec. Its background
+    // watchdog exits when Pi exits, or kills the group if the host disappears.
     const watchdog =
-      'host="$PPID"; (while kill -0 "$host" 2>/dev/null; do sleep 0.2; done; kill -KILL -$$ 2>/dev/null || kill -KILL $$) & exec "$0" "$@"';
+      'host="$PPID"; leader="$$"; (while kill -0 "$host" 2>/dev/null && kill -0 "$leader" 2>/dev/null; do sleep 0.2; done; if ! kill -0 "$host" 2>/dev/null; then kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null; fi) & exec "$0" "$@"';
     const child = spawn('/bin/sh', ['-c', watchdog, piExecutable, ...args], {
       cwd: input.cwd,
       detached: true,
@@ -363,6 +408,18 @@ export class RuntimeHostService {
         PI_DASHBOARD_IDENTITY_TOKEN: input.identityToken,
       },
     });
+    await new Promise<void>((resolve, reject) => {
+      const onSpawn = () => {
+        child.off('error', onError);
+        resolve();
+      };
+      const onError = (error: Error) => {
+        child.off('spawn', onSpawn);
+        reject(error);
+      };
+      child.once('spawn', onSpawn);
+      child.once('error', onError);
+    });
     if (!child.pid || !child.stdout || !child.stderr)
       throw new Error('Could not start headless Pi runtime.');
     const runtime: HostRuntime = {
@@ -371,10 +428,7 @@ export class RuntimeHostService {
       args,
       process: child,
       pid: child.pid,
-      location: {
-        id: `runtime-host:${input.runtimeId}`,
-        displayTarget: `runtime-host://${input.runtimeId}`,
-      },
+      location: runtimeHostLocation(input.runtimeId),
       status: 'running',
       startedAt: Date.now(),
       diagnostics: '',
@@ -391,7 +445,7 @@ export class RuntimeHostService {
       runtime.exitCode = code;
       runtime.signal = signal;
     });
-    child.once('error', (error) =>
+    child.on('error', (error) =>
       appendDiagnostics(runtime, `${error.message}\n`),
     );
     return runtime;
@@ -429,6 +483,12 @@ export class RuntimeHostClient {
       connection.setEncoding('utf8');
       connection.on('data', (chunk: string) => {
         buffer += chunk;
+        if (Buffer.byteLength(buffer) > RUNTIME_HOST_MAX_LINE_BYTES) {
+          clearTimeout(timer);
+          connection.destroy();
+          reject(new Error('Runtime host response exceeded its bound.'));
+          return;
+        }
         const newline = buffer.indexOf('\n');
         if (newline < 0) return;
         clearTimeout(timer);

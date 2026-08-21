@@ -13,6 +13,7 @@ import {
   type ManagedLaunchRecord,
   type MetadataStore,
 } from './metadata.js';
+import { runtimeHostLocation } from './runtime-host.js';
 import type { RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { sanitizeDisplayName } from './security.js';
 import type { SessionIndex } from './session-index.js';
@@ -228,7 +229,20 @@ export class RuntimeManager {
       });
     let binding: RuntimeBinding | undefined;
     let metadataRecorded = false;
+    const expectedLocation = runtimeHostLocation(runtimeId);
     try {
+      this.metadata.recordManagedLaunch(
+        runtimeId,
+        workspace.id,
+        expectedLocation,
+        {
+          identityToken,
+          launchToken,
+          launchConsumed: false,
+          mode: request.mode ?? 'write',
+        },
+      );
+      metadataRecorded = true;
       binding = await this.provider.start({
         workspace: {
           id: workspace.id,
@@ -250,6 +264,8 @@ export class RuntimeManager {
         model: request.model,
         mode: request.mode,
       });
+      if (binding.location?.id !== expectedLocation.id)
+        throw new Error('Runtime host returned an unexpected location.');
       const launch: LaunchRecord = {
         runtimeId,
         launchToken,
@@ -258,31 +274,16 @@ export class RuntimeManager {
         binding,
         mode: request.mode ?? 'write',
         runtimeProvider: runtimeProvider ?? 'extension-bridge',
-        metadataRecorded: false,
+        metadataRecorded: true,
         createdAt: Date.now(),
       };
       this.launches.set(runtimeId, launch);
-      this.metadata.recordManagedLaunch(
-        runtimeId,
-        workspace.id,
-        binding.location ?? { id: `${runtimeId}:location` },
-        {
-          identityToken,
-          launchToken,
-          launchConsumed: !this.tokens.has(launchToken),
-          mode: request.mode ?? 'write',
-        },
-      );
-      metadataRecorded = true;
-      launch.metadataRecorded = true;
       this.dispatchInitialPrompt(runtimeId);
       return { runtimeId };
     } catch (error) {
       this.tokens.delete(launchToken);
-      if (binding) {
-        await this.provider.stop(binding);
-        if (metadataRecorded) this.metadata.markManagedStopped(runtimeId);
-      }
+      if (binding) await this.provider.stop(binding);
+      if (metadataRecorded) this.metadata.markManagedStopped(runtimeId);
       this.initialPrompts.delete(runtimeId);
       this.launches.delete(runtimeId);
       throw error;
