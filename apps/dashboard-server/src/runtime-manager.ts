@@ -42,6 +42,8 @@ function bindingFromLocation(
   return { runtimeId, location };
 }
 
+const REGISTRATION_TIMEOUT_MS = 10_000;
+
 export class RuntimeManager {
   private readonly workspaces = new Map<string, WorkspaceTarget>();
   private readonly launches = new Map<string, LaunchRecord>();
@@ -266,6 +268,14 @@ export class RuntimeManager {
       });
       if (binding.location?.id !== expectedLocation.id)
         throw new Error('Runtime host returned an unexpected location.');
+      if (
+        (
+          this.provider as AgentRuntimeProvider & {
+            requiresRegistration?: boolean;
+          }
+        ).requiresRegistration
+      )
+        await this.waitForRegistration(runtimeId);
       const launch: LaunchRecord = {
         runtimeId,
         launchToken,
@@ -282,7 +292,12 @@ export class RuntimeManager {
       return { runtimeId };
     } catch (error) {
       this.tokens.delete(launchToken);
-      if (binding) await this.provider.stop(binding);
+      const cleanupBinding =
+        binding ??
+        (metadataRecorded
+          ? { runtimeId, location: expectedLocation }
+          : undefined);
+      if (cleanupBinding) await this.provider.stop(cleanupBinding);
       if (metadataRecorded) this.metadata.markManagedStopped(runtimeId);
       this.initialPrompts.delete(runtimeId);
       this.launches.delete(runtimeId);
@@ -308,9 +323,13 @@ export class RuntimeManager {
       launch.binding = await this.provider.attach({ runtimeId, location });
       return true;
     } catch {
-      // A location that cannot be attached is unrecoverable. Remove the
-      // managed side effect rather than relaunching against unknown ownership.
-      await this.provider.stop(launch.binding);
+      // If the sidecar itself is unavailable, retain ownership evidence for a
+      // later cleanup attempt but do not prevent the dashboard from starting.
+      try {
+        await this.provider.stop(launch.binding);
+      } catch {
+        return false;
+      }
       if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
       this.launches.delete(runtimeId);
       return false;
@@ -424,6 +443,16 @@ export class RuntimeManager {
   onRegistryChange(change: RegistryChange): void {
     if (change.kind !== 'registered') return;
     this.dispatchInitialPrompt(change.snapshot.runtimeId);
+  }
+
+  private async waitForRegistration(runtimeId: string): Promise<void> {
+    const deadline = Date.now() + REGISTRATION_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const snapshot = this.registry.get(runtimeId);
+      if (snapshot && snapshot.online !== false) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('Managed runtime did not connect to the dashboard.');
   }
 
   private dispatchInitialPrompt(runtimeId: string): void {

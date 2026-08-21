@@ -1,8 +1,13 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createConnection } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RuntimeHostClient, RuntimeHostService } from './runtime-host.js';
+import {
+  RUNTIME_HOST_MAX_LINE_BYTES,
+  RuntimeHostClient,
+  RuntimeHostService,
+} from './runtime-host.js';
 
 async function eventually(check: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 2_000;
@@ -20,10 +25,11 @@ describe('runtime host', () => {
     );
     const socket = path.join(root, 'host.sock');
     const marker = path.join(root, 'cancelled');
+    const started = path.join(root, 'started');
     const executable = path.join(root, 'fake-pi.mjs');
     await writeFile(
       executable,
-      `#!/usr/bin/env node\nimport fs from 'node:fs';\nprocess.stdout.write(JSON.stringify({type:'extension_ui_request',id:'request-1'})+'\\n');\nprocess.stdin.setEncoding('utf8'); process.stdin.on('data', value => { if (value.includes('cancelled')) fs.writeFileSync(${JSON.stringify(marker)}, 'yes'); }); setInterval(() => {}, 1000);\n`,
+      `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(started)}, 'start\\n');\nprocess.stdout.write(JSON.stringify({type:'extension_ui_request',id:'request-1'})+'\\n');\nlet buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; let newline; while ((newline=buffer.indexOf('\\n')) >= 0) { const line=buffer.slice(0,newline); buffer=buffer.slice(newline+1); const request=JSON.parse(line); if (request.type === 'get_state') process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); if (request.cancelled) fs.writeFileSync(${JSON.stringify(marker)}, 'yes'); }}); setInterval(() => {}, 1000);\n`,
     );
     await chmod(executable, 0o700);
     const service = new RuntimeHostService(socket);
@@ -40,9 +46,12 @@ describe('runtime host', () => {
       piExecutable: executable,
     };
     try {
-      const first = await client.start(input);
-      const second = await client.start(input);
+      const [first, second] = await Promise.all([
+        client.start(input),
+        client.start(input),
+      ]);
       expect(second).toEqual(first);
+      expect(await readFile(started, 'utf8')).toBe('start\n');
       expect((await client.inspect('runtime-1'))?.args).toEqual([
         '--mode',
         'rpc',
@@ -78,10 +87,13 @@ describe('runtime host', () => {
       path.join(os.tmpdir(), 'dashboard-runtime-host-exit-'),
     );
     const socket = path.join(root, 'host.sock');
-    const executable = path.join(root, 'exit-pi.sh');
+    const executable = path.join(root, 'exit-pi.mjs');
     // The descendant inherits stdout. The watchdog must terminate the whole
     // process group after the leader exits or Node will never observe close.
-    await writeFile(executable, '#!/bin/sh\nsleep 60 &\nexit 7\n');
+    await writeFile(
+      executable,
+      `#!/usr/bin/env node\nimport { spawn } from 'node:child_process';\nlet buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; const newline=buffer.indexOf('\\n'); if (newline < 0) return; const request=JSON.parse(buffer.slice(0,newline)); process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); spawn('sleep',['60'],{stdio:'inherit'}); setTimeout(() => process.exit(7), 20); });\n`,
+    );
     await chmod(executable, 0o700);
     const service = new RuntimeHostService(socket);
     await service.listen();
@@ -104,6 +116,45 @@ describe('runtime host', () => {
         status: 'stopped',
         exitCode: 7,
       });
+    } finally {
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('contains malformed clients and child stdin errors', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'dashboard-runtime-host-errors-'),
+    );
+    const socket = path.join(root, 'host.sock');
+    const executable = path.join(root, 'closed-stdin-pi.mjs');
+    await writeFile(
+      executable,
+      `#!/usr/bin/env node\nlet buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; const newline=buffer.indexOf('\\n'); if (newline < 0) return; const request=JSON.parse(buffer.slice(0,newline)); process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); process.stdin.destroy(); setTimeout(() => process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'closed-input'})+'\\n'), 20); }); setInterval(() => {}, 1000);\n`,
+    );
+    await chmod(executable, 0o700);
+    const service = new RuntimeHostService(socket);
+    await service.listen();
+    const client = new RuntimeHostClient(socket);
+    try {
+      await client.start({
+        runtimeId: 'runtime-errors',
+        cwd: root,
+        socketPath: path.join(root, 'bridge.sock'),
+        launchToken: 'launch',
+        identityToken: 'identity',
+        piExecutable: executable,
+      });
+      await new Promise<void>((resolve) => {
+        const connection = createConnection(socket);
+        connection.once('connect', () =>
+          connection.write('x'.repeat(RUNTIME_HOST_MAX_LINE_BYTES + 1)),
+        );
+        connection.once('close', () => resolve());
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(await client.list()).toHaveLength(1);
+      expect((await client.inspect('runtime-errors'))?.status).toBe('running');
     } finally {
       await service.close();
       await rm(root, { recursive: true, force: true });

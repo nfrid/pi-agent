@@ -119,7 +119,8 @@ async function main() {
     const runtimeHostSocket =
       env.PI_DASHBOARD_RUNTIME_HOST_SOCKET ??
       path.join(
-        env.PI_DASHBOARD_STATE_DIR ?? path.join(root, 'dashboard'),
+        env.PI_DASHBOARD_STATE_DIR ??
+          path.join(env.HOME ?? process.cwd(), '.pi', 'agent', 'dashboard'),
         'runtime-host.sock',
       );
     if (

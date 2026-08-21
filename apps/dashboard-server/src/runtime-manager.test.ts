@@ -93,6 +93,40 @@ describe('runtime stopping', () => {
     expect(forget).toHaveBeenCalledOnce();
   });
 
+  it('retains recovery evidence when the sidecar is unavailable', async () => {
+    const runtimeId = 'runtime-sidecar-unavailable';
+    const markManagedStopped = vi.fn();
+    const manager = new RuntimeManager(
+      {} as never,
+      {
+        attach: vi.fn().mockRejectedValue(new Error('host unavailable')),
+        stop: vi.fn().mockRejectedValue(new Error('host unavailable')),
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId,
+            workspaceId: 'workspace-sidecar',
+            location: { id: `runtime-host:${runtimeId}` },
+            identityTokenHash: 'identity-hash',
+            launchTokenHash: 'launch-hash',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        markManagedStopped,
+      } as never,
+      '/tmp/bridge.sock',
+    );
+
+    await expect(manager.recover(runtimeId)).resolves.toBe(false);
+    expect(manager.location(runtimeId)).toEqual({
+      id: `runtime-host:${runtimeId}`,
+    });
+    expect(markManagedStopped).not.toHaveBeenCalled();
+  });
+
   it('forgets an external runtime even when its stale bridge rejects shutdown', async () => {
     const forget = vi.fn();
     const manager = new RuntimeManager(
@@ -241,6 +275,80 @@ describe('managed runtime launch safety', () => {
       text: 'start here',
     });
     await rm(root, { recursive: true, force: true });
+  });
+
+  it('waits for a required bridge registration before launch succeeds', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-hello-'));
+    let runtimeId = '';
+    const registry = {
+      snapshots: () => [],
+      get: vi.fn(() =>
+        registry.get.mock.calls.length > 1
+          ? { ...runtime('hello-session'), runtimeId, online: true }
+          : undefined,
+      ),
+    };
+    const manager = new RuntimeManager(
+      registry as never,
+      {
+        requiresRegistration: true,
+        start: vi.fn(async ({ runtimeId: id }: { runtimeId: string }) => {
+          runtimeId = id;
+          return binding(id);
+        }),
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [],
+        recordManagedLaunch: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([workspace(root)]);
+
+    await expect(
+      manager.launch({ workspaceId: 'workspace-1' }),
+    ).resolves.toMatchObject({ runtimeId: expect.any(String) });
+    expect(registry.get).toHaveBeenCalledTimes(2);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('stops and tombstones a host that never registers its bridge', async () => {
+    vi.useFakeTimers();
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-no-hello-'));
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const markManagedStopped = vi.fn();
+    try {
+      const manager = new RuntimeManager(
+        { snapshots: () => [], get: () => undefined } as never,
+        {
+          requiresRegistration: true,
+          start: vi.fn(async ({ runtimeId }: { runtimeId: string }) =>
+            binding(runtimeId),
+          ),
+          stop,
+        } as never,
+        {} as never,
+        {
+          managedLaunches: () => [],
+          recordManagedLaunch: vi.fn(),
+          markManagedStopped,
+        } as never,
+        '/tmp/bridge.sock',
+      );
+      manager.setWorkspaces([workspace(root)]);
+
+      const launch = expect(
+        manager.launch({ workspaceId: 'workspace-1' }),
+      ).rejects.toThrow('did not connect');
+      await vi.advanceTimersByTimeAsync(10_100);
+      await launch;
+      expect(stop).toHaveBeenCalledOnce();
+      expect(markManagedStopped).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('launches and stops the headless provider with its deterministic location', async () => {
@@ -436,6 +544,7 @@ describe('managed runtime launch safety', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-order-'));
     const events: string[] = [];
     const markManagedStopped = vi.fn(() => events.push('stopped'));
+    const stop = vi.fn(async () => events.push('stop'));
     const manager = new RuntimeManager(
       { snapshots: () => [] } as never,
       {
@@ -443,6 +552,7 @@ describe('managed runtime launch safety', () => {
           events.push('start');
           throw new Error('spawn failed');
         }),
+        stop,
       } as never,
       {} as never,
       {
@@ -456,7 +566,14 @@ describe('managed runtime launch safety', () => {
     await expect(
       manager.launch({ workspaceId: 'workspace-1' }),
     ).rejects.toThrow('spawn failed');
-    expect(events).toEqual(['record', 'start', 'stopped']);
+    expect(events).toEqual(['record', 'start', 'stop', 'stopped']);
+    expect(stop).toHaveBeenCalledWith({
+      runtimeId: expect.stringMatching(/^runtime-/),
+      location: {
+        id: expect.stringMatching(/^runtime-host:runtime-/),
+        displayTarget: expect.stringMatching(/^runtime-host:\/\/runtime-/),
+      },
+    });
     expect(markManagedStopped).toHaveBeenCalledOnce();
     await rm(root, { recursive: true, force: true });
   });

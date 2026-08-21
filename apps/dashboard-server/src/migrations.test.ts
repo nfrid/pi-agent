@@ -63,7 +63,7 @@ describe('migration metadata', () => {
         VALUES ('rename-thread','rename-project','Rename thread','rename-checkout','settled',3,4,5,6,'settled');
         INSERT INTO orchestration_run
           (id,thread_id,checkout_id,attempt,mode,runtime_provider,runtime_id,pi_session_id,initial_prompt,status,created_at,started_at,finished_at,error)
-        VALUES ('rename-run','rename-thread','rename-checkout',1,'write','extension-bridge','rename-runtime','rename-session','Rename prompt','settled',7,8,9,NULL);
+        VALUES ('rename-run','rename-thread','rename-checkout',1,'write','pi-server','rename-runtime','rename-session','Rename prompt','settled',7,8,9,NULL);
         INSERT INTO orchestration_runtime
           (runtime_id,pi_session_id,run_id,status,created_at,updated_at)
         VALUES ('rename-runtime','rename-session','rename-run','stopped',10,11);
@@ -77,7 +77,7 @@ describe('migration metadata', () => {
         VALUES (7,'rename-thread','legacy.snapshot',NULL,'migration','legacy-snapshot','{"status":"settled"}',15);
         INSERT INTO command_receipt
           (idempotency_key,command_type,resource_type,resource_id,runtime_id,command_fingerprint,result_json,created_at)
-        VALUES ('rename-command','thread.create','thread','rename-thread','rename-runtime',NULL,'{"thread":{"id":"rename-thread","projectId":"rename-project","title":"Rename thread","checkoutId":"rename-checkout","status":"settled","pinnedAt":5,"archivedAt":6,"preArchiveStatus":"settled","createdAt":3,"updatedAt":4},"run":{"id":"rename-run","threadId":"rename-thread","checkoutId":"rename-checkout","attempt":1,"mode":"write","runtimeProvider":"extension-bridge","runtimeId":"rename-runtime","piSessionId":"rename-session","initialPrompt":"Rename prompt","status":"settled","createdAt":7,"startedAt":8,"finishedAt":9}}',16);
+        VALUES ('rename-command','thread.create','thread','rename-thread','rename-runtime',NULL,'{"thread":{"id":"rename-thread","projectId":"rename-project","title":"Rename thread","checkoutId":"rename-checkout","status":"settled","pinnedAt":5,"archivedAt":6,"preArchiveStatus":"settled","createdAt":3,"updatedAt":4},"run":{"id":"rename-run","threadId":"rename-thread","checkoutId":"rename-checkout","attempt":1,"mode":"write","runtimeProvider":"pi-server","runtimeId":"rename-runtime","piSessionId":"rename-session","initialPrompt":"Rename prompt","status":"settled","createdAt":7,"startedAt":8,"finishedAt":9}}',16);
       `);
       const indexesBefore = db
         .prepare(

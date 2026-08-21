@@ -84,7 +84,7 @@ function columns(db: DatabaseSync, table: string): Set<string> {
   );
 }
 
-function completedReceiptJson(serialized: string): string | undefined {
+function normalizedReceiptJson(serialized: string): string | undefined {
   let changed = false;
   const value = JSON.parse(serialized, (key, item) => {
     if (
@@ -93,6 +93,10 @@ function completedReceiptJson(serialized: string): string | undefined {
     ) {
       changed = true;
       return 'completed';
+    }
+    if (key === 'runtimeProvider' && item === 'pi-server') {
+      changed = true;
+      return 'extension-bridge';
     }
     return item;
   });
@@ -641,7 +645,7 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         'UPDATE command_receipt SET result_json=? WHERE idempotency_key=?',
       );
       for (const receipt of receipts) {
-        const resultJson = completedReceiptJson(receipt.result_json);
+        const resultJson = normalizedReceiptJson(receipt.result_json);
         if (resultJson !== undefined)
           updateReceipt.run(resultJson, receipt.idempotency_key);
       }

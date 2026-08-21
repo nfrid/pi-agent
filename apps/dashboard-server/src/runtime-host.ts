@@ -19,6 +19,7 @@ import type {
 export const RUNTIME_HOST_MAX_LINE_BYTES = 1024 * 1024;
 export const RUNTIME_HOST_MAX_DIAGNOSTICS_BYTES = 32 * 1024;
 const TERM_WAIT_MS = 2_000;
+const READINESS_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 const READ_ONLY_TOOLS = 'read,grep,find,ls';
@@ -50,6 +51,9 @@ type HostRuntime = {
   signal?: NodeJS.Signals | null;
   diagnostics: string;
   stdoutBuffer: string;
+  readinessId?: string;
+  resolveReadiness?: () => void;
+  rejectReadiness?: (error: Error) => void;
   /** Credentials are retained only in memory to reject conflicting retries. */
   launchFingerprint: string;
 };
@@ -157,7 +161,20 @@ function handleRpcLine(runtime: HostRuntime, line: string): void {
     );
     return;
   }
-  if (!isRecord(value) || value.type !== 'extension_ui_request') return;
+  if (!isRecord(value)) return;
+  if (
+    value.type === 'response' &&
+    value.id === runtime.readinessId &&
+    value.command === 'get_state'
+  ) {
+    if (value.success === true) runtime.resolveReadiness?.();
+    else
+      runtime.rejectReadiness?.(
+        new Error('Pi rejected the runtime readiness probe.'),
+      );
+    return;
+  }
+  if (value.type !== 'extension_ui_request') return;
   // A managed runtime has no local UI. Never leave an extension request
   // waiting on a promise: cancellation is the fail-closed response.
   if (typeof value.id === 'string')
@@ -260,6 +277,7 @@ async function socketAcceptsConnections(socketPath: string): Promise<boolean> {
 /** Stable owner of headless Pi processes. One instance is intended per user. */
 export class RuntimeHostService {
   private readonly runtimes = new Map<string, HostRuntime>();
+  private readonly startLocks = new Map<string, Promise<void>>();
   private server?: Server;
   private closing = false;
 
@@ -311,7 +329,7 @@ export class RuntimeHostService {
     socket.on('data', (chunk: string) => {
       buffer += chunk;
       if (Buffer.byteLength(buffer) > RUNTIME_HOST_MAX_LINE_BYTES) {
-        socket.destroy(new Error('Runtime host request exceeded its bound.'));
+        socket.destroy();
         return;
       }
       let newline = buffer.indexOf('\n');
@@ -345,21 +363,11 @@ export class RuntimeHostService {
 
   private async dispatch(request: HostRequest): Promise<HostResponse> {
     switch (request.op) {
-      case 'start': {
-        const existing = this.runtimes.get(request.input.runtimeId);
-        if (existing?.status === 'running') {
-          if (!sameLaunch(existing, request.input))
-            throw Object.assign(
-              new Error('Runtime ID is already owned by a different launch.'),
-              { code: 'runtime-conflict' },
-            );
-          return { ok: true, runtime: summary(existing) };
-        }
-        if (existing) this.runtimes.delete(request.input.runtimeId);
-        const runtime = await this.startRuntime(request.input);
-        this.runtimes.set(runtime.runtimeId, runtime);
-        return { ok: true, runtime: summary(runtime) };
-      }
+      case 'start':
+        return {
+          ok: true,
+          runtime: summary(await this.startSerialized(request.input)),
+        };
       case 'list':
         return { ok: true, runtimes: this.summaries() };
       case 'inspect': {
@@ -383,6 +391,36 @@ export class RuntimeHostService {
         await this.stopRuntime(runtime, request.force === true);
         return { ok: true, runtime: summary(runtime) };
       }
+    }
+  }
+
+  private async startSerialized(input: HostStartInput): Promise<HostRuntime> {
+    const runtimeId = input.runtimeId;
+    const previous = this.startLocks.get(runtimeId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.startLocks.set(runtimeId, current);
+    await previous;
+    try {
+      const existing = this.runtimes.get(runtimeId);
+      if (existing?.status === 'running') {
+        if (!sameLaunch(existing, input))
+          throw Object.assign(
+            new Error('Runtime ID is already owned by a different launch.'),
+            { code: 'runtime-conflict' },
+          );
+        return existing;
+      }
+      if (existing) this.runtimes.delete(runtimeId);
+      const runtime = await this.startRuntime(input);
+      this.runtimes.set(runtimeId, runtime);
+      return runtime;
+    } finally {
+      release();
+      if (this.startLocks.get(runtimeId) === current)
+        this.startLocks.delete(runtimeId);
     }
   }
 
@@ -439,15 +477,52 @@ export class RuntimeHostService {
     child.stderr.on('data', (chunk) =>
       appendDiagnostics(runtime, String(chunk)),
     );
+    child.stdin?.on('error', (error) =>
+      appendDiagnostics(runtime, `${error.message}\n`),
+    );
     child.once('close', (code, signal) => {
       runtime.status = 'stopped';
       runtime.stoppedAt = Date.now();
       runtime.exitCode = code;
       runtime.signal = signal;
+      runtime.rejectReadiness?.(
+        new Error('Pi exited before completing its readiness probe.'),
+      );
     });
     child.on('error', (error) =>
       appendDiagnostics(runtime, `${error.message}\n`),
     );
+    runtime.readinessId = `runtime-host-ready:${input.runtimeId}`;
+    const readiness = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('Pi readiness probe timed out.')),
+        READINESS_TIMEOUT_MS,
+      );
+      timer.unref?.();
+      runtime.resolveReadiness = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      runtime.rejectReadiness = (error) => {
+        clearTimeout(timer);
+        reject(error);
+      };
+    });
+    writeRpcResponse(runtime, {
+      id: runtime.readinessId,
+      type: 'get_state',
+    });
+    try {
+      await readiness;
+    } catch (error) {
+      signalGroup(runtime, 'SIGKILL');
+      await waitForClose(runtime, TERM_WAIT_MS);
+      throw error;
+    } finally {
+      runtime.readinessId = undefined;
+      runtime.resolveReadiness = undefined;
+      runtime.rejectReadiness = undefined;
+    }
     return runtime;
   }
 

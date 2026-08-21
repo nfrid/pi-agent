@@ -10,6 +10,7 @@ import { type HostStartInput, RuntimeHostClient } from './runtime-host.js';
 
 /** Dashboard agent commands/events still use remote-control and bridge. */
 export class HeadlessRuntimeProvider implements AgentRuntimeProvider {
+  readonly requiresRegistration = true;
   private readonly host: RuntimeHostClient;
 
   constructor(
