@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
+import type { ProjectRenameCommand } from '@pi-dashboard/protocol';
 import {
   gitText,
   repositoryIdentity,
   repositoryRoot,
 } from '@pi-dashboard/worktree-manager';
 import type { CreateProjectCommand, OrchestrationHost } from './helpers.js';
+
+export function expandHomePath(value: string, home = homedir()): string {
+  if (value === '~') return home;
+  return value.startsWith('~/') ? path.join(home, value.slice(2)) : value;
+}
 
 function isNotGitRepository(error: unknown): boolean {
   const stderr =
@@ -24,13 +31,33 @@ export async function createProject(
   return adoptProject(host, command);
 }
 
+export function renameProject(
+  host: OrchestrationHost,
+  projectId: string,
+  command: ProjectRenameCommand,
+): unknown {
+  const prior = host.receipt(command.commandId, 'project.rename');
+  if (prior) return prior.result;
+  host.requireProject(projectId);
+  const title = command.title.trim();
+  if (!title) throw new Error('Project title cannot be empty.');
+  const project = host.repository.updateProject(projectId, { title });
+  const persisted = host.saveReceipt(
+    command.commandId,
+    'project.rename',
+    project,
+  );
+  host.changed();
+  return persisted;
+}
+
 export async function adoptProject(
   host: OrchestrationHost,
   command: CreateProjectCommand,
 ): Promise<unknown> {
   const prior = host.receipt(command.commandId, 'project.adopt');
   if (prior) return prior.result;
-  const candidate = command.rootPath;
+  const candidate = expandHomePath(command.rootPath);
 
   let candidateRoot: string;
   try {

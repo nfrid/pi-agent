@@ -71,6 +71,53 @@ function tokenStore() {
 }
 
 describe('DashboardHttpClient command requests', () => {
+  it('patches project titles and validates the renamed project', async () => {
+    const project = {
+      id: 'project-1',
+      title: 'Renamed project',
+      rootPath: '/repo',
+      defaultIsolation: 'worktree',
+      maxParallelRuns: 1,
+      status: 'active',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify(project), { status: 200 }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await expect(
+      client.renameProject('project-1', {
+        commandId: 'rename-project',
+        title: 'Renamed project',
+      }),
+    ).resolves.toEqual(project);
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/projects/project-1',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          commandId: 'rename-project',
+          title: 'Renamed project',
+        }),
+      }),
+    );
+
+    fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 'not-a-project' }), { status: 200 }),
+    );
+    await expect(
+      client.renameProject('project-1', {
+        commandId: 'bad-response',
+        title: 'Bad response',
+      }),
+    ).rejects.toMatchObject({ kind: 'malformed-output' });
+  });
+
   it('posts lifecycle controls to stable URLs and validates Thread responses', async () => {
     const fetch = vi.fn(
       async () => new Response(JSON.stringify(validThread), { status: 200 }),

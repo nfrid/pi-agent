@@ -14,6 +14,7 @@ import {
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
+  type ProjectRenameCommand,
   type ProtocolInfo,
   parseRenameSessionMutationOutput,
   parseRestartRuntimeMutationOutput,
@@ -38,6 +39,7 @@ import {
   tryParseBrowserSnapshot,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
+  tryParseProject,
   tryParseProtocolInfo,
   tryParseRuntimeCommandOutput,
   tryParseSessionApiResponse,
@@ -644,6 +646,20 @@ export class DashboardHttpClient {
       method: 'POST',
       body: JSON.stringify(command),
     });
+  }
+
+  async renameProject(
+    projectId: string,
+    command: ProjectRenameCommand,
+  ): Promise<Project> {
+    const value = await this.request<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}`,
+      { method: 'PATCH', body: JSON.stringify(command) },
+    );
+    const project = tryParseProject(value);
+    if (!project)
+      throw malformedOutput('Invalid renamed project response.', value);
+    return project;
   }
 
   async adoptProject(command: ProjectAdoptCommand): Promise<{

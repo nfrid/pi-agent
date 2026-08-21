@@ -50,10 +50,16 @@
   color: var(--muted);
 }
 
-.projectActions {
+.projectActions,
+.renameForm {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.renameForm input {
+  min-width: 10rem;
+  max-width: 18rem;
 }
 
 .sectionHeading {

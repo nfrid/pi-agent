@@ -14,6 +14,7 @@ import {
   PinThreadCommandSchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
+  ProjectRenameCommandSchema,
   RestoreThreadCommandSchema,
   RetryCommandSchema,
   SessionAdoptCommandSchema,
@@ -142,6 +143,7 @@ export interface DashboardRouteContext {
   pushSubscribe(body: unknown): void;
   vapidPublicKey(): string | null;
   adoptProject?(command: unknown): Promise<unknown>;
+  renameProject?(projectId: string, command: unknown): Promise<unknown>;
   createThread?(projectId: string, command: unknown): Promise<unknown>;
   adoptSession?(
     projectId: string,
@@ -375,6 +377,20 @@ export const dashboardRoutes: FastifyPluginAsync<{
       return sendError(reply, error);
     }
   });
+  app.patch<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId',
+    { schema: { body: ProjectRenameCommandSchema } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.renameProject)(
+          request.params.projectId,
+          request.body,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.post<{ Params: { projectId: string } }>(
     '/api/projects/:projectId/threads',
     { schema: { body: ThreadCreateCommandSchema } },

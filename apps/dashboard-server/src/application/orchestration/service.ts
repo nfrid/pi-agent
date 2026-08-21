@@ -5,6 +5,7 @@ import type {
   Checkout,
   CommandReceipt,
   Project,
+  ProjectRenameCommand,
   Run,
   SessionAdoptCommand,
   SessionIndexEntry,
@@ -38,7 +39,7 @@ import {
   type OrchestrationHost,
   type OrchestrationServiceOptions,
 } from './helpers.js';
-import { adoptProject, createProject } from './projects.js';
+import { adoptProject, createProject, renameProject } from './projects.js';
 import {
   cancelRun as cancelRunLifecycle,
   drain as drainLifecycle,
@@ -164,6 +165,13 @@ export class OrchestrationService implements OrchestrationHost {
 
   async adoptProject(command: CreateProjectCommand): Promise<unknown> {
     return adoptProject(this, command);
+  }
+
+  async renameProject(
+    projectId: string,
+    command: ProjectRenameCommand,
+  ): Promise<unknown> {
+    return renameProject(this, projectId, command);
   }
 
   async adoptSession(

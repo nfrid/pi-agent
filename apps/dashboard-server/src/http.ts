@@ -479,6 +479,14 @@ export class DashboardServerImpl implements DashboardServer {
           command as Parameters<typeof service.adoptProject>[0],
         );
       },
+      renameProject: (projectId, command) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.renameProject(
+          projectId,
+          command as Parameters<typeof service.renameProject>[1],
+        );
+      },
       createThread: (projectId, command) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');

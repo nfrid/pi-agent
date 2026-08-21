@@ -171,6 +171,37 @@ it('adopts and deduplicates a non-Git directory without Sesh', async () => {
   }
 });
 
+it('renames a project idempotently and publishes the change', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    fixture.onChange.mockClear();
+    await expect(
+      fixture.service.renameProject(fixture.projectId, {
+        commandId: 'rename-project',
+        title: '  Renamed project  ',
+      }),
+    ).resolves.toMatchObject({
+      id: fixture.projectId,
+      title: 'Renamed project',
+    });
+    await expect(
+      fixture.service.renameProject(fixture.projectId, {
+        commandId: 'rename-project',
+        title: 'Ignored replay',
+      }),
+    ).resolves.toMatchObject({
+      id: fixture.projectId,
+      title: 'Renamed project',
+    });
+    expect(
+      fixture.metadata.orchestration.getProject(fixture.projectId)?.title,
+    ).toBe('Renamed project');
+    expect(fixture.onChange).toHaveBeenCalledOnce();
+  } finally {
+    await fixture.close();
+  }
+});
+
 it('keeps lifecycle controls out of runtime and run execution', async () => {
   const fixture = await orchestrationFixture();
   try {

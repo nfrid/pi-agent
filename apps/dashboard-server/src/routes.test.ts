@@ -307,6 +307,10 @@ describe('Fastify dashboard route plugin', () => {
     };
     const created = { thread: { id: 'thread-1' }, run: { id: 'run-1' } };
     routeContext.adoptProject = vi.fn(async () => adopted);
+    routeContext.renameProject = vi.fn(async (projectId, command) => ({
+      id: projectId,
+      title: (command as { title: string }).title,
+    }));
     routeContext.adoptSession = vi.fn(async () => created);
     routeContext.createThread = vi.fn(async () => created);
     routeContext.retryRun = vi.fn(async () => created);
@@ -402,6 +406,24 @@ describe('Fastify dashboard route plugin', () => {
         })
       ).statusCode,
     ).toBe(201);
+    const renamed = await app.inject({
+      method: 'PATCH',
+      url: '/api/projects/project-1',
+      headers,
+      payload: { commandId: 'rename-1', title: 'Renamed project' },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(routeContext.renameProject).toHaveBeenCalledWith('project-1', {
+      commandId: 'rename-1',
+      title: 'Renamed project',
+    });
+    const invalidRename = await app.inject({
+      method: 'PATCH',
+      url: '/api/projects/project-1',
+      headers,
+      payload: { commandId: 'rename-2', title: '', extra: true },
+    });
+    expect(invalidRename.statusCode).toBe(400);
     const adoption = await app.inject({
       method: 'POST',
       url: '/api/projects/project-1/sessions/session-1/adopt',

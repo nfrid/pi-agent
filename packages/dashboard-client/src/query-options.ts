@@ -6,6 +6,7 @@ import type {
   DelegateHistoryRunDetailResponse,
   ProjectAdoptCommand,
   ProjectCreateCommand,
+  ProjectRenameCommand,
   RetryCommand,
   SessionAdoptCommand,
   StartRuntimeRequest,
@@ -425,6 +426,23 @@ export function createProjectMutationOptions(client: DashboardHttpClient) {
     mutationFn: (command: CommandInput<ProjectCreateCommand>) =>
       client.createProject(
         withMutationCommandId<ProjectCreateCommand>('project-create', command),
+      ),
+    retry: false,
+  });
+}
+
+export function renameProjectMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      projectId,
+      command,
+    }: {
+      projectId: string;
+      command: CommandInput<ProjectRenameCommand>;
+    }) =>
+      client.renameProject(
+        projectId,
+        withMutationCommandId<ProjectRenameCommand>('project-rename', command),
       ),
     retry: false,
   });

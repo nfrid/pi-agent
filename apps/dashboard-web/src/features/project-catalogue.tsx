@@ -1,6 +1,7 @@
 import {
   createProjectMutationOptions,
   dashboardHttpClient,
+  renameProjectMutationOptions,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot, ProjectSummary } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
@@ -89,8 +90,12 @@ export function ProjectsView({ snapshot }: { snapshot: BrowserSnapshot }) {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const candidate = rootPath.trim();
-    if (!candidate.startsWith('/')) {
-      setError('Enter an absolute local directory path.');
+    if (
+      !candidate.startsWith('/') &&
+      candidate !== '~' &&
+      !candidate.startsWith('~/')
+    ) {
+      setError('Enter an absolute path or a path starting with ~/.');
       return;
     }
     setError(undefined);
@@ -122,7 +127,7 @@ export function ProjectsView({ snapshot }: { snapshot: BrowserSnapshot }) {
             type="text"
             value={rootPath}
             onChange={(event) => setRootPath(event.target.value)}
-            placeholder="/Users/me/code/project"
+            placeholder="~/code/project"
             autoComplete="off"
             disabled={mutation.isPending}
           />
@@ -184,6 +189,27 @@ export function ProjectView({
   const sessions = snapshot.sessions.filter(
     (session) => session.projectId === id,
   );
+  const [renaming, setRenaming] = useState(false);
+  const [title, setTitle] = useState(project?.title ?? '');
+  const [renameError, setRenameError] = useState<string>();
+  const renameMutation = useMutation(
+    renameProjectMutationOptions(dashboardHttpClient),
+  );
+  const submitRename = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextTitle = title.trim();
+    if (!project || !nextTitle || renameMutation.isPending) return;
+    setRenameError(undefined);
+    try {
+      await renameMutation.mutateAsync({
+        projectId: project.id,
+        command: { title: nextTitle },
+      });
+      setRenaming(false);
+    } catch (cause) {
+      setRenameError(errorMessage(cause));
+    }
+  };
 
   return (
     <section className={styles.page}>
@@ -196,6 +222,50 @@ export function ProjectView({
         {project && (
           <div className={styles.projectActions}>
             <span className="workspace-state active">{project.status}</span>
+            {renaming ? (
+              <form
+                className={styles.renameForm}
+                onSubmit={(event) => void submitRename(event)}
+              >
+                <label className="sr-only" htmlFor="project-title">
+                  Project name
+                </label>
+                <input
+                  id="project-title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  disabled={renameMutation.isPending}
+                />
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setTitle(project.title);
+                    setRenameError(undefined);
+                    setRenaming(false);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!title.trim() || renameMutation.isPending}
+                >
+                  {renameMutation.isPending ? 'Saving…' : 'Save'}
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setTitle(project.title);
+                  setRenaming(true);
+                }}
+              >
+                Rename
+              </button>
+            )}
             <button
               type="button"
               onClick={() =>
@@ -207,6 +277,11 @@ export function ProjectView({
           </div>
         )}
       </div>
+      {renameError && (
+        <p className="error" role="alert">
+          {renameError}
+        </p>
+      )}
 
       {!project && (
         <output className="empty">This project is no longer registered.</output>

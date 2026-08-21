@@ -47,6 +47,15 @@ export const ProjectAdoptCommandSchema = Type.Object(
 );
 export type ProjectAdoptCommand = Static<typeof ProjectAdoptCommandSchema>;
 
+export const ProjectRenameCommandSchema = Type.Object(
+  {
+    commandId: CommandIdSchema,
+    title: Type.String({ minLength: 1, maxLength: 512 }),
+  },
+  { additionalProperties: false },
+);
+export type ProjectRenameCommand = Static<typeof ProjectRenameCommandSchema>;
+
 /** Adopt an existing unassigned Pi transcript without launching a runtime. */
 export const SessionAdoptCommandSchema = Type.Object(
   {
