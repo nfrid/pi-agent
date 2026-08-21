@@ -652,6 +652,30 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
     },
   },
   {
+    version: 13,
+    name: 'durable-thread-settlement',
+    foreignKeysOff: true,
+    up(db) {
+      db.exec(`
+        ALTER TABLE thread ADD COLUMN settled_at INTEGER;
+        CREATE TABLE thread_event_v13 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL CHECK (event_type IN ('legacy.snapshot','thread.archive','thread.restore','thread.pin','thread.unpin','thread.settle','thread.unsettle')),
+          command_id TEXT UNIQUE,
+          actor TEXT NOT NULL CHECK (actor IN ('user','migration')),
+          reason TEXT NOT NULL CHECK (reason IN ('user-command','legacy-snapshot')),
+          payload_json TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL
+        );
+        INSERT INTO thread_event_v13 SELECT * FROM thread_event;
+        DROP TABLE thread_event;
+        ALTER TABLE thread_event_v13 RENAME TO thread_event;
+        CREATE INDEX thread_event_thread_order ON thread_event(thread_id,id);
+      `);
+    },
+  },
+  {
     version: 12,
     name: 'headless-runtime-location-and-retire-tmux-launches',
     foreignKeysOff: true,

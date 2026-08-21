@@ -54,6 +54,8 @@ import {
   archiveThread as archiveThreadLifecycle,
   createThread as createThreadLifecycle,
   pinThread as pinThreadLifecycle,
+  settleThread as settleThreadLifecycle,
+  unsettleThread as unsettleThreadLifecycle,
   restoreThread as restoreThreadLifecycle,
   unpinThread as unpinThreadLifecycle,
 } from './threads.js';
@@ -217,6 +219,14 @@ export class OrchestrationService implements OrchestrationHost {
 
   async unpinThread(threadId: string, commandId: string): Promise<Thread> {
     return unpinThreadLifecycle(this, threadId, commandId);
+  }
+
+  async settleThread(threadId: string, commandId: string): Promise<Thread> {
+    return settleThreadLifecycle(this, threadId, commandId);
+  }
+
+  async unsettleThread(threadId: string, commandId: string): Promise<Thread> {
+    return unsettleThreadLifecycle(this, threadId, commandId);
   }
 
   async reviewCheckout(checkoutId: string): Promise<unknown> {

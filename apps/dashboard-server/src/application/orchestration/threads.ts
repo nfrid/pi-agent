@@ -274,3 +274,23 @@ export async function unpinThread(
   host.changed();
   return result.thread;
 }
+
+export async function settleThread(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const result = host.repository.settleThread(commandId, threadId);
+  host.changed();
+  return result.thread;
+}
+
+export async function unsettleThread(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const result = host.repository.unsettleThread(commandId, threadId);
+  host.changed();
+  return result.thread;
+}

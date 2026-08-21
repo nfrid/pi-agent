@@ -14,6 +14,7 @@ import { dashboardStatus } from '../presentation-status';
 export type DurableThreadMetadata = {
   threadId: string;
   archivedAt?: number;
+  settledAt?: number;
   pinnedAt?: number;
   hasActiveRun: boolean;
 };
@@ -48,6 +49,7 @@ export type AgentThreadSections = {
   pinned: AgentThreadRow[];
   active: AgentThreadRow[];
   archived: AgentThreadRow[];
+  settled: AgentThreadRow[];
 };
 
 export const MAX_VISIBLE_ACTIVE_THREADS = 40;
@@ -93,7 +95,10 @@ export function durableThreadForSession(
   snapshot: Pick<BrowserSnapshot, 'runs'> &
     Partial<Pick<BrowserSnapshot, 'runtimes'>>,
   sessionId: string,
-  threads: readonly Pick<Thread, 'id' | 'archivedAt' | 'pinnedAt'>[],
+  threads: readonly Pick<
+    Thread,
+    'id' | 'archivedAt' | 'pinnedAt' | 'settledAt'
+  >[],
   directLinks: readonly SessionThreadLink[] = [],
 ): DurableThreadMetadata | undefined {
   const runs = snapshot.runs ?? [];
@@ -119,6 +124,9 @@ export function durableThreadForSession(
       ...(directLink.pinnedAt === undefined
         ? {}
         : { pinnedAt: directLink.pinnedAt }),
+      ...(directLink.settledAt === undefined
+        ? {}
+        : { settledAt: directLink.settledAt }),
       hasActiveRun:
         directLink.activeRunId !== undefined ||
         runs.some(
@@ -142,6 +150,7 @@ export function durableThreadForSession(
       ? {}
       : { archivedAt: thread.archivedAt }),
     ...(thread.pinnedAt === undefined ? {} : { pinnedAt: thread.pinnedAt }),
+    ...(thread.settledAt === undefined ? {} : { settledAt: thread.settledAt }),
     hasActiveRun:
       runs.some(
         (run) =>
@@ -156,7 +165,10 @@ export function durableThreadForSession(
 
 export function agentThreadRows(
   snapshot: BrowserSnapshot,
-  durableThreads?: readonly Pick<Thread, 'id' | 'archivedAt' | 'pinnedAt'>[],
+  durableThreads?: readonly Pick<
+    Thread,
+    'id' | 'archivedAt' | 'pinnedAt' | 'settledAt'
+  >[],
   directLinks: readonly SessionThreadLink[] = [],
 ): AgentThreadRow[] {
   const durableForSession =
@@ -246,7 +258,7 @@ export function filterAgentThreadRows(
     ? rows.filter((row) =>
         `${row.title} ${row.workspaceName} ${row.cwd} ${row.status} ${
           isArchivedThread(row) ? 'archived' : ''
-        }`
+        } ${row.durableThread?.settledAt !== undefined ? 'settled' : ''}`
           .toLowerCase()
           .includes(needle),
       )
@@ -278,8 +290,21 @@ export function sectionAgentThreadRows(
   );
   // Runtime absence is availability, not a lifecycle shelf. Dormant and
   // offline sessions therefore remain in Active until explicitly archived.
+  const allSettled = pinnedFirst(
+    rows.filter(
+      (row) =>
+        !isPinnedThread(row) &&
+        !isArchivedThread(row) &&
+        row.durableThread?.settledAt !== undefined,
+    ),
+  );
   const allActive = pinnedFirst(
-    rows.filter((row) => !isPinnedThread(row) && !isArchivedThread(row)),
+    rows.filter(
+      (row) =>
+        !isPinnedThread(row) &&
+        !isArchivedThread(row) &&
+        row.durableThread?.settledAt === undefined,
+    ),
   );
   const active = allActive.slice(
     0,
@@ -294,6 +319,7 @@ export function sectionAgentThreadRows(
     pinned,
     active,
     archived: pinnedFirst(rows.filter(isArchivedThread)),
+    settled: allSettled,
   };
 }
 
@@ -301,7 +327,12 @@ export function searchAgentThreadRows(
   rows: readonly AgentThreadRow[],
 ): AgentThreadRow[] {
   const sections = sectionAgentThreadRows(rows, Number.POSITIVE_INFINITY);
-  return [...sections.pinned, ...sections.active, ...sections.archived];
+  return [
+    ...sections.pinned,
+    ...sections.active,
+    ...sections.settled,
+    ...sections.archived,
+  ];
 }
 
 export function archivedRowsForShelf(
@@ -320,7 +351,12 @@ export function boundedAgentThreadRows(
   selectedSessionId?: string,
 ): AgentThreadRow[] {
   const sections = sectionAgentThreadRows(rows, activeLimit, selectedSessionId);
-  return [...sections.pinned, ...sections.active, ...sections.archived];
+  return [
+    ...sections.pinned,
+    ...sections.active,
+    ...sections.settled,
+    ...sections.archived,
+  ];
 }
 
 export function hiddenAgentThreadRowCount(
@@ -329,10 +365,17 @@ export function hiddenAgentThreadRowCount(
 ): number {
   return Math.max(
     0,
-    rows.filter((row) => !isPinnedThread(row) && !isArchivedThread(row))
-      .length -
+    rows.filter(
+      (row) =>
+        !isPinnedThread(row) &&
+        !isArchivedThread(row) &&
+        row.durableThread?.settledAt === undefined,
+    ).length -
       visibleRows.filter(
-        (row) => !isPinnedThread(row) && !isArchivedThread(row),
+        (row) =>
+          !isPinnedThread(row) &&
+          !isArchivedThread(row) &&
+          row.durableThread?.settledAt === undefined,
       ).length,
   );
 }

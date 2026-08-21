@@ -65,6 +65,8 @@ export const ThreadLifecycleEventTypeSchema = Type.Union([
   Type.Literal('thread.restore'),
   Type.Literal('thread.pin'),
   Type.Literal('thread.unpin'),
+  Type.Literal('thread.settle'),
+  Type.Literal('thread.unsettle'),
 ]);
 export type ThreadLifecycleEventType = Static<
   typeof ThreadLifecycleEventTypeSchema
@@ -205,6 +207,7 @@ export const ThreadSchema = Type.Object(
     status: ThreadStatusSchema,
     /** Independent visibility state; execution status is never replaced by archive. */
     archivedAt: Type.Optional(TimestampSchema),
+    settledAt: Type.Optional(TimestampSchema),
     /** Execution projection remembered while archived; omitted for visible threads. */
     preArchiveStatus: Type.Optional(ThreadStatusSchema),
     pinnedAt: Type.Optional(TimestampSchema),
@@ -235,6 +238,7 @@ export const SessionThreadLinkSchema = Type.Object(
     sessionId: IdentifierSchema,
     threadId: IdentifierSchema,
     archivedAt: Type.Optional(TimestampSchema),
+    settledAt: Type.Optional(TimestampSchema),
     pinnedAt: Type.Optional(TimestampSchema),
     activeRunId: Type.Optional(IdentifierSchema),
   },

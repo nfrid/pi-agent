@@ -130,3 +130,14 @@ export const UnpinThreadCommandSchema = Type.Object(
   { additionalProperties: false },
 );
 export type UnpinThreadCommand = Static<typeof UnpinThreadCommandSchema>;
+
+export const SettleThreadCommandSchema = Type.Object(
+  { commandId: CommandIdSchema },
+  { additionalProperties: false },
+);
+export type SettleThreadCommand = Static<typeof SettleThreadCommandSchema>;
+export const UnsettleThreadCommandSchema = Type.Object(
+  { commandId: CommandIdSchema },
+  { additionalProperties: false },
+);
+export type UnsettleThreadCommand = Static<typeof UnsettleThreadCommandSchema>;
