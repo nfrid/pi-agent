@@ -73,6 +73,27 @@ describe('agent thread view model', () => {
     ).not.toBe(first);
   });
 
+  it('assigns indexed sessions to a known workspace by cwd when workspaceId is absent', () => {
+    const rows = agentThreadRows({
+      runtimes: [],
+      workspaces: [{ id: 'app', name: 'App', canonicalPath: '/work/app' }],
+      sessions: [
+        {
+          id: 'dormant-session',
+          cwd: '/work/app/packages/dashboard',
+          updatedAt: 10,
+        },
+      ],
+    } as never);
+
+    expect(rows[0]).toMatchObject({
+      id: 'dormant-session',
+      workspaceId: 'app',
+      workspaceName: 'App',
+      status: 'dormant',
+    });
+  });
+
   it('keeps unindexed runtime chronology stable across live surface updates', () => {
     const snapshot = (surface: unknown) =>
       ({

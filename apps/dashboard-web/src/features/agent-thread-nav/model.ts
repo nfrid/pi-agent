@@ -204,13 +204,13 @@ export function agentThreadRows(
   }
   for (const session of snapshot.sessions) {
     if (rows.has(session.id)) continue;
-    const workspace = workspaces.find(
-      (item) => item.id === session.workspaceId,
-    );
+    const workspace =
+      workspaces.find((item) => item.id === session.workspaceId) ??
+      workspaceForPath(session.cwd, workspaces);
     rows.set(session.id, {
       id: session.id,
       title: sessionDisplayTitle(session),
-      workspaceId: session.workspaceId,
+      workspaceId: session.workspaceId ?? workspace?.id,
       workspaceName: workspace?.name ?? 'Other workspace',
       cwd: session.cwd,
       durableThread: durableForSession?.get(session.id),
