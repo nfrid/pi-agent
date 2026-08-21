@@ -53,7 +53,7 @@
 }
 .workspaceChooserBackdrop {
   position: fixed;
-  z-index: 20;
+  z-index: 1000;
   inset: 0;
   display: grid;
   place-items: center;
@@ -80,7 +80,16 @@
 }
 .workspaceChooserOptions {
   display: grid;
+  min-width: 0;
   gap: 5px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.workspaceChooserLegend {
+  color: var(--muted);
+  padding: 0 0 5px;
+  font-size: 10px;
 }
 .workspaceChooserOptions button,
 .workspaceChooserCancel {
@@ -94,13 +103,46 @@
   font-size: 12px;
   text-align: left;
 }
+.workspaceChooserSearch {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 10px;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.workspaceChooserSearch:focus-visible {
+  border-color: var(--purple);
+  outline: none;
+}
 .workspaceChooserOptions button:hover,
 .workspaceChooserOptions button:focus-visible,
+.workspaceChooserOptions button[data-workspace-active="true"],
 .workspaceChooserCancel:hover,
 .workspaceChooserCancel:focus-visible {
   border-color: var(--purple);
   background: color-mix(in srgb, var(--purple) 12%, transparent);
   outline: none;
+}
+.workspaceChooserOptions button {
+  display: grid;
+  gap: 2px;
+}
+.workspaceChooserOptions button small {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspaceChooserEmpty {
+  color: var(--muted);
+  padding: 8px 9px;
+  font-size: 11px;
 }
 .workspaceChooserCancel {
   display: block;
@@ -386,7 +428,7 @@ button.shelfHeading:focus-visible {
 .threadRow:hover,
 .threadRow:global(.selected) {
   opacity: 1;
-  border-color: var(--line-soft);
+  border-color: transparent;
   background: color-mix(in srgb, var(--purple) 10%, var(--bg));
   color: var(--fg);
 }
@@ -514,10 +556,10 @@ button.shelfHeading:focus-visible {
   color: var(--dim);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: normal;
   line-height: 1;
   text-overflow: ellipsis;
-  text-transform: uppercase;
+  text-transform: none;
   white-space: nowrap;
 }
 .threadWorkspace > span:first-child {
@@ -525,10 +567,19 @@ button.shelfHeading:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.threadMeta {
+  min-width: 0;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
 .threadPin {
   flex: none;
-  color: var(--orange);
-  font-size: 10px;
+  color: var(--dim);
+  font-size: 11px;
   letter-spacing: normal;
 }
 .threadRow:global(.agent-thread-slim) .threadLink {
@@ -540,7 +591,17 @@ button.shelfHeading:focus-visible {
   align-items: center;
   gap: 8px;
 }
+.threadRow:global(.agent-thread-slim) .threadWorkspace {
+  max-width: 34%;
+  flex: 0 1 auto;
+  font-size: 9px;
+  font-weight: 550;
+  letter-spacing: normal;
+  text-transform: none;
+}
 .threadRow:global(.agent-thread-slim) .threadCopy strong {
+  min-width: 0;
+  flex: 1 1 auto;
   font-size: 11px;
   font-weight: 550;
 }

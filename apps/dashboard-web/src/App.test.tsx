@@ -33,6 +33,7 @@ import {
   shouldShowActivityLead,
   shouldShowJumpToLatest,
   shouldShowQueuePanel,
+  sortWorkspacesByRecency,
   toTranscriptEntries,
   upsertQueuedMessage,
   writeComposerDraft,
@@ -227,16 +228,106 @@ describe('image attachments', () => {
   });
 });
 
+describe('workspace presentation ordering', () => {
+  const workspace = (id: string, name = id, canonicalPath = `/work/${id}`) => ({
+    id,
+    name,
+    canonicalPath,
+    path: canonicalPath,
+    source: 'directory',
+    active: true,
+  });
+
+  it('orders by latest indexed session, falls back to cwd, and keeps stable ties', () => {
+    const snapshot = {
+      workspaces: [
+        workspace('first'),
+        workspace('second'),
+        workspace('third'),
+        workspace('unused'),
+      ],
+      sessions: [
+        {
+          id: 's1',
+          file: '/sessions/s1.jsonl',
+          cwd: '/work/first',
+          updatedAt: 10,
+        },
+        {
+          id: 's2',
+          file: '/sessions/s2.jsonl',
+          cwd: '/work/second',
+          updatedAt: 20,
+        },
+        {
+          id: 's3',
+          file: '/sessions/s3.jsonl',
+          cwd: '/work/third',
+          updatedAt: 20,
+        },
+        {
+          id: 's4',
+          file: '/sessions/s4.jsonl',
+          cwd: '/work/second',
+          updatedAt: 20,
+        },
+      ],
+    } as never;
+    expect(sortWorkspacesByRecency(snapshot).map((item) => item.id)).toEqual([
+      'second',
+      'third',
+      'first',
+      'unused',
+    ]);
+  });
+
+  it('accepts workspaces-only partial snapshots without mutating order', () => {
+    const snapshot = { workspaces: [workspace('a'), workspace('b')] } as never;
+    expect(sortWorkspacesByRecency({ workspaces: [] })).toEqual([]);
+    expect(sortWorkspacesByRecency(snapshot).map((item) => item.id)).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+});
+
 describe('project-scoped new chat', () => {
   it('uses the first usable workspace for context-free new chat entries', () => {
     const snapshot = {
       workspaces: [
-        { id: 'dormant', active: false },
-        { id: 'active', active: true },
+        {
+          id: 'dormant',
+          name: 'Dormant',
+          path: '/dormant',
+          canonicalPath: '/dormant',
+          source: 'directory',
+          active: false,
+        },
+        {
+          id: 'active',
+          name: 'Active',
+          path: '/active',
+          canonicalPath: '/active',
+          source: 'directory',
+          active: true,
+        },
       ],
     } as never;
     expect(newChatPath(snapshot)).toBe('/workspaces/dormant/new');
-    expect(newChatPath({ workspaces: [] } as never)).toBe('/workspaces');
+    expect(
+      newChatPath({
+        workspaces: snapshot.workspaces,
+        sessions: [
+          {
+            id: 'recent',
+            file: '/sessions/recent.jsonl',
+            cwd: '/active',
+            updatedAt: 99,
+          },
+        ],
+      } as never),
+    ).toBe('/workspaces/active/new');
+    expect(newChatPath({ workspaces: [] })).toBe('/workspaces');
     expect(newChatPath(snapshot, 'dormant')).toBe('/workspaces/dormant/new');
     expect(pendingChatPath('workspace-1', 'runtime/1')).toBe(
       '/workspaces/workspace-1/new/pending/runtime%2F1',
@@ -383,6 +474,36 @@ describe('command palette', () => {
     expect(items.some((item) => item.title === 'Session: session-436')).toBe(
       false,
     );
+  });
+
+  it('orders workspace navigation items with the shared recency projection', () => {
+    const items = paletteItems({
+      runtimes: [],
+      workspaces: [
+        {
+          id: 'first',
+          name: 'First',
+          canonicalPath: '/work/first',
+        },
+        {
+          id: 'second',
+          name: 'Second',
+          canonicalPath: '/work/second',
+        },
+      ],
+      sessions: [
+        {
+          id: 'recent',
+          file: '/sessions/recent.jsonl',
+          cwd: '/work/second',
+          updatedAt: 10,
+        },
+      ],
+    } as never).filter((item) => item.title.startsWith('Workspace:'));
+    expect(items.map((item) => item.title)).toEqual([
+      'Workspace: Second',
+      'Workspace: First',
+    ]);
   });
 
   it('disambiguates identical actions by their runtime target', () => {

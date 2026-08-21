@@ -12,6 +12,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
+import { sortWorkspacesByRecency } from '../app-helpers';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import {
   type AgentThreadRow,
@@ -24,7 +26,6 @@ import {
   searchAgentThreadRows,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
-  shortPath,
   statusGlyph,
   statusLabel,
 } from './agent-thread-nav/model';
@@ -130,13 +131,36 @@ function WorkspaceChooser({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const firstButtonRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const filtered = workspaces.filter((workspace) =>
+    `${workspace.name} ${workspace.canonicalPath} ${workspace.path}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
 
   useEffect(() => {
-    firstButtonRef.current?.focus();
+    searchRef.current?.focus();
   }, []);
+  useEffect(() => {
+    setActiveIndex((index) =>
+      Math.min(index, Math.max(0, filtered.length - 1)),
+    );
+  }, [filtered.length]);
 
-  return (
+  const move = (direction: 1 | -1) => {
+    if (!filtered.length) return;
+    setActiveIndex(
+      (index) => (index + direction + filtered.length) % filtered.length,
+    );
+  };
+  const chooseActive = () => {
+    const workspace = filtered[activeIndex];
+    if (workspace) onChoose(workspace.id);
+  };
+
+  return createPortal(
     // biome-ignore lint/a11y/noStaticElementInteractions: The backdrop closes the modal on outside clicks.
     <div
       className={styles.workspaceChooserBackdrop}
@@ -159,11 +183,31 @@ function WorkspaceChooser({
             onClose();
             return;
           }
+          if (
+            event.key === 'ArrowDown' ||
+            (event.ctrlKey && event.key.toLowerCase() === 'j')
+          ) {
+            event.preventDefault();
+            move(1);
+          } else if (
+            event.key === 'ArrowUp' ||
+            (event.ctrlKey && event.key.toLowerCase() === 'k')
+          ) {
+            event.preventDefault();
+            move(-1);
+          } else if (
+            event.key === 'Enter' &&
+            event.target instanceof HTMLInputElement
+          ) {
+            event.preventDefault();
+            chooseActive();
+            return;
+          }
           if (event.key !== 'Tab') return;
           event.stopPropagation();
           const focusable = Array.from(
             dialogRef.current?.querySelectorAll<HTMLElement>(
-              'button:not(:disabled)',
+              'input, button:not(:disabled)',
             ) ?? [],
           );
           const first = focusable[0];
@@ -181,18 +225,37 @@ function WorkspaceChooser({
       >
         <h2 id="agent-thread-workspace-chooser-heading">Choose a workspace</h2>
         <p>Where should the new thread start?</p>
-        <div className={styles.workspaceChooserOptions}>
-          {workspaces.map((workspace, index) => (
+        <input
+          ref={searchRef}
+          className={styles.workspaceChooserSearch}
+          aria-label="Search workspaces"
+          placeholder="Search name or path"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setActiveIndex(0);
+          }}
+        />
+        <fieldset className={styles.workspaceChooserOptions}>
+          <legend className={styles.workspaceChooserLegend}>Workspaces</legend>
+          {filtered.map((workspace, index) => (
             <button
-              ref={index === 0 ? firstButtonRef : undefined}
               type="button"
+              aria-label={workspace.name}
+              data-workspace-active={index === activeIndex ? 'true' : undefined}
               key={workspace.id}
               onClick={() => onChoose(workspace.id)}
             >
-              {workspace.name}
+              <span>{workspace.name}</span>
+              <small>{workspace.canonicalPath}</small>
             </button>
           ))}
-        </div>
+          {!filtered.length && (
+            <span className={styles.workspaceChooserEmpty}>
+              No matching workspaces.
+            </span>
+          )}
+        </fieldset>
         <button
           type="button"
           className={styles.workspaceChooserCancel}
@@ -201,7 +264,8 @@ function WorkspaceChooser({
           Cancel
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -244,6 +308,26 @@ function AgentThreadLink({
         {density === 'card' && (
           <span className={styles.threadWorkspace} data-row-content="workspace">
             <span>{row.workspaceName}</span>
+            <span className={styles.threadMeta}>
+              {[
+                'working',
+                'compacting',
+                'waiting',
+                'input',
+                'failed',
+                'paused',
+              ].includes(row.status) ? (
+                statusLabel(row)
+              ) : row.updatedAt === undefined ? (
+                statusLabel(row)
+              ) : (
+                <DashboardTime
+                  className={`agent-thread-time ${styles.threadTime}`}
+                  timestamp={row.updatedAt}
+                  context="sidebar"
+                />
+              )}
+            </span>
             {row.durableThread?.pinnedAt !== undefined && (
               <span
                 className={styles.threadPin}
@@ -251,32 +335,27 @@ function AgentThreadLink({
                 role="img"
                 aria-label="Pinned"
               >
-                📌
+                •
               </span>
             )}
           </span>
         )}
+        {density === 'slim' && (
+          <span className={styles.threadWorkspace} data-row-content="workspace">
+            <span>{row.workspaceName}</span>
+          </span>
+        )}
         <strong>{row.title}</strong>
-        {density === 'card' ? (
-          <small>
-            <span className={styles.threadContext} data-row-content="context">
-              <span>{statusLabel(row)}</span>
-              <span aria-hidden="true"> · </span>
-              <span>{shortPath(row.cwd)}</span>
-            </span>
+        {density === 'slim' &&
+          (row.updatedAt === undefined ? (
+            <span className={styles.threadTime}>{statusLabel(row)}</span>
+          ) : (
             <DashboardTime
               className={`agent-thread-time ${styles.threadTime}`}
               timestamp={row.updatedAt}
               context="sidebar"
             />
-          </small>
-        ) : (
-          <DashboardTime
-            className={`agent-thread-time ${styles.threadTime}`}
-            timestamp={row.updatedAt}
-            context="sidebar"
-          />
-        )}
+          ))}
       </span>
     </button>
   );
@@ -349,6 +428,10 @@ export function AgentThreadNav({
     priorSessionIdentityKey.current = sessionIdentityKey;
     void sessionThreadLinksQuery.refetch();
   }, [sessionIdentityKey, sessionThreadLinksQuery]);
+  const workspaces = useMemo(
+    () => sortWorkspacesByRecency(snapshot),
+    [snapshot],
+  );
   const rows = useMemo(
     () => agentThreadRows(snapshot, durableThreads, directLinks),
     [directLinks, durableThreads, snapshot],
@@ -471,8 +554,8 @@ export function AgentThreadNav({
       if (mode === 'session') onOpenChange?.(false);
       return;
     }
-    if (snapshot.workspaces.length === 1) {
-      go(newChatPath(snapshot, snapshot.workspaces[0].id));
+    if (workspaces.length === 1) {
+      go(newChatPath(snapshot, workspaces[0].id));
       if (mode === 'session') onOpenChange?.(false);
       return;
     }
@@ -573,20 +656,20 @@ export function AgentThreadNav({
       <div className={styles.header}>
         <div>
           <p className="eyebrow">Workspace threads</p>
-          <strong>Agents</strong>
         </div>
         <button
           ref={newThreadButtonRef}
           type="button"
           className={styles.newThread}
+          aria-label="New thread"
           onClick={openNewThread}
         >
-          <span aria-hidden="true">+</span> New thread
+          <span aria-hidden="true">+</span> New
         </button>
       </div>
       {workspaceChooserOpen && (
         <WorkspaceChooser
-          workspaces={snapshot.workspaces}
+          workspaces={workspaces}
           onChoose={chooseWorkspace}
           onClose={closeWorkspaceChooser}
         />
@@ -629,7 +712,7 @@ export function AgentThreadNav({
           }}
         >
           <option value="all">All workspaces</option>
-          {snapshot.workspaces.map((workspace) => (
+          {workspaces.map((workspace) => (
             <option key={workspace.id} value={workspace.id}>
               {workspace.name}
             </option>
