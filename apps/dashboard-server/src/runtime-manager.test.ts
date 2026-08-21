@@ -163,6 +163,110 @@ describe('runtime stopping', () => {
     });
   });
 
+  it('gives managed shutdown a bounded command grace before provider cleanup', async () => {
+    const runtimeId = 'runtime-managed-stop';
+    let acknowledge!: () => void;
+    const sendCommand = vi.fn(
+      () =>
+        new Promise<{ accepted: true }>((resolve) => {
+          acknowledge = () => resolve({ accepted: true });
+        }),
+    );
+    const isOnline = vi.fn(() => true);
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const forget = vi.fn();
+    const manager = new RuntimeManager(
+      {
+        get: () => ({
+          runtimeId,
+          ownership: 'managed',
+          pid: 10,
+          cwd: '/tmp',
+          liveState: 'idle',
+          session: { id: 'managed-session', entries: [] },
+        }),
+        sendCommand,
+        isOnline,
+        forget,
+      } as never,
+      { stop } as never,
+      {} as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId,
+            workspaceId: 'workspace-managed',
+            location: { id: `runtime-host:${runtimeId}` },
+            identityTokenHash: 'identity-hash',
+            launchTokenHash: 'launch-hash',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        markManagedStopped: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+
+    const stopping = manager.stop(runtimeId);
+    await Promise.resolve();
+    expect(stop).not.toHaveBeenCalled();
+    acknowledge();
+    await stopping;
+    expect(sendCommand).toHaveBeenCalledWith(runtimeId, { type: 'shutdown' });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(isOnline).not.toHaveBeenCalled();
+    expect(forget).toHaveBeenCalledWith(runtimeId);
+  });
+
+  it('caps managed shutdown command grace when acknowledgement never arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const runtimeId = 'runtime-managed-timeout';
+      const stop = vi.fn().mockResolvedValue(undefined);
+      const manager = new RuntimeManager(
+        {
+          get: () => ({
+            runtimeId,
+            ownership: 'managed',
+            pid: 10,
+            cwd: '/tmp',
+            liveState: 'idle',
+            session: { id: 'managed-session', entries: [] },
+          }),
+          sendCommand: () => new Promise<never>(() => undefined),
+          forget: vi.fn(),
+        } as never,
+        { stop } as never,
+        {} as never,
+        {
+          managedLaunches: () => [
+            {
+              runtimeId,
+              workspaceId: 'workspace-managed',
+              location: { id: `runtime-host:${runtimeId}` },
+              identityTokenHash: 'identity-hash',
+              launchTokenHash: 'launch-hash',
+              launchConsumed: true,
+              launchedAt: 1,
+            },
+          ],
+          markManagedStopped: vi.fn(),
+        } as never,
+        '/tmp/bridge.sock',
+      );
+
+      const stopping = manager.stop(runtimeId);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await stopping;
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('forgets an external runtime even when its stale bridge rejects shutdown', async () => {
     const forget = vi.fn();
     const manager = new RuntimeManager(
@@ -267,6 +371,7 @@ describe('managed runtime launch safety', () => {
     expect(start.mock.calls[0]?.[0]).toMatchObject({
       cwd: await realpath(root),
     });
+    expect(start.mock.calls[0]?.[0]).not.toHaveProperty('name');
     await rm(root, { recursive: true, force: true });
   });
 
@@ -548,6 +653,7 @@ describe('managed runtime launch safety', () => {
         get: (id: string) => (id === runtimeId ? snapshot : undefined),
         snapshots: () => [],
         isOnline: () => false,
+        sendCommand: vi.fn().mockResolvedValue({ accepted: true }),
         forget: vi.fn(),
       } as never,
       { start, stop: vi.fn().mockResolvedValue(undefined) } as never,

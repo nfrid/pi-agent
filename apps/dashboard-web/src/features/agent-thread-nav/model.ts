@@ -51,6 +51,7 @@ export const MAX_VISIBLE_HISTORY_THREADS = 24;
 export function sessionThreadIdentityKey(
   snapshot: Pick<BrowserSnapshot, 'sessions' | 'runtimes'>,
 ): string {
+  const indexed = new Set(snapshot.sessions.map((session) => session.id));
   return [
     ...new Set([
       ...snapshot.sessions.map((session) => session.id),
@@ -58,6 +59,10 @@ export function sessionThreadIdentityKey(
     ]),
   ]
     .sort()
+    .map(
+      (sessionId) =>
+        `${indexed.has(sessionId) ? 'indexed' : 'runtime'}:${sessionId}`,
+    )
     .join('\n');
 }
 

@@ -43,6 +43,7 @@ function bindingFromLocation(
 }
 
 const REGISTRATION_TIMEOUT_MS = 10_000;
+const SHUTDOWN_COMMAND_GRACE_MS = 500;
 
 export class RuntimeManager {
   private readonly workspaces = new Map<string, WorkspaceTarget>();
@@ -258,10 +259,7 @@ export class RuntimeManager {
           active: true,
         },
         cwd,
-        name: sanitizeDisplayName(
-          request.name,
-          request.sessionId ? 'resume-agent' : 'pi-agent',
-        ),
+        ...(request.name ? { name: sanitizeDisplayName(request.name) } : {}),
         runtimeId,
         runtimeProvider: runtimeProvider ?? 'extension-bridge',
         sessionId: request.sessionId,
@@ -441,23 +439,16 @@ export class RuntimeManager {
       this.registry.forget(runtimeId);
       return;
     }
-    if (snapshot && !force) {
-      try {
-        await this.registry.sendCommand(runtimeId, { type: 'shutdown' });
-      } catch {
-        /* bridge may already be gone; cleanup remains bounded */
-      }
-      const gracefulDeadline = Date.now() + 5_000;
-      while (this.registry.isOnline(runtimeId) && Date.now() < gracefulDeadline)
-        await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    const termDeadline = Date.now() + (force ? 500 : 2_000);
-    while (
-      snapshot &&
-      this.registry.isOnline(runtimeId) &&
-      Date.now() < termDeadline
-    )
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    if (snapshot && !force)
+      await Promise.race([
+        this.registry.sendCommand(runtimeId, { type: 'shutdown' }).then(
+          () => undefined,
+          () => undefined,
+        ),
+        new Promise<void>((resolve) =>
+          setTimeout(resolve, SHUTDOWN_COMMAND_GRACE_MS),
+        ),
+      ]);
     // Provider failure is intentionally allowed to reject. In that case the
     // launch, metadata, and registry snapshot remain available for retry.
     if (launch) {

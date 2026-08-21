@@ -41,7 +41,9 @@ describe('agent thread view model', () => {
       sessions: [{ id: 'session-b' }, { id: 'session-a' }],
       runtimes: [{ session: { id: 'session-live' } }],
     } as never);
-    expect(first).toBe('session-a\nsession-b\nsession-live');
+    expect(first).toBe(
+      'indexed:session-a\nindexed:session-b\nruntime:session-live',
+    );
     expect(
       sessionThreadIdentityKey({
         sessions: [{ id: 'session-a' }, { id: 'session-b' }],
@@ -54,6 +56,16 @@ describe('agent thread view model', () => {
           { id: 'session-a' },
           { id: 'session-b' },
           { id: 'session-new' },
+        ],
+        runtimes: [{ session: { id: 'session-live' } }],
+      } as never),
+    ).not.toBe(first);
+    expect(
+      sessionThreadIdentityKey({
+        sessions: [
+          { id: 'session-a' },
+          { id: 'session-b' },
+          { id: 'session-live' },
         ],
         runtimes: [{ session: { id: 'session-live' } }],
       } as never),

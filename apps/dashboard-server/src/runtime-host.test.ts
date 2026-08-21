@@ -1,4 +1,11 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,6 +49,19 @@ describe('runtime host', () => {
     }
   });
 
+  it('prewarms the login environment for the host working directory', async () => {
+    let loads = 0;
+    const service = new RuntimeHostService(
+      path.join(os.tmpdir(), 'unused-runtime-host.sock'),
+      async () => {
+        loads += 1;
+        return { ...process.env };
+      },
+    );
+    expect(loads).toBe(1);
+    await service.close();
+  });
+
   it('owns headless RPC children, drains UI requests, and makes start idempotent', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'dashboard-runtime-host-'),
@@ -55,7 +75,11 @@ describe('runtime host', () => {
       `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(started)}, 'start\\n');\nprocess.stdout.write(JSON.stringify({type:'extension_ui_request',id:'request-1'})+'\\n');\nlet buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; let newline; while ((newline=buffer.indexOf('\\n')) >= 0) { const line=buffer.slice(0,newline); buffer=buffer.slice(newline+1); const request=JSON.parse(line); if (request.type === 'get_state') process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); if (request.cancelled) fs.writeFileSync(${JSON.stringify(marker)}, 'yes'); }}); setInterval(() => {}, 1000);\n`,
     );
     await chmod(executable, 0o700);
-    const service = new RuntimeHostService(socket, testEnvironment);
+    const environmentLoads: string[] = [];
+    const service = new RuntimeHostService(socket, async (cwd) => {
+      environmentLoads.push(cwd);
+      return testEnvironment();
+    });
     await service.listen();
     const client = new RuntimeHostClient(socket);
     const input = {
@@ -99,6 +123,22 @@ describe('runtime host', () => {
       await client.stop('runtime-1');
       await client.stop('runtime-1');
       expect((await client.inspect('runtime-1'))?.status).toBe('stopped');
+
+      await client.start({ ...input, runtimeId: 'runtime-same-cwd' });
+      await client.stop('runtime-same-cwd');
+
+      const otherCwd = path.join(root, 'other-cwd');
+      await mkdir(otherCwd);
+      await client.start({
+        ...input,
+        runtimeId: 'runtime-2',
+        cwd: otherCwd,
+      });
+      await client.stop('runtime-2');
+      expect(environmentLoads.filter((cwd) => cwd === root)).toHaveLength(1);
+      expect(environmentLoads.filter((cwd) => cwd === otherCwd)).toHaveLength(
+        1,
+      );
     } finally {
       await service.close();
       await rm(root, { recursive: true, force: true });

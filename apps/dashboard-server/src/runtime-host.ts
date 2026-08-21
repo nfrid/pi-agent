@@ -319,6 +319,10 @@ async function socketAcceptsConnections(socketPath: string): Promise<boolean> {
 export class RuntimeHostService {
   private readonly runtimes = new Map<string, HostRuntime>();
   private readonly startLocks = new Map<string, Promise<void>>();
+  private readonly loginEnvironments = new Map<
+    string,
+    Promise<NodeJS.ProcessEnv>
+  >();
   private server?: Server;
   private closing = false;
 
@@ -327,7 +331,18 @@ export class RuntimeHostService {
     private readonly environmentForRuntime: (
       cwd: string,
     ) => Promise<NodeJS.ProcessEnv> = loadLoginEnvironment,
-  ) {}
+  ) {
+    void this.loginEnvironment(process.cwd());
+  }
+
+  private loginEnvironment(cwd: string): Promise<NodeJS.ProcessEnv> {
+    let environment = this.loginEnvironments.get(cwd);
+    if (!environment) {
+      environment = this.environmentForRuntime(cwd);
+      this.loginEnvironments.set(cwd, environment);
+    }
+    return environment;
+  }
 
   async listen(): Promise<void> {
     if (this.server) return;
@@ -478,7 +493,7 @@ export class RuntimeHostService {
       input.piExecutable ?? process.env.PI_EXECUTABLE ?? 'pi';
     const args = buildPiArgs(input);
     await ensureExecutable(piExecutable, input.cwd);
-    const loginEnvironment = await this.environmentForRuntime(input.cwd);
+    const loginEnvironment = await this.loginEnvironment(input.cwd);
     // The shell remains the process-group leader after exec. Its background
     // watchdog exits when Pi exits, or kills the group if the host disappears.
     const watchdog =
@@ -489,6 +504,7 @@ export class RuntimeHostService {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...loginEnvironment,
+        PWD: input.cwd,
         PI_DASHBOARD_RUNTIME_ID: input.runtimeId,
         PI_DASHBOARD_SOCKET: input.socketPath,
         PI_DASHBOARD_TOKEN: input.launchToken,
