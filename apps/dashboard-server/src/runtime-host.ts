@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, chmod, mkdir, unlink } from 'node:fs/promises';
 import {
@@ -7,7 +7,9 @@ import {
   type Server,
   type Socket,
 } from 'node:net';
+import { userInfo } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type {
   RuntimeAttachInput,
   RuntimeBinding,
@@ -23,6 +25,8 @@ const READINESS_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 const READ_ONLY_TOOLS = 'read,grep,find,ls';
+const LOGIN_ENV_MARKER = '\0__PI_RUNTIME_ENV_START__\0';
+const execFileAsync = promisify(execFile);
 
 type HostStartInput = Pick<
   RuntimeStartInput,
@@ -237,6 +241,43 @@ function waitForClose(runtime: HostRuntime, timeoutMs: number): Promise<void> {
   });
 }
 
+export async function loadLoginEnvironment(
+  cwd: string,
+  shell = userInfo().shell,
+): Promise<NodeJS.ProcessEnv> {
+  const base = { ...process.env };
+  if (!shell) return base;
+  try {
+    const { stdout } = await execFileAsync(
+      shell,
+      ['-lic', "printf '\\0__PI_RUNTIME_ENV_START__\\0'; /usr/bin/env -0"],
+      {
+        cwd,
+        env: base,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        timeout: 5_000,
+      },
+    );
+    const markerAt = stdout.indexOf(LOGIN_ENV_MARKER);
+    if (markerAt < 0) return base;
+    const environment = { ...base };
+    for (const entry of stdout
+      .slice(markerAt + LOGIN_ENV_MARKER.length)
+      .split('\0')) {
+      const separator = entry.indexOf('=');
+      if (separator < 1) continue;
+      const key = entry.slice(0, separator);
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) continue;
+      environment[key] = entry.slice(separator + 1);
+    }
+    return environment;
+  } catch {
+    // Unsupported or broken shell startup must not make managed Pi unusable.
+    return base;
+  }
+}
+
 async function ensureExecutable(
   executable: string,
   cwd: string,
@@ -281,7 +322,12 @@ export class RuntimeHostService {
   private server?: Server;
   private closing = false;
 
-  constructor(private readonly socketPath: string) {}
+  constructor(
+    private readonly socketPath: string,
+    private readonly environmentForRuntime: (
+      cwd: string,
+    ) => Promise<NodeJS.ProcessEnv> = loadLoginEnvironment,
+  ) {}
 
   async listen(): Promise<void> {
     if (this.server) return;
@@ -432,6 +478,7 @@ export class RuntimeHostService {
       input.piExecutable ?? process.env.PI_EXECUTABLE ?? 'pi';
     const args = buildPiArgs(input);
     await ensureExecutable(piExecutable, input.cwd);
+    const loginEnvironment = await this.environmentForRuntime(input.cwd);
     // The shell remains the process-group leader after exec. Its background
     // watchdog exits when Pi exits, or kills the group if the host disappears.
     const watchdog =
@@ -441,7 +488,7 @@ export class RuntimeHostService {
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
-        ...process.env,
+        ...loginEnvironment,
         PI_DASHBOARD_RUNTIME_ID: input.runtimeId,
         PI_DASHBOARD_SOCKET: input.socketPath,
         PI_DASHBOARD_TOKEN: input.launchToken,

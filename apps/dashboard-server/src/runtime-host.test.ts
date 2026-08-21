@@ -4,10 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  loadLoginEnvironment,
   RUNTIME_HOST_MAX_LINE_BYTES,
   RuntimeHostClient,
   RuntimeHostService,
 } from './runtime-host.js';
+
+const testEnvironment = async (): Promise<NodeJS.ProcessEnv> => ({
+  ...process.env,
+});
 
 async function eventually(check: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 2_000;
@@ -19,6 +24,24 @@ async function eventually(check: () => Promise<boolean>): Promise<void> {
 }
 
 describe('runtime host', () => {
+  it('loads exported variables after shell startup output', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'runtime-shell-env-'));
+    const shell = path.join(root, 'login-shell');
+    await writeFile(
+      shell,
+      "#!/bin/sh\nprintf 'startup output\\n\\0__PI_RUNTIME_ENV_START__\\0CUSTOM_RUNTIME_VALUE=from-shell\\0PATH=/shell/bin\\0invalid-key=ignored\\0'\n",
+    );
+    await chmod(shell, 0o700);
+    try {
+      const environment = await loadLoginEnvironment(root, shell);
+      expect(environment.CUSTOM_RUNTIME_VALUE).toBe('from-shell');
+      expect(environment.PATH).toBe('/shell/bin');
+      expect(environment['invalid-key']).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('owns headless RPC children, drains UI requests, and makes start idempotent', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'dashboard-runtime-host-'),
@@ -32,7 +55,7 @@ describe('runtime host', () => {
       `#!/usr/bin/env node\nimport fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(started)}, 'start\\n');\nprocess.stdout.write(JSON.stringify({type:'extension_ui_request',id:'request-1'})+'\\n');\nlet buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; let newline; while ((newline=buffer.indexOf('\\n')) >= 0) { const line=buffer.slice(0,newline); buffer=buffer.slice(newline+1); const request=JSON.parse(line); if (request.type === 'get_state') process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); if (request.cancelled) fs.writeFileSync(${JSON.stringify(marker)}, 'yes'); }}); setInterval(() => {}, 1000);\n`,
     );
     await chmod(executable, 0o700);
-    const service = new RuntimeHostService(socket);
+    const service = new RuntimeHostService(socket, testEnvironment);
     await service.listen();
     const client = new RuntimeHostClient(socket);
     const input = {
@@ -95,7 +118,7 @@ describe('runtime host', () => {
       `#!/usr/bin/env node\nimport { spawn } from 'node:child_process';\nlet buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; const newline=buffer.indexOf('\\n'); if (newline < 0) return; const request=JSON.parse(buffer.slice(0,newline)); process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); spawn('sleep',['60'],{stdio:'inherit'}); setTimeout(() => process.exit(7), 20); });\n`,
     );
     await chmod(executable, 0o700);
-    const service = new RuntimeHostService(socket);
+    const service = new RuntimeHostService(socket, testEnvironment);
     await service.listen();
     const client = new RuntimeHostClient(socket);
     try {
@@ -133,7 +156,7 @@ describe('runtime host', () => {
       `#!/usr/bin/env node\nlet buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; const newline=buffer.indexOf('\\n'); if (newline < 0) return; const request=JSON.parse(buffer.slice(0,newline)); process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); process.stdin.destroy(); setTimeout(() => process.stdout.write(JSON.stringify({type:'extension_ui_request',id:'closed-input'})+'\\n'), 20); }); setInterval(() => {}, 1000);\n`,
     );
     await chmod(executable, 0o700);
-    const service = new RuntimeHostService(socket);
+    const service = new RuntimeHostService(socket, testEnvironment);
     await service.listen();
     const client = new RuntimeHostClient(socket);
     try {
@@ -166,8 +189,8 @@ describe('runtime host', () => {
       path.join(os.tmpdir(), 'dashboard-runtime-host-owner-'),
     );
     const socket = path.join(root, 'host.sock');
-    const service = new RuntimeHostService(socket);
-    const second = new RuntimeHostService(socket);
+    const service = new RuntimeHostService(socket, testEnvironment);
+    const second = new RuntimeHostService(socket, testEnvironment);
     await service.listen();
     try {
       await expect(second.listen()).rejects.toThrow('already running');
