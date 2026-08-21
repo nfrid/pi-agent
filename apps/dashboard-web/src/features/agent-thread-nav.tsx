@@ -19,11 +19,10 @@ import { formatCompactCount } from '../shared/lib/format';
 import {
   type AgentThreadRow,
   agentThreadRows,
-  boundedAgentThreadRows,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
+  isArchivedThread,
   MAX_VISIBLE_ACTIVE_THREADS,
-  searchAgentThreadRows,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
   statusGlyph,
@@ -53,7 +52,6 @@ import { UsageCapsule } from './usage-indicator';
 export type { AgentThreadRow } from './agent-thread-nav/model';
 export {
   agentThreadRows,
-  boundedAgentThreadRows,
   sectionAgentThreadRows,
   workspaceNameForSession,
 } from './agent-thread-nav/model';
@@ -298,7 +296,12 @@ function AgentThreadLink({
   runtimes: BrowserSnapshot['runtimes'];
 }) {
   const details = density === 'card' ? activeThreadDetails(row, runtimes) : [];
-  const timestamp = row.durableThread?.settledAt ?? row.updatedAt;
+  const timestamp =
+    density === 'slim' &&
+    !isArchivedThread(row) &&
+    row.durableThread?.settledAt !== undefined
+      ? row.durableThread.settledAt
+      : row.updatedAt;
   const showDetails =
     density === 'card' && (details.length > 0 || timestamp !== undefined);
   return (
@@ -452,16 +455,23 @@ export function AgentThreadNav({
     () => filterAgentThreadRows(scopedRows, query),
     [query, scopedRows],
   );
-  const visibleRows = useMemo(
+  const sections = useMemo(
     () =>
-      query.trim()
-        ? searchAgentThreadRows(filtered)
-        : boundedAgentThreadRows(filtered, activeLimit, currentSessionId),
+      sectionAgentThreadRows(
+        filtered,
+        query.trim() ? Number.POSITIVE_INFINITY : activeLimit,
+        currentSessionId,
+      ),
     [activeLimit, currentSessionId, filtered, query],
   );
-  const sections = useMemo(
-    () => sectionAgentThreadRows(visibleRows, Number.POSITIVE_INFINITY),
-    [visibleRows],
+  const visibleRows = useMemo(
+    () => [
+      ...sections.pinned,
+      ...sections.active,
+      ...sections.settled,
+      ...sections.archived,
+    ],
+    [sections],
   );
   const hiddenRowCount = hiddenAgentThreadRowCount(filtered, visibleRows);
   const searchResultRows = query.trim() ? visibleRows : [];

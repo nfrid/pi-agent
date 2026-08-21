@@ -3,7 +3,6 @@
 export {
   AgentThreadNav,
   agentThreadRows,
-  boundedAgentThreadRows,
 } from '../features/agent-thread-nav';
 export {
   actionNeedsInput,

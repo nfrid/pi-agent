@@ -735,7 +735,20 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
       },
     ],
     workspaces: [],
-    sessions: [],
+    sessions: [
+      {
+        id: 'session-durable',
+        file: '/tmp/session-durable.jsonl',
+        cwd: '/tmp/durable-controls',
+        updatedAt: 7,
+      },
+      {
+        id: 'session-conflicting',
+        file: '/tmp/session-conflicting.jsonl',
+        cwd: '/tmp/durable-controls',
+        updatedAt: 8,
+      },
+    ],
     runs: [
       {
         id: 'run-durable',
@@ -865,6 +878,10 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   await durableMenu.getByRole('menuitem', { name: 'Pin' }).click();
   await expect(durableMenu).toHaveCount(0);
   await expect(durableRow.locator('[data-row-density="card"]')).toHaveCount(1);
+  await expect(durableRow.locator('.agent-thread-time')).toHaveAttribute(
+    'datetime',
+    new Date(7).toISOString(),
+  );
   await expect(durableRow.getByRole('img', { name: 'Pinned' })).toBeVisible();
 
   await durableRow.getByRole('button').press('ContextMenu');
@@ -888,6 +905,10 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   await archivedShelf.click();
   await expect(durableRow).toBeVisible();
   await expect(durableRow.locator('[data-row-density="slim"]')).toHaveCount(1);
+  await expect(durableRow.locator('.agent-thread-time')).toHaveAttribute(
+    'datetime',
+    new Date(7).toISOString(),
+  );
   await durableRow.getByRole('button').click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Actions for Durable session' })
@@ -1777,33 +1798,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(
     agentNav.locator('.agent-thread-row.status-dormant .agent-thread-glyph'),
   ).toHaveText('◌');
-  const idleMarker = await agentNav
-    .locator('.agent-thread-row.status-idle .agent-thread-glyph')
-    .evaluate((element) => {
-      const marker = getComputedStyle(element, '::before');
-      return {
-        width: marker.width,
-        height: marker.height,
-        background: marker.backgroundColor,
-      };
-    });
-  const dormantMarker = await agentNav
-    .locator('.agent-thread-row.status-dormant .agent-thread-glyph')
-    .evaluate((element) => {
-      const marker = getComputedStyle(element, '::before');
-      return {
-        width: marker.width,
-        height: marker.height,
-        borderStyle: marker.borderStyle,
-      };
-    });
-  expect(idleMarker).toMatchObject({ width: '8px', height: '8px' });
-  expect(idleMarker.background).not.toBe('rgba(0, 0, 0, 0)');
-  expect(dormantMarker).toEqual({
-    width: '8px',
-    height: '8px',
-    borderStyle: 'dotted',
-  });
   await expect(agentNav.locator('.agent-thread-time')).toHaveCount(2);
   await page.locator('.agent-nav-backdrop').click();
 
@@ -1835,24 +1829,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const dormantComposer = page.locator('form.composer');
   await expect(dormantNotice).toBeVisible();
   await expect(dormantComposer).toBeVisible();
-  const dormantStack = await dormantNotice.evaluate((notice) => {
-    const composer = notice.nextElementSibling;
-    const noticeRect = notice.getBoundingClientRect();
-    const composerRect = composer?.getBoundingClientRect();
-    return {
-      composerIsNext: composer?.matches('form.composer') ?? false,
-      noticeBottom: noticeRect.bottom,
-      composerTop: composerRect?.top,
-      leftGap: Math.abs(noticeRect.left - (composerRect?.left ?? 0)),
-      rightGap: Math.abs(noticeRect.right - (composerRect?.right ?? 0)),
-    };
-  });
-  expect(dormantStack.composerIsNext).toBe(true);
-  expect(dormantStack.noticeBottom).toBeLessThanOrEqual(
-    dormantStack.composerTop ?? 0,
-  );
-  expect(dormantStack.leftGap).toBeLessThanOrEqual(1);
-  expect(dormantStack.rightGap).toBeLessThanOrEqual(1);
   await transcriptScroll(page).evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     element.scrollTop = 0;

@@ -39,12 +39,6 @@ export type AgentThreadRow = {
   updatedAt?: number;
 };
 
-export type AgentThreadGroup = {
-  workspaceId?: string;
-  workspaceName: string;
-  rows: AgentThreadRow[];
-};
-
 export type AgentThreadSections = {
   pinned: AgentThreadRow[];
   active: AgentThreadRow[];
@@ -323,42 +317,6 @@ export function sectionAgentThreadRows(
   };
 }
 
-export function searchAgentThreadRows(
-  rows: readonly AgentThreadRow[],
-): AgentThreadRow[] {
-  const sections = sectionAgentThreadRows(rows, Number.POSITIVE_INFINITY);
-  return [
-    ...sections.pinned,
-    ...sections.active,
-    ...sections.settled,
-    ...sections.archived,
-  ];
-}
-
-export function archivedRowsForShelf(
-  rows: readonly AgentThreadRow[],
-  expanded: boolean,
-  selectedSessionId?: string,
-): AgentThreadRow[] {
-  return expanded
-    ? pinnedFirst(rows)
-    : rows.filter((row) => row.id === selectedSessionId);
-}
-
-export function boundedAgentThreadRows(
-  rows: readonly AgentThreadRow[],
-  activeLimit = MAX_VISIBLE_ACTIVE_THREADS,
-  selectedSessionId?: string,
-): AgentThreadRow[] {
-  const sections = sectionAgentThreadRows(rows, activeLimit, selectedSessionId);
-  return [
-    ...sections.pinned,
-    ...sections.active,
-    ...sections.settled,
-    ...sections.archived,
-  ];
-}
-
 export function hiddenAgentThreadRowCount(
   rows: readonly AgentThreadRow[],
   visibleRows: readonly AgentThreadRow[],
@@ -378,32 +336,6 @@ export function hiddenAgentThreadRowCount(
           row.durableThread?.settledAt === undefined,
       ).length,
   );
-}
-
-export function workspaceGroupIsExpanded(
-  collapsed: boolean,
-  searching: boolean,
-): boolean {
-  return !collapsed || searching;
-}
-
-export function groupAgentThreadRows(
-  rows: readonly AgentThreadRow[],
-): Array<[string, AgentThreadGroup]> {
-  const result = new Map<string, AgentThreadGroup>();
-  for (const row of rows) {
-    const key = row.workspaceId ?? `other:${row.workspaceName}`;
-    const group =
-      result.get(key) ??
-      ({
-        workspaceId: row.workspaceId,
-        workspaceName: row.workspaceName,
-        rows: [],
-      } satisfies AgentThreadGroup);
-    group.rows.push(row);
-    result.set(key, group);
-  }
-  return [...result.entries()];
 }
 
 export function statusGlyph(status: AgentThreadRow['status']): string {

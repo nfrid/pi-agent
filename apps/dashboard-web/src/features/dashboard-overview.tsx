@@ -7,7 +7,7 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { workspaceForPath } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
-import { sessionDisplayTitle, sortWorkspacesByRecency } from '../app-helpers';
+import { sessionDisplayTitle } from '../app-helpers';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
 import styles from './dashboard-overview.module.css';
@@ -154,7 +154,7 @@ export function WorkspacesView({
         <WorkspaceRefresh snapshot={snapshot} store={store} />
       </div>
       <div className="workspace-list">
-        {sortWorkspacesByRecency(snapshot).map((workspace) => {
+        {snapshot.workspaces.map((workspace) => {
           const runtimes = snapshot.runtimes.filter(
             (runtime) =>
               workspaceForPath(runtime.cwd, [workspace])?.id === workspace.id,

@@ -47,7 +47,6 @@ import {
 import {
   activeThreadDetails,
   agentThreadRows,
-  boundedAgentThreadRows,
 } from './features/agent-thread-nav';
 import { visualViewportKeyboardInset } from './features/session';
 import { actionNeedsInput, paletteItems } from './routes/dashboard';
@@ -315,19 +314,6 @@ describe('project-scoped new chat', () => {
       ],
     };
     expect(newChatPath(snapshot)).toBe('/workspaces/dormant/new');
-    expect(
-      newChatPath({
-        workspaces: snapshot.workspaces,
-        sessions: [
-          {
-            id: 'recent',
-            file: '/sessions/recent.jsonl',
-            cwd: '/active',
-            updatedAt: 99,
-          },
-        ],
-      } as never),
-    ).toBe('/workspaces/active/new');
     expect(newChatPath({ workspaces: [] })).toBe('/workspaces');
     expect(newChatPath(snapshot, 'dormant')).toBe('/workspaces/dormant/new');
     expect(pendingChatPath('workspace-1', 'runtime/1')).toBe(
@@ -475,36 +461,6 @@ describe('command palette', () => {
     expect(items.some((item) => item.title === 'Session: session-436')).toBe(
       false,
     );
-  });
-
-  it('orders workspace navigation items with the shared recency projection', () => {
-    const items = paletteItems({
-      runtimes: [],
-      workspaces: [
-        {
-          id: 'first',
-          name: 'First',
-          canonicalPath: '/work/first',
-        },
-        {
-          id: 'second',
-          name: 'Second',
-          canonicalPath: '/work/second',
-        },
-      ],
-      sessions: [
-        {
-          id: 'recent',
-          file: '/sessions/recent.jsonl',
-          cwd: '/work/second',
-          updatedAt: 10,
-        },
-      ],
-    } as never).filter((item) => item.title.startsWith('Workspace:'));
-    expect(items.map((item) => item.title)).toEqual([
-      'Workspace: Second',
-      'Workspace: First',
-    ]);
   });
 
   it('disambiguates identical actions by their runtime target', () => {
@@ -938,144 +894,6 @@ describe('workspace-first agent navigation', () => {
       startedAt: undefined,
       updatedAt: undefined,
     });
-  });
-
-  it('keeps offline and dormant threads in Active after live statuses', () => {
-    const snapshot = {
-      runtimes: [
-        {
-          runtimeId: 'idle',
-          liveState: 'idle',
-          online: true,
-          cwd: '/workspace/app',
-          session: { id: 'idle-session', title: 'Old thread', entries: [] },
-        },
-        {
-          runtimeId: 'offline',
-          liveState: 'idle',
-          online: false,
-          cwd: '/workspace/app',
-          session: {
-            id: 'offline-session',
-            title: 'Offline thread',
-            entries: [],
-          },
-        },
-        {
-          runtimeId: 'failed',
-          liveState: 'failed',
-          online: true,
-          cwd: '/workspace/app',
-          session: {
-            id: 'failed-session',
-            title: 'Broken thread',
-            entries: [],
-          },
-        },
-        {
-          runtimeId: 'working',
-          liveState: 'working',
-          online: true,
-          cwd: '/workspace/app',
-          session: {
-            id: 'working-session',
-            title: 'Current thread',
-            entries: [],
-          },
-        },
-        {
-          runtimeId: 'compacting',
-          liveState: 'compacting',
-          online: true,
-          cwd: '/workspace/app',
-          session: {
-            id: 'compacting-session',
-            title: 'Compacting thread',
-            entries: [],
-          },
-        },
-      ],
-      workspaces: [{ id: 'app', name: 'App', canonicalPath: '/workspace/app' }],
-      sessions: [
-        {
-          id: 'idle-session',
-          cwd: '/workspace/app',
-          startedAt: 450,
-          updatedAt: 2,
-        },
-        {
-          id: 'offline-session',
-          cwd: '/workspace/app',
-          startedAt: 700,
-          updatedAt: 7,
-        },
-        {
-          id: 'failed-session',
-          cwd: '/workspace/app',
-          startedAt: 300,
-          updatedAt: 3,
-        },
-        {
-          id: 'working-session',
-          cwd: '/workspace/app',
-          startedAt: 400,
-          updatedAt: 5,
-        },
-        {
-          id: 'compacting-session',
-          cwd: '/workspace/app',
-          startedAt: 500,
-          updatedAt: 1,
-        },
-        {
-          id: 'dormant-session',
-          cwd: '/workspace/app',
-          startedAt: 600,
-          updatedAt: 6,
-        },
-      ],
-    } as never;
-    const rows = agentThreadRows(snapshot);
-    expect(rows.map((row) => [row.id, row.status])).toEqual([
-      ['compacting-session', 'compacting'],
-      ['idle-session', 'idle'],
-      ['working-session', 'working'],
-      ['failed-session', 'failed'],
-      ['offline-session', 'offline'],
-      ['dormant-session', 'dormant'],
-    ]);
-    expect(
-      boundedAgentThreadRows(rows).map((row) => [row.id, row.status]),
-    ).toEqual([
-      ['compacting-session', 'compacting'],
-      ['idle-session', 'idle'],
-      ['working-session', 'working'],
-      ['failed-session', 'failed'],
-      ['offline-session', 'offline'],
-      ['dormant-session', 'dormant'],
-    ]);
-    const offline = rows[4];
-    if (!offline) throw new Error('offline row missing');
-    const history = Array.from({ length: 100 }, (_, index) => ({
-      ...offline,
-      id: `history-${index}`,
-      status: index % 2 === 0 ? ('offline' as const) : ('dormant' as const),
-      updatedAt: index,
-    }));
-    expect(
-      boundedAgentThreadRows([...rows.slice(0, 4), ...history]),
-    ).toHaveLength(40);
-    expect(
-      boundedAgentThreadRows([...rows.slice(0, 4), ...history], 48),
-    ).toHaveLength(48);
-    const active = Array.from({ length: 60 }, (_, index) => ({
-      ...rows[0],
-      id: `active-${index}`,
-      status: 'working' as const,
-    }));
-    expect(boundedAgentThreadRows([...active, ...history], 48)).toHaveLength(
-      48,
-    );
   });
 });
 

@@ -2,19 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentThreadRow } from './model';
 import {
   agentThreadRows,
-  archivedRowsForShelf,
-  boundedAgentThreadRows,
   durableThreadForSession,
   filterAgentThreadRows,
-  groupAgentThreadRows,
   hiddenAgentThreadRowCount,
   isArchivedThread,
   isUnavailableThread,
-  searchAgentThreadRows,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
   statusGlyph,
-  workspaceGroupIsExpanded,
 } from './model';
 
 function row(
@@ -349,15 +344,10 @@ describe('agent thread view model', () => {
     const rows = [row('normal', 'Dashboard'), pinned, archived];
 
     expect(isArchivedThread(archived)).toBe(true);
-    expect(boundedAgentThreadRows(rows).map(({ id }) => id)).toEqual([
-      'pinned',
-      'normal',
-      'archived',
-    ]);
-    expect(archivedRowsForShelf([archived], false, 'missing')).toEqual([]);
-    expect(archivedRowsForShelf([archived], false, 'archived')).toEqual([
-      archived,
-    ]);
+    const sections = sectionAgentThreadRows(rows);
+    expect(sections.pinned.map(({ id }) => id)).toEqual(['pinned']);
+    expect(sections.active.map(({ id }) => id)).toEqual(['normal']);
+    expect(sections.archived.map(({ id }) => id)).toEqual(['archived']);
   });
 
   it('uses compact distinct glyphs for passive waiting and input', () => {
@@ -392,8 +382,9 @@ describe('agent thread view model', () => {
       row(`old-${index}`, 'Dashboard', 'dormant'),
     );
 
-    expect(searchAgentThreadRows(dormant)).toHaveLength(25);
-    expect(sectionAgentThreadRows(dormant).active).toHaveLength(25);
+    expect(
+      sectionAgentThreadRows(dormant, Number.POSITIVE_INFINITY).active,
+    ).toHaveLength(25);
     expect(sectionAgentThreadRows(dormant).archived).toEqual([]);
   });
 
@@ -402,7 +393,7 @@ describe('agent thread view model', () => {
       row(`thread-${index}`, 'Dashboard', index % 2 ? 'dormant' : 'working'),
     );
 
-    const visible = boundedAgentThreadRows(rows, 40);
+    const visible = sectionAgentThreadRows(rows, 40).active;
     expect(visible).toHaveLength(40);
     expect(visible.every((item) => item.status !== 'offline')).toBe(true);
     expect(hiddenAgentThreadRowCount(rows, visible)).toBe(3);
@@ -414,37 +405,7 @@ describe('agent thread view model', () => {
     );
 
     expect(
-      boundedAgentThreadRows(dormant, 1, 'old-2').map(({ id }) => id),
+      sectionAgentThreadRows(dormant, 1, 'old-2').active.map(({ id }) => id),
     ).toEqual(['old-0', 'old-2']);
-  });
-
-  it('keeps collapsed groups closed unless actively searching', () => {
-    expect(workspaceGroupIsExpanded(true, false)).toBe(false);
-    expect(workspaceGroupIsExpanded(true, true)).toBe(true);
-    expect(workspaceGroupIsExpanded(false, false)).toBe(true);
-  });
-
-  it('groups rows by workspace identity and names other workspaces separately', () => {
-    const rows = [
-      row('one', 'Dashboard', 'working', 'workspace-1'),
-      row('two', 'Dashboard', 'offline', 'workspace-1'),
-      row('three', 'External'),
-      row('four', 'External'),
-    ];
-
-    expect(groupAgentThreadRows(rows)).toEqual([
-      [
-        'workspace-1',
-        {
-          workspaceId: 'workspace-1',
-          workspaceName: 'Dashboard',
-          rows: [rows[0], rows[1]],
-        },
-      ],
-      [
-        'other:External',
-        { workspaceName: 'External', rows: [rows[2], rows[3]] },
-      ],
-    ]);
   });
 });
