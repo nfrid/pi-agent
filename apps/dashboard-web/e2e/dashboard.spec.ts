@@ -174,7 +174,10 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     page.getByRole('button', { name: 'Open agent list' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Open agent list' }).click();
-  await expect(page.getByText('Agents', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Workspace threads', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('Agents', { exact: true })).toHaveCount(0);
   await expect(
     page.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
@@ -183,6 +186,10 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   const agentNav = page.getByRole('complementary', {
     name: 'Agents and threads',
   });
+  const mobileThreadRow = agentNav.locator('.agent-thread-row').first();
+  await expect(mobileThreadRow).toContainText('Demo');
+  await expect(mobileThreadRow).toContainText('offline');
+  await expect(mobileThreadRow).not.toContainText('/Users/example');
   await expect(
     agentNav.getByRole('button', { name: /New thread/ }),
   ).toBeVisible();
@@ -524,6 +531,9 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   await expect(
     nav.getByRole('button', { name: /Two thread dormant/ }),
   ).toBeVisible();
+  const slimThread = nav.locator('[data-row-density="slim"]').first();
+  await expect(slimThread).toContainText(/One|Two/);
+  await expect(slimThread).not.toContainText('/work/');
   await nav.getByRole('button', { name: /New thread/ }).click();
   const workspaceChooser = page.getByRole('dialog', {
     name: 'Choose a workspace',
@@ -535,11 +545,27 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   await expect(
     workspaceChooser.getByRole('button', { name: 'Two' }),
   ).toBeVisible();
+  expect(
+    await workspaceChooser.evaluate(
+      (element) => element.parentElement?.parentElement === document.body,
+    ),
+  ).toBe(true);
+  const chooserSearch = workspaceChooser.getByRole('textbox', {
+    name: 'Search workspaces',
+  });
+  await chooserSearch.fill('Two');
+  await expect(
+    workspaceChooser.getByRole('button', { name: 'One' }),
+  ).toHaveCount(0);
+  await chooserSearch.fill('');
+  await chooserSearch.press('Control+j');
+  await chooserSearch.press('Enter');
+  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await page.goto('/');
+  await nav.getByRole('button', { name: /New thread/ }).click();
   await page.keyboard.press('Escape');
   await expect(workspaceChooser).toHaveCount(0);
-  await nav.getByRole('button', { name: /New thread/ }).click();
-  await workspaceChooser.getByRole('button', { name: 'Two' }).press('Enter');
-  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await expect(nav.getByRole('button', { name: /New thread/ })).toBeFocused();
   await page.goto('/');
   await nav
     .getByRole('combobox', { name: 'Workspace scope' })
@@ -552,6 +578,15 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   ).toBeVisible();
   await nav.getByRole('button', { name: /New thread/ }).click();
   await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await page.goto('/workspaces');
+  const workspaceCards = page.locator('.workspace-card');
+  await expect(workspaceCards.first()).toContainText('One');
+  await page.getByRole('button', { name: 'Open command palette' }).click();
+  const paletteWorkspaceItems = page
+    .locator('.command-palette .palette-list button')
+    .filter({ hasText: 'Workspace:' });
+  await expect(paletteWorkspaceItems.first()).toContainText('Workspace: One');
+  await expect(paletteWorkspaceItems.nth(1)).toContainText('Workspace: Two');
 });
 
 test('desktop sidebar and new chat fill the tall session surface @desktop', async ({

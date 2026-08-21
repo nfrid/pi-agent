@@ -233,11 +233,8 @@ function WorkspaceChooser({
             setActiveIndex(0);
           }}
         />
-        <div
-          className={styles.workspaceChooserOptions}
-          role="listbox"
-          aria-label="Workspaces"
-        >
+        <fieldset className={styles.workspaceChooserOptions}>
+          <legend className={styles.workspaceChooserLegend}>Workspaces</legend>
           {filtered.map((workspace, index) => (
             <button
               type="button"
@@ -261,7 +258,7 @@ function WorkspaceChooser({
               No matching workspaces.
             </span>
           )}
-        </div>
+        </fieldset>
         <button
           type="button"
           className={styles.workspaceChooserCancel}
@@ -323,6 +320,8 @@ function AgentThreadLink({
                 'failed',
                 'paused',
               ].includes(row.status) ? (
+                statusLabel(row)
+              ) : row.updatedAt === undefined ? (
                 statusLabel(row)
               ) : (
                 <DashboardTime

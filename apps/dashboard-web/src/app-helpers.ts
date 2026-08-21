@@ -5,16 +5,22 @@ import {
   workspaceForPath,
 } from '@pi-dashboard/protocol';
 
+export type WorkspacePresentationSnapshot = Pick<
+  BrowserSnapshot,
+  'workspaces'
+> &
+  Partial<Pick<BrowserSnapshot, 'sessions' | 'runtimes'>>;
+
 /**
  * Return workspace presentation order without mutating the protocol snapshot.
  * Indexed sessions may omit workspaceId, so their cwd is resolved against the
  * same catalogue used by the rest of the dashboard.
  */
 export function sortWorkspacesByRecency(
-  snapshot: Pick<BrowserSnapshot, 'workspaces' | 'sessions'>,
+  snapshot: WorkspacePresentationSnapshot,
 ): BrowserSnapshot['workspaces'] {
   const latestByWorkspace = new Map<string, number>();
-  for (const session of snapshot.sessions) {
+  for (const session of snapshot.sessions ?? []) {
     const workspace =
       snapshot.workspaces.find(
         (candidate) => candidate.id === session.workspaceId,
