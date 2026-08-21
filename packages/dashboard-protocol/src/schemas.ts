@@ -1323,6 +1323,9 @@ export const SessionIndexEntrySchema = Type.Object(
     file: Type.String({ maxLength: MAX_PATH }),
     cwd: Type.String({ maxLength: MAX_PATH }),
     workspaceId: Type.Optional(IdentifierSchema),
+    /** Server-resolved durable project association; null means unassigned. */
+    projectId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
+    checkoutId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
     /** Compact resume hints derived from the latest indexed leaf ancestry. */

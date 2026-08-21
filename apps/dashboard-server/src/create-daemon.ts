@@ -195,6 +195,7 @@ function dependencies(
     push,
     stateDir: config.stateDir,
     orchestration: orchestrationService,
+    projectResolver,
     onChange: () => applicationChanges.publish(undefined),
   });
   return {

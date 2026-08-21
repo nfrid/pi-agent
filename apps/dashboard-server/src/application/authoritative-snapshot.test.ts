@@ -45,6 +45,7 @@ async function fixture(
   entries: readonly unknown[] = [
     { type: 'session', id: sessionId, cwd: '/tmp/snapshot' },
   ],
+  projectAssociation?: { projectId: string | null; checkoutId: string | null },
 ): Promise<Fixture> {
   const root = await mkdtemp(
     path.join(os.tmpdir(), 'dashboard-authoritative-'),
@@ -79,6 +80,13 @@ async function fixture(
     usage: { get: async () => null },
     push: { notify: async () => undefined },
     stateDir: path.join(root, 'state'),
+    ...(projectAssociation
+      ? {
+          projectResolver: {
+            resolve: () => projectAssociation,
+          } as never,
+        }
+      : {}),
   });
   await app.start();
   const result: Fixture = {
@@ -153,6 +161,34 @@ function runtime(
 }
 
 describe('authoritative application snapshot lifecycle', () => {
+  it('projects indexed and live session project association', async () => {
+    const value = await fixture(
+      'project-session',
+      [{ type: 'session', id: 'project-session', cwd: '/tmp/snapshot' }],
+      { projectId: 'project-indexed', checkoutId: 'checkout-indexed' },
+    );
+    expect(value.app.sessionMetadata()[0]).toMatchObject({
+      projectId: 'project-indexed',
+      checkoutId: 'checkout-indexed',
+    });
+
+    value.register({
+      runtimeId: 'runtime-project-session',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp/live',
+      projectId: null,
+      checkoutId: null,
+      liveState: 'idle',
+      session: { id: 'project-session', entries: [] },
+    });
+    expect(value.app.sessionMetadata()[0]).toMatchObject({
+      projectId: null,
+      checkoutId: null,
+      activeRuntimeId: 'runtime-project-session',
+    });
+  });
+
   it('can complete a fresh idle registration when its persisted branch is authoritative', async () => {
     const f = await fixture();
     f.register(runtime(f.file, { liveState: 'idle' }));

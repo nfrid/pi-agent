@@ -33,6 +33,7 @@ import {
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type { MetadataStore } from '../metadata.js';
+import type { ProjectResolver } from '../project-resolver.js';
 import type { PushSender } from '../push.js';
 import type { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
 import type { RuntimeManager } from '../runtime-manager.js';
@@ -75,6 +76,8 @@ export interface DashboardApplicationOptions {
   stateDir: string;
   onChange?: () => void;
   orchestration?: OrchestrationService;
+  /** Resolves indexed sessions; runtime association stays in RuntimeRegistry. */
+  projectResolver?: ProjectResolver;
 }
 
 export interface SessionMetadataDelta {
@@ -86,6 +89,8 @@ const SESSION_METADATA_FIELDS = [
   'file',
   'cwd',
   'workspaceId',
+  'projectId',
+  'checkoutId',
   'name',
   'title',
   'lastKnownModel',
@@ -735,6 +740,7 @@ export class DashboardApplication {
   /** Bounded, process-local live transcript projection; never persisted. */
   private readonly activeTranscripts = new Map<string, ActiveTranscriptState>();
   readonly orchestrationService?: OrchestrationService;
+  private readonly projectResolver?: ProjectResolver;
 
   constructor(options: DashboardApplicationOptions) {
     this.registry = options.registry;
@@ -743,6 +749,7 @@ export class DashboardApplication {
     this.orchestration = options.metadata.orchestration;
     this.sessionIndex = options.sessions;
     this.orchestrationService = options.orchestration;
+    this.projectResolver = options.projectResolver;
     this.runtime = new RuntimeService(
       options.registry,
       options.manager,
@@ -792,8 +799,18 @@ export class DashboardApplication {
     );
     return this.sessions.list().map((session) => {
       const runtime = activeRuntimes.get(session.id);
+      const association = runtime
+        ? {
+            projectId: runtime.projectId ?? null,
+            checkoutId: runtime.checkoutId ?? null,
+          }
+        : (this.projectResolver?.resolve(session.cwd) ?? {
+            projectId: null,
+            checkoutId: null,
+          });
       return {
         ...session,
+        ...association,
         ...(runtime?.session.name !== undefined
           ? { name: runtime.session.name }
           : {}),
