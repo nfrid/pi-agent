@@ -14,7 +14,10 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { sortWorkspacesByRecency } from '../app-helpers';
-import { newChatPath, useDashboardNavigate } from '../routes/navigation';
+import {
+  newProjectThreadPath,
+  useDashboardNavigate,
+} from '../routes/navigation';
 import { formatCompactCount } from '../shared/lib/format';
 import {
   type AgentThreadRow,
@@ -89,21 +92,21 @@ function writeExpandedArchived(state: ExpandedArchived): void {
   }
 }
 
-function WorkspaceChooser({
-  workspaces,
+function ProjectChooser({
+  projects,
   onChoose,
   onClose,
 }: {
-  workspaces: BrowserSnapshot['workspaces'];
-  onChoose: (workspaceId: string) => void;
+  projects: NonNullable<BrowserSnapshot['projects']>;
+  onChoose: (projectId: string) => void;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
-  const filtered = workspaces.filter((workspace) =>
-    `${workspace.name} ${workspace.canonicalPath} ${workspace.path}`
+  const filtered = projects.filter((project) =>
+    `${project.title} ${project.rootPath}`
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
   );
@@ -124,15 +127,15 @@ function WorkspaceChooser({
     );
   };
   const chooseActive = () => {
-    const workspace = filtered[activeIndex];
-    if (workspace) onChoose(workspace.id);
+    const project = filtered[activeIndex];
+    if (project) onChoose(project.id);
   };
 
   return createPortal(
     // biome-ignore lint/a11y/noStaticElementInteractions: The backdrop closes the modal on outside clicks.
     <div
       className={styles.workspaceChooserBackdrop}
-      data-workspace-chooser-backdrop=""
+      data-project-chooser-backdrop=""
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -143,7 +146,7 @@ function WorkspaceChooser({
         className={styles.workspaceChooser}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="agent-thread-workspace-chooser-heading"
+        aria-labelledby="agent-thread-project-chooser-heading"
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault();
@@ -191,12 +194,12 @@ function WorkspaceChooser({
         }}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <h2 id="agent-thread-workspace-chooser-heading">Choose a workspace</h2>
+        <h2 id="agent-thread-project-chooser-heading">Choose a project</h2>
         <p>Where should the new thread start?</p>
         <input
           ref={searchRef}
           className={styles.workspaceChooserSearch}
-          aria-label="Search workspaces"
+          aria-label="Search projects"
           placeholder="Search name or path"
           value={query}
           onChange={(event) => {
@@ -206,31 +209,27 @@ function WorkspaceChooser({
         />
         <div
           className={styles.workspaceChooserScroll}
-          data-workspace-options-scroll=""
+          data-project-options-scroll=""
         >
           <fieldset className={styles.workspaceChooserOptions}>
-            <legend className={styles.workspaceChooserLegend}>
-              Workspaces
-            </legend>
-            {filtered.map((workspace, index) => (
+            <legend className={styles.workspaceChooserLegend}>Projects</legend>
+            {filtered.map((project, index) => (
               <button
                 type="button"
-                aria-label={workspace.name}
-                data-workspace-active={
-                  index === activeIndex ? 'true' : undefined
-                }
-                key={workspace.id}
-                onClick={() => onChoose(workspace.id)}
+                aria-label={project.title}
+                data-project-active={index === activeIndex ? 'true' : undefined}
+                key={project.id}
+                onClick={() => onChoose(project.id)}
               >
-                <span>{workspace.name}</span>
+                <span>{project.title}</span>
                 <small className={styles.workspaceChooserPath}>
-                  {workspace.canonicalPath}
+                  {project.rootPath}
                 </small>
               </button>
             ))}
             {!filtered.length && (
               <span className={styles.workspaceChooserEmpty}>
-                No matching workspaces.
+                No matching projects.
               </span>
             )}
           </fieldset>
@@ -390,7 +389,7 @@ export function AgentThreadNav({
   const [query, setQuery] = useState('');
   const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [workspaceScope, setWorkspaceScope] = useState('all');
-  const [workspaceChooserOpen, setWorkspaceChooserOpen] = useState(false);
+  const [projectChooserOpen, setProjectChooserOpen] = useState(false);
   const newThreadButtonRef = useRef<HTMLButtonElement>(null);
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
     Boolean(readExpandedArchived().all),
@@ -439,6 +438,13 @@ export function AgentThreadNav({
   const workspaces = useMemo(
     () => sortWorkspacesByRecency(snapshot),
     [snapshot],
+  );
+  const projects = useMemo(
+    () =>
+      (snapshot.projects ?? []).filter(
+        (project) => project.status === 'active',
+      ),
+    [snapshot.projects],
   );
   const rows = useMemo(
     () => agentThreadRows(snapshot, durableThreads, directLinks),
@@ -552,30 +558,25 @@ export function AgentThreadNav({
     else go(fallbackPath);
   };
   const openNewThread = () => {
-    if (workspaceScope !== 'all') {
-      go(newChatPath(snapshot, workspaceScope));
+    if (projects.length === 0) {
+      go('/projects');
       if (mode === 'session') onOpenChange?.(false);
       return;
     }
-    if (snapshot.workspaces.length === 0) {
-      go('/workspaces');
+    if (projects.length === 1) {
+      go(newProjectThreadPath(snapshot, projects[0].id));
       if (mode === 'session') onOpenChange?.(false);
       return;
     }
-    if (workspaces.length === 1) {
-      go(newChatPath(snapshot, workspaces[0].id));
-      if (mode === 'session') onOpenChange?.(false);
-      return;
-    }
-    setWorkspaceChooserOpen(true);
+    setProjectChooserOpen(true);
   };
-  const closeWorkspaceChooser = () => {
-    setWorkspaceChooserOpen(false);
+  const closeProjectChooser = () => {
+    setProjectChooserOpen(false);
     requestAnimationFrame(() => newThreadButtonRef.current?.focus());
   };
-  const chooseWorkspace = (workspaceId: string) => {
-    setWorkspaceChooserOpen(false);
-    go(newChatPath(snapshot, workspaceId));
+  const chooseProject = (projectId: string) => {
+    setProjectChooserOpen(false);
+    go(newProjectThreadPath(snapshot, projectId));
     if (mode === 'session') onOpenChange?.(false);
   };
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
@@ -664,7 +665,7 @@ export function AgentThreadNav({
     >
       <div className={styles.header}>
         <div>
-          <p className="eyebrow">Workspace threads</p>
+          <p className="eyebrow">Project threads</p>
         </div>
         <button
           ref={newThreadButtonRef}
@@ -676,11 +677,11 @@ export function AgentThreadNav({
           <span aria-hidden="true">+</span> New
         </button>
       </div>
-      {workspaceChooserOpen && (
-        <WorkspaceChooser
-          workspaces={workspaces}
-          onChoose={chooseWorkspace}
-          onClose={closeWorkspaceChooser}
+      {projectChooserOpen && (
+        <ProjectChooser
+          projects={projects}
+          onChoose={chooseProject}
+          onClose={closeProjectChooser}
         />
       )}
       <div className={styles.search}>

@@ -147,6 +147,15 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         },
       },
     ],
+    projects: [
+      {
+        id: 'p',
+        title: 'Demo project',
+        rootPath:
+          '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
+        status: 'active',
+      },
+    ],
     workspaces: [
       {
         id: 'w',
@@ -175,7 +184,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await expect(
-    page.getByText('Workspace threads', { exact: true }),
+    page.getByText('Project threads', { exact: true }),
   ).toBeVisible();
   await expect(page.getByText('Agents', { exact: true })).toHaveCount(0);
   await expect(
@@ -241,7 +250,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toBeVisible();
   await expect(page.getByRole('option', { name: /Dashboard/ })).toBeVisible();
-  await expect(page.getByRole('option', { name: /New chat/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: /New thread/ })).toBeVisible();
   await expect(
     page.getByRole('option', { name: /Workspace: Demo/ }),
   ).toBeVisible();
@@ -273,8 +282,8 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toHaveCount(0);
   await paletteTrigger.click();
-  await page.getByRole('option', { name: /New chat/ }).click();
-  await expect(page).toHaveURL(/\/workspaces\/w\/new$/u);
+  await page.getByRole('option', { name: /New thread/ }).click();
+  await expect(page).toHaveURL(/\/projects\/p\/new$/u);
   await page.goto('/workspaces/w');
   await expect(page).toHaveURL(/\/workspaces\/w$/u);
   const workspaceSummary = page.getByRole('region', {
@@ -367,6 +376,10 @@ test('mobile workspace picker dismisses without closing the agent drawer', async
     revision: 1,
     cursor: 1,
     runtimes: [],
+    projects: [
+      { id: 'one', title: 'One', rootPath: '/work/one', status: 'active' },
+      { id: 'two', title: 'Two', rootPath: '/work/two', status: 'active' },
+    ],
     workspaces: [
       { id: 'one', name: 'One', canonicalPath: '/work/one', active: true },
       { id: 'two', name: 'Two', canonicalPath: '/work/two', active: true },
@@ -382,7 +395,7 @@ test('mobile workspace picker dismisses without closing the agent drawer', async
   });
   const newThread = nav.getByRole('button', { name: /New thread/ });
   await newThread.click();
-  const chooser = page.getByRole('dialog', { name: 'Choose a workspace' });
+  const chooser = page.getByRole('dialog', { name: 'Choose a project' });
   await expect(chooser).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
@@ -397,18 +410,18 @@ test('mobile workspace picker dismisses without closing the agent drawer', async
   await expect(newThread).toBeFocused();
   await newThread.click();
   await page
-    .locator('[data-workspace-chooser-backdrop]')
+    .locator('[data-project-chooser-backdrop]')
     .click({ position: { x: 2, y: 2 } });
   await expect(chooser).toHaveCount(0);
   await expect(newThread).toBeFocused();
 
   await newThread.click();
   await chooser.getByRole('button', { name: 'Two' }).click();
-  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await expect(page).toHaveURL(/\/projects\/two\/new$/u);
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
 });
 
-test('sidebar New thread handles one and zero workspace fallbacks @desktop', async ({
+test('sidebar New thread handles one and zero project fallbacks @desktop', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -428,10 +441,13 @@ test('sidebar New thread handles one and zero workspace fallbacks @desktop', asy
   };
   await routeSidebarData(page);
   await installDashboardBootstrap(page, {
-    serverId: 'dashboard-one-workspace',
+    serverId: 'dashboard-one-project',
     revision: 1,
     cursor: 1,
     runtimes: [],
+    projects: [
+      { id: 'only', title: 'Only', rootPath: '/work/only', status: 'active' },
+    ],
     workspaces: [
       { id: 'only', name: 'Only', canonicalPath: '/work/only', active: true },
     ],
@@ -443,15 +459,16 @@ test('sidebar New thread handles one and zero workspace fallbacks @desktop', asy
     .getByRole('complementary', { name: 'Agents and threads' })
     .getByRole('button', { name: /New thread/ })
     .click();
-  await expect(page).toHaveURL(/\/workspaces\/only\/new$/u);
+  await expect(page).toHaveURL(/\/projects\/only\/new$/u);
 
   const zeroPage = await page.context().newPage();
   await routeSidebarData(zeroPage);
   await installDashboardBootstrap(zeroPage, {
-    serverId: 'dashboard-zero-workspace',
+    serverId: 'dashboard-zero-project',
     revision: 1,
     cursor: 1,
     runtimes: [],
+    projects: [],
     workspaces: [],
     sessions: [],
     unread: [],
@@ -461,11 +478,11 @@ test('sidebar New thread handles one and zero workspace fallbacks @desktop', asy
     .getByRole('complementary', { name: 'Agents and threads' })
     .getByRole('button', { name: /New thread/ })
     .click();
-  await expect(zeroPage).toHaveURL(/\/workspaces$/u);
+  await expect(zeroPage).toHaveURL(/\/projects$/u);
   await zeroPage.close();
 });
 
-test('desktop workspace scope filters threads and scopes New thread navigation @desktop', async ({
+test('desktop workspace scope filters threads while New thread uses projects @desktop', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -486,6 +503,16 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
     revision: 1,
     cursor: 1,
     runtimes: [],
+    projects: [
+      { id: 'one', title: 'One', rootPath: '/work/one', status: 'active' },
+      { id: 'two', title: 'Two', rootPath: '/work/two', status: 'active' },
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: `extra-${index}`,
+        title: `Extra ${index}`,
+        rootPath: `/work/extra-${index}`,
+        status: 'active',
+      })),
+    ],
     workspaces: [
       {
         id: 'one',
@@ -538,23 +565,23 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   await expect(activeThread).toContainText('Resumes on send');
   await expect(activeThread).not.toContainText('/work/');
   await nav.getByRole('button', { name: /New thread/ }).click();
-  const workspaceChooser = page.getByRole('dialog', {
-    name: 'Choose a workspace',
+  const projectChooser = page.getByRole('dialog', {
+    name: 'Choose a project',
   });
-  await expect(workspaceChooser).toBeVisible();
+  await expect(projectChooser).toBeVisible();
   await expect(
-    workspaceChooser.getByRole('button', { name: 'One' }),
+    projectChooser.getByRole('button', { name: 'One' }),
   ).toBeVisible();
   await expect(
-    workspaceChooser.getByRole('button', { name: 'Two' }),
+    projectChooser.getByRole('button', { name: 'Two' }),
   ).toBeVisible();
   expect(
-    await workspaceChooser.evaluate(
+    await projectChooser.evaluate(
       (element) => element.parentElement?.parentElement === document.body,
     ),
   ).toBe(true);
-  const chooserGeometry = await workspaceChooser.evaluate((element) => {
-    const options = element.querySelector('[data-workspace-options-scroll]');
+  const chooserGeometry = await projectChooser.evaluate((element) => {
+    const options = element.querySelector('[data-project-options-scroll]');
     return {
       dialogHeight: element.getBoundingClientRect().height,
       viewportHeight: window.innerHeight,
@@ -568,25 +595,25 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   expect(chooserGeometry.optionsScrollHeight).toBeGreaterThan(
     chooserGeometry.optionsClientHeight,
   );
-  const chooserSearch = workspaceChooser.getByRole('textbox', {
-    name: 'Search workspaces',
+  const chooserSearch = projectChooser.getByRole('textbox', {
+    name: 'Search projects',
   });
   await chooserSearch.fill('Two');
-  await expect(
-    workspaceChooser.getByRole('button', { name: 'One' }),
-  ).toHaveCount(0);
+  await expect(projectChooser.getByRole('button', { name: 'One' })).toHaveCount(
+    0,
+  );
   await chooserSearch.fill('');
   await chooserSearch.press('Control+j');
   await chooserSearch.press('Enter');
-  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await expect(page).toHaveURL(/\/projects\/two\/new$/u);
   await page.goto('/');
   await nav.getByRole('button', { name: /New thread/ }).click();
-  const chooserCancel = workspaceChooser.getByRole('button', {
+  const chooserCancel = projectChooser.getByRole('button', {
     name: 'Cancel',
   });
   await chooserCancel.focus();
   await chooserCancel.press('Enter');
-  await expect(workspaceChooser).toHaveCount(0);
+  await expect(projectChooser).toHaveCount(0);
   await expect(nav.getByRole('button', { name: /New thread/ })).toBeFocused();
   await page.goto('/');
   await nav
@@ -599,7 +626,9 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
     nav.getByRole('button', { name: /Two thread dormant/ }),
   ).toBeVisible();
   await nav.getByRole('button', { name: /New thread/ }).click();
-  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await expect(projectChooser).toBeVisible();
+  await projectChooser.getByRole('button', { name: 'Two' }).click();
+  await expect(page).toHaveURL(/\/projects\/two\/new$/u);
   await page.goto('/workspaces');
   const workspaceCards = page.locator('.workspace-card');
   await expect(workspaceCards.first()).toContainText('One');

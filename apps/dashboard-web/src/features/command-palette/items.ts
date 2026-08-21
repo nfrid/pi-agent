@@ -4,7 +4,7 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { sessionDisplayTitle } from '../../app-helpers';
-import { newChatPath } from '../../routes/navigation';
+import { newProjectThreadPath } from '../../routes/navigation';
 
 export function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
   const schema = action.inputSchema;
@@ -65,10 +65,7 @@ function snapshotActions(snapshot: BrowserSnapshot) {
   );
 }
 
-export function paletteItems(
-  snapshot: BrowserSnapshot,
-  workspaceId?: string,
-): PaletteItem[] {
+export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
   const primary: PaletteItem[] = [
     {
       kind: 'navigate',
@@ -80,9 +77,9 @@ export function paletteItems(
     {
       kind: 'navigate',
       id: 'new-chat',
-      title: 'New chat',
-      description: 'Start a chat in a workspace',
-      path: newChatPath(snapshot, workspaceId),
+      title: 'New thread',
+      description: 'Start a thread in a project',
+      path: newProjectThreadPath(snapshot),
     },
     {
       kind: 'navigate',

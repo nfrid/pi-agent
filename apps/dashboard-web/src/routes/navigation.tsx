@@ -12,6 +12,16 @@ export function newChatPath(
   return id ? `/workspaces/${encodeURIComponent(id)}/new` : '/workspaces';
 }
 
+export function newProjectThreadPath(
+  snapshot: Pick<BrowserSnapshot, 'projects'>,
+  projectId?: string,
+): string {
+  const id =
+    projectId ??
+    snapshot.projects?.find((project) => project.status === 'active')?.id;
+  return id ? `/projects/${encodeURIComponent(id)}/new` : '/projects';
+}
+
 export function shouldUseDashboardViewTransition({
   currentPath,
   targetPath,

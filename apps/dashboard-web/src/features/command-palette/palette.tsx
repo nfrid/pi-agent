@@ -1,6 +1,5 @@
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
@@ -32,14 +31,7 @@ export function CommandPalette({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { rememberFocus } = useOverlayFocusRestore(open);
   const utilityTimerRef = useRef<number | undefined>(undefined);
-  const pathname = useRouterState({
-    select: (state) => state.location.pathname,
-  });
-  const workspaceMatch = pathname.match(/^\/workspaces\/([^/]+)(?:\/|$)/u);
-  const items = paletteItems(
-    snapshot,
-    workspaceMatch?.[1] ? decodeURIComponent(workspaceMatch[1]) : undefined,
-  );
+  const items = paletteItems(snapshot);
   const runtimeActionCount = items.filter(
     (item) => item.kind === 'action',
   ).length;

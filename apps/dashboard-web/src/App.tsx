@@ -56,7 +56,7 @@ export {
   preferredNewChatRuntime,
   sessionPathForRuntime,
 } from './features/new-chat';
-export { newChatPath } from './routes/navigation';
+export { newChatPath, newProjectThreadPath } from './routes/navigation';
 export { dashboardRouterInstance, dashboardRouteTree } from './routes/tree';
 export { toTranscriptEntries } from './transcript';
 

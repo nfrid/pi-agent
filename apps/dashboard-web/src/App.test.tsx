@@ -18,6 +18,7 @@ import {
   newChatPath,
   newChatRequest,
   newChatThinkingLevels,
+  newProjectThreadPath,
   pendingChatPath,
   preferredNewChatRuntime,
   queueCommand,
@@ -316,6 +317,21 @@ describe('project-scoped new chat', () => {
     expect(newChatPath(snapshot)).toBe('/workspaces/dormant/new');
     expect(newChatPath({ workspaces: [] })).toBe('/workspaces');
     expect(newChatPath(snapshot, 'dormant')).toBe('/workspaces/dormant/new');
+    expect(
+      newProjectThreadPath({
+        projects: [
+          {
+            id: 'archived-project',
+            status: 'archived',
+          },
+          {
+            id: 'active-project',
+            status: 'active',
+          },
+        ],
+      } as unknown as Parameters<typeof newProjectThreadPath>[0]),
+    ).toBe('/projects/active-project/new');
+    expect(newProjectThreadPath({ projects: [] })).toBe('/projects');
     expect(pendingChatPath('workspace-1', 'runtime/1')).toBe(
       '/workspaces/workspace-1/new/pending/runtime%2F1',
     );
@@ -453,10 +469,10 @@ describe('command palette', () => {
     const items = paletteItems(snapshot);
     expect(items.slice(0, 2).map((item) => item.title)).toEqual([
       'Dashboard',
-      'New chat',
+      'New thread',
     ]);
-    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(30);
-    expect(items[5]?.title).toBe('Session: Untitled session');
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(31);
+    expect(items[6]?.title).toBe('Session: Untitled session');
     expect(items.at(-1)?.title).toBe('Workspace: Workspace');
     expect(items.some((item) => item.title === 'Session: session-436')).toBe(
       false,

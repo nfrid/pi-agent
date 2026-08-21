@@ -8,7 +8,10 @@ import { workspaceForPath } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
-import { newChatPath, useDashboardNavigate } from '../routes/navigation';
+import {
+  newProjectThreadPath,
+  useDashboardNavigate,
+} from '../routes/navigation';
 import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
 import styles from './dashboard-overview.module.css';
 import { runtimePauseStatus } from './extension-surfaces';
@@ -110,8 +113,11 @@ export function Dashboard({
           <div
             className={`empty-workspace-actions ${styles.emptyWorkspaceActions}`}
           >
-            <button type="button" onClick={() => go(newChatPath(snapshot))}>
-              New chat
+            <button
+              type="button"
+              onClick={() => go(newProjectThreadPath(snapshot))}
+            >
+              New thread
             </button>
             {latestId && (
               <button

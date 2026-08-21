@@ -15,7 +15,7 @@ import {
   WorkspacesView,
   WorkspaceView,
 } from './dashboard';
-import { newChatPath, useDashboardNavigate } from './navigation';
+import { newProjectThreadPath, useDashboardNavigate } from './navigation';
 import { RuntimeView } from './runtime';
 
 export function HomeRoute() {
@@ -158,8 +158,8 @@ export function LegacyNewRoute() {
   const dashboard = useDashboardContext();
   const go = useDashboardNavigate();
   const path = dashboard.snapshot
-    ? newChatPath(dashboard.snapshot)
-    : '/workspaces';
+    ? newProjectThreadPath(dashboard.snapshot)
+    : '/projects';
   useEffect(() => go(path), [go, path]);
   return (
     <output className={`new-chat-missing ${newChatStyles.newChatMissing}`}>

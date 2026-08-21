@@ -21,4 +21,9 @@ export { ProjectsView, ProjectView } from '../features/project-catalogue';
 export { ProjectNewThreadView } from '../features/project-new-thread';
 export { SessionRow } from '../features/workspace-session';
 export { WorkspaceView } from '../features/workspace-view';
-export { Back, newChatPath, useDashboardNavigate } from './navigation';
+export {
+  Back,
+  newChatPath,
+  newProjectThreadPath,
+  useDashboardNavigate,
+} from './navigation';

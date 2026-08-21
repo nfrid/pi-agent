@@ -1,6 +1,9 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useRouterState } from '@tanstack/react-router';
-import { newChatPath, useDashboardNavigate } from '../routes/navigation';
+import {
+  newProjectThreadPath,
+  useDashboardNavigate,
+} from '../routes/navigation';
 import { CommandPalette } from './command-palette';
 import { useDashboardUtility } from './dashboard-utility-context';
 import { UsageCapsule } from './usage-indicator';
@@ -48,12 +51,12 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
             className="global-new-agent"
             aria-label="New chat"
             onClick={() => {
-              const workspaceMatch = pathname.match(/^\/workspaces\/([^/]+)$/u);
+              const projectMatch = pathname.match(/^\/projects\/([^/]+)$/u);
               go(
-                newChatPath(
+                newProjectThreadPath(
                   snapshot,
-                  workspaceMatch?.[1]
-                    ? decodeURIComponent(workspaceMatch[1])
+                  projectMatch?.[1]
+                    ? decodeURIComponent(projectMatch[1])
                     : undefined,
                 ),
               );
