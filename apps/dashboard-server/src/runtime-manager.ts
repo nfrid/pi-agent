@@ -356,7 +356,14 @@ export class RuntimeManager {
       } catch {
         return false;
       }
-      if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
+      try {
+        if (launch.metadataRecorded)
+          this.metadata.markManagedStopped(runtimeId);
+      } catch {
+        // The provider is already stopped, but the durable tombstone can be
+        // retried from the retained launch record on the next reconciliation.
+        return false;
+      }
       this.launches.delete(runtimeId);
       return false;
     }

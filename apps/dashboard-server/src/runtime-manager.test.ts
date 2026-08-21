@@ -127,6 +127,42 @@ describe('runtime stopping', () => {
     expect(markManagedStopped).not.toHaveBeenCalled();
   });
 
+  it('retains recovery evidence when tombstoning fails after cleanup', async () => {
+    const runtimeId = 'runtime-tombstone-retry';
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const manager = new RuntimeManager(
+      {} as never,
+      {
+        attach: vi.fn().mockRejectedValue(new Error('runtime absent')),
+        stop,
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId,
+            workspaceId: 'workspace-tombstone',
+            location: { id: `runtime-host:${runtimeId}` },
+            identityTokenHash: 'identity-hash',
+            launchTokenHash: 'launch-hash',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        markManagedStopped: vi.fn(() => {
+          throw new Error('database unavailable');
+        }),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+
+    await expect(manager.recover(runtimeId)).resolves.toBe(false);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(manager.location(runtimeId)).toEqual({
+      id: `runtime-host:${runtimeId}`,
+    });
+  });
+
   it('forgets an external runtime even when its stale bridge rejects shutdown', async () => {
     const forget = vi.fn();
     const manager = new RuntimeManager(
