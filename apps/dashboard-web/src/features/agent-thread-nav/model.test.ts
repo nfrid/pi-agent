@@ -8,9 +8,8 @@ import {
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
-  historyRowsForShelf,
   isArchivedThread,
-  isHistoryThread,
+  isUnavailableThread,
   searchAgentThreadRows,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
@@ -283,11 +282,10 @@ describe('agent thread view model', () => {
     ]);
     expect(sections.pinned.map(({ id }) => id)).toEqual(['pinned-dormant']);
     expect(sections.active.map(({ id }) => id)).toEqual(['active', 'history']);
-    expect(sections.history).toEqual([]);
     expect(sections.archived.map(({ id }) => id)).toEqual(['archived']);
   });
 
-  it('keeps archived rows out of active/history and puts pinned rows first', () => {
+  it('keeps archived rows out of active and puts pinned rows first', () => {
     const pinned = {
       ...row('pinned', 'Dashboard'),
       durableThread: {
@@ -307,7 +305,6 @@ describe('agent thread view model', () => {
     const rows = [row('normal', 'Dashboard'), pinned, archived];
 
     expect(isArchivedThread(archived)).toBe(true);
-    expect(isHistoryThread(archived)).toBe(false);
     expect(boundedAgentThreadRows(rows).map(({ id }) => id)).toEqual([
       'pinned',
       'normal',
@@ -336,10 +333,14 @@ describe('agent thread view model', () => {
     expect(filterAgentThreadRows(rows, '   ')).toEqual(rows);
   });
 
-  it('classifies dormant and offline availability without making a history shelf', () => {
-    expect(isHistoryThread(row('live', 'Dashboard', 'idle'))).toBe(false);
-    expect(isHistoryThread(row('offline', 'Dashboard', 'offline'))).toBe(true);
-    expect(isHistoryThread(row('dormant', 'Dashboard', 'dormant'))).toBe(true);
+  it('classifies dormant and offline availability without a lifecycle shelf', () => {
+    expect(isUnavailableThread(row('live', 'Dashboard', 'idle'))).toBe(false);
+    expect(isUnavailableThread(row('offline', 'Dashboard', 'offline'))).toBe(
+      true,
+    );
+    expect(isUnavailableThread(row('dormant', 'Dashboard', 'dormant'))).toBe(
+      true,
+    );
   });
 
   it('shows all matching dormant rows while searching', () => {
@@ -348,18 +349,8 @@ describe('agent thread view model', () => {
     );
 
     expect(searchAgentThreadRows(dormant)).toHaveLength(25);
-    expect(sectionAgentThreadRows(dormant).history).toEqual([]);
-  });
-
-  it('keeps archived shelf helpers available for the archived shelf', () => {
-    const history = [
-      row('old-1', 'Dashboard', 'dormant'),
-      row('old-2', 'Dashboard', 'offline'),
-    ];
-
-    expect(historyRowsForShelf(history, false, 'old-2')).toEqual([history[1]]);
-    expect(historyRowsForShelf(history, false, 'missing')).toEqual([]);
-    expect(historyRowsForShelf(history, true, 'old-2')).toEqual(history);
+    expect(sectionAgentThreadRows(dormant).active).toHaveLength(25);
+    expect(sectionAgentThreadRows(dormant).archived).toEqual([]);
   });
 
   it('bounds Active rows and reports the next disclosure count', () => {

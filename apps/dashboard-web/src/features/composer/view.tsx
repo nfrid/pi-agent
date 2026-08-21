@@ -146,6 +146,9 @@ export function Composer({
   useEffect(() => {
     setMode(defaultMode);
   }, [defaultMode]);
+  useEffect(() => {
+    if (runtime) setResumePending(false);
+  }, [runtime]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedText = text.trim();

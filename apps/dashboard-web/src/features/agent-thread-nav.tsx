@@ -369,7 +369,7 @@ export function AgentThreadNav({
   const go = useDashboardNavigate();
   const utility = useDashboardUtility();
   const [query, setQuery] = useState('');
-  const [historyLimit, setHistoryLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
+  const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [workspaceScope, setWorkspaceScope] = useState('all');
   const [workspaceChooserOpen, setWorkspaceChooserOpen] = useState(false);
   const newThreadButtonRef = useRef<HTMLButtonElement>(null);
@@ -440,8 +440,8 @@ export function AgentThreadNav({
     () =>
       query.trim()
         ? searchAgentThreadRows(filtered)
-        : boundedAgentThreadRows(filtered, historyLimit, currentSessionId),
-    [currentSessionId, filtered, historyLimit, query],
+        : boundedAgentThreadRows(filtered, activeLimit, currentSessionId),
+    [activeLimit, currentSessionId, filtered, query],
   );
   const sections = useMemo(
     () => sectionAgentThreadRows(visibleRows, Number.POSITIVE_INFINITY),
@@ -664,7 +664,7 @@ export function AgentThreadNav({
           onChange={(event) => {
             setQuery(event.target.value);
             setActiveResultId(undefined);
-            setHistoryLimit(MAX_VISIBLE_ACTIVE_THREADS);
+            setActiveLimit(MAX_VISIBLE_ACTIVE_THREADS);
           }}
           onKeyDown={onSearchKeyDown}
           placeholder="Search threads"
@@ -690,7 +690,7 @@ export function AgentThreadNav({
           value={workspaceScope}
           onChange={(event) => {
             setWorkspaceScope(event.target.value);
-            setHistoryLimit(MAX_VISIBLE_ACTIVE_THREADS);
+            setActiveLimit(MAX_VISIBLE_ACTIVE_THREADS);
           }}
         >
           <option value="all">All workspaces</option>
@@ -757,7 +757,7 @@ export function AgentThreadNav({
           type="button"
           className={styles.more}
           onClick={() =>
-            setHistoryLimit((current) => current + MAX_VISIBLE_ACTIVE_THREADS)
+            setActiveLimit((current) => current + MAX_VISIBLE_ACTIVE_THREADS)
           }
         >
           Show next {Math.min(hiddenRowCount, MAX_VISIBLE_ACTIVE_THREADS)} older
