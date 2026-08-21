@@ -8,9 +8,8 @@ import {
   filterAgentThreadRows,
   groupAgentThreadRows,
   hiddenAgentThreadRowCount,
-  historyRowsForShelf,
   isArchivedThread,
-  isHistoryThread,
+  isUnavailableThread,
   searchAgentThreadRows,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
@@ -259,7 +258,7 @@ describe('agent thread view model', () => {
     ).toBeUndefined();
   });
 
-  it('partitions pinned rows globally before active, history, and archived', () => {
+  it('partitions pinned rows globally before active and archived', () => {
     const pinnedDormant = {
       ...row('pinned-dormant', 'Other', 'dormant'),
       durableThread: {
@@ -282,12 +281,11 @@ describe('agent thread view model', () => {
       },
     ]);
     expect(sections.pinned.map(({ id }) => id)).toEqual(['pinned-dormant']);
-    expect(sections.active.map(({ id }) => id)).toEqual(['active']);
-    expect(sections.history.map(({ id }) => id)).toEqual(['history']);
+    expect(sections.active.map(({ id }) => id)).toEqual(['active', 'history']);
     expect(sections.archived.map(({ id }) => id)).toEqual(['archived']);
   });
 
-  it('keeps archived rows out of active/history and puts pinned rows first', () => {
+  it('keeps archived rows out of active and puts pinned rows first', () => {
     const pinned = {
       ...row('pinned', 'Dashboard'),
       durableThread: {
@@ -307,7 +305,6 @@ describe('agent thread view model', () => {
     const rows = [row('normal', 'Dashboard'), pinned, archived];
 
     expect(isArchivedThread(archived)).toBe(true);
-    expect(isHistoryThread(archived)).toBe(false);
     expect(boundedAgentThreadRows(rows).map(({ id }) => id)).toEqual([
       'pinned',
       'normal',
@@ -336,57 +333,44 @@ describe('agent thread view model', () => {
     expect(filterAgentThreadRows(rows, '   ')).toEqual(rows);
   });
 
-  it('partitions dormant and offline rows into history', () => {
-    expect(isHistoryThread(row('live', 'Dashboard', 'idle'))).toBe(false);
-    expect(isHistoryThread(row('offline', 'Dashboard', 'offline'))).toBe(true);
-    expect(isHistoryThread(row('dormant', 'Dashboard', 'dormant'))).toBe(true);
+  it('classifies dormant and offline availability without a lifecycle shelf', () => {
+    expect(isUnavailableThread(row('live', 'Dashboard', 'idle'))).toBe(false);
+    expect(isUnavailableThread(row('offline', 'Dashboard', 'offline'))).toBe(
+      true,
+    );
+    expect(isUnavailableThread(row('dormant', 'Dashboard', 'dormant'))).toBe(
+      true,
+    );
   });
 
-  it('shows all matching history rows while searching', () => {
-    const history = Array.from({ length: 25 }, (_, index) =>
+  it('shows all matching dormant rows while searching', () => {
+    const dormant = Array.from({ length: 25 }, (_, index) =>
       row(`old-${index}`, 'Dashboard', 'dormant'),
     );
 
-    expect(searchAgentThreadRows(history)).toHaveLength(25);
+    expect(searchAgentThreadRows(dormant)).toHaveLength(25);
+    expect(sectionAgentThreadRows(dormant).active).toHaveLength(25);
+    expect(sectionAgentThreadRows(dormant).archived).toEqual([]);
   });
 
-  it('keeps only the selected history row as a collapsed-shelf exception', () => {
-    const history = [
-      row('old-1', 'Dashboard', 'dormant'),
-      row('old-2', 'Dashboard', 'offline'),
-    ];
-
-    expect(historyRowsForShelf(history, false, 'old-2')).toEqual([history[1]]);
-    expect(historyRowsForShelf(history, false, 'missing')).toEqual([]);
-    expect(historyRowsForShelf(history, true, 'old-2')).toEqual(history);
-  });
-
-  it('bounds active and history rows independently', () => {
-    const active = Array.from({ length: 41 }, (_, index) =>
-      row(`active-${index}`, 'Dashboard'),
+  it('bounds Active rows and reports the next disclosure count', () => {
+    const rows = Array.from({ length: 43 }, (_, index) =>
+      row(`thread-${index}`, 'Dashboard', index % 2 ? 'dormant' : 'working'),
     );
-    const history = [
-      row('old-1', 'Dashboard', 'dormant'),
-      row('old-2', 'Dashboard', 'offline'),
-      row('old-3', 'Dashboard', 'dormant'),
-    ];
 
-    const visible = boundedAgentThreadRows([...active, ...history], 2);
-    expect(visible).toHaveLength(42);
-    expect(visible.slice(0, 40).map(({ id }) => id)).toEqual(
-      active.slice(0, 40).map(({ id }) => id),
-    );
-    expect(visible.slice(40).map(({ id }) => id)).toEqual(['old-1', 'old-2']);
-    expect(hiddenAgentThreadRowCount([...active, ...history], visible)).toBe(1);
+    const visible = boundedAgentThreadRows(rows, 40);
+    expect(visible).toHaveLength(40);
+    expect(visible.every((item) => item.status !== 'offline')).toBe(true);
+    expect(hiddenAgentThreadRowCount(rows, visible)).toBe(3);
   });
 
-  it('keeps the selected dormant thread visible past the history bound', () => {
-    const history = Array.from({ length: 3 }, (_, index) =>
+  it('keeps the selected dormant thread visible past the Active bound', () => {
+    const dormant = Array.from({ length: 3 }, (_, index) =>
       row(`old-${index}`, 'Dashboard', 'dormant'),
     );
 
     expect(
-      boundedAgentThreadRows(history, 1, 'old-2').map(({ id }) => id),
+      boundedAgentThreadRows(dormant, 1, 'old-2').map(({ id }) => id),
     ).toEqual(['old-0', 'old-2']);
   });
 

@@ -55,6 +55,13 @@ describe('composer runtime model', () => {
   });
 
   it('builds resume requests and checks image capability explicitly', () => {
+    expect(
+      resumeRuntimeRequest('workspace-1', 'session-1', 'resume me'),
+    ).toEqual({
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      initialPrompt: 'resume me',
+    });
     expect(resumeRuntimeRequest('workspace-1', 'session-1')).toEqual({
       workspaceId: 'workspace-1',
       sessionId: 'session-1',

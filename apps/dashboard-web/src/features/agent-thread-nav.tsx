@@ -21,8 +21,7 @@ import {
   boundedAgentThreadRows,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
-  isHistoryThread,
-  MAX_VISIBLE_HISTORY_THREADS,
+  MAX_VISIBLE_ACTIVE_THREADS,
   searchAgentThreadRows,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
@@ -57,40 +56,9 @@ export {
   workspaceNameForSession,
 } from './agent-thread-nav/model';
 
-const COLLAPSED_HISTORY_KEY = 'pi-dashboard-collapsed-history-v1';
 const EXPANDED_ARCHIVED_KEY = 'pi-dashboard-expanded-archived-v1';
 
-type CollapsedHistory = Record<string, boolean>;
 type ExpandedArchived = Record<string, boolean>;
-
-function readCollapsedHistory(): CollapsedHistory {
-  try {
-    const raw = globalThis.localStorage?.getItem(COLLAPSED_HISTORY_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-      return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, boolean] =>
-          typeof entry[0] === 'string' && entry[1] === true,
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function writeCollapsedHistory(state: CollapsedHistory): void {
-  try {
-    globalThis.localStorage?.setItem(
-      COLLAPSED_HISTORY_KEY,
-      JSON.stringify(state),
-    );
-  } catch {
-    // Storage can be unavailable in private browsing; expansion remains local.
-  }
-}
 
 function readExpandedArchived(): ExpandedArchived {
   try {
@@ -289,6 +257,10 @@ function activeThreadDetails(row: AgentThreadRow): string[] {
     details.push(`${Math.round(contextPercent)}% ctx`);
   const queued = row.runtime?.queueDrafts?.length ?? 0;
   if (queued > 0) details.push(`${queued} queued`);
+  if (!details.length) {
+    if (row.status === 'dormant') details.push('Resumes on send');
+    else if (row.status === 'offline') details.push('Controls unavailable');
+  }
   return details;
 }
 
@@ -397,13 +369,10 @@ export function AgentThreadNav({
   const go = useDashboardNavigate();
   const utility = useDashboardUtility();
   const [query, setQuery] = useState('');
-  const [historyLimit, setHistoryLimit] = useState(MAX_VISIBLE_HISTORY_THREADS);
+  const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [workspaceScope, setWorkspaceScope] = useState('all');
   const [workspaceChooserOpen, setWorkspaceChooserOpen] = useState(false);
   const newThreadButtonRef = useRef<HTMLButtonElement>(null);
-  const [historyCollapsed, setHistoryCollapsed] = useState(() =>
-    Boolean(readCollapsedHistory().all),
-  );
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
     Boolean(readExpandedArchived().all),
   );
@@ -471,8 +440,8 @@ export function AgentThreadNav({
     () =>
       query.trim()
         ? searchAgentThreadRows(filtered)
-        : boundedAgentThreadRows(filtered, historyLimit, currentSessionId),
-    [currentSessionId, filtered, historyLimit, query],
+        : boundedAgentThreadRows(filtered, activeLimit, currentSessionId),
+    [activeLimit, currentSessionId, filtered, query],
   );
   const sections = useMemo(
     () => sectionAgentThreadRows(visibleRows, Number.POSITIVE_INFINITY),
@@ -490,13 +459,6 @@ export function AgentThreadNav({
   useEffect(() => {
     visitCurrent(rows);
   }, [rows, visitCurrent]);
-  const toggleHistory = () => {
-    setHistoryCollapsed((current) => {
-      const next = !current;
-      writeCollapsedHistory(next ? { all: true } : {});
-      return next;
-    });
-  };
   const toggleArchived = () => {
     setArchivedExpanded((current) => {
       const next = !current;
@@ -702,7 +664,7 @@ export function AgentThreadNav({
           onChange={(event) => {
             setQuery(event.target.value);
             setActiveResultId(undefined);
-            setHistoryLimit(MAX_VISIBLE_HISTORY_THREADS);
+            setActiveLimit(MAX_VISIBLE_ACTIVE_THREADS);
           }}
           onKeyDown={onSearchKeyDown}
           placeholder="Search threads"
@@ -728,7 +690,7 @@ export function AgentThreadNav({
           value={workspaceScope}
           onChange={(event) => {
             setWorkspaceScope(event.target.value);
-            setHistoryLimit(MAX_VISIBLE_HISTORY_THREADS);
+            setActiveLimit(MAX_VISIBLE_ACTIVE_THREADS);
           }}
         >
           <option value="all">All workspaces</option>
@@ -761,34 +723,6 @@ export function AgentThreadNav({
             {sections.active.map((row) => renderThreadRow(row, 'card'))}
           </section>
         )}
-        {(sections.history.length > 0 || filtered.some(isHistoryThread)) && (
-          <>
-            <button
-              type="button"
-              className={styles.shelfHeading}
-              aria-expanded={!historyCollapsed || Boolean(query.trim())}
-              aria-controls="agent-thread-history"
-              aria-label={`${historyCollapsed && !query.trim() ? 'Expand' : 'Collapse'} History`}
-              onClick={toggleHistory}
-            >
-              <span>History</span>
-              <small>{filtered.filter(isHistoryThread).length}</small>
-              <span aria-hidden="true">
-                {historyCollapsed && !query.trim() ? '▸' : '▾'}
-              </span>
-            </button>
-            <section
-              id="agent-thread-history"
-              className={styles.compactShelf}
-              aria-label="History threads"
-            >
-              {(historyCollapsed && !query.trim()
-                ? sections.history.filter((row) => row.id === currentSessionId)
-                : sections.history
-              ).map((row) => renderThreadRow(row, 'slim'))}
-            </section>
-          </>
-        )}
         {sections.archived.length > 0 && (
           <>
             <button
@@ -818,17 +752,17 @@ export function AgentThreadNav({
           </>
         )}
       </div>
-      {hiddenRowCount > 0 && !query.trim() && !historyCollapsed && (
+      {hiddenRowCount > 0 && !query.trim() && (
         <button
           type="button"
           className={styles.more}
           onClick={() =>
-            setHistoryLimit((current) => current + MAX_VISIBLE_HISTORY_THREADS)
+            setActiveLimit((current) => current + MAX_VISIBLE_ACTIVE_THREADS)
           }
         >
-          Show next {Math.min(hiddenRowCount, MAX_VISIBLE_HISTORY_THREADS)}{' '}
-          older thread
-          {Math.min(hiddenRowCount, MAX_VISIBLE_HISTORY_THREADS) === 1
+          Show next {Math.min(hiddenRowCount, MAX_VISIBLE_ACTIVE_THREADS)} older
+          thread
+          {Math.min(hiddenRowCount, MAX_VISIBLE_ACTIVE_THREADS) === 1
             ? ''
             : 's'}
         </button>

@@ -193,18 +193,14 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(
     agentNav.getByRole('button', { name: /New thread/ }),
   ).toBeVisible();
-  const historyHeading = agentNav.getByRole('button', {
-    name: 'Collapse History',
-  });
-  await historyHeading.click();
-  await expect(
-    agentNav.getByRole('button', { name: 'Expand History' }),
-  ).toHaveAttribute('aria-expanded', 'false');
+  await expect(agentNav.getByRole('heading', { name: 'History' })).toHaveCount(
+    0,
+  );
   await expect(
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
     }),
-  ).toHaveCount(0);
+  ).toBeVisible();
   const threadSearch = agentNav.getByPlaceholder('Search threads');
   await threadSearch.fill('deliberately long');
   await threadSearch.press('ArrowDown');
@@ -233,7 +229,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
     }),
-  ).toHaveCount(0);
+  ).toBeVisible();
   await page.locator('.agent-nav-backdrop').click();
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
   const paletteTrigger = page.getByRole('button', {
@@ -537,9 +533,10 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   await expect(
     nav.getByRole('button', { name: /Two thread dormant/ }),
   ).toBeVisible();
-  const slimThread = nav.locator('[data-row-density="slim"]').first();
-  await expect(slimThread).toContainText(/One|Two/);
-  await expect(slimThread).not.toContainText('/work/');
+  const activeThread = nav.locator('[data-row-density="card"]').first();
+  await expect(activeThread).toContainText(/One|Two/);
+  await expect(activeThread).toContainText('Resumes on send');
+  await expect(activeThread).not.toContainText('/work/');
   await nav.getByRole('button', { name: /New thread/ }).click();
   const workspaceChooser = page.getByRole('dialog', {
     name: 'Choose a workspace',
@@ -1712,9 +1709,9 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     .locator('.agent-thread-row')
     .filter({ hasText: 'Dormant thread' });
   const loadedCard = loadedRow.locator('[data-row-density="card"]');
-  const dormantSlim = dormantRow.locator('[data-row-density="slim"]');
+  const dormantCard = dormantRow.locator('[data-row-density="card"]');
   await expect(loadedCard).toHaveCount(1);
-  await expect(dormantSlim).toHaveCount(1);
+  await expect(dormantCard).toHaveCount(1);
   await expect(
     loadedCard.locator('[data-row-content="workspace"] > span').first(),
   ).toHaveText('Tmp workspace');
@@ -1729,13 +1726,14 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     loadedCard.locator('[data-row-content="workspace"] .agent-thread-glyph'),
   ).toHaveCount(1);
   await expect(
-    dormantSlim.locator('[data-row-content="workspace"] > span').first(),
+    dormantCard.locator('[data-row-content="workspace"] > span').first(),
   ).toHaveText('Tmp workspace');
-  await expect(dormantSlim.locator('[data-row-content="context"]')).toHaveCount(
+  await expect(dormantCard.locator('[data-row-content="context"]')).toHaveCount(
     0,
   );
-  await expect(dormantSlim).toContainText('Dormant thread');
-  await expect(dormantSlim.locator('.agent-thread-time')).toHaveCount(1);
+  await expect(dormantCard).toContainText('Dormant thread');
+  await expect(dormantCard).toContainText('Resumes on send');
+  await expect(dormantCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     agentNav.locator('.agent-thread-row.status-idle .agent-thread-glyph'),
   ).toHaveText('●');
@@ -1788,7 +1786,14 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     .getByRole('button', { name: 'Dormant thread dormant' })
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-dormant$/u);
-  await expect(page.getByText('This session is dormant.')).toBeVisible();
+  await expect(
+    page.getByText('This session is dormant', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Sending a message will resume Pi in this workspace.', {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(page.getByText('Dormant latest')).toBeVisible();
   await expect(page.locator('.session-page')).not.toHaveAttribute(
     'data-tail-pending',

@@ -8,11 +8,13 @@ import { hasSettledBackground } from '../presentation-status';
 export function resumeRuntimeRequest(
   workspaceId: string | undefined,
   sessionId: string,
+  initialPrompt?: string,
 ): StartRuntimeRequest | undefined {
   if (!workspaceId) return undefined;
   return {
     workspaceId,
     sessionId,
+    ...(initialPrompt ? { initialPrompt } : {}),
   };
 }
 

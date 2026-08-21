@@ -27,7 +27,7 @@ These cases should remain usable in the sidebar, but lifecycle actions may be ab
 
 `dormant` describes current execution availability: the session is indexed but has no live runtime. `settled` is a user decision to park work while retaining it in the sidebar. A settled thread could still have runtime activity, and a dormant thread may still need attention.
 
-For the first UI pass, dormant sessions continue to populate a compact **History** shelf. We must not rename that shelf to **Settled** or persist settlement inferred from runtime absence. Explicit settle and unsettle can be added later as durable lifecycle commands.
+Dormant sessions are unavailable runtimes, not a lifecycle decision. Every unarchived, unpinned session—including dormant and offline sessions—renders in **Active**. No lifecycle state is inferred from runtime absence. Explicit settle and unsettle can be added later as durable lifecycle commands.
 
 ### Existing lifecycle coverage
 
@@ -44,7 +44,7 @@ Session rename already exists in the transcript header. This project will not du
 3. Replace expanded workspace blocks with a workspace scope control. Keep an "All workspaces" option.
 4. Render globally pinned threads first as full rows/cards.
 5. Render active threads as full rows/cards with Pi's existing status vocabulary.
-6. Render dormant threads as compact rows in a collapsible **History** shelf.
+6. Render dormant and offline threads in **Active**, retaining status ordering and the bounded Show-next disclosure for large lists.
 7. Keep archived threads reachable in a compact collapsed shelf until a dedicated archived view exists.
 8. Keep existing context-menu actions, unread state, runtime controls, timestamps, and keyboard search behavior.
 9. Make the new-thread route look like an empty real thread: normal workspace header, blank transcript area, and the same composer at the bottom. Remove the centered onboarding illustration and copy.
@@ -69,7 +69,7 @@ Add only when requested or when the copied UX requires it:
 - No title regeneration.
 - No sidebar rename control.
 - No complete deletion.
-- No inferred settlement.
+- No inferred settlement; runtime absence only makes a thread dormant/offline.
 - No new lifecycle database tables or protocol commands.
 - No T3 dependency stack, Tailwind migration, or wholesale component copy.
 - No project favicon, pull-request, terminal-process, or environment artwork work.
@@ -80,28 +80,32 @@ Add only when requested or when the copied UX requires it:
 - Reuse `AgentThreadNav`, its existing queries, and its action wrappers.
 - Keep row derivation in `agent-thread-nav/model.ts`; keep DOM and interaction state in `agent-thread-nav.tsx`.
 - Use the dashboard's CSS tokens and CSS Modules. Recreate the T3 hierarchy, density, hover behavior, and responsive shell rather than importing its UI framework.
-- A pinned thread appears once, above unpinned active and history rows.
-- Search ignores shelf collapse and searches every visible session identity.
-- The selected thread remains reachable when it falls beyond the initial history page.
+- The sidebar has separate **Pinned**, **Active**, and **Archived** sections. Pinned threads appear once above unpinned Active rows; dormant and offline rows remain in Active.
+- Search ignores Archived collapse and searches every visible session identity.
+- The selected thread remains reachable when it falls beyond the initial Active bound.
 - Unsupported lifecycle actions stay hidden. The UI must not offer an action that will fail because the session lacks an exact durable link.
 - Desktop and mobile render the same semantic sidebar content.
+
+## Dormant active-thread slice
+
+The accepted follow-up keeps the normal composer shell for dormant sessions and attaches a compact notice: **This session is dormant** / **Sending a message will resume Pi in this workspace.** A text submission starts the existing runtime with `workspaceId`, `sessionId`, and `initialPrompt` exactly once; the draft is retained on failure and cleared only after a successful start mutation. Image attachment selection remains disabled while dormant because model capability is not available until a runtime exists. Missing workspace association remains a disabled error case. Explicit durable Settled state remains a later slice; this change adds no settle commands, storage, or protocol fields.
 
 ## First-slice acceptance checks
 
 ### Unit and component behavior
 
-- Grouping produces pinned, active, history, and archived sections without duplicates.
-- Workspace scope filters all sections consistently.
+- Grouping produces Pinned, Active, and Archived sections without duplicates; dormant and offline rows are in Active.
+- Workspace scope filters Pinned, Active, and Archived consistently.
 - Search still supports clear, ArrowUp, ArrowDown, Enter, and Escape.
 - Existing pin, archive, unread, stop, and restart actions remain wired.
-- The selected deep-history session remains rendered.
+- The selected deep-Active session remains rendered.
 - New-thread submission still starts a runtime, supports model/thinking selection and images, and navigates to the created session.
 
 ### Browser behavior
 
 - Desktop sidebar is full-height and no longer reads as a floating card.
 - Mobile sidebar opens, traps focus, closes by backdrop/Escape/swipe, and exposes the same controls.
-- Search, workspace scope, new thread, active selection, collapsed history, and context menus work at desktop and mobile widths.
+- Search, workspace scope, new thread, Active selection, collapsed Archived, and context menus work at desktop and mobile widths.
 - The new-thread surface uses the normal thread workspace geometry and bottom composer.
 
 ### Validation
