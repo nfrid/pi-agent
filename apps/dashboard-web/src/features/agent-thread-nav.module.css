@@ -553,7 +553,7 @@ button.shelfHeading:focus-visible {
   min-width: 0;
   align-items: center;
   gap: 5px;
-  overflow: hidden;
+  overflow: visible;
   color: var(--dim);
   font-size: 9px;
   font-weight: 700;
@@ -570,7 +570,6 @@ button.shelfHeading:focus-visible {
 }
 .threadMeta {
   display: inline-flex;
-  min-width: 0;
   align-items: center;
   gap: 4px;
   margin-left: auto;
