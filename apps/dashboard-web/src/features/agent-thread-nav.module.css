@@ -223,6 +223,10 @@
   overflow: auto;
   padding: 0 7px 8px;
   scrollbar-gutter: stable;
+
+  > button {
+    margin-top: 1em;
+  }
 }
 .workspaceGroup + .workspaceGroup {
   margin-top: 8px;
