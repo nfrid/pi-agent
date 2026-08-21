@@ -6,7 +6,11 @@ import type {
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { credentialHash } from '../metadata-credentials.js';
-import type { ManagedLaunchRecord, MetadataRepository } from './types.js';
+import type {
+  ManagedLaunchIdentity,
+  ManagedLaunchRecord,
+  MetadataRepository,
+} from './types.js';
 
 export class SqliteMetadataRepository implements MetadataRepository {
   constructor(private readonly db: DatabaseSync) {}
@@ -65,7 +69,7 @@ export class SqliteMetadataRepository implements MetadataRepository {
 
   recordManagedLaunch(
     runtimeId: string,
-    workspaceId: string,
+    identity: string | ManagedLaunchIdentity,
     location: RuntimeLocation,
     credentials: {
       identityToken: string;
@@ -74,13 +78,18 @@ export class SqliteMetadataRepository implements MetadataRepository {
       mode?: 'read' | 'write';
     },
   ): void {
+    const value: ManagedLaunchIdentity =
+      typeof identity === 'string' ? { workspaceId: identity } : identity;
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,runtime_location_json,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode) VALUES (?,?,?,?,NULL,?,?,?,?)`,
+        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,project_id,checkout_id,cwd,runtime_location_json,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode) VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?)`,
       )
       .run(
         runtimeId,
-        workspaceId,
+        value.workspaceId ?? null,
+        value.projectId ?? null,
+        value.checkoutId ?? null,
+        value.cwd ?? null,
         JSON.stringify(location),
         Date.now(),
         credentialHash(credentials.identityToken),
@@ -94,12 +103,17 @@ export class SqliteMetadataRepository implements MetadataRepository {
     return (
       this.db
         .prepare(
-          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,runtime_location_json as locationJson,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch WHERE stopped_at IS NULL AND runtime_location_json IS NOT NULL',
+          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,project_id as projectId,checkout_id as checkoutId,cwd,runtime_location_json as locationJson,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch WHERE stopped_at IS NULL AND runtime_location_json IS NOT NULL',
         )
         .all() as Array<Record<string, unknown>>
     ).map((row) => ({
       runtimeId: String(row.runtimeId),
-      workspaceId: String(row.workspaceId),
+      ...(row.workspaceId == null
+        ? {}
+        : { workspaceId: String(row.workspaceId) }),
+      ...(row.projectId == null ? {} : { projectId: String(row.projectId) }),
+      ...(row.checkoutId == null ? {} : { checkoutId: String(row.checkoutId) }),
+      ...(row.cwd == null ? {} : { cwd: String(row.cwd) }),
       location: (() => {
         try {
           const value: unknown = JSON.parse(String(row.locationJson));

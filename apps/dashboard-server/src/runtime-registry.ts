@@ -111,6 +111,11 @@ export interface RuntimeRegistryOptions {
     launchToken: string | undefined,
     identityToken: string | undefined,
   ) => boolean;
+  /** Server-owned cwd association; runtime-supplied IDs are never trusted. */
+  resolveRuntime?: (cwd: string) => {
+    projectId: string | null;
+    checkoutId: string | null;
+  };
   allowExternalWithoutToken?: boolean;
   commandTimeoutMs?: number;
   disconnectGraceMs?: number;
@@ -144,6 +149,47 @@ export class RuntimeRegistry {
 
   isOnline(runtimeId: string): boolean {
     return Boolean(this.runtimes.get(runtimeId)?.socket);
+  }
+
+  private authoritativeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+    const {
+      projectId: _ignoredProject,
+      checkoutId: _ignoredCheckout,
+      ...untrusted
+    } = snapshot;
+    let association:
+      | { projectId: string | null; checkoutId: string | null }
+      | undefined;
+    try {
+      association = this.options.resolveRuntime?.(snapshot.cwd);
+    } catch {
+      association = undefined;
+    }
+    return {
+      ...untrusted,
+      projectId: association?.projectId ?? null,
+      checkoutId: association?.checkoutId ?? null,
+    };
+  }
+
+  private authoritativeEvent(
+    event: BridgeEvent,
+    snapshot: RuntimeSnapshot,
+  ): BridgeEvent {
+    if (
+      (event.type !== 'runtime.heartbeat' &&
+        event.type !== 'runtime.stateChanged') ||
+      event.snapshot === undefined
+    )
+      return event;
+    return {
+      ...event,
+      snapshot: {
+        ...event.snapshot,
+        projectId: snapshot.projectId ?? null,
+        checkoutId: snapshot.checkoutId ?? null,
+      },
+    } as BridgeEvent;
   }
 
   /** Attach one Unix-socket connection. The first frame must be runtime.hello. */
@@ -193,7 +239,7 @@ export class RuntimeRegistry {
             BridgeEvent,
             { type: 'runtime.hello' }
           >;
-          const snapshot = hello.snapshot;
+          const snapshot = this.authoritativeSnapshot(hello.snapshot);
           if (
             hello.protocolVersion !== PROTOCOL_VERSION ||
             !snapshot.runtimeId ||
@@ -680,9 +726,19 @@ export class RuntimeRegistry {
           },
         }
       : reduced.state;
-    record.reducerState = reducedState;
+    const associatedSnapshot = this.authoritativeSnapshot(
+      reducedState.snapshot,
+    );
+    const authoritativeEvent = this.authoritativeEvent(
+      event,
+      associatedSnapshot,
+    );
+    record.reducerState = {
+      ...reducedState,
+      snapshot: associatedSnapshot,
+    };
     record.snapshot = {
-      ...reducedState.snapshot,
+      ...associatedSnapshot,
       online: true,
       // Keep heartbeat recency strictly advancing even when multiple bridge
       // frames arrive within one clock tick.
@@ -702,7 +758,7 @@ export class RuntimeRegistry {
     this.options.onChange?.({
       kind: 'event',
       runtimeId: record.snapshot.runtimeId,
-      event,
+      event: authoritativeEvent,
       snapshot: record.snapshot,
       runtimeEpoch: record.runtimeEpoch,
       runtimeSeq: frame.seq,

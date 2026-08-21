@@ -14,6 +14,7 @@ export { createDaemon } from './create-daemon.js';
 export * from './headless-runtime-provider.js';
 export { createDashboardServer } from './http.js';
 export * from './metadata.js';
+export * from './project-resolver.js';
 export * from './runtime-host.js';
 export * from './runtime-manager.js';
 export * from './runtime-registry.js';

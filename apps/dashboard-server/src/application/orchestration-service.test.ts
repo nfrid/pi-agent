@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises';
@@ -72,7 +73,7 @@ async function orchestrationFixture() {
     repository: metadata.orchestration,
     manager: manager as never,
     registry: registry as never,
-    workspaces: () => [workspace(root)],
+    workspaces: () => [],
     readSession: async (id) => ({
       metadata: {
         id,
@@ -124,6 +125,53 @@ async function orchestrationFixture() {
     },
   };
 }
+
+it('adopts and deduplicates a non-Git directory without Sesh', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'pi-directory-project-'));
+  const state = await mkdtemp(
+    path.join(os.tmpdir(), 'pi-directory-project-state-'),
+  );
+  const metadata = new MetadataStore(path.join(state, 'dashboard.sqlite'));
+  const service = new OrchestrationService({
+    repository: metadata.orchestration,
+    manager: {} as never,
+    registry: {} as never,
+    workspaces: () => [],
+  });
+  try {
+    const first = (await service.adoptProject({
+      commandId: 'adopt-directory-first',
+      rootPath: root,
+      defaultIsolation: 'worktree',
+    })) as {
+      project: {
+        id: string;
+        defaultIsolation: string;
+        repositoryIdentity?: string;
+      };
+      checkout: { id: string; kind: string; path: string };
+    };
+    const second = (await service.adoptProject({
+      commandId: 'adopt-directory-second',
+      rootPath: root,
+    })) as typeof first;
+
+    expect(first.project).toMatchObject({ defaultIsolation: 'main' });
+    expect(first.project).not.toHaveProperty('repositoryIdentity');
+    expect(first.checkout).toMatchObject({
+      kind: 'main',
+      path: await realpath(root),
+    });
+    expect(second.project.id).toBe(first.project.id);
+    expect(second.checkout.id).toBe(first.checkout.id);
+    expect(metadata.orchestration.listProjects()).toHaveLength(1);
+    expect(metadata.orchestration.listCheckouts()).toHaveLength(1);
+  } finally {
+    metadata.close();
+    await rm(root, { recursive: true, force: true });
+    await rm(state, { recursive: true, force: true });
+  }
+});
 
 it('keeps lifecycle controls out of runtime and run execution', async () => {
   const fixture = await orchestrationFixture();

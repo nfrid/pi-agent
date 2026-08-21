@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import type {
   AgentRuntimeProvider,
   RuntimeBinding,
@@ -13,6 +14,7 @@ import {
   type ManagedLaunchRecord,
   type MetadataStore,
 } from './metadata.js';
+import type { OrchestrationRepository } from './repositories/types.js';
 import { runtimeHostLocation } from './runtime-host.js';
 import type { RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { sanitizeDisplayName } from './security.js';
@@ -24,7 +26,11 @@ interface LaunchRecord {
   launchToken: string;
   /** Runtime identity survives reconnects and daemon restarts. */
   identityToken: string;
-  workspace: WorkspaceTarget;
+  /** Legacy Sesh identity; caller-owned launches intentionally omit it. */
+  workspace?: WorkspaceTarget;
+  projectId?: string;
+  checkoutId?: string;
+  cwd: string;
   /** The provider-owned binding must remain opaque to the manager. */
   binding: RuntimeBinding;
   /** Preserve the launch capability when restarting within this daemon. */
@@ -64,6 +70,7 @@ export class RuntimeManager {
     private readonly sessions: SessionIndex,
     private readonly metadata: MetadataStore,
     private readonly socketPath: string,
+    private readonly orchestration?: OrchestrationRepository,
   ) {
     // Recover host ownership before accepting a reconnect. Raw
     // credentials are never restored; only their hashes live in SQLite.
@@ -75,18 +82,28 @@ export class RuntimeManager {
   private restoreLaunch(record: ManagedLaunchRecord): LaunchRecord {
     // The daemon can validate the identity hash from metadata. The launch
     // record intentionally has no usable raw token after a daemon restart.
+    const workspace = record.workspaceId
+      ? (this.workspaces.get(record.workspaceId) ?? {
+          id: record.workspaceId,
+          name: record.workspaceId,
+          path: '',
+          canonicalPath: '',
+          source: 'directory' as const,
+          active: false,
+        })
+      : undefined;
+    const checkout =
+      record.projectId && record.checkoutId
+        ? this.orchestration?.getCheckout(record.checkoutId)
+        : undefined;
     return {
       runtimeId: record.runtimeId,
       launchToken: '',
       identityToken: '',
-      workspace: this.workspaces.get(record.workspaceId) ?? {
-        id: record.workspaceId,
-        name: record.workspaceId,
-        path: '',
-        canonicalPath: '',
-        source: 'directory',
-        active: false,
-      },
+      ...(workspace ? { workspace } : {}),
+      ...(record.projectId ? { projectId: record.projectId } : {}),
+      ...(record.checkoutId ? { checkoutId: record.checkoutId } : {}),
+      cwd: record.cwd ?? checkout?.path ?? workspace?.canonicalPath ?? '',
       binding: bindingFromLocation(
         record.runtimeId,
         record.location ?? { id: `${record.runtimeId}:unrecoverable` },
@@ -105,6 +122,7 @@ export class RuntimeManager {
     for (const workspace of workspaces)
       this.workspaces.set(workspace.id, workspace);
     for (const launch of this.launches.values()) {
+      if (!launch.workspace) continue;
       const workspace = this.workspaces.get(launch.workspace.id);
       if (workspace) launch.workspace = workspace;
     }
@@ -150,9 +168,22 @@ export class RuntimeManager {
     return [...this.workspaces.values()];
   }
 
+  private containsPath(root: string, target: string): boolean {
+    const relative = path.relative(
+      realpathSync.native(root),
+      realpathSync.native(target),
+    );
+    return (
+      relative === '' ||
+      (!relative.startsWith('..') && !path.isAbsolute(relative))
+    );
+  }
+
   async launchInCheckout(input: {
-    workspaceId: string;
-    checkoutCwd: string;
+    workspaceId?: string;
+    projectId?: string;
+    checkoutId?: string;
+    checkoutCwd?: string;
     runtimeId?: string;
     sessionId?: string;
     name?: string;
@@ -178,14 +209,37 @@ export class RuntimeManager {
             withoutProvider)(raw)
         : input;
     const request = validateStartRuntimeRequest(requestInput);
-    const workspace = this.workspaces.get(request.workspaceId);
-    if (!workspace)
-      throw new Error('Workspace is not in the current Sesh catalogue.');
-    // Sesh supplies workspace discovery. Launch uses the validated canonical
-    // directory and does not require a live terminal/session.
-    const cwd = realpathSync.native(
-      request.checkoutCwd ?? workspace.canonicalPath,
-    );
+    let workspace: WorkspaceTarget | undefined;
+    let projectId: string | undefined;
+    let checkoutId: string | undefined;
+    let cwd: string;
+    if (request.workspaceId !== undefined) {
+      workspace = this.workspaces.get(request.workspaceId);
+      if (!workspace)
+        throw new Error('Workspace is not in the current Sesh catalogue.');
+      cwd = realpathSync.native(request.checkoutCwd ?? workspace.canonicalPath);
+      if (!this.containsPath(workspace.canonicalPath, cwd))
+        throw new Error('Launch cwd is outside the selected workspace.');
+    } else {
+      if (!this.orchestration)
+        throw new Error('Persisted project launches are unavailable.');
+      if (!request.projectId || !request.checkoutId)
+        throw new Error('Persisted launches require projectId and checkoutId.');
+      const project = this.orchestration.getProject(request.projectId);
+      if (!project) throw new Error('Project does not exist.');
+      if (project.status !== 'active') throw new Error('Project is archived.');
+      const checkout = this.orchestration.getCheckout(request.checkoutId);
+      if (!checkout) throw new Error('Checkout does not exist.');
+      if (checkout.projectId !== project.id)
+        throw new Error('Checkout does not belong to the selected project.');
+      if (checkout.status === 'retired')
+        throw new Error('A retired checkout cannot be launched.');
+      cwd = realpathSync.native(request.checkoutCwd ?? checkout.path);
+      if (!this.containsPath(checkout.path, cwd))
+        throw new Error('Launch cwd is outside the selected checkout.');
+      projectId = project.id;
+      checkoutId = checkout.id;
+    }
     let sessionFile: string | undefined;
     if (request.sessionId) {
       const session = this.sessions.get(request.sessionId);
@@ -242,7 +296,12 @@ export class RuntimeManager {
     try {
       this.metadata.recordManagedLaunch(
         runtimeId,
-        workspace.id,
+        {
+          ...(workspace ? { workspaceId: workspace.id } : {}),
+          ...(projectId ? { projectId } : {}),
+          ...(checkoutId ? { checkoutId } : {}),
+          cwd,
+        },
         expectedLocation,
         {
           identityToken,
@@ -253,11 +312,15 @@ export class RuntimeManager {
       );
       metadataRecorded = true;
       binding = await this.provider.start({
-        workspace: {
-          id: workspace.id,
-          name: workspace.name,
-          active: true,
-        },
+        ...(workspace
+          ? {
+              workspace: {
+                id: workspace.id,
+                name: workspace.name,
+                active: true,
+              },
+            }
+          : {}),
         cwd,
         ...(request.name ? { name: sanitizeDisplayName(request.name) } : {}),
         runtimeId,
@@ -284,7 +347,10 @@ export class RuntimeManager {
         runtimeId,
         launchToken,
         identityToken,
-        workspace,
+        ...(workspace ? { workspace } : {}),
+        ...(projectId ? { projectId } : {}),
+        ...(checkoutId ? { checkoutId } : {}),
+        cwd,
         binding,
         mode: request.mode ?? 'write',
         runtimeProvider: runtimeProvider ?? 'extension-bridge',
@@ -314,7 +380,10 @@ export class RuntimeManager {
             runtimeId,
             launchToken,
             identityToken,
-            workspace,
+            ...(workspace ? { workspace } : {}),
+            ...(projectId ? { projectId } : {}),
+            ...(checkoutId ? { checkoutId } : {}),
+            cwd,
             binding: cleanupBinding,
             mode: request.mode ?? 'write',
             runtimeProvider: runtimeProvider ?? 'extension-bridge',
@@ -397,10 +466,25 @@ export class RuntimeManager {
     if (!snapshot || !launch)
       throw new Error('Only managed runtimes can restart.');
     const session = this.sessions.get(snapshot.session.id);
-    const request = {
-      workspaceId: launch.workspace.id,
-      checkoutCwd: snapshot.cwd,
-      ...(session ? { sessionId: session.id } : {}),
+    const request =
+      launch.projectId && launch.checkoutId
+        ? {
+            projectId: launch.projectId,
+            checkoutId: launch.checkoutId,
+            checkoutCwd: snapshot.cwd,
+            ...(session ? { sessionId: session.id } : {}),
+          }
+        : launch.workspace
+          ? {
+              workspaceId: launch.workspace.id,
+              checkoutCwd: snapshot.cwd,
+              ...(session ? { sessionId: session.id } : {}),
+            }
+          : undefined;
+    if (!request)
+      throw new Error('Managed runtime has no persisted launch identity.');
+    const restartRequest = {
+      ...request,
       ...(snapshot.session.name ? { name: snapshot.session.name } : {}),
       ...(snapshot.model
         ? {
@@ -417,7 +501,7 @@ export class RuntimeManager {
       runtimeProvider: launch.runtimeProvider,
     };
     await this.stop(runtimeId);
-    return this.launch(request);
+    return this.launch(restartRequest);
   }
 
   async stop(runtimeId: string, force = false): Promise<void> {

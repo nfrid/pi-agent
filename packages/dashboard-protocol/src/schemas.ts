@@ -423,6 +423,10 @@ const RuntimeSnapshotProperties = {
   pid: Type.Integer({ minimum: 1 }),
   cwd: Type.String({ minLength: 1, maxLength: MAX_PATH }),
   workspaceHint: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  /** Server-owned durable orchestration association. Runtime clients may send
+   * spoofed values, but the dashboard replaces them before publication. */
+  projectId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
+  checkoutId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
   tmux: Type.Optional(
     Type.Object(
       {
@@ -2218,7 +2222,11 @@ export type SessionFeedInput = Static<typeof SessionFeedInputSchema>;
 
 export const StartRuntimeRequestSchema = Type.Object(
   {
-    workspaceId: Type.String({ minLength: 1, maxLength: 256 }),
+    /** Legacy Sesh/workspace launch identity. */
+    workspaceId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    /** Persisted orchestration launch identity. These replace workspaceId. */
+    projectId: Type.Optional(IdentifierSchema),
+    checkoutId: Type.Optional(IdentifierSchema),
     /** Internal orchestration identity. Browser launches may omit it. */
     runtimeId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_ID })),
     /** Explicit isolated checkout cwd; tmux placement still uses workspaceId. */

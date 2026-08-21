@@ -729,8 +729,14 @@ export function serializeFrame(frame: unknown): string {
 
 export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
   if (!Value.Check(StartRuntimeRequestSchema, value)) {
-    if (!isRecord(value) || !safeIdentifier(value.workspaceId, 256))
-      throw new Error('workspaceId is required.');
+    if (!isRecord(value)) throw new Error('A launch identity is required.');
+    const hasWorkspace = safeIdentifier(value.workspaceId, 256);
+    const hasProject = safeIdentifier(value.projectId, MAX_ID);
+    const hasCheckout = safeIdentifier(value.checkoutId, MAX_ID);
+    if (!hasWorkspace && !(hasProject && hasCheckout))
+      throw new Error('workspaceId or projectId/checkoutId is required.');
+    if (hasWorkspace && (hasProject || hasCheckout))
+      throw new Error('Use either workspaceId or projectId/checkoutId.');
     if (
       value.initialPrompt !== undefined &&
       !nonEmptyString(value.initialPrompt, 100_000)
@@ -753,7 +759,22 @@ export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
     throw new Error('Invalid start runtime request.');
   }
   const input = value as StartRuntimeRequest;
-  const result: StartRuntimeRequest = { workspaceId: input.workspaceId };
+  const hasWorkspace = input.workspaceId !== undefined;
+  const hasPersistentIdentity =
+    input.projectId !== undefined && input.checkoutId !== undefined;
+  if (!hasWorkspace && !hasPersistentIdentity)
+    throw new Error('workspaceId or projectId/checkoutId is required.');
+  if (
+    hasWorkspace &&
+    (input.projectId !== undefined || input.checkoutId !== undefined)
+  )
+    throw new Error('Use either workspaceId or projectId/checkoutId.');
+  const result: StartRuntimeRequest = hasWorkspace
+    ? { workspaceId: input.workspaceId as string }
+    : {
+        projectId: input.projectId as string,
+        checkoutId: input.checkoutId as string,
+      };
   if (input.runtimeId !== undefined && !safeIdentifier(input.runtimeId, MAX_ID))
     throw new Error('Invalid runtimeId.');
   if (

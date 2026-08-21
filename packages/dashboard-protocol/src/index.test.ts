@@ -1131,6 +1131,28 @@ describe('dashboard protocol', () => {
     });
   });
 
+  it('accepts legacy and persisted launch identities without inventing a workspace', () => {
+    expect(
+      validateStartRuntimeRequest({ workspaceId: 'legacy' }),
+    ).toMatchObject({
+      workspaceId: 'legacy',
+    });
+    expect(
+      validateStartRuntimeRequest({
+        projectId: 'project-1',
+        checkoutId: 'checkout-1',
+        runtimeId: 'runtime-1',
+      }),
+    ).toEqual({
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+      runtimeId: 'runtime-1',
+    });
+    expect(() =>
+      validateStartRuntimeRequest({ runtimeId: 'runtime-only' }),
+    ).toThrow('workspaceId or projectId/checkoutId');
+  });
+
   it('validates structured launch requests', () => {
     expect(
       validateStartRuntimeRequest({

@@ -172,7 +172,12 @@ export async function createThread(
     status: 'queued' as const,
   };
   let result: { thread: Thread; run: Run; receipt: CommandReceipt };
-  const chosenIsolation = command.isolation ?? project.defaultIsolation;
+  // Non-Git adopted directories are caller-owned roots; they cannot support
+  // worktree preparation, even if an old client asks for it explicitly.
+  const chosenIsolation =
+    project.repositoryIdentity === undefined
+      ? 'main'
+      : (command.isolation ?? project.defaultIsolation);
   if (command.checkoutId || chosenIsolation === 'main') {
     const checkout = command.checkoutId
       ? host.requireCheckout(command.checkoutId)

@@ -17,11 +17,13 @@ import { SqliteOrchestrationRepository } from './repositories/sqlite-orchestrati
 export { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
 
 import type {
+  ManagedLaunchIdentity,
   ManagedLaunchRecord,
   PushSubscriptionRecord,
 } from './repositories/types.js';
 
 export type {
+  ManagedLaunchIdentity,
   ManagedLaunchRecord,
   PushSubscriptionRecord,
 } from './repositories/types.js';
@@ -75,7 +77,7 @@ export class MetadataStore {
 
   recordManagedLaunch(
     runtimeId: string,
-    workspaceId: string,
+    identity: string | ManagedLaunchIdentity,
     location: RuntimeLocation,
     credentials: {
       identityToken: string;
@@ -86,7 +88,7 @@ export class MetadataStore {
   ): void {
     this.metadata.recordManagedLaunch(
       runtimeId,
-      workspaceId,
+      identity,
       location,
       credentials,
     );

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
 import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
 import type { Run } from '@pi-dashboard/protocol';
 import {
@@ -368,30 +367,15 @@ export async function execute(
       return;
     }
 
-    const anchor = host.workspaces().find((item) => {
-      try {
-        return (
-          realpathSync.native(item.canonicalPath) === project.rootPath ||
-          realpathSync.native(item.path) === project.rootPath
-        );
-      } catch {
-        return (
-          item.canonicalPath === project.rootPath ||
-          item.path === project.rootPath
-        );
-      }
-    });
-    if (!anchor)
-      throw new Error(
-        'The project parent workspace is not available as a launch anchor.',
-      );
     runtimeId = runtimeId ?? `runtime-${randomUUID()}`;
     host.repository.setRunRuntime(run.id, runtimeId);
     host.repository.transitionRun(run.id, 'starting');
-    // Orchestration owns durable prompt delivery after hello. Do not route
-    // the prompt through RuntimeManager's legacy memory-only launch path.
+    // Orchestration owns durable prompt delivery after hello. The persisted
+    // project/checkout identity is the launch authority; Sesh is not an
+    // anchor and may be empty or unavailable.
     await host.manager.launch({
-      workspaceId: anchor.id,
+      projectId: project.id,
+      checkoutId: checkout.id,
       runtimeId,
       checkoutCwd: cwd,
       name: host.requireThread(run.threadId).title,

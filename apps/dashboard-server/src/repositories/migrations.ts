@@ -706,6 +706,39 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 14,
+    name: 'caller-owned-managed-launch-identity',
+    foreignKeysOff: true,
+    up(db) {
+      // workspace_id remains readable for legacy callers, but is no longer the
+      // authority for new launches. Keep all old credential/location rows and
+      // make the persisted project/checkout/cwd identity nullable so a Sesh
+      // catalogue is not required during restoration.
+      db.exec(`
+        CREATE TABLE managed_launch_v14 (
+          runtime_id TEXT PRIMARY KEY,
+          workspace_id TEXT,
+          project_id TEXT,
+          checkout_id TEXT,
+          cwd TEXT,
+          runtime_location_json TEXT,
+          launched_at INTEGER NOT NULL,
+          stopped_at INTEGER,
+          identity_token_hash TEXT,
+          launch_token_hash TEXT,
+          launch_consumed INTEGER NOT NULL DEFAULT 0,
+          mode TEXT NOT NULL DEFAULT 'write' CHECK (mode IN ('read','write'))
+        );
+        INSERT INTO managed_launch_v14
+          (runtime_id,workspace_id,project_id,checkout_id,cwd,runtime_location_json,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode)
+          SELECT runtime_id,workspace_id,NULL,NULL,NULL,runtime_location_json,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode
+          FROM managed_launch;
+        DROP TABLE managed_launch;
+        ALTER TABLE managed_launch_v14 RENAME TO managed_launch;
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

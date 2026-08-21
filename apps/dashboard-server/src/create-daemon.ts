@@ -15,6 +15,7 @@ import { HeadlessRuntimeProvider } from './headless-runtime-provider.js';
 import { type DashboardServer, DashboardServerImpl } from './http.js';
 import { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
+import { ProjectResolver } from './project-resolver.js';
 import type { PushSender } from './push.js';
 import { RuntimeManager } from './runtime-manager.js';
 import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
@@ -135,11 +136,13 @@ function dependencies(
       delegateSessionDirectory(options),
     );
   const sesh = options.sesh ?? new CliSeshAdapter();
+  const projectResolver = new ProjectResolver(metadata.orchestration);
   let manager!: RuntimeManager;
   const registry =
     options.registry ??
     new RuntimeRegistry({
       allowExternalWithoutToken: true,
+      resolveRuntime: (cwd) => projectResolver.resolve(cwd),
       expectedToken: (runtimeId, launchToken, identityToken) =>
         manager.expectedToken(runtimeId, launchToken, identityToken),
       onChange: (change) => registryChanges.publish(change),
@@ -170,6 +173,7 @@ function dependencies(
     sessions,
     metadata,
     config.socketPath,
+    metadata.orchestration,
   );
   const orchestrationService = new OrchestrationService({
     repository: metadata.orchestration,

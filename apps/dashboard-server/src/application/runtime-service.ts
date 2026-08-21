@@ -187,7 +187,7 @@ export class RuntimeService {
     const completion = await this.executeWithReceipt({
       commandId,
       commandType: 'runtime.start',
-      target: input.workspaceId,
+      target: input.workspaceId ?? input.checkoutId,
       ...(input.runtimeId ? { runtimeId: input.runtimeId } : {}),
       payload: request,
       execute: async () => {

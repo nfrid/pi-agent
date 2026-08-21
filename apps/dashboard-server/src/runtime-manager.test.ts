@@ -375,6 +375,60 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('launches a persisted checkout without a Sesh workspace', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-project-'));
+    const start = vi.fn(async ({ runtimeId }: { runtimeId: string }) =>
+      binding(runtimeId),
+    );
+    const recordManagedLaunch = vi.fn();
+    const project = { id: 'project-1', status: 'active' };
+    const checkout = {
+      id: 'checkout-1',
+      projectId: project.id,
+      path: root,
+      status: 'ready',
+    };
+    const manager = new RuntimeManager(
+      { snapshots: () => [] } as never,
+      { start } as never,
+      {} as never,
+      { managedLaunches: () => [], recordManagedLaunch } as never,
+      '/tmp/bridge.sock',
+      {
+        getProject: (id: string) => (id === project.id ? project : undefined),
+        getCheckout: (id: string) =>
+          id === checkout.id ? checkout : undefined,
+      } as never,
+    );
+
+    await expect(
+      manager.launch({ projectId: project.id, checkoutId: checkout.id }),
+    ).resolves.toMatchObject({ runtimeId: expect.any(String) });
+    expect(start.mock.calls[0]?.[0]).toMatchObject({
+      cwd: await realpath(root),
+    });
+    expect(start.mock.calls[0]?.[0]).not.toHaveProperty('workspace');
+    expect(recordManagedLaunch).toHaveBeenCalledWith(
+      expect.any(String),
+      {
+        projectId: project.id,
+        checkoutId: checkout.id,
+        cwd: await realpath(root),
+      },
+      expect.objectContaining({ id: expect.stringMatching(/^runtime-host:/) }),
+      expect.objectContaining({ mode: 'write' }),
+    );
+
+    await expect(
+      manager.launch({
+        projectId: project.id,
+        checkoutId: checkout.id,
+        checkoutCwd: path.dirname(root),
+      }),
+    ).rejects.toThrow('outside the selected checkout');
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('rejects concurrent launches for the same explicit runtime identity', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-same-id-'));
     let releaseStart!: () => void;
@@ -693,6 +747,77 @@ describe('managed runtime launch safety', () => {
       cwd: await realpath(checkout),
       mode: 'read',
     });
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('restores and restarts a persisted project launch without Sesh', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-runtime-project-restart-'),
+    );
+    const metadata = new MetadataStore(path.join(root, 'dashboard.sqlite'));
+    const checkoutRoot = path.join(root, 'checkout');
+    await mkdir(checkoutRoot);
+    const { project, checkout } =
+      metadata.orchestration.createProjectWithCheckout(
+        {
+          id: 'project-restored',
+          title: 'Restored',
+          rootPath: checkoutRoot,
+          defaultIsolation: 'main',
+        },
+        {
+          id: 'checkout-restored',
+          kind: 'main',
+          path: checkoutRoot,
+          status: 'ready',
+        },
+      );
+    const runtimeId = 'runtime-project-restored';
+    metadata.recordManagedLaunch(
+      runtimeId,
+      {
+        projectId: project.id,
+        checkoutId: checkout.id,
+        cwd: checkoutRoot,
+      },
+      { id: `runtime-host:${runtimeId}` },
+      {
+        launchToken: 'launch-secret',
+        identityToken: 'identity-secret',
+        mode: 'read',
+      },
+    );
+    const snapshot = {
+      ...runtime('session-project-restored'),
+      runtimeId,
+      cwd: checkoutRoot,
+    };
+    const start = vi.fn(async ({ runtimeId: nextId }: { runtimeId: string }) =>
+      binding(nextId),
+    );
+    const manager = new RuntimeManager(
+      {
+        get: (id: string) => (id === runtimeId ? snapshot : undefined),
+        snapshots: () => [],
+        isOnline: () => false,
+        sendCommand: vi.fn().mockResolvedValue({ accepted: true }),
+        forget: vi.fn(),
+      } as never,
+      { start, stop: vi.fn().mockResolvedValue(undefined) } as never,
+      { get: () => undefined } as never,
+      metadata,
+      '/tmp/bridge.sock',
+      metadata.orchestration,
+    );
+
+    await manager.restart(runtimeId);
+
+    expect(start.mock.calls[0]?.[0]).toMatchObject({
+      cwd: await realpath(checkoutRoot),
+      mode: 'read',
+    });
+    expect(start.mock.calls[0]?.[0]).not.toHaveProperty('workspace');
+    metadata.close();
     await rm(root, { recursive: true, force: true });
   });
 

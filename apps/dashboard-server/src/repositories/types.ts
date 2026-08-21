@@ -29,9 +29,20 @@ export interface PushSubscriptionRecord {
   updatedAt: number;
 }
 
+export interface ManagedLaunchIdentity {
+  workspaceId?: string;
+  projectId?: string;
+  checkoutId?: string;
+  cwd?: string;
+}
+
 export interface ManagedLaunchRecord {
   runtimeId: string;
-  workspaceId: string;
+  /** Legacy Sesh identity, absent for caller-owned launches. */
+  workspaceId?: string;
+  projectId?: string;
+  checkoutId?: string;
+  cwd?: string;
   /** Opaque location owned by the runtime provider/host. */
   location: RuntimeLocation;
   /** Managed Pi tool capability; old rows are treated as writable. */
@@ -49,7 +60,7 @@ export interface MetadataRepository {
   saveSession(session: SessionIndexEntry): void;
   recordManagedLaunch(
     runtimeId: string,
-    workspaceId: string,
+    identity: string | ManagedLaunchIdentity,
     location: RuntimeLocation,
     credentials: {
       identityToken: string;

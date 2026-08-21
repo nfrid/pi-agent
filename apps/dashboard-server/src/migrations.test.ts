@@ -24,18 +24,21 @@ it('applies numbered dashboard migrations idempotently', async () => {
     ).toEqual(
       DASHBOARD_MIGRATIONS.map(({ version, name }) => ({ version, name })),
     );
-    const columns = db
-      .prepare('PRAGMA table_info(managed_launch)')
-      .all()
-      .map((row) => row.name);
-    expect(columns).toEqual(
+    const columns = db.prepare('PRAGMA table_info(managed_launch)').all();
+    expect(columns.map((row) => row.name)).toEqual(
       expect.arrayContaining([
         'identity_token_hash',
         'launch_token_hash',
         'launch_consumed',
         'mode',
+        'project_id',
+        'checkout_id',
+        'cwd',
       ]),
     );
+    expect(columns.find((row) => row.name === 'workspace_id')).toMatchObject({
+      notnull: 0,
+    });
   } finally {
     db.close();
   }
@@ -44,7 +47,7 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
     ]);
   });
 

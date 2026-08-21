@@ -80,6 +80,67 @@ describe('runtime registry', () => {
     rejected.close();
   });
 
+  it('owns external runtime project association and re-resolves cwd changes', async () => {
+    const resolveRuntime = vi.fn((cwd: string) =>
+      cwd === '/tmp/project'
+        ? { projectId: 'project-server', checkoutId: 'checkout-server' }
+        : { projectId: null, checkoutId: null },
+    );
+    const registry = new RuntimeRegistry({
+      allowExternalWithoutToken: true,
+      resolveRuntime,
+    });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            ...snapshot,
+            ownership: 'external',
+            projectId: 'project-spoofed',
+            checkoutId: 'checkout-spoofed',
+          },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    expect(registry.get('runtime-1')).toMatchObject({
+      projectId: 'project-server',
+      checkoutId: 'checkout-server',
+    });
+
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'runtime.stateChanged',
+          state: 'working',
+          snapshot: {
+            cwd: '/tmp/unassigned',
+            projectId: 'project-spoofed-again',
+            checkoutId: 'checkout-spoofed-again',
+          },
+        },
+      }),
+    );
+    await eventually(() =>
+      registry.get('runtime-1')?.cwd === '/tmp/unassigned' ? true : undefined,
+    );
+    expect(registry.get('runtime-1')).toMatchObject({
+      projectId: null,
+      checkoutId: null,
+    });
+    expect(resolveRuntime).toHaveBeenCalledWith('/tmp/project');
+    expect(resolveRuntime).toHaveBeenCalledWith('/tmp/unassigned');
+    bridge.destroy();
+  });
+
   it('publishes forgotten runtime removal and tombstones leaked clients', async () => {
     const changes: RegistryChange[] = [];
     const registry = new RuntimeRegistry({
