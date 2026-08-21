@@ -44,8 +44,76 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     ]);
+  });
+
+  it('rebuilds lifecycle events for settlement without losing history', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 12));
+      db.exec(`
+        INSERT INTO project (id,title,root_path,default_isolation,max_parallel_runs,status,created_at,updated_at)
+        VALUES ('settle-project','Settle','/settle','main',1,'active',1,1);
+        INSERT INTO thread (id,project_id,title,status,created_at,updated_at)
+        VALUES ('settle-thread','settle-project','Settle','completed',1,2);
+        INSERT INTO thread_event
+          (id,thread_id,event_type,command_id,actor,reason,payload_json,occurred_at)
+        VALUES (41,'settle-thread','thread.archive','archive-history','user','user-command','{"status":"completed"}',3),
+               (42,'settle-thread','thread.restore',NULL,'migration','legacy-snapshot','{"status":"completed"}',4);
+      `);
+      runMigrations(db);
+      expect(
+        db
+          .prepare(
+            'SELECT id,event_type,payload_json,occurred_at FROM thread_event ORDER BY id',
+          )
+          .all(),
+      ).toEqual([
+        {
+          id: 41,
+          event_type: 'thread.archive',
+          payload_json: '{"status":"completed"}',
+          occurred_at: 3,
+        },
+        {
+          id: 42,
+          event_type: 'thread.restore',
+          payload_json: '{"status":"completed"}',
+          occurred_at: 4,
+        },
+      ]);
+      expect(
+        db
+          .prepare('PRAGMA table_info(thread)')
+          .all()
+          .map((row) => row.name),
+      ).toContain('settled_at');
+      for (const type of ['thread.settle', 'thread.unsettle']) {
+        db.prepare(
+          `INSERT INTO thread_event (thread_id,event_type,command_id,actor,reason,payload_json,occurred_at)
+           VALUES (?,?,?,?,?,?,?)`,
+        ).run(
+          'settle-thread',
+          type,
+          `${type}-command`,
+          'user',
+          'user-command',
+          '{}',
+          5,
+        );
+      }
+      expect(
+        db.prepare('SELECT id,event_type FROM thread_event ORDER BY id').all(),
+      ).toEqual([
+        { id: 41, event_type: 'thread.archive' },
+        { id: 42, event_type: 'thread.restore' },
+        { id: 43, event_type: 'thread.settle' },
+        { id: 44, event_type: 'thread.unsettle' },
+      ]);
+    } finally {
+      db.close();
+    }
   });
 
   it('converts v10 settled durable rows without losing dependent data or indexes', () => {

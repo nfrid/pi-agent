@@ -12,6 +12,8 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   type PinThreadCommand,
+  type SettleThreadCommand,
+  type UnsettleThreadCommand,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
@@ -835,6 +837,36 @@ export class DashboardHttpClient {
     const thread = tryParseThread(value);
     if (!thread)
       throw malformedOutput('Invalid pinned thread response.', value);
+    return thread;
+  }
+
+  async settleThread(
+    threadId: string,
+    command: SettleThreadCommand | string,
+  ): Promise<Thread> {
+    return this.lifecycleThreadMutation(threadId, command, 'settle');
+  }
+
+  async unsettleThread(
+    threadId: string,
+    command: UnsettleThreadCommand | string,
+  ): Promise<Thread> {
+    return this.lifecycleThreadMutation(threadId, command, 'unsettle');
+  }
+
+  private async lifecycleThreadMutation(
+    threadId: string,
+    command: { commandId: string } | string,
+    action: string,
+  ): Promise<Thread> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
+    const value = await this.request<unknown>(
+      `/api/threads/${encodeURIComponent(threadId)}/${action}`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput(`Invalid ${action} thread response.`, value);
     return thread;
   }
 

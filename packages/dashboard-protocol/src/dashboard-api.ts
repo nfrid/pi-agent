@@ -31,8 +31,10 @@ export type {
   RestoreThreadCommand,
   RetryCommand,
   SessionAdoptCommand,
+  SettleThreadCommand,
   ThreadCreateCommand,
   UnpinThreadCommand,
+  UnsettleThreadCommand,
 } from './orchestration-commands.js';
 export {
   ArchiveThreadCommandSchema,
@@ -46,8 +48,10 @@ export {
   RestoreThreadCommandSchema,
   RetryCommandSchema,
   SessionAdoptCommandSchema,
+  SettleThreadCommandSchema,
   ThreadCreateCommandSchema,
   UnpinThreadCommandSchema,
+  UnsettleThreadCommandSchema,
 } from './orchestration-commands.js';
 export type {
   Checkout,
@@ -115,11 +119,13 @@ export {
   parseRetryCommand,
   parseRun,
   parseSessionAdoptCommand,
+  parseSettleThreadCommand,
   parseThread,
   parseThreadCreateCommand,
   parseThreadLifecycleCommandResult,
   parseThreadLifecycleEvent,
   parseUnpinThreadCommand,
+  parseUnsettleThreadCommand,
   tryParseArchiveThreadCommand,
   tryParseCancelCommand,
   tryParseCheckout,
@@ -133,11 +139,13 @@ export {
   tryParseRetryCommand,
   tryParseRun,
   tryParseSessionAdoptCommand,
+  tryParseSettleThreadCommand,
   tryParseThread,
   tryParseThreadCreateCommand,
   tryParseThreadLifecycleCommandResult,
   tryParseThreadLifecycleEvent,
   tryParseUnpinThreadCommand,
+  tryParseUnsettleThreadCommand,
 } from './orchestration-parsers.js';
 export {
   parseAuthoritativeSessionSnapshot,

@@ -13,6 +13,8 @@ import {
   type DelegateHistoryRunQuery,
   DelegateHistoryRunQuerySchema,
   PinThreadCommandSchema,
+  SettleThreadCommandSchema,
+  UnsettleThreadCommandSchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   RestoreThreadCommandSchema,
@@ -160,6 +162,8 @@ export interface DashboardRouteContext {
   restoreThread?(threadId: string, commandId: string): Promise<unknown>;
   pinThread?(threadId: string, commandId: string): Promise<unknown>;
   unpinThread?(threadId: string, commandId: string): Promise<unknown>;
+  settleThread?(threadId: string, commandId: string): Promise<unknown>;
+  unsettleThread?(threadId: string, commandId: string): Promise<unknown>;
   listThreads?(projectId?: string): Promise<unknown> | unknown;
   sessionThreadLinks?(): unknown;
   readThread?(threadId: string): Promise<unknown> | unknown;
@@ -570,6 +574,8 @@ export const dashboardRoutes: FastifyPluginAsync<{
     ['restore', 'restoreThread', RestoreThreadCommandSchema],
     ['pin', 'pinThread', PinThreadCommandSchema],
     ['unpin', 'unpinThread', UnpinThreadCommandSchema],
+    ['settle', 'settleThread', SettleThreadCommandSchema],
+    ['unsettle', 'unsettleThread', UnsettleThreadCommandSchema],
   ] as const) {
     app.post<{ Params: { threadId: string } }>(
       `/api/threads/:threadId/${suffix}`,

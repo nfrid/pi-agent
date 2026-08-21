@@ -739,6 +739,15 @@ export function AgentThreadNav({
             {sections.active.map((row) => renderThreadRow(row, 'card'))}
           </section>
         )}
+        {sections.settled.length > 0 && (
+          <section aria-label="Settled threads">
+            <h3 className={styles.shelfHeading}>
+              <span>Settled</span>
+              <small>{sections.settled.length}</small>
+            </h3>
+            {sections.settled.map((row) => renderThreadRow(row, 'card'))}
+          </section>
+        )}
         {sections.archived.length > 0 && (
           <>
             <button

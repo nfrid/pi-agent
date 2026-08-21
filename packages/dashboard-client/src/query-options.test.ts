@@ -18,11 +18,13 @@ import {
   renameSessionMutationOptions,
   restartRuntimeMutationOptions,
   restoreThreadMutationOptions,
+  settleThreadMutationOptions,
   snapshotQueryOptions,
   snapshotRequestGeneration,
   startRuntimeMutationOptions,
   stopRuntimeMutationOptions,
   unpinThreadMutationOptions,
+  unsettleThreadMutationOptions,
 } from './query-options.js';
 import { DashboardLiveStore } from './store.js';
 
@@ -324,11 +326,18 @@ describe('dashboard query and mutation factories', () => {
     const restoreThread = vi.fn(async (...value: unknown[]) => value);
     const pinThread = vi.fn(async (...value: unknown[]) => value);
     const unpinThread = vi.fn(async (...value: unknown[]) => value);
+    const settleThread = vi.fn(async (...value: unknown[]) => value);
+    const unsettleThread = vi.fn(async (...value: unknown[]) => value);
     const mutations = [
       [archiveThreadMutationOptions({ archiveThread } as never), archiveThread],
       [restoreThreadMutationOptions({ restoreThread } as never), restoreThread],
       [pinThreadMutationOptions({ pinThread } as never), pinThread],
       [unpinThreadMutationOptions({ unpinThread } as never), unpinThread],
+      [settleThreadMutationOptions({ settleThread } as never), settleThread],
+      [
+        unsettleThreadMutationOptions({ unsettleThread } as never),
+        unsettleThread,
+      ],
     ] as const;
     const variables = { threadId: 'thread-1' };
     for (const [options, calls] of mutations) {

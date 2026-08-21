@@ -59,6 +59,8 @@ const LIFECYCLE_EVENT_TYPES = new Set([
   'thread.restore',
   'thread.pin',
   'thread.unpin',
+  'thread.settle',
+  'thread.unsettle',
 ]);
 export const SESSION_LINK_TECHNICAL_PROJECT_ID = 'project-system-session-index';
 
@@ -563,6 +565,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         ? {}
         : { checkoutId: optionalString(row, 'checkout_id') }),
       status: stringValue(row, 'status') as Thread['status'],
+      ...(row.settled_at == null ? {} : { settledAt: Number(row.settled_at) }),
       ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
       ...(optionalString(row, 'active_run_id') === undefined
         ? {}
@@ -703,7 +706,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return rows<Record<string, unknown>>(
       this.db
         .prepare(
-          `SELECT l.session_id,l.thread_id,t.archived_at,t.pinned_at,
+          `SELECT l.session_id,l.thread_id,t.archived_at,t.settled_at,t.pinned_at,
              (SELECT r.id FROM orchestration_run r
               WHERE r.thread_id=t.id AND r.status IN ${ACTIVE_RUN_SQL}
               ORDER BY r.created_at,r.id LIMIT 1) AS active_run_id
@@ -721,6 +724,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         ? {}
         : { archivedAt: Number(row.archived_at) }),
       ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
+      ...(row.settled_at == null ? {} : { settledAt: Number(row.settled_at) }),
       ...(optionalString(row, 'active_run_id') === undefined
         ? {}
         : { activeRunId: optionalString(row, 'active_run_id') }),
@@ -1011,6 +1015,27 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     now = Date.now(),
   ): ThreadLifecycleCommandResult {
     return this.applyThreadLifecycle(commandId, threadId, 'thread.unpin', now);
+  }
+
+  settleThread(
+    commandId: string,
+    threadId: string,
+    now = Date.now(),
+  ): ThreadLifecycleCommandResult {
+    return this.applyThreadLifecycle(commandId, threadId, 'thread.settle', now);
+  }
+
+  unsettleThread(
+    commandId: string,
+    threadId: string,
+    now = Date.now(),
+  ): ThreadLifecycleCommandResult {
+    return this.applyThreadLifecycle(
+      commandId,
+      threadId,
+      'thread.unsettle',
+      now,
+    );
   }
 
   listThreadEvents(threadId: string): ThreadLifecycleEvent[] {
@@ -1675,7 +1700,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       | 'thread.archive'
       | 'thread.restore'
       | 'thread.pin'
-      | 'thread.unpin',
+      | 'thread.unpin'
+      | 'thread.settle'
+      | 'thread.unsettle',
     now: number,
   ): ThreadLifecycleCommandResult {
     return this.withTransaction(() => {
@@ -1755,6 +1782,16 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           .prepare('UPDATE thread SET pinned_at=NULL,updated_at=? WHERE id=?')
           .run(now, threadId);
         changed = Number(result.changes) === 1;
+      } else if (eventType === 'thread.settle') {
+        const result = this.db
+          .prepare('UPDATE thread SET settled_at=?,updated_at=? WHERE id=?')
+          .run(now, now, threadId);
+        changed = Number(result.changes) === 1;
+      } else if (eventType === 'thread.unsettle') {
+        const result = this.db
+          .prepare('UPDATE thread SET settled_at=NULL,updated_at=? WHERE id=?')
+          .run(now, threadId);
+        changed = Number(result.changes) === 1;
       }
       if (
         !changed &&
@@ -1771,6 +1808,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           ? {}
           : { archivedAt: thread.archivedAt }),
         ...(thread.pinnedAt === undefined ? {} : { pinnedAt: thread.pinnedAt }),
+        ...(thread.settledAt === undefined
+          ? {}
+          : { settledAt: thread.settledAt }),
       };
       this.db
         .prepare(
@@ -1933,6 +1973,7 @@ function threadFromRow(row: Record<string, unknown>): Thread {
           ) as Thread['status'],
         }),
     ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
+    ...(row.settled_at == null ? {} : { settledAt: Number(row.settled_at) }),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };

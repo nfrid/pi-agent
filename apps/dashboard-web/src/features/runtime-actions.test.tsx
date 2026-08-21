@@ -1,4 +1,4 @@
-import { dashboardQueryKeys } from '@pi-dashboard/client';
+import { dashboardHttpClient, dashboardQueryKeys } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, create } from 'react-test-renderer';
@@ -39,6 +39,74 @@ describe('runtime lifecycle action availability', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: dashboardQueryKeys.sessionThreadLinks(),
     });
+  });
+
+  it('renders and invokes Settle, while archived rows do not offer it', async () => {
+    const client = new QueryClient();
+    const settle = vi
+      .spyOn(dashboardHttpClient, 'settleThread')
+      .mockResolvedValue({ id: 'thread-1' } as never);
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <QueryClientProvider client={client}>
+          <DurableThreadActions
+            title="Durable thread"
+            closeMenu={vi.fn()}
+            thread={{ threadId: 'thread-1', hasActiveRun: true }}
+          />
+        </QueryClientProvider>,
+      );
+    });
+    const button = tree.root.findAllByType('button')[0];
+    expect(button?.children.join(' ')).toBe('Settle');
+    await act(async () => {
+      await button?.props.onClick({ stopPropagation: vi.fn() });
+    });
+    expect(settle).toHaveBeenCalledWith('thread-1', expect.anything());
+    act(() => tree.unmount());
+    settle.mockRestore();
+
+    act(() => {
+      tree = create(
+        <QueryClientProvider client={client}>
+          <DurableThreadActions
+            title="Settled thread"
+            closeMenu={vi.fn()}
+            thread={{
+              threadId: 'thread-1',
+              settledAt: 20,
+              hasActiveRun: false,
+            }}
+          />
+        </QueryClientProvider>,
+      );
+    });
+    expect(tree.root.findAllByType('button')[0]?.children.join(' ')).toBe(
+      'Unsettle',
+    );
+    act(() => tree.unmount());
+
+    act(() => {
+      tree = create(
+        <QueryClientProvider client={client}>
+          <DurableThreadActions
+            title="Archived thread"
+            closeMenu={vi.fn()}
+            thread={{
+              threadId: 'thread-1',
+              archivedAt: 10,
+              settledAt: 20,
+              hasActiveRun: false,
+            }}
+          />
+        </QueryClientProvider>,
+      );
+    });
+    expect(
+      tree.root.findAllByType('button').map((item) => item.children.join(' ')),
+    ).not.toEqual(expect.arrayContaining(['Settle', 'Unsettle']));
+    act(() => tree.unmount());
   });
 
   it('renders durable lifecycle controls and disables archive for active runs', () => {

@@ -622,6 +622,23 @@ describe('Fastify dashboard route plugin', () => {
       createdAt: 1,
       updatedAt: 2,
     }));
+    routeContext.settleThread = vi.fn(async () => ({
+      id: 'thread-1',
+      projectId: 'project-1',
+      title: 'Thread',
+      status: 'completed',
+      settledAt: 3,
+      createdAt: 1,
+      updatedAt: 3,
+    }));
+    routeContext.unsettleThread = vi.fn(async () => ({
+      id: 'thread-1',
+      projectId: 'project-1',
+      title: 'Thread',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 4,
+    }));
     const restore = await app.inject({
       method: 'POST',
       url: '/api/threads/thread-1/restore',
@@ -673,6 +690,42 @@ describe('Fastify dashboard route plugin', () => {
       payload: { commandId: 'unpin-extra', extra: true },
     });
     expect(invalidUnpin.statusCode).toBe(400);
+    const settle = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/settle',
+      headers,
+      payload: { commandId: 'settle-1' },
+    });
+    expect(settle.statusCode).toBe(200);
+    expect(routeContext.settleThread).toHaveBeenCalledWith(
+      'thread-1',
+      'settle-1',
+    );
+    const invalidSettle = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/settle',
+      headers,
+      payload: { commandId: 'settle-extra', extra: true },
+    });
+    expect(invalidSettle.statusCode).toBe(400);
+    const unsettle = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/unsettle',
+      headers,
+      payload: { commandId: 'unsettle-1' },
+    });
+    expect(unsettle.statusCode).toBe(200);
+    expect(routeContext.unsettleThread).toHaveBeenCalledWith(
+      'thread-1',
+      'unsettle-1',
+    );
+    const invalidUnsettle = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/unsettle',
+      headers,
+      payload: { commandId: 'unsettle-extra', extra: true },
+    });
+    expect(invalidUnsettle.statusCode).toBe(400);
 
     routeContext.retryRun = vi.fn(async () => {
       throw new Error('Run missing.');

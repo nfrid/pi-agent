@@ -252,6 +252,16 @@ export interface OrchestrationRepository {
     threadId: string,
     now?: number,
   ): ThreadLifecycleCommandResult;
+  settleThread(
+    commandId: string,
+    threadId: string,
+    now?: number,
+  ): ThreadLifecycleCommandResult;
+  unsettleThread(
+    commandId: string,
+    threadId: string,
+    now?: number,
+  ): ThreadLifecycleCommandResult;
   /** Internal inspection seam; HTTP never exposes event history. */
   listThreadEvents(threadId: string): ThreadLifecycleEvent[];
   transitionCheckout(

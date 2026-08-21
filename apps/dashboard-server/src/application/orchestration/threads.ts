@@ -216,6 +216,7 @@ function archiveResponseThread(thread: Thread): Thread {
   const response = { ...thread };
   delete response.archivedAt;
   delete response.preArchiveStatus;
+  delete response.settledAt;
   return response;
 }
 
@@ -271,6 +272,26 @@ export async function unpinThread(
   commandId: string,
 ): Promise<Thread> {
   const result = host.repository.unpinThread(commandId, threadId);
+  host.changed();
+  return result.thread;
+}
+
+export async function settleThread(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const result = host.repository.settleThread(commandId, threadId);
+  host.changed();
+  return result.thread;
+}
+
+export async function unsettleThread(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const result = host.repository.unsettleThread(commandId, threadId);
   host.changed();
   return result.thread;
 }

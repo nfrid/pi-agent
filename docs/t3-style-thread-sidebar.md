@@ -27,7 +27,7 @@ These cases should remain usable in the sidebar, but lifecycle actions may be ab
 
 `dormant` describes current execution availability: the session is indexed but has no live runtime. `settled` is a user decision to park work while retaining it in the sidebar. A settled thread could still have runtime activity, and a dormant thread may still need attention.
 
-Dormant sessions are unavailable runtimes, not a lifecycle decision. Every unarchived, unpinned session—including dormant and offline sessions—renders in **Active**. No lifecycle state is inferred from runtime absence. Explicit settle and unsettle can be added later as durable lifecycle commands.
+Dormant sessions are unavailable runtimes, not a lifecycle decision. Every unarchived, unpinned, unsettled session—including dormant and offline sessions—renders in **Active**. No lifecycle state is inferred from runtime absence. Explicit settle and unsettle are implemented as durable lifecycle commands; settlement is independent of execution availability.
 
 ### Existing lifecycle coverage
 
@@ -44,18 +44,18 @@ Session rename already exists in the transcript header. This project will not du
 3. Replace expanded workspace blocks with a workspace scope control. Keep an "All workspaces" option.
 4. Render globally pinned threads first as full rows/cards.
 5. Render active threads as full rows/cards with Pi's existing status vocabulary.
-6. Render dormant and offline threads in **Active**, retaining status ordering and the bounded Show-next disclosure for large lists.
-7. Keep archived threads reachable in a compact collapsed shelf until a dedicated archived view exists.
-8. Keep existing context-menu actions, unread state, runtime controls, timestamps, and keyboard search behavior.
-9. Make the new-thread route look like an empty real thread: normal workspace header, blank transcript area, and the same composer at the bottom. Remove the centered onboarding illustration and copy.
-10. Preserve the current server contracts. This slice is primarily component structure, presentation, and client-side grouping.
+6. Render unpinned settled threads in a Settled shelf between Active and Archived; archived and pinned rows retain precedence.
+7. Render dormant and offline threads in **Active**, retaining status ordering and the bounded Show-next disclosure for large lists.
+8. Keep archived threads reachable in a compact collapsed shelf until a dedicated archived view exists.
+9. Keep existing context-menu actions, unread state, runtime controls, timestamps, and keyboard search behavior.
+10. Make the new-thread route look like an empty real thread: normal workspace header, blank transcript area, and the same composer at the bottom. Remove the centered onboarding illustration and copy.
+11. Preserve the current server contracts. This slice is primarily component structure, presentation, and client-side grouping.
 
 ### Follow-up lifecycle work
 
 Add only when requested or when the copied UX requires it:
 
 - persisted pin ordering and drag reordering;
-- explicit settle and unsettle;
 - snooze, wake, and a snoozed shelf;
 - sidebar draft persistence and draft rows;
 - multi-select and bulk actions;
@@ -70,7 +70,7 @@ Add only when requested or when the copied UX requires it:
 - No sidebar rename control.
 - No complete deletion.
 - No inferred settlement; runtime absence only makes a thread dormant/offline.
-- No new lifecycle database tables or protocol commands.
+- Settlement uses one nullable thread column and lifecycle events; no new lifecycle table or status enum member.
 - No T3 dependency stack, Tailwind migration, or wholesale component copy.
 - No project favicon, pull-request, terminal-process, or environment artwork work.
 - No deployment until focused tests and browser checks pass and the branch is explicitly approved for production.

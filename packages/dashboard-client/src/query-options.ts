@@ -580,6 +580,26 @@ export function pinThreadMutationOptions(client: DashboardHttpClient) {
   });
 }
 
+export function settleThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (variables: { threadId: string; commandId?: string }) =>
+      client.settleThread(variables.threadId, {
+        commandId: lifecycleCommandId('thread-settle', variables),
+      }),
+    retry: false,
+  });
+}
+
+export function unsettleThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (variables: { threadId: string; commandId?: string }) =>
+      client.unsettleThread(variables.threadId, {
+        commandId: lifecycleCommandId('thread-unsettle', variables),
+      }),
+    retry: false,
+  });
+}
+
 export function unpinThreadMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
     mutationFn: (variables: { threadId: string; commandId?: string }) =>

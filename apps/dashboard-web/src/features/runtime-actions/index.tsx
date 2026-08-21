@@ -5,6 +5,8 @@ import {
   pinThreadMutationOptions,
   restartRuntimeMutationOptions,
   restoreThreadMutationOptions,
+  settleThreadMutationOptions,
+  unsettleThreadMutationOptions,
   stopRuntimeMutationOptions,
   unpinThreadMutationOptions,
 } from '@pi-dashboard/client';
@@ -98,13 +100,25 @@ export function DurableThreadActions({
   );
   const pin = useMutation(pinThreadMutationOptions(dashboardHttpClient));
   const unpin = useMutation(unpinThreadMutationOptions(dashboardHttpClient));
+  const settle = useMutation(
+    settleThreadMutationOptions(dashboardHttpClient),
+  );
+  const unsettle = useMutation(
+    unsettleThreadMutationOptions(dashboardHttpClient),
+  );
   const archived = thread.archivedAt !== undefined;
   const pinned = thread.pinnedAt !== undefined;
+  const settled = thread.settledAt !== undefined;
   const busy =
-    archive.isPending || restore.isPending || pin.isPending || unpin.isPending;
+    archive.isPending ||
+    restore.isPending ||
+    pin.isPending ||
+    unpin.isPending ||
+    settle.isPending ||
+    unsettle.isPending;
 
   const run = async (
-    action: 'archive' | 'restore' | 'pin' | 'unpin',
+    action: 'archive' | 'restore' | 'pin' | 'unpin' | 'settle' | 'unsettle',
   ): Promise<void> => {
     setError(undefined);
     try {
@@ -114,7 +128,11 @@ export function DurableThreadActions({
         await restore.mutateAsync({ threadId: thread.threadId });
       else if (action === 'pin')
         await pin.mutateAsync({ threadId: thread.threadId });
-      else await unpin.mutateAsync({ threadId: thread.threadId });
+      else if (action === 'unpin')
+        await unpin.mutateAsync({ threadId: thread.threadId });
+      else if (action === 'settle')
+        await settle.mutateAsync({ threadId: thread.threadId });
+      else await unsettle.mutateAsync({ threadId: thread.threadId });
       await refreshDurableThreadMetadata(queryClient);
       closeMenu();
     } catch (cause) {
@@ -135,6 +153,19 @@ export function DurableThreadActions({
       >
         {pinned ? 'Unpin' : 'Pin'}
       </button>
+      {!archived && (
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busy}
+          onClick={(event) => {
+            event.stopPropagation();
+            void run(settled ? 'unsettle' : 'settle');
+          }}
+        >
+          {settled ? 'Unsettle' : 'Settle'}
+        </button>
+      )}
       <button
         type="button"
         role="menuitem"
