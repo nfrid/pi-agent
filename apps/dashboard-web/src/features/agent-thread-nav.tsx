@@ -349,13 +349,16 @@ function AgentThreadLink({
           </span>
         )}
         <strong>{row.title}</strong>
-        {density === 'slim' && (
-          <DashboardTime
-            className={`agent-thread-time ${styles.threadTime}`}
-            timestamp={row.updatedAt}
-            context="sidebar"
-          />
-        )}
+        {density === 'slim' &&
+          (row.updatedAt === undefined ? (
+            <span className={styles.threadTime}>{statusLabel(row)}</span>
+          ) : (
+            <DashboardTime
+              className={`agent-thread-time ${styles.threadTime}`}
+              timestamp={row.updatedAt}
+              context="sidebar"
+            />
+          ))}
       </span>
     </button>
   );
