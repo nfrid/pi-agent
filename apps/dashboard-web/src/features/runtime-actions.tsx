@@ -5,5 +5,6 @@ export {
   type RuntimeLifecycleActionAvailability,
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,
+  refreshDurableThreadMetadata,
   runtimeLifecycleActionAvailability,
 } from './runtime-actions/index';

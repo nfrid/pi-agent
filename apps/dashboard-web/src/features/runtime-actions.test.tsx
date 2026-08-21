@@ -1,9 +1,11 @@
+import { dashboardQueryKeys } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DurableThreadActions,
+  refreshDurableThreadMetadata,
   runtimeLifecycleActionAvailability,
 } from './runtime-actions';
 
@@ -23,6 +25,22 @@ function runtime(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
 }
 
 describe('runtime lifecycle action availability', () => {
+  it('refreshes durable thread state after runtime lifecycle changes', async () => {
+    const client = new QueryClient();
+    const invalidate = vi
+      .spyOn(client, 'invalidateQueries')
+      .mockResolvedValue(undefined);
+
+    await refreshDurableThreadMetadata(client);
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: dashboardQueryKeys.threads(),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: dashboardQueryKeys.sessionThreadLinks(),
+    });
+  });
+
   it('renders durable lifecycle controls and disables archive for active runs', () => {
     const client = new QueryClient();
     let tree!: ReturnType<typeof create>;

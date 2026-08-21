@@ -9,7 +9,11 @@ import {
   unpinThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryClient,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { type ReactNode, useRef, useState } from 'react';
 import { errorMessage } from '../../shared/lib/error-message';
@@ -20,6 +24,21 @@ import {
   runtimeLifecycleActionAvailability,
 } from './availability';
 import { useRuntimeLifecycleMenu } from './lifecycle-menu';
+
+export async function refreshDurableThreadMetadata(
+  queryClient: QueryClient,
+): Promise<void> {
+  await Promise.all([
+    queryClient
+      .invalidateQueries({ queryKey: dashboardQueryKeys.threads() })
+      .catch(() => undefined),
+    queryClient
+      .invalidateQueries({
+        queryKey: dashboardQueryKeys.sessionThreadLinks(),
+      })
+      .catch(() => undefined),
+  ]);
+}
 
 type AgentThreadActionMenuProps = {
   title: string;
@@ -96,16 +115,7 @@ export function DurableThreadActions({
       else if (action === 'pin')
         await pin.mutateAsync({ threadId: thread.threadId });
       else await unpin.mutateAsync({ threadId: thread.threadId });
-      await Promise.all([
-        queryClient
-          .invalidateQueries({ queryKey: dashboardQueryKeys.threads() })
-          .catch(() => undefined),
-        queryClient
-          .invalidateQueries({
-            queryKey: dashboardQueryKeys.sessionThreadLinks(),
-          })
-          .catch(() => undefined),
-      ]);
+      await refreshDurableThreadMetadata(queryClient);
       closeMenu();
     } catch (cause) {
       setError(`Unable to ${action} ${title}: ${errorMessage(cause)}`);
@@ -158,6 +168,7 @@ export function RuntimeLifecycleActions({
   children,
 }: RuntimeLifecycleActionsProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string>();
   const [gracefulStopFailed, setGracefulStopFailed] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -174,6 +185,7 @@ export function RuntimeLifecycleActions({
     setError(undefined);
     try {
       await stop.mutateAsync({ runtimeId: runtime.runtimeId, force });
+      await refreshDurableThreadMetadata(queryClient);
       if (!force) setGracefulStopFailed(false);
       closeMenu();
     } catch (cause) {
