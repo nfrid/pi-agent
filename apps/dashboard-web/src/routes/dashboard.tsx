@@ -17,6 +17,7 @@ export {
 } from '../features/dashboard-overview';
 export { InboxView } from '../features/inbox';
 export { Header, runtimeStatusCounts } from '../features/navigation';
+export { ProjectsView, ProjectView } from '../features/project-catalogue';
 export { SessionRow } from '../features/workspace-session';
 export { WorkspaceView } from '../features/workspace-view';
 export { Back, newChatPath, useDashboardNavigate } from './navigation';

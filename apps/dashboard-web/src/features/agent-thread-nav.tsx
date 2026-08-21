@@ -814,10 +814,13 @@ export function AgentThreadNav({
         <button
           type="button"
           className={styles.utility}
-          onClick={() => openUtility('workspaces', '/workspaces')}
+          onClick={() => {
+            onOpenChange?.(false);
+            go('/projects');
+          }}
         >
           <span aria-hidden="true">⌂</span>
-          <span>Workspaces</span>
+          <span>Projects</span>
         </button>
         <button
           type="button"

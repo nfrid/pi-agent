@@ -40,6 +40,7 @@ type PaletteItem =
 
 // Keep the palette useful on large installations without creating a second
 // unbounded session browser inside the dialog.
+const MAX_PALETTE_PROJECTS = 24;
 const MAX_PALETTE_WORKSPACES = 24;
 const MAX_PALETTE_SESSIONS = 24;
 
@@ -85,9 +86,16 @@ export function paletteItems(
     },
     {
       kind: 'navigate',
+      id: 'projects',
+      title: 'Projects',
+      description: 'Browse registered projects',
+      path: '/projects',
+    },
+    {
+      kind: 'navigate',
       id: 'workspaces',
       title: 'Workspaces',
-      description: 'Browse workspaces',
+      description: 'Browse legacy workspace discovery',
       path: '/workspaces',
     },
     {
@@ -126,6 +134,15 @@ export function paletteItems(
       path: `/sessions/${encodeURIComponent(session.id)}`,
     }),
   );
+  const projects = (snapshot.projects ?? []).slice(0, MAX_PALETTE_PROJECTS).map(
+    (project): PaletteItem => ({
+      kind: 'navigate',
+      id: `project:${project.id}`,
+      title: `Project: ${project.title}`,
+      description: project.rootPath,
+      path: `/projects/${encodeURIComponent(project.id)}`,
+    }),
+  );
   const workspaces = snapshot.workspaces.slice(0, MAX_PALETTE_WORKSPACES).map(
     (workspace): PaletteItem => ({
       kind: 'navigate',
@@ -135,5 +152,5 @@ export function paletteItems(
       path: `/workspaces/${encodeURIComponent(workspace.id)}`,
     }),
   );
-  return [...primary, ...actions, ...sessions, ...workspaces];
+  return [...primary, ...actions, ...sessions, ...projects, ...workspaces];
 }

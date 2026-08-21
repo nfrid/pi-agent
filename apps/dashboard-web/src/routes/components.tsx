@@ -8,6 +8,8 @@ import { SessionView } from '../features/session';
 import {
   Dashboard,
   InboxView,
+  ProjectsView,
+  ProjectView,
   SessionsView,
   WorkspacesView,
   WorkspaceView,
@@ -77,6 +79,21 @@ export function PendingNewChatRoute() {
   ) : null;
 }
 
+export function ProjectsRoute() {
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectsView snapshot={dashboard.snapshot} />
+  ) : null;
+}
+
+export function ProjectRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId' });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectView id={projectId} snapshot={dashboard.snapshot} />
+  ) : null;
+}
+
 export function WorkspacesRoute() {
   const dashboard = useDashboardContext();
   return dashboard.snapshot ? (
@@ -117,11 +134,8 @@ export function LegacyNewRoute() {
     : '/workspaces';
   useEffect(() => go(path), [go, path]);
   return (
-    <section
-      className={`new-chat-missing ${newChatStyles.newChatMissing}`}
-      role="status"
-    >
+    <output className={`new-chat-missing ${newChatStyles.newChatMissing}`}>
       <p>Opening a new chat…</p>
-    </section>
+    </output>
   );
 }

@@ -10,6 +10,8 @@ import {
   LegacyNewRoute,
   NewChatRoute,
   PendingNewChatRoute,
+  ProjectRoute,
+  ProjectsRoute,
   RuntimeRoute,
   SessionRoute,
   SessionsRoute,
@@ -32,6 +34,16 @@ const sessionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/sessions/$sessionId',
   component: SessionRoute,
+});
+const projectsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects',
+  component: ProjectsRoute,
+});
+const projectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects/$projectId',
+  component: ProjectRoute,
 });
 const workspacesRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -73,6 +85,8 @@ export const dashboardRouteTree = rootRoute.addChildren([
   homeRoute,
   sessionsRoute,
   sessionRoute,
+  projectsRoute,
+  projectRoute,
   workspacesRoute,
   workspaceRoute,
   newChatRoute,
