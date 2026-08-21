@@ -113,77 +113,81 @@ export function ComposerShell({
   notice?: ReactNode;
 }) {
   return (
-    <form
-      className={`composer${dragging ? ' dragging' : ''}${className ? ` ${className}` : ''}`}
-      aria-label={ariaLabel}
-      onSubmit={onSubmit}
-      onDragEnter={onDragEnter}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
-      <ImageAttachmentInput
-        enabled={attachmentsEnabled}
-        busy={attachmentsBusy}
-        inputRef={fileInputRef}
-        onFiles={onSelectImages}
-      />
-      <ImageAttachmentPreviews
-        attachments={attachments}
-        busy={attachmentsBusy}
-        onRemove={onRemoveImage}
-      />
+    <>
       {notice}
-      <ComposerRichSurface
-        onPasteCapture={onPasteCapture}
-        submissionDisabled={submissionDisabled}
+      <form
+        className={`composer${dragging ? ' dragging' : ''}${className ? ` ${className}` : ''}`}
+        aria-label={ariaLabel}
+        onSubmit={onSubmit}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
       >
-        <Suspense
-          fallback={
-            <output className="composer-editor-loading">Loading editor…</output>
-          }
+        <ImageAttachmentInput
+          enabled={attachmentsEnabled}
+          busy={attachmentsBusy}
+          inputRef={fileInputRef}
+          onFiles={onSelectImages}
+        />
+        <ImageAttachmentPreviews
+          attachments={attachments}
+          busy={attachmentsBusy}
+          onRemove={onRemoveImage}
+        />
+        <ComposerRichSurface
+          onPasteCapture={onPasteCapture}
+          submissionDisabled={submissionDisabled}
         >
-          <MarkdownComposerEditor
-            ref={editorRef}
-            {...(initialMarkdown === undefined ? {} : { initialMarkdown })}
-            commands={commands}
-            onChange={onChange}
-            placeholder={placeholder}
-            readOnly={readOnly}
-          />
-        </Suspense>
-        <div className="composer-actions">
-          <AriaButton
-            type="button"
-            className="composer-attach"
-            isDisabled={!attachmentsEnabled || attachmentsBusy}
-            onPress={() => fileInputRef.current?.click()}
-            aria-label={
-              attachmentsEnabled
-                ? 'Attach images'
-                : 'Attach images (unsupported by selected model)'
+          <Suspense
+            fallback={
+              <output className="composer-editor-loading">
+                Loading editor…
+              </output>
             }
           >
-            <span aria-hidden="true">＋</span>
-            <span className="composer-attach-label">Image</span>
-          </AriaButton>
-          <AriaButton
-            type="submit"
-            className="composer-send"
-            isDisabled={sendDisabled}
-            aria-label={sendAriaLabel}
-          >
-            <span aria-hidden="true">↑</span>
-            {sendSrOnly && <span className="sr-only">{sendSrOnly}</span>}
-          </AriaButton>
-          {actionExtras}
+            <MarkdownComposerEditor
+              ref={editorRef}
+              {...(initialMarkdown === undefined ? {} : { initialMarkdown })}
+              commands={commands}
+              onChange={onChange}
+              placeholder={placeholder}
+              readOnly={readOnly}
+            />
+          </Suspense>
+          <div className="composer-actions">
+            <AriaButton
+              type="button"
+              className="composer-attach"
+              isDisabled={!attachmentsEnabled || attachmentsBusy}
+              onPress={() => fileInputRef.current?.click()}
+              aria-label={
+                attachmentsEnabled
+                  ? 'Attach images'
+                  : 'Attach images (unsupported by selected model)'
+              }
+            >
+              <span aria-hidden="true">＋</span>
+              <span className="composer-attach-label">Image</span>
+            </AriaButton>
+            <AriaButton
+              type="submit"
+              className="composer-send"
+              isDisabled={sendDisabled}
+              aria-label={sendAriaLabel}
+            >
+              <span aria-hidden="true">↑</span>
+              {sendSrOnly && <span className="sr-only">{sendSrOnly}</span>}
+            </AriaButton>
+            {actionExtras}
+          </div>
+        </ComposerRichSurface>
+        <div className="composer-secondary">
+          <div className="composer-mode">{mode}</div>
+          <div className="composer-control-row">{controls}</div>
+          {footer}
         </div>
-      </ComposerRichSurface>
-      <div className="composer-secondary">
-        <div className="composer-mode">{mode}</div>
-        <div className="composer-control-row">{controls}</div>
-        {footer}
-      </div>
-    </form>
+      </form>
+    </>
   );
 }

@@ -1,17 +1,22 @@
 import type { MDXEditorMethods } from '@mdxeditor/editor';
+import type { DashboardLiveStore } from '@pi-dashboard/client';
 import {
   commandMutationOptions,
   composerCommandsQueryOptions,
   dashboardHttpClient,
   startRuntimeMutationOptions,
 } from '@pi-dashboard/client';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  RuntimeSnapshot,
+  SessionIndexEntry,
+} from '@pi-dashboard/protocol';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
 import { ProgressBar } from '../../shared/ui/progress-bar';
+
 import { hasSettledBackground } from '../presentation-status';
 import { useImageAttachments } from './attachments';
 import { useComposerDraft } from './draft';
@@ -27,8 +32,11 @@ import {
   composerMode,
   composerSubmissionPolicy,
   contextIndicatorData,
+  dormantResumeMetadata,
+  formatContextTokens,
   resumeRuntimeRequest,
   runtimeSupportsImages,
+  waitForStartedRuntime,
 } from './runtime';
 import {
   RuntimeModelControl,
@@ -67,6 +75,8 @@ function ContextIndicator({
 export function Composer({
   runtime,
   runtimes = runtime ? [runtime] : [],
+  session,
+  store,
   sessionId,
   workspaceId,
   onMessageSubmitted,
@@ -74,6 +84,8 @@ export function Composer({
 }: {
   runtime: RuntimeSnapshot | undefined;
   runtimes?: readonly RuntimeSnapshot[];
+  session?: SessionIndexEntry;
+  store?: DashboardLiveStore;
   sessionId: string;
   workspaceId?: string;
   onMessageSubmitted?: () => void;
@@ -91,6 +103,7 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [resumeError, setResumeError] = useState<string>();
   const [resumePending, setResumePending] = useState(false);
+  const dormantImageAttemptRef = useRef(false);
   const commandMutation = useMutation(
     commandMutationOptions(dashboardHttpClient),
   );
@@ -110,12 +123,10 @@ export function Composer({
   const submissionDisabled = runtime
     ? disabled
     : !workspaceId || resumeMutation.isPending || resumePending;
-  // Dormant sessions cannot safely advertise image support until a runtime
-  // reports its model capability, so attachment selection stays disabled.
-  const attachmentsEnabled =
-    Boolean(runtime) &&
-    runtime?.liveState !== 'compacting' &&
-    (runtime ? runtimeSupportsImages(runtime) : false);
+  const dormantMetadata = dormantResumeMetadata(session, runtimes);
+  const attachmentsEnabled = runtime
+    ? runtime.liveState !== 'compacting' && runtimeSupportsImages(runtime)
+    : dormantMetadata.supportsImages;
   const {
     attachments,
     dragging,
@@ -131,6 +142,7 @@ export function Composer({
   } = useImageAttachments({
     enabled: attachmentsEnabled,
     busy: busy || disabled || resumePending,
+    clearOnDisable: !dormantImageAttemptRef.current,
     onError: setError,
   });
   const submissionPolicy = runtime
@@ -149,6 +161,10 @@ export function Composer({
   useEffect(() => {
     if (runtime) setResumePending(false);
   }, [runtime]);
+  useEffect(() => {
+    if (runtime && attachments.length === 0)
+      dormantImageAttemptRef.current = false;
+  }, [attachments.length, runtime]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedText = text.trim();
@@ -161,24 +177,50 @@ export function Composer({
     setBusy(true);
     setError(undefined);
     if (!runtime) {
-      const request = resumeRuntimeRequest(workspaceId, sessionId, trimmedText);
+      const hasImages = attachments.length > 0;
+      const request = resumeRuntimeRequest(
+        workspaceId,
+        sessionId,
+        hasImages ? undefined : trimmedText,
+      );
       if (!request) {
         setResumeError('This session has no workspace association.');
         setBusy(false);
         return;
       }
       setResumeError(undefined);
+      dormantImageAttemptRef.current = hasImages;
+      setResumePending(true);
       try {
-        // The initial prompt belongs to the start mutation. Do not echo it as
-        // a runtime command after the dormant session comes online.
-        await resumeMutation.mutateAsync(request);
+        // Text resumes use the start mutation's exact-once initialPrompt path.
+        const result = await resumeMutation.mutateAsync(request);
         if (!mountedRef.current) return;
-        setResumePending(true);
+        if (hasImages) {
+          if (!store)
+            throw new Error('The dormant session store is unavailable.');
+          const started = await waitForStartedRuntime(
+            store,
+            result.result.runtimeId,
+          );
+          if (!runtimeSupportsImages(started))
+            throw new Error(
+              'The resumed runtime does not support image input.',
+            );
+          await dashboardHttpClient.sendCommandWithImages(
+            result.result.runtimeId,
+            { type: 'prompt', text: trimmedText },
+            attachments.map((attachment) => attachment.file),
+          );
+          clearAttachments();
+        }
         clearDraft();
         editorRef.current?.setMarkdown('');
         onPromptSubmitted?.(trimmedText);
       } catch (cause) {
-        if (mountedRef.current) setResumeError(errorMessage(cause));
+        if (mountedRef.current) {
+          setResumePending(false);
+          setResumeError(errorMessage(cause));
+        }
       } finally {
         if (mountedRef.current) setBusy(false);
       }
@@ -249,8 +291,8 @@ export function Composer({
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        attachmentsEnabled={false}
-        attachmentsBusy={submissionDisabled || busy}
+        attachmentsEnabled={attachmentsEnabled}
+        attachmentsBusy={submissionDisabled || busy || resumePending}
         fileInputRef={fileInputRef}
         attachments={attachments}
         onSelectImages={selectImages}
@@ -263,10 +305,22 @@ export function Composer({
         placeholder="Message Pi…"
         readOnly={submissionDisabled || busy}
         submissionDisabled={submissionDisabled || busy}
-        sendDisabled={submissionDisabled || busy || !text.trim()}
+        sendDisabled={
+          submissionDisabled || busy || (!text.trim() && !attachments.length)
+        }
         sendAriaLabel="Send message"
         mode={<span>Prompt</span>}
-        controls={null}
+        controls={
+          <span className="composer-resume-metadata">
+            {dormantMetadata.model
+              ? `${dormantMetadata.model.provider}/${dormantMetadata.model.model}`
+              : '? model'}{' '}
+            · {dormantMetadata.thinking ?? '? effort'} ·{' '}
+            {dormantMetadata.contextTokens === undefined
+              ? '? ctx'
+              : `${formatContextTokens(dormantMetadata.contextTokens)} ctx`}
+          </span>
+        }
         notice={
           <div className="composer-notice" role="note">
             <strong>This session is dormant</strong>

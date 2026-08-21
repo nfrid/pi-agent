@@ -15,6 +15,7 @@ import {
 import { createPortal } from 'react-dom';
 import { sortWorkspacesByRecency } from '../app-helpers';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
+import { formatCompactCount } from '../shared/lib/format';
 import {
   type AgentThreadRow,
   agentThreadRows,
@@ -37,6 +38,7 @@ import {
   useAgentThreadDrawer,
 } from './agent-thread-nav/use-agent-thread-drawer';
 import styles from './agent-thread-nav.module.css';
+import { dormantResumeMetadata } from './composer/runtime';
 import { useDashboardUtility } from './dashboard-utility-context';
 import {
   AgentThreadActionMenu,
@@ -248,19 +250,30 @@ function WorkspaceChooser({
   );
 }
 
-function activeThreadDetails(row: AgentThreadRow): string[] {
+export function activeThreadDetails(
+  row: AgentThreadRow,
+  runtimes: BrowserSnapshot['runtimes'],
+): string[] {
   const details: string[] = [];
-  if (row.runtime?.model?.model) details.push(row.runtime.model.model);
-  if (row.runtime?.model?.thinking) details.push(row.runtime.model.thinking);
-  const contextPercent = row.runtime?.contextUsage?.percent;
-  if (typeof contextPercent === 'number' && Number.isFinite(contextPercent))
-    details.push(`${Math.round(contextPercent)}% ctx`);
+  const indexed = dormantResumeMetadata(row.session, runtimes);
+  const model = row.runtime?.model ?? indexed.model;
+  if (model) details.push(`${model.provider}/${model.model}`);
+  else
+    details.push(
+      row.status === 'dormant' ? 'Resumes on send' : 'Controls unavailable',
+    );
+  const thinking = row.runtime?.model?.thinking ?? indexed.thinking;
+  details.push(thinking ?? '? effort');
+  const runtimeTokens = row.runtime?.contextUsage?.tokens;
+  const tokens =
+    typeof runtimeTokens === 'number' && Number.isFinite(runtimeTokens)
+      ? runtimeTokens
+      : indexed.contextTokens;
+  details.push(
+    tokens === undefined ? '? ctx' : `${formatCompactCount(tokens)} ctx`,
+  );
   const queued = row.runtime?.queueDrafts?.length ?? 0;
   if (queued > 0) details.push(`${queued} queued`);
-  if (!details.length) {
-    if (row.status === 'dormant') details.push('Resumes on send');
-    else if (row.status === 'offline') details.push('Controls unavailable');
-  }
   return details;
 }
 
@@ -273,6 +286,7 @@ function AgentThreadLink({
   density,
   onSelect,
   lifecycleProps,
+  runtimes,
 }: {
   row: AgentThreadRow;
   selected: boolean;
@@ -281,8 +295,9 @@ function AgentThreadLink({
   density: 'card' | 'slim';
   onSelect: () => void;
   lifecycleProps?: RuntimeLifecycleThreadProps;
+  runtimes: BrowserSnapshot['runtimes'];
 }) {
-  const details = density === 'card' ? activeThreadDetails(row) : [];
+  const details = density === 'card' ? activeThreadDetails(row, runtimes) : [];
   const showDetails =
     density === 'card' && (details.length > 0 || row.updatedAt !== undefined);
   return (
@@ -601,6 +616,7 @@ export function AgentThreadNav({
         density={density}
         onSelect={() => select(row.id)}
         lifecycleProps={lifecycleProps}
+        runtimes={snapshot.runtimes}
       />
     );
     if (!row.runtime) {

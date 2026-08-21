@@ -45,6 +45,7 @@ import {
   sampleTranscriptLandmarks,
 } from './entities/transcript';
 import {
+  activeThreadDetails,
   agentThreadRows,
   boundedAgentThreadRows,
 } from './features/agent-thread-nav';
@@ -850,6 +851,48 @@ describe('shared transcript projection web integration', () => {
 });
 
 describe('workspace-first agent navigation', () => {
+  it('prefers runtime, indexed, then configured resume metadata', () => {
+    const runtimes = [
+      {
+        model: { provider: 'configured', model: 'default', thinking: 'low' },
+        modelCatalog: [
+          { provider: 'configured', model: 'default', supportsImages: false },
+        ],
+        thinkingLevels: ['low'],
+      },
+    ] as never;
+    const indexed = {
+      lastKnownModel: { provider: 'indexed', model: 'old' },
+      lastKnownThinking: 'medium',
+      lastKnownContextTokens: 42,
+    };
+    expect(
+      activeThreadDetails(
+        {
+          status: 'idle',
+          runtime: {
+            model: { provider: 'runtime', model: 'current', thinking: 'high' },
+            contextUsage: { tokens: 123 },
+          },
+          session: indexed,
+        } as never,
+        runtimes,
+      ),
+    ).toEqual(['runtime/current', 'high', '123 ctx']);
+    expect(
+      activeThreadDetails(
+        { status: 'dormant', runtime: {}, session: indexed } as never,
+        runtimes,
+      ),
+    ).toEqual(['indexed/old', 'medium', '42 ctx']);
+    expect(
+      activeThreadDetails(
+        { status: 'dormant', session: {} } as never,
+        runtimes,
+      ),
+    ).toEqual(['configured/default', 'low', '? ctx']);
+  });
+
   it('keeps unindexed live rows stable until session metadata arrives', () => {
     const dateNow = vi.spyOn(Date, 'now').mockReturnValue(700);
     const snapshot = {

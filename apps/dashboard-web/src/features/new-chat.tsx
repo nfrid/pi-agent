@@ -22,6 +22,7 @@ import {
   ComposerThinkingControl,
   useImageAttachments,
 } from './composer/public';
+import { waitForStartedRuntime } from './composer/runtime';
 import {
   configuredModelOptions,
   modelOptionValue,
@@ -29,30 +30,9 @@ import {
 } from './model-option';
 import styles from './new-chat.module.css';
 
-type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
+export { waitForStartedRuntime } from './composer/runtime';
 
-export async function waitForStartedRuntime(
-  store: DashboardLiveStore,
-  runtimeId: string,
-  timeoutMs = 30_000,
-): Promise<RuntimeSnapshot> {
-  const current = () => store.getSnapshot().runtimesById[runtimeId];
-  const ready = current();
-  if (ready) return ready;
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      unsubscribe();
-      reject(new Error('The new runtime did not connect in time.'));
-    }, timeoutMs);
-    const unsubscribe = store.subscribe(() => {
-      const runtime = current();
-      if (!runtime) return;
-      clearTimeout(timeout);
-      unsubscribe();
-      resolve(runtime);
-    });
-  });
-}
+type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
 
 export function preferredNewChatRuntime(
   workspacePath: string,

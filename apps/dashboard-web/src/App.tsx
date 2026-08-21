@@ -24,6 +24,7 @@ export {
 } from './entities/transcript';
 export {
   AgentThreadNav,
+  activeThreadDetails,
   agentThreadRows,
   boundedAgentThreadRows,
 } from './features/agent-thread-nav';

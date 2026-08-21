@@ -3,7 +3,10 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mutateAsync = vi.fn(async () => ({ result: { runtimeId: 'runtime-1' } }));
+const sendCommandWithImages = vi.fn(async () => undefined);
 const clearDraft = vi.fn();
+const clearAttachments = vi.fn();
+let mockedAttachments: readonly { file: File; previewUrl: string }[] = [];
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutateAsync }),
@@ -12,7 +15,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@pi-dashboard/client', () => ({
   commandMutationOptions: vi.fn(),
   composerCommandsQueryOptions: vi.fn(),
-  dashboardHttpClient: {},
+  dashboardHttpClient: { sendCommandWithImages },
   startRuntimeMutationOptions: vi.fn(),
 }));
 vi.mock('../../routes/navigation', () => ({
@@ -28,12 +31,12 @@ vi.mock('./draft', () => ({
 }));
 vi.mock('./attachments', () => ({
   useImageAttachments: () => ({
-    attachments: [],
+    attachments: mockedAttachments,
     dragging: false,
     fileInputRef: { current: null },
     selectImages: vi.fn(),
     removeImage: vi.fn(),
-    clearAttachments: vi.fn(),
+    clearAttachments,
     onDragEnter: vi.fn(),
     onDragOver: vi.fn(),
     onDragLeave: vi.fn(),
@@ -87,11 +90,61 @@ vi.mock('./shell', () => ({
 }));
 
 afterEach(() => {
-  mutateAsync.mockClear();
+  mutateAsync.mockReset();
+  mutateAsync.mockResolvedValue({ result: { runtimeId: 'runtime-1' } });
+  sendCommandWithImages.mockClear();
   clearDraft.mockClear();
+  clearAttachments.mockClear();
+  mockedAttachments = [];
 });
 
 describe('Composer dormant resume transition', () => {
+  it('does not reassert pending after runtime registration wins the race', async () => {
+    let resolveStart!: (value: { result: { runtimeId: string } }) => void;
+    mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={undefined}
+          sessionId="session-1"
+          workspaceId="workspace-1"
+        />,
+      );
+    });
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'text' },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    await act(async () => {
+      renderer.update(
+        <Composer
+          runtime={runtime}
+          sessionId="session-1"
+          workspaceId="workspace-1"
+        />,
+      );
+      resolveStart({ result: { runtimeId: 'runtime-1' } });
+      await Promise.resolve();
+    });
+    expect(renderer.root.findByType('div').props['data-attachments-busy']).toBe(
+      'false',
+    );
+  });
+
   it('clears pending state when the started runtime arrives', async () => {
     const { Composer } = await import('./view');
     const dormant = (
@@ -142,5 +195,118 @@ describe('Composer dormant resume transition', () => {
     expect(
       renderer.root.findByProps({ children: 'Attach' }).props.disabled,
     ).toBe(false);
+  });
+
+  it('starts dormant image resumes without initialPrompt and sends once', async () => {
+    mockedAttachments = [
+      { file: { name: 'image.png' } as File, previewUrl: 'preview' },
+    ];
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'vision', supportsImages: true },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const store = {
+      getSnapshot: () => ({ runtimesById: { 'runtime-1': runtime } }),
+      subscribe: vi.fn(),
+    } as never;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={undefined}
+          runtimes={[runtime]}
+          session={{
+            id: 'session-1',
+            file: '',
+            cwd: '/tmp',
+            updatedAt: 1,
+            lastKnownModel: { provider: 'test', model: 'vision' },
+          }}
+          store={store}
+          sessionId="session-1"
+          workspaceId="workspace-1"
+        />,
+      );
+    });
+    expect(
+      renderer.root.findByProps({ children: 'Attach' }).props.disabled,
+    ).toBe(false);
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    expect(mutateAsync).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+    });
+    expect(sendCommandWithImages).toHaveBeenCalledOnce();
+    expect(clearAttachments).toHaveBeenCalledOnce();
+    expect(clearDraft).toHaveBeenCalledOnce();
+  });
+
+  it('preserves dormant images when capability or delivery fails', async () => {
+    mockedAttachments = [
+      { file: { name: 'image.png' } as File, previewUrl: 'preview' },
+    ];
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'vision', supportsImages: true },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const startedRuntime = {
+      ...runtime,
+      model: { provider: 'test', model: 'vision', supportsImages: false },
+    } as unknown as RuntimeSnapshot;
+    const store = {
+      getSnapshot: () => ({ runtimesById: { 'runtime-1': startedRuntime } }),
+      subscribe: vi.fn(),
+    } as never;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={undefined}
+          runtimes={[runtime]}
+          session={{
+            id: 'session-1',
+            file: '',
+            cwd: '/tmp',
+            updatedAt: 1,
+            lastKnownModel: { provider: 'test', model: 'vision' },
+          }}
+          store={store}
+          sessionId="session-1"
+          workspaceId="workspace-1"
+        />,
+      );
+    });
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    expect(sendCommandWithImages).not.toHaveBeenCalled();
+    expect(clearAttachments).not.toHaveBeenCalled();
+    expect(clearDraft).not.toHaveBeenCalled();
+
+    startedRuntime.model = {
+      provider: 'test',
+      model: 'vision',
+      supportsImages: true,
+    };
+    sendCommandWithImages.mockRejectedValueOnce(new Error('send failed'));
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    expect(sendCommandWithImages).toHaveBeenCalledOnce();
+    expect(clearAttachments).not.toHaveBeenCalled();
+    expect(clearDraft).not.toHaveBeenCalled();
   });
 });

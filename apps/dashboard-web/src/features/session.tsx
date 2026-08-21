@@ -249,6 +249,7 @@ export function SessionView({
           sessionChange={sessionChange}
           store={store}
           runtimes={snapshot.runtimes}
+          session={data.metadata}
           sessionId={id}
           workspaceId={workspaceId}
           onPromptSubmitted={(text) => {

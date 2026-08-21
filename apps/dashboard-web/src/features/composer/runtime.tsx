@@ -1,9 +1,39 @@
+import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type {
   RuntimeSnapshot,
+  SessionIndexEntry,
   StartRuntimeRequest,
 } from '@pi-dashboard/protocol';
 import { formatCompactCount } from '../../shared/lib/format';
+import {
+  configuredModelOptions,
+  modelOptionValue,
+  type RuntimeModelOption,
+} from '../model-option';
 import { hasSettledBackground } from '../presentation-status';
+
+export async function waitForStartedRuntime(
+  store: DashboardLiveStore,
+  runtimeId: string,
+  timeoutMs = 30_000,
+): Promise<RuntimeSnapshot> {
+  const current = () => store.getSnapshot().runtimesById[runtimeId];
+  const ready = current();
+  if (ready) return ready;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      reject(new Error('The new runtime did not connect in time.'));
+    }, timeoutMs);
+    const unsubscribe = store.subscribe(() => {
+      const runtime = current();
+      if (!runtime) return;
+      clearTimeout(timeout);
+      unsubscribe();
+      resolve(runtime);
+    });
+  });
+}
 
 export function resumeRuntimeRequest(
   workspaceId: string | undefined,
@@ -48,6 +78,53 @@ export function contextIndicatorData(
 
 export function runtimeSupportsImages(runtime: RuntimeSnapshot): boolean {
   return runtime.model?.supportsImages === true;
+}
+
+export type DormantResumeMetadata = {
+  model?: RuntimeModelOption;
+  thinking?: string;
+  contextTokens?: number;
+  supportsImages: boolean;
+};
+
+function currentModelSupportsImages(
+  model: RuntimeModelOption | undefined,
+  runtimes: readonly RuntimeSnapshot[],
+): boolean {
+  if (!model) return false;
+  const value = modelOptionValue(model.provider, model.model);
+  return runtimes.some(
+    (runtime) =>
+      (runtime.model &&
+        modelOptionValue(runtime.model.provider, runtime.model.model) ===
+          value &&
+        runtime.model.supportsImages === true) ||
+      runtime.modelCatalog?.some(
+        (option) =>
+          modelOptionValue(option.provider, option.model) === value &&
+          option.supportsImages === true,
+      ),
+  );
+}
+
+export function dormantResumeMetadata(
+  session: SessionIndexEntry | undefined,
+  runtimes: readonly RuntimeSnapshot[],
+): DormantResumeMetadata {
+  const persistedModel = session?.lastKnownModel;
+  const model = persistedModel ?? configuredModelOptions(runtimes)[0];
+  const thinkingLevels = runtimes.flatMap(
+    (runtime) => runtime.thinkingLevels ?? [],
+  );
+  const thinking = session?.lastKnownThinking ?? thinkingLevels[0];
+  return {
+    ...(model ? { model } : {}),
+    ...(thinking ? { thinking } : {}),
+    ...(session?.lastKnownContextTokens === undefined
+      ? {}
+      : { contextTokens: session.lastKnownContextTokens }),
+    supportsImages: currentModelSupportsImages(persistedModel, runtimes),
+  };
 }
 
 export type ComposerMode = 'prompt' | 'steer' | 'followUp';

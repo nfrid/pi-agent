@@ -1,5 +1,8 @@
 import type { DashboardLiveStore } from '@pi-dashboard/client';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  RuntimeSnapshot,
+  SessionIndexEntry,
+} from '@pi-dashboard/protocol';
 import type { ComponentType, ReactNode, RefObject } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
 import { useDashboardNavigate } from '../../routes/navigation';
@@ -12,6 +15,8 @@ import { InlineSessionRename } from '../session-rename';
 export type SessionComposerProps = {
   runtime: RuntimeSnapshot | undefined;
   runtimes?: readonly RuntimeSnapshot[];
+  session?: SessionIndexEntry;
+  store?: DashboardLiveStore;
   sessionId: string;
   workspaceId?: string;
   onMessageSubmitted?: () => void;
@@ -223,6 +228,7 @@ export function SessionControlLayer({
   sessionChange,
   store,
   runtimes,
+  session,
   sessionId,
   workspaceId,
   onPromptSubmitted,
@@ -235,6 +241,7 @@ export function SessionControlLayer({
   sessionChange: number;
   store: DashboardLiveStore;
   runtimes: readonly RuntimeSnapshot[];
+  session?: SessionIndexEntry;
   sessionId: string;
   workspaceId: string | undefined;
   onPromptSubmitted: (text: string) => void;
@@ -266,6 +273,8 @@ export function SessionControlLayer({
         key={sessionId}
         runtime={runtime}
         runtimes={runtimes}
+        session={session}
+        store={store}
         sessionId={sessionId}
         workspaceId={workspaceId}
         onMessageSubmitted={onJumpToLatest}
