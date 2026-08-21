@@ -61,7 +61,11 @@
   padding: 16px;
 }
 .workspaceChooser {
+  display: flex;
   width: min(320px, 100%);
+  max-height: min(72dvh, 640px);
+  flex-direction: column;
+  overflow: hidden;
   border: var(--border-soft);
   border-radius: 8px;
   background: var(--bg-alt);
@@ -81,10 +85,13 @@
 .workspaceChooserOptions {
   display: grid;
   min-width: 0;
+  min-height: 0;
   gap: 5px;
+  overflow-y: auto;
   border: 0;
   margin: 0;
   padding: 0;
+  scrollbar-gutter: stable;
 }
 .workspaceChooserLegend {
   color: var(--muted);
@@ -592,8 +599,9 @@ button.shelfHeading:focus-visible {
   gap: 8px;
 }
 .threadRow:global(.agent-thread-slim) .threadWorkspace {
-  max-width: 34%;
-  flex: 0 1 auto;
+  width: 28%;
+  max-width: 64px;
+  flex: none;
   font-size: 9px;
   font-weight: 550;
   letter-spacing: normal;

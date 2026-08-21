@@ -503,6 +503,12 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
         canonicalPath: '/work/two',
         active: true,
       },
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: `extra-${index}`,
+        name: `Extra ${index}`,
+        canonicalPath: `/work/extra-${index}`,
+        active: true,
+      })),
     ],
     sessions: [
       {
@@ -550,6 +556,21 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
       (element) => element.parentElement?.parentElement === document.body,
     ),
   ).toBe(true);
+  const chooserGeometry = await workspaceChooser.evaluate((element) => {
+    const options = element.querySelector('fieldset');
+    return {
+      dialogHeight: element.getBoundingClientRect().height,
+      viewportHeight: window.innerHeight,
+      optionsClientHeight: options?.clientHeight ?? 0,
+      optionsScrollHeight: options?.scrollHeight ?? 0,
+    };
+  });
+  expect(chooserGeometry.dialogHeight).toBeLessThanOrEqual(
+    chooserGeometry.viewportHeight * 0.75,
+  );
+  expect(chooserGeometry.optionsScrollHeight).toBeGreaterThan(
+    chooserGeometry.optionsClientHeight,
+  );
   const chooserSearch = workspaceChooser.getByRole('textbox', {
     name: 'Search workspaces',
   });
