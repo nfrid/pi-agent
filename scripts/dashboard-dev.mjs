@@ -76,9 +76,9 @@ function stop(exitCode = 0) {
   process.exitCode = exitCode;
 }
 
-function portInUse(host, port) {
+function endpointInUse(target) {
   return new Promise((resolve) => {
-    const socket = net.connect({ host, port });
+    const socket = net.connect(target);
     const finish = (used) => {
       socket.removeAllListeners();
       socket.destroy();
@@ -100,7 +100,7 @@ async function main() {
   if (mode === 'all' || mode === 'daemon') {
     const host = env.PI_DASHBOARD_HOST;
     const port = Number(env.PI_DASHBOARD_PORT);
-    if (await portInUse(host, port)) {
+    if (await endpointInUse({ host, port })) {
       process.stderr.write(
         `Dashboard API ${host}:${port} is already in use. Refusing to start a second daemon because it would steal dashboard/bridge.sock and make live sessions look dormant.\nUse \`pnpm dashboard:web\` for UI HMR against the running production API.\n`,
       );
@@ -115,8 +115,21 @@ async function main() {
     mode === 'daemon' ||
     mode === 'serve' ||
     mode === 'runtime-host'
-  )
-    run('runtime-host', ['--filter', '@pi-dashboard/server', 'runtime-host']);
+  ) {
+    const runtimeHostSocket =
+      env.PI_DASHBOARD_RUNTIME_HOST_SOCKET ??
+      path.join(
+        env.PI_DASHBOARD_STATE_DIR ?? path.join(root, 'dashboard'),
+        'runtime-host.sock',
+      );
+    if (
+      mode !== 'runtime-host' &&
+      (await endpointInUse({ path: runtimeHostSocket }))
+    )
+      process.stderr.write(`Reusing runtime host at ${runtimeHostSocket}.\n`);
+    else
+      run('runtime-host', ['--filter', '@pi-dashboard/server', 'runtime-host']);
+  }
   if (mode === 'all' || mode === 'web')
     run('web', ['--filter', '@pi-dashboard/web', 'dev']);
   if (mode === 'serve') {
