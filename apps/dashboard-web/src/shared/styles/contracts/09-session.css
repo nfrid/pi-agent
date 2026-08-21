@@ -2,8 +2,8 @@
 .agent-thread-nav-session {
   position: fixed;
   z-index: 12;
-  left: max(clamp(16px, 4vw, 56px), calc(50vw - 564px));
-  width: 248px;
+  left: 0;
+  width: 310px;
   max-height: calc(100vh);
 }
 .agent-nav-handle,
