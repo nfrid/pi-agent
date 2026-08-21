@@ -174,6 +174,17 @@ describe('canonical prompt composition', () => {
     expect(prompt.match(/Preserve the current work mode/g)).toHaveLength(1);
   });
 
+  it('keeps simplicity and scope guidance in the canonical agent prompt', () => {
+    const prompt = buildSystemPrompt(options(), 'json');
+    expect(prompt).toContain('Choose the smallest complete implementation.');
+    expect(prompt).toContain(
+      'Use DRY to prevent behavior from drifting, not to eliminate every repeated line.',
+    );
+    expect(prompt).toContain('Treat scope spillover as a defect.');
+    expect(prompt).toContain('After implementation, run a deletion pass.');
+    expect(prompt.match(/Treat scope spillover as a defect/g)).toHaveLength(1);
+  });
+
   it('includes bilingual active micro-plan guidance only in transcript-rendering modes', () => {
     const tuiPrompt = buildSystemPrompt(options(), 'tui');
     const rpcPrompt = buildSystemPrompt(options(), 'rpc');
