@@ -4,16 +4,21 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: var(--border-soft);
-  border-radius: 10px;
+  min-height: 100%;
+  border-right: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--bg-alt) 72%, var(--bg));
   color: var(--fg);
 }
 .drawer {
   min-width: 0;
 }
+:global(.agent-thread-nav-session) {
+  height: calc(100dvh - 28px);
+  max-height: calc(100dvh - 28px);
+}
 .drawer > .threadNav {
   height: 100%;
+  border-right: 0;
 }
 .header {
   display: flex;
@@ -30,6 +35,22 @@
 .header strong {
   font-size: 14px;
   font-weight: 650;
+}
+.newThread {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--purple) 65%, var(--line-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--purple) 12%, transparent);
+  color: var(--fg);
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+.newThread:hover {
+  background: color-mix(in srgb, var(--purple) 22%, transparent);
 }
 .utility {
   border: var(--border-soft);
@@ -64,6 +85,28 @@
 }
 .search input::placeholder {
   color: var(--dim);
+}
+.scope {
+  display: grid;
+  gap: 4px;
+  margin: 0 10px 9px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.scope select {
+  min-width: 0;
+  border: var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: normal;
+  text-transform: none;
 }
 .search button {
   border: 0;
@@ -397,6 +440,17 @@ button.shelfHeading:focus-visible {
   gap: 6px;
   color: var(--dim);
   font-size: 10px;
+}
+.compactShelf .threadLink {
+  min-height: 30px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.compactShelf .threadCopy {
+  gap: 0;
+}
+.compactShelf .threadCopy strong {
+  font-size: 11px;
 }
 .threadContext {
   min-width: 0;

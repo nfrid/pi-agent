@@ -44,6 +44,13 @@ export type AgentThreadGroup = {
   rows: AgentThreadRow[];
 };
 
+export type AgentThreadSections = {
+  pinned: AgentThreadRow[];
+  active: AgentThreadRow[];
+  history: AgentThreadRow[];
+  archived: AgentThreadRow[];
+};
+
 export const MAX_VISIBLE_ACTIVE_THREADS = 40;
 export const MAX_VISIBLE_HISTORY_THREADS = 24;
 
@@ -256,18 +263,55 @@ function pinnedFirst(rows: readonly AgentThreadRow[]): AgentThreadRow[] {
   );
 }
 
+function isPinnedThread(row: AgentThreadRow): boolean {
+  return row.durableThread?.pinnedAt !== undefined;
+}
+
+/** Partition the sidebar into the T3-style hierarchy without duplicating rows. */
+export function sectionAgentThreadRows(
+  rows: readonly AgentThreadRow[],
+  historyLimit = MAX_VISIBLE_HISTORY_THREADS,
+  selectedSessionId?: string,
+): AgentThreadSections {
+  const pinned = pinnedFirst(
+    rows.filter((row) => isPinnedThread(row) && !isArchivedThread(row)),
+  );
+  const activeRows = pinnedFirst(
+    rows.filter(
+      (row) =>
+        !isPinnedThread(row) && !isHistoryThread(row) && !isArchivedThread(row),
+    ),
+  );
+  const active = activeRows.slice(
+    0,
+    Number.isFinite(historyLimit) ? MAX_VISIBLE_ACTIVE_THREADS : undefined,
+  );
+  const allHistory = pinnedFirst(
+    rows.filter((row) => isHistoryThread(row) && !isPinnedThread(row)),
+  );
+  const history = allHistory.slice(0, Math.max(0, historyLimit));
+  const selected = selectedSessionId
+    ? allHistory.find((row) => row.id === selectedSessionId)
+    : undefined;
+  if (selected && !history.some((row) => row.id === selected.id))
+    history.push(selected);
+  return {
+    pinned,
+    active,
+    history,
+    archived: pinnedFirst(rows.filter(isArchivedThread)),
+  };
+}
+
 export function searchAgentThreadRows(
   rows: readonly AgentThreadRow[],
 ): AgentThreadRow[] {
-  const active = pinnedFirst(
-    rows.filter((row) => !isHistoryThread(row) && !isArchivedThread(row)),
-  );
-  const history = pinnedFirst(rows.filter(isHistoryThread));
-  const archived = pinnedFirst(rows.filter(isArchivedThread));
+  const sections = sectionAgentThreadRows(rows, Number.POSITIVE_INFINITY);
   return [
-    ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
-    ...history,
-    ...archived,
+    ...sections.pinned,
+    ...sections.active,
+    ...sections.history,
+    ...sections.archived,
   ];
 }
 
@@ -296,22 +340,16 @@ export function boundedAgentThreadRows(
   historyLimit = MAX_VISIBLE_HISTORY_THREADS,
   selectedSessionId?: string,
 ): AgentThreadRow[] {
-  const active = pinnedFirst(
-    rows.filter((row) => !isHistoryThread(row) && !isArchivedThread(row)),
+  const sections = sectionAgentThreadRows(
+    rows,
+    historyLimit,
+    selectedSessionId,
   );
-  const history = pinnedFirst(rows.filter(isHistoryThread));
-  const archived = pinnedFirst(rows.filter(isArchivedThread));
-  const visibleHistory = history.slice(0, Math.max(0, historyLimit));
-  const selected = selectedSessionId
-    ? history.find((row) => row.id === selectedSessionId)
-    : undefined;
-  if (selected && !visibleHistory.some((row) => row.id === selected.id)) {
-    visibleHistory.push(selected);
-  }
   return [
-    ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
-    ...visibleHistory,
-    ...archived,
+    ...sections.pinned,
+    ...sections.active,
+    ...sections.history,
+    ...sections.archived,
   ];
 }
 

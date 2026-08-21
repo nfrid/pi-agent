@@ -12,6 +12,7 @@ import {
   isArchivedThread,
   isHistoryThread,
   searchAgentThreadRows,
+  sectionAgentThreadRows,
   sessionThreadIdentityKey,
   statusGlyph,
   workspaceGroupIsExpanded,
@@ -235,6 +236,34 @@ describe('agent thread view model', () => {
     expect(
       durableThreadForSession(snapshot, 'conflict-session', [], links),
     ).toBeUndefined();
+  });
+
+  it('partitions pinned rows globally before active, history, and archived', () => {
+    const pinnedDormant = {
+      ...row('pinned-dormant', 'Other', 'dormant'),
+      durableThread: {
+        threadId: 'thread-pinned-dormant',
+        pinnedAt: 30,
+        hasActiveRun: false,
+      },
+    };
+    const sections = sectionAgentThreadRows([
+      row('active', 'Dashboard'),
+      pinnedDormant,
+      row('history', 'Dashboard', 'offline'),
+      {
+        ...row('archived', 'Other'),
+        durableThread: {
+          threadId: 'thread-archived',
+          archivedAt: 20,
+          hasActiveRun: false,
+        },
+      },
+    ]);
+    expect(sections.pinned.map(({ id }) => id)).toEqual(['pinned-dormant']);
+    expect(sections.active.map(({ id }) => id)).toEqual(['active']);
+    expect(sections.history.map(({ id }) => id)).toEqual(['history']);
+    expect(sections.archived.map(({ id }) => id)).toEqual(['archived']);
   });
 
   it('keeps archived rows out of active/history and puts pinned rows first', () => {

@@ -184,25 +184,16 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     name: 'Agents and threads',
   });
   await expect(
-    agentNav.getByRole('button', { name: 'New chat in Demo', exact: true }),
+    agentNav.getByRole('button', { name: /New thread/ }),
   ).toBeVisible();
   await expect(agentNav.getByText('Active', { exact: true })).toBeVisible();
   const historyHeading = agentNav.getByRole('button', {
-    name: 'Collapse History in Demo',
+    name: 'Collapse History',
   });
   await historyHeading.click();
   await expect(
-    agentNav.getByRole('button', { name: 'Expand History in Demo' }),
+    agentNav.getByRole('button', { name: 'Expand History' }),
   ).toHaveAttribute('aria-expanded', 'false');
-  await expect(
-    agentNav.getByRole('button', {
-      name: 'A deliberately long session title that must wrap safely offline',
-    }),
-  ).toHaveCount(0);
-  const workspaceHeading = agentNav.getByRole('button', {
-    name: 'Collapse Demo',
-  });
-  await workspaceHeading.getByText('Demo', { exact: true }).click();
   await expect(
     agentNav.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
@@ -237,7 +228,6 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
       name: 'A deliberately long session title that must wrap safely offline',
     }),
   ).toHaveCount(0);
-  await agentNav.getByRole('button', { name: 'Expand Demo' }).click();
   await page.locator('.agent-nav-backdrop').click();
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
   const paletteTrigger = page.getByRole('button', {

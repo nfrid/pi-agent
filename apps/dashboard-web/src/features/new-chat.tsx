@@ -311,11 +311,11 @@ export function NewChatView({
               <h1>New chat</h1>
             </div>
           </header>
-          <div className={styles.newChatPendingState} role="status">
+          <output className={styles.newChatPendingState} aria-live="polite">
             <span className="session-loading-indicator" aria-hidden="true" />
             <strong>Starting agent…</strong>
             <p className="muted">Your chat will open as soon as it is ready.</p>
-          </div>
+          </output>
         </section>
       </div>
     );
@@ -340,13 +340,6 @@ export function NewChatView({
           </div>
         </header>
         <div className={styles.newChatEmpty}>
-          <div className={styles.newChatIntro}>
-            <span className="empty-mark" aria-hidden="true">
-              ›_
-            </span>
-            <h2>Start a conversation</h2>
-            <p className="muted">What would you like to work on?</p>
-          </div>
           <ComposerShell
             className={`new-chat-composer ${styles.newChatComposer}`}
             ariaLabel="Start a new chat"
