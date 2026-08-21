@@ -194,17 +194,25 @@
   opacity: 0.45;
 }
 .session-control-layer > .jump-latest {
+  --width: 10em;
+  font-size: 0.8em;
   position: absolute;
-  right: 0;
+  right: calc(50% - var(--width) / 2);
   bottom: calc(100% + 8px);
-  width: 36px;
-  height: 36px;
-  border-color: var(--cyan);
-  border-radius: 50%;
+  width: var(--width);
+  padding: 3px;
+  height: auto;
+  border-color: var(--dim);
+  border-radius: 1em;
   background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
-  box-shadow: 0 7px 20px #0008;
-  color: var(--cyan);
-  padding: 0;
+  box-shadow: 0 7px 20px #0004;
+  color: var(--dim);
+  display: flex;
+
+  &::after {
+    content: "↓";
+    margin-left: 0.5em;
+  }
 }
 
 /* Status launchers stay above the composer; details are dedicated sheets. */

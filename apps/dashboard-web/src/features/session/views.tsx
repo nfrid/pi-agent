@@ -248,7 +248,7 @@ export function SessionControlLayer({
           onClick={onJumpToLatest}
           aria-label="Jump to latest transcript activity"
         >
-          ↓
+          Jump to latest
         </button>
       )}
       <DelegateHistorySurface

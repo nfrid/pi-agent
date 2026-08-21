@@ -260,12 +260,23 @@
     height: 28px;
   }
   .session-control-layer > .jump-latest {
+    position: absolute;
+    right: 0;
+    border-color: var(--dim);
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+    box-shadow: 0 7px 20px #0008;
+    color: var(--dim);
+    padding: 0;
     bottom: calc(100% + 10px);
     width: 48px;
     height: 48px;
-    border-color: color-mix(in srgb, var(--cyan) 72%, var(--line));
-    box-shadow: 0 8px 24px #0009;
-    font-size: 22px;
+    font-size: 0;
+
+    &::after {
+      font-size: 22px;
+      margin-left: 0;
+    }
   }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
