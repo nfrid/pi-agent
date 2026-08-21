@@ -9,7 +9,7 @@ export type WorkspacePresentationSnapshot = Pick<
   BrowserSnapshot,
   'workspaces'
 > &
-  Partial<Pick<BrowserSnapshot, 'sessions' | 'runtimes'>>;
+  Partial<Pick<BrowserSnapshot, 'sessions'>>;
 
 /**
  * Return workspace presentation order without mutating the protocol snapshot.

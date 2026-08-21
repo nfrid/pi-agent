@@ -195,7 +195,10 @@ function WorkspaceChooser({
           ) {
             event.preventDefault();
             move(-1);
-          } else if (event.key === 'Enter') {
+          } else if (
+            event.key === 'Enter' &&
+            event.target instanceof HTMLInputElement
+          ) {
             event.preventDefault();
             chooseActive();
             return;
@@ -242,12 +245,6 @@ function WorkspaceChooser({
               data-workspace-active={index === activeIndex ? 'true' : undefined}
               key={workspace.id}
               onClick={() => onChoose(workspace.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.stopPropagation();
-                  onChoose(workspace.id);
-                }
-              }}
             >
               <span>{workspace.name}</span>
               <small>{workspace.canonicalPath}</small>

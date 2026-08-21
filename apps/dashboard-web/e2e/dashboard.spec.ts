@@ -563,7 +563,11 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
   await page.goto('/');
   await nav.getByRole('button', { name: /New thread/ }).click();
-  await page.keyboard.press('Escape');
+  const chooserCancel = workspaceChooser.getByRole('button', {
+    name: 'Cancel',
+  });
+  await chooserCancel.focus();
+  await chooserCancel.press('Enter');
   await expect(workspaceChooser).toHaveCount(0);
   await expect(nav.getByRole('button', { name: /New thread/ })).toBeFocused();
   await page.goto('/');

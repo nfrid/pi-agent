@@ -250,7 +250,7 @@ describe('workspace presentation ordering', () => {
         { id: 's1', cwd: '/work/first', updatedAt: 10 },
         { id: 's2', cwd: '/work/second', updatedAt: 20 },
         { id: 's3', cwd: '/work/third', updatedAt: 20 },
-        { id: 's4', cwd: '/work/second', updatedAt: 30 },
+        { id: 's4', cwd: '/work/second', updatedAt: 20 },
       ],
     } as never;
     expect(sortWorkspacesByRecency(snapshot).map((item) => item.id)).toEqual([
@@ -275,8 +275,22 @@ describe('project-scoped new chat', () => {
   it('uses the first usable workspace for context-free new chat entries', () => {
     const snapshot = {
       workspaces: [
-        { id: 'dormant', active: false },
-        { id: 'active', active: true },
+        {
+          id: 'dormant',
+          name: 'Dormant',
+          path: '/dormant',
+          canonicalPath: '/dormant',
+          source: 'directory',
+          active: false,
+        },
+        {
+          id: 'active',
+          name: 'Active',
+          path: '/active',
+          canonicalPath: '/active',
+          source: 'directory',
+          active: true,
+        },
       ],
     } as never;
     expect(newChatPath(snapshot)).toBe('/workspaces/dormant/new');
