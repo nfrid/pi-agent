@@ -113,7 +113,7 @@
 }
 .workspaceChooserOptions button:hover,
 .workspaceChooserOptions button:focus-visible,
-.workspaceChooserOptions button[aria-selected="true"],
+.workspaceChooserOptions button[data-workspace-active="true"],
 .workspaceChooserCancel:hover,
 .workspaceChooserCancel:focus-visible {
   border-color: var(--purple);

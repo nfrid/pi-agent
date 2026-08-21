@@ -242,7 +242,7 @@ function WorkspaceChooser({
             <button
               type="button"
               aria-label={workspace.name}
-              aria-selected={index === activeIndex}
+              data-workspace-active={index === activeIndex ? 'true' : undefined}
               key={workspace.id}
               onClick={() => onChoose(workspace.id)}
               onKeyDown={(event) => {
