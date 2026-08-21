@@ -17,6 +17,10 @@ export function useSessionHydration({
   onReplacement: (sessionId: string) => void;
 }) {
   const runtime = useDashboardStore(store, selectRuntimeForSession(id));
+  const connectionInitialized = useDashboardStore(
+    store,
+    (state) => state.connection.status !== 'offline',
+  );
   const sessionChange = useDashboardStore(store, selectSessionChange(id));
   const sessionSnapshot = useDashboardStore(store, selectSessionSnapshot(id));
   const sessionSync = useDashboardStore(
@@ -39,10 +43,10 @@ export function useSessionHydration({
     : undefined;
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !connectionInitialized) return;
     const subscription = store.acquireSession(id);
     return () => subscription?.release();
-  }, [id, store]);
+  }, [connectionInitialized, id, store]);
 
   useEffect(() => {
     if (sessionSnapshot && sessionSnapshot.metadata.id !== id)

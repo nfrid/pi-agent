@@ -42,6 +42,7 @@ describe('useSessionHydration', () => {
   it('acquires only the selected session feed and releases on route changes', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const store = new DashboardLiveStore();
+    store.setConnection('connecting');
     const releases: string[] = [];
     const acquire = vi
       .spyOn(store, 'acquireSession')
@@ -70,6 +71,31 @@ describe('useSessionHydration', () => {
       expect(releases).toContain('session-1');
       await act(async () => renderer?.unmount());
       expect(releases).toContain('session-2');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('waits for the connection runtime before acquiring the session', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const store = new DashboardLiveStore();
+    const release = vi.fn();
+    const acquire = vi
+      .spyOn(store, 'acquireSession')
+      .mockReturnValue({ sessionId: 'session-1', release });
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(HydrationProbe, { store }));
+      });
+      expect(acquire).not.toHaveBeenCalled();
+
+      await act(async () => store.setConnection('connecting'));
+      expect(acquire).toHaveBeenCalledOnce();
+      expect(acquire).toHaveBeenLastCalledWith('session-1');
+
+      await act(async () => renderer?.unmount());
+      expect(release).toHaveBeenCalledOnce();
     } finally {
       vi.unstubAllGlobals();
     }
