@@ -52,6 +52,63 @@
 .newThread:hover {
   background: color-mix(in srgb, var(--purple) 22%, transparent);
 }
+.workspaceChooserBackdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 42%);
+  padding: 16px;
+}
+.workspaceChooser {
+  width: min(320px, 100%);
+  border: var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-alt);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 35%);
+  color: var(--fg);
+  padding: 16px;
+}
+.workspaceChooser h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.workspaceChooser p {
+  margin: 5px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.workspaceChooserOptions {
+  display: grid;
+  gap: 5px;
+}
+.workspaceChooserOptions button,
+.workspaceChooserCancel {
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  padding: 8px 9px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.workspaceChooserOptions button:hover,
+.workspaceChooserOptions button:focus-visible,
+.workspaceChooserCancel:hover,
+.workspaceChooserCancel:focus-visible {
+  border-color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 12%, transparent);
+  outline: none;
+}
+.workspaceChooserCancel {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
 .utility {
   border: var(--border-soft);
   border-radius: 6px;
@@ -420,7 +477,7 @@ button.shelfHeading:focus-visible {
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
-  gap: 2px;
+  gap: 3px;
 }
 .threadCopy strong,
 .threadCopy small {
@@ -432,7 +489,7 @@ button.shelfHeading:focus-visible {
 .threadCopy strong {
   color: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
 }
 .threadCopy small {
   display: flex;
@@ -441,16 +498,55 @@ button.shelfHeading:focus-visible {
   color: var(--dim);
   font-size: 10px;
 }
-.compactShelf .threadLink {
+.threadRow:global(.agent-thread-card) .threadLink {
+  min-height: 57px;
+  align-items: flex-start;
+  padding: 7px 8px;
+}
+.threadRow:global(.agent-thread-card) .threadGlyph {
+  margin-top: 7px;
+}
+.threadWorkspace {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.threadWorkspace > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.threadPin {
+  flex: none;
+  color: var(--orange);
+  font-size: 10px;
+  letter-spacing: normal;
+}
+.threadRow:global(.agent-thread-slim) .threadLink {
   min-height: 30px;
-  padding-top: 3px;
-  padding-bottom: 3px;
+  padding: 3px 7px;
 }
-.compactShelf .threadCopy {
-  gap: 0;
+.threadRow:global(.agent-thread-slim) .threadCopy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.compactShelf .threadCopy strong {
+.threadRow:global(.agent-thread-slim) .threadCopy strong {
   font-size: 11px;
+  font-weight: 550;
+}
+.threadRow:global(.agent-thread-slim) .threadTime {
+  margin-left: auto;
 }
 .threadContext {
   min-width: 0;

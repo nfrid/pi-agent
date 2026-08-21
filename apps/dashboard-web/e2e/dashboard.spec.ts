@@ -405,6 +405,23 @@ test('desktop workspace scope filters threads and scopes New thread navigation @
   await expect(
     nav.getByRole('button', { name: /Two thread dormant/ }),
   ).toBeVisible();
+  await nav.getByRole('button', { name: /New thread/ }).click();
+  const workspaceChooser = page.getByRole('dialog', {
+    name: 'Choose a workspace',
+  });
+  await expect(workspaceChooser).toBeVisible();
+  await expect(
+    workspaceChooser.getByRole('button', { name: 'One' }),
+  ).toBeVisible();
+  await expect(
+    workspaceChooser.getByRole('button', { name: 'Two' }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(workspaceChooser).toHaveCount(0);
+  await nav.getByRole('button', { name: /New thread/ }).click();
+  await workspaceChooser.getByRole('button', { name: 'Two' }).press('Enter');
+  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await page.goto('/');
   await nav
     .getByRole('combobox', { name: 'Workspace scope' })
     .selectOption('two');
@@ -652,6 +669,8 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   ).toBeVisible();
   await durableMenu.getByRole('menuitem', { name: 'Pin' }).click();
   await expect(durableMenu).toHaveCount(0);
+  await expect(durableRow.locator('[data-row-density="card"]')).toHaveCount(1);
+  await expect(durableRow.getByRole('img', { name: 'Pinned' })).toBeVisible();
 
   await durableRow.getByRole('button').press('ContextMenu');
   await expect(
@@ -673,6 +692,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   await expect(durableRow).toHaveCount(0);
   await archivedShelf.click();
   await expect(durableRow).toBeVisible();
+  await expect(durableRow.locator('[data-row-density="slim"]')).toHaveCount(1);
   await durableRow.getByRole('button').click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Actions for Durable session' })
@@ -1489,6 +1509,38 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(
     agentNav.getByRole('button', { name: 'Dormant thread dormant' }),
   ).toBeVisible();
+  const loadedRow = agentNav
+    .locator('.agent-thread-row')
+    .filter({ hasText: 'Loaded shell' });
+  const dormantRow = agentNav
+    .locator('.agent-thread-row')
+    .filter({ hasText: 'Dormant thread' });
+  await expect(loadedRow.locator('[data-row-density="card"]')).toHaveCount(1);
+  await expect(dormantRow.locator('[data-row-density="slim"]')).toHaveCount(1);
+  await expect
+    .poll(async () =>
+      loadedRow.locator('[data-row-density="card"]').evaluate((element) => {
+        const copy = element.querySelector('.agent-thread-copy');
+        if (!copy) throw new Error('Card row copy is missing.');
+        return {
+          display: getComputedStyle(copy).display,
+          height: element.getBoundingClientRect().height,
+        };
+      }),
+    )
+    .toMatchObject({ display: 'grid' });
+  await expect
+    .poll(async () =>
+      dormantRow.locator('[data-row-density="slim"]').evaluate((element) => {
+        const copy = element.querySelector('.agent-thread-copy');
+        if (!copy) throw new Error('Slim row copy is missing.');
+        return {
+          display: getComputedStyle(copy).display,
+          height: element.getBoundingClientRect().height,
+        };
+      }),
+    )
+    .toMatchObject({ display: 'flex' });
   await expect(
     agentNav.locator('.agent-thread-row.status-idle .agent-thread-glyph'),
   ).toHaveText('●');
