@@ -701,6 +701,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
     updatedAt: 2,
   };
   let listedThreads = [durableThread, conflictingThread];
+  const settledAt = Date.now() - 120_000;
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-durable-controls',
     revision: 1,
@@ -801,6 +802,24 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
       });
       return;
     }
+    if (pathname.endsWith('/unpin')) {
+      listedThreads = listedThreads.map(({ pinnedAt, ...thread }) => thread);
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(listedThreads[0]),
+      });
+      return;
+    }
+    if (pathname.endsWith('/settle')) {
+      listedThreads = listedThreads.map((thread) =>
+        thread.id === 'thread-durable' ? { ...thread, settledAt } : thread,
+      );
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(listedThreads[0]),
+      });
+      return;
+    }
     if (pathname.endsWith('/archive')) {
       listedThreads = listedThreads.map((thread) =>
         thread.id === 'thread-durable' ? { ...thread, archivedAt: 4 } : thread,
@@ -878,6 +897,31 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
     nav.getByRole('button', { name: /Expand Archived/u }),
   ).toHaveCount(0);
   await expect(durableRow).toBeVisible();
+
+  await durableRow.getByRole('button').click({ button: 'right' });
+  await page
+    .getByRole('menu', { name: 'Actions for Durable session' })
+    .getByRole('menuitem', { name: 'Unpin' })
+    .click();
+  await durableRow.getByRole('button').click({ button: 'right' });
+  await page
+    .getByRole('menu', { name: 'Actions for Durable session' })
+    .getByRole('menuitem', { name: 'Settle' })
+    .click();
+  await expect(
+    nav.getByRole('region', { name: 'Settled threads' }),
+  ).toBeVisible();
+  await expect(durableRow.locator('[data-row-density="slim"]')).toHaveCount(1);
+  await expect(durableRow.locator('.agent-thread-time')).toHaveAttribute(
+    'datetime',
+    new Date(settledAt).toISOString(),
+  );
+  await expect(durableRow.locator('.agent-thread-time')).toHaveText(/\S/u);
+  await expect
+    .poll(() =>
+      durableRow.evaluate((element) => getComputedStyle(element).userSelect),
+    )
+    .toBe('none');
 
   await conflictingRow.getByRole('button').click({ button: 'right' });
   const conflictingMenu = page.getByRole('menu', {

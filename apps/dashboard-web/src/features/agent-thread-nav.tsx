@@ -298,8 +298,9 @@ function AgentThreadLink({
   runtimes: BrowserSnapshot['runtimes'];
 }) {
   const details = density === 'card' ? activeThreadDetails(row, runtimes) : [];
+  const timestamp = row.durableThread?.settledAt ?? row.updatedAt;
   const showDetails =
-    density === 'card' && (details.length > 0 || row.updatedAt !== undefined);
+    density === 'card' && (details.length > 0 || timestamp !== undefined);
   return (
     <button
       {...lifecycleProps}
@@ -329,12 +330,12 @@ function AgentThreadLink({
           <span className={styles.threadMeta}>
             {density === 'card' ? (
               statusLabel(row)
-            ) : row.updatedAt === undefined ? (
+            ) : timestamp === undefined ? (
               statusLabel(row)
             ) : (
               <DashboardTime
                 className={`agent-thread-time ${styles.threadTime}`}
-                timestamp={row.updatedAt}
+                timestamp={timestamp}
                 context="sidebar-relative"
               />
             )}
@@ -354,10 +355,10 @@ function AgentThreadLink({
                 {details.join(' · ')}
               </span>
             )}
-            {row.updatedAt !== undefined && (
+            {timestamp !== undefined && (
               <DashboardTime
                 className={`agent-thread-time ${styles.threadTime}`}
-                timestamp={row.updatedAt}
+                timestamp={timestamp}
                 context="sidebar-relative"
               />
             )}
@@ -745,7 +746,7 @@ export function AgentThreadNav({
               <span>Settled</span>
               <small>{sections.settled.length}</small>
             </h3>
-            {sections.settled.map((row) => renderThreadRow(row, 'card'))}
+            {sections.settled.map((row) => renderThreadRow(row, 'slim'))}
           </section>
         )}
         {sections.archived.length > 0 && (

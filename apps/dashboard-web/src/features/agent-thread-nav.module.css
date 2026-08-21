@@ -352,6 +352,8 @@ button.shelfHeading:focus-visible {
   color: var(--muted);
   text-align: left;
   cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
   padding: 0;
   transition:
     background 150ms ease,
