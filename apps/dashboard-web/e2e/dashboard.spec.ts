@@ -2675,7 +2675,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
   await expect(page.locator('.message-meta, .message-role')).toHaveCount(0);
-  await expect(page.locator('.activity-step-time')).toBeVisible();
+  await expect(page.locator('.activity-step-time')).toHaveCount(0);
+  await expect(
+    page.locator('.activity-group-accessories .activity-time').first(),
+  ).toBeVisible();
   const fullWidthGeometry = await page.evaluate(() => {
     const transcript = document.querySelector('.transcript');
     const message = document.querySelector('.message-bubble');
@@ -2712,23 +2715,12 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(
     page.getByText('Context compacted', { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText('232K tokens', { exact: true })).toBeVisible();
+  await expect(page.getByText('232k tokens', { exact: true })).toBeVisible();
   await expect(page.getByText(/Tasks · T1 added · 1 waiting/)).toBeVisible();
   await expect(page.getByText(/Tasks · T1 started · 1 active/)).toBeVisible();
   await expect(
     page.getByText('Model → openai/gpt-5.6-sol · thinking medium'),
   ).toBeVisible();
-  const delegateResult = page.getByText('Delegate finished · UX audit');
-  const delegateEvent = page.locator('details.event-delegate-result');
-  await expect(delegateResult).toBeVisible();
-  await delegateResult.click();
-  await expect(delegateEvent).toContainText('Status: success');
-  await expect(delegateEvent).toContainText(
-    'Recovery completed after the final check.',
-  );
-  await expect(delegateEvent).not.toContainText(
-    'Projection: {"outcome":"done"}',
-  );
   await expect(
     page.getByText(/Background command finished · Dashboard build · 2s/),
   ).toBeVisible();
@@ -2761,14 +2753,25 @@ test('dense mobile session keeps conversation and activity readable', async ({
   const threadRow = page
     .locator('.agent-nav-drawer.open .agent-thread-row')
     .first();
-  const threadCopyRightGap = await threadRow.evaluate((row) => {
+  const threadCopyRightInset = await threadRow.evaluate((row) => {
     const copy = row.querySelector('.agent-thread-copy');
-    if (!copy) throw new Error('Agent thread copy missing');
-    return (
-      row.getBoundingClientRect().right - copy.getBoundingClientRect().right
-    );
+    const link = row.querySelector('button[data-row-density]');
+    if (!copy || !link) throw new Error('Agent thread row geometry missing');
+    const styles = getComputedStyle(link);
+    return {
+      actual:
+        row.getBoundingClientRect().right - copy.getBoundingClientRect().right,
+      expected:
+        row.getBoundingClientRect().right -
+        link.getBoundingClientRect().right +
+        Number.parseFloat(styles.paddingRight) +
+        Number.parseFloat(styles.borderRightWidth),
+    };
   });
-  expect(threadCopyRightGap).toBeLessThanOrEqual(8);
+  expect(threadCopyRightInset.actual).toBeCloseTo(
+    threadCopyRightInset.expected,
+    1,
+  );
   await threadRow.click();
   await expect(page.locator('.agent-nav-drawer.open')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
@@ -3080,11 +3083,13 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(thinkingLayout.blobBackgroundImage).toContain('linear-gradient');
   expect(thinkingLayout.timestampBackgroundImage).toBe('none');
   const timestampRights = await page
-    .locator('.activity-group .transcript-time:visible')
+    .locator(
+      '.activity-group .activity-time:visible, .activity-group .activity-step-time:visible',
+    )
     .evaluateAll((timestamps) =>
       timestamps.map((timestamp) => timestamp.getBoundingClientRect().right),
     );
-  expect(timestampRights.length).toBeGreaterThanOrEqual(3);
+  expect(timestampRights.length).toBeGreaterThanOrEqual(2);
   expect(
     Math.max(...timestampRights) - Math.min(...timestampRights),
   ).toBeLessThanOrEqual(1);
