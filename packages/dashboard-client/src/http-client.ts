@@ -844,29 +844,29 @@ export class DashboardHttpClient {
     threadId: string,
     command: SettleThreadCommand | string,
   ): Promise<Thread> {
-    return this.lifecycleThreadMutation(threadId, command, 'settle');
+    const body = typeof command === 'string' ? { commandId: command } : command;
+    const value = await this.request<unknown>(
+      `/api/threads/${encodeURIComponent(threadId)}/settle`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput('Invalid settled thread response.', value);
+    return thread;
   }
 
   async unsettleThread(
     threadId: string,
     command: UnsettleThreadCommand | string,
   ): Promise<Thread> {
-    return this.lifecycleThreadMutation(threadId, command, 'unsettle');
-  }
-
-  private async lifecycleThreadMutation(
-    threadId: string,
-    command: { commandId: string } | string,
-    action: string,
-  ): Promise<Thread> {
     const body = typeof command === 'string' ? { commandId: command } : command;
     const value = await this.request<unknown>(
-      `/api/threads/${encodeURIComponent(threadId)}/${action}`,
+      `/api/threads/${encodeURIComponent(threadId)}/unsettle`,
       { method: 'POST', body: JSON.stringify(body) },
     );
     const thread = tryParseThread(value);
     if (!thread)
-      throw malformedOutput(`Invalid ${action} thread response.`, value);
+      throw malformedOutput('Invalid unsettled thread response.', value);
     return thread;
   }
 
