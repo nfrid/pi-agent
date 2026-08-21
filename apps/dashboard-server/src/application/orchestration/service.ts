@@ -54,10 +54,10 @@ import {
   archiveThread as archiveThreadLifecycle,
   createThread as createThreadLifecycle,
   pinThread as pinThreadLifecycle,
-  settleThread as settleThreadLifecycle,
-  unsettleThread as unsettleThreadLifecycle,
   restoreThread as restoreThreadLifecycle,
+  settleThread as settleThreadLifecycle,
   unpinThread as unpinThreadLifecycle,
+  unsettleThread as unsettleThreadLifecycle,
 } from './threads.js';
 
 /**

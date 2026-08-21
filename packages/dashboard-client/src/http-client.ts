@@ -12,8 +12,6 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   type PinThreadCommand,
-  type SettleThreadCommand,
-  type UnsettleThreadCommand,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
@@ -30,6 +28,7 @@ import {
   type SessionAdoptCommand,
   type SessionApiResponse,
   type SessionThreadLink,
+  type SettleThreadCommand,
   type StartRuntimeMutationOutput,
   type StartRuntimeRequest,
   type StopRuntimeMutationOutput,
@@ -48,6 +47,7 @@ import {
   tryParseShellSnapshotResponse,
   tryParseThread,
   type UnpinThreadCommand,
+  type UnsettleThreadCommand,
 } from '@pi-dashboard/protocol';
 import {
   browserDashboardTokenStore,

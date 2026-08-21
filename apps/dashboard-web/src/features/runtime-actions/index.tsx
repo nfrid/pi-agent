@@ -6,9 +6,9 @@ import {
   restartRuntimeMutationOptions,
   restoreThreadMutationOptions,
   settleThreadMutationOptions,
-  unsettleThreadMutationOptions,
   stopRuntimeMutationOptions,
   unpinThreadMutationOptions,
+  unsettleThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import {
@@ -100,9 +100,7 @@ export function DurableThreadActions({
   );
   const pin = useMutation(pinThreadMutationOptions(dashboardHttpClient));
   const unpin = useMutation(unpinThreadMutationOptions(dashboardHttpClient));
-  const settle = useMutation(
-    settleThreadMutationOptions(dashboardHttpClient),
-  );
+  const settle = useMutation(settleThreadMutationOptions(dashboardHttpClient));
   const unsettle = useMutation(
     unsettleThreadMutationOptions(dashboardHttpClient),
   );

@@ -13,16 +13,16 @@ import {
   type DelegateHistoryRunQuery,
   DelegateHistoryRunQuerySchema,
   PinThreadCommandSchema,
-  SettleThreadCommandSchema,
-  UnsettleThreadCommandSchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   RestoreThreadCommandSchema,
   RetryCommandSchema,
   SessionAdoptCommandSchema,
   SessionThreadLinksSchema,
+  SettleThreadCommandSchema,
   ThreadCreateCommandSchema,
   UnpinThreadCommandSchema,
+  UnsettleThreadCommandSchema,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type {

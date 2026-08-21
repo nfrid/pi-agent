@@ -58,10 +58,12 @@ describe('runtime lifecycle action availability', () => {
         </QueryClientProvider>,
       );
     });
-    const button = tree.root.findAllByType('button')[0];
-    expect(button?.children.join(' ')).toBe('Settle');
+    const settleButton = tree.root
+      .findAllByType('button')
+      .find((button) => button.children.join(' ') === 'Settle');
+    expect(settleButton).toBeDefined();
     await act(async () => {
-      await button?.props.onClick({ stopPropagation: vi.fn() });
+      settleButton?.props.onClick({ stopPropagation: vi.fn() });
     });
     expect(settle).toHaveBeenCalledWith('thread-1', expect.anything());
     act(() => tree.unmount());
@@ -82,9 +84,11 @@ describe('runtime lifecycle action availability', () => {
         </QueryClientProvider>,
       );
     });
-    expect(tree.root.findAllByType('button')[0]?.children.join(' ')).toBe(
-      'Unsettle',
-    );
+    expect(
+      tree.root
+        .findAllByType('button')
+        .some((button) => button.children.join(' ') === 'Unsettle'),
+    ).toBe(true);
     act(() => tree.unmount());
 
     act(() => {
@@ -129,11 +133,13 @@ describe('runtime lifecycle action availability', () => {
     });
 
     const buttons = tree.root.findAllByType('button');
-    expect(buttons.map((button) => button.children.join(' '))).toEqual([
-      'Unpin',
-      'Archive',
-    ]);
-    expect(buttons[1]?.props.disabled).toBe(true);
+    const labels = buttons.map((button) => button.children.join(' '));
+    expect(labels).toContain('Unpin');
+    expect(labels).toContain('Settle');
+    expect(
+      buttons.find((button) => button.children.join(' ') === 'Archive')?.props
+        .disabled,
+    ).toBe(true);
     act(() => tree.unmount());
   });
 
