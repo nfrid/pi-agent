@@ -324,7 +324,7 @@ describe('session index', () => {
     expect(index.get('empty-id')).not.toHaveProperty('lastKnownContextTokens');
   });
 
-  it('rejects malformed latest ancestry instead of claiming partial metadata', async () => {
+  it('keeps sessions indexed when optional resume ancestry is malformed', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-resume-invalid-'),
     );
@@ -366,8 +366,18 @@ describe('session index', () => {
     );
     const index = new SessionIndex(root);
     await index.rebuild();
-    expect(index.get('missing-parent-id')).toBeUndefined();
-    expect(index.get('cyclic-id')).toBeUndefined();
+    expect(index.get('missing-parent-id')).toMatchObject({
+      id: 'missing-parent-id',
+    });
+    expect(index.get('missing-parent-id')).not.toHaveProperty('lastKnownModel');
+    expect(index.get('cyclic-id')).toMatchObject({ id: 'cyclic-id' });
+    expect(index.get('cyclic-id')).not.toHaveProperty('lastKnownThinking');
+    await expect(
+      index.readEntries('missing-parent-id', undefined, 'leaf'),
+    ).rejects.toThrow('Invalid session branch');
+    await expect(
+      index.readEntries('cyclic-id', undefined, 'cycle-b'),
+    ).rejects.toThrow('Invalid session branch');
   });
 
   it('retries latest-leaf reads when the file is appended between passes', async () => {

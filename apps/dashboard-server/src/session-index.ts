@@ -457,43 +457,74 @@ function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
   };
 }
 
+function branchPageDescriptors(
+  index: SessionHistoryIndex,
+  leafId: string | undefined,
+): { descriptors: SessionLineDescriptor[]; leafId?: string } {
+  const all = [...index.descriptors];
+  if (leafId === undefined) {
+    if (all.length !== 1) throw new Error('Invalid session branch.');
+    return { descriptors: all };
+  }
+  const byId = new Map<string, SessionLineDescriptor>();
+  for (const descriptor of all) {
+    if (!descriptor.id) continue;
+    if (byId.has(descriptor.id)) throw new Error('Invalid session branch.');
+    byId.set(descriptor.id, descriptor);
+  }
+  const leaf = byId.get(leafId);
+  if (!leaf) throw new Error('Invalid session branch.');
+  const selected = new Set<string>();
+  let current = leaf;
+  while (true) {
+    if (!current.id || selected.has(current.id))
+      throw new Error('Invalid session branch.');
+    selected.add(current.id);
+    const parentId = current.parentId;
+    if (parentId === undefined || parentId === null) break;
+    if (typeof parentId !== 'string')
+      throw new Error('Invalid session branch.');
+    const parent = byId.get(parentId);
+    if (!parent || parent.ordinal >= current.ordinal)
+      throw new Error('Invalid session branch.');
+    current = parent;
+  }
+  const descriptors = all.filter(
+    (descriptor) =>
+      descriptor.ordinal === 0 ||
+      (descriptor.id !== undefined && selected.has(descriptor.id)),
+  );
+  if (descriptors.length === 0 || descriptors[0]?.ordinal !== 0)
+    throw new Error('Invalid session branch.');
+  return { descriptors, leafId };
+}
+
 function resumeMetadataFromDescriptors(
-  byId: ReadonlyMap<string, SessionLineDescriptor>,
+  index: SessionHistoryIndex,
   leafId: string | undefined,
 ): Pick<
   SessionIndexEntry,
   'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
 > {
   if (!leafId) return {};
-  const chain: SessionLineDescriptor[] = [];
-  const seen = new Set<string>();
-  let current = byId.get(leafId);
-  while (current?.id) {
-    if (seen.has(current.id)) throw new Error('Invalid session ancestry.');
-    seen.add(current.id);
-    chain.push(current);
-    if (current.parentId === undefined || current.parentId === null) break;
-    if (typeof current.parentId !== 'string')
-      throw new Error('Invalid session ancestry.');
-    const parent = byId.get(current.parentId);
-    if (!parent || parent.ordinal >= current.ordinal)
-      throw new Error('Invalid session ancestry.');
-    current = parent;
+  try {
+    const descriptors = branchPageDescriptors(index, leafId).descriptors;
+    const result: Pick<
+      SessionIndexEntry,
+      'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
+    > = {};
+    for (const descriptor of descriptors) {
+      if (descriptor.resume?.model)
+        result.lastKnownModel = descriptor.resume.model;
+      if (descriptor.resume?.thinking)
+        result.lastKnownThinking = descriptor.resume.thinking;
+      if (descriptor.resume?.contextTokens !== undefined)
+        result.lastKnownContextTokens = descriptor.resume.contextTokens;
+    }
+    return result;
+  } catch {
+    return {};
   }
-  if (!current) throw new Error('Invalid session ancestry.');
-  const result: Pick<
-    SessionIndexEntry,
-    'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
-  > = {};
-  for (const descriptor of chain.reverse()) {
-    if (descriptor.resume?.model)
-      result.lastKnownModel = descriptor.resume.model;
-    if (descriptor.resume?.thinking)
-      result.lastKnownThinking = descriptor.resume.thinking;
-    if (descriptor.resume?.contextTokens !== undefined)
-      result.lastKnownContextTokens = descriptor.resume.contextTokens;
-  }
-  return result;
 }
 
 export class SessionIndex {
@@ -1102,48 +1133,6 @@ export class SessionIndex {
     return indexed;
   }
 
-  private branchPageDescriptors(
-    index: SessionHistoryIndex,
-    leafId: string | undefined,
-  ): { descriptors: SessionLineDescriptor[]; leafId?: string } {
-    const all = [...index.descriptors];
-    if (leafId === undefined) {
-      if (all.length !== 1) throw new Error('Invalid session branch.');
-      return { descriptors: all };
-    }
-    const byId = new Map<string, SessionLineDescriptor>();
-    for (const descriptor of all) {
-      if (!descriptor.id) continue;
-      if (byId.has(descriptor.id)) throw new Error('Invalid session branch.');
-      byId.set(descriptor.id, descriptor);
-    }
-    const leaf = byId.get(leafId);
-    if (!leaf) throw new Error('Invalid session branch.');
-    const selected = new Set<string>();
-    let current = leaf;
-    while (true) {
-      if (!current.id || selected.has(current.id))
-        throw new Error('Invalid session branch.');
-      selected.add(current.id);
-      const parentId = current.parentId;
-      if (parentId === undefined || parentId === null) break;
-      if (typeof parentId !== 'string')
-        throw new Error('Invalid session branch.');
-      const parent = byId.get(parentId);
-      if (!parent || parent.ordinal >= current.ordinal)
-        throw new Error('Invalid session branch.');
-      current = parent;
-    }
-    const descriptors = all.filter(
-      (descriptor) =>
-        descriptor.ordinal === 0 ||
-        (descriptor.id !== undefined && selected.has(descriptor.id)),
-    );
-    if (descriptors.length === 0 || descriptors[0]?.ordinal !== 0)
-      throw new Error('Invalid session branch.');
-    return { descriptors, leafId };
-  }
-
   private selectHistoryPage(
     descriptors: readonly SessionLineDescriptor[],
     groups: readonly import('@pi-dashboard/activity-model').ActivityGroup[],
@@ -1307,10 +1296,7 @@ export class SessionIndex {
 
     const branch =
       requestedLeaf !== undefined || (options.resolveLatestLeaf && !cursor)
-        ? this.branchPageDescriptors(
-            index,
-            requestedLeaf ?? index.latestEntryId,
-          )
+        ? branchPageDescriptors(index, requestedLeaf ?? index.latestEntryId)
         : { descriptors: [...index.descriptors] };
     const descriptors = branch.descriptors;
     const groups =
@@ -2335,6 +2321,7 @@ export class SessionIndex {
             offset = end;
             return;
           }
+          const resume = resumeFromRawEntry(parsed);
           if (!header) {
             if (!isRecord(parsed) || parsed.type !== 'session') {
               throw new Error('Invalid session header.');
@@ -2384,15 +2371,11 @@ export class SessionIndex {
               ...(isRecord(parsed) && typeof parsed.type === 'string'
                 ? { type: parsed.type }
                 : {}),
-              ...(resumeFromRawEntry(parsed)
-                ? { resume: resumeFromRawEntry(parsed) }
-                : {}),
+              ...(resume ? { resume } : {}),
               activity: activityEntryFromRaw(parsed),
             };
             descriptors.push(descriptor);
             if (descriptor.id !== undefined) {
-              if (byId.has(descriptor.id))
-                throw new Error('Invalid session ancestry.');
               byId.set(descriptor.id, descriptor);
               lastEntryId = descriptor.id;
               latestEntryId = descriptor.id;
@@ -2525,7 +2508,7 @@ export class SessionIndex {
               ? Date.parse(header.timestamp)
               : endStat.birthtimeMs,
           updatedAt: endStat.mtimeMs,
-          ...resumeMetadataFromDescriptors(byId, latestEntryId),
+          ...resumeMetadataFromDescriptors(historyIndex, latestEntryId),
           header,
           lastEntryId,
           historyIndex,

@@ -49,7 +49,7 @@ Session rename already exists in the transcript header. This project will not du
 8. Keep archived threads reachable in a compact collapsed shelf until a dedicated archived view exists.
 9. Keep existing context-menu actions, unread state, runtime controls, timestamps, and keyboard search behavior.
 10. Make the new-thread route look like an empty real thread: normal workspace header, blank transcript area, and the same composer at the bottom. Remove the centered onboarding illustration and copy.
-11. Preserve the current server contracts. This slice is primarily component structure, presentation, and client-side grouping.
+11. Preserve existing server contracts while using the additive durable lifecycle contracts for pin, archive, settle, and restore. This slice is primarily component structure, presentation, and client-side grouping.
 
 ### Follow-up lifecycle work
 
@@ -80,7 +80,7 @@ Add only when requested or when the copied UX requires it:
 - Reuse `AgentThreadNav`, its existing queries, and its action wrappers.
 - Keep row derivation in `agent-thread-nav/model.ts`; keep DOM and interaction state in `agent-thread-nav.tsx`.
 - Use the dashboard's CSS tokens and CSS Modules. Recreate the T3 hierarchy, density, hover behavior, and responsive shell rather than importing its UI framework.
-- The sidebar has separate **Pinned**, **Active**, and **Archived** sections. Pinned threads appear once above unpinned Active rows; dormant and offline rows remain in Active.
+- The sidebar has separate **Pinned**, **Active**, **Settled**, and **Archived** sections. Pinned threads appear once above unpinned Active rows; dormant and offline rows remain in Active.
 - Search ignores Archived collapse and searches every visible session identity.
 - The selected thread remains reachable when it falls beyond the initial Active bound.
 - Unsupported lifecycle actions stay hidden. The UI must not offer an action that will fail because the session lacks an exact durable link.
@@ -90,7 +90,7 @@ Add only when requested or when the copied UX requires it:
 
 The accepted follow-up keeps the normal composer shell for dormant sessions and attaches a compact notice: **This session is dormant** / **Sending a message will resume Pi in this workspace.** Indexed sessions may expose optional last-known provider/model, thinking effort, and assistant context-token hints from the latest leaf ancestry. Runtime values remain authoritative; dormant rows prefer these hints, then the same configured/default model choices used by New Chat. Missing values remain honest (`? effort`, `? ctx`, or a resume fallback), and CWD is never restored.
 
-A text submission starts the existing runtime with `workspaceId`, `sessionId`, and `initialPrompt` exactly once. For an explicitly image-capable indexed model, the dashboard starts without an initial prompt, waits for the connected runtime through `DashboardLiveStore`, verifies that runtime's image capability, and sends the prompt plus attachments once. Drafts and attachments stay intact on any failure and clear only after success. Image support fails closed unless the indexed model matches a current runtime model/catalog entry marked `supportsImages: true`. Missing workspace association remains a disabled error case. Image delivery intentionally uses the existing command transport; its pre-existing ACK-timeout retry limitation remains a residual exact-once risk and is not expanded with a new receipt endpoint. Explicit durable Settled state remains a later slice; this change adds no settle commands, storage, endpoints, or tables.
+A text submission starts the existing runtime with `workspaceId`, `sessionId`, and `initialPrompt` exactly once. For an explicitly image-capable indexed model, the dashboard starts without an initial prompt, waits for the connected runtime through `DashboardLiveStore`, verifies that runtime's image capability, and sends the prompt plus attachments once. Drafts and attachments stay intact on any failure and clear only after success. Image support fails closed unless the indexed model matches a current runtime model/catalog entry marked `supportsImages: true`. Missing workspace association remains a disabled error case. Image delivery intentionally uses the existing command transport; its pre-existing ACK-timeout retry limitation remains a residual exact-once risk and is not expanded with a new receipt endpoint. Explicit durable Settled state is now implemented through the additive lifecycle command, thread metadata, session-thread-link projection, and lifecycle event contracts; settlement remains independent of runtime availability and does not introduce a new status enum.
 
 ## First-slice acceptance checks
 
