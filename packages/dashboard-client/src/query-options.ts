@@ -45,9 +45,6 @@ export const dashboardQueryKeys = {
       runId,
       leafId ?? '',
     ] as const,
-  workspace: (id: string) => ['dashboard', 'workspace', id] as const,
-  composerCommands: (workspaceId: string) =>
-    ['dashboard', 'composer-commands', workspaceId] as const,
   runtime: (id: string) => ['dashboard', 'runtime', id] as const,
   notifications: () => ['dashboard', 'notifications'] as const,
   settings: () => ['dashboard', 'settings'] as const,
@@ -216,20 +213,6 @@ export function usageQueryOptions(client: DashboardHttpClient) {
   });
 }
 
-export function composerCommandsQueryOptions(
-  client: DashboardHttpClient,
-  workspaceId: string,
-) {
-  return queryOptions({
-    queryKey: dashboardQueryKeys.composerCommands(workspaceId),
-    queryFn: ({ signal }) => client.composerCommands(workspaceId, signal),
-    // Resource files can change independently of the dashboard snapshot.
-    staleTime: 30_000,
-    retry: networkRetry,
-    enabled: Boolean(workspaceId),
-  });
-}
-
 export function threadsQueryOptions(
   client: DashboardHttpClient,
   projectId?: string,
@@ -259,19 +242,6 @@ export function threadQueryOptions(client: DashboardHttpClient, id: string) {
   return queryOptions({
     queryKey: dashboardQueryKeys.thread(id),
     queryFn: ({ signal }) => client.thread(id, signal),
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: networkRetry,
-    enabled: Boolean(id),
-  });
-}
-
-export function workspaceQueryOptions(client: DashboardHttpClient, id: string) {
-  return queryOptions({
-    queryKey: dashboardQueryKeys.workspace(id),
-    queryFn: async () => {
-      const snapshot = await client.snapshot();
-      return snapshot.workspaces.find((workspace) => workspace.id === id);
-    },
     staleTime: Number.POSITIVE_INFINITY,
     retry: networkRetry,
     enabled: Boolean(id),
@@ -394,13 +364,6 @@ export function restartRuntimeMutationOptions(client: DashboardHttpClient) {
 export function pushSubscribeMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
     mutationFn: (subscription: unknown) => client.subscribePush(subscription),
-    retry: false,
-  });
-}
-
-export function workspaceRefreshMutationOptions(client: DashboardHttpClient) {
-  return mutationOptions({
-    mutationFn: () => client.refreshWorkspaces(),
     retry: false,
   });
 }

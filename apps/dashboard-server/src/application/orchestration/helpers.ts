@@ -5,7 +5,6 @@ import type {
   Run,
   SessionIndexEntry,
   Thread,
-  WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type {
   createWorktreeCreator,
@@ -20,8 +19,6 @@ export interface OrchestrationServiceOptions {
   repository: OrchestrationRepository;
   manager: RuntimeManager;
   registry: RuntimeRegistry;
-  /** Discovery only: durable projects never store a WorkspaceTarget. */
-  workspaces: () => readonly WorkspaceTarget[];
   onChange?: () => void;
   pollMs?: number;
   /** How long startup waits for a restored provider runtime to say hello. */
@@ -43,8 +40,7 @@ export interface OrchestrationServiceOptions {
 export interface CreateProjectCommand {
   commandId: string;
   title?: string;
-  rootPath?: string;
-  workspaceId?: string;
+  rootPath: string;
   defaultBaseBranch?: string;
   defaultModel?: Project['defaultModel'];
   defaultIsolation?: Project['defaultIsolation'];
@@ -102,7 +98,6 @@ export interface OrchestrationHost {
   readonly repository: OrchestrationRepository;
   readonly manager: RuntimeManager;
   readonly registry: RuntimeRegistry;
-  readonly workspaces: () => readonly WorkspaceTarget[];
   readonly beforeWorktreePreparation?: () => Promise<void>;
   readonly beforeWorktreeFinish?: () => Promise<void>;
   readonly defaultRuntimeProvider: Run['runtimeProvider'];

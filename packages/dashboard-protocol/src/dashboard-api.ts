@@ -331,7 +331,6 @@ export type {
   StopRuntimeMutationInput,
   StopRuntimeMutationOutput,
   StopRuntimeOutput,
-  WorkspaceTarget,
 } from './schemas.js';
 export {
   AuthoritativeSessionSnapshotSchema,
@@ -426,7 +425,6 @@ export {
   StopRuntimeMutationInputSchema,
   StopRuntimeMutationOutputSchema,
   StopRuntimeOutputSchema,
-  WorkspaceTargetSchema,
 } from './schemas.js';
 export {
   deriveSessionTitle,
@@ -434,6 +432,4 @@ export {
   normalizeSessionTitle,
   SESSION_NAME_MAX_LENGTH,
   SESSION_TITLE_MAX_LENGTH,
-  workspaceForPath,
-  workspaceSourcePriority,
 } from './semantic.js';

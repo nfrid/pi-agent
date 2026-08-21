@@ -333,7 +333,7 @@ export const ComposerCommandCatalogueSchema = Type.Object(
 export type ComposerCommandCatalogue = Static<
   typeof ComposerCommandCatalogueSchema
 >;
-/** Response spelling used by the authenticated workspace discovery endpoint. */
+/** Runtime composer-command catalogue response. */
 export const ComposerCommandsResponseSchema = ComposerCommandCatalogueSchema;
 export type ComposerCommandsResponse = ComposerCommandCatalogue;
 
@@ -422,22 +422,10 @@ const RuntimeSnapshotProperties = {
   ownership: RuntimeOwnershipSchema,
   pid: Type.Integer({ minimum: 1 }),
   cwd: Type.String({ minLength: 1, maxLength: MAX_PATH }),
-  workspaceHint: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   /** Server-owned durable orchestration association. Runtime clients may send
    * spoofed values, but the dashboard replaces them before publication. */
   projectId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
   checkoutId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
-  tmux: Type.Optional(
-    Type.Object(
-      {
-        session: Type.String({ minLength: 1, maxLength: 512 }),
-        windowId: Type.String({ minLength: 1, maxLength: 128 }),
-        paneId: Type.String({ minLength: 1, maxLength: 128 }),
-        displayTarget: Type.String({ minLength: 1, maxLength: 768 }),
-      },
-      { additionalProperties: false },
-    ),
-  ),
   liveState: RuntimeLiveStateSchema,
   session: SessionSnapshotSchema,
   model: Type.Optional(
@@ -1297,32 +1285,11 @@ export type BridgeFrame =
   | Extract<BridgeFrameStatic, { kind: 'command' }>
   | Extract<BridgeFrameStatic, { kind: 'ack' }>;
 
-export const WorkspaceTargetSchema = Type.Object(
-  {
-    id: IdentifierSchema,
-    name: Type.String({ minLength: 1, maxLength: 512 }),
-    path: Type.String({ maxLength: MAX_PATH }),
-    canonicalPath: Type.String({ maxLength: MAX_PATH }),
-    gitRoot: Type.Optional(Type.String({ maxLength: MAX_PATH })),
-    source: Type.Union([
-      Type.Literal('tmux'),
-      Type.Literal('sesh-config'),
-      Type.Literal('zoxide'),
-      Type.Literal('directory'),
-    ]),
-    tmuxSession: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    active: Type.Boolean(),
-  },
-  { additionalProperties: false },
-);
-export type WorkspaceTarget = Static<typeof WorkspaceTargetSchema>;
-
 export const SessionIndexEntrySchema = Type.Object(
   {
     id: IdentifierSchema,
     file: Type.String({ maxLength: MAX_PATH }),
     cwd: Type.String({ maxLength: MAX_PATH }),
-    workspaceId: Type.Optional(IdentifierSchema),
     /** Server-resolved durable project association; null means unassigned. */
     projectId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
     checkoutId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
@@ -1373,7 +1340,6 @@ export const NotificationEventSchema = Type.Object(
 export type NotificationEvent = Static<typeof NotificationEventSchema>;
 
 export const ShellProjectionDomainSchema = Type.Union([
-  Type.Literal('workspaces'),
   Type.Literal('projects'),
   Type.Literal('checkouts'),
   Type.Literal('threads'),
@@ -1402,7 +1368,6 @@ export const BrowserSnapshotSchema = Type.Object(
     /** Authoritative position in the daemon-global resumable event stream. */
     cursor: Type.Integer({ minimum: 0 }),
     runtimes: Type.Array(RuntimeSnapshotSchema),
-    workspaces: Type.Array(WorkspaceTargetSchema),
     sessions: Type.Array(SessionIndexEntrySchema),
     /** Durable orchestration shell summaries; transcript entries never cross this boundary. */
     projects: Type.Optional(
@@ -1424,7 +1389,6 @@ type BrowserSnapshotStatic = Static<typeof BrowserSnapshotSchema>;
 export type BrowserSnapshot = Omit<
   BrowserSnapshotStatic,
   | 'runtimes'
-  | 'workspaces'
   | 'sessions'
   | 'unread'
   | 'projects'
@@ -1433,7 +1397,6 @@ export type BrowserSnapshot = Omit<
   | 'runs'
 > & {
   readonly runtimes: readonly RuntimeSnapshot[];
-  readonly workspaces: readonly WorkspaceTarget[];
   readonly sessions: readonly SessionIndexEntry[];
   readonly projects?: readonly ProjectSummary[];
   readonly checkouts?: readonly CheckoutSummary[];
@@ -1520,9 +1483,6 @@ export const ShellSnapshotSchema = Type.Object(
     revision: Type.Integer({ minimum: 0 }),
     cursor: Type.Integer({ minimum: 0 }),
     runtimes: Type.Array(ShellRuntimeSnapshotSchema, {
-      maxItems: MAX_SHELL_INDEX_ITEMS,
-    }),
-    workspaces: Type.Array(WorkspaceTargetSchema, {
       maxItems: MAX_SHELL_INDEX_ITEMS,
     }),
     sessions: Type.Array(SessionIndexEntrySchema, {
@@ -1998,7 +1958,6 @@ export const ShellFeedDomainSchema = Type.Union([
   Type.Literal('runtime'),
   Type.Literal('session-index'),
   Type.Literal('notification'),
-  Type.Literal('workspace'),
   Type.Literal('orchestration'),
   Type.Literal('usage'),
 ]);
@@ -2055,15 +2014,6 @@ const ShellSessionIndexPatchSchema = Type.Union([
   ShellSessionIndexDeltaSchema,
   ShellSessionIndexReplaceSchema,
 ]);
-const ShellWorkspacePatchSchema = Type.Object(
-  {
-    workspaces: Type.Readonly(
-      Type.Array(WorkspaceTargetSchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
-    ),
-    shellProjection: Type.Optional(ShellProjectionSchema),
-  },
-  { additionalProperties: false },
-);
 const ShellOrchestrationPatchSchema = Type.Object(
   {
     projects: Type.Readonly(
@@ -2102,7 +2052,6 @@ const ShellUsagePatchSchema = Type.Object(
 export const ShellFeedDataSchema = Type.Union([
   ShellRuntimePatchSchema,
   ShellSessionIndexPatchSchema,
-  ShellWorkspacePatchSchema,
   ShellOrchestrationPatchSchema,
   ShellNotificationPatchSchema,
   ShellUsagePatchSchema,
@@ -2121,14 +2070,6 @@ export const ShellFeedEventSchema = Type.Union([
       ...ShellFeedEventProperties,
       domain: Type.Literal('session-index'),
       data: ShellSessionIndexPatchSchema,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      ...ShellFeedEventProperties,
-      domain: Type.Literal('workspace'),
-      data: ShellWorkspacePatchSchema,
     },
     { additionalProperties: false },
   ),
@@ -2225,14 +2166,12 @@ export type SessionFeedInput = Static<typeof SessionFeedInputSchema>;
 
 export const StartRuntimeRequestSchema = Type.Object(
   {
-    /** Legacy Sesh/workspace launch identity. */
-    workspaceId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    /** Persisted orchestration launch identity. These replace workspaceId. */
+    /** Persisted orchestration launch identity. */
     projectId: Type.Optional(IdentifierSchema),
     checkoutId: Type.Optional(IdentifierSchema),
     /** Internal orchestration identity. Browser launches may omit it. */
     runtimeId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_ID })),
-    /** Explicit isolated checkout cwd; tmux placement still uses workspaceId. */
+    /** Explicit cwd within the selected checkout. */
     checkoutCwd: Type.Optional(
       Type.String({ minLength: 1, maxLength: MAX_PATH }),
     ),

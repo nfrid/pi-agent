@@ -10,7 +10,6 @@ const validSnapshot = {
   revision: 1,
   cursor: 7,
   runtimes: [],
-  workspaces: [],
   sessions: [],
   unread: [],
 };
@@ -144,84 +143,6 @@ describe('DashboardHttpClient command requests', () => {
     expect(fetch).toHaveBeenCalledWith(
       '/api/session-threads',
       expect.objectContaining({ headers: expect.anything() }),
-    );
-  });
-
-  it('fetches and validates workspace composer commands', async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            commands: [
-              {
-                name: 'review',
-                description: 'Review code',
-                argumentHint: '<path>',
-                source: 'prompt',
-              },
-            ],
-          }),
-          { status: 200 },
-        ),
-    );
-    const client = new DashboardHttpClient({
-      fetch,
-      tokenStore: {
-        get: () => 'test-token',
-        set: () => undefined,
-        clear: () => undefined,
-      },
-    });
-    await expect(client.composerCommands('workspace/1')).resolves.toEqual({
-      commands: [
-        {
-          name: 'review',
-          description: 'Review code',
-          argumentHint: '<path>',
-          source: 'prompt',
-        },
-      ],
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/workspaces/workspace%2F1/composer-commands',
-      expect.objectContaining({ headers: expect.anything() }),
-    );
-  });
-
-  it('rejects malformed workspace composer command responses', async () => {
-    const client = new DashboardHttpClient({
-      fetch: vi.fn(
-        async () =>
-          new Response(JSON.stringify({ commands: [] }), { status: 200 }),
-      ),
-      tokenStore: {
-        get: () => undefined,
-        set: () => undefined,
-        clear: () => undefined,
-      },
-    });
-    await expect(client.composerCommands('workspace')).resolves.toEqual({
-      commands: [],
-    });
-
-    const invalid = new DashboardHttpClient({
-      fetch: vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              commands: [{ name: 'bad', source: 'extension' }],
-            }),
-            { status: 200 },
-          ),
-      ),
-      tokenStore: {
-        get: () => undefined,
-        set: () => undefined,
-        clear: () => undefined,
-      },
-    });
-    await expect(invalid.composerCommands('workspace')).rejects.toThrow(
-      'invalid composer command',
     );
   });
 
@@ -538,14 +459,16 @@ describe('DashboardHttpClient command requests', () => {
       },
     });
     await client.startRuntime({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       initialPrompt: 'inspect this',
       commandId: 'start-id',
     });
     const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
     expect(String(call[1]?.[0])).toContain('/trpc/startRuntime');
     expect(JSON.parse(String(call[1]?.[1]?.body))).toEqual({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       initialPrompt: 'inspect this',
       commandId: 'start-id',
     });
@@ -570,13 +493,15 @@ describe('DashboardHttpClient command requests', () => {
       },
     });
     await client.startRuntime({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       sessionId: 'session-1',
       commandId: 'resume-id',
     });
     const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
     expect(JSON.parse(String(call[1]?.[1]?.body))).toEqual({
-      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
       sessionId: 'session-1',
       commandId: 'resume-id',
     });

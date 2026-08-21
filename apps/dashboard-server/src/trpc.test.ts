@@ -38,7 +38,6 @@ function snapshot() {
     revision: 4,
     cursor: 8,
     runtimes: [],
-    workspaces: [],
     sessions: [],
     unread: [],
   } as const;
@@ -50,9 +49,6 @@ function context(): DashboardRouteContext {
     serverId: () => 'generation-1',
     origins: () => [ORIGIN],
     snapshot,
-    workspaces: () => [],
-    refreshWorkspaces: async () => [],
-    composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
     sessionSnapshot: async (sessionId, before) => ({
       metadata: {
@@ -164,7 +160,6 @@ async function realSessionSnapshotFixture() {
     manager: { onRegistryChange: () => undefined } as never,
     sessions,
     metadata,
-    sesh: { list: async () => [] },
     usage: { get: async () => null },
     push: { notify: async () => undefined },
     stateDir: path.join(root, 'state'),
@@ -378,7 +373,7 @@ describe('dashboard tRPC boundary', () => {
           message: { role: 'user', content: 'new' },
         })}\n`,
       );
-      await fixture.sessions.refresh([]);
+      await fixture.sessions.refresh();
       const fresh = await request();
       expect(
         fresh
@@ -467,7 +462,11 @@ describe('dashboard tRPC boundary', () => {
       method: 'POST',
       url: '/trpc/startRuntime',
       headers: authHeaders(),
-      payload: { commandId: 'start-1', workspaceId: 'workspace-1' },
+      payload: {
+        commandId: 'start-1',
+        projectId: 'project-1',
+        checkoutId: 'checkout-1',
+      },
     });
     expect(valid.statusCode).toBe(200);
     expect(valid.json().result.data.result.runtimeId).toBe('runtime-1');
@@ -479,7 +478,8 @@ describe('dashboard tRPC boundary', () => {
       headers: authHeaders(),
       payload: {
         commandId: 'start-2',
-        workspaceId: 'workspace-1',
+        projectId: 'project-1',
+        checkoutId: 'checkout-1',
         unexpected: true,
       },
     });
@@ -491,7 +491,11 @@ describe('dashboard tRPC boundary', () => {
       method: 'POST',
       url: '/trpc/startRuntime',
       headers: authHeaders(),
-      payload: { commandId: 'start-3', workspaceId: 'workspace-1' },
+      payload: {
+        commandId: 'start-3',
+        projectId: 'project-1',
+        checkoutId: 'checkout-1',
+      },
     });
     expect(malformedOutput.statusCode).toBe(500);
   });

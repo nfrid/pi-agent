@@ -16,8 +16,6 @@ import {
   redactImageData,
   type SessionIndexEntry,
   validateSessionName,
-  type WorkspaceTarget,
-  workspaceForPath,
 } from '@pi-dashboard/protocol';
 import type { MetadataStore } from './metadata.js';
 
@@ -417,14 +415,6 @@ function within(root: string, file: string): boolean {
   );
 }
 
-function workspaceFor(
-  cwd: string,
-  workspaces: readonly WorkspaceTarget[],
-): string | undefined {
-  const normalized = path.resolve(cwd);
-  return workspaceForPath(normalized, workspaces)?.id;
-}
-
 function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
   if (!isRecord(value)) return undefined;
   if (value.type === 'model_change') {
@@ -539,7 +529,6 @@ export class SessionIndex {
   private readonly indexing = new Map<string, Promise<void>>();
   private readonly appendStates = new Map<string, AuxiliaryAppendState>();
   private readonly appendGenerations = new Map<string, number>();
-  private workspaces: readonly WorkspaceTarget[] = [];
   private historyReadBytesTotal = 0;
   constructor(
     private readonly sessionDir: string,
@@ -562,8 +551,7 @@ export class SessionIndex {
     this.historyReadBytesTotal = 0;
   }
 
-  async rebuild(workspaces: readonly WorkspaceTarget[] = []): Promise<void> {
-    this.workspaces = workspaces;
+  async rebuild(): Promise<void> {
     this.files.clear();
     this.fileIds.clear();
     this.appendStates.clear();
@@ -571,27 +559,23 @@ export class SessionIndex {
     const paths = (
       await Promise.all(this.sessionRoots().map((root) => this.findJsonl(root)))
     ).flat();
-    for (const file of paths)
-      await this.indexFile(file, this.workspaces).catch(() => undefined);
+    for (const file of paths) await this.indexFile(file).catch(() => undefined);
   }
 
-  async start(workspaces: readonly WorkspaceTarget[] = []): Promise<void> {
-    this.workspaces = workspaces;
-    await this.rebuild(this.workspaces);
+  async start(): Promise<void> {
+    await this.rebuild();
     await Promise.all(
       this.sessionRoots().map((root) => this.ensureWatcher(root)),
     );
   }
 
-  async refresh(workspaces: readonly WorkspaceTarget[] = []): Promise<void> {
-    this.workspaces = workspaces;
-    await this.rebuild(this.workspaces);
+  async refresh(): Promise<void> {
+    await this.rebuild();
   }
 
-  list(workspaceId?: string): SessionIndexEntry[] {
+  list(): SessionIndexEntry[] {
     return [...this.files.values()]
       .filter((file) => !this.isAuxiliaryFile(file.file))
-      .filter((file) => !workspaceId || file.workspaceId === workspaceId)
       .map(
         ({
           header: _header,
@@ -1124,9 +1108,7 @@ export class SessionIndex {
     ) {
       // A watcher may not have delivered an append yet. Refresh exactly once;
       // the refresh itself is the only operation allowed to scan the file.
-      await this.indexFile(indexed.file, this.workspaces, [
-        ...previous.prefixHashes.keys(),
-      ]);
+      await this.indexFile(indexed.file, [...previous.prefixHashes.keys()]);
       indexed = this.files.get(id);
       if (!indexed) throw new Error('Unknown session.');
     }
@@ -2055,7 +2037,7 @@ export class SessionIndex {
     // appendFile uses O_APPEND so one JSONL entry is not overwritten by a
     // concurrent Pi append. Re-index from disk so latest-name semantics apply.
     await fs.appendFile(indexed.file, `${JSON.stringify(entry)}\n`, 'utf8');
-    await this.indexFile(indexed.file, this.workspaces);
+    await this.indexFile(indexed.file);
     const renamed = this.files.get(id);
     if (!renamed) throw new Error('Session disappeared while renaming.');
     return this.publicEntry(renamed);
@@ -2160,7 +2142,7 @@ export class SessionIndex {
     filename: string | Buffer | null | undefined,
   ): void {
     if (!filename) {
-      void this.rebuild(this.workspaces)
+      void this.rebuild()
         .then(() => this.notifyChange())
         .catch(() => undefined);
       return;
@@ -2175,7 +2157,7 @@ export class SessionIndex {
     // They are not catalogue inputs; only their JSONL transcript triggers an
     // incremental index update. Normal roots retain the fallback rebuild.
     if (this.isAuxiliaryFile(file)) return;
-    void this.rebuild(this.workspaces)
+    void this.rebuild()
       .then(() => this.notifyChange())
       .catch(() => undefined);
   }
@@ -2207,7 +2189,7 @@ export class SessionIndex {
       const previous = this.indexing.get(file) ?? Promise.resolve();
       const previousId = this.fileIds.get(path.resolve(file));
       const next = previous
-        .then(() => this.indexFile(file, this.workspaces))
+        .then(() => this.indexFile(file))
         .catch(() => this.removeFile(file))
         .then(() =>
           this.notifyChange(
@@ -2247,7 +2229,6 @@ export class SessionIndex {
 
   private async indexFile(
     file: string,
-    workspaces: readonly WorkspaceTarget[],
     proofOffsets: readonly number[] = [],
   ): Promise<void> {
     const resolved = path.resolve(file);
@@ -2256,7 +2237,6 @@ export class SessionIndex {
       existingId === undefined ? undefined : this.files.get(existingId);
     return this.indexFileStreaming(
       file,
-      workspaces,
       proofOffsets.concat(
         existing === undefined
           ? []
@@ -2267,7 +2247,6 @@ export class SessionIndex {
 
   private async indexFileStreaming(
     file: string,
-    workspaces: readonly WorkspaceTarget[],
     proofOffsets: readonly number[],
   ): Promise<void> {
     const resolved = path.resolve(file);
@@ -2497,7 +2476,6 @@ export class SessionIndex {
           id,
           file: resolved,
           cwd: header.cwd,
-          workspaceId: workspaceFor(header.cwd, workspaces),
           ...(sawSessionInfo && name ? { name } : {}),
           title: deriveSessionTitle(
             firstUserEntry === undefined ? [] : [firstUserEntry],

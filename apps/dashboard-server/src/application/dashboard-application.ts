@@ -30,7 +30,6 @@ import {
   type ShellUsage,
   type ThreadSummary,
   tryParseDelegateTranscriptEntry,
-  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type { MetadataStore } from '../metadata.js';
 import type { ProjectResolver } from '../project-resolver.js';
@@ -38,17 +37,14 @@ import type { PushSender } from '../push.js';
 import type { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
 import type { RuntimeManager } from '../runtime-manager.js';
 import type { RegistryChange, RuntimeRegistry } from '../runtime-registry.js';
-import type { SeshAdapter } from '../sesh.js';
 import type { AuxiliarySourceCursor, SessionIndex } from '../session-index.js';
 import type { UsageProvider } from '../usage.js';
-import { ComposerCommandService } from './composer-command-service.js';
 import { NotificationService } from './notification-service.js';
 import type { OrchestrationService } from './orchestration-service.js';
 import { RuntimeService } from './runtime-service.js';
 import { SessionService } from './session-service.js';
 import { UploadService } from './upload-service.js';
 import { UsageService } from './usage-service.js';
-import { WorkspaceService } from './workspace-service.js';
 
 export interface ApplicationChange {
   type: 'event' | 'snapshot';
@@ -70,7 +66,6 @@ export interface DashboardApplicationOptions {
   manager: RuntimeManager;
   sessions: SessionIndex;
   metadata: MetadataStore;
-  sesh: SeshAdapter;
   usage: UsageProvider;
   push: PushSender;
   stateDir: string;
@@ -88,7 +83,6 @@ export interface SessionMetadataDelta {
 const SESSION_METADATA_FIELDS = [
   'file',
   'cwd',
-  'workspaceId',
   'projectId',
   'checkoutId',
   'name',
@@ -230,7 +224,6 @@ export function projectShellUsage(value: unknown): ShellUsage | undefined {
 const MAX_SHELL_RUNTIME_BYTES = 256 * 1024;
 const MAX_SHELL_CATALOGUE_BYTES = 350_000;
 const SHELL_PROJECTION_DOMAINS = [
-  'workspaces',
   'projects',
   'checkouts',
   'threads',
@@ -242,7 +235,6 @@ export interface ShellProjectionResult {
   readonly shellProjection: ShellProjection;
   readonly runtimes: ShellRuntimeSnapshot[];
   readonly sessions: SessionIndexEntry[];
-  readonly workspaces: WorkspaceTarget[];
   readonly projects: ProjectSummary[];
   readonly checkouts: CheckoutSummary[];
   readonly threads: ThreadSummary[];
@@ -725,9 +717,7 @@ export function projectPublicBridgeEvent(event: BridgeEvent): BridgeEvent {
 export class DashboardApplication {
   readonly runtime: RuntimeService;
   readonly sessions: SessionService;
-  readonly workspaces: WorkspaceService;
   readonly notifications: NotificationService;
-  readonly composerCommands: ComposerCommandService;
   readonly usage: UsageService;
   readonly uploads: UploadService;
   private readonly registry: RuntimeRegistry;
@@ -757,31 +747,18 @@ export class DashboardApplication {
       options.metadata.orchestration,
     );
     this.sessions = new SessionService(options.sessions);
-    this.workspaces = new WorkspaceService(
-      options.sesh,
-      options.manager,
-      options.sessions,
-      options.metadata,
-      options.onChange,
-    );
     this.notifications = new NotificationService(
       options.metadata,
       options.push,
     );
-    this.composerCommands = new ComposerCommandService();
     this.usage = new UsageService(options.usage, options.onChange);
     this.uploads = new UploadService(options.stateDir);
   }
 
   async start(): Promise<void> {
     await this.uploads.start();
-    await this.workspaces.refresh();
     await this.sessionsStart();
     this.initializeSessionMetadataBaseline();
-  }
-
-  async refreshWorkspaces(): Promise<WorkspaceTarget[]> {
-    return this.workspaces.refresh();
   }
 
   setPush(push: PushSender): void {
@@ -886,7 +863,6 @@ export class DashboardApplication {
       if (projected.length !== values.length) omitted.add(domain);
       return projected;
     };
-    const workspaces = catalogue('workspaces', this.workspaces.list());
     const projects = catalogue(
       'projects',
       this.orchestration.projectSummaries(),
@@ -910,7 +886,6 @@ export class DashboardApplication {
       revision: Number.MAX_SAFE_INTEGER,
       cursor: Number.MAX_SAFE_INTEGER,
       runtimes,
-      workspaces,
       projects,
       checkouts,
       threads,
@@ -926,7 +901,6 @@ export class DashboardApplication {
       { domain: 'threads' as const, items: threads },
       { domain: 'checkouts' as const, items: checkouts },
       { domain: 'projects' as const, items: projects },
-      { domain: 'workspaces' as const, items: workspaces },
     ];
     while (
       Buffer.byteLength(JSON.stringify(makeSnapshot()) ?? '') >
@@ -956,7 +930,6 @@ export class DashboardApplication {
       shellProjection: makeMarker(),
       runtimes,
       sessions,
-      workspaces,
       projects,
       checkouts,
       threads,
@@ -978,7 +951,6 @@ export class DashboardApplication {
       revision,
       cursor,
       runtimes: projection.runtimes,
-      workspaces: projection.workspaces,
       projects: projection.projects,
       checkouts: projection.checkouts,
       threads: projection.threads,
@@ -1002,7 +974,6 @@ export class DashboardApplication {
       revision,
       cursor,
       runtimes: liveRuntimes.map((runtime) => compactPublicRuntime(runtime)),
-      workspaces: this.workspaces.list(),
       projects: this.orchestration.projectSummaries(),
       checkouts: this.orchestration.checkoutSummaries(),
       threads: this.orchestration.threadSummaries(),
@@ -1495,7 +1466,7 @@ export class DashboardApplication {
 
   private async sessionsStart(): Promise<void> {
     // SessionIndex.start is intentionally kept behind the application boundary.
-    await this.sessionIndex.start(this.workspaces.list());
+    await this.sessionIndex.start();
   }
 }
 

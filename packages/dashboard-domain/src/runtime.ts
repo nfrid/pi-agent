@@ -220,10 +220,6 @@ function mergeRuntimeEvent(
       return {
         ...snapshot,
         ...(update?.cwd === undefined ? {} : { cwd: update.cwd }),
-        ...(update?.workspaceHint === undefined
-          ? {}
-          : { workspaceHint: update.workspaceHint }),
-        ...(update?.tmux === undefined ? {} : { tmux: update.tmux }),
         liveState: event.state,
         ...(update?.session === undefined ? {} : { session: update.session }),
         ...(update?.model === undefined ? {} : { model: update.model }),

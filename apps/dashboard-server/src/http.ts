@@ -32,7 +32,6 @@ import {
   tryParseDelegateTranscriptEntry,
   validateBridgeCommand,
   validateSessionRenameRequest,
-  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -248,7 +247,6 @@ export interface DashboardServer {
   start(): Promise<void>;
   stop(): Promise<void>;
   snapshot(): BrowserSnapshot;
-  refreshWorkspaces(): Promise<WorkspaceTarget[]>;
   publishChange(message?: unknown): void;
   publishSessionIndexChange(sessionId?: string, auxiliary?: boolean): void;
 }
@@ -278,7 +276,6 @@ export class DashboardServerImpl implements DashboardServer {
   private readonly sessionFeeds: SessionFeedRegistry;
   private readonly application: DashboardDependencies['application'];
   private readonly runtimeProvider: DashboardDependencies['runtimeProvider'];
-  private workspaces: WorkspaceTarget[] = [];
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
   private lifecycle: 'stopped' | 'starting' | 'started' | 'stopping' =
@@ -365,13 +362,6 @@ export class DashboardServerImpl implements DashboardServer {
       },
       sessionSnapshotAt: (id, sequence) =>
         this.buildSessionSnapshot(id, undefined, sequence),
-      workspaces: () => this.application.workspaces.list(),
-      refreshWorkspaces: () => this.refreshWorkspaces(),
-      composerCommands: (workspaceId) =>
-        this.application.composerCommands.forWorkspace(
-          workspaceId,
-          this.application.workspaces.list(),
-        ),
       usage: () => this.application.usage.get(),
       readActiveDelegateTranscripts: (id) =>
         this.activeDelegateTranscriptResult(id),
@@ -607,12 +597,9 @@ export class DashboardServerImpl implements DashboardServer {
       await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
       await this.application.uploads.start();
       await this.bridge.listen(this.socketPath);
-      // Keep the HTTP boundary closed until the initial workspace refresh and
-      // session index startup (including watcher installation) are complete.
-      // refreshWorkspaces performs the first scan; start performs the second
-      // scan before installing watchers, avoiding a scan-to-watcher gap.
-      await this.refreshWorkspaces();
-      await this.sessions.start(this.workspaces);
+      // Keep the HTTP boundary closed until session indexing and watcher
+      // installation are complete.
+      await this.sessions.start();
       // Every indexed ordinary session gets its exact durable link before the
       // HTTP listener opens. The repository sorts and makes this idempotent.
       this.application.orchestrationService?.ensureSessionThreadLinks(
@@ -674,22 +661,11 @@ export class DashboardServerImpl implements DashboardServer {
           full: JSON.stringify({ kind: 'upsert', runtime: compacted }),
         });
       }
-      // Startup callbacks are suppressed while the workspace and session
-      // state is being assembled. The subscription's initial snapshot is the
-      // authority; retain one concrete event for the historical cursor.
+      // Startup callbacks are suppressed while session state is assembled.
+      // The subscription's initial snapshot is authoritative.
       try {
         const projection = this.application.shellProjection();
         this.seedApplicationDomainSignatures(projection);
-        this.shellPatchSignatures.delete('workspace');
-        this.publishShellPatch(
-          'workspace',
-          {
-            workspaces: projection.workspaces,
-            shellProjection: projection.shellProjection,
-          },
-          undefined,
-          'workspace',
-        );
       } catch (error) {
         // Keep startup available so the shell endpoint can report an explicit
         // hard-capacity failure for an oversized authoritative session index.
@@ -803,24 +779,6 @@ export class DashboardServerImpl implements DashboardServer {
 
   snapshot(cursor = this.shellFeed.sequence): BrowserSnapshot {
     return this.application.snapshot(this.serverId, this.revision, cursor);
-  }
-
-  async refreshWorkspaces(): Promise<WorkspaceTarget[]> {
-    const workspaces = await this.application.refreshWorkspaces();
-    this.workspaces = workspaces;
-    if (this.lifecycle === 'started') {
-      const projection = this.application.shellProjection();
-      this.publishShellPatch(
-        'workspace',
-        {
-          workspaces: projection.workspaces,
-          shellProjection: projection.shellProjection,
-        },
-        undefined,
-        'workspace',
-      );
-    }
-    return workspaces;
   }
 
   private async activeDelegateTranscriptResult(
@@ -1402,13 +1360,6 @@ export class DashboardServerImpl implements DashboardServer {
     projection = this.application.shellProjection(),
   ): void {
     this.shellPatchSignatures.set(
-      'workspace',
-      JSON.stringify({
-        workspaces: projection.workspaces,
-        shellProjection: projection.shellProjection,
-      }),
-    );
-    this.shellPatchSignatures.set(
       'orchestration',
       JSON.stringify({
         projects: projection.projects,
@@ -1436,15 +1387,6 @@ export class DashboardServerImpl implements DashboardServer {
 
   private publishApplicationDomains(): void {
     const projection = this.application.shellProjection();
-    this.publishShellPatch(
-      'workspace',
-      {
-        workspaces: projection.workspaces,
-        shellProjection: projection.shellProjection,
-      },
-      undefined,
-      'workspace',
-    );
     this.publishShellPatch(
       'orchestration',
       {
@@ -1510,7 +1452,6 @@ export class DashboardServerImpl implements DashboardServer {
     if (record?.type === 'sessions')
       this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
     else if (record?.domain === 'usage') this.publishApplicationDomains();
-    else if (record?.domain === 'workspace') this.publishApplicationDomains();
     else if (record?.domain === 'orchestration')
       this.publishApplicationDomains();
     else {

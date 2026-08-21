@@ -18,7 +18,6 @@ const snapshot = (serverId: string, cursor: number): BrowserSnapshot =>
     revision: cursor,
     cursor,
     runtimes: [],
-    workspaces: [],
     sessions: [],
     unread: [],
   }) as BrowserSnapshot;
@@ -151,16 +150,8 @@ describe('DashboardLiveStore', () => {
   it('converges near-capacity catalogue patches with a fresh shell snapshot', () => {
     const projection: ShellProjection = {
       truncated: true,
-      omitted: [
-        'workspaces',
-        'projects',
-        'checkouts',
-        'threads',
-        'runs',
-        'unread',
-      ],
+      omitted: ['projects', 'checkouts', 'threads', 'runs', 'unread'],
     };
-    const workspaces = [{ id: 'workspace-kept' }];
     const projects = [{ id: 'project-kept' }];
     const checkouts = [{ id: 'checkout-kept' }];
     const threads = [{ id: 'thread-kept' }];
@@ -168,7 +159,6 @@ describe('DashboardLiveStore', () => {
     const unread = [{ id: 'notification-kept' }];
     const fresh = {
       ...snapshot('daemon-1', 4),
-      workspaces,
       projects,
       checkouts,
       threads,
@@ -183,12 +173,6 @@ describe('DashboardLiveStore', () => {
       {
         sequence: 1,
         revision: 1,
-        domain: 'workspace' as const,
-        data: { workspaces, shellProjection: projection },
-      },
-      {
-        sequence: 2,
-        revision: 2,
         domain: 'orchestration' as const,
         data: {
           projects,
@@ -199,14 +183,14 @@ describe('DashboardLiveStore', () => {
         },
       },
       {
-        sequence: 3,
-        revision: 3,
+        sequence: 2,
+        revision: 2,
         domain: 'notification' as const,
         data: { unread, shellProjection: projection },
       },
       {
-        sequence: 4,
-        revision: 4,
+        sequence: 3,
+        revision: 3,
         domain: 'usage' as const,
         data: { shellProjection: projection },
       },
@@ -214,7 +198,6 @@ describe('DashboardLiveStore', () => {
     for (const event of events)
       expect(store.acceptShellEvent(event, 1)).toBe(true);
     const patched = selectSnapshot(store.getSnapshot());
-    expect(patched?.workspaces).toEqual(fresh.workspaces);
     expect(patched?.projects).toEqual(fresh.projects);
     expect(patched?.checkouts).toEqual(fresh.checkouts);
     expect(patched?.threads).toEqual(fresh.threads);
@@ -1219,9 +1202,6 @@ describe('DashboardLiveStore', () => {
     store.installSnapshot({
       ...snapshot('daemon-1', 1),
       usage: { remaining: 3 },
-      workspaces: [
-        { id: 'workspace-1', name: 'Workspace', canonicalPath: '/tmp' },
-      ],
       sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 }],
       unread: [
         {
@@ -1239,7 +1219,6 @@ describe('DashboardLiveStore', () => {
     expect(selectSnapshot(hydrated)).toMatchObject({
       cursor: 1,
       usage: { remaining: 3 },
-      workspaces: [{ id: 'workspace-1' }],
       sessions: [{ id: 'session-1' }],
       unread: [{ id: 'notification-1' }],
     });

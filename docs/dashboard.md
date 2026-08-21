@@ -53,11 +53,10 @@ bridge socket is configured:
 PI_DASHBOARD_SOCKET="$HOME/.pi/agent/dashboard/bridge.sock" pi
 ```
 
-Dashboard launches use a fixed headless RPC `pi` argv, an absolute validated
-workspace, and one child per managed runtime. Sesh remains workspace discovery
-only; a usable canonical directory is launchable. Existing managed tmux windows
-should be stopped before this cutover because legacy active rows are not
-recoverable.
+Dashboard launches use a fixed headless RPC `pi` argv, a persisted project and
+checkout with an absolute validated cwd, and one child per managed runtime.
+Manually started runtimes are associated to registered projects by cwd; unmatched
+runtimes remain explicitly unassigned.
 
 For production build and restart instructions, see
 [dashboard-deployment.md](dashboard-deployment.md).
@@ -105,13 +104,12 @@ The application layer is split by responsibility:
 application/
   runtime-service       launch, restart, stop, commands, rename
   session-service       session catalogue and transcript access
-  workspace-service     Sesh catalogue and refresh persistence
   notification-service  runtime-derived notifications and push fan-out
   usage-service         bounded provider cache and request coalescing
   upload-service        bounded image validation, ownership, and cleanup
 repositories/
   migrations                     numbered idempotent SQLite migrations
-  sqlite-metadata-repository     workspace/runtime/session/launch metadata
+  sqlite-metadata-repository     runtime/session/launch metadata
   sqlite-notification-repository notifications and push subscriptions
 ```
 

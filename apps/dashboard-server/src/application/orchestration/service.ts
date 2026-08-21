@@ -69,7 +69,6 @@ export class OrchestrationService implements OrchestrationHost {
   readonly repository: OrchestrationRepository;
   readonly manager: RuntimeManager;
   readonly registry: RuntimeRegistry;
-  readonly workspaces: () => readonly import('@pi-dashboard/protocol').WorkspaceTarget[];
   private readonly onChange?: () => void;
   private readonly pollMs: number;
   readonly reconnectGraceMs: number;
@@ -112,7 +111,6 @@ export class OrchestrationService implements OrchestrationHost {
     this.repository = options.repository;
     this.manager = options.manager;
     this.registry = options.registry;
-    this.workspaces = options.workspaces;
     this.onChange = options.onChange;
     this.pollMs = options.pollMs ?? 500;
     const reconnectGraceMs = options.reconnectGraceMs ?? 5_000;

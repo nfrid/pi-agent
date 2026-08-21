@@ -2,7 +2,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDaemon } from './create-daemon.js';
 
-export * from './application/composer-command-service.js';
 export * from './application/dashboard-application.js';
 export * from './application/orchestration-service.js';
 export type {
@@ -19,7 +18,6 @@ export * from './runtime-host.js';
 export * from './runtime-manager.js';
 export * from './runtime-registry.js';
 export * from './security.js';
-export * from './sesh.js';
 export * from './session-index.js';
 
 /** Production/launchd entrypoint shared by dist/index.js and the dev wrapper. */

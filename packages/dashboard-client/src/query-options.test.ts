@@ -9,7 +9,6 @@ import {
   activeDelegateTranscriptQueryOptions,
   archiveThreadMutationOptions,
   commandMutationOptions,
-  composerCommandsQueryOptions,
   createThreadMutationOptions,
   dashboardQueryKeys,
   delegateHistoryQueryOptions,
@@ -34,27 +33,6 @@ const client = {
 } as unknown as DashboardHttpClient;
 
 describe('dashboard query and mutation factories', () => {
-  it('creates workspace-scoped composer command queries', async () => {
-    const composerCommands = vi.fn(async () => ({ commands: [] }));
-    const options = composerCommandsQueryOptions(
-      { composerCommands } as unknown as DashboardHttpClient,
-      'workspace-1',
-    );
-    expect(options.queryKey).toEqual([
-      'dashboard',
-      'composer-commands',
-      'workspace-1',
-    ]);
-    expect(options.staleTime).toBe(30_000);
-    if (!options.queryFn) throw new Error('Query function is missing.');
-    await expect(
-      options.queryFn({ signal: undefined } as never),
-    ).resolves.toEqual({
-      commands: [],
-    });
-    expect(composerCommands).toHaveBeenCalledWith('workspace-1', undefined);
-  });
-
   it('queries persisted delegate history by session ID', async () => {
     const delegateHistory = vi.fn(async () => ({
       version: 2 as const,
@@ -284,7 +262,10 @@ describe('dashboard query and mutation factories', () => {
     const restart = restartRuntimeMutationOptions({
       restartRuntime,
     } as unknown as DashboardHttpClient);
-    const startVariables = { workspaceId: 'workspace-1' };
+    const startVariables = {
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+    };
     const renameVariables = { id: 'session-1', name: 'Renamed' };
     const stopVariables = { runtimeId: 'runtime-1', force: true };
     const restartVariables = { runtimeId: 'runtime-1' };

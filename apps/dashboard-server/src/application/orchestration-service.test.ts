@@ -27,7 +27,7 @@ async function gitOutput(cwd: string, ...args: string[]): Promise<string> {
   return result.stdout;
 }
 
-function workspace(root: string) {
+function _workspace(root: string) {
   return {
     id: 'workspace-main',
     name: 'main',
@@ -73,7 +73,6 @@ async function orchestrationFixture() {
     repository: metadata.orchestration,
     manager: manager as never,
     registry: registry as never,
-    workspaces: () => [],
     readSession: async (id) => ({
       metadata: {
         id,
@@ -136,7 +135,6 @@ it('adopts and deduplicates a non-Git directory without Sesh', async () => {
     repository: metadata.orchestration,
     manager: {} as never,
     registry: {} as never,
-    workspaces: () => [],
   });
   try {
     const first = (await service.adoptProject({
@@ -398,7 +396,6 @@ async function isolatedServiceFixture(
     repository: metadata.orchestration,
     manager: manager as never,
     registry: registry as never,
-    workspaces: () => [workspace(root)],
     pollMs: 5,
     beforeWorktreePreparation: options.beforeWorktreePreparation,
     beforeWorktreeFinish: options.beforeWorktreeFinish,
@@ -1587,7 +1584,6 @@ describe('OrchestrationService', () => {
         repository: metadata.orchestration,
         manager: manager as never,
         registry: registry as never,
-        workspaces: () => [workspace(root)],
       });
       const adopted = (await service.adoptProject({
         commandId: 'adopt-once',
@@ -1722,7 +1718,6 @@ describe('OrchestrationService', () => {
           get: () => undefined,
           sendCommand: vi.fn(async () => ({ accepted: true })),
         } as never,
-        workspaces: () => [workspace(root)],
       });
       const second = new OrchestrationService({
         repository: secondMetadata.orchestration,
@@ -1731,7 +1726,6 @@ describe('OrchestrationService', () => {
           get: () => undefined,
           sendCommand: vi.fn(async () => ({ accepted: true })),
         } as never,
-        workspaces: () => [workspace(root)],
       });
       const results = await Promise.all([
         first.adoptProject({ commandId: 'adopt-main', rootPath: root }),
@@ -1797,7 +1791,6 @@ describe('OrchestrationService', () => {
           get: () => undefined,
           sendCommand: vi.fn(async () => ({ accepted: true })),
         } as never,
-        workspaces: () => [workspace(root)],
         pollMs: 5,
       });
       const adopted = (await service.adoptProject({

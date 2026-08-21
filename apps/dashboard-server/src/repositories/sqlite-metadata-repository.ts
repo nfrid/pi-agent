@@ -3,7 +3,6 @@ import type {
   RuntimeLocation,
   RuntimeSnapshot,
   SessionIndexEntry,
-  WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { credentialHash } from '../metadata-credentials.js';
 import type {
@@ -14,22 +13,6 @@ import type {
 
 export class SqliteMetadataRepository implements MetadataRepository {
   constructor(private readonly db: DatabaseSync) {}
-
-  saveWorkspace(workspace: WorkspaceTarget): void {
-    this.db
-      .prepare(
-        `INSERT INTO workspace (id,path,canonical_path,name,source,active,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,canonical_path=excluded.canonical_path,name=excluded.name,source=excluded.source,active=excluded.active,updated_at=excluded.updated_at`,
-      )
-      .run(
-        workspace.id,
-        workspace.path,
-        workspace.canonicalPath,
-        workspace.name,
-        workspace.source,
-        workspace.active ? 1 : 0,
-        Date.now(),
-      );
-  }
 
   saveRuntime(snapshot: RuntimeSnapshot): void {
     this.db
@@ -60,7 +43,7 @@ export class SqliteMetadataRepository implements MetadataRepository {
         session.id,
         session.file,
         session.cwd,
-        session.workspaceId ?? null,
+        null,
         session.name ?? null,
         session.updatedAt,
         session.entryCount ?? null,
@@ -69,7 +52,7 @@ export class SqliteMetadataRepository implements MetadataRepository {
 
   recordManagedLaunch(
     runtimeId: string,
-    identity: string | ManagedLaunchIdentity,
+    identity: ManagedLaunchIdentity,
     location: RuntimeLocation,
     credentials: {
       identityToken: string;
@@ -78,15 +61,14 @@ export class SqliteMetadataRepository implements MetadataRepository {
       mode?: 'read' | 'write';
     },
   ): void {
-    const value: ManagedLaunchIdentity =
-      typeof identity === 'string' ? { workspaceId: identity } : identity;
+    const value = identity;
     this.db
       .prepare(
         `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,project_id,checkout_id,cwd,runtime_location_json,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode) VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?)`,
       )
       .run(
         runtimeId,
-        value.workspaceId ?? null,
+        null,
         value.projectId ?? null,
         value.checkoutId ?? null,
         value.cwd ?? null,
@@ -103,14 +85,11 @@ export class SqliteMetadataRepository implements MetadataRepository {
     return (
       this.db
         .prepare(
-          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,project_id as projectId,checkout_id as checkoutId,cwd,runtime_location_json as locationJson,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch WHERE stopped_at IS NULL AND runtime_location_json IS NOT NULL',
+          'SELECT runtime_id as runtimeId,project_id as projectId,checkout_id as checkoutId,cwd,runtime_location_json as locationJson,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch WHERE stopped_at IS NULL AND runtime_location_json IS NOT NULL',
         )
         .all() as Array<Record<string, unknown>>
     ).map((row) => ({
       runtimeId: String(row.runtimeId),
-      ...(row.workspaceId == null
-        ? {}
-        : { workspaceId: String(row.workspaceId) }),
       ...(row.projectId == null ? {} : { projectId: String(row.projectId) }),
       ...(row.checkoutId == null ? {} : { checkoutId: String(row.checkoutId) }),
       ...(row.cwd == null ? {} : { cwd: String(row.cwd) }),

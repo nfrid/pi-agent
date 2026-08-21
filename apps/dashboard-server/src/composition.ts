@@ -8,7 +8,6 @@ import type { PushSender } from './push.js';
 import type { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
 import type { RuntimeManager } from './runtime-manager.js';
 import type { RuntimeRegistry } from './runtime-registry.js';
-import type { SeshAdapter } from './sesh.js';
 import type { SessionIndex } from './session-index.js';
 import type { UsageProvider } from './usage.js';
 
@@ -22,7 +21,6 @@ export interface DashboardServerOptions {
   sessionDir?: string;
   /** Hidden Pi child sessions addressable by ID but omitted from shell listings. */
   delegateSessionDir?: string;
-  sesh?: SeshAdapter;
   runtimeProvider?: AgentRuntimeProvider;
   /** Stable sidecar socket; defaults below the dashboard state directory. */
   runtimeHostSocketPath?: string;
@@ -61,7 +59,6 @@ export interface DashboardDependencies {
   readonly metadata: MetadataStore;
   readonly orchestration: SqliteOrchestrationRepository;
   readonly sessions: SessionIndex;
-  readonly sesh: SeshAdapter;
   readonly runtimeProvider: AgentRuntimeProvider;
   readonly usage: UsageProvider;
   push: PushSender;

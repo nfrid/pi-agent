@@ -21,7 +21,6 @@ import {
   type ShellRuntimeSnapshot,
   type ThreadSummary,
   tryParseAuthoritativeSessionSnapshot,
-  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
 import { DashboardConnectionRuntime } from './connection-runtime.js';
@@ -102,8 +101,6 @@ export interface DashboardLiveState {
   sessionSnapshotsById: Readonly<Record<string, AuthoritativeSessionSnapshot>>;
   /** Verified, contiguous disk-history coverage owned by the store. */
   sessionHistoryCoverageById: Readonly<Record<string, SessionHistoryCoverage>>;
-  workspacesById: Readonly<Record<string, WorkspaceTarget>>;
-  workspaceOrder: readonly string[];
   runtimesById: Readonly<Record<string, RuntimeSnapshot>>;
   sessionsById: Readonly<Record<string, SessionIndexEntry>>;
   /** First-turn titles are rendered before Pi persists or publishes session metadata. */
@@ -179,8 +176,6 @@ function emptyState(): DashboardLiveState {
     sessionSyncById: {},
     sessionSnapshotsById: {},
     sessionHistoryCoverageById: {},
-    workspacesById: {},
-    workspaceOrder: [],
     runtimesById: {},
     sessionsById: {},
     optimisticSessionTitlesById: {},
@@ -371,8 +366,6 @@ export class DashboardLiveStore {
       checkouts: snapshot.checkouts,
       threads: snapshot.threads,
       runs: snapshot.runs,
-      workspacesById: indexed(snapshot.workspaces),
-      workspaceOrder: snapshot.workspaces.map((item) => item.id),
       runtimesById: runtimeIndex(runtimes),
       sessionsById: sessions,
       optimisticSessionTitlesById: optimisticSessions,
@@ -833,16 +826,6 @@ export class DashboardLiveStore {
         }
         break;
       }
-      case 'workspace':
-        nextState = {
-          ...nextState,
-          ...(event.data.shellProjection === undefined
-            ? {}
-            : { shellProjection: event.data.shellProjection }),
-          workspacesById: indexed(event.data.workspaces),
-          workspaceOrder: event.data.workspaces.map((item) => item.id),
-        };
-        break;
       case 'orchestration':
         nextState = {
           ...nextState,
@@ -1925,8 +1908,6 @@ let lastMaterializedParts:
       | 'checkouts'
       | 'threads'
       | 'runs'
-      | 'workspacesById'
-      | 'workspaceOrder'
       | 'runtimesById'
       | 'sessionsById'
       | 'notificationsById'
@@ -1949,8 +1930,6 @@ export function materializeSnapshot(
     checkouts: state.checkouts,
     threads: state.threads,
     runs: state.runs,
-    workspacesById: state.workspacesById,
-    workspaceOrder: state.workspaceOrder,
     runtimesById: state.runtimesById,
     sessionsById: state.sessionsById,
     notificationsById: state.notificationsById,
@@ -1970,10 +1949,6 @@ export function materializeSnapshot(
     revision: state.revision,
     cursor: state.snapshotCursor,
     runtimes: Object.values(state.runtimesById),
-    workspaces: state.workspaceOrder.flatMap((id) => {
-      const workspace = state.workspacesById[id];
-      return workspace ? [workspace] : [];
-    }),
     sessions: Object.values(state.sessionsById),
     ...(state.usage === undefined ? {} : { usage: state.usage }),
     ...(state.projects === undefined ? {} : { projects: state.projects }),
@@ -1995,7 +1970,6 @@ const EMPTY_PROJECTS: readonly ProjectSummary[] = [];
 const EMPTY_CHECKOUTS: readonly CheckoutSummary[] = [];
 const EMPTY_THREADS: readonly ThreadSummary[] = [];
 const EMPTY_RUNS: readonly RunSummary[] = [];
-const EMPTY_WORKSPACES: readonly WorkspaceTarget[] = [];
 const EMPTY_RUNTIMES: readonly RuntimeSnapshot[] = [];
 const EMPTY_SESSIONS: readonly SessionIndexEntry[] = [];
 const EMPTY_NOTIFICATIONS: readonly BrowserSnapshot['unread'][number][] = [];
@@ -2007,8 +1981,6 @@ export const selectThreads = (state: DashboardLiveState) =>
   state.threads ?? EMPTY_THREADS;
 export const selectRuns = (state: DashboardLiveState) =>
   state.runs ?? EMPTY_RUNS;
-export const selectWorkspaces = (state: DashboardLiveState) =>
-  materializeSnapshot(state)?.workspaces ?? EMPTY_WORKSPACES;
 export const selectRuntimes = (state: DashboardLiveState) =>
   materializeSnapshot(state)?.runtimes ?? EMPTY_RUNTIMES;
 export const selectSessions = (state: DashboardLiveState) =>

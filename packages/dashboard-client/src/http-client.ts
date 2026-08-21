@@ -6,7 +6,6 @@ import {
   type CancelCommand,
   type Checkout,
   type CommandReceipt,
-  type ComposerCommandCatalogue,
   DASHBOARD_PROTOCOL_VERSION,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
@@ -37,7 +36,6 @@ import {
   tryParseActiveDelegateTranscriptBaseline,
   tryParseAuthoritativeSessionSnapshot,
   tryParseBrowserSnapshot,
-  tryParseComposerCommandCatalogue,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
   tryParseProtocolInfo,
@@ -637,23 +635,6 @@ export class DashboardHttpClient {
     return this.request('/api/usage');
   }
 
-  async composerCommands(
-    workspaceId: string,
-    signal?: AbortSignal,
-  ): Promise<ComposerCommandCatalogue> {
-    const value = await this.request<unknown>(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/composer-commands`,
-      signal ? { signal } : {},
-    );
-    const catalogue = tryParseComposerCommandCatalogue(value);
-    if (!catalogue)
-      throw malformedOutput(
-        'Dashboard returned invalid composer command data.',
-        value,
-      );
-    return catalogue;
-  }
-
   async createProject(command: ProjectCreateCommand): Promise<{
     project: Project;
     checkout: Checkout;
@@ -1052,13 +1033,6 @@ export class DashboardHttpClient {
 
   async readAllNotifications(): Promise<unknown> {
     return this.request('/api/notifications/read-all', {
-      method: 'POST',
-      body: '{}',
-    });
-  }
-
-  async refreshWorkspaces(): Promise<unknown> {
-    return this.request('/api/workspaces/refresh', {
       method: 'POST',
       body: '{}',
     });

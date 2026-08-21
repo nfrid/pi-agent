@@ -6,7 +6,6 @@ import type {
   RuntimeLocation,
   RuntimeSnapshot,
   SessionIndexEntry,
-  WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { credentialHash } from './metadata-credentials.js';
 import { runMigrations } from './repositories/migrations.js';
@@ -63,10 +62,6 @@ export class MetadataStore {
     this.orchestration = new SqliteOrchestrationRepository(this.db);
   }
 
-  saveWorkspace(workspace: WorkspaceTarget): void {
-    this.metadata.saveWorkspace(workspace);
-  }
-
   saveRuntime(snapshot: RuntimeSnapshot): void {
     this.metadata.saveRuntime(snapshot);
   }
@@ -77,7 +72,7 @@ export class MetadataStore {
 
   recordManagedLaunch(
     runtimeId: string,
-    identity: string | ManagedLaunchIdentity,
+    identity: ManagedLaunchIdentity,
     location: RuntimeLocation,
     credentials: {
       identityToken: string;

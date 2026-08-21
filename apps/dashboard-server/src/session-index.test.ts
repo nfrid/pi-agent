@@ -5,7 +5,6 @@ import {
   mkdtemp,
   readFile,
   rename,
-  rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -22,45 +21,6 @@ import {
 } from './session-index.js';
 
 describe('session index', () => {
-  it('refreshes workspace ownership and removes deleted session files', async () => {
-    const root = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-dashboard-session-refresh-'),
-    );
-    const directory = path.join(root, 'project');
-    await mkdir(directory);
-    const file = path.join(directory, 'session.jsonl');
-    await writeFile(
-      file,
-      `${JSON.stringify({ type: 'session', id: 'refresh-id', cwd: '/workspace/project' })}\n`,
-    );
-    const index = new SessionIndex(root);
-    await index.rebuild();
-    expect(index.list('workspace-1')).toHaveLength(0);
-    await index.refresh([
-      {
-        id: 'workspace-1',
-        name: 'Workspace',
-        path: '/workspace',
-        canonicalPath: '/workspace',
-        source: 'directory',
-        active: true,
-      },
-    ]);
-    expect(index.list('workspace-1')).toHaveLength(1);
-    await rm(file);
-    await index.refresh([
-      {
-        id: 'workspace-1',
-        name: 'Workspace',
-        path: '/workspace',
-        canonicalPath: '/workspace',
-        source: 'directory',
-        active: true,
-      },
-    ]);
-    expect(index.get('refresh-id')).toBeUndefined();
-  });
-
   it('rebuilds from Pi JSONL headers and only reads known IDs', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-sessions-'),

@@ -7,7 +7,6 @@ import {
   CancelCommandSchema,
   CheckoutActionCommandSchema,
   CheckoutReviewCommandSchema,
-  type ComposerCommandCatalogue,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
@@ -23,7 +22,6 @@ import {
   ThreadCreateCommandSchema,
   UnpinThreadCommandSchema,
   UnsettleThreadCommandSchema,
-  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type {
   FastifyInstance,
@@ -114,9 +112,6 @@ export interface DashboardRouteContext {
     id: string,
     sequence: number,
   ): Promise<AuthoritativeSessionSnapshot>;
-  workspaces(): WorkspaceTarget[];
-  refreshWorkspaces(): Promise<WorkspaceTarget[]>;
-  composerCommands(workspaceId: string): Promise<ComposerCommandCatalogue>;
   usage(): Promise<{ usage: unknown; error?: string }>;
   readActiveDelegateTranscripts(
     id: string,
@@ -344,30 +339,10 @@ export const dashboardRoutes: FastifyPluginAsync<{
     { schema: { response: { 200: Type.Object({ ok: Type.Boolean() }) } } },
     async () => ({ ok: true }),
   );
-  app.get('/api/workspaces', async () => ({
-    workspaces: context.workspaces(),
-  }));
   app.get(
     '/api/session-threads',
     { schema: { response: { 200: SessionThreadLinksSchema } } },
     async () => context.sessionThreadLinks?.() ?? [],
-  );
-  app.post('/api/workspaces/refresh', async (_request, reply) => {
-    try {
-      return { workspaces: await context.refreshWorkspaces() };
-    } catch (error) {
-      return sendError(reply, error);
-    }
-  });
-  app.get<{ Params: { workspaceId: string } }>(
-    '/api/workspaces/:workspaceId/composer-commands',
-    async (request, reply) => {
-      try {
-        return await context.composerCommands(request.params.workspaceId);
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
   );
   app.get('/api/usage', async (_request, reply) => {
     try {

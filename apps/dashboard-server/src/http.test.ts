@@ -37,7 +37,6 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const origin = `http://127.0.0.1:${server.port}`;
@@ -73,7 +72,6 @@ describe('dashboard HTTP boundary', () => {
       stateDir: path.join(root, 'state'),
       sessionDir,
       delegateSessionDir: delegateDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const internals = server as unknown as {
@@ -234,7 +232,6 @@ describe('dashboard HTTP boundary', () => {
       stateDir: path.join(root, 'state'),
       sessionDir,
       delegateSessionDir: delegateDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const internals = server as unknown as {
@@ -385,7 +382,6 @@ describe('dashboard HTTP boundary', () => {
         `dh-${path.basename(root).slice(-6)}.sock`,
       ),
       sessionDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const headers = { 'x-dashboard-token': 'test-token' };
@@ -512,7 +508,6 @@ describe('dashboard HTTP boundary', () => {
         `dh-${path.basename(root).slice(-6)}.sock`,
       ),
       sessionDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const headers = { 'x-dashboard-token': 'test-token' };
@@ -553,7 +548,6 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       stateDir,
       sessionDir: path.join(root, 'sessions'),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const metadata = new MetadataStore(path.join(stateDir, 'dashboard.sqlite'));
@@ -592,7 +586,6 @@ describe('dashboard HTTP boundary', () => {
       port: 0,
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
-      sesh: { list: async () => [] },
     };
     server = await createDashboardServer(options);
     const token = server.token;
@@ -612,7 +605,6 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const bridge = net.createConnection(server.socketPath);
@@ -645,7 +637,6 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const implementation = server as unknown as {
@@ -685,96 +676,6 @@ describe('dashboard HTTP boundary', () => {
     ]);
   });
 
-  it('suppresses startup changes until one authoritative initial publication', async () => {
-    const root = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-dashboard-startup-order-'),
-    );
-    let releaseWorkspaces!: () => void;
-    let workspacesStarted!: () => void;
-    const workspaceStarted = new Promise<void>((resolve) => {
-      workspacesStarted = resolve;
-    });
-    const workspaceRelease = new Promise<void>((resolve) => {
-      releaseWorkspaces = resolve;
-    });
-    const sessionDir = path.join(root, 'sessions');
-    await mkdir(sessionDir, { recursive: true });
-    for (const id of ['startup-session-one', 'startup-session-two'])
-      await writeFile(
-        path.join(sessionDir, `${id}.jsonl`),
-        `${JSON.stringify({ type: 'session', id, cwd: '/tmp/project' })}\n`,
-      );
-    server = await createDashboardServer({
-      port: 0,
-      authToken: 'test-token',
-      stateDir: path.join(root, 'state'),
-      sessionDir: path.join(root, 'sessions'),
-      sesh: {
-        list: async () => {
-          workspacesStarted();
-          await workspaceRelease;
-          return [];
-        },
-      },
-    });
-    const startup = server.start();
-    await workspaceStarted;
-    const http = (server as unknown as { http: { listening: boolean } }).http;
-    expect(http.listening).toBe(false);
-    const bridge = net.createConnection(server.socketPath);
-    await new Promise<void>((resolve, reject) => {
-      bridge.once('connect', resolve);
-      bridge.once('error', reject);
-    });
-    bridge.write(
-      serializeFrame({
-        kind: 'event',
-        seq: 1,
-        event: {
-          type: 'runtime.hello',
-          protocolVersion: 1,
-          snapshot: {
-            runtimeId: 'startup-runtime',
-            ownership: 'external',
-            pid: 1,
-            cwd: '/tmp/project',
-            liveState: 'idle',
-            session: { id: 'startup-session', entries: [] },
-          },
-        },
-      }),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(server.snapshot().revision).toBe(0);
-    expect(server.snapshot().cursor).toBe(0);
-    releaseWorkspaces();
-    await startup;
-    expect(http.listening).toBe(true);
-    const input = encodeURIComponent(JSON.stringify({ protocolVersion: 3 }));
-    const response = await fetch(
-      `http://127.0.0.1:${server.port}/trpc/shellSnapshot?input=${input}`,
-      {
-        headers: {
-          authorization: 'Bearer test-token',
-          'x-dashboard-protocol-version': '3',
-        },
-      },
-    );
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      result?: {
-        data?: { snapshot?: { sessions?: Array<{ id: string }> } };
-      };
-    };
-    expect(body.result?.data?.snapshot?.sessions?.map(({ id }) => id)).toEqual([
-      'startup-session-two',
-      'startup-session-one',
-    ]);
-    expect(server.snapshot().revision).toBe(1);
-    expect(server.snapshot().cursor).toBe(1);
-    bridge.destroy();
-  });
-
   it('publishes session metadata before a replacement runtime upsert', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-session-ordering-'),
@@ -800,7 +701,6 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const runningServer = server;
@@ -892,7 +792,6 @@ describe('dashboard HTTP boundary', () => {
         os.tmpdir(),
         `pd-${path.basename(root).slice(-8)}-transcript.sock`,
       ),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const bridge = net.createConnection(server.socketPath);
@@ -921,7 +820,7 @@ describe('dashboard HTTP boundary', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 25));
     const afterHello = server.snapshot().cursor;
-    expect(afterHello).toBeGreaterThan(1);
+    expect(afterHello).toBeGreaterThanOrEqual(1);
     await new Promise((resolve) => setTimeout(resolve, 10));
     const beforeHeartbeat = server
       .snapshot()
@@ -1008,7 +907,6 @@ describe('dashboard HTTP boundary', () => {
         os.tmpdir(),
         `pd-${path.basename(root).slice(-8)}-stop.sock`,
       ),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const bridge = net.createConnection(server.socketPath);
@@ -1082,7 +980,6 @@ describe('dashboard HTTP boundary', () => {
         os.tmpdir(),
         `pd-${path.basename(root).slice(-8)}-sibling.sock`,
       ),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const bridges = [
@@ -1172,7 +1069,6 @@ describe('dashboard HTTP boundary', () => {
         os.tmpdir(),
         `pd-${path.basename(root).slice(-8)}-offline.sock`,
       ),
-      sesh: { list: async () => [] },
       registry,
     });
     await server.start();
@@ -1224,7 +1120,6 @@ describe('dashboard HTTP boundary', () => {
         os.tmpdir(),
         `pd-${path.basename(root).slice(-8)}-readd.sock`,
       ),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const bridge = net.createConnection(server.socketPath);
@@ -1308,7 +1203,6 @@ describe('dashboard HTTP boundary', () => {
         `pd-${path.basename(root).slice(-8)}-index.sock`,
       ),
       sessions: sessionIndex,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const input = encodeURIComponent(JSON.stringify({ protocolVersion: 3 }));
@@ -1331,12 +1225,12 @@ describe('dashboard HTTP boundary', () => {
     const sessions = new SessionIndex(path.join(root, 'sessions'));
     const originalStart = sessions.start.bind(sessions);
     let fail = true;
-    sessions.start = async (workspaces) => {
+    sessions.start = async () => {
       if (fail) {
         fail = false;
         throw new Error('startup failed');
       }
-      await originalStart(workspaces);
+      await originalStart();
     };
     server = await createDashboardServer({
       port: 0,
@@ -1344,7 +1238,6 @@ describe('dashboard HTTP boundary', () => {
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
       sessions,
-      sesh: { list: async () => [] },
     });
     await expect(server.start()).rejects.toThrow('startup failed');
     await expect(server.start()).resolves.toBeUndefined();
@@ -1357,7 +1250,6 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const bridge = net.createConnection(server.socketPath);
@@ -1473,7 +1365,6 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       stateDir,
       sessionDir: path.join(root, 'sessions'),
-      sesh: { list: async () => [] },
     });
     await server.start();
     const form = new FormData();
@@ -1534,7 +1425,6 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir,
-      sesh: { list: async () => [] },
     });
     await server.start();
     const origin = `http://127.0.0.1:${server.port}`;
@@ -1574,7 +1464,6 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
-      sesh: { list: async () => [] },
       usage: {
         get: async () => {
           calls += 1;
@@ -1608,7 +1497,6 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
-      sesh: { list: async () => [] },
       usage: { get: async () => usageValue },
     });
     await server.start();

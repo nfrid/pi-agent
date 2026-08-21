@@ -76,7 +76,6 @@ async function fixture(
     manager: { onRegistryChange: () => undefined } as never,
     sessions,
     metadata,
-    sesh: { list: async () => [] },
     usage: { get: async () => null },
     push: { notify: async () => undefined },
     stateDir: path.join(root, 'state'),
@@ -345,7 +344,7 @@ describe('authoritative application snapshot lifecycle', () => {
       f.file,
       `${JSON.stringify({ type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' })}\n${JSON.stringify({ type: 'message', id: 'persisted-terminal', message: { role: 'assistant', content: 'done', timestamp: 100 } })}\n`,
     );
-    await f.sessions.refresh([]);
+    await f.sessions.refresh();
     const durable = await f.app.sessionSnapshot(
       'generation-1',
       'snapshot-session',
@@ -411,7 +410,7 @@ describe('authoritative application snapshot lifecycle', () => {
         },
       )}\n`,
     );
-    await f.sessions.refresh([]);
+    await f.sessions.refresh();
 
     const durableSnapshot = await f.app.sessionSnapshot(
       'generation-1',
@@ -466,7 +465,7 @@ describe('authoritative application snapshot lifecycle', () => {
         },
       )}\n`,
     );
-    await f.sessions.refresh([]);
+    await f.sessions.refresh();
 
     const durableSnapshot = await f.app.sessionSnapshot(
       'generation-1',
@@ -522,7 +521,7 @@ describe('authoritative application snapshot lifecycle', () => {
         },
       )}\n`,
     );
-    await f.sessions.refresh([]);
+    await f.sessions.refresh();
 
     const durableSnapshot = await f.app.sessionSnapshot(
       'generation-1',

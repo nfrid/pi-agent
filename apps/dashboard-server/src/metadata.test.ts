@@ -41,14 +41,19 @@ describe('dashboard metadata wire boundaries', () => {
         id: 'host:read-runtime',
         displayTarget: 'runtime-host://read-runtime',
       };
-      store.recordManagedLaunch('read-runtime', 'workspace', location, {
-        identityToken: 'identity-read',
-        launchToken: 'launch-read',
-        mode: 'read',
-      });
+      store.recordManagedLaunch(
+        'read-runtime',
+        { projectId: 'project', checkoutId: 'checkout', cwd: '/tmp' },
+        location,
+        {
+          identityToken: 'identity-read',
+          launchToken: 'launch-read',
+          mode: 'read',
+        },
+      );
       store.recordManagedLaunch(
         'write-runtime',
-        'workspace',
+        { projectId: 'project', checkoutId: 'checkout', cwd: '/tmp' },
         {
           id: 'host:write-runtime',
           displayTarget: 'runtime-host://write-runtime',

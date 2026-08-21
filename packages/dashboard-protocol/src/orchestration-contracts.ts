@@ -387,13 +387,6 @@ export interface RuntimeStartInput {
     readonly model: string;
     readonly thinking?: string;
   };
-  /** Legacy workspace placement metadata. Persisted launches do not invent one. */
-  readonly workspace?: {
-    readonly id: string;
-    readonly name: string;
-    readonly sessionId?: string;
-    readonly active: boolean;
-  };
 }
 
 export interface RuntimeAttachInput {

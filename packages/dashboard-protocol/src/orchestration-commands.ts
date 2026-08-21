@@ -12,8 +12,7 @@ export type CommandId = Static<typeof CommandIdSchema>;
 
 const ProjectOptions = {
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-  rootPath: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
-  workspaceId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  rootPath: Type.String({ minLength: 1, maxLength: MAX_PATH }),
   defaultBaseBranch: Type.Optional(
     Type.String({ minLength: 1, maxLength: 512 }),
   ),
@@ -33,7 +32,7 @@ export type ProjectCreateCommand = Static<typeof ProjectCreateCommandSchema>;
 export const ProjectAdoptCommandSchema = Type.Object(
   {
     commandId: CommandIdSchema,
-    workspaceId: Type.String({ minLength: 1, maxLength: 256 }),
+    rootPath: Type.String({ minLength: 1, maxLength: MAX_PATH }),
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     defaultBaseBranch: Type.Optional(
       Type.String({ minLength: 1, maxLength: 512 }),

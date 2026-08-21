@@ -30,11 +30,7 @@ export async function adoptProject(
 ): Promise<unknown> {
   const prior = host.receipt(command.commandId, 'project.adopt');
   if (prior) return prior.result;
-  const workspace = command.workspaceId
-    ? host.workspaces().find((item) => item.id === command.workspaceId)
-    : undefined;
-  const candidate = command.rootPath ?? workspace?.canonicalPath;
-  if (!candidate) throw new Error('A rootPath or workspaceId is required.');
+  const candidate = command.rootPath;
 
   let candidateRoot: string;
   try {

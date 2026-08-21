@@ -19,7 +19,6 @@ import { ProjectResolver } from './project-resolver.js';
 import type { PushSender } from './push.js';
 import { RuntimeManager } from './runtime-manager.js';
 import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
-import { CliSeshAdapter } from './sesh.js';
 import { SessionIndex } from './session-index.js';
 import { CodexUsageProvider } from './usage.js';
 
@@ -135,7 +134,6 @@ function dependencies(
         }),
       delegateSessionDirectory(options),
     );
-  const sesh = options.sesh ?? new CliSeshAdapter();
   const projectResolver = new ProjectResolver(metadata.orchestration);
   let manager!: RuntimeManager;
   const registry =
@@ -179,7 +177,6 @@ function dependencies(
     repository: metadata.orchestration,
     manager,
     registry,
-    workspaces: () => manager.activeWorkspaces(),
     getSession: (id) => sessions.get(id),
     readSession: (id) => sessions.readEntries(id),
     defaultRuntimeProvider: 'extension-bridge',
@@ -190,7 +187,6 @@ function dependencies(
     manager,
     sessions,
     metadata,
-    sesh,
     usage,
     push,
     stateDir: config.stateDir,
@@ -204,7 +200,6 @@ function dependencies(
       metadata,
       orchestration: metadata.orchestration,
       sessions,
-      sesh,
       runtimeProvider,
       usage,
       push,

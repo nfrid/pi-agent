@@ -83,7 +83,6 @@ describe('useSessionHydration', () => {
       revision: 0,
       cursor: 0,
       runtimes: [],
-      workspaces: [],
       sessions: [response.metadata],
       unread: [],
     });

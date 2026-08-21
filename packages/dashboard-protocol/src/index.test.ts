@@ -52,8 +52,6 @@ import {
   validateBridgeCommand,
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
-  type WorkspaceTarget,
-  workspaceForPath,
 } from './index.js';
 
 describe('dashboard protocol', () => {
@@ -497,7 +495,6 @@ describe('dashboard protocol', () => {
         revision: 2,
         cursor: 3,
         runtimes: [],
-        workspaces: [],
         sessions: [],
         unread: [],
       },
@@ -587,38 +584,6 @@ describe('dashboard protocol', () => {
     expect(deriveSessionTitle(entries)).toBe(
       'first line second line with full intent',
     );
-  });
-
-  it('matches the closest workspace and uses explicit sources as tie-breakers', () => {
-    const workspace = (
-      id: string,
-      canonicalPath: string,
-      source: WorkspaceTarget['source'],
-    ): WorkspaceTarget => ({
-      id,
-      name: id,
-      path: canonicalPath,
-      canonicalPath,
-      source,
-      active: source === 'tmux',
-    });
-    const zoxideParent = workspace('zoxide-parent', '/Users/me/.pi', 'zoxide');
-    const tmuxChild = workspace('pi-config', '/Users/me/.pi/agent', 'tmux');
-    expect(
-      workspaceForPath('/Users/me/.pi/agent', [zoxideParent, tmuxChild])?.id,
-    ).toBe('pi-config');
-    expect(
-      workspaceForPath('/Users/me/.pi/project', [
-        workspace('tmux-home', '/Users/me', 'tmux'),
-        workspace('zoxide-project', '/Users/me/.pi/project', 'zoxide'),
-      ])?.id,
-    ).toBe('zoxide-project');
-    expect(
-      workspaceForPath('/workspace', [
-        workspace('zoxide', '/workspace', 'zoxide'),
-        workspace('configured', '/workspace', 'sesh-config'),
-      ])?.id,
-    ).toBe('configured');
   });
 
   it('round trips bounded commands', () => {
@@ -1131,12 +1096,7 @@ describe('dashboard protocol', () => {
     });
   });
 
-  it('accepts legacy and persisted launch identities without inventing a workspace', () => {
-    expect(
-      validateStartRuntimeRequest({ workspaceId: 'legacy' }),
-    ).toMatchObject({
-      workspaceId: 'legacy',
-    });
+  it('requires persisted project and checkout launch identity', () => {
     expect(
       validateStartRuntimeRequest({
         projectId: 'project-1',
@@ -1150,30 +1110,22 @@ describe('dashboard protocol', () => {
     });
     expect(() =>
       validateStartRuntimeRequest({ runtimeId: 'runtime-only' }),
-    ).toThrow('workspaceId or projectId/checkoutId');
+    ).toThrow('projectId and checkoutId');
   });
 
   it('validates structured launch requests', () => {
     expect(
       validateStartRuntimeRequest({
-        workspaceId: 'w',
+        projectId: 'p',
+        checkoutId: 'c',
         mode: 'read',
         model: { provider: 'p', model: 'm' },
       }).mode,
     ).toBe('read');
-    expect(
-      validateStartRuntimeRequest({
-        workspaceId: 'w',
-        model: { provider: 'p', model: 'm' },
-      }).workspaceId,
-    ).toBe('w');
-    expect(() =>
-      validateStartRuntimeRequest({ workspaceId: '../etc' }),
-    ).not.toThrow();
-    expect(() => validateStartRuntimeRequest({ workspaceId: '' })).toThrow();
     expect(() =>
       validateStartRuntimeRequest({
-        workspaceId: 'w',
+        projectId: 'p',
+        checkoutId: 'c',
         initialPrompt: 'x'.repeat(100_001),
       }),
     ).toThrow('initial prompt');

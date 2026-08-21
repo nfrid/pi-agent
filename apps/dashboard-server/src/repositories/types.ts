@@ -18,7 +18,6 @@ import type {
   ThreadLifecycleCommandResult,
   ThreadLifecycleEvent,
   ThreadSummary,
-  WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
 
@@ -30,7 +29,6 @@ export interface PushSubscriptionRecord {
 }
 
 export interface ManagedLaunchIdentity {
-  workspaceId?: string;
   projectId?: string;
   checkoutId?: string;
   cwd?: string;
@@ -38,8 +36,6 @@ export interface ManagedLaunchIdentity {
 
 export interface ManagedLaunchRecord {
   runtimeId: string;
-  /** Legacy Sesh identity, absent for caller-owned launches. */
-  workspaceId?: string;
   projectId?: string;
   checkoutId?: string;
   cwd?: string;
@@ -55,12 +51,11 @@ export interface ManagedLaunchRecord {
 }
 
 export interface MetadataRepository {
-  saveWorkspace(workspace: WorkspaceTarget): void;
   saveRuntime(snapshot: import('@pi-dashboard/protocol').RuntimeSnapshot): void;
   saveSession(session: SessionIndexEntry): void;
   recordManagedLaunch(
     runtimeId: string,
-    identity: string | ManagedLaunchIdentity,
+    identity: ManagedLaunchIdentity,
     location: RuntimeLocation,
     credentials: {
       identityToken: string;

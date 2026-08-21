@@ -6,7 +6,6 @@ import type {
   RuntimeBinding,
   RuntimeLocation,
   RuntimeProvider,
-  WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { validateStartRuntimeRequest } from '@pi-dashboard/protocol';
 import {
@@ -26,8 +25,6 @@ interface LaunchRecord {
   launchToken: string;
   /** Runtime identity survives reconnects and daemon restarts. */
   identityToken: string;
-  /** Legacy Sesh identity; caller-owned launches intentionally omit it. */
-  workspace?: WorkspaceTarget;
   projectId?: string;
   checkoutId?: string;
   cwd: string;
@@ -52,7 +49,6 @@ const REGISTRATION_TIMEOUT_MS = 10_000;
 const SHUTDOWN_COMMAND_GRACE_MS = 500;
 
 export class RuntimeManager {
-  private readonly workspaces = new Map<string, WorkspaceTarget>();
   private readonly launches = new Map<string, LaunchRecord>();
   private readonly tokens = new Map<
     string,
@@ -82,16 +78,6 @@ export class RuntimeManager {
   private restoreLaunch(record: ManagedLaunchRecord): LaunchRecord {
     // The daemon can validate the identity hash from metadata. The launch
     // record intentionally has no usable raw token after a daemon restart.
-    const workspace = record.workspaceId
-      ? (this.workspaces.get(record.workspaceId) ?? {
-          id: record.workspaceId,
-          name: record.workspaceId,
-          path: '',
-          canonicalPath: '',
-          source: 'directory' as const,
-          active: false,
-        })
-      : undefined;
     const checkout =
       record.projectId && record.checkoutId
         ? this.orchestration?.getCheckout(record.checkoutId)
@@ -100,32 +86,19 @@ export class RuntimeManager {
       runtimeId: record.runtimeId,
       launchToken: '',
       identityToken: '',
-      ...(workspace ? { workspace } : {}),
       ...(record.projectId ? { projectId: record.projectId } : {}),
       ...(record.checkoutId ? { checkoutId: record.checkoutId } : {}),
-      cwd: record.cwd ?? checkout?.path ?? workspace?.canonicalPath ?? '',
+      cwd: record.cwd ?? checkout?.path ?? '',
       binding: bindingFromLocation(
         record.runtimeId,
         record.location ?? { id: `${record.runtimeId}:unrecoverable` },
       ),
-      // Older persisted launches have no mode/provider provenance and remain
-      // writable on the legacy extension-bridge path.
+      // Older persisted launches have no mode/provider provenance.
       mode: record.mode ?? 'write',
       runtimeProvider: 'extension-bridge',
       metadataRecorded: true,
       createdAt: record.launchedAt,
     };
-  }
-
-  setWorkspaces(workspaces: readonly WorkspaceTarget[]): void {
-    this.workspaces.clear();
-    for (const workspace of workspaces)
-      this.workspaces.set(workspace.id, workspace);
-    for (const launch of this.launches.values()) {
-      if (!launch.workspace) continue;
-      const workspace = this.workspaces.get(launch.workspace.id);
-      if (workspace) launch.workspace = workspace;
-    }
   }
 
   expectedToken(
@@ -164,10 +137,6 @@ export class RuntimeManager {
     );
   }
 
-  activeWorkspaces(): WorkspaceTarget[] {
-    return [...this.workspaces.values()];
-  }
-
   private containsPath(root: string, target: string): boolean {
     const relative = path.relative(
       realpathSync.native(root),
@@ -180,7 +149,6 @@ export class RuntimeManager {
   }
 
   async launchInCheckout(input: {
-    workspaceId?: string;
     projectId?: string;
     checkoutId?: string;
     checkoutCwd?: string;
@@ -209,37 +177,24 @@ export class RuntimeManager {
             withoutProvider)(raw)
         : input;
     const request = validateStartRuntimeRequest(requestInput);
-    let workspace: WorkspaceTarget | undefined;
-    let projectId: string | undefined;
-    let checkoutId: string | undefined;
-    let cwd: string;
-    if (request.workspaceId !== undefined) {
-      workspace = this.workspaces.get(request.workspaceId);
-      if (!workspace)
-        throw new Error('Workspace is not in the current Sesh catalogue.');
-      cwd = realpathSync.native(request.checkoutCwd ?? workspace.canonicalPath);
-      if (!this.containsPath(workspace.canonicalPath, cwd))
-        throw new Error('Launch cwd is outside the selected workspace.');
-    } else {
-      if (!this.orchestration)
-        throw new Error('Persisted project launches are unavailable.');
-      if (!request.projectId || !request.checkoutId)
-        throw new Error('Persisted launches require projectId and checkoutId.');
-      const project = this.orchestration.getProject(request.projectId);
-      if (!project) throw new Error('Project does not exist.');
-      if (project.status !== 'active') throw new Error('Project is archived.');
-      const checkout = this.orchestration.getCheckout(request.checkoutId);
-      if (!checkout) throw new Error('Checkout does not exist.');
-      if (checkout.projectId !== project.id)
-        throw new Error('Checkout does not belong to the selected project.');
-      if (checkout.status === 'retired')
-        throw new Error('A retired checkout cannot be launched.');
-      cwd = realpathSync.native(request.checkoutCwd ?? checkout.path);
-      if (!this.containsPath(checkout.path, cwd))
-        throw new Error('Launch cwd is outside the selected checkout.');
-      projectId = project.id;
-      checkoutId = checkout.id;
-    }
+    if (!this.orchestration)
+      throw new Error('Persisted project launches are unavailable.');
+    if (!request.projectId || !request.checkoutId)
+      throw new Error('Persisted launches require projectId and checkoutId.');
+    const project = this.orchestration.getProject(request.projectId);
+    if (!project) throw new Error('Project does not exist.');
+    if (project.status !== 'active') throw new Error('Project is archived.');
+    const checkout = this.orchestration.getCheckout(request.checkoutId);
+    if (!checkout) throw new Error('Checkout does not exist.');
+    if (checkout.projectId !== project.id)
+      throw new Error('Checkout does not belong to the selected project.');
+    if (checkout.status === 'retired')
+      throw new Error('A retired checkout cannot be launched.');
+    const cwd = realpathSync.native(request.checkoutCwd ?? checkout.path);
+    if (!this.containsPath(checkout.path, cwd))
+      throw new Error('Launch cwd is outside the selected checkout.');
+    const projectId = project.id;
+    const checkoutId = checkout.id;
     let sessionFile: string | undefined;
     if (request.sessionId) {
       const session = this.sessions.get(request.sessionId);
@@ -297,7 +252,6 @@ export class RuntimeManager {
       this.metadata.recordManagedLaunch(
         runtimeId,
         {
-          ...(workspace ? { workspaceId: workspace.id } : {}),
           ...(projectId ? { projectId } : {}),
           ...(checkoutId ? { checkoutId } : {}),
           cwd,
@@ -312,15 +266,6 @@ export class RuntimeManager {
       );
       metadataRecorded = true;
       binding = await this.provider.start({
-        ...(workspace
-          ? {
-              workspace: {
-                id: workspace.id,
-                name: workspace.name,
-                active: true,
-              },
-            }
-          : {}),
         cwd,
         ...(request.name ? { name: sanitizeDisplayName(request.name) } : {}),
         runtimeId,
@@ -347,7 +292,6 @@ export class RuntimeManager {
         runtimeId,
         launchToken,
         identityToken,
-        ...(workspace ? { workspace } : {}),
         ...(projectId ? { projectId } : {}),
         ...(checkoutId ? { checkoutId } : {}),
         cwd,
@@ -380,7 +324,6 @@ export class RuntimeManager {
             runtimeId,
             launchToken,
             identityToken,
-            ...(workspace ? { workspace } : {}),
             ...(projectId ? { projectId } : {}),
             ...(checkoutId ? { checkoutId } : {}),
             cwd,
@@ -474,13 +417,7 @@ export class RuntimeManager {
             checkoutCwd: snapshot.cwd,
             ...(session ? { sessionId: session.id } : {}),
           }
-        : launch.workspace
-          ? {
-              workspaceId: launch.workspace.id,
-              checkoutCwd: snapshot.cwd,
-              ...(session ? { sessionId: session.id } : {}),
-            }
-          : undefined;
+        : undefined;
     if (!request)
       throw new Error('Managed runtime has no persisted launch identity.');
     const restartRequest = {

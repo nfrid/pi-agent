@@ -140,7 +140,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
   await expect(
     page.getByText(
-      'No runtimes are connected. Offline and failed threads remain in the workspace nav for diagnosis.',
+      'No runtimes are connected. Offline and failed threads remain in the project nav for diagnosis.',
     ),
   ).toBeVisible();
   await expect(
@@ -1692,9 +1692,12 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     page.getByText('This session is dormant', { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText('Sending a message will resume Pi in this workspace.', {
-      exact: true,
-    }),
+    page.getByText(
+      'Sending a message will resume Pi in this project checkout.',
+      {
+        exact: true,
+      },
+    ),
   ).toBeVisible();
   const dormantNotice = page.locator('.composer-notice');
   const dormantComposer = page.locator('form.composer');

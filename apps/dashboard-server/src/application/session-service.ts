@@ -5,8 +5,8 @@ import type { SessionIndex } from '../session-index.js';
 export class SessionService {
   constructor(private readonly index: SessionIndex) {}
 
-  list(workspaceId?: string): SessionIndexEntry[] {
-    return this.index.list(workspaceId);
+  list(): SessionIndexEntry[] {
+    return this.index.list();
   }
 
   async read(id: string) {

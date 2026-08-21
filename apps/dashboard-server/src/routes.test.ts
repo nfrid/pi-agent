@@ -19,10 +19,8 @@ function context(): DashboardRouteContext {
       cursor: 1,
       runtimes: [],
       sessions: [],
-      workspaces: [],
       unread: [],
     }),
-    workspaces: () => [],
     sessionThreadLinks: () => [
       {
         sessionId: 'session-1',
@@ -31,8 +29,6 @@ function context(): DashboardRouteContext {
         activeRunId: 'run-1',
       },
     ],
-    refreshWorkspaces: async () => [],
-    composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
     readActiveDelegateTranscripts: async (id) => ({
       version: 1,
@@ -96,56 +92,6 @@ describe('Fastify dashboard route plugin', () => {
         activeRunId: 'run-1',
       },
     ]);
-  });
-
-  it('delegates restart IDs and workspace refresh through typed route boundaries', async () => {
-    const app = Fastify();
-    apps.push(app);
-    const restart = vi.fn(async () => ({ runtimeId: 'restarted' }));
-    const refreshWorkspaces = vi.fn(async () => [
-      {
-        id: 'workspace-1',
-        name: 'Project',
-        path: '/tmp/project',
-        canonicalPath: '/tmp/project',
-        source: 'directory' as const,
-        active: true,
-      },
-    ]);
-    const routeContext = context();
-    routeContext.restartRuntime = restart;
-    routeContext.refreshWorkspaces = refreshWorkspaces;
-    await app.register(dashboardRoutes, { context: routeContext });
-    await app.ready();
-    const headers = {
-      origin: 'http://dashboard.test',
-      'x-dashboard-token': 'route-token',
-    };
-    const refreshed = await app.inject({
-      method: 'POST',
-      url: '/api/workspaces/refresh',
-      headers,
-      payload: {},
-    });
-    expect(refreshed.statusCode).toBe(200);
-    expect(refreshed.json().workspaces[0]).toMatchObject({ id: 'workspace-1' });
-    expect(refreshWorkspaces).toHaveBeenCalledOnce();
-
-    const invalid = await app.inject({
-      method: 'POST',
-      url: '/api/runtimes/runtime-1/restart',
-      headers,
-      payload: { id: 'bad\u0000id' },
-    });
-    expect(invalid.statusCode).toBe(400);
-    const restarted = await app.inject({
-      method: 'POST',
-      url: '/api/runtimes/runtime-1/restart',
-      headers,
-      payload: { id: 'restart-1' },
-    });
-    expect(restarted.statusCode).toBe(200);
-    expect(restart).toHaveBeenCalledWith('runtime-1', 'restart-1');
   });
 
   it('serves authenticated delegate history by session ID', async () => {
@@ -249,47 +195,6 @@ describe('Fastify dashboard route plugin', () => {
       'run-1',
       { lineageId: 'lineage-1', leafId: 'leaf-1' },
     );
-  });
-
-  it('serves authenticated workspace composer commands and rejects unknown ids', async () => {
-    const app = Fastify();
-    apps.push(app);
-    const routeContext = context();
-    routeContext.composerCommands = vi.fn(async (workspaceId) => {
-      if (workspaceId === 'missing')
-        throw Object.assign(new Error('Unknown workspace.'), {
-          code: 'unknown-workspace',
-        });
-      return { commands: [{ name: 'compact', source: 'builtin' as const }] };
-    });
-    await app.register(dashboardRoutes, { context: routeContext });
-    await app.ready();
-    const headers = {
-      origin: 'http://dashboard.test',
-      'x-dashboard-token': 'route-token',
-    };
-    const commands = await app.inject({
-      method: 'GET',
-      url: '/api/workspaces/workspace-1/composer-commands',
-      headers,
-    });
-    expect(commands.statusCode).toBe(200);
-    expect(commands.json()).toEqual({
-      commands: [{ name: 'compact', source: 'builtin' }],
-    });
-    await expect(
-      app.inject({
-        method: 'GET',
-        url: '/api/workspaces/missing/composer-commands',
-        headers,
-      }),
-    ).resolves.toMatchObject({ statusCode: 404 });
-    await expect(
-      app.inject({
-        method: 'GET',
-        url: '/api/workspaces/workspace-1/composer-commands',
-      }),
-    ).resolves.toMatchObject({ statusCode: 401 });
   });
 
   it('supports inject without starting an HTTP listener', async () => {
@@ -493,7 +398,7 @@ describe('Fastify dashboard route plugin', () => {
           method: 'POST',
           url: '/api/projects/adopt',
           headers,
-          payload: { commandId: 'adopt-1', workspaceId: 'workspace-1' },
+          payload: { commandId: 'adopt-1', rootPath: '/tmp/repo' },
         })
       ).statusCode,
     ).toBe(201);
