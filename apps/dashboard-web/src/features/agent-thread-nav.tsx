@@ -480,7 +480,7 @@ export function AgentThreadNav({
   };
   const closeWorkspaceChooser = () => {
     setWorkspaceChooserOpen(false);
-    newThreadButtonRef.current?.focus();
+    requestAnimationFrame(() => newThreadButtonRef.current?.focus());
   };
   const chooseWorkspace = (workspaceId: string) => {
     setWorkspaceChooserOpen(false);

@@ -805,7 +805,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
     .getByRole('menuitem', { name: 'Archive' })
     .click();
   const archivedShelf = nav.getByRole('button', {
-    name: 'Expand Archived in Other workspace',
+    name: 'Expand Archived',
   });
   await expect(archivedShelf).toHaveAttribute('aria-expanded', 'false');
   await expect(durableRow).toHaveCount(0);
@@ -818,7 +818,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
     .getByRole('menuitem', { name: 'Restore' })
     .click();
   await expect(
-    nav.getByRole('button', { name: /Archived in Other workspace/u }),
+    nav.getByRole('button', { name: /Expand Archived/u }),
   ).toHaveCount(0);
   await expect(durableRow).toBeVisible();
 
