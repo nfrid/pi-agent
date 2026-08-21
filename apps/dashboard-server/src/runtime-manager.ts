@@ -297,10 +297,28 @@ export class RuntimeManager {
         (metadataRecorded
           ? { runtimeId, location: expectedLocation }
           : undefined);
-      if (cleanupBinding) await this.provider.stop(cleanupBinding);
-      if (metadataRecorded) this.metadata.markManagedStopped(runtimeId);
+      let cleanupFailure: unknown;
+      try {
+        if (cleanupBinding) await this.provider.stop(cleanupBinding);
+        if (metadataRecorded) this.metadata.markManagedStopped(runtimeId);
+      } catch (cleanupError) {
+        cleanupFailure = cleanupError;
+        if (cleanupBinding && metadataRecorded)
+          this.launches.set(runtimeId, {
+            runtimeId,
+            launchToken,
+            identityToken,
+            workspace,
+            binding: cleanupBinding,
+            mode: request.mode ?? 'write',
+            runtimeProvider: runtimeProvider ?? 'extension-bridge',
+            metadataRecorded: true,
+            createdAt: Date.now(),
+          });
+      }
       this.initialPrompts.delete(runtimeId);
-      this.launches.delete(runtimeId);
+      if (!cleanupFailure) this.launches.delete(runtimeId);
+      if (cleanupFailure) throw cleanupFailure;
       throw error;
     }
   }

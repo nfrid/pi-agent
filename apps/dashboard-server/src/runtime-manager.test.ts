@@ -540,6 +540,47 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('retains cleanup evidence but drops prompts when compensation fails', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-cleanup-'));
+    const sendCommand = vi.fn();
+    let runtimeId = '';
+    const manager = new RuntimeManager(
+      { snapshots: () => [], sendCommand } as never,
+      {
+        start: vi.fn(async ({ runtimeId: id }: { runtimeId: string }) => {
+          runtimeId = id;
+          throw new Error('response lost');
+        }),
+        stop: vi.fn().mockRejectedValue(new Error('host unavailable')),
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [],
+        recordManagedLaunch: vi.fn(),
+        markManagedStopped: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([workspace(root)]);
+
+    await expect(
+      manager.launch({
+        workspaceId: 'workspace-1',
+        initialPrompt: 'must not replay',
+      }),
+    ).rejects.toThrow('host unavailable');
+    expect(runtimeId).toMatch(/^runtime-/);
+    expect(manager.hasLaunch(runtimeId)).toBe(true);
+    expect(manager.location(runtimeId)?.id).toBe(`runtime-host:${runtimeId}`);
+    manager.onRegistryChange({
+      kind: 'registered',
+      snapshot: { ...runtime('late-session'), runtimeId },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sendCommand).not.toHaveBeenCalled();
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('persists ownership before spawn and tombstones a failed start', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-order-'));
     const events: string[] = [];

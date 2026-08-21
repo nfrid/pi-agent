@@ -325,6 +325,9 @@ export class RuntimeHostService {
 
   private accept(socket: Socket): void {
     let buffer = '';
+    socket.on('error', () => {
+      /* A malformed or disconnected client must not affect owned runtimes. */
+    });
     socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
       buffer += chunk;
