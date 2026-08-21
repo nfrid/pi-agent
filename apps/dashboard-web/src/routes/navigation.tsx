@@ -1,11 +1,11 @@
+import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback } from 'react';
-import type { WorkspacePresentationSnapshot } from '../app-helpers';
 import { useDashboardUtility } from '../features/dashboard-utility-context';
 import { usePrefersReducedMotion } from '../shared/hooks/use-prefers-reduced-motion';
 
 export function newChatPath(
-  snapshot: WorkspacePresentationSnapshot,
+  snapshot: Pick<BrowserSnapshot, 'workspaces'>,
   workspaceId?: string,
 ): string {
   const id = workspaceId ?? snapshot.workspaces[0]?.id;
