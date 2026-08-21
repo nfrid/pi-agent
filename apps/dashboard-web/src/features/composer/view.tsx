@@ -103,6 +103,7 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [resumeError, setResumeError] = useState<string>();
   const [resumePending, setResumePending] = useState(false);
+  const dormantImageAttemptRef = useRef(false);
   const commandMutation = useMutation(
     commandMutationOptions(dashboardHttpClient),
   );
@@ -141,6 +142,7 @@ export function Composer({
   } = useImageAttachments({
     enabled: attachmentsEnabled,
     busy: busy || disabled || resumePending,
+    clearOnDisable: !dormantImageAttemptRef.current,
     onError: setError,
   });
   const submissionPolicy = runtime
@@ -159,6 +161,10 @@ export function Composer({
   useEffect(() => {
     if (runtime) setResumePending(false);
   }, [runtime]);
+  useEffect(() => {
+    if (runtime && attachments.length === 0)
+      dormantImageAttemptRef.current = false;
+  }, [attachments.length, runtime]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedText = text.trim();
@@ -183,11 +189,12 @@ export function Composer({
         return;
       }
       setResumeError(undefined);
+      dormantImageAttemptRef.current = hasImages;
+      setResumePending(true);
       try {
         // Text resumes use the start mutation's exact-once initialPrompt path.
         const result = await resumeMutation.mutateAsync(request);
         if (!mountedRef.current) return;
-        setResumePending(true);
         if (hasImages) {
           if (!store)
             throw new Error('The dormant session store is unavailable.');
@@ -210,7 +217,10 @@ export function Composer({
         editorRef.current?.setMarkdown('');
         onPromptSubmitted?.(trimmedText);
       } catch (cause) {
-        if (mountedRef.current) setResumeError(errorMessage(cause));
+        if (mountedRef.current) {
+          setResumePending(false);
+          setResumeError(errorMessage(cause));
+        }
       } finally {
         if (mountedRef.current) setBusy(false);
       }
@@ -281,8 +291,8 @@ export function Composer({
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        attachmentsEnabled={false}
-        attachmentsBusy={submissionDisabled || busy}
+        attachmentsEnabled={attachmentsEnabled}
+        attachmentsBusy={submissionDisabled || busy || resumePending}
         fileInputRef={fileInputRef}
         attachments={attachments}
         onSelectImages={selectImages}

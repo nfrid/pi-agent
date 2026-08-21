@@ -87,10 +87,13 @@ export function useImageAttachments({
   enabled,
   busy,
   onError,
+  clearOnDisable = true,
 }: {
   enabled: boolean;
   busy: boolean;
   onError: (error: string | undefined) => void;
+  /** Dormant resume keeps selected files while the started runtime is checked. */
+  clearOnDisable?: boolean;
 }) {
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const attachmentsRef = useRef<ImageAttachment[]>([]);
@@ -109,8 +112,8 @@ export function useImageAttachments({
   }, []);
 
   useEffect(() => {
-    if (!enabled) clearAttachments();
-  }, [clearAttachments, enabled]);
+    if (!enabled && clearOnDisable) clearAttachments();
+  }, [clearAttachments, clearOnDisable, enabled]);
   useEffect(
     () => () => {
       for (const attachment of attachmentsRef.current)

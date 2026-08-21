@@ -324,6 +324,52 @@ describe('session index', () => {
     expect(index.get('empty-id')).not.toHaveProperty('lastKnownContextTokens');
   });
 
+  it('rejects malformed latest ancestry instead of claiming partial metadata', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-resume-invalid-'),
+    );
+    await writeFile(
+      path.join(root, 'missing-parent.jsonl'),
+      `${[
+        { type: 'session', id: 'missing-parent-id', cwd: '/tmp' },
+        {
+          type: 'model_change',
+          id: 'leaf',
+          parentId: 'not-present',
+          provider: 'test',
+          modelId: 'model',
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    await writeFile(
+      path.join(root, 'cyclic.jsonl'),
+      `${[
+        { type: 'session', id: 'cyclic-id', cwd: '/tmp' },
+        {
+          type: 'model_change',
+          id: 'cycle-a',
+          parentId: 'cycle-b',
+          provider: 'test',
+          modelId: 'model',
+        },
+        {
+          type: 'thinking_level_change',
+          id: 'cycle-b',
+          parentId: 'cycle-a',
+          thinkingLevel: 'high',
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    expect(index.get('missing-parent-id')).toBeUndefined();
+    expect(index.get('cyclic-id')).toBeUndefined();
+  });
+
   it('retries latest-leaf reads when the file is appended between passes', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-latest-leaf-race-'),

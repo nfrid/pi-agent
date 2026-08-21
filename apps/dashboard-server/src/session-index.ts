@@ -458,28 +458,29 @@ function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
 }
 
 function resumeMetadataFromDescriptors(
-  descriptors: readonly SessionLineDescriptor[],
+  byId: ReadonlyMap<string, SessionLineDescriptor>,
   leafId: string | undefined,
 ): Pick<
   SessionIndexEntry,
   'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
 > {
   if (!leafId) return {};
-  const byId = new Map(
-    descriptors.flatMap((descriptor) =>
-      descriptor.id ? [[descriptor.id, descriptor] as const] : [],
-    ),
-  );
   const chain: SessionLineDescriptor[] = [];
   const seen = new Set<string>();
   let current = byId.get(leafId);
-  while (current?.id && !seen.has(current.id)) {
+  while (current?.id) {
+    if (seen.has(current.id)) throw new Error('Invalid session ancestry.');
     seen.add(current.id);
     chain.push(current);
     if (current.parentId === undefined || current.parentId === null) break;
-    if (typeof current.parentId !== 'string') break;
-    current = byId.get(current.parentId);
+    if (typeof current.parentId !== 'string')
+      throw new Error('Invalid session ancestry.');
+    const parent = byId.get(current.parentId);
+    if (!parent || parent.ordinal >= current.ordinal)
+      throw new Error('Invalid session ancestry.');
+    current = parent;
   }
+  if (!current) throw new Error('Invalid session ancestry.');
   const result: Pick<
     SessionIndexEntry,
     'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
@@ -2390,6 +2391,8 @@ export class SessionIndex {
             };
             descriptors.push(descriptor);
             if (descriptor.id !== undefined) {
+              if (byId.has(descriptor.id))
+                throw new Error('Invalid session ancestry.');
               byId.set(descriptor.id, descriptor);
               lastEntryId = descriptor.id;
               latestEntryId = descriptor.id;
@@ -2522,7 +2525,7 @@ export class SessionIndex {
               ? Date.parse(header.timestamp)
               : endStat.birthtimeMs,
           updatedAt: endStat.mtimeMs,
-          ...resumeMetadataFromDescriptors(descriptors, latestEntryId),
+          ...resumeMetadataFromDescriptors(byId, latestEntryId),
           header,
           lastEntryId,
           historyIndex,

@@ -111,7 +111,8 @@ export function dormantResumeMetadata(
   session: SessionIndexEntry | undefined,
   runtimes: readonly RuntimeSnapshot[],
 ): DormantResumeMetadata {
-  const model = session?.lastKnownModel ?? configuredModelOptions(runtimes)[0];
+  const persistedModel = session?.lastKnownModel;
+  const model = persistedModel ?? configuredModelOptions(runtimes)[0];
   const thinkingLevels = runtimes.flatMap(
     (runtime) => runtime.thinkingLevels ?? [],
   );
@@ -122,7 +123,7 @@ export function dormantResumeMetadata(
     ...(session?.lastKnownContextTokens === undefined
       ? {}
       : { contextTokens: session.lastKnownContextTokens }),
-    supportsImages: currentModelSupportsImages(model, runtimes),
+    supportsImages: currentModelSupportsImages(persistedModel, runtimes),
   };
 }
 

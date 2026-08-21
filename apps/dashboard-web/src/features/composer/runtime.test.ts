@@ -84,6 +84,9 @@ describe('composer runtime model', () => {
         [runtime],
       ).supportsImages,
     ).toBe(false);
+    expect(dormantResumeMetadata(undefined, [runtime]).supportsImages).toBe(
+      false,
+    );
   });
 
   it('builds resume requests and checks image capability explicitly', () => {
