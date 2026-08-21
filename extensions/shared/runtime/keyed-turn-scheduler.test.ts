@@ -76,9 +76,10 @@ function message(content: string) {
 
 const GLOBAL_PI_DIST =
   '/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist';
+const PI_EXECUTABLE = '/opt/homebrew/bin/pi';
 
 describe('keyed turn scheduler', () => {
-  it.runIf(existsSync(`${GLOBAL_PI_DIST}/cli.js`))(
+  it.runIf(existsSync(`${GLOBAL_PI_DIST}/cli.js`) && existsSync(PI_EXECUTABLE))(
     'patches the constructor owned by the running CLI instead of a local SDK copy',
     () => {
       const requireModule = createRequire(__filename);
@@ -86,14 +87,16 @@ describe('keyed turn scheduler', () => {
         AgentSession: typeof AgentSession;
       };
       const previousEntry = process.argv[1];
-      process.argv[1] = `${GLOBAL_PI_DIST}/cli.js`;
       try {
-        expect(resolveHostAgentSession()?.prototype).toBe(
-          installed.AgentSession.prototype,
-        );
-        expect(resolveHostAgentSession()?.prototype).not.toBe(
-          AgentSession.prototype,
-        );
+        for (const entry of [`${GLOBAL_PI_DIST}/cli.js`, PI_EXECUTABLE]) {
+          process.argv[1] = entry;
+          expect(resolveHostAgentSession()?.prototype).toBe(
+            installed.AgentSession.prototype,
+          );
+          expect(resolveHostAgentSession()?.prototype).not.toBe(
+            AgentSession.prototype,
+          );
+        }
       } finally {
         process.argv[1] = previousEntry;
       }

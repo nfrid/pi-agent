@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type {
@@ -71,7 +71,13 @@ export function resolveHostAgentSession(): AgentSessionConstructor | undefined {
   const candidates: string[] = [];
   const entry = process.argv[1];
   if (entry) {
-    const cliCandidate = path.join(path.dirname(entry), 'index.js');
+    let resolvedEntry = entry;
+    try {
+      resolvedEntry = realpathSync(entry);
+    } catch {
+      // Keep the original entry when the executable path cannot be resolved.
+    }
+    const cliCandidate = path.join(path.dirname(resolvedEntry), 'index.js');
     if (existsSync(cliCandidate)) candidates.push(cliCandidate);
   }
   for (const modulesPath of requireModule.resolve.paths(
