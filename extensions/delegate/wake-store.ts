@@ -250,6 +250,12 @@ function isTerminal(state: string): boolean {
   return state === 'entered' || state === 'cancelled' || state === 'blocked';
 }
 
+function activeWakeCount(wakes: Iterable<WakeSnapshot>): number {
+  let count = 0;
+  for (const wake of wakes) if (!isTerminal(wake.state)) count++;
+  return count;
+}
+
 function progress(state: string): number {
   if (state === 'pending') return 0;
   if (state === 'ready') return 1;
@@ -320,7 +326,8 @@ function wakeHistory(ctx: SessionBranch): FoldedWakeHistory | undefined {
         if (!old || !keepPriorWake(old, wake)) ledger.set(wake.id, wake);
       }
     }
-    if (ledger.size > WAKE_MAX_SUBSCRIPTIONS) return undefined;
+    if (activeWakeCount(ledger.values()) > WAKE_MAX_SUBSCRIPTIONS)
+      return undefined;
     const folded: WakeCoordinatorSnapshot = {
       version: 1,
       ownerSessionId: state.ownerSessionId,

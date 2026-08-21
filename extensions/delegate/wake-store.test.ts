@@ -538,6 +538,75 @@ describe('wake store', () => {
     await workflow.dispose();
   });
 
+  test('folds and restores more than 256 terminal tombstones with active wakes', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const gate = workflow.schedule({
+      logicalId: 'many-tombstones-gate',
+      mode: 'single',
+      tasks: ['many-tombstones-gate'],
+      execute: (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => resolve({ runs: [], handoff: 'gate' }),
+            { once: true },
+          ),
+        ),
+    });
+    const terminalAttempt = workflow.schedule({
+      logicalId: 'many-tombstones-terminal',
+      mode: 'single',
+      tasks: ['many-tombstones-terminal'],
+      execute: async () => ({ runs: [], handoff: 'terminal' }),
+    });
+    await vi.waitFor(() =>
+      expect(
+        workflow.require(terminalAttempt.identity).settledAt,
+      ).toBeDefined(),
+    );
+    let source!: WakeCoordinator;
+    source = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        source.markEntered(dispatch.wake.id, dispatch.acknowledgement);
+      },
+    });
+    for (let index = 0; index <= WAKE_MAX_SUBSCRIPTIONS; index++)
+      source.register({
+        id: `terminal-${index}`,
+        condition: { node: terminalAttempt.identity },
+      });
+    source.register({
+      id: 'active-after-tombstones',
+      condition: { node: gate.identity },
+    });
+
+    const entries: unknown[] = [];
+    persistWakeState(source, {
+      appendEntry(type: string, data: unknown) {
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+    const branchEntries = branch(entries);
+    expect(latestWakeState(branchEntries)?.wakes).toHaveLength(
+      WAKE_MAX_SUBSCRIPTIONS + 2,
+    );
+
+    const dispatch = vi.fn();
+    const restored = new WakeCoordinator({ workflow, dispatch });
+    restoreWakeState(restored, branchEntries);
+    expect(restored.list()).toMatchObject([
+      { id: 'active-after-tombstones', state: 'pending' },
+    ]);
+    expect(restored.require('terminal-256')).toMatchObject({
+      id: 'terminal-256',
+      state: 'entered',
+    });
+    expect(restored.snapshot().wakes).toHaveLength(WAKE_MAX_SUBSCRIPTIONS + 2);
+    expect(dispatch).not.toHaveBeenCalled();
+    await workflow.dispose();
+  });
+
   test('reload retains terminal tombstones against stale persisted state', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const attempt = workflow.schedule({
