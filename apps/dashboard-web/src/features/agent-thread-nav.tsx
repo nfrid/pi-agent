@@ -140,6 +140,7 @@ function WorkspaceChooser({
     // biome-ignore lint/a11y/noStaticElementInteractions: The backdrop closes the modal on outside clicks.
     <div
       className={styles.workspaceChooserBackdrop}
+      data-workspace-chooser-backdrop=""
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -154,10 +155,12 @@ function WorkspaceChooser({
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             onClose();
             return;
           }
           if (event.key !== 'Tab') return;
+          event.stopPropagation();
           const focusable = Array.from(
             dialogRef.current?.querySelectorAll<HTMLElement>(
               'button:not(:disabled)',
@@ -239,7 +242,7 @@ function AgentThreadLink({
       </span>
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
         {density === 'card' && (
-          <span className={styles.threadWorkspace}>
+          <span className={styles.threadWorkspace} data-row-content="workspace">
             <span>{row.workspaceName}</span>
             {row.durableThread?.pinnedAt !== undefined && (
               <span
@@ -256,7 +259,7 @@ function AgentThreadLink({
         <strong>{row.title}</strong>
         {density === 'card' ? (
           <small>
-            <span className={styles.threadContext}>
+            <span className={styles.threadContext} data-row-content="context">
               <span>{statusLabel(row)}</span>
               <span aria-hidden="true"> · </span>
               <span>{shortPath(row.cwd)}</span>
@@ -298,6 +301,7 @@ export function AgentThreadNav({
   const [historyLimit, setHistoryLimit] = useState(MAX_VISIBLE_HISTORY_THREADS);
   const [workspaceScope, setWorkspaceScope] = useState('all');
   const [workspaceChooserOpen, setWorkspaceChooserOpen] = useState(false);
+  const newThreadButtonRef = useRef<HTMLButtonElement>(null);
   const [historyCollapsed, setHistoryCollapsed] = useState(() =>
     Boolean(readCollapsedHistory().all),
   );
@@ -474,6 +478,10 @@ export function AgentThreadNav({
     }
     setWorkspaceChooserOpen(true);
   };
+  const closeWorkspaceChooser = () => {
+    setWorkspaceChooserOpen(false);
+    newThreadButtonRef.current?.focus();
+  };
   const chooseWorkspace = (workspaceId: string) => {
     setWorkspaceChooserOpen(false);
     go(newChatPath(snapshot, workspaceId));
@@ -568,6 +576,7 @@ export function AgentThreadNav({
           <strong>Agents</strong>
         </div>
         <button
+          ref={newThreadButtonRef}
           type="button"
           className={styles.newThread}
           onClick={openNewThread}
@@ -579,7 +588,7 @@ export function AgentThreadNav({
         <WorkspaceChooser
           workspaces={snapshot.workspaces}
           onChoose={chooseWorkspace}
-          onClose={() => setWorkspaceChooserOpen(false)}
+          onClose={closeWorkspaceChooser}
         />
       )}
       <div className={styles.search}>

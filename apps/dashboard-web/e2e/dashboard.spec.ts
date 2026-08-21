@@ -343,6 +343,125 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
 });
 
+test('mobile workspace picker dismisses without closing the agent drawer', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.route('**/api/threads*', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/session-threads', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/workspaces/*/composer-commands', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ commands: [] }),
+    }),
+  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-mobile-picker',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    workspaces: [
+      { id: 'one', name: 'One', canonicalPath: '/work/one', active: true },
+      { id: 'two', name: 'Two', canonicalPath: '/work/two', active: true },
+    ],
+    sessions: [],
+    unread: [],
+  } as never);
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const nav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  const newThread = nav.getByRole('button', { name: /New thread/ });
+  await newThread.click();
+  const chooser = page.getByRole('dialog', { name: 'Choose a workspace' });
+  await expect(chooser).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(chooser).toHaveCount(0);
+  await expect(newThread).toBeFocused();
+  await expect(
+    page.getByRole('button', { name: 'Close agent list' }),
+  ).toBeVisible();
+
+  await newThread.click();
+  await chooser.getByRole('button', { name: 'Cancel' }).click();
+  await expect(chooser).toHaveCount(0);
+  await expect(newThread).toBeFocused();
+  await newThread.click();
+  await page
+    .locator('[data-workspace-chooser-backdrop]')
+    .click({ position: { x: 2, y: 2 } });
+  await expect(chooser).toHaveCount(0);
+  await expect(newThread).toBeFocused();
+
+  await newThread.click();
+  await chooser.getByRole('button', { name: 'Two' }).click();
+  await expect(page).toHaveURL(/\/workspaces\/two\/new$/u);
+  await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
+});
+
+test('sidebar New thread handles one and zero workspace fallbacks @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const routeSidebarData = async (target: Page) => {
+    await target.route('**/api/threads*', async (route) =>
+      route.fulfill({ contentType: 'application/json', body: '[]' }),
+    );
+    await target.route('**/api/session-threads', async (route) =>
+      route.fulfill({ contentType: 'application/json', body: '[]' }),
+    );
+    await target.route('**/api/workspaces/*/composer-commands', async (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ commands: [] }),
+      }),
+    );
+  };
+  await routeSidebarData(page);
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-one-workspace',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    workspaces: [
+      { id: 'only', name: 'Only', canonicalPath: '/work/only', active: true },
+    ],
+    sessions: [],
+    unread: [],
+  } as never);
+  await page.goto('/');
+  await page
+    .getByRole('complementary', { name: 'Agents and threads' })
+    .getByRole('button', { name: /New thread/ })
+    .click();
+  await expect(page).toHaveURL(/\/workspaces\/only\/new$/u);
+
+  const zeroPage = await page.context().newPage();
+  await routeSidebarData(zeroPage);
+  await installDashboardBootstrap(zeroPage, {
+    serverId: 'dashboard-zero-workspace',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    workspaces: [],
+    sessions: [],
+    unread: [],
+  } as never);
+  await zeroPage.goto('/');
+  await zeroPage
+    .getByRole('complementary', { name: 'Agents and threads' })
+    .getByRole('button', { name: /New thread/ })
+    .click();
+  await expect(zeroPage).toHaveURL(/\/workspaces$/u);
+  await zeroPage.close();
+});
+
 test('desktop workspace scope filters threads and scopes New thread navigation @desktop', async ({
   page,
 }) => {
@@ -1515,32 +1634,25 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const dormantRow = agentNav
     .locator('.agent-thread-row')
     .filter({ hasText: 'Dormant thread' });
-  await expect(loadedRow.locator('[data-row-density="card"]')).toHaveCount(1);
-  await expect(dormantRow.locator('[data-row-density="slim"]')).toHaveCount(1);
-  await expect
-    .poll(async () =>
-      loadedRow.locator('[data-row-density="card"]').evaluate((element) => {
-        const copy = element.querySelector('.agent-thread-copy');
-        if (!copy) throw new Error('Card row copy is missing.');
-        return {
-          display: getComputedStyle(copy).display,
-          height: element.getBoundingClientRect().height,
-        };
-      }),
-    )
-    .toMatchObject({ display: 'grid' });
-  await expect
-    .poll(async () =>
-      dormantRow.locator('[data-row-density="slim"]').evaluate((element) => {
-        const copy = element.querySelector('.agent-thread-copy');
-        if (!copy) throw new Error('Slim row copy is missing.');
-        return {
-          display: getComputedStyle(copy).display,
-          height: element.getBoundingClientRect().height,
-        };
-      }),
-    )
-    .toMatchObject({ display: 'flex' });
+  const loadedCard = loadedRow.locator('[data-row-density="card"]');
+  const dormantSlim = dormantRow.locator('[data-row-density="slim"]');
+  await expect(loadedCard).toHaveCount(1);
+  await expect(dormantSlim).toHaveCount(1);
+  await expect(loadedCard.locator('[data-row-content="workspace"]')).toHaveText(
+    'Tmp workspace',
+  );
+  await expect(
+    loadedCard.locator('[data-row-content="context"]'),
+  ).toContainText('idle');
+  await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
+  await expect(
+    dormantSlim.locator('[data-row-content="workspace"]'),
+  ).toHaveCount(0);
+  await expect(dormantSlim.locator('[data-row-content="context"]')).toHaveCount(
+    0,
+  );
+  await expect(dormantSlim).toContainText('Dormant thread');
+  await expect(dormantSlim.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     agentNav.locator('.agent-thread-row.status-idle .agent-thread-glyph'),
   ).toHaveText('●');
