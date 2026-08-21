@@ -2,10 +2,9 @@
 .agent-thread-nav-session {
   position: fixed;
   z-index: 12;
-  top: 14px;
   left: max(clamp(16px, 4vw, 56px), calc(50vw - 564px));
   width: 248px;
-  max-height: calc(100vh - 28px);
+  max-height: calc(100vh);
 }
 .agent-nav-handle,
 .agent-nav-backdrop {

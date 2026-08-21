@@ -11,10 +11,6 @@
 .drawer {
   min-width: 0;
 }
-:global(.agent-thread-nav-session) {
-  height: calc(100dvh - 28px);
-  max-height: calc(100dvh - 28px);
-}
 .drawer > .threadNav {
   height: 100%;
   border-right: 0;
