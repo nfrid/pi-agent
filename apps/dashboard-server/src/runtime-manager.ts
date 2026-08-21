@@ -55,6 +55,7 @@ export class RuntimeManager {
     string,
     { text: string; sent: boolean }
   >();
+  private readonly launchingIds = new Set<string>();
 
   constructor(
     private readonly registry: RuntimeRegistry,
@@ -219,7 +220,11 @@ export class RuntimeManager {
         get?: (id: string) => unknown;
       }
     ).get?.(runtimeId);
-    if (this.launches.has(runtimeId) || registered)
+    if (
+      this.launches.has(runtimeId) ||
+      registered ||
+      this.launchingIds.has(runtimeId)
+    )
       throw new Error('This runtime identity is already active.');
     const launchToken = randomUUID();
     const identityToken = randomUUID();
@@ -232,6 +237,7 @@ export class RuntimeManager {
     let binding: RuntimeBinding | undefined;
     let metadataRecorded = false;
     const expectedLocation = runtimeHostLocation(runtimeId);
+    this.launchingIds.add(runtimeId);
     try {
       this.metadata.recordManagedLaunch(
         runtimeId,
@@ -289,8 +295,10 @@ export class RuntimeManager {
       };
       this.launches.set(runtimeId, launch);
       this.dispatchInitialPrompt(runtimeId);
+      this.launchingIds.delete(runtimeId);
       return { runtimeId };
     } catch (error) {
+      this.launchingIds.delete(runtimeId);
       this.tokens.delete(launchToken);
       const cleanupBinding =
         binding ??

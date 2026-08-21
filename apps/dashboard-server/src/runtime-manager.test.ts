@@ -234,6 +234,43 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('rejects concurrent launches for the same explicit runtime identity', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-same-id-'));
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const start = vi.fn(async ({ runtimeId }: { runtimeId: string }) => {
+      await startGate;
+      return binding(runtimeId);
+    });
+    const recordManagedLaunch = vi.fn();
+    const manager = new RuntimeManager(
+      { snapshots: () => [] } as never,
+      { start } as never,
+      {} as never,
+      { managedLaunches: () => [], recordManagedLaunch } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([workspace(root)]);
+
+    const first = manager.launch({
+      workspaceId: 'workspace-1',
+      runtimeId: 'runtime-explicit',
+    });
+    await expect(
+      manager.launch({
+        workspaceId: 'workspace-1',
+        runtimeId: 'runtime-explicit',
+      }),
+    ).rejects.toThrow('already active');
+    releaseStart();
+    await expect(first).resolves.toEqual({ runtimeId: 'runtime-explicit' });
+    expect(start).toHaveBeenCalledOnce();
+    expect(recordManagedLaunch).toHaveBeenCalledOnce();
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('delivers an initial prompt even if hello races host launch completion', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-prompt-'));
     const sendCommand = vi.fn().mockResolvedValue({ accepted: true });

@@ -583,6 +583,27 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('continues reconciliation when recovered cleanup remains unavailable', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.transitionRun(fixture.runId, 'running');
+      repository.setRunRuntime(fixture.runId, 'runtime-cleanup-pending');
+      fixture.manager.recover.mockResolvedValueOnce(true);
+      fixture.manager.stopRecovered.mockRejectedValueOnce(
+        new Error('runtime host unavailable'),
+      );
+
+      await expect(reconcile(fixture.service)).resolves.toBeUndefined();
+      expect(fixture.manager.stopRecovered).toHaveBeenCalledOnce();
+      expect(repository.getRun(fixture.runId)?.status).toBe('interrupted');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('shares concurrent registered callbacks and sends one initial prompt', async () => {
     const fixture = await orchestrationFixture();
     try {

@@ -185,7 +185,12 @@ export async function reconcile(host: OrchestrationHost): Promise<void> {
               snapshot: restored,
             });
         } else {
-          await host.stopRecoveredRuntime(run.runtimeId);
+          try {
+            await host.stopRecoveredRuntime(run.runtimeId);
+          } catch {
+            // Retained manager metadata is the retry handle. Cleanup failure
+            // must not prevent the rest of dashboard startup reconciliation.
+          }
           host.failRun(
             run.id,
             'interrupted',
