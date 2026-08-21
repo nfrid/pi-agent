@@ -27,3 +27,64 @@ After validating a dashboard-affecting change:
 4. If startup fails, inspect `dashboard/serve.log` and `dashboard/serve.error.log` before making further changes.
 
 Do not delete or clean `apps/**/dist` or `packages/**/dist` while the production service is running: the preview server returns `404` without its bundle. Do not run tests or temporary dashboard servers against the production `dashboard/bridge.sock`; always provide an isolated `stateDir` or `socketPath`. A successful build alone is not a deployment, and a web `200` alone does not prove the bridge daemon is healthy.
+
+## Project catalogue cutover gate
+
+Use this additional gate when removing the legacy Sesh/workspace catalogue. Do
+not deploy merely because the isolated checks pass.
+
+### Before approval
+
+1. Record the exact candidate commit and require a clean checkout. Confirm
+   `extensions/notify-sound/index.ts` has no candidate diff.
+2. Re-run scoped typechecks, focused server/protocol/client tests, and the
+   project catalogue, project picker, project thread, and session reconnect
+   browser tests from an isolated checkout.
+3. Start a disposable daemon with isolated state, session directory, bridge
+   socket, runtime-host socket, and a `PATH` without `sesh` or `tmux`. Verify
+   authenticated health, Git and non-Git project adoption, restart, and
+   idempotent project recovery. Remove every disposable process, socket, state
+   directory, and temporary artifact link afterward.
+4. Record the production dashboard and runtime-host service state, current
+   commit, current dashboard bundle, database path, bridge socket, and the URL
+   of the active session. Confirm the runtime-host service is healthy and will
+   not be restarted by the dashboard deploy.
+5. Take a consistent SQLite backup with the daemon stopped or with SQLite's
+   online backup mechanism; copying only the main file while WAL writes are
+   active is not a valid backup. Retain the previous dashboard `dist/` bundles.
+6. Obtain explicit deployment approval. Project registration is deliberate:
+   never import Sesh entries, historical session cwd values, or arbitrary
+   runtime cwd values as projects.
+
+### After the dashboard-only restart
+
+1. Confirm the runtime-host PID/service instance did not change.
+2. Confirm the bridge socket and health endpoint, web entrypoint, protocol-v3
+   shell subscription, and authenticated project endpoints are available.
+3. Confirm `/projects` loads, the legacy `/workspaces` UI and refresh/composer
+   endpoints are absent, and no dashboard process requires `sesh` or `tmux`.
+4. Register one approved Git project and one disposable non-Git directory.
+   Verify main/worktree launch behavior, then remove the disposable project.
+5. Confirm matched external runtimes and indexed sessions show the registered
+   project and checkout. Confirm an unmatched cwd remains **Unassigned** and is
+   still visible and controllable.
+6. Open the pre-recorded active session URL, send a harmless interaction if
+   approved, and verify reconnect after one dashboard-daemon restart while the
+   runtime host remains running.
+7. Check daemon and web logs for schema, feed replay, association, launch, and
+   reconnect errors before declaring the cutover complete.
+
+### Rollback
+
+1. Stop only `com.pi.dashboard`; do not stop the runtime-host service or managed
+   runtimes.
+2. Restore the retained previous dashboard bundles and previous application
+   commit. Restart `com.pi.dashboard`, then repeat bridge, health, web, active
+   session, and reconnect checks.
+3. The cutover keeps historical workspace/tmux SQLite migration columns and
+   adds no destructive migration. Prefer code/bundle rollback without database
+   restoration. Restore the consistent database backup only if data integrity
+   requires it, with the dashboard daemon stopped.
+4. If rollback cannot restore browser access promptly, leave the runtime host
+   and active Pi processes running, keep the bridge/state files intact, and use
+   the direct TUI session until the dashboard service is repaired.
