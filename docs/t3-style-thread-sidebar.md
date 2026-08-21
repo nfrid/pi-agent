@@ -27,7 +27,7 @@ These cases should remain usable in the sidebar, but lifecycle actions may be ab
 
 `dormant` describes current execution availability: the session is indexed but has no live runtime. `settled` is a user decision to park work while retaining it in the sidebar. A settled thread could still have runtime activity, and a dormant thread may still need attention.
 
-Dormant sessions are unavailable runtimes, not a lifecycle decision. Every unarchived, unpinned session—including dormant and offline sessions—renders in **Active**. There is no inferred **History** or **Settled** shelf. Explicit settle and unsettle can be added later as durable lifecycle commands.
+Dormant sessions are unavailable runtimes, not a lifecycle decision. Every unarchived, unpinned session—including dormant and offline sessions—renders in **Active**. No lifecycle state is inferred from runtime absence. Explicit settle and unsettle can be added later as durable lifecycle commands.
 
 ### Existing lifecycle coverage
 
@@ -80,9 +80,9 @@ Add only when requested or when the copied UX requires it:
 - Reuse `AgentThreadNav`, its existing queries, and its action wrappers.
 - Keep row derivation in `agent-thread-nav/model.ts`; keep DOM and interaction state in `agent-thread-nav.tsx`.
 - Use the dashboard's CSS tokens and CSS Modules. Recreate the T3 hierarchy, density, hover behavior, and responsive shell rather than importing its UI framework.
-- A pinned thread appears once, above unpinned active and history rows.
-- Search ignores shelf collapse and searches every visible session identity.
-- The selected thread remains reachable when it falls beyond the initial history page.
+- The sidebar has separate **Pinned**, **Active**, and **Archived** sections. Pinned threads appear once above unpinned Active rows; dormant and offline rows remain in Active.
+- Search ignores Archived collapse and searches every visible session identity.
+- The selected thread remains reachable when it falls beyond the initial Active bound.
 - Unsupported lifecycle actions stay hidden. The UI must not offer an action that will fail because the session lacks an exact durable link.
 - Desktop and mobile render the same semantic sidebar content.
 
@@ -94,18 +94,18 @@ The accepted follow-up keeps the normal composer shell for dormant sessions and 
 
 ### Unit and component behavior
 
-- Grouping produces pinned, active, history, and archived sections without duplicates.
-- Workspace scope filters all sections consistently.
+- Grouping produces Pinned, Active, and Archived sections without duplicates; dormant and offline rows are in Active.
+- Workspace scope filters Pinned, Active, and Archived consistently.
 - Search still supports clear, ArrowUp, ArrowDown, Enter, and Escape.
 - Existing pin, archive, unread, stop, and restart actions remain wired.
-- The selected deep-history session remains rendered.
+- The selected deep-Active session remains rendered.
 - New-thread submission still starts a runtime, supports model/thinking selection and images, and navigates to the created session.
 
 ### Browser behavior
 
 - Desktop sidebar is full-height and no longer reads as a floating card.
 - Mobile sidebar opens, traps focus, closes by backdrop/Escape/swipe, and exposes the same controls.
-- Search, workspace scope, new thread, active selection, collapsed history, and context menus work at desktop and mobile widths.
+- Search, workspace scope, new thread, Active selection, collapsed Archived, and context menus work at desktop and mobile widths.
 - The new-thread surface uses the normal thread workspace geometry and bottom composer.
 
 ### Validation
