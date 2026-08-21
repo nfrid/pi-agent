@@ -10,6 +10,8 @@ import {
   LegacyNewRoute,
   NewChatRoute,
   PendingNewChatRoute,
+  ProjectNewThreadRoute,
+  ProjectPendingThreadRoute,
   ProjectRoute,
   ProjectsRoute,
   RuntimeRoute,
@@ -44,6 +46,16 @@ const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectId',
   component: ProjectRoute,
+});
+const projectNewThreadRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects/$projectId/new',
+  component: ProjectNewThreadRoute,
+});
+const projectPendingThreadRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects/$projectId/new/pending/$threadId',
+  component: ProjectPendingThreadRoute,
 });
 const workspacesRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -87,6 +99,8 @@ export const dashboardRouteTree = rootRoute.addChildren([
   sessionRoute,
   projectsRoute,
   projectRoute,
+  projectNewThreadRoute,
+  projectPendingThreadRoute,
   workspacesRoute,
   workspaceRoute,
   newChatRoute,

@@ -27,6 +27,18 @@ describe('dashboard route tree', () => {
     });
     expect(router.state.location.pathname).toBe('/projects/project-1');
     await router.navigate({
+      to: '/projects/$projectId/new',
+      params: { projectId: 'project-1' },
+    });
+    expect(router.state.location.pathname).toBe('/projects/project-1/new');
+    await router.navigate({
+      to: '/projects/$projectId/new/pending/$threadId',
+      params: { projectId: 'project-1', threadId: 'thread-1' },
+    });
+    expect(router.state.location.pathname).toBe(
+      '/projects/project-1/new/pending/thread-1',
+    );
+    await router.navigate({
       to: '/workspaces/$workspaceId/new',
       params: { workspaceId: 'workspace-1' },
     });

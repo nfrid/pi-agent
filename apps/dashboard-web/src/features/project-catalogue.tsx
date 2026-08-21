@@ -173,6 +173,7 @@ export function ProjectView({
   id: string;
   snapshot: BrowserSnapshot;
 }) {
+  const go = useDashboardNavigate();
   const project = (snapshot.projects ?? []).find((item) => item.id === id);
   const checkouts = (snapshot.checkouts ?? []).filter(
     (checkout) => checkout.projectId === id,
@@ -193,7 +194,17 @@ export function ProjectView({
           {project && <p className="muted path">{project.rootPath}</p>}
         </div>
         {project && (
-          <span className="workspace-state active">{project.status}</span>
+          <div className={styles.projectActions}>
+            <span className="workspace-state active">{project.status}</span>
+            <button
+              type="button"
+              onClick={() =>
+                go(`/projects/${encodeURIComponent(project.id)}/new`)
+              }
+            >
+              New thread
+            </button>
+          </div>
         )}
       </div>
 

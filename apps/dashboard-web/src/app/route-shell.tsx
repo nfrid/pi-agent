@@ -19,6 +19,8 @@ export function RouteShell() {
       isSession: state.matches.some(
         (match) =>
           match.routeId === '/sessions/$sessionId' ||
+          match.routeId === '/projects/$projectId/new' ||
+          match.routeId === '/projects/$projectId/new/pending/$threadId' ||
           match.routeId === '/workspaces/$workspaceId/new' ||
           match.routeId === '/workspaces/$workspaceId/new/pending/$runtimeId',
       ),

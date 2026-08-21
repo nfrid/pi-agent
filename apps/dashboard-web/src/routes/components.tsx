@@ -8,6 +8,7 @@ import { SessionView } from '../features/session';
 import {
   Dashboard,
   InboxView,
+  ProjectNewThreadView,
   ProjectsView,
   ProjectView,
   SessionsView,
@@ -91,6 +92,33 @@ export function ProjectRoute() {
   const dashboard = useDashboardContext();
   return dashboard.snapshot ? (
     <ProjectView id={projectId} snapshot={dashboard.snapshot} />
+  ) : null;
+}
+
+export function ProjectNewThreadRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId/new' });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectNewThreadView
+      projectId={projectId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
+  ) : null;
+}
+
+export function ProjectPendingThreadRoute() {
+  const { projectId, threadId } = useParams({
+    from: '/projects/$projectId/new/pending/$threadId',
+  });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectNewThreadView
+      projectId={projectId}
+      pendingThreadId={threadId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
   ) : null;
 }
 
