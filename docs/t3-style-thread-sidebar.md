@@ -96,8 +96,8 @@ A text submission starts the existing runtime with `workspaceId`, `sessionId`, a
 
 ### Unit and component behavior
 
-- Grouping produces Pinned, Active, and Archived sections without duplicates; dormant and offline rows are in Active.
-- Workspace scope filters Pinned, Active, and Archived consistently.
+- Grouping produces Pinned, Active, Settled, and Archived sections without duplicates; dormant and offline rows are in Active.
+- Workspace scope filters Pinned, Active, Settled, and Archived consistently.
 - Search still supports clear, ArrowUp, ArrowDown, Enter, and Escape.
 - Existing pin, archive, unread, stop, and restart actions remain wired.
 - The selected deep-Active session remains rendered.
