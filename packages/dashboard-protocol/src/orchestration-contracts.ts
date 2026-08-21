@@ -224,6 +224,7 @@ export const ThreadSummarySchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
     status: ThreadStatusSchema,
+    settledAt: Type.Optional(TimestampSchema),
     pinnedAt: Type.Optional(TimestampSchema),
     activeRunId: Type.Optional(IdentifierSchema),
     updatedAt: TimestampSchema,

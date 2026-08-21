@@ -77,7 +77,17 @@ describe('SqliteOrchestrationRepository', () => {
     ];
     persistSessionIndex(value.db, sessions);
     value.repository.ensureSessionThreadLinks(sessions);
-    const first = value.repository.sessionThreadLinks();
+    const initialLinks = value.repository.sessionThreadLinks();
+    const firstThreadId = initialLinks[0]?.threadId;
+    if (!firstThreadId) throw new Error('Missing first session thread link.');
+    value.repository.settleThread('settle-session-link', firstThreadId, 30);
+    const settledLinks = value.repository.sessionThreadLinks();
+    const first = settledLinks;
+    expect(first.find((link) => link.threadId === firstThreadId)).toMatchObject(
+      {
+        settledAt: 30,
+      },
+    );
     expect(first.map((link) => link.sessionId)).toEqual([
       'session-a',
       'session-b',
@@ -87,6 +97,7 @@ describe('SqliteOrchestrationRepository', () => {
         {
           sessionId: 'session-a',
           threadId: expect.stringMatching(/^thread-session-/),
+          settledAt: 30,
         },
         {
           sessionId: 'session-b',
@@ -113,7 +124,7 @@ describe('SqliteOrchestrationRepository', () => {
     expect(value.repository.listRuns()).toEqual([]);
     expect(
       value.repository.listThreadEvents(first[0]?.threadId ?? ''),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     value.db.close();
   });
 
@@ -342,6 +353,15 @@ describe('SqliteOrchestrationRepository', () => {
       21,
     );
     expect(settledSecond.thread).toMatchObject({
+      status: 'failed',
+      pinnedAt: 20,
+      settledAt: 21,
+    });
+    expect(
+      value.repository
+        .threadSummaries()
+        .find((thread) => thread.id === second.id),
+    ).toMatchObject({
       status: 'failed',
       pinnedAt: 20,
       settledAt: 21,

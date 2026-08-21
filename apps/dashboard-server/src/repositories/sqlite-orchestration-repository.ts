@@ -565,6 +565,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         ? {}
         : { checkoutId: optionalString(row, 'checkout_id') }),
       status: stringValue(row, 'status') as Thread['status'],
+      ...(row.settled_at == null ? {} : { settledAt: Number(row.settled_at) }),
       ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
       ...(optionalString(row, 'active_run_id') === undefined
         ? {}
@@ -1021,12 +1022,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     threadId: string,
     now = Date.now(),
   ): ThreadLifecycleCommandResult {
-    return this.applyThreadLifecycle(
-      commandId,
-      threadId,
-      'thread.settle',
-      now,
-    );
+    return this.applyThreadLifecycle(commandId, threadId, 'thread.settle', now);
   }
 
   unsettleThread(
