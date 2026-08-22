@@ -43,11 +43,14 @@ export {
   writeComposerDraft,
 } from './features/composer';
 export {
+  beginDraftRetry,
   createDraft,
   deleteDraft,
   draftPath,
   draftPromotionCommandId,
+  draftRetryCommandId,
   getOrCreateDraft,
+  markDraftPromoted,
   readDrafts,
   updateDraft,
   useDrafts,

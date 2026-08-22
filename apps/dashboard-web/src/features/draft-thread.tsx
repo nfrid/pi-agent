@@ -2,6 +2,7 @@ import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
   createThreadMutationOptions,
   dashboardHttpClient,
+  retryThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
@@ -13,7 +14,9 @@ import { useImageAttachments } from './composer/attachments';
 import { useComposerDraft } from './composer/draft';
 import { ComposerShell } from './composer/shell';
 import {
+  beginDraftRetry,
   draftPromotionCommandId,
+  markDraftPromoted,
   readDrafts,
   updateDraft,
   useDrafts,
@@ -39,8 +42,11 @@ export function DraftThreadView({
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const editorRef = useRef<MDXEditorMethods>(null);
-  const mutation = useMutation(
+  const createMutation = useMutation(
     createThreadMutationOptions(dashboardHttpClient),
+  );
+  const retryMutation = useMutation(
+    retryThreadMutationOptions(dashboardHttpClient),
   );
   const { initialDraft, text, updateText } = useComposerDraft(draftId);
   const attachments = useImageAttachments({
@@ -70,20 +76,41 @@ export function DraftThreadView({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const prompt = text.trim();
-    if (!prompt || submitting || mutation.isPending) return;
+    if (
+      !prompt ||
+      submitting ||
+      createMutation.isPending ||
+      retryMutation.isPending
+    )
+      return;
     setError(undefined);
     setSubmitting(true);
     try {
-      const result = await mutation.mutateAsync({
-        projectId: fallbackDraft.projectId,
+      const liveDraft =
+        readDrafts().find((candidate) => candidate.id === draftId) ??
+        fallbackDraft;
+      if (liveDraft.promotedThreadId) {
+        const retry = beginDraftRetry(draftId);
+        if (!retry)
+          throw new Error('The promoted draft is no longer available.');
+        await retryMutation.mutateAsync({
+          threadId: retry.threadId,
+          command: { commandId: retry.commandId, prompt },
+        });
+        go(draftPendingPath(draftId, retry.threadId));
+        return;
+      }
+      const result = await createMutation.mutateAsync({
+        projectId: liveDraft.projectId,
         command: {
-          commandId: draftPromotionCommandId(fallbackDraft.id),
+          commandId: draftPromotionCommandId(draftId),
           title: threadTitle(prompt),
           prompt,
-          isolation: fallbackDraft.isolation,
+          isolation: liveDraft.isolation,
         },
       });
-      go(draftPendingPath(fallbackDraft.id, result.thread.id));
+      markDraftPromoted(draftId, result.thread.id);
+      go(draftPendingPath(draftId, result.thread.id));
     } catch (cause) {
       setError(errorMessage(cause));
       setSubmitting(false);

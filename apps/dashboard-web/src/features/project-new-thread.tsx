@@ -89,8 +89,14 @@ export function ProjectNewThreadView({
   }, [clearDraft, draftId, go, pendingRuntime?.session.id]);
 
   useEffect(() => {
-    if (pendingRun?.status !== 'failed') return;
-    setError(pendingRun.error ?? 'The run failed before its runtime started.');
+    if (pendingRun?.status !== 'failed' && pendingRun?.status !== 'interrupted')
+      return;
+    setError(
+      pendingRun.error ??
+        (pendingRun.status === 'interrupted'
+          ? 'The run was interrupted before its runtime started.'
+          : 'The run failed before its runtime started.'),
+    );
   }, [pendingRun?.error, pendingRun?.status]);
 
   if (!project) {
@@ -133,7 +139,7 @@ export function ProjectNewThreadView({
             )
           }
         >
-          {draftId ? 'Return to draft and retry' : 'Back to project'}
+          {draftId ? 'Return to draft' : 'Back to project'}
         </button>
       </section>
     );

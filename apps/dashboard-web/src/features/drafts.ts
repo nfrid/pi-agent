@@ -10,6 +10,8 @@ export type DraftMetadata = {
   updatedAt: number;
   isolation: DraftIsolation;
   title?: string;
+  promotedThreadId?: string;
+  promotionAttempt?: number;
 };
 
 const DRAFTS_STORAGE_KEY = 'pi-dashboard-drafts:v1';
@@ -30,7 +32,14 @@ function validDraft(value: unknown): value is DraftMetadata {
     Number.isFinite(draft.updatedAt) &&
     (draft.isolation === 'worktree' || draft.isolation === 'main') &&
     (draft.title === undefined ||
-      (typeof draft.title === 'string' && draft.title.length <= 96))
+      (typeof draft.title === 'string' && draft.title.length <= 96)) &&
+    (draft.promotedThreadId === undefined ||
+      (typeof draft.promotedThreadId === 'string' &&
+        draft.promotedThreadId.length > 0)) &&
+    (draft.promotionAttempt === undefined ||
+      (typeof draft.promotionAttempt === 'number' &&
+        Number.isInteger(draft.promotionAttempt) &&
+        draft.promotionAttempt >= 0))
   );
 }
 
@@ -87,6 +96,10 @@ export function draftPath(draftId: string): string {
 
 export function draftPromotionCommandId(draftId: string): string {
   return `draft-promote-${draftId}`;
+}
+
+export function draftRetryCommandId(draftId: string, attempt: number): string {
+  return `draft-retry-${draftId}-${attempt}`;
 }
 
 export function createDraft(
@@ -147,6 +160,46 @@ export function updateDraft(draftId: string, title?: string): void {
         : candidate,
     ),
   );
+}
+
+export function markDraftPromoted(
+  draftId: string,
+  promotedThreadId: string,
+): void {
+  const drafts = freshDrafts();
+  persistDrafts(
+    drafts.map((draft) =>
+      draft.id === draftId
+        ? {
+            ...draft,
+            promotedThreadId,
+            promotionAttempt: 0,
+            updatedAt: Date.now(),
+          }
+        : draft,
+    ),
+  );
+}
+
+export function beginDraftRetry(
+  draftId: string,
+): { threadId: string; attempt: number; commandId: string } | undefined {
+  const drafts = freshDrafts();
+  const draft = drafts.find((candidate) => candidate.id === draftId);
+  if (!draft?.promotedThreadId) return undefined;
+  const attempt = (draft.promotionAttempt ?? 0) + 1;
+  persistDrafts(
+    drafts.map((candidate) =>
+      candidate.id === draftId
+        ? { ...candidate, promotionAttempt: attempt, updatedAt: Date.now() }
+        : candidate,
+    ),
+  );
+  return {
+    threadId: draft.promotedThreadId,
+    attempt,
+    commandId: draftRetryCommandId(draftId, attempt),
+  };
 }
 
 export function deleteDraft(draftId: string): void {

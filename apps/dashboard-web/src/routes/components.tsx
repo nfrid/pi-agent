@@ -67,7 +67,11 @@ export function DraftRoute() {
   const { draftId } = useParams({ from: '/drafts/$draftId' });
   const dashboard = useDashboardContext();
   return dashboard.snapshot ? (
-    <DraftThreadView draftId={draftId} snapshot={dashboard.snapshot} />
+    <DraftThreadView
+      key={draftId}
+      draftId={draftId}
+      snapshot={dashboard.snapshot}
+    />
   ) : null;
 }
 
@@ -132,6 +136,6 @@ export function LegacyNewRoute() {
   const path = dashboard.snapshot
     ? newProjectThreadPath(dashboard.snapshot)
     : '/projects';
-  useEffect(() => go(path), [go, path]);
+  useEffect(() => go(path, { replace: true }), [go, path]);
   return <output className="route-loading">Opening a new thread…</output>;
 }

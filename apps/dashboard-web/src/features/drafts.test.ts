@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeComposerDraft } from './composer/draft';
 import {
+  beginDraftRetry,
   createDraft,
   deleteDraft,
   draftPath,
   draftPromotionCommandId,
+  draftRetryCommandId,
   getOrCreateDraft,
+  markDraftPromoted,
   readDrafts,
   updateDraft,
 } from './drafts';
@@ -68,6 +71,25 @@ describe('browser-local draft metadata', () => {
     ).toHaveLength(2);
     deleteDraft(empty.id);
     deleteDraft(invested.id);
+  });
+
+  it('stores promotion linkage and increments retry attempts', () => {
+    installStorage();
+    const draft = createDraft('promotion-project', 'worktree', 123);
+    markDraftPromoted(draft.id, 'thread-1');
+    expect(readDrafts()).toContainEqual(
+      expect.objectContaining({
+        id: draft.id,
+        promotedThreadId: 'thread-1',
+        promotionAttempt: 0,
+      }),
+    );
+    expect(draftRetryCommandId(draft.id, 1)).toContain('-1');
+    expect(beginDraftRetry(draft.id)).toEqual({
+      threadId: 'thread-1',
+      attempt: 1,
+      commandId: draftRetryCommandId(draft.id, 1),
+    });
   });
 
   it('reads fresh metadata before updating and persists the bounded title', () => {

@@ -1,16 +1,26 @@
 import { act, create } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { mutateAsync, go, deleteDraft, draft } = vi.hoisted(() => ({
+const {
+  mutateAsync,
+  go,
+  deleteDraft,
+  markDraftPromoted,
+  beginDraftRetry,
+  draft,
+} = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   go: vi.fn(),
   deleteDraft: vi.fn(),
+  markDraftPromoted: vi.fn(),
+  beginDraftRetry: vi.fn(),
   draft: {
     id: 'draft-1',
     projectId: 'project-1',
     createdAt: 1,
     updatedAt: 1,
     isolation: 'worktree' as const,
+    promotedThreadId: undefined as string | undefined,
   },
 }));
 
@@ -19,6 +29,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 vi.mock('@pi-dashboard/client', () => ({
   createThreadMutationOptions: vi.fn(() => ({})),
+  retryThreadMutationOptions: vi.fn(() => ({})),
   dashboardHttpClient: {},
 }));
 vi.mock('../routes/navigation', () => ({
@@ -52,8 +63,12 @@ vi.mock('./composer/shell', () => ({
   ),
 }));
 vi.mock('./drafts', () => ({
+  beginDraftRetry,
   deleteDraft,
   draftPromotionCommandId: (id: string) => `draft-promote-${id}`,
+  draftRetryCommandId: (id: string, attempt: number) =>
+    `draft-retry-${id}-${attempt}`,
+  markDraftPromoted,
   readDrafts: () => [draft],
   updateDraft: vi.fn(),
   useDrafts: () => [draft],
@@ -69,6 +84,9 @@ afterEach(() => {
   mutateAsync.mockReset();
   go.mockReset();
   deleteDraft.mockReset();
+  markDraftPromoted.mockReset();
+  beginDraftRetry.mockReset();
+  delete draft.promotedThreadId;
 });
 
 describe('draft thread promotion', () => {
@@ -95,8 +113,38 @@ describe('draft thread promotion', () => {
         isolation: 'worktree',
       },
     });
+    expect(markDraftPromoted).toHaveBeenCalledWith('draft-1', 'thread-1');
     expect(deleteDraft).not.toHaveBeenCalled();
     expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-1');
+    renderer.unmount();
+  });
+
+  it('retries a promoted draft instead of creating another thread', async () => {
+    draft.promotedThreadId = 'thread-existing';
+    beginDraftRetry.mockReturnValue({
+      threadId: 'thread-existing',
+      attempt: 1,
+      commandId: 'draft-retry-draft-1-1',
+    });
+    mutateAsync.mockResolvedValue({ run: { id: 'run-1' } });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={snapshot} />,
+      );
+    });
+    const form = renderer.root.findByType('form');
+
+    await act(async () => {
+      await form.props.onSubmit({ preventDefault: vi.fn() });
+    });
+
+    expect(beginDraftRetry).toHaveBeenCalledWith('draft-1');
+    expect(mutateAsync).toHaveBeenCalledWith({
+      threadId: 'thread-existing',
+      command: { commandId: 'draft-retry-draft-1-1', prompt: 'Do the thing' },
+    });
+    expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-existing');
     renderer.unmount();
   });
 
