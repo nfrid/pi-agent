@@ -127,25 +127,71 @@ describe('draft thread controls', () => {
     expect(draftThinkingLevels(runtimes)).toEqual(['off', 'low', 'high']);
   });
 
-  it('deletes the draft after confirmation and replaces navigation', async () => {
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    );
+  it('shows startup in place and only transitions when the runtime appears', async () => {
+    draft.promotedThreadId = 'thread-1';
+    const pendingSnapshot = {
+      projects: [
+        { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+      ],
+      runtimes: [],
+      runs: [
+        {
+          threadId: 'thread-1',
+          runtimeId: 'runtime-1',
+          attempt: 1,
+          createdAt: 10,
+          status: 'starting',
+        },
+      ],
+    } as never;
     let renderer!: ReturnType<typeof create>;
     await act(async () => {
       renderer = create(
-        <DraftThreadView draftId="draft-1" snapshot={snapshot} />,
+        <DraftThreadView draftId="draft-1" snapshot={pendingSnapshot} />,
       );
     });
-    const button = renderer.root
-      .findAllByType('button')
-      .find((candidate) => candidate.props.children === 'Delete draft');
-    if (!button) throw new Error('delete button not found');
-    await act(async () => button.props.onClick());
-    expect(clearDraft).toHaveBeenCalledOnce();
+    expect(
+      renderer.root
+        .findAllByType('span')
+        .some((node) => node.children.some((child) => child === 'starting')),
+    ).toBe(true);
+    expect(go).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer.update(
+        <DraftThreadView
+          draftId="draft-1"
+          snapshot={
+            {
+              projects: [
+                {
+                  id: 'project-1',
+                  title: 'Project One',
+                  rootPath: '/work/one',
+                },
+              ],
+              runs: [
+                {
+                  threadId: 'thread-1',
+                  runtimeId: 'runtime-1',
+                  attempt: 1,
+                  createdAt: 10,
+                  status: 'starting',
+                },
+              ],
+              runtimes: [
+                {
+                  runtimeId: 'runtime-1',
+                  session: { id: 'session-1', entries: [] },
+                },
+              ],
+            } as never
+          }
+        />,
+      );
+    });
     expect(deleteDraft).toHaveBeenCalledWith('draft-1');
-    expect(go).toHaveBeenCalledWith('/projects/project-1', { replace: true });
+    expect(go).toHaveBeenCalledWith('/sessions/session-1', { replace: true });
     renderer.unmount();
   });
 });
@@ -176,9 +222,7 @@ describe('draft thread promotion', () => {
     });
     expect(markDraftPromoted).toHaveBeenCalledWith('draft-1', 'thread-1');
     expect(deleteDraft).not.toHaveBeenCalled();
-    expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-1', {
-      replace: true,
-    });
+    expect(go).not.toHaveBeenCalled();
     renderer.unmount();
   });
 
@@ -243,9 +287,7 @@ describe('draft thread promotion', () => {
       threadId: 'thread-existing',
       command: { commandId: 'draft-retry-draft-1-1', prompt: 'Do the thing' },
     });
-    expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-existing', {
-      replace: true,
-    });
+    expect(go).not.toHaveBeenCalled();
     renderer.unmount();
   });
 

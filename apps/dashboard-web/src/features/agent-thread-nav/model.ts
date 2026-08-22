@@ -234,6 +234,14 @@ export function agentThreadRows(
   for (const draft of drafts) {
     const project = projectsById.get(draft.projectId);
     const prompt = readComposerDraft(draft.id).replace(/\s+/gu, ' ').trim();
+    const starting = Boolean(
+      draft.promotedThreadId &&
+        (snapshot.runs ?? []).some(
+          (run) =>
+            run.threadId === draft.promotedThreadId &&
+            ACTIVE_RUN_STATUSES.includes(run.status),
+        ),
+    );
     rows.set(draft.id, {
       id: draft.id,
       title:
@@ -242,8 +250,8 @@ export function agentThreadRows(
       projectId: draft.projectId,
       projectName: project?.title ?? 'Unknown project',
       cwd: project?.rootPath ?? '',
-      status: 'draft',
-      statusLabel: 'draft',
+      status: starting ? 'waiting' : 'draft',
+      statusLabel: starting ? 'starting' : 'draft',
       draft,
       startedAt: draft.createdAt,
       updatedAt: draft.updatedAt,

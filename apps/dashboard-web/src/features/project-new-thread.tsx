@@ -27,10 +27,6 @@ export function projectPendingPath(
   return `/projects/${encodeURIComponent(projectId)}/new/pending/${encodeURIComponent(threadId)}`;
 }
 
-export function draftPendingPath(draftId: string, threadId: string): string {
-  return `/drafts/${encodeURIComponent(draftId)}/pending/${encodeURIComponent(threadId)}`;
-}
-
 export function latestRunForThread<
   T extends { threadId: string; attempt: number; createdAt: number },
 >(runs: readonly T[], threadId: string): T | undefined {

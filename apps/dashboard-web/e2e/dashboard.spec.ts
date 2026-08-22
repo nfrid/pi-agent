@@ -252,9 +252,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(page.locator('.session-status.status-draft')).toContainText(
     'draft',
   );
-  await expect(
-    page.getByRole('button', { name: 'Delete draft' }),
-  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete draft' })).toHaveCount(
+    0,
+  );
   await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
   const modelControl = page.getByRole('combobox', { name: 'Model' });
   const thinkingControl = page.getByRole('combobox', {
@@ -294,9 +294,17 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
       .locator('body')
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: 'Delete draft' }).click();
-  await expect(page).toHaveURL(/\/projects\/p$/u);
+  const draftUrl = page.url();
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const draftNav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  await expect(draftNav).toBeVisible();
+  const draftRow = draftNav.locator('.agent-thread-row.selected');
+  await draftRow.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Delete draft' }).click();
+  await expect(page).toHaveURL(draftUrl);
+  await expect(page.getByText('Draft deleted')).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -4043,6 +4051,45 @@ async function installPhase6Mocks(
       ),
   };
 }
+
+test('runtime restart stays on the current thread with pending status', async ({
+  page,
+}) => {
+  await installPhase6Mocks(page);
+  let releaseRestart!: () => void;
+  const restartPending = new Promise<void>((resolve) => {
+    releaseRestart = resolve;
+  });
+  await page.route('**/trpc/restartRuntime', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    await restartPending;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: trpcData({
+        commandId: input.commandId,
+        status: 'completed',
+        result: { runtimeId: 'r-restarted' },
+      }),
+    });
+  });
+  await page.goto('/sessions/s1');
+  const originalUrl = page.url();
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const nav = page.getByRole('complementary', { name: 'Agents and threads' });
+  await expect(nav).toBeVisible();
+  const row = nav.locator('.agent-thread-row.status-working').first();
+  const thread = row.getByRole('button');
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Restart' }).click();
+
+  await expect(thread).toHaveAccessibleName(/restarting/u);
+  await expect(row).toContainText('restarting');
+  await expect(page).toHaveURL(originalUrl);
+
+  releaseRestart();
+  await expect(page.getByRole('menu', { name: /Actions for/u })).toHaveCount(0);
+  await expect(page).toHaveURL(originalUrl);
+});
 
 test('activity header renders Markdown and proves float and sticky geometry @desktop', async ({
   page,

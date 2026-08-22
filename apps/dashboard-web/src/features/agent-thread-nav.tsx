@@ -41,7 +41,7 @@ import {
 import styles from './agent-thread-nav.module.css';
 import { dormantResumeMetadata } from './composer/runtime';
 import { useDashboardUtility } from './dashboard-utility-context';
-import { draftPath, useDrafts } from './drafts';
+import { deleteDraft, draftPath, useDrafts } from './drafts';
 import {
   AgentThreadActionMenu,
   DurableThreadActions,
@@ -291,6 +291,7 @@ function AgentThreadLink({
   density,
   onSelect,
   lifecycleProps,
+  lifecycleStatus,
   runtimes,
 }: {
   row: AgentThreadRow;
@@ -300,6 +301,7 @@ function AgentThreadLink({
   density: 'card' | 'slim';
   onSelect: () => void;
   lifecycleProps?: RuntimeLifecycleThreadProps;
+  lifecycleStatus?: 'restarting';
   runtimes: BrowserSnapshot['runtimes'];
 }) {
   const details = density === 'card' ? activeThreadDetails(row, runtimes) : [];
@@ -319,7 +321,7 @@ function AgentThreadLink({
       aria-current={selected ? 'page' : undefined}
       data-row-density={density}
       data-search-active={activeResult ? '' : undefined}
-      aria-label={`${row.title} ${statusLabel(row)}${unread ? ' unread' : ''}`}
+      aria-label={`${row.title} ${lifecycleStatus ?? statusLabel(row)}${unread ? ' unread' : ''}`}
       onClick={onSelect}
     >
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
@@ -337,9 +339,9 @@ function AgentThreadLink({
           )}
           <span className={styles.threadMeta}>
             {density === 'card' ? (
-              statusLabel(row)
+              (lifecycleStatus ?? statusLabel(row))
             ) : timestamp === undefined ? (
-              statusLabel(row)
+              (lifecycleStatus ?? statusLabel(row))
             ) : (
               <DashboardTime
                 className={`agent-thread-time ${styles.threadTime}`}
@@ -351,7 +353,7 @@ function AgentThreadLink({
               className={`agent-thread-glyph ${styles.threadGlyph}`}
               aria-hidden="true"
             >
-              {statusGlyph(row.status)}
+              {lifecycleStatus ? '◐' : statusGlyph(row.status)}
             </span>
           </span>
         </span>
@@ -630,7 +632,10 @@ export function AgentThreadNav({
         )}
       </>
     );
-    const renderThreadLink = (lifecycleProps?: RuntimeLifecycleThreadProps) => (
+    const renderThreadLink = (
+      lifecycleProps?: RuntimeLifecycleThreadProps,
+      lifecycleStatus?: 'restarting',
+    ) => (
       <AgentThreadLink
         row={row}
         selected={selected}
@@ -639,14 +644,33 @@ export function AgentThreadNav({
         density={density}
         onSelect={() => select(row.id)}
         lifecycleProps={lifecycleProps}
+        lifecycleStatus={lifecycleStatus}
         runtimes={snapshot.runtimes}
       />
     );
     if (row.draft) {
       return (
-        <div key={row.id} className={rowClassName}>
-          {renderThreadLink()}
-        </div>
+        <AgentThreadActionMenu
+          key={row.id}
+          title={row.title}
+          rowClassName={rowClassName}
+          menuItems={({ closeMenu }) => (
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.lifecycleActionDanger}
+              onClick={(event) => {
+                event.stopPropagation();
+                closeMenu();
+                deleteDraft(row.id);
+              }}
+            >
+              Delete draft
+            </button>
+          )}
+        >
+          {renderThreadLink}
+        </AgentThreadActionMenu>
       );
     }
     if (!row.runtime) {

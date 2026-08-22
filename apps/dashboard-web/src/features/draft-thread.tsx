@@ -36,8 +36,7 @@ import {
   modelOptionValue,
   parseModelOptionValue,
 } from './model-option';
-import styles from './project-catalogue.module.css';
-import { draftPendingPath, threadTitle } from './project-new-thread';
+import { latestRunForThread, threadTitle } from './project-new-thread';
 
 export function draftModelSelection(
   runtimes: readonly RuntimeSnapshot[],
@@ -98,6 +97,7 @@ export function DraftThreadView({
   const go = useDashboardNavigate();
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const [agentNavOpen, setAgentNavOpen] = useState(false);
   const editorRef = useRef<MDXEditorMethods>(null);
   const createMutation = useMutation(
     createThreadMutationOptions(dashboardHttpClient),
@@ -118,22 +118,62 @@ export function DraftThreadView({
     fallbackDraft?.model,
   );
   const thinkingLevels = draftThinkingLevels(snapshot.runtimes, selectedModel);
+  const promotedThreadId = fallbackDraft?.promotedThreadId;
+  const pendingRun = promotedThreadId
+    ? latestRunForThread(snapshot.runs ?? [], promotedThreadId)
+    : undefined;
+  const pendingRuntime = pendingRun?.runtimeId
+    ? snapshot.runtimes.find(
+        (runtime) => runtime.runtimeId === pendingRun.runtimeId,
+      )
+    : undefined;
+  const starting =
+    submitting ||
+    (Boolean(promotedThreadId) &&
+      pendingRun?.status !== 'failed' &&
+      pendingRun?.status !== 'interrupted' &&
+      !pendingRuntime);
 
   useEffect(() => {
     if (text !== initialDraft) updateDraft(draftId, threadTitle(text));
   }, [draftId, initialDraft, text]);
 
+  useEffect(() => {
+    const sessionId = pendingRuntime?.session.id;
+    if (!sessionId) return;
+    clearDraft();
+    deleteDraft(draftId);
+    go(`/sessions/${encodeURIComponent(sessionId)}`, { replace: true });
+  }, [clearDraft, draftId, go, pendingRuntime?.session.id]);
+
+  useEffect(() => {
+    if (pendingRun?.status !== 'failed' && pendingRun?.status !== 'interrupted')
+      return;
+    setSubmitting(false);
+    setError(
+      pendingRun.error ??
+        (pendingRun.status === 'interrupted'
+          ? 'The run was interrupted before its runtime started.'
+          : 'The run failed before its runtime started.'),
+    );
+  }, [pendingRun?.error, pendingRun?.status]);
+
   if (!fallbackDraft || !project) {
     return (
-      <section className={styles.page}>
-        <h1>Draft not found</h1>
-        <p className="error" role="alert">
-          This draft or project is no longer available.
-        </p>
-        <button type="button" onClick={() => go('/projects')}>
-          Choose a project
-        </button>
-      </section>
+      <div className="session-layout">
+        <AgentThreadNav
+          snapshot={snapshot}
+          mode="session"
+          open={agentNavOpen}
+          onOpenChange={setAgentNavOpen}
+        />
+        <section className={`session-page${agentNavOpen ? ' modal-open' : ''}`}>
+          <div className="draft-empty-transcript" aria-live="polite">
+            <p className="eyebrow">Draft deleted</p>
+            <p>Select a thread or start a new one.</p>
+          </div>
+        </section>
+      </div>
     );
   }
 
@@ -169,7 +209,6 @@ export function DraftThreadView({
             ...(submissionModel ? { model: submissionModel } : {}),
           },
         });
-        go(draftPendingPath(draftId, retry.threadId), { replace: true });
         return;
       }
       const result = await createMutation.mutateAsync({
@@ -183,7 +222,6 @@ export function DraftThreadView({
         },
       });
       markDraftPromoted(draftId, result.thread.id);
-      go(draftPendingPath(draftId, result.thread.id), { replace: true });
     } catch (cause) {
       setError(errorMessage(cause));
       setSubmitting(false);
@@ -196,8 +234,10 @@ export function DraftThreadView({
         snapshot={snapshot}
         mode="session"
         currentDraftId={fallbackDraft.id}
+        open={agentNavOpen}
+        onOpenChange={setAgentNavOpen}
       />
-      <section className="session-page">
+      <section className={`session-page${agentNavOpen ? ' modal-open' : ''}`}>
         <div className="session-context-slot">
           <header className="session-context session-heading">
             <div className="session-context-main">
@@ -212,26 +252,14 @@ export function DraftThreadView({
                   </span>
                   <h1>New thread</h1>
                 </div>
-                <span className="session-status status-draft">
-                  <i aria-hidden="true">●</i> draft
+                <span
+                  className={`session-status ${starting ? 'status-waiting' : 'status-draft'}`}
+                  aria-live="polite"
+                >
+                  <i aria-hidden="true">{starting ? '◐' : '●'}</i>{' '}
+                  {starting ? 'starting' : 'draft'}
                 </span>
               </div>
-            </div>
-            <div className="session-heading-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  if (!globalThis.confirm('Delete this draft?')) return;
-                  clearDraft();
-                  deleteDraft(draftId);
-                  go(`/projects/${encodeURIComponent(project.id)}`, {
-                    replace: true,
-                  });
-                }}
-              >
-                Delete draft
-              </button>
             </div>
           </header>
         </div>

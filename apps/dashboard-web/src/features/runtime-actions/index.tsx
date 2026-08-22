@@ -16,7 +16,6 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import { type ReactNode, useRef, useState } from 'react';
 import { errorMessage } from '../../shared/lib/error-message';
 import type { DurableThreadMetadata } from '../agent-thread-nav/model';
@@ -42,11 +41,16 @@ export async function refreshDurableThreadMetadata(
   ]);
 }
 
+type ThreadLifecycleStatus = 'restarting';
+
 type AgentThreadActionMenuProps = {
   title: string;
   rowClassName: string;
   menuItems: (actions: { closeMenu: () => void }) => ReactNode;
-  children: (threadProps?: RuntimeLifecycleThreadProps) => ReactNode;
+  children: (
+    threadProps?: RuntimeLifecycleThreadProps,
+    lifecycleStatus?: ThreadLifecycleStatus,
+  ) => ReactNode;
 };
 
 /** Shared context-menu wrapper for every sidebar thread, online or dormant. */
@@ -78,7 +82,10 @@ type RuntimeLifecycleActionsProps = {
   title: string;
   rowClassName: string;
   menuItems?: (actions: { closeMenu: () => void }) => ReactNode;
-  children: (threadProps?: RuntimeLifecycleThreadProps) => ReactNode;
+  children: (
+    threadProps?: RuntimeLifecycleThreadProps,
+    lifecycleStatus?: ThreadLifecycleStatus,
+  ) => ReactNode;
 };
 
 export function DurableThreadActions({
@@ -196,7 +203,6 @@ export function RuntimeLifecycleActions({
   menuItems,
   children,
 }: RuntimeLifecycleActionsProps) {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string>();
   const [gracefulStopFailed, setGracefulStopFailed] = useState(false);
@@ -229,11 +235,9 @@ export function RuntimeLifecycleActions({
       const result = await restart.mutateAsync({
         runtimeId: runtime.runtimeId,
       });
-      const nextId = result.result.runtimeId;
-      if (typeof nextId !== 'string')
+      if (typeof result.result.runtimeId !== 'string')
         throw new Error('Restart did not return a runtime ID.');
       closeMenu();
-      await navigate({ to: `/runtimes/${nextId}` });
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -296,7 +300,9 @@ export function RuntimeLifecycleActions({
         </>
       )}
     >
-      {children}
+      {(threadProps) =>
+        children(threadProps, restarting ? 'restarting' : undefined)
+      }
     </AgentThreadActionMenu>
   );
 }

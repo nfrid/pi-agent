@@ -68,6 +68,35 @@ describe('agent thread view model', () => {
       '/drafts/draft-1',
     );
   });
+
+  it('shows a promoted draft as starting while its run is active', () => {
+    const rows = agentThreadRows(
+      {
+        runtimes: [],
+        sessions: [],
+        runs: [{ threadId: 'thread-1', status: 'starting' }],
+        projects: [
+          { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+        ],
+      } as never,
+      undefined,
+      [],
+      [
+        {
+          id: 'draft-1',
+          projectId: 'project-1',
+          createdAt: 1,
+          updatedAt: 2,
+          isolation: 'worktree',
+          promotedThreadId: 'thread-1',
+        },
+      ],
+    );
+    expect(rows[0]).toEqual(
+      expect.objectContaining({ status: 'waiting', statusLabel: 'starting' }),
+    );
+  });
+
   it('keys persisted-link refreshes to the exact session identity set', () => {
     const first = sessionThreadIdentityKey({
       sessions: [{ id: 'session-b' }, { id: 'session-a' }],

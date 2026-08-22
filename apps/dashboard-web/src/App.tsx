@@ -61,7 +61,6 @@ export {
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
 } from './features/extension-surfaces';
-export { draftPendingPath } from './features/project-new-thread';
 export {
   dashboardNavigateOptions,
   newProjectThreadPath,
