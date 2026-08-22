@@ -115,7 +115,9 @@ describe('draft thread promotion', () => {
     });
     expect(markDraftPromoted).toHaveBeenCalledWith('draft-1', 'thread-1');
     expect(deleteDraft).not.toHaveBeenCalled();
-    expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-1');
+    expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-1', {
+      replace: true,
+    });
     renderer.unmount();
   });
 
@@ -144,7 +146,9 @@ describe('draft thread promotion', () => {
       threadId: 'thread-existing',
       command: { commandId: 'draft-retry-draft-1-1', prompt: 'Do the thing' },
     });
-    expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-existing');
+    expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-existing', {
+      replace: true,
+    });
     renderer.unmount();
   });
 

@@ -31,6 +31,22 @@ export function draftPendingPath(draftId: string, threadId: string): string {
   return `/drafts/${encodeURIComponent(draftId)}/pending/${encodeURIComponent(threadId)}`;
 }
 
+export function latestRunForThread<
+  T extends { threadId: string; attempt: number; createdAt: number },
+>(runs: readonly T[], threadId: string): T | undefined {
+  return runs
+    .filter((run) => run.threadId === threadId)
+    .reduce<T | undefined>(
+      (latest, run) =>
+        !latest ||
+        run.attempt > latest.attempt ||
+        (run.attempt === latest.attempt && run.createdAt > latest.createdAt)
+          ? run
+          : latest,
+      undefined,
+    );
+}
+
 export function ProjectNewThreadView({
   projectId,
   draftId,
@@ -58,7 +74,7 @@ export function ProjectNewThreadView({
   const promotionCompleted = useRef(false);
   const pendingRun = useDashboardStore(store, (state) =>
     pendingThreadId
-      ? state.runs?.find((candidate) => candidate.threadId === pendingThreadId)
+      ? latestRunForThread(state.runs ?? [], pendingThreadId)
       : undefined,
   );
   const pendingRuntime = useDashboardStore(store, (state) =>

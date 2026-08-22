@@ -97,7 +97,7 @@ export function DraftThreadView({
           threadId: retry.threadId,
           command: { commandId: retry.commandId, prompt },
         });
-        go(draftPendingPath(draftId, retry.threadId));
+        go(draftPendingPath(draftId, retry.threadId), { replace: true });
         return;
       }
       const result = await createMutation.mutateAsync({
@@ -110,7 +110,7 @@ export function DraftThreadView({
         },
       });
       markDraftPromoted(draftId, result.thread.id);
-      go(draftPendingPath(draftId, result.thread.id));
+      go(draftPendingPath(draftId, result.thread.id), { replace: true });
     } catch (cause) {
       setError(errorMessage(cause));
       setSubmitting(false);
