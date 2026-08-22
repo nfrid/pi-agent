@@ -248,13 +248,62 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await paletteTrigger.click();
   await page.getByRole('option', { name: /New thread/ }).click();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
-  await expect(page.getByRole('heading', { name: 'Draft' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New thread' })).toBeVisible();
+  await expect(page.locator('.session-status.status-draft')).toContainText(
+    'draft',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Delete draft' }),
+  ).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
+  const modelControl = page.getByRole('combobox', { name: 'Model' });
+  const thinkingControl = page.getByRole('combobox', {
+    name: 'Thinking level',
+  });
+  await expect(modelControl).toHaveValue('test/careful');
+  await expect(thinkingControl).toHaveValue('high');
+  await modelControl.selectOption('test/fast');
+  await thinkingControl.selectOption('medium');
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const drafts = JSON.parse(
+          localStorage.getItem('pi-dashboard-drafts:v1') ?? '[]',
+        ) as Array<{ model?: unknown }>;
+        return drafts[0]?.model;
+      }),
+    )
+    .toEqual({ provider: 'test', model: 'fast', thinking: 'medium' });
+  const emptyState = page.getByText('New conversation');
+  const transcript = page.getByRole('region', { name: 'Transcript' });
+  const [emptyBox, transcriptBox] = await Promise.all([
+    emptyState.boundingBox(),
+    transcript.boundingBox(),
+  ]);
+  expect(emptyBox).not.toBeNull();
+  expect(transcriptBox).not.toBeNull();
+  expect(
+    Math.abs(
+      (emptyBox?.y ?? 0) +
+        (emptyBox?.height ?? 0) / 2 -
+        ((transcriptBox?.y ?? 0) + (transcriptBox?.height ?? 0) / 2),
+    ),
+  ).toBeLessThan(40);
   expect(
     await page
       .locator('body')
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Delete draft' }).click();
+  await expect(page).toHaveURL(/\/projects\/p$/u);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        JSON.parse(localStorage.getItem('pi-dashboard-drafts:v1') ?? '[]'),
+      ),
+    )
+    .toEqual([]);
 });
 
 test('mobile project picker dismisses without closing the agent drawer', async ({

@@ -231,6 +231,19 @@
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
+.draft-empty-transcript {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+.draft-empty-transcript p {
+  margin: 0;
+}
 .session-page > .session-control-layer {
   position: relative;
   z-index: 30;

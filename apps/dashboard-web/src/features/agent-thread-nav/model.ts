@@ -243,7 +243,7 @@ export function agentThreadRows(
       projectName: project?.title ?? 'Unknown project',
       cwd: project?.rootPath ?? '',
       status: 'draft',
-      statusLabel: 'Draft',
+      statusLabel: 'draft',
       draft,
       startedAt: draft.createdAt,
       updatedAt: draft.updatedAt,

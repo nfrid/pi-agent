@@ -251,6 +251,14 @@ export function activeThreadDetails(
   row: AgentThreadRow,
   runtimes: BrowserSnapshot['runtimes'],
 ): string[] {
+  if (row.draft) {
+    const model = row.draft.model;
+    return [
+      model ? `${model.provider}/${model.model}` : '? model',
+      model?.thinking ?? '? effort',
+      '? ctx',
+    ];
+  }
   const details: string[] = [];
   const indexed = dormantResumeMetadata(row.session, runtimes);
   const model = row.runtime?.model ?? indexed.model;

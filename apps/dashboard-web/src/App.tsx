@@ -52,6 +52,7 @@ export {
   getOrCreateDraft,
   markDraftPromoted,
   readDrafts,
+  setDraftModel,
   updateDraft,
   useDrafts,
 } from './features/drafts';

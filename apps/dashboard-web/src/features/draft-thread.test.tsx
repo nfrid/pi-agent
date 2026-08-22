@@ -7,6 +7,8 @@ const {
   deleteDraft,
   markDraftPromoted,
   beginDraftRetry,
+  setDraftModel,
+  clearDraft,
   draft,
 } = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
@@ -14,6 +16,8 @@ const {
   deleteDraft: vi.fn(),
   markDraftPromoted: vi.fn(),
   beginDraftRetry: vi.fn(),
+  setDraftModel: vi.fn(),
+  clearDraft: vi.fn(),
   draft: {
     id: 'draft-1',
     projectId: 'project-1',
@@ -21,6 +25,9 @@ const {
     updatedAt: 1,
     isolation: 'worktree' as const,
     promotedThreadId: undefined as string | undefined,
+    model: undefined as
+      | { provider: string; model: string; thinking?: string }
+      | undefined,
   },
 }));
 
@@ -55,6 +62,7 @@ vi.mock('./composer/draft', () => ({
     initialDraft: 'Do the thing',
     text: 'Do the thing',
     updateText: vi.fn(),
+    clearDraft,
   }),
 }));
 vi.mock('./composer/shell', () => ({
@@ -70,14 +78,20 @@ vi.mock('./drafts', () => ({
     `draft-retry-${id}-${attempt}`,
   markDraftPromoted,
   readDrafts: () => [draft],
+  setDraftModel,
   updateDraft: vi.fn(),
   useDrafts: () => [draft],
 }));
 
-import { DraftThreadView } from './draft-thread';
+import {
+  DraftThreadView,
+  draftModelSelection,
+  draftThinkingLevels,
+} from './draft-thread';
 
 const snapshot = {
   projects: [{ id: 'project-1', title: 'Project One', rootPath: '/work/one' }],
+  runtimes: [],
 } as never;
 
 afterEach(() => {
@@ -86,7 +100,54 @@ afterEach(() => {
   deleteDraft.mockReset();
   markDraftPromoted.mockReset();
   beginDraftRetry.mockReset();
-  delete draft.promotedThreadId;
+  setDraftModel.mockReset();
+  clearDraft.mockReset();
+  vi.unstubAllGlobals();
+  draft.promotedThreadId = undefined;
+  draft.model = undefined;
+});
+
+describe('draft thread controls', () => {
+  it('chooses a configured current model and exposes effort levels', () => {
+    const runtimes = [
+      {
+        model: { provider: 'test', model: 'fast', thinking: 'high' },
+        modelCatalog: [
+          { provider: 'test', model: 'fast', name: 'Fast' },
+          { provider: 'test', model: 'careful', name: 'Careful' },
+        ],
+        thinkingLevels: ['off', 'low', 'high'],
+      },
+    ] as never;
+    expect(draftModelSelection(runtimes)).toEqual({
+      provider: 'test',
+      model: 'fast',
+      thinking: 'high',
+    });
+    expect(draftThinkingLevels(runtimes)).toEqual(['off', 'low', 'high']);
+  });
+
+  it('deletes the draft after confirmation and replaces navigation', async () => {
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={snapshot} />,
+      );
+    });
+    const button = renderer.root
+      .findAllByType('button')
+      .find((candidate) => candidate.props.children === 'Delete draft');
+    if (!button) throw new Error('delete button not found');
+    await act(async () => button.props.onClick());
+    expect(clearDraft).toHaveBeenCalledOnce();
+    expect(deleteDraft).toHaveBeenCalledWith('draft-1');
+    expect(go).toHaveBeenCalledWith('/projects/project-1', { replace: true });
+    renderer.unmount();
+  });
 });
 
 describe('draft thread promotion', () => {
@@ -118,6 +179,42 @@ describe('draft thread promotion', () => {
     expect(go).toHaveBeenCalledWith('/drafts/draft-1/pending/thread-1', {
       replace: true,
     });
+    renderer.unmount();
+  });
+
+  it('passes the selected model and effort into thread creation', async () => {
+    mutateAsync.mockResolvedValue({ thread: { id: 'thread-1' } });
+    const modelSnapshot = {
+      projects: [
+        { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+      ],
+      runtimes: [
+        {
+          model: { provider: 'test', model: 'fast', thinking: 'high' },
+          modelCatalog: [{ provider: 'test', model: 'fast', name: 'Fast' }],
+          thinkingLevels: ['off', 'high'],
+        },
+      ],
+    } as never;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={modelSnapshot} />,
+      );
+    });
+    const form = renderer.root.findByType('form');
+
+    await act(async () => {
+      await form.props.onSubmit({ preventDefault: vi.fn() });
+    });
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({
+          model: { provider: 'test', model: 'fast', thinking: 'high' },
+        }),
+      }),
+    );
     renderer.unmount();
   });
 

@@ -1,3 +1,4 @@
+import type { ModelSelection } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
 import { readComposerDraft, writeComposerDraft } from './composer/draft';
 
@@ -12,11 +13,29 @@ export type DraftMetadata = {
   title?: string;
   promotedThreadId?: string;
   promotionAttempt?: number;
+  model?: ModelSelection;
 };
 
 const DRAFTS_STORAGE_KEY = 'pi-dashboard-drafts:v1';
 const DRAFTS_CHANGE_EVENT = 'pi-dashboard-drafts-change';
 let cachedDrafts: DraftMetadata[] | undefined;
+
+function validModel(value: unknown): value is ModelSelection {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const model = value as Record<string, unknown>;
+  return (
+    typeof model.provider === 'string' &&
+    model.provider.length > 0 &&
+    model.provider.length <= 200 &&
+    typeof model.model === 'string' &&
+    model.model.length > 0 &&
+    model.model.length <= 300 &&
+    (model.thinking === undefined ||
+      (typeof model.thinking === 'string' &&
+        model.thinking.length > 0 &&
+        model.thinking.length <= 64))
+  );
+}
 
 function validDraft(value: unknown): value is DraftMetadata {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -39,7 +58,8 @@ function validDraft(value: unknown): value is DraftMetadata {
     (draft.promotionAttempt === undefined ||
       (typeof draft.promotionAttempt === 'number' &&
         Number.isInteger(draft.promotionAttempt) &&
-        draft.promotionAttempt >= 0))
+        draft.promotionAttempt >= 0)) &&
+    (draft.model === undefined || validModel(draft.model))
   );
 }
 
@@ -165,6 +185,15 @@ export function updateDraft(draftId: string, title?: string): void {
             ...(title === undefined ? {} : { title }),
           }
         : candidate,
+    ),
+  );
+}
+
+export function setDraftModel(draftId: string, model: ModelSelection): void {
+  const drafts = freshDrafts();
+  persistDrafts(
+    drafts.map((draft) =>
+      draft.id === draftId ? { ...draft, model, updatedAt: Date.now() } : draft,
     ),
   );
 }

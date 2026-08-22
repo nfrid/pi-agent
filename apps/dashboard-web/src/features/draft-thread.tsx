@@ -4,25 +4,82 @@ import {
   dashboardHttpClient,
   retryThreadMutationOptions,
 } from '@pi-dashboard/client';
-import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import type {
+  BrowserSnapshot,
+  ModelSelection,
+  RuntimeSnapshot,
+} from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
 import { errorMessage } from '../shared/lib/error-message';
 import { AgentThreadNav } from './agent-thread-nav';
 import { useImageAttachments } from './composer/attachments';
+import {
+  ComposerModelControl,
+  ComposerThinkingControl,
+} from './composer/controls';
 import { useComposerDraft } from './composer/draft';
 import { ComposerShell } from './composer/shell';
 import {
   beginDraftRetry,
+  deleteDraft,
   draftPromotionCommandId,
   markDraftPromoted,
   readDrafts,
+  setDraftModel,
   updateDraft,
   useDrafts,
 } from './drafts';
+import {
+  configuredModelOptions,
+  modelOptionValue,
+  parseModelOptionValue,
+} from './model-option';
 import styles from './project-catalogue.module.css';
 import { draftPendingPath, threadTitle } from './project-new-thread';
+
+export function draftModelSelection(
+  runtimes: readonly RuntimeSnapshot[],
+  selected?: ModelSelection,
+): ModelSelection | undefined {
+  const models = configuredModelOptions(runtimes);
+  const available = new Set(
+    models.map((model) => modelOptionValue(model.provider, model.model)),
+  );
+  if (
+    selected &&
+    available.has(modelOptionValue(selected.provider, selected.model))
+  )
+    return selected;
+  const current = runtimes.find(
+    (runtime) =>
+      runtime.model &&
+      available.has(
+        modelOptionValue(runtime.model.provider, runtime.model.model),
+      ),
+  )?.model;
+  if (current)
+    return {
+      provider: current.provider,
+      model: current.model,
+      ...(current.thinking ? { thinking: current.thinking } : {}),
+    };
+  const first = models[0];
+  return first ? { provider: first.provider, model: first.model } : undefined;
+}
+
+export function draftThinkingLevels(
+  runtimes: readonly RuntimeSnapshot[],
+  selected?: ModelSelection,
+): string[] {
+  return [
+    ...new Set([
+      ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),
+      ...(selected?.thinking ? [selected.thinking] : []),
+    ]),
+  ];
+}
 
 export function DraftThreadView({
   draftId,
@@ -48,12 +105,19 @@ export function DraftThreadView({
   const retryMutation = useMutation(
     retryThreadMutationOptions(dashboardHttpClient),
   );
-  const { initialDraft, text, updateText } = useComposerDraft(draftId);
+  const { initialDraft, text, updateText, clearDraft } =
+    useComposerDraft(draftId);
   const attachments = useImageAttachments({
     enabled: false,
     busy: submitting,
     onError: setError,
   });
+  const modelOptions = configuredModelOptions(snapshot.runtimes);
+  const selectedModel = draftModelSelection(
+    snapshot.runtimes,
+    fallbackDraft?.model,
+  );
+  const thinkingLevels = draftThinkingLevels(snapshot.runtimes, selectedModel);
 
   useEffect(() => {
     if (text !== initialDraft) updateDraft(draftId, threadTitle(text));
@@ -89,13 +153,21 @@ export function DraftThreadView({
       const liveDraft =
         readDrafts().find((candidate) => candidate.id === draftId) ??
         fallbackDraft;
+      const submissionModel = draftModelSelection(
+        snapshot.runtimes,
+        liveDraft.model,
+      );
       if (liveDraft.promotedThreadId) {
         const retry = beginDraftRetry(draftId);
         if (!retry)
           throw new Error('The promoted draft is no longer available.');
         await retryMutation.mutateAsync({
           threadId: retry.threadId,
-          command: { commandId: retry.commandId, prompt },
+          command: {
+            commandId: retry.commandId,
+            prompt,
+            ...(submissionModel ? { model: submissionModel } : {}),
+          },
         });
         go(draftPendingPath(draftId, retry.threadId), { replace: true });
         return;
@@ -107,6 +179,7 @@ export function DraftThreadView({
           title: threadTitle(prompt),
           prompt,
           isolation: liveDraft.isolation,
+          ...(submissionModel ? { model: submissionModel } : {}),
         },
       });
       markDraftPromoted(draftId, result.thread.id);
@@ -137,12 +210,28 @@ export function DraftThreadView({
                   >
                     /
                   </span>
-                  <h1>Draft</h1>
+                  <h1>New thread</h1>
                 </div>
                 <span className="session-status status-draft">
-                  <i aria-hidden="true">●</i> Draft
+                  <i aria-hidden="true">●</i> draft
                 </span>
               </div>
+            </div>
+            <div className="session-heading-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  if (!globalThis.confirm('Delete this draft?')) return;
+                  clearDraft();
+                  deleteDraft(draftId);
+                  go(`/projects/${encodeURIComponent(project.id)}`, {
+                    replace: true,
+                  });
+                }}
+              >
+                Delete draft
+              </button>
             </div>
           </header>
         </div>
@@ -177,12 +266,40 @@ export function DraftThreadView({
             sendDisabled={submitting || !text.trim()}
             sendAriaLabel="Send message"
             mode={<span>Prompt</span>}
-            controls={<span>Isolation: {fallbackDraft.isolation}</span>}
-            notice={
-              <div className="composer-notice" role="note">
-                <strong>Draft thread</strong>
-                <p>Your text is saved locally in this browser.</p>
-              </div>
+            controls={
+              <>
+                <ComposerModelControl
+                  models={modelOptions}
+                  value={
+                    selectedModel
+                      ? modelOptionValue(
+                          selectedModel.provider,
+                          selectedModel.model,
+                        )
+                      : ''
+                  }
+                  disabled={submitting}
+                  onChange={(value) => {
+                    const model = parseModelOptionValue(value);
+                    if (!model) return;
+                    setDraftModel(draftId, {
+                      ...model,
+                      ...(selectedModel?.thinking
+                        ? { thinking: selectedModel.thinking }
+                        : {}),
+                    });
+                  }}
+                />
+                <ComposerThinkingControl
+                  levels={thinkingLevels}
+                  value={selectedModel?.thinking ?? thinkingLevels[0] ?? ''}
+                  disabled={submitting || !selectedModel}
+                  onChange={(thinking) => {
+                    if (!selectedModel) return;
+                    setDraftModel(draftId, { ...selectedModel, thinking });
+                  }}
+                />
+              </>
             }
             footer={
               error ? (

@@ -10,6 +10,7 @@ import {
   getOrCreateDraft,
   markDraftPromoted,
   readDrafts,
+  setDraftModel,
   updateDraft,
 } from './drafts';
 
@@ -90,6 +91,26 @@ describe('browser-local draft metadata', () => {
       attempt: 1,
       commandId: draftRetryCommandId(draft.id, 1),
     });
+  });
+
+  it('persists the selected model and effort', () => {
+    installStorage();
+    const draft = createDraft('model-project', 'worktree', 123);
+    setDraftModel(draft.id, {
+      provider: 'openai-codex',
+      model: 'gpt-5.6',
+      thinking: 'high',
+    });
+    expect(readDrafts()).toContainEqual(
+      expect.objectContaining({
+        id: draft.id,
+        model: {
+          provider: 'openai-codex',
+          model: 'gpt-5.6',
+          thinking: 'high',
+        },
+      }),
+    );
   });
 
   it('reads fresh metadata before updating and persists the bounded title', () => {

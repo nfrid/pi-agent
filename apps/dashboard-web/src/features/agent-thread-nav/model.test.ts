@@ -60,7 +60,7 @@ describe('agent thread view model', () => {
         projectId: 'project-1',
         projectName: 'Project One',
         status: 'draft',
-        statusLabel: 'Draft',
+        statusLabel: 'draft',
         draft: expect.anything(),
       }),
     );
