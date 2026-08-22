@@ -41,6 +41,7 @@ import {
 import styles from './agent-thread-nav.module.css';
 import { dormantResumeMetadata } from './composer/runtime';
 import { useDashboardUtility } from './dashboard-utility-context';
+import { draftPath, useDrafts } from './drafts';
 import {
   AgentThreadActionMenu,
   DurableThreadActions,
@@ -372,12 +373,14 @@ export function AgentThreadNav({
   snapshot,
   mode = 'home',
   currentSessionId,
+  currentDraftId,
   open = false,
   onOpenChange,
 }: {
   snapshot: BrowserSnapshot;
   mode?: AgentThreadNavMode;
   currentSessionId?: string;
+  currentDraftId?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -392,6 +395,7 @@ export function AgentThreadNav({
     Boolean(readExpandedArchived().all),
   );
   const [activeResultId, setActiveResultId] = useState<string>();
+  const drafts = useDrafts();
   const {
     state: unreadState,
     visitCurrent,
@@ -440,8 +444,8 @@ export function AgentThreadNav({
     [snapshot.projects],
   );
   const rows = useMemo(
-    () => agentThreadRows(snapshot, durableThreads, directLinks),
-    [directLinks, durableThreads, snapshot],
+    () => agentThreadRows(snapshot, durableThreads, directLinks, drafts),
+    [directLinks, drafts, durableThreads, snapshot],
   );
   const scopedRows = useMemo(
     () =>
@@ -512,7 +516,8 @@ export function AgentThreadNav({
     }
   };
   const select = (id: string) => {
-    go(`/sessions/${encodeURIComponent(id)}`);
+    const row = rows.find((candidate) => candidate.id === id);
+    go(row?.draft ? draftPath(id) : `/sessions/${encodeURIComponent(id)}`);
     if (mode === 'session') onOpenChange?.(false);
   };
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -572,43 +577,49 @@ export function AgentThreadNav({
     if (mode === 'session') onOpenChange?.(false);
   };
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
-    const selected = row.id === currentSessionId;
-    const unread = isThreadUnread(row, unreadState);
+    const selected = row.draft
+      ? row.id === currentDraftId
+      : row.id === currentSessionId;
+    const unread = row.draft ? false : isThreadUnread(row, unreadState);
     const activeResult = row.id === activeResultId;
     const rowClassName = `agent-thread-row ${density === 'card' ? 'agent-thread-card' : 'agent-thread-slim'} ${styles.threadRow} ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} ${activeResult ? 'active-result' : ''} status-${row.status}`;
     const menuItems = ({ closeMenu }: { closeMenu: () => void }) => (
       <>
-        {row.durableThread && (
+        {!row.draft && row.durableThread && (
           <DurableThreadActions
             thread={row.durableThread}
             title={row.title}
             closeMenu={closeMenu}
           />
         )}
-        <button
-          type="button"
-          role="menuitem"
-          aria-label={`Mark ${row.title} as unread`}
-          onClick={(event) => {
-            event.stopPropagation();
-            markUnread(row.id, row.updatedAt);
-            closeMenu();
-          }}
-        >
-          Mark unread
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          aria-label={`Copy path for ${row.title}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            void copyPath(row);
-            closeMenu();
-          }}
-        >
-          Copy path
-        </button>
+        {!row.draft && (
+          <button
+            type="button"
+            role="menuitem"
+            aria-label={`Mark ${row.title} as unread`}
+            onClick={(event) => {
+              event.stopPropagation();
+              markUnread(row.id, row.updatedAt);
+              closeMenu();
+            }}
+          >
+            Mark unread
+          </button>
+        )}
+        {!row.draft && (
+          <button
+            type="button"
+            role="menuitem"
+            aria-label={`Copy path for ${row.title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void copyPath(row);
+              closeMenu();
+            }}
+          >
+            Copy path
+          </button>
+        )}
       </>
     );
     const renderThreadLink = (lifecycleProps?: RuntimeLifecycleThreadProps) => (
@@ -623,6 +634,13 @@ export function AgentThreadNav({
         runtimes={snapshot.runtimes}
       />
     );
+    if (row.draft) {
+      return (
+        <div key={row.id} className={rowClassName}>
+          {renderThreadLink()}
+        </div>
+      );
+    }
     if (!row.runtime) {
       return (
         <AgentThreadActionMenu

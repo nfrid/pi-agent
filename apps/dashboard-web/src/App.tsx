@@ -43,6 +43,16 @@ export {
   writeComposerDraft,
 } from './features/composer';
 export {
+  createDraft,
+  deleteDraft,
+  draftPath,
+  draftPromotionCommandId,
+  getOrCreateDraft,
+  readDrafts,
+  updateDraft,
+  useDrafts,
+} from './features/drafts';
+export {
   ExtensionSurfaceStack,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,

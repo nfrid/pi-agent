@@ -15,7 +15,8 @@ export function RouteShell() {
         (match) =>
           match.routeId === '/sessions/$sessionId' ||
           match.routeId === '/projects/$projectId/new' ||
-          match.routeId === '/projects/$projectId/new/pending/$threadId',
+          match.routeId === '/projects/$projectId/new/pending/$threadId' ||
+          match.routeId === '/drafts/$draftId',
       ),
       pathname: state.location.pathname,
     }),

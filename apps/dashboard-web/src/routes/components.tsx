@@ -2,6 +2,7 @@ import { useParams } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useDashboardContext } from '../app/dashboard-context';
 import { Composer } from '../features/composer';
+import { DraftThreadView } from '../features/draft-thread';
 import { SessionView } from '../features/session';
 import {
   Dashboard,
@@ -59,6 +60,14 @@ export function ProjectNewThreadRoute() {
       snapshot={dashboard.snapshot}
       store={dashboard.store}
     />
+  ) : null;
+}
+
+export function DraftRoute() {
+  const { draftId } = useParams({ from: '/drafts/$draftId' });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <DraftThreadView draftId={draftId} snapshot={dashboard.snapshot} />
   ) : null;
 }
 

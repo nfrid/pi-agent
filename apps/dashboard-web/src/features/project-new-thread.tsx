@@ -1,17 +1,14 @@
 import {
-  createThreadMutationOptions,
   type DashboardLiveStore,
-  dashboardHttpClient,
   useDashboardStore,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
-import { errorMessage } from '../shared/lib/error-message';
+import { draftPath, getOrCreateDraft } from './drafts';
 import styles from './project-catalogue.module.css';
 
-function threadTitle(prompt: string): string {
+export function threadTitle(prompt: string): string {
   const normalized = prompt.replace(/\s+/gu, ' ').trim();
   return [...normalized].slice(0, 96).join('');
 }
@@ -38,11 +35,7 @@ export function ProjectNewThreadView({
   const project = (snapshot.projects ?? []).find(
     (candidate) => candidate.id === projectId,
   );
-  const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string>();
-  const mutation = useMutation(
-    createThreadMutationOptions(dashboardHttpClient),
-  );
   const pendingRun = useDashboardStore(store, (state) =>
     pendingThreadId
       ? state.runs?.find((candidate) => candidate.threadId === pendingThreadId)
@@ -53,6 +46,16 @@ export function ProjectNewThreadView({
       ? state.runtimesById[pendingRun.runtimeId]
       : undefined,
   );
+
+  useEffect(() => {
+    if (!pendingThreadId && project) {
+      const draft = getOrCreateDraft(
+        project.id,
+        project.defaultIsolation ?? 'worktree',
+      );
+      go(draftPath(draft.id));
+    }
+  }, [go, pendingThreadId, project]);
 
   useEffect(() => {
     const sessionId = pendingRuntime?.session.id;
@@ -77,26 +80,6 @@ export function ProjectNewThreadView({
       </section>
     );
   }
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = prompt.trim();
-    if (!text || mutation.isPending) return;
-    setError(undefined);
-    try {
-      const result = await mutation.mutateAsync({
-        projectId,
-        command: {
-          title: threadTitle(text),
-          prompt: text,
-          isolation: project.defaultIsolation,
-        },
-      });
-      go(projectPendingPath(projectId, result.thread.id));
-    } catch (cause) {
-      setError(errorMessage(cause));
-    }
-  };
 
   if (pendingThreadId) {
     return (
@@ -125,38 +108,9 @@ export function ProjectNewThreadView({
 
   return (
     <section className={styles.page}>
-      <div className="section-heading page-heading">
-        <div>
-          <p className="eyebrow">{project.title}</p>
-          <h1>New thread</h1>
-          <p className="muted path">{project.rootPath}</p>
-        </div>
-      </div>
-      <form
-        className={styles.threadForm}
-        onSubmit={(event) => void submit(event)}
-      >
-        <label htmlFor="project-thread-prompt">Task</label>
-        <textarea
-          id="project-thread-prompt"
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Describe what the agent should do"
-          rows={8}
-          disabled={mutation.isPending}
-        />
-        <p className="muted">
-          Isolation: {project.defaultIsolation ?? 'worktree'}
-        </p>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={!prompt.trim() || mutation.isPending}>
-          {mutation.isPending ? 'Creating…' : 'Create thread'}
-        </button>
-      </form>
+      <p className="eyebrow">{project.title}</p>
+      <h1>Opening draft…</h1>
+      <p className="muted">Preparing a local draft for this project.</p>
     </section>
   );
 }

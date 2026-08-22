@@ -26,7 +26,9 @@ export function shouldUseDashboardViewTransition({
   const current = currentPath.split(/[?#]/, 1)[0];
   const target = targetPath.split(/[?#]/, 1)[0];
   const isSessionPath = (path: string) =>
-    path === '/sessions' || path.startsWith('/sessions/');
+    path === '/sessions' ||
+    path.startsWith('/sessions/') ||
+    path.startsWith('/drafts/');
   // Live session/transcript surfaces are intentionally excluded from this experiment.
   return (
     !reducedMotion &&

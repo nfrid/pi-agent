@@ -34,6 +34,11 @@ describe('dashboard route tree', () => {
       '/projects/project-1/new/pending/thread-1',
     );
     await router.navigate({
+      to: '/drafts/$draftId',
+      params: { draftId: 'draft-1' },
+    });
+    expect(router.state.location.pathname).toBe('/drafts/draft-1');
+    await router.navigate({
       to: '/sessions/$sessionId',
       params: { sessionId: 's1' },
     });

@@ -5,6 +5,7 @@ import {
 } from '@tanstack/react-router';
 import { RouteShell } from '../app/route-shell';
 import {
+  DraftRoute,
   HomeRoute,
   InboxRoute,
   LegacyNewRoute,
@@ -53,6 +54,11 @@ const projectPendingThreadRoute = createRoute({
   path: '/projects/$projectId/new/pending/$threadId',
   component: ProjectPendingThreadRoute,
 });
+const draftRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/drafts/$draftId',
+  component: DraftRoute,
+});
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
@@ -77,6 +83,7 @@ export const dashboardRouteTree = rootRoute.addChildren([
   projectRoute,
   projectNewThreadRoute,
   projectPendingThreadRoute,
+  draftRoute,
   inboxRoute,
   runtimeRoute,
   legacyNewRoute,
