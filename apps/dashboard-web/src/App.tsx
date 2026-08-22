@@ -43,11 +43,28 @@ export {
   writeComposerDraft,
 } from './features/composer';
 export {
+  beginDraftRetry,
+  createDraft,
+  deleteDraft,
+  draftPath,
+  draftPromotionCommandId,
+  draftRetryCommandId,
+  getOrCreateDraft,
+  markDraftPromoted,
+  readDrafts,
+  updateDraft,
+  useDrafts,
+} from './features/drafts';
+export {
   ExtensionSurfaceStack,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
 } from './features/extension-surfaces';
-export { newProjectThreadPath } from './routes/navigation';
+export { draftPendingPath } from './features/project-new-thread';
+export {
+  dashboardNavigateOptions,
+  newProjectThreadPath,
+} from './routes/navigation';
 export { dashboardRouterInstance, dashboardRouteTree } from './routes/tree';
 export { toTranscriptEntries } from './transcript';
 

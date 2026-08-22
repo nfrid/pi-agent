@@ -2,6 +2,7 @@ import { useParams } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useDashboardContext } from '../app/dashboard-context';
 import { Composer } from '../features/composer';
+import { DraftThreadView } from '../features/draft-thread';
 import { SessionView } from '../features/session';
 import {
   Dashboard,
@@ -62,6 +63,33 @@ export function ProjectNewThreadRoute() {
   ) : null;
 }
 
+export function DraftRoute() {
+  const { draftId } = useParams({ from: '/drafts/$draftId' });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <DraftThreadView
+      key={draftId}
+      draftId={draftId}
+      snapshot={dashboard.snapshot}
+    />
+  ) : null;
+}
+
+export function DraftPendingThreadRoute() {
+  const { draftId, threadId } = useParams({
+    from: '/drafts/$draftId/pending/$threadId',
+  });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectNewThreadView
+      draftId={draftId}
+      pendingThreadId={threadId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
+  ) : null;
+}
+
 export function ProjectPendingThreadRoute() {
   const { projectId, threadId } = useParams({
     from: '/projects/$projectId/new/pending/$threadId',
@@ -108,6 +136,6 @@ export function LegacyNewRoute() {
   const path = dashboard.snapshot
     ? newProjectThreadPath(dashboard.snapshot)
     : '/projects';
-  useEffect(() => go(path), [go, path]);
+  useEffect(() => go(path, { replace: true }), [go, path]);
   return <output className="route-loading">Opening a new thread…</output>;
 }

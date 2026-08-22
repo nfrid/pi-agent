@@ -247,9 +247,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toHaveCount(0);
   await paletteTrigger.click();
   await page.getByRole('option', { name: /New thread/ }).click();
-  await expect(page).toHaveURL(/\/projects\/p\/new$/u);
-  await expect(page.getByRole('heading', { name: 'New thread' })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Task' })).toBeVisible();
+  await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
+  await expect(page.getByRole('heading', { name: 'Draft' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
   expect(
     await page
       .locator('body')
@@ -309,7 +309,7 @@ test('mobile project picker dismisses without closing the agent drawer', async (
 
   await newThread.click();
   await chooser.getByRole('button', { name: 'Two' }).click();
-  await expect(page).toHaveURL(/\/projects\/two\/new$/u);
+  await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
 });
 
@@ -342,7 +342,7 @@ test('sidebar New thread handles one and zero project fallbacks @desktop', async
     .getByRole('complementary', { name: 'Agents and threads' })
     .getByRole('button', { name: /New thread/ })
     .click();
-  await expect(page).toHaveURL(/\/projects\/only\/new$/u);
+  await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
 
   const zeroPage = await page.context().newPage();
   await routeSidebarData(zeroPage);
@@ -463,7 +463,7 @@ test('desktop project scope filters threads and starts project threads @desktop'
   await chooserSearch.fill('');
   await chooserSearch.press('Control+j');
   await chooserSearch.press('Enter');
-  await expect(page).toHaveURL(/\/projects\/two\/new$/u);
+  await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await page.goto('/');
   await nav.getByRole('button', { name: /New thread/ }).click();
   const chooserCancel = projectChooser.getByRole('button', {
@@ -486,7 +486,7 @@ test('desktop project scope filters threads and starts project threads @desktop'
   await nav.getByRole('button', { name: /New thread/ }).click();
   await expect(projectChooser).toBeVisible();
   await projectChooser.getByRole('button', { name: 'Two' }).click();
-  await expect(page).toHaveURL(/\/projects\/two\/new$/u);
+  await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await page.goto('/projects');
   const projectCards = page.locator('.workspace-card');
   await expect(projectCards.first()).toContainText('One');
@@ -515,7 +515,7 @@ test('desktop project thread form stays readable @desktop', async ({
   } as never);
 
   await page.goto('/projects/one/new');
-  const form = page.getByRole('textbox', { name: 'Task' });
+  const form = page.getByRole('textbox', { name: 'Message Pi' });
   await expect(form).toBeVisible();
   const geometry = await form.evaluate((element) => {
     const rect = element.getBoundingClientRect();

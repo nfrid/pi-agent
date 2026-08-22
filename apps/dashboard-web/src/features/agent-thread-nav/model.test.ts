@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { draftPath } from '../drafts';
 import type { AgentThreadRow } from './model';
 import {
   agentThreadRows,
@@ -31,6 +32,42 @@ function row(
 }
 
 describe('agent thread view model', () => {
+  it('includes drafts in project-scoped navigation rows without runtime state', () => {
+    const rows = agentThreadRows(
+      {
+        runtimes: [],
+        sessions: [],
+        runs: [],
+        projects: [
+          { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+        ],
+      } as never,
+      undefined,
+      [],
+      [
+        {
+          id: 'draft-1',
+          projectId: 'project-1',
+          createdAt: 1,
+          updatedAt: 2,
+          isolation: 'worktree',
+        },
+      ],
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        id: 'draft-1',
+        projectId: 'project-1',
+        projectName: 'Project One',
+        status: 'draft',
+        statusLabel: 'Draft',
+        draft: expect.anything(),
+      }),
+    );
+    expect(draftPath(rows.find((row) => row.draft)?.id ?? '')).toBe(
+      '/drafts/draft-1',
+    );
+  });
   it('keys persisted-link refreshes to the exact session identity set', () => {
     const first = sessionThreadIdentityKey({
       sessions: [{ id: 'session-b' }, { id: 'session-a' }],
@@ -398,6 +435,15 @@ describe('agent thread view model', () => {
     expect(visible).toHaveLength(40);
     expect(visible.every((item) => item.status !== 'offline')).toBe(true);
     expect(hiddenAgentThreadRowCount(rows, visible)).toBe(3);
+  });
+
+  it('keeps the selected draft visible past the Active bound', () => {
+    const drafts = Array.from({ length: 3 }, (_, index) =>
+      row(`draft-${index}`, 'Dashboard', 'draft'),
+    );
+    expect(
+      sectionAgentThreadRows(drafts, 1, 'draft-2').active.map(({ id }) => id),
+    ).toEqual(['draft-0', 'draft-2']);
   });
 
   it('keeps the selected dormant thread visible past the Active bound', () => {

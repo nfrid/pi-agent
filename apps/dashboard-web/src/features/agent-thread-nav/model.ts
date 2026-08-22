@@ -7,6 +7,8 @@ import type {
   Thread,
 } from '@pi-dashboard/protocol';
 import { sessionDisplayTitle } from '../../app-helpers';
+import { readComposerDraft } from '../composer/draft';
+import type { DraftMetadata } from '../drafts';
 import { dashboardStatus } from '../presentation-status';
 
 export type DurableThreadMetadata = {
@@ -26,6 +28,7 @@ export type AgentThreadRow = {
   durableThread?: DurableThreadMetadata;
   status:
     | RuntimeSnapshot['liveState']
+    | 'draft'
     | 'paused'
     | 'offline'
     | 'dormant'
@@ -33,6 +36,7 @@ export type AgentThreadRow = {
   statusLabel?: string;
   runtime?: RuntimeSnapshot;
   session?: SessionIndexEntry;
+  draft?: DraftMetadata;
   startedAt?: number;
   updatedAt?: number;
 };
@@ -162,6 +166,7 @@ export function agentThreadRows(
     'id' | 'archivedAt' | 'pinnedAt' | 'settledAt'
   >[],
   directLinks: readonly SessionThreadLink[] = [],
+  drafts: readonly DraftMetadata[] = [],
 ): AgentThreadRow[] {
   const durableForSession =
     durableThreads !== undefined || directLinks.length > 0
@@ -224,6 +229,24 @@ export function agentThreadRows(
       session,
       startedAt: session.startedAt ?? 0,
       updatedAt: session.updatedAt,
+    });
+  }
+  for (const draft of drafts) {
+    const project = projectsById.get(draft.projectId);
+    const prompt = readComposerDraft(draft.id).replace(/\s+/gu, ' ').trim();
+    rows.set(draft.id, {
+      id: draft.id,
+      title:
+        draft.title ||
+        (prompt ? [...prompt].slice(0, 96).join('') : 'New draft'),
+      projectId: draft.projectId,
+      projectName: project?.title ?? 'Unknown project',
+      cwd: project?.rootPath ?? '',
+      status: 'draft',
+      statusLabel: 'Draft',
+      draft,
+      startedAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
     });
   }
   return [...rows.values()].sort(
@@ -347,6 +370,7 @@ export function statusGlyph(status: AgentThreadRow['status']): string {
   if (status === 'failed') return '!';
   if (status === 'offline') return '○';
   if (status === 'dormant') return '◌';
+  if (status === 'draft') return '✎';
   return '●';
 }
 

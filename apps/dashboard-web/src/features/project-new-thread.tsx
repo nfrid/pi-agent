@@ -1,17 +1,21 @@
 import {
-  createThreadMutationOptions,
   type DashboardLiveStore,
-  dashboardHttpClient,
   useDashboardStore,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
-import { errorMessage } from '../shared/lib/error-message';
+import { useComposerDraft } from './composer/draft';
+import {
+  deleteDraft,
+  draftPath,
+  getOrCreateDraft,
+  readDrafts,
+  useDrafts,
+} from './drafts';
 import styles from './project-catalogue.module.css';
 
-function threadTitle(prompt: string): string {
+export function threadTitle(prompt: string): string {
   const normalized = prompt.replace(/\s+/gu, ' ').trim();
   return [...normalized].slice(0, 96).join('');
 }
@@ -23,29 +27,54 @@ export function projectPendingPath(
   return `/projects/${encodeURIComponent(projectId)}/new/pending/${encodeURIComponent(threadId)}`;
 }
 
+export function draftPendingPath(draftId: string, threadId: string): string {
+  return `/drafts/${encodeURIComponent(draftId)}/pending/${encodeURIComponent(threadId)}`;
+}
+
+export function latestRunForThread<
+  T extends { threadId: string; attempt: number; createdAt: number },
+>(runs: readonly T[], threadId: string): T | undefined {
+  return runs
+    .filter((run) => run.threadId === threadId)
+    .reduce<T | undefined>(
+      (latest, run) =>
+        !latest ||
+        run.attempt > latest.attempt ||
+        (run.attempt === latest.attempt && run.createdAt > latest.createdAt)
+          ? run
+          : latest,
+      undefined,
+    );
+}
+
 export function ProjectNewThreadView({
   projectId,
+  draftId,
   pendingThreadId,
   snapshot,
   store,
 }: {
-  projectId: string;
+  projectId?: string;
+  draftId?: string;
   pendingThreadId?: string;
   snapshot: BrowserSnapshot;
   store: DashboardLiveStore;
 }) {
   const go = useDashboardNavigate();
+  const drafts = useDrafts();
+  const draft = drafts.find((candidate) => candidate.id === draftId);
+  const fallbackDraft =
+    draft ?? readDrafts().find((candidate) => candidate.id === draftId);
+  const resolvedProjectId = projectId ?? fallbackDraft?.projectId;
+  const { clearDraft } = useComposerDraft(draftId ?? '__legacy-pending__');
   const project = (snapshot.projects ?? []).find(
-    (candidate) => candidate.id === projectId,
+    (candidate) => candidate.id === resolvedProjectId,
   );
-  const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string>();
-  const mutation = useMutation(
-    createThreadMutationOptions(dashboardHttpClient),
-  );
+  const promotionCompleted = useRef(false);
   const pendingRun = useDashboardStore(store, (state) =>
     pendingThreadId
-      ? state.runs?.find((candidate) => candidate.threadId === pendingThreadId)
+      ? latestRunForThread(state.runs ?? [], pendingThreadId)
       : undefined,
   );
   const pendingRuntime = useDashboardStore(store, (state) =>
@@ -55,13 +84,35 @@ export function ProjectNewThreadView({
   );
 
   useEffect(() => {
-    const sessionId = pendingRuntime?.session.id;
-    if (sessionId) go(`/sessions/${encodeURIComponent(sessionId)}`);
-  }, [go, pendingRuntime?.session.id]);
+    if (!pendingThreadId && project && resolvedProjectId) {
+      const draft = getOrCreateDraft(
+        project.id,
+        project.defaultIsolation ?? 'worktree',
+      );
+      go(draftPath(draft.id), { replace: true });
+    }
+  }, [go, pendingThreadId, project, resolvedProjectId]);
 
   useEffect(() => {
-    if (pendingRun?.status !== 'failed') return;
-    setError(pendingRun.error ?? 'The run failed before its runtime started.');
+    const sessionId = pendingRuntime?.session.id;
+    if (!sessionId || promotionCompleted.current) return;
+    promotionCompleted.current = true;
+    if (draftId) {
+      clearDraft();
+      deleteDraft(draftId);
+    }
+    go(`/sessions/${encodeURIComponent(sessionId)}`, { replace: true });
+  }, [clearDraft, draftId, go, pendingRuntime?.session.id]);
+
+  useEffect(() => {
+    if (pendingRun?.status !== 'failed' && pendingRun?.status !== 'interrupted')
+      return;
+    setError(
+      pendingRun.error ??
+        (pendingRun.status === 'interrupted'
+          ? 'The run was interrupted before its runtime started.'
+          : 'The run failed before its runtime started.'),
+    );
   }, [pendingRun?.error, pendingRun?.status]);
 
   if (!project) {
@@ -77,26 +128,6 @@ export function ProjectNewThreadView({
       </section>
     );
   }
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = prompt.trim();
-    if (!text || mutation.isPending) return;
-    setError(undefined);
-    try {
-      const result = await mutation.mutateAsync({
-        projectId,
-        command: {
-          title: threadTitle(text),
-          prompt: text,
-          isolation: project.defaultIsolation,
-        },
-      });
-      go(projectPendingPath(projectId, result.thread.id));
-    } catch (cause) {
-      setError(errorMessage(cause));
-    }
-  };
 
   if (pendingThreadId) {
     return (
@@ -115,9 +146,16 @@ export function ProjectNewThreadView({
         <button
           type="button"
           className="secondary-button"
-          onClick={() => go(`/projects/${encodeURIComponent(projectId)}`)}
+          onClick={() =>
+            go(
+              draftId
+                ? draftPath(draftId)
+                : `/projects/${encodeURIComponent(resolvedProjectId ?? '')}`,
+              { replace: Boolean(draftId) },
+            )
+          }
         >
-          Back to project
+          {draftId ? 'Return to draft' : 'Back to project'}
         </button>
       </section>
     );
@@ -125,38 +163,9 @@ export function ProjectNewThreadView({
 
   return (
     <section className={styles.page}>
-      <div className="section-heading page-heading">
-        <div>
-          <p className="eyebrow">{project.title}</p>
-          <h1>New thread</h1>
-          <p className="muted path">{project.rootPath}</p>
-        </div>
-      </div>
-      <form
-        className={styles.threadForm}
-        onSubmit={(event) => void submit(event)}
-      >
-        <label htmlFor="project-thread-prompt">Task</label>
-        <textarea
-          id="project-thread-prompt"
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Describe what the agent should do"
-          rows={8}
-          disabled={mutation.isPending}
-        />
-        <p className="muted">
-          Isolation: {project.defaultIsolation ?? 'worktree'}
-        </p>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={!prompt.trim() || mutation.isPending}>
-          {mutation.isPending ? 'Creating…' : 'Create thread'}
-        </button>
-      </form>
+      <p className="eyebrow">{project.title}</p>
+      <h1>Opening draft…</h1>
+      <p className="muted">Preparing a local draft for this project.</p>
     </section>
   );
 }
