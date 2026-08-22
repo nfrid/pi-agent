@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { shouldUseDashboardViewTransition } from './navigation';
+import {
+  dashboardNavigateOptions,
+  shouldUseDashboardViewTransition,
+} from './navigation';
 
 describe('dashboard view transition navigation policy', () => {
+  it('supports replacing redirect entries', () => {
+    expect(dashboardNavigateOptions({ replace: true })).toEqual({
+      replace: true,
+    });
+    expect(dashboardNavigateOptions()).toEqual({});
+  });
   it('enables transitions for eligible in-app navigation', () => {
     expect(
       shouldUseDashboardViewTransition({

@@ -236,7 +236,9 @@ export function agentThreadRows(
     const prompt = readComposerDraft(draft.id).replace(/\s+/gu, ' ').trim();
     rows.set(draft.id, {
       id: draft.id,
-      title: prompt ? [...prompt].slice(0, 96).join('') : 'New draft',
+      title:
+        draft.title ||
+        (prompt ? [...prompt].slice(0, 96).join('') : 'New draft'),
       projectId: draft.projectId,
       projectName: project?.title ?? 'Unknown project',
       cwd: project?.rootPath ?? '',

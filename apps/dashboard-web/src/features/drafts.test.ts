@@ -7,6 +7,7 @@ import {
   draftPromotionCommandId,
   getOrCreateDraft,
   readDrafts,
+  updateDraft,
 } from './drafts';
 
 const values = new Map<string, string>();
@@ -67,6 +68,29 @@ describe('browser-local draft metadata', () => {
     ).toHaveLength(2);
     deleteDraft(empty.id);
     deleteDraft(invested.id);
+  });
+
+  it('reads fresh metadata before updating and persists the bounded title', () => {
+    installStorage();
+    const first = createDraft('fresh-project', 'worktree', 123);
+    const external = {
+      id: 'external-draft',
+      projectId: 'fresh-project',
+      createdAt: 124,
+      updatedAt: 124,
+      isolation: 'main',
+    };
+    values.set(
+      'pi-dashboard-drafts:v1',
+      JSON.stringify([...readDrafts(), external]),
+    );
+    updateDraft(first.id, 'A derived title');
+    expect(readDrafts()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'external-draft' }),
+        expect.objectContaining({ id: first.id, title: 'A derived title' }),
+      ]),
+    );
   });
 
   it('provides stable encoded navigation and promotion identities', () => {

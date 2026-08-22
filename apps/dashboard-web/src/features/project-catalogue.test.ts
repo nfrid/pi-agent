@@ -1,7 +1,7 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import { projectCounts } from './project-catalogue';
-import { projectPendingPath } from './project-new-thread';
+import { draftPendingPath, projectPendingPath } from './project-new-thread';
 
 describe('project catalogue', () => {
   it('counts only entities with the authoritative project identity', () => {
@@ -30,6 +30,9 @@ describe('project catalogue', () => {
   it('builds encoded pending thread routes', () => {
     expect(projectPendingPath('project/one', 'thread/two')).toBe(
       '/projects/project%2Fone/new/pending/thread%2Ftwo',
+    );
+    expect(draftPendingPath('draft/one', 'thread/two')).toBe(
+      '/drafts/draft%2Fone/pending/thread%2Ftwo',
     );
   });
 });

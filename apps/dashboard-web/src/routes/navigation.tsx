@@ -40,7 +40,20 @@ export function shouldUseDashboardViewTransition({
   );
 }
 
-export function useDashboardNavigate(): (path: string) => void {
+export type DashboardNavigateOptions = {
+  replace?: boolean;
+};
+
+export function dashboardNavigateOptions(options?: DashboardNavigateOptions): {
+  replace?: true;
+} {
+  return options?.replace ? { replace: true } : {};
+}
+
+export function useDashboardNavigate(): (
+  path: string,
+  options?: DashboardNavigateOptions,
+) => void {
   const navigate = useNavigate();
   const currentPath = useRouterState({
     select: (state) => state.location.pathname,
@@ -48,12 +61,13 @@ export function useDashboardNavigate(): (path: string) => void {
   const reducedMotion = usePrefersReducedMotion();
   const utility = useDashboardUtility();
   return useCallback(
-    (path: string) => {
+    (path: string, options?: DashboardNavigateOptions) => {
       // Navigation from a utility panel must never leave the old panel over the
       // destination. The panel state is intentionally independent of the URL.
       utility?.close();
       void navigate({
         to: path,
+        ...dashboardNavigateOptions(options),
         viewTransition: shouldUseDashboardViewTransition({
           currentPath,
           targetPath: path,

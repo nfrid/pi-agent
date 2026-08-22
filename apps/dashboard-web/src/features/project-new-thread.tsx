@@ -3,9 +3,16 @@ import {
   useDashboardStore,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
-import { draftPath, getOrCreateDraft } from './drafts';
+import { useComposerDraft } from './composer/draft';
+import {
+  deleteDraft,
+  draftPath,
+  getOrCreateDraft,
+  readDrafts,
+  useDrafts,
+} from './drafts';
 import styles from './project-catalogue.module.css';
 
 export function threadTitle(prompt: string): string {
@@ -20,22 +27,35 @@ export function projectPendingPath(
   return `/projects/${encodeURIComponent(projectId)}/new/pending/${encodeURIComponent(threadId)}`;
 }
 
+export function draftPendingPath(draftId: string, threadId: string): string {
+  return `/drafts/${encodeURIComponent(draftId)}/pending/${encodeURIComponent(threadId)}`;
+}
+
 export function ProjectNewThreadView({
   projectId,
+  draftId,
   pendingThreadId,
   snapshot,
   store,
 }: {
-  projectId: string;
+  projectId?: string;
+  draftId?: string;
   pendingThreadId?: string;
   snapshot: BrowserSnapshot;
   store: DashboardLiveStore;
 }) {
   const go = useDashboardNavigate();
+  const drafts = useDrafts();
+  const draft = drafts.find((candidate) => candidate.id === draftId);
+  const fallbackDraft =
+    draft ?? readDrafts().find((candidate) => candidate.id === draftId);
+  const resolvedProjectId = projectId ?? fallbackDraft?.projectId;
+  const { clearDraft } = useComposerDraft(draftId ?? '__legacy-pending__');
   const project = (snapshot.projects ?? []).find(
-    (candidate) => candidate.id === projectId,
+    (candidate) => candidate.id === resolvedProjectId,
   );
   const [error, setError] = useState<string>();
+  const promotionCompleted = useRef(false);
   const pendingRun = useDashboardStore(store, (state) =>
     pendingThreadId
       ? state.runs?.find((candidate) => candidate.threadId === pendingThreadId)
@@ -48,19 +68,25 @@ export function ProjectNewThreadView({
   );
 
   useEffect(() => {
-    if (!pendingThreadId && project) {
+    if (!pendingThreadId && project && resolvedProjectId) {
       const draft = getOrCreateDraft(
         project.id,
         project.defaultIsolation ?? 'worktree',
       );
-      go(draftPath(draft.id));
+      go(draftPath(draft.id), { replace: true });
     }
-  }, [go, pendingThreadId, project]);
+  }, [go, pendingThreadId, project, resolvedProjectId]);
 
   useEffect(() => {
     const sessionId = pendingRuntime?.session.id;
-    if (sessionId) go(`/sessions/${encodeURIComponent(sessionId)}`);
-  }, [go, pendingRuntime?.session.id]);
+    if (!sessionId || promotionCompleted.current) return;
+    promotionCompleted.current = true;
+    if (draftId) {
+      clearDraft();
+      deleteDraft(draftId);
+    }
+    go(`/sessions/${encodeURIComponent(sessionId)}`, { replace: true });
+  }, [clearDraft, draftId, go, pendingRuntime?.session.id]);
 
   useEffect(() => {
     if (pendingRun?.status !== 'failed') return;
@@ -98,9 +124,16 @@ export function ProjectNewThreadView({
         <button
           type="button"
           className="secondary-button"
-          onClick={() => go(`/projects/${encodeURIComponent(projectId)}`)}
+          onClick={() =>
+            go(
+              draftId
+                ? draftPath(draftId)
+                : `/projects/${encodeURIComponent(resolvedProjectId ?? '')}`,
+              { replace: Boolean(draftId) },
+            )
+          }
         >
-          Back to project
+          {draftId ? 'Return to draft and retry' : 'Back to project'}
         </button>
       </section>
     );

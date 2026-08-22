@@ -465,9 +465,9 @@ export function AgentThreadNav({
       sectionAgentThreadRows(
         filtered,
         query.trim() ? Number.POSITIVE_INFINITY : activeLimit,
-        currentSessionId,
+        currentDraftId ?? currentSessionId,
       ),
-    [activeLimit, currentSessionId, filtered, query],
+    [activeLimit, currentDraftId, currentSessionId, filtered, query],
   );
   const visibleRows = useMemo(
     () => [

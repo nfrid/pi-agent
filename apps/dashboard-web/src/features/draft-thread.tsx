@@ -13,14 +13,13 @@ import { useImageAttachments } from './composer/attachments';
 import { useComposerDraft } from './composer/draft';
 import { ComposerShell } from './composer/shell';
 import {
-  deleteDraft,
   draftPromotionCommandId,
   readDrafts,
   updateDraft,
   useDrafts,
 } from './drafts';
 import styles from './project-catalogue.module.css';
-import { projectPendingPath, threadTitle } from './project-new-thread';
+import { draftPendingPath, threadTitle } from './project-new-thread';
 
 export function DraftThreadView({
   draftId,
@@ -51,7 +50,7 @@ export function DraftThreadView({
   });
 
   useEffect(() => {
-    if (text !== initialDraft) updateDraft(draftId);
+    if (text !== initialDraft) updateDraft(draftId, threadTitle(text));
   }, [draftId, initialDraft, text]);
 
   if (!fallbackDraft || !project) {
@@ -84,8 +83,7 @@ export function DraftThreadView({
           isolation: fallbackDraft.isolation,
         },
       });
-      deleteDraft(fallbackDraft.id);
-      go(projectPendingPath(fallbackDraft.projectId, result.thread.id));
+      go(draftPendingPath(fallbackDraft.id, result.thread.id));
     } catch (cause) {
       setError(errorMessage(cause));
       setSubmitting(false);

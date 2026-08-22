@@ -437,6 +437,15 @@ describe('agent thread view model', () => {
     expect(hiddenAgentThreadRowCount(rows, visible)).toBe(3);
   });
 
+  it('keeps the selected draft visible past the Active bound', () => {
+    const drafts = Array.from({ length: 3 }, (_, index) =>
+      row(`draft-${index}`, 'Dashboard', 'draft'),
+    );
+    expect(
+      sectionAgentThreadRows(drafts, 1, 'draft-2').active.map(({ id }) => id),
+    ).toEqual(['draft-0', 'draft-2']);
+  });
+
   it('keeps the selected dormant thread visible past the Active bound', () => {
     const dormant = Array.from({ length: 3 }, (_, index) =>
       row(`old-${index}`, 'Dashboard', 'dormant'),

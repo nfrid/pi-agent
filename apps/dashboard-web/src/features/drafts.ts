@@ -9,6 +9,7 @@ export type DraftMetadata = {
   createdAt: number;
   updatedAt: number;
   isolation: DraftIsolation;
+  title?: string;
 };
 
 const DRAFTS_STORAGE_KEY = 'pi-dashboard-drafts:v1';
@@ -27,7 +28,9 @@ function validDraft(value: unknown): value is DraftMetadata {
     Number.isFinite(draft.createdAt) &&
     typeof draft.updatedAt === 'number' &&
     Number.isFinite(draft.updatedAt) &&
-    (draft.isolation === 'worktree' || draft.isolation === 'main')
+    (draft.isolation === 'worktree' || draft.isolation === 'main') &&
+    (draft.title === undefined ||
+      (typeof draft.title === 'string' && draft.title.length <= 96))
   );
 }
 
@@ -46,6 +49,12 @@ export function readDrafts(): DraftMetadata[] {
 function currentDrafts(): DraftMetadata[] {
   if (!cachedDrafts) cachedDrafts = readDrafts();
   return cachedDrafts;
+}
+
+function freshDrafts(): DraftMetadata[] {
+  const drafts = readDrafts();
+  cachedDrafts = drafts;
+  return drafts;
 }
 
 function notifyDrafts(): void {
@@ -92,7 +101,7 @@ export function createDraft(
     updatedAt: now,
     isolation,
   } satisfies DraftMetadata;
-  persistDrafts([...currentDrafts(), draft]);
+  persistDrafts([...freshDrafts(), draft]);
   return draft;
 }
 
@@ -101,7 +110,7 @@ export function getOrCreateDraft(
   projectId: string,
   isolation: DraftIsolation,
 ): DraftMetadata {
-  const projectDrafts = currentDrafts()
+  const projectDrafts = freshDrafts()
     .filter((draft) => draft.projectId === projectId)
     .sort((left, right) => right.updatedAt - left.updatedAt);
   const empty = projectDrafts.find(
@@ -117,20 +126,24 @@ export function getOrCreateDraft(
         .map((draft) => draft.id),
     );
     if (emptyIds.size)
-      persistDrafts(currentDrafts().filter((draft) => !emptyIds.has(draft.id)));
+      persistDrafts(freshDrafts().filter((draft) => !emptyIds.has(draft.id)));
     return empty;
   }
   return createDraft(projectId, isolation);
 }
 
-export function updateDraft(draftId: string): void {
-  const drafts = currentDrafts();
+export function updateDraft(draftId: string, title?: string): void {
+  const drafts = freshDrafts();
   const draft = drafts.find((candidate) => candidate.id === draftId);
   if (!draft) return;
   persistDrafts(
     drafts.map((candidate) =>
       candidate.id === draftId
-        ? { ...candidate, updatedAt: Date.now() }
+        ? {
+            ...candidate,
+            updatedAt: Date.now(),
+            ...(title === undefined ? {} : { title }),
+          }
         : candidate,
     ),
   );
@@ -138,12 +151,13 @@ export function updateDraft(draftId: string): void {
 
 export function deleteDraft(draftId: string): void {
   writeComposerDraft(draftId, '');
-  persistDrafts(currentDrafts().filter((draft) => draft.id !== draftId));
+  persistDrafts(freshDrafts().filter((draft) => draft.id !== draftId));
 }
 
 function subscribeDrafts(onChange: () => void): () => void {
   const localListener = () => onChange();
-  const storageListener = () => {
+  const storageListener = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== DRAFTS_STORAGE_KEY) return;
     cachedDrafts = undefined;
     onChange();
   };

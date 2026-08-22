@@ -71,6 +71,21 @@ export function DraftRoute() {
   ) : null;
 }
 
+export function DraftPendingThreadRoute() {
+  const { draftId, threadId } = useParams({
+    from: '/drafts/$draftId/pending/$threadId',
+  });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectNewThreadView
+      draftId={draftId}
+      pendingThreadId={threadId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
+  ) : null;
+}
+
 export function ProjectPendingThreadRoute() {
   const { projectId, threadId } = useParams({
     from: '/projects/$projectId/new/pending/$threadId',
