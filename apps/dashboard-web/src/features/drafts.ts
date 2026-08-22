@@ -43,7 +43,7 @@ function validDraft(value: unknown): value is DraftMetadata {
   );
 }
 
-export function readDrafts(): DraftMetadata[] {
+function readStoredDrafts(): DraftMetadata[] | undefined {
   try {
     const raw = globalThis.localStorage?.getItem(DRAFTS_STORAGE_KEY);
     if (!raw) return [];
@@ -51,8 +51,12 @@ export function readDrafts(): DraftMetadata[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(validDraft);
   } catch {
-    return [];
+    return undefined;
   }
+}
+
+export function readDrafts(): DraftMetadata[] {
+  return readStoredDrafts() ?? [];
 }
 
 function currentDrafts(): DraftMetadata[] {
@@ -61,9 +65,12 @@ function currentDrafts(): DraftMetadata[] {
 }
 
 function freshDrafts(): DraftMetadata[] {
-  const drafts = readDrafts();
-  cachedDrafts = drafts;
-  return drafts;
+  const drafts = readStoredDrafts();
+  if (drafts) {
+    cachedDrafts = drafts;
+    return drafts;
+  }
+  return currentDrafts();
 }
 
 function notifyDrafts(): void {
