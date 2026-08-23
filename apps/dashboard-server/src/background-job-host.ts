@@ -326,7 +326,7 @@ export class BackgroundJobHostService {
       let child: ChildProcess;
       try {
         const watchdog =
-          'host="$PPID"; leader="$$"; (while kill -0 "$host" 2>/dev/null; do sleep 0.2; done; kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null) </dev/null >/dev/null 2>&1 & exec "$0" "$@"';
+          'host="$PPID"; leader="$$"; (trap "" TERM; while kill -0 "$host" 2>/dev/null; do sleep 0.2; done; kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null) </dev/null >/dev/null 2>&1 & exec "$0" "$@"';
         child = spawn(
           '/bin/sh',
           ['-c', watchdog, '/bin/bash', '-c', input.command],

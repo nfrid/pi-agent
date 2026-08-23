@@ -1,7 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BackgroundJobHostService } from './background-job-host.js';
@@ -41,19 +42,37 @@ afterEach(async () => {
 
 describe('background process host', () => {
   it('watchdog kills a descendant after abrupt process-host death', async () => {
-    execFileSync('pnpm', ['--filter', '@pi-agent/background-jobs', 'build'], {
-      cwd: process.cwd(),
-      stdio: 'ignore',
-    });
     const root = await mkdtemp(path.join(os.tmpdir(), 'background-abrupt-'));
     const socket = path.join(root, 'jobs.sock');
+    const subprocessTsconfig = path.join(root, 'tsconfig.json');
+    await writeFile(
+      subprocessTsconfig,
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: process.cwd(),
+          paths: {
+            '@pi-agent/background-jobs': [
+              path.resolve('packages/background-jobs/src/index.ts'),
+            ],
+          },
+        },
+      }),
+    );
+    const tsxRoot = path.resolve('apps/dashboard-server/node_modules/tsx/dist');
     const processHost = spawn(
-      'pnpm',
-      ['--filter', '@pi-dashboard/server', 'process-host'],
+      process.execPath,
+      [
+        '--require',
+        path.join(tsxRoot, 'preflight.cjs'),
+        '--import',
+        pathToFileURL(path.join(tsxRoot, 'loader.mjs')).href,
+        path.resolve('apps/dashboard-server/src/process-host-main.ts'),
+      ],
       {
         cwd: process.cwd(),
         env: {
           ...process.env,
+          TSX_TSCONFIG_PATH: subprocessTsconfig,
           PI_PROCESS_HOST_SOCKET: socket,
           PI_DASHBOARD_STATE_DIR: root,
         },
@@ -62,12 +81,14 @@ describe('background process host', () => {
     );
     try {
       const client = new BackgroundJobsClient(socket, 'abrupt');
-      // Wait for the subprocess-owned socket explicitly.
+      const startupDeadline = Date.now() + 5_000;
       for (;;) {
         try {
           await client.list();
           break;
         } catch {
+          if (Date.now() >= startupDeadline)
+            throw new Error('Timed out waiting for the process host.');
           await new Promise((resolve) => setTimeout(resolve, 25));
         }
       }
@@ -77,35 +98,24 @@ describe('background process host', () => {
         title: 'abrupt',
         cwd: process.cwd(),
       });
-      let descendant = 0;
-      await waitUntil(() => {
-        try {
-          const output = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], {
-            encoding: 'utf8',
-          });
-          const matches = output
-            .split('\n')
-            .filter((line) => line.includes('process-host-main'));
-          if (matches.length)
-            descendant = Number(matches.at(-1)?.trim().split(/\s+/u)[0]);
-          return Boolean(descendant);
-        } catch {
-          return false;
-        }
-      });
       let pid = 0;
-      for (;;) {
-        const job = await client.inspect(started.id);
-        pid = Number(job?.stdout.text.trim());
+      const outputDeadline = Date.now() + 3_000;
+      while (pid <= 0) {
+        pid = Number((await client.inspect(started.id))?.stdout.text.trim());
         if (pid > 0) break;
+        if (Date.now() >= outputDeadline)
+          throw new Error('Timed out waiting for the descendant PID.');
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       expect(pid).toBeGreaterThan(0);
-      process.kill(descendant, 'SIGKILL');
+      if (!processHost.pid) throw new Error('Process host has no PID.');
+      process.kill(processHost.pid, 'SIGKILL');
       await waitUntil(() => {
         try {
-          process.kill(pid, 0);
-          return false;
+          const state = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+            encoding: 'utf8',
+          }).trim();
+          return state === '' || state.startsWith('Z');
         } catch {
           return true;
         }
