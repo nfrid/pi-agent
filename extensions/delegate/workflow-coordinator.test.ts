@@ -688,6 +688,86 @@ describe('DelegateWorkflowCoordinator', () => {
     ).toMatchObject({ sessionId: 'child-session-restored' });
   });
 
+  test('restores only the current owner and keeps same identities deterministic', async () => {
+    const processJobId = '123e4567-e89b-42d3-a456-426614174000';
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'branch-local',
+    });
+    coordinator.restoreMetadata({
+      version: 1,
+      attempts: [
+        {
+          ownerBranchId: 'branch-foreign',
+          logicalId: 'shared',
+          attempt: 1,
+          identity: 'shared@1',
+          state: 'running',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 1,
+          scheduledAt: 1,
+          queuedAt: 1,
+          startedAt: 1,
+          sessionId: 'foreign-session',
+          processJobId,
+        },
+        {
+          ownerBranchId: 'branch-local',
+          logicalId: 'shared',
+          attempt: 1,
+          identity: 'shared@1',
+          state: 'success',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 2,
+          scheduledAt: 2,
+          queuedAt: 2,
+          startedAt: 2,
+          settledAt: 3,
+          sessionId: 'local-session',
+          processJobId,
+        },
+      ],
+    });
+
+    expect(coordinator.require('shared@1')).toMatchObject({
+      ownerBranchId: 'branch-local',
+      state: 'success',
+      processJobId,
+    });
+    expect(coordinator.listRestorableHostedLinks()).toEqual([]);
+    await expect(coordinator.cancel('foreign@1')).rejects.toThrow();
+
+    const foreignOnly = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'branch-local',
+    });
+    foreignOnly.restoreMetadata({
+      version: 1,
+      attempts: [
+        {
+          ownerBranchId: 'branch-foreign',
+          logicalId: 'foreign',
+          attempt: 1,
+          identity: 'foreign@1',
+          state: 'running',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 1,
+          scheduledAt: 1,
+          queuedAt: 1,
+          startedAt: 1,
+          sessionId: 'foreign-session',
+          processJobId,
+        },
+      ],
+    });
+    expect(foreignOnly.list()).toEqual([]);
+    expect(foreignOnly.listRestorableHostedLinks()).toEqual([]);
+    await expect(foreignOnly.cancel('foreign@1')).rejects.toThrow();
+    await coordinator.dispose();
+    await foreignOnly.dispose();
+  });
+
   test('cancelling during async symbolic preparation prevents job launch', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });

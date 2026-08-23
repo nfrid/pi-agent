@@ -319,6 +319,20 @@ function sameMetadata(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function isPersisted(
+  coordinator: DelegateWorkflowCoordinator,
+  identity: string,
+): boolean {
+  const current = coordinator
+    .metadataSnapshot()
+    .attempts.find((attempt) => attempt.identity === identity);
+  if (!current) return false;
+  const persisted = persistedMetadata
+    .get(coordinator)
+    ?.get(metadataKey(current));
+  return persisted !== undefined && sameMetadata(persisted, current);
+}
+
 export interface WorkflowStoreWriteGuard {
   /** False defers the owner write until its branch runtime is active again. */
   isOwnerActive?: () => boolean;
@@ -341,6 +355,7 @@ function appendCheckpoint(
   } satisfies WorkflowStoreSnapshotEntry);
   persistedMetadata.set(coordinator, metadataMap(state));
   guard.onPersist?.();
+  coordinator.retryPendingHostedLaunches();
 }
 
 /**
@@ -360,7 +375,10 @@ export function persistWorkflowDelta(
     const prior = previous.get(metadataKey(attempt));
     return prior === undefined || !sameMetadata(prior, attempt);
   });
-  if (changed.length === 0) return;
+  if (changed.length === 0) {
+    coordinator.retryPendingHostedLaunches();
+    return;
+  }
 
   const next = new Map(previous);
   let persisted = false;
@@ -385,6 +403,7 @@ export function persistWorkflowDelta(
   if (persisted) {
     persistedMetadata.set(coordinator, next);
     guard.onPersist?.();
+    coordinator.retryPendingHostedLaunches();
   }
 }
 
@@ -455,9 +474,23 @@ export function attachWorkflowStore(
   pi: AppendOnly,
   guard: WorkflowStoreWriteGuard = {},
 ): () => void {
-  return coordinator.subscribeChanges(() =>
+  const acknowledgeHostedLink = (identity: string): boolean => {
+    // This is deliberately synchronous. A hosted adapter launch is admitted
+    // only after the owner guard allows this flush and its durable baseline
+    // contains the exact queued link.
+    persistWorkflowDelta(coordinator, pi, guard);
+    if (guard.isOwnerActive && !guard.isOwnerActive()) return false;
+    return isPersisted(coordinator, identity);
+  };
+  const detachAcknowledgement =
+    coordinator.setHostedLinkPersistenceAcknowledgement(acknowledgeHostedLink);
+  const detachChanges = coordinator.subscribeChanges(() =>
     persistWorkflowDelta(coordinator, pi, guard),
   );
+  return () => {
+    detachChanges();
+    detachAcknowledgement();
+  };
 }
 
 /** Small adapter facade useful at extension/session boundaries. */

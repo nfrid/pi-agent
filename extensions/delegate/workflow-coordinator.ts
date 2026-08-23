@@ -197,6 +197,10 @@ export type DelegateWorkflowTerminalListener = (
   attempt: DelegateWorkflowAttemptSnapshot,
 ) => void;
 
+export type DelegateWorkflowHostedLinkPersistenceAcknowledgement = (
+  identity: AttemptIdentity,
+) => boolean;
+
 export interface DelegateWorkflowCoordinatorOptions {
   /** Immutable branch that owns attempts created by this coordinator. */
   ownerBranchId?: string;
@@ -657,6 +661,9 @@ export class DelegateWorkflowCoordinator {
   >();
   /** Guards the one terminal callback belonging to each restored observation. */
   private readonly restoredTerminalObservations = new Set<string>();
+  /** Hosted jobs waiting for their queued process link to be durably acknowledged. */
+  private readonly pendingHostedLaunches = new Set<AttemptIdentity>();
+  private hostedLinkPersistenceAcknowledgement?: DelegateWorkflowHostedLinkPersistenceAcknowledgement;
 
   constructor(options: DelegateWorkflowCoordinatorOptions = {}) {
     if (
@@ -776,6 +783,40 @@ export class DelegateWorkflowCoordinator {
   subscribeChanges(listener: () => void): () => void {
     this.changeListeners.add(listener);
     return () => this.changeListeners.delete(listener);
+  }
+
+  /**
+   * Require an attached store to acknowledge hosted links before execution.
+   * The acknowledgement is intentionally narrow: unhosted attempts retain the
+   * coordinator's existing synchronous launch path.
+   */
+  setHostedLinkPersistenceAcknowledgement(
+    acknowledgement:
+      | DelegateWorkflowHostedLinkPersistenceAcknowledgement
+      | undefined,
+  ): () => void {
+    this.hostedLinkPersistenceAcknowledgement = acknowledgement;
+    return () => {
+      if (this.hostedLinkPersistenceAcknowledgement === acknowledgement)
+        this.hostedLinkPersistenceAcknowledgement = undefined;
+    };
+  }
+
+  /** Retry hosted launches released by a successful owner persistence flush. */
+  retryPendingHostedLaunches(): void {
+    if (this.disposed || !this.hostedLinkPersistenceAcknowledgement) return;
+    for (const identity of [...this.pendingHostedLaunches]) {
+      const record = this.records.get(identity);
+      this.pendingHostedLaunches.delete(identity);
+      if (
+        !record ||
+        record.jobId !== undefined ||
+        record.state !== 'queued' ||
+        record.cancellationRequested
+      )
+        continue;
+      this.startJob(record, record.launch);
+    }
   }
 
   /** Return bounded coordinator metadata without resolved inputs or results. */
@@ -1056,8 +1097,13 @@ export class DelegateWorkflowCoordinator {
     );
     for (const metadata of attempts) {
       if (this.records.size >= this.maxAttempts) break;
-      const owner = metadata.ownerBranchId ?? ownerBranchId;
-      if (!isBranchOwnerId(owner)) continue;
+      const currentOwner = this.ownerBranchId ?? ownerBranchId;
+      if (!isBranchOwnerId(currentOwner)) continue;
+      // Explicit owners are authoritative. Only legacy ownerless records bind
+      // to the supplied/current owner; a sibling's same public identity must
+      // remain unavailable to this coordinator and its restore adapters.
+      const owner = metadata.ownerBranchId ?? currentOwner;
+      if (owner !== currentOwner) continue;
       const attempt = Object.freeze({
         logicalId: metadata.logicalId,
         ordinal: metadata.attempt,
@@ -1276,6 +1322,10 @@ export class DelegateWorkflowCoordinator {
     const waitingForLaunch = launching.map((record) =>
       this.waitForCancellation(record),
     );
+    for (const record of launching) {
+      if (!this.pendingHostedLaunches.delete(record.attempt.identity)) continue;
+      this.settle(record, 'cancelled', 'Cancelled before launch.');
+    }
     const preparationWork = new Set<Promise<void>>();
     if (waitForPreparation)
       for (const record of localRecords) {
@@ -1330,6 +1380,7 @@ export class DelegateWorkflowCoordinator {
     this.importedSourceDetachers.clear();
     this.importedSources.clear();
     this.records.clear();
+    this.pendingHostedLaunches.clear();
     this.importedRecordIdentities.clear();
     this.restoredTerminalObservations.clear();
     this.results.clear();
@@ -1678,15 +1729,29 @@ export class DelegateWorkflowCoordinator {
       );
       return;
     }
+    const hosted =
+      launch.sessionId !== undefined || launch.processJobId !== undefined;
+    record.launch = launch;
     record.reason = undefined;
-    record.sessionId = launch.sessionId;
-    record.processJobId = launch.processJobId;
-    record.queuedAt = this.now();
-    this.transition(record, 'queued');
+    if (record.state !== 'queued') {
+      record.sessionId = launch.sessionId;
+      record.processJobId = launch.processJobId;
+      record.queuedAt = this.now();
+      this.transition(record, 'queued');
+    }
     try {
       // Persist the durable child/session link while still queued. The adapter
       // can execute synchronously from jobs.start, so this must precede it.
       this.changed();
+      if (
+        hosted &&
+        this.hostedLinkPersistenceAcknowledgement &&
+        !this.hostedLinkPersistenceAcknowledgement(record.attempt.identity)
+      ) {
+        this.pendingHostedLaunches.add(record.attempt.identity);
+        return;
+      }
+      this.pendingHostedLaunches.delete(record.attempt.identity);
       // Lazy capacity is checked here, immediately before the adapter call.
       this.jobs.assertAccepting();
       const job = this.jobs.start({
@@ -1805,6 +1870,7 @@ export class DelegateWorkflowCoordinator {
       compactSessionId(evidence) ?? record.continuationToken,
     );
     if (isTerminalWorkflowAttemptState(record.state)) {
+      this.pendingHostedLaunches.delete(record.attempt.identity);
       record.launch = undefined;
       // Drop lazy closures immediately. A late preparation still writes its
       // returned discard handle and calls discardPrepared exactly once.
@@ -1837,6 +1903,7 @@ export class DelegateWorkflowCoordinator {
     reason?: string,
   ): void {
     if (isTerminalWorkflowAttemptState(record.state)) return;
+    this.pendingHostedLaunches.delete(record.attempt.identity);
     this.transition(record, state);
     record.settledAt = this.now();
     if (reason) record.reason = boundedReason(reason);

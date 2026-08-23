@@ -1,9 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
+import { DelegateJobManager } from './jobs';
 import { createRun } from './types';
 import { DelegateWorkflowCoordinator } from './workflow-coordinator';
 import {
   attachWorkflowStore,
   latestWorkflowState,
+  persistWorkflowDelta,
   persistWorkflowState,
   WORKFLOW_ENTRY_TYPE,
   workflowStoreHistory,
@@ -156,6 +158,71 @@ describe('workflow store', () => {
       execute: async () => ({ runs: [], handoff: 'not persisted' }),
     });
     expect(entries).toHaveLength(0);
+  });
+
+  test('does not launch a hosted preparation result until the active owner flushes its link', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'owner-branch',
+    });
+    const entries: unknown[] = [];
+    let ownerActive = true;
+    const guard = { isOwnerActive: () => ownerActive };
+    attachWorkflowStore(coordinator, piFor(entries), guard);
+    const processJobId = '123e4567-e89b-42d3-a456-426614174000';
+    const start = vi.spyOn(manager, 'start');
+    const execute = vi.fn(async () => ({ runs: [], handoff: 'hosted' }));
+    const prepare = vi.fn(async () => {
+      ownerActive = false;
+      return {
+        mode: 'single' as const,
+        tasks: ['hosted-deferred'],
+        sessionId: 'child-session-deferred',
+        processJobId,
+        execute,
+      };
+    });
+
+    coordinator.schedule({ logicalId: 'hosted-deferred', prepare });
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(coordinator.require('hosted-deferred@1').state).toBe('queued'),
+    );
+    expect(start).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(latestWorkflowState(branch(entries))?.attempts[0]).toMatchObject({
+      identity: 'hosted-deferred@1',
+      state: 'scheduled',
+    });
+
+    ownerActive = true;
+    persistWorkflowDelta(coordinator, piFor(entries), guard);
+    await vi.waitFor(() =>
+      expect(coordinator.require('hosted-deferred@1').state).toBe('success'),
+    );
+    expect(start).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(latestWorkflowState(branch(entries))?.attempts[0]).toMatchObject({
+      identity: 'hosted-deferred@1',
+      sessionId: 'child-session-deferred',
+      processJobId,
+    });
+
+    const reloaded = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    const restoredState = latestWorkflowState(branch(entries));
+    if (!restoredState) throw new Error('missing persisted workflow state');
+    reloaded.restoreMetadata(restoredState);
+    expect(reloaded.metadataSnapshot().attempts[0]).toMatchObject({
+      identity: 'hosted-deferred@1',
+      sessionId: 'child-session-deferred',
+      processJobId,
+    });
+    await reloaded.dispose();
+    await coordinator.dispose();
+    await manager.dispose();
   });
 
   test('persists a hosted process link while queued and after settlement', async () => {
