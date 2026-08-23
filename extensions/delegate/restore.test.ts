@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { describe, expect, test, vi } from 'vitest';
 import { DelegateJobManager, type DelegateJobResult } from './jobs';
 import {
+  RestoreBindingConflictError,
   type RestoreSessionError,
   reconcileRestoredHostedAttempts,
   resolveTrustedDelegateSession,
@@ -135,6 +136,292 @@ describe('restored delegate adapter', () => {
       expect(coordinator.require('restore@1').state).toBe('success'),
     );
     expect(coordinator.listRestorableHostedLinks()).toEqual([]);
+    await cleanup();
+  });
+
+  test('duplicate restore claims do not start an orphan observer or terminal callback', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    let release!: () => void;
+    const execute = vi.fn(
+      () =>
+        new Promise<DelegatedRun>((resolve) => {
+          release = () => resolve(finishedRun('restore'));
+        }),
+    );
+    const terminal = vi.fn();
+    coordinator.subscribeTerminal(terminal);
+    const first = restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: { runDelegate: execute as never },
+    });
+
+    expect(() =>
+      restoreHostedDelegateAttempt({
+        parentSessionId: PARENT,
+        attempt: 'restore@1',
+        manager,
+        coordinator,
+        dependencies: { runDelegate: execute as never },
+      }),
+    ).toThrowError(RestoreBindingConflictError);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    expect(manager.runningCount).toBe(1);
+    release();
+    await vi.waitFor(() =>
+      expect(coordinator.require('restore@1').state).toBe('success'),
+    );
+    expect(execute).toHaveBeenCalledOnce();
+    expect(terminal).toHaveBeenCalledOnce();
+    expect(manager.get(first.job.id)).toMatchObject({ state: 'success' });
+    await cleanup();
+  });
+
+  test('cancellation during finalize returns one canonical aborted result', async () => {
+    const child = session('cancel-finalize-worktree');
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    const record = {
+      id: '11111111-1111-1111-1111-111111111111',
+      repositoryRoot: '/tmp/repository',
+      worktreePath: '/tmp/worktree',
+      branch: 'delegate/restore',
+      workingDirectory: '',
+    } as WorktreeRecord;
+    const prepared = {
+      record,
+      env: { PI_DELEGATE_WORKTREE: record.id },
+    } as PreparedWorktree;
+    let releaseFinalize!: () => void;
+    const finalize = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFinalize = resolve;
+        }),
+    );
+    const materialize = vi.fn(async (runs: DelegatedRun[]) => ({
+      runs,
+      handoff: 'should not publish',
+    }));
+    const updates: DelegatedRun[] = [];
+    restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      stopExistingHost: async () => undefined,
+      dependencies: {
+        loadWorktree: () => record,
+        restoreWorktreeSession: () => prepared,
+        finalizeWorktreeRun: finalize,
+        runDelegate: async () => finishedRun('restore'),
+        materialize,
+        onRunUpdate: (run) => updates.push(run),
+      },
+    });
+    await vi.waitFor(() => expect(finalize).toHaveBeenCalledOnce());
+    const cancellation = coordinator.cancel('restore@1');
+    releaseFinalize();
+    await cancellation;
+    expect(coordinator.require('restore@1').state).toBe('cancelled');
+    expect(materialize).not.toHaveBeenCalled();
+    expect(updates.at(-1)).toMatchObject({ state: 'aborted', exitCode: 130 });
+    await cleanup();
+  });
+
+  test('detach during finalize does not publish or settle the workflow', async () => {
+    const child = session('detach-finalize-worktree');
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    const record = {
+      id: '11111111-1111-1111-1111-111111111111',
+      repositoryRoot: '/tmp/repository',
+      worktreePath: '/tmp/worktree',
+      branch: 'delegate/restore',
+      workingDirectory: '',
+    } as WorktreeRecord;
+    const prepared = {
+      record,
+      env: { PI_DELEGATE_WORKTREE: record.id },
+    } as PreparedWorktree;
+    let releaseFinalize!: () => void;
+    const finalize = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFinalize = resolve;
+        }),
+    );
+    const materialize = vi.fn(async (runs: DelegatedRun[]) => ({
+      runs,
+      handoff: 'should not publish',
+    }));
+    const updates: DelegatedRun[] = [];
+    const restored = restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: {
+        loadWorktree: () => record,
+        restoreWorktreeSession: () => prepared,
+        finalizeWorktreeRun: finalize,
+        runDelegate: async () => finishedRun('restore'),
+        materialize,
+        onRunUpdate: (run) => updates.push(run),
+      },
+    });
+    await vi.waitFor(() => expect(finalize).toHaveBeenCalledOnce());
+    const detaching = manager.detach([restored.job.id]);
+    releaseFinalize();
+    await detaching;
+    expect(coordinator.require('restore@1').state).toBe('running');
+    expect(materialize).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+    await cleanup();
+  });
+
+  test('cancellation during materialization cannot settle observation success', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    let releaseMaterialize!: (result: DelegateJobResult) => void;
+    const materialize = vi.fn(
+      (runs: DelegatedRun[]) =>
+        new Promise<DelegateJobResult>((resolve) => {
+          releaseMaterialize = (result) => resolve(result);
+          void runs;
+        }),
+    );
+    const updates: DelegatedRun[] = [];
+    const restored = restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      stopExistingHost: async () => undefined,
+      dependencies: {
+        runDelegate: async () => finishedRun('restore'),
+        materialize,
+        onRunUpdate: (run) => updates.push(run),
+      },
+    });
+    await vi.waitFor(() => expect(materialize).toHaveBeenCalledOnce());
+    const cancellation = coordinator.cancel('restore@1');
+    releaseMaterialize({ runs: [finishedRun('restore')], handoff: 'success' });
+    await cancellation;
+    expect(coordinator.require('restore@1').state).toBe('cancelled');
+    expect(updates.at(-1)).toMatchObject({ state: 'aborted', exitCode: 130 });
+    expect(manager.get(restored.job.id)).toMatchObject({ state: 'aborted' });
+    await cleanup();
+  });
+
+  test('detach during materialization leaves workflow active without publishing terminal state', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    let releaseMaterialize!: (result: DelegateJobResult) => void;
+    const materialize = vi.fn(
+      (runs: DelegatedRun[]) =>
+        new Promise<DelegateJobResult>((resolve) => {
+          releaseMaterialize = (result) => resolve(result);
+          void runs;
+        }),
+    );
+    const updates: DelegatedRun[] = [];
+    const restored = restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: {
+        runDelegate: async () => finishedRun('restore'),
+        materialize,
+        onRunUpdate: (run) => updates.push(run),
+      },
+    });
+    await vi.waitFor(() => expect(materialize).toHaveBeenCalledOnce());
+    const detaching = manager.detach([restored.job.id]);
+    releaseMaterialize({ runs: [finishedRun('restore')], handoff: 'success' });
+    await detaching;
+    expect(coordinator.require('restore@1').state).toBe('running');
+    expect(updates).toHaveLength(0);
+    await cleanup();
+  });
+
+  test('materialization failure updates status with canonical failed run before workflow error', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    const updates: DelegatedRun[] = [];
+    restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: {
+        runDelegate: async () => finishedRun('restore'),
+        materialize: async () => {
+          throw new Error('artifact publication failed');
+        },
+        onRunUpdate: (run) => updates.push(run),
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require('restore@1').state).toBe('error'),
+    );
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      state: 'error',
+      workflowAttempt: { identity: 'restore@1' },
+      errorMessage: expect.stringContaining('artifact publication failed'),
+    });
+    expect(coordinator.getResult('restore@1')?.runs[0]?.state).toBe('error');
     await cleanup();
   });
 
