@@ -40,9 +40,11 @@ export interface SessionHistoryCoverage {
 
 /** Explicit caps keep historical pages from becoming an unbounded cache. */
 export const SESSION_HISTORY_BUDGET = {
-  maxPages: 32,
-  maxEntries: 4096,
-  maxBytes: 4 * 1024 * 1024,
+  // Keep a finite cache guard while allowing the large (roughly 60 MiB)
+  // transcripts seen in production to be paged in one session.
+  maxPages: 512,
+  maxEntries: 131_072,
+  maxBytes: 128 * 1024 * 1024,
 } as const;
 
 export interface LiveMessageIdentity {

@@ -7,6 +7,7 @@ import {
 } from '../../features/timestamp';
 import {
   sampleTranscriptLandmarks,
+  sampleTranscriptMinimapLandmarks,
   type TranscriptLandmark,
 } from './landmarks';
 
@@ -39,9 +40,12 @@ export function TranscriptOutline({
   onJump: (landmark: TranscriptLandmark) => void;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
-  const outlineLandmarks = useMemo(() => [...landmarks], [landmarks]);
+  const outlineLandmarks = useMemo(
+    () => sampleTranscriptLandmarks(landmarks, 256),
+    [landmarks],
+  );
   const minimapLandmarks = useMemo(
-    () => sampleTranscriptLandmarks(landmarks, 48),
+    () => sampleTranscriptMinimapLandmarks(landmarks, 48),
     [landmarks],
   );
   const [activeKey, setActiveKey] = useState(minimapLandmarks[0]?.key);

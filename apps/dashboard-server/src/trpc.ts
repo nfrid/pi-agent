@@ -83,6 +83,7 @@ export const DASHBOARD_DOMAIN_CODES = [
   'orchestration-conflict',
   'session-assigned',
   'unknown-workspace',
+  'stale-history-cursor',
   'protocol-mismatch',
 ] as const;
 export type DashboardDomainCode = (typeof DASHBOARD_DOMAIN_CODES)[number];
@@ -99,6 +100,8 @@ function domainCode(error: unknown): DashboardDomainCode | undefined {
       return code as DashboardDomainCode;
     const message = current instanceof Error ? current.message : '';
     if (/sqlite|unique constraint/i.test(message)) return 'sqlite-constraint';
+    if (/^(?:stale|invalid) history cursor\.?$/iu.test(message))
+      return 'stale-history-cursor';
     current = (current as { cause?: unknown }).cause;
   }
   return undefined;
@@ -108,6 +111,7 @@ function transportCode(
   code: DashboardDomainCode,
 ): 'BAD_REQUEST' | 'CONFLICT' | 'NOT_FOUND' {
   if (code === 'unknown-workspace') return 'NOT_FOUND';
+  if (code === 'stale-history-cursor') return 'BAD_REQUEST';
   if (
     code === 'active-session' ||
     code === 'merge-conflict' ||

@@ -335,6 +335,108 @@ describe('useOlderSessionHistory', () => {
     }
   });
 
+  it('coalesces an outline target into an in-flight page request', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const store = new DashboardLiveStore();
+    const metadata = {
+      id: 'session-1',
+      file: '/tmp/session.jsonl',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    const active: AuthoritativeSessionSnapshot['active'] = {
+      messages: [],
+      tools: [],
+      delegates: [],
+      truncated: false,
+    };
+    const initial = {
+      serverId: 'daemon-1',
+      cursor: 1,
+      metadata,
+      entries: [
+        { type: 'message', id: 'newest', message: { role: 'assistant' } },
+      ],
+      history: {
+        version: 1 as const,
+        start: 20,
+        end: 30,
+        hasOlder: true,
+        nextBefore: 'before-20',
+      },
+      entriesComplete: true,
+      active,
+      completeThroughCursor: true,
+    } as AuthoritativeSessionSnapshot;
+    store.hydrateSession(initial);
+    let releaseFirst!: () => void;
+    const firstPage = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const sessionBefore = vi
+      .spyOn(dashboardHttpClient, 'sessionBefore')
+      .mockImplementation(async (_id, before) => {
+        if (before === 'before-20') {
+          await firstPage;
+          return {
+            ...initial,
+            entries: [
+              { type: 'message', id: 'middle', message: { role: 'assistant' } },
+            ],
+            history: {
+              version: 1,
+              start: 10,
+              end: 20,
+              hasOlder: true,
+              nextBefore: 'before-10',
+            },
+          };
+        }
+        return {
+          ...initial,
+          entries: [
+            { type: 'message', id: 'oldest', message: { role: 'assistant' } },
+          ],
+          history: { version: 1, start: 0, end: 10, hasOlder: false },
+        };
+      });
+    let controls!: ReturnType<typeof useOlderSessionHistory>;
+    function Probe() {
+      controls = useOlderSessionHistory({
+        id: 'session-1',
+        data: initial,
+        store,
+        sessionMounted: true,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe));
+      });
+      let firstLoad!: Promise<void>;
+      act(() => {
+        firstLoad = controls.loadEarlierHistory();
+      });
+      await vi.waitFor(() => expect(sessionBefore).toHaveBeenCalledTimes(1));
+      const targetedLoad = controls.loadThroughOrdinal(0);
+      releaseFirst();
+      await act(async () => {
+        await Promise.all([firstLoad, targetedLoad]);
+      });
+      expect(sessionBefore).toHaveBeenCalledTimes(2);
+      expect(controls.history?.start).toBe(0);
+      expect(
+        store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+      ).toEqual(['oldest', 'middle', 'newest']);
+    } finally {
+      sessionBefore.mockRestore();
+      renderer?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('retries transparently when the authoritative window changes before commit', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const store = new DashboardLiveStore();
@@ -469,6 +571,72 @@ describe('useOlderSessionHistory', () => {
       sessionBefore.mockRestore();
       reconnect.mockRestore();
       prepend.mockRestore();
+      renderer?.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rebases and reconnects after a stale cursor response', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const store = new DashboardLiveStore();
+    const initial = {
+      metadata: {
+        id: 'session-1',
+        file: '/tmp/session.jsonl',
+        cwd: '/tmp',
+        updatedAt: 1,
+      },
+      entries: [],
+      history: {
+        version: 1 as const,
+        start: 20,
+        end: 40,
+        hasOlder: true,
+        nextBefore: 'stale-cursor',
+      },
+      entriesComplete: true,
+      cursor: 40,
+      serverId: 'daemon-1',
+      active: {
+        messages: [],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: true,
+    } as AuthoritativeSessionSnapshot;
+    store.hydrateSession(initial);
+    const sessionBefore = vi
+      .spyOn(dashboardHttpClient, 'sessionBefore')
+      .mockRejectedValue(new Error('Stale history cursor.'));
+    const reset = vi.spyOn(store, 'resetSessionHistoryToNewest');
+    const reconnect = vi.spyOn(store, 'reconnectSession');
+    let controls!: ReturnType<typeof useOlderSessionHistory>;
+    function Probe() {
+      controls = useOlderSessionHistory({
+        id: 'session-1',
+        data: initial,
+        store,
+        sessionMounted: true,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe));
+      });
+      await act(async () => {
+        await controls.loadEarlierHistory();
+      });
+      expect(sessionBefore).toHaveBeenCalledTimes(1);
+      expect(reset).toHaveBeenCalledTimes(1);
+      expect(reconnect).toHaveBeenCalledTimes(1);
+      expect(controls.historyError).toBeUndefined();
+    } finally {
+      sessionBefore.mockRestore();
+      reset.mockRestore();
+      reconnect.mockRestore();
       renderer?.unmount();
       vi.unstubAllGlobals();
     }

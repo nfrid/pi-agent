@@ -89,6 +89,7 @@ export function Transcript({
     [modelEntries, runtime],
   );
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [pendingJumpKey, setPendingJumpKey] = useState<string>();
   const isVirtualizedTranscript =
     items.length > 80 && virtualize && Boolean(transcriptScrollElementRef);
   const restoredRevisionRef = useRef(0);
@@ -151,6 +152,33 @@ export function Transcript({
           };
     });
   }, [loadedLandmarks, outline]);
+  useLayoutEffect(() => {
+    // Re-run after a pending ordinal load commits its rendered items.
+    void loadedLandmarks;
+    if (!pendingJumpKey) return;
+    const scrollElement = transcriptScrollElementRef?.current;
+    const keys = new Set([pendingJumpKey, `group-${pendingJumpKey}`]);
+    const target = Array.from(
+      (scrollElement ?? document).querySelectorAll<HTMLElement>(
+        '[data-transcript-key]',
+      ),
+    ).find((element) => keys.has(element.dataset.transcriptKey ?? ''));
+    // The target may be absent in this render while an ordinal load is being
+    // committed. Keep the key pending and let the loaded render retry it.
+    if (!target) return;
+    setPendingJumpKey(undefined);
+    if (!scrollElement) {
+      target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      return;
+    }
+    scrollElement.scrollTo({
+      top:
+        scrollElement.scrollTop +
+        target.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top,
+      behavior: 'auto',
+    });
+  }, [loadedLandmarks, pendingJumpKey, transcriptScrollElementRef]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
     if (onJumpToLandmark) {
@@ -160,32 +188,8 @@ export function Transcript({
           `group-${candidate.id}` === landmark.key,
       );
       if (target && !(await onJumpToLandmark(target))) return;
-      if (target)
-        await new Promise<void>((resolve) =>
-          window.requestAnimationFrame(() => resolve()),
-        );
     }
-    const scrollElement = transcriptScrollElementRef?.current;
-    const keys = new Set([landmark.key, `group-${landmark.key}`]);
-    const target = scrollElement
-      ? Array.from(
-          scrollElement.querySelectorAll<HTMLElement>('[data-transcript-key]'),
-        ).find((element) => keys.has(element.dataset.transcriptKey ?? ''))
-      : Array.from(
-          document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
-        ).find((element) => keys.has(element.dataset.transcriptKey ?? ''));
-    if (!target) return;
-    if (!scrollElement) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-    scrollElement.scrollTo({
-      top:
-        scrollElement.scrollTop +
-        target.getBoundingClientRect().top -
-        scrollElement.getBoundingClientRect().top,
-      behavior: 'smooth',
-    });
+    setPendingJumpKey(landmark.key);
   };
   const { groupByStart, groupCoverage } = useMemo(
     () => buildTranscriptGroupCoverage(items.length, groups),
@@ -205,6 +209,8 @@ export function Transcript({
         outlineOpen={outlineOpen}
         onOutlineOpenChange={onOutlineOpenChange}
         onBeforeScroll={onBeforeScroll}
+        pendingJumpKey={pendingJumpKey}
+        onPendingJumpHandled={() => setPendingJumpKey(undefined)}
         scrollElementRef={transcriptScrollElementRef}
       />
     );

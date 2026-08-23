@@ -637,6 +637,12 @@ describe('dashboard tRPC boundary', () => {
     );
     expect(safe.code).toBe('CONFLICT');
     expect(safe.message).toBe('The session is already active.');
+
+    const staleCursor = toDashboardTrpcError(
+      new Error('Stale history cursor.'),
+    );
+    expect(staleCursor.code).toBe('BAD_REQUEST');
+    expect(staleCursor.message).toBe('Stale history cursor.');
   });
 
   it('parses the public request adapter with strict fields', () => {
