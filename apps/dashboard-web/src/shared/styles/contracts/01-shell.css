@@ -309,12 +309,12 @@ h2 {
 }
 .notice {
   color: var(--orange);
+  z-index: 99;
 }
 .sync-notice {
   position: fixed;
   top: max(58px, calc(env(safe-area-inset-top) + 46px));
   right: max(12px, env(safe-area-inset-right));
-  z-index: 18;
   width: min(390px, calc(100vw - 24px));
   margin: 0;
   padding: 10px 13px;
