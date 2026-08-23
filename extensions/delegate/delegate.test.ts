@@ -624,6 +624,12 @@ describe('delegate', () => {
   });
 
   test('creates durable opaque sessions with revalidatable resource routing', () => {
+    expect(() =>
+      createDelegateSession({
+        cwd: '/tmp/project',
+        parentSessionId: ' parent-session ',
+      }),
+    ).toThrow('Invalid delegate parent session identity.');
     const session = createDelegateSession({
       cwd: '/tmp/project',
       name: 'Original agent',

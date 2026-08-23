@@ -67,6 +67,19 @@ const ACTIVE_GRACE_MS = 24 * 60 * 60 * 1000;
 const TOKEN_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+function validParentSessionId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    ![...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
+}
+
 function sessionDir(): string {
   return path.join(getAgentDir(), '.delegate-sessions');
 }
@@ -149,6 +162,11 @@ export function createDelegateSession(options: {
   /** Original parent Pi session; immutable across continuations and rewrites. */
   parentSessionId?: string;
 }): DelegateSession {
+  if (
+    options.parentSessionId !== undefined &&
+    !validParentSessionId(options.parentSessionId)
+  )
+    throw new Error('Invalid delegate parent session identity.');
   const token = randomUUID();
   const lineageId = createOpaqueId();
   const createdAt = new Date().toISOString();
@@ -235,9 +253,8 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
         typeof metadata.lineageId === 'string' && metadata.lineageId.trim()
           ? metadata.lineageId.trim()
           : deriveCompatibilityLineageId(token),
-      ...(typeof metadata.parentSessionId === 'string' &&
-      metadata.parentSessionId.trim()
-        ? { parentSessionId: metadata.parentSessionId.trim() }
+      ...(validParentSessionId(metadata.parentSessionId)
+        ? { parentSessionId: metadata.parentSessionId }
         : {}),
       filePath,
       cwd: metadata.cwd,

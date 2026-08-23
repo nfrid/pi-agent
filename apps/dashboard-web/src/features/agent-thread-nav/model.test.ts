@@ -142,6 +142,28 @@ describe('agent thread view model', () => {
     ).toBe('indexed:session-a\nindexed:session-b');
   });
 
+  it('keeps nested delegate sessions out of top-level thread navigation', () => {
+    const snapshot = {
+      runtimes: [],
+      sessions: [
+        { id: 'parent', cwd: '/work/app', updatedAt: 1 },
+        {
+          id: 'child',
+          cwd: '/work/app',
+          updatedAt: 2,
+          sessionKind: 'delegate',
+          parentSessionId: 'parent',
+        },
+      ],
+      runs: [],
+    } as never;
+
+    expect(agentThreadRows(snapshot).map((entry) => entry.id)).toEqual([
+      'parent',
+    ]);
+    expect(sessionThreadIdentityKey(snapshot)).toBe('indexed:parent');
+  });
+
   it('uses the server-owned project association for indexed sessions', () => {
     const rows = agentThreadRows({
       runtimes: [],

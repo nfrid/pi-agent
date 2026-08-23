@@ -3,7 +3,10 @@ import {
   selectSessionReplacement,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import type {
+  BrowserSnapshot,
+  SessionIndexEntry,
+} from '@pi-dashboard/protocol';
 import {
   type ComponentType,
   useCallback,
@@ -30,6 +33,12 @@ import {
 import { useSessionNavigation } from './session-navigation-context';
 
 export { visualViewportKeyboardInset } from './session/viewport';
+
+export function sessionAllowsControls(
+  session: Pick<SessionIndexEntry, 'sessionKind'>,
+): boolean {
+  return session.sessionKind !== 'delegate';
+}
 
 export function SessionView({
   id,
@@ -240,7 +249,7 @@ export function SessionView({
             virtualize={!embedded}
           />
         </section>
-        {data.metadata.sessionKind !== 'delegate' && (
+        {sessionAllowsControls(data.metadata) && (
           <SessionControlLayer
             controlLayerRef={controlLayerRef}
             awayFromLatest={awayFromLatest}

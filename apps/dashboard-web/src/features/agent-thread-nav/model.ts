@@ -54,7 +54,16 @@ export const MAX_VISIBLE_ACTIVE_THREADS = 40;
 export function sessionThreadIdentityKey(
   snapshot: Pick<BrowserSnapshot, 'sessions' | 'runtimes' | 'runs'>,
 ): string {
-  const indexed = new Set(snapshot.sessions.map((session) => session.id));
+  const delegateSessions = new Set(
+    snapshot.sessions
+      .filter((session) => session.sessionKind === 'delegate')
+      .map((session) => session.id),
+  );
+  const indexed = new Set(
+    snapshot.sessions
+      .filter((session) => session.sessionKind !== 'delegate')
+      .map((session) => session.id),
+  );
   const managed = new Set(
     (snapshot.runs ?? []).flatMap((run) => {
       if (run.piSessionId) return [run.piSessionId];
@@ -71,7 +80,10 @@ export function sessionThreadIdentityKey(
       ...snapshot.runtimes.map((runtime) => runtime.session.id),
     ]),
   ]
-    .filter((sessionId) => !managed.has(sessionId))
+    .filter(
+      (sessionId) =>
+        !managed.has(sessionId) && !delegateSessions.has(sessionId),
+    )
     .sort()
     .map(
       (sessionId) =>
@@ -205,6 +217,7 @@ export function agentThreadRows(
   const rows = new Map<string, AgentThreadRow>();
   for (const runtime of snapshot.runtimes) {
     const session = sessionsById.get(runtime.session.id);
+    if (session?.sessionKind === 'delegate') continue;
     const projectId = runtime.projectId ?? session?.projectId;
     const presentation = dashboardStatus(runtime);
     rows.set(runtime.session.id, {
@@ -225,7 +238,7 @@ export function agentThreadRows(
     });
   }
   for (const session of snapshot.sessions) {
-    if (rows.has(session.id)) continue;
+    if (session.sessionKind === 'delegate' || rows.has(session.id)) continue;
     const projectId = session.projectId;
     rows.set(session.id, {
       id: session.id,

@@ -1255,7 +1255,7 @@ describe('DelegateWorkflowCoordinator', () => {
       prepare,
     });
     await vi.waitFor(() =>
-      expect(coordinator.require(continuation.identity).state).toBe('error'),
+      expect(coordinator.require(continuation.identity).state).toBe('blocked'),
     );
     expect(prepare).not.toHaveBeenCalled();
     await coordinator.dispose();

@@ -55,6 +55,23 @@ function SessionProjectLink({
   );
 }
 
+export function sessionRelationships(
+  id: string,
+  session: Pick<SessionIndexEntry, 'parentSessionId'>,
+  sessions: readonly SessionIndexEntry[],
+): { parent?: SessionIndexEntry; children: SessionIndexEntry[] } {
+  return {
+    ...(session.parentSessionId
+      ? {
+          parent: sessions.find(
+            (candidate) => candidate.id === session.parentSessionId,
+          ),
+        }
+      : {}),
+    children: sessions.filter((candidate) => candidate.parentSessionId === id),
+  };
+}
+
 function SessionLink({ session }: { session: SessionIndexEntry }) {
   const go = useDashboardNavigate();
   const href = `/sessions/${encodeURIComponent(session.id)}`;
@@ -183,10 +200,7 @@ export function SessionHeader({
   sessions: readonly SessionIndexEntry[];
 }) {
   const title = sessionDisplayTitle(data, entries);
-  const children = sessions.filter((session) => session.parentSessionId === id);
-  const parent = data.parentSessionId
-    ? sessions.find((session) => session.id === data.parentSessionId)
-    : undefined;
+  const { parent, children } = sessionRelationships(id, data, sessions);
   return (
     <>
       <SessionHeaderFrame
