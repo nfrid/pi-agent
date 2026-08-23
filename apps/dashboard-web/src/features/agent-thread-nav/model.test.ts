@@ -302,6 +302,46 @@ describe('agent thread view model', () => {
     ).toBeUndefined();
   });
 
+  it('prefers live snapshot lifecycle metadata over a stale finite-query fallback', () => {
+    const snapshot = {
+      runtimes: [
+        {
+          runtimeId: 'runtime-live',
+          liveState: 'working',
+          online: true,
+          cwd: '/work/app',
+          session: { id: 'session-live', entries: [] },
+        },
+      ],
+      sessions: [],
+      runs: [
+        {
+          piSessionId: 'session-live',
+          threadId: 'thread-live',
+          status: 'running',
+        },
+      ],
+      threads: [
+        {
+          id: 'thread-live',
+          archivedAt: 20,
+          pinnedAt: 30,
+          settledAt: 40,
+        },
+      ],
+    } as never;
+
+    const rows = agentThreadRows(snapshot, [{ id: 'thread-live' }] as never);
+
+    expect(rows[0]?.durableThread).toEqual({
+      threadId: 'thread-live',
+      archivedAt: 20,
+      pinnedAt: 30,
+      settledAt: 40,
+      hasActiveRun: true,
+    });
+  });
+
   it('uses exact links, rejects conflicting run identities, and treats online runtimes as active', () => {
     const snapshot = {
       runs: [

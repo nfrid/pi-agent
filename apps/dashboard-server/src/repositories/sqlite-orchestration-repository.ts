@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   assertRunTransition,
@@ -112,6 +113,17 @@ function jsonValue<T>(value: unknown): T | undefined {
 
 function rows<T>(value: unknown): T[] {
   return value as T[];
+}
+
+function releasedWorktreeTombstone(
+  existingPath: string,
+  checkoutId: string,
+): string {
+  const absolutePath = resolve(existingPath);
+  return join(
+    dirname(absolutePath),
+    `.${basename(absolutePath)}.released-${checkoutId}`,
+  );
 }
 
 /**
@@ -382,6 +394,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         status: current.status,
         updatedAt: now,
       };
+      this.releaseCollidingWorktreePlacements(
+        id,
+        checkout.path,
+        checkout.branch,
+        now,
+      );
       this.db
         .prepare(
           'UPDATE checkout SET kind=?,path=?,branch=?,base_sha=?,updated_at=? WHERE id=?',
@@ -396,6 +414,54 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         );
       return checkout;
     });
+  }
+
+  private releaseCollidingWorktreePlacements(
+    checkoutId: string,
+    path: string,
+    branch: string | undefined,
+    now: number,
+  ): void {
+    const collisions = rows<Record<string, unknown>>(
+      this.db
+        .prepare(
+          `SELECT c.id,c.path
+           FROM checkout c LEFT JOIN worktree_record w ON w.checkout_id=c.id
+           WHERE c.id<>?
+             AND c.kind='worktree'
+             AND (c.path=? OR (? IS NOT NULL AND c.branch=?))
+             AND c.status IN ('failed','retired')
+             AND w.checkout_id IS NULL`,
+        )
+        .all(checkoutId, path, branch ?? null, branch ?? null),
+    );
+    const occupiedPaths = new Set(
+      rows<Record<string, unknown>>(
+        this.db
+          .prepare('SELECT path FROM checkout WHERE id<>?')
+          .all(checkoutId),
+      ).map((row) => stringValue(row, 'path')),
+    );
+    for (const collision of collisions) {
+      const tombstoneBase = releasedWorktreeTombstone(
+        stringValue(collision, 'path'),
+        stringValue(collision, 'id'),
+      );
+      let tombstone = tombstoneBase;
+      let suffix = 0;
+      while (tombstone === path || occupiedPaths.has(tombstone)) {
+        suffix += 1;
+        tombstone = `${tombstoneBase}-${suffix}`;
+      }
+      occupiedPaths.add(tombstone);
+      this.db
+        .prepare(
+          `UPDATE checkout
+           SET path=?,branch=NULL,base_sha=NULL,updated_at=?
+           WHERE id=?`,
+        )
+        .run(tombstone, now, stringValue(collision, 'id'));
+    }
   }
 
   deleteCheckout(id: string): void {

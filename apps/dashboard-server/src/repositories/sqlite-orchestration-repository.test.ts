@@ -2,6 +2,7 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
 import { describe, expect, it } from 'vitest';
 import { runMigrations } from './migrations.js';
 import { SqliteOrchestrationRepository } from './sqlite-orchestration-repository.js';
@@ -439,6 +440,116 @@ describe('SqliteOrchestrationRepository', () => {
     ).toBeUndefined();
     expect(value.repository.listThreadEvents(thread.id)).toHaveLength(0);
     value.db.exec('DROP TRIGGER abort_thread_event');
+    value.db.close();
+  });
+
+  it('releases discarded terminal worktree placements before reusing their path and branch', async () => {
+    const value = await fixture();
+    value.repository.transitionCheckout(value.checkout.id, 'failed');
+    value.repository.createCheckout({
+      id: 'checkout-second-released',
+      projectId: value.project.id,
+      kind: 'worktree',
+      path: '/repo/.worktrees/two',
+      branch: 'pi/two',
+      status: 'failed',
+    });
+    const replacement = value.repository.createCheckout({
+      id: 'checkout-replacement',
+      projectId: value.project.id,
+      kind: 'worktree',
+      path: '/repo/.worktrees/replacement',
+      branch: 'pi/replacement',
+      status: 'preparing',
+    });
+
+    const updated = value.repository.updateCheckout(replacement.id, {
+      path: value.checkout.path,
+      branch: 'pi/two',
+      baseSha: 'base-replacement',
+    });
+
+    expect(updated).toMatchObject({
+      path: value.checkout.path,
+      branch: 'pi/two',
+      baseSha: 'base-replacement',
+    });
+    expect(value.repository.getCheckout(value.checkout.id)).toMatchObject({
+      path: '/repo/.worktrees/.one.released-checkout-1',
+      status: 'failed',
+    });
+    expect(value.repository.getCheckout(value.checkout.id)?.path).not.toBe(
+      updated.path,
+    );
+    expect(
+      path.isAbsolute(
+        value.repository.getCheckout(value.checkout.id)?.path ?? '',
+      ),
+    ).toBe(true);
+    expect(value.repository.getCheckout(value.checkout.id)).not.toHaveProperty(
+      'branch',
+    );
+    expect(value.repository.getCheckout(value.checkout.id)).not.toHaveProperty(
+      'baseSha',
+    );
+    expect(
+      value.repository.getCheckout('checkout-second-released'),
+    ).toMatchObject({
+      path: '/repo/.worktrees/.two.released-checkout-second-released',
+      status: 'failed',
+    });
+    expect(
+      value.repository.getCheckout('checkout-second-released')?.path,
+    ).not.toBe(value.repository.getCheckout(value.checkout.id)?.path);
+    value.db.close();
+  });
+
+  it('preserves collisions for retained worktree evidence and live placements', async () => {
+    const value = await fixture();
+    value.repository.writeWorktreeRecord(value.checkout.id, {
+      version: 1,
+      id: 'record-retained',
+      repositoryRoot: '/repo',
+      worktreePath: value.checkout.path,
+      workingDirectory: '.',
+      branch: value.checkout.branch ?? 'pi/one',
+      baseHead: 'base-one',
+      base: 'head',
+      carriedWip: false,
+      status: 'active',
+      createdAt: new Date(1).toISOString(),
+      updatedAt: new Date(1).toISOString(),
+    } satisfies WorktreeRecord);
+    const replacement = value.repository.createCheckout({
+      id: 'checkout-retained-replacement',
+      projectId: value.project.id,
+      kind: 'worktree',
+      path: '/repo/.worktrees/replacement-retained',
+      branch: 'pi/replacement-retained',
+      status: 'preparing',
+    });
+
+    expect(() =>
+      value.repository.updateCheckout(replacement.id, {
+        path: value.checkout.path,
+        branch: value.checkout.branch,
+      }),
+    ).toThrow('The orchestration request conflicts with existing state.');
+
+    const live = value.repository.createCheckout({
+      id: 'checkout-live-collision',
+      projectId: value.project.id,
+      kind: 'worktree',
+      path: '/repo/.worktrees/live',
+      branch: 'pi/live',
+      status: 'preparing',
+    });
+    expect(() =>
+      value.repository.updateCheckout(replacement.id, {
+        path: live.path,
+        branch: live.branch,
+      }),
+    ).toThrow('The orchestration request conflicts with existing state.');
     value.db.close();
   });
 

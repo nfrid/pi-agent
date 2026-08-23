@@ -1368,6 +1368,61 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('reuses a released same-title worktree after a pre-runtime launch failure', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      const first = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'same-title-first',
+        title: 'Same title',
+        prompt: 'The first attempt fails before runtime.',
+      })) as { run: { id: string; checkoutId: string } };
+      const repository = fixture.metadata.orchestration;
+      repository.updateCheckout(first.run.checkoutId, {
+        path: path.join(fixture.root, '.worktrees', 'same-title'),
+        branch: 'pi/same-title',
+        baseSha: 'base',
+      });
+      repository.transitionRun(first.run.id, 'preparing');
+      repository.transitionRun(first.run.id, 'failed');
+      repository.transitionCheckout(first.run.checkoutId, 'failed');
+      expect(
+        repository.loadWorktreeRecord(first.run.checkoutId),
+      ).toBeUndefined();
+
+      const second = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'same-title-second',
+        title: 'Same title',
+        prompt: 'The retry should launch.',
+      })) as { run: { id: string; checkoutId: string } };
+      await fixture.service.start();
+      await waitFor(() => fixture.launches.length === 1);
+      expect(repository.getCheckout(second.run.checkoutId)).toMatchObject({
+        status: 'ready',
+      });
+      const releasedPath = path.join(
+        fixture.root,
+        '.worktrees',
+        `.same-title.released-${first.run.checkoutId}`,
+      );
+      expect(repository.getCheckout(first.run.checkoutId)).toMatchObject({
+        status: 'failed',
+        path: releasedPath,
+      });
+      expect(path.isAbsolute(releasedPath)).toBe(true);
+      expect(releasedPath).not.toBe(
+        path.join(fixture.root, '.worktrees', 'same-title'),
+      );
+      expect(repository.getCheckout(first.run.checkoutId)).not.toHaveProperty(
+        'branch',
+      );
+      expect(repository.getCheckout(first.run.checkoutId)).not.toHaveProperty(
+        'baseSha',
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('fails closed before merge when retained runtime cleanup rejects', async () => {
     const fixture = await isolatedServiceFixture();
     try {

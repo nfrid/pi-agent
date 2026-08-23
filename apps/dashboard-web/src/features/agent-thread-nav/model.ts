@@ -191,8 +191,9 @@ export function agentThreadRows(
   directLinks: readonly SessionThreadLink[] = [],
   drafts: readonly DraftMetadata[] = [],
 ): AgentThreadRow[] {
+  const authoritativeThreads = snapshot.threads ?? durableThreads;
   const durableForSession =
-    durableThreads !== undefined || directLinks.length > 0
+    authoritativeThreads !== undefined || directLinks.length > 0
       ? new Map(
           [
             ...snapshot.runtimes.map((runtime) => runtime.session.id),
@@ -202,7 +203,7 @@ export function agentThreadRows(
             durableThreadForSession(
               snapshot,
               sessionId,
-              durableThreads ?? [],
+              authoritativeThreads ?? [],
               directLinks,
             ),
           ]),

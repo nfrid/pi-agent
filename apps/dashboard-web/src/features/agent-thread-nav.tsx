@@ -426,9 +426,11 @@ export function AgentThreadNav({
   const sessionThreadLinksQuery = useQuery(
     sessionThreadLinksQueryOptions(dashboardHttpClient),
   );
-  const durableThreads = durableThreadsQuery.isSuccess
-    ? durableThreadsQuery.data
-    : undefined;
+  // Snapshot thread metadata is published with the live orchestration state;
+  // never let a slower finite query overwrite it with stale lifecycle data.
+  const durableThreads =
+    snapshot.threads ??
+    (durableThreadsQuery.isSuccess ? durableThreadsQuery.data : undefined);
   const directLinks = sessionThreadLinksQuery.isSuccess
     ? sessionThreadLinksQuery.data
     : [];
