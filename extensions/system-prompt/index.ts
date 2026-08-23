@@ -20,6 +20,7 @@ export {
   buildSystemPrompt,
   filterGlobalContextFiles,
   formatSkillsForPrompt,
+  isIsolatedGitWorktree,
   loadAgentInstructions,
 } from './composition';
 export {

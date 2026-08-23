@@ -1,4 +1,5 @@
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { lstatSync, readFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
   type BuildSystemPromptOptions,
   formatSkillsForPrompt as formatPiSkillsForPrompt,
@@ -21,6 +22,28 @@ export function formatSkillsForPrompt(
   skills: NonNullable<BuildSystemPromptOptions['skills']>,
 ): string {
   return formatPiSkillsForPrompt(skills);
+}
+
+export function isIsolatedGitWorktree(cwd: string): boolean {
+  let current = resolve(cwd);
+  while (true) {
+    const dotGit = resolve(current, '.git');
+    try {
+      if (lstatSync(dotGit).isFile()) {
+        const match = /^gitdir:\s*(.+)$/u.exec(
+          readFileSync(dotGit, 'utf8').trim(),
+        );
+        if (!match?.[1]) return false;
+        const gitDir = resolve(current, match[1]);
+        return basename(dirname(gitDir)) === 'worktrees';
+      }
+      return false;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return false;
+      current = parent;
+    }
+  }
 }
 
 export function filterGlobalContextFiles(
@@ -171,6 +194,12 @@ export function buildSystemPrompt(
   if (mode && mode !== 'tui') {
     addGuidelines(
       `Pi is running in ${mode} mode; avoid assuming interactive terminal UI is available.`,
+    );
+  }
+
+  if (process.env.PI_DELEGATE_CHILD !== '1' && isIsolatedGitWorktree(cwd)) {
+    addGuidelines(
+      'This main agent is running in an isolated Git worktree. When the task is fully finished and validated, ask the user whether to merge the finished branch into `main` and clean up the worktree and merged branch, or leave them available for review, unless the user already stated an integration preference.',
     );
   }
 

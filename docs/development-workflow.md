@@ -27,30 +27,6 @@ When unrelated changes appear during a task:
 
 Do not use destructive cleanup (`git reset --hard`, broad checkout/restore commands, or deleting untracked files) to obtain a clean tree.
 
-## Finish isolated worktree tasks
-
-A committed and validated worktree branch is a handoff, not an integrated task.
-Do not report the overall task as complete while its accepted changes exist only
-on a side branch unless the user explicitly requested a branch-only result.
-
-When the agent's own checkout is an isolated worktree and the user has not
-already stated an integration preference, ask whether to:
-
-1. merge the finished branch into `main` or another named target and remove the worktree; or
-2. leave the branch and worktree available for review.
-
-Do not merge into the target branch or delete the worktree without that
-decision. If the user chooses integration, verify the target checkout is clean,
-merge the exact validated commit or branch, confirm the merged tree and relevant
-checks, then remove the worktree and delete the merged branch. Report the target
-commit and any worktrees or branches intentionally retained.
-
-The parent agent owns integration and cleanup for child delegate worktrees. A
-child completion does not finish the user's task. The parent must review and
-integrate accepted child changes, clean up worktrees it no longer needs, and ask
-the user only when the target branch or retention decision is genuinely
-unresolved.
-
 ## Validate the smallest relevant scope
 
 Start with checks that match the files and subsystem you changed. This shortens

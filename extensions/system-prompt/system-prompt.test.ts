@@ -15,6 +15,7 @@ import {
   filterGlobalContextFiles,
   findOuterMetaSkillPath,
   formatPromptInfo,
+  isIsolatedGitWorktree,
   loadGuidelines,
   loadInstruction,
   summarizeContextMessages,
@@ -119,6 +120,45 @@ describe('canonical prompt composition', () => {
         '/home/me/.pi/agent',
       ),
     ).toEqual(files);
+  });
+
+  it('injects completion guidance only for a main agent in a linked worktree', () => {
+    const checkout = temporaryDirectory();
+    const nested = join(checkout, 'packages', 'app');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(
+      join(checkout, '.git'),
+      `gitdir: ${join(checkout, '.git-common', 'worktrees', 'task')}\n`,
+    );
+    expect(isIsolatedGitWorktree(nested)).toBe(true);
+
+    const previousDelegateChild = process.env.PI_DELEGATE_CHILD;
+    delete process.env.PI_DELEGATE_CHILD;
+    try {
+      const prompt = buildSystemPrompt(options({ cwd: nested }), 'json');
+      expect(prompt).toContain(
+        'This main agent is running in an isolated Git worktree.',
+      );
+      expect(prompt).toContain(
+        'ask the user whether to merge the finished branch into `main` and clean up the worktree and merged branch',
+      );
+
+      process.env.PI_DELEGATE_CHILD = '1';
+      expect(buildSystemPrompt(options({ cwd: nested }), 'json')).not.toContain(
+        'This main agent is running in an isolated Git worktree.',
+      );
+    } finally {
+      if (previousDelegateChild === undefined)
+        delete process.env.PI_DELEGATE_CHILD;
+      else process.env.PI_DELEGATE_CHILD = previousDelegateChild;
+    }
+
+    const mainCheckout = temporaryDirectory();
+    mkdirSync(join(mainCheckout, '.git'));
+    expect(isIsolatedGitWorktree(mainCheckout)).toBe(false);
+    expect(
+      buildSystemPrompt(options({ cwd: mainCheckout }), 'json'),
+    ).not.toContain('This main agent is running in an isolated Git worktree.');
   });
 
   it('does not support direct prompt replacement or append inputs', () => {
