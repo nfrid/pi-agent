@@ -226,7 +226,7 @@ export function shouldFetchDelegateDetail(
     'persisted' | 'live' | 'row'
   >,
 ): boolean {
-  if (run.persisted !== true) return false;
+  if (run.persisted !== true || run.row.sessionId) return false;
   return !(
     run.live === true &&
     isActiveDelegateState(run.row.state, run.row.pauseState)
@@ -249,9 +249,11 @@ export function shouldPromoteDelegateDetailSelection(options: {
   fetching: boolean;
   persistedRunExists: boolean;
   liveActive: boolean;
+  canonicalTranscript: boolean;
 }): boolean {
   return (
     !options.shouldFetch &&
+    !options.canonicalTranscript &&
     options.ownerMatches &&
     !options.fetching &&
     options.persistedRunExists &&

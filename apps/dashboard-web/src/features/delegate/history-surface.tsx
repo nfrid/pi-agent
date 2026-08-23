@@ -132,6 +132,7 @@ export function DelegateHistorySurface({
     lineageId: string;
     runId: string;
     shouldFetch: boolean;
+    canonicalTranscript: boolean;
   }>();
   const summaryLeafId = historyQuery.data?.leafId;
   const selectionOwnerMatches = detailSelection?.sessionId === id;
@@ -221,6 +222,7 @@ export function DelegateHistorySurface({
         fetching: historyQuery.isFetching,
         persistedRunExists: selectedPersistedRunExists,
         liveActive,
+        canonicalTranscript: detailSelection.canonicalTranscript,
       })
     )
       setDetailSelection((current) =>
@@ -322,6 +324,7 @@ export function DelegateHistorySurface({
               lineageId: run.row.lineageId,
               runId: run.id,
               shouldFetch: shouldFetchDelegateDetail(run),
+              canonicalTranscript: Boolean(run.row.sessionId),
             });
           }}
           detail={

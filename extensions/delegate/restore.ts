@@ -539,6 +539,7 @@ export function restoreHostedDelegateAttempt(
       sessionId: session.sessionId,
       allowWrites: session.allowWrites,
       route: session.routing?.route,
+      feedback: (message) => control.enqueue('feedback', message),
       execute,
       onTerminal: (result, snapshot) =>
         options.coordinator.acceptRestoredHostedTerminal(

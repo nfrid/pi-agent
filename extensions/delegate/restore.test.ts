@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { describe, expect, test, vi } from 'vitest';
 import { DelegateJobManager, type DelegateJobResult } from './jobs';
 import {
@@ -136,6 +136,54 @@ describe('restored delegate adapter', () => {
       expect(coordinator.require('restore@1').state).toBe('success'),
     );
     expect(coordinator.listRestorableHostedLinks()).toEqual([]);
+    await cleanup();
+  });
+
+  test('reopened control channels accept feedback while observation is active', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    let release!: () => void;
+    const restored = restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: {
+        runDelegate: () =>
+          new Promise<DelegatedRun>((resolve) => {
+            release = () => resolve(finishedRun('restore'));
+          }),
+      },
+    });
+    await vi.waitFor(() => expect(manager.runningCount).toBe(1));
+
+    expect(
+      manager.sendFeedback(restored.job.id, 'Use the corrected result.'),
+    ).toMatchObject({ delivery: 'queued' });
+    expect(
+      readFileSync(restored.control.filePath, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'feedback',
+        message: 'Use the corrected result.',
+      }),
+    ]);
+
+    release();
+    await vi.waitFor(() =>
+      expect(coordinator.require('restore@1').state).toBe('success'),
+    );
     await cleanup();
   });
 

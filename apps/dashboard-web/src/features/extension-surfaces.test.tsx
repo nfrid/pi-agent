@@ -301,7 +301,7 @@ describe('live extension surface fixtures', () => {
     }
   });
 
-  it('fetches persisted detail when a settled live overlay has no transcript', () => {
+  it('fetches legacy persisted detail but uses canonical child transcripts when available', () => {
     const row = {
       id: 'lineage-1',
       runId: 'run-1',
@@ -315,6 +315,13 @@ describe('live extension surface fixtures', () => {
     expect(
       shouldFetchDelegateDetail({ persisted: true, live: true, row }),
     ).toBe(true);
+    expect(
+      shouldFetchDelegateDetail({
+        persisted: true,
+        live: true,
+        row: { ...row, sessionId: 'child-session' },
+      }),
+    ).toBe(false);
     expect(
       shouldFetchDelegateDetail({
         persisted: true,
@@ -363,6 +370,7 @@ describe('live extension surface fixtures', () => {
         fetching: false,
         persistedRunExists: true,
         liveActive: false,
+        canonicalTranscript: false,
       }),
     ).toBe(true);
     expect(
@@ -371,7 +379,18 @@ describe('live extension surface fixtures', () => {
         ownerMatches: true,
         fetching: false,
         persistedRunExists: true,
+        liveActive: false,
+        canonicalTranscript: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPromoteDelegateDetailSelection({
+        shouldFetch: false,
+        ownerMatches: true,
+        fetching: false,
+        persistedRunExists: true,
         liveActive: true,
+        canonicalTranscript: false,
       }),
     ).toBe(false);
   });
