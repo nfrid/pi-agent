@@ -187,7 +187,10 @@ describe('session index', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'text', text: 'Inspecting the parser' },
+              {
+                type: 'text',
+                text: `Inspecting the parser ${'carefully '.repeat(30)}`,
+              },
               {
                 type: 'toolCall',
                 id: 'tool-call',
@@ -226,7 +229,7 @@ describe('session index', () => {
         id: 'assistant-entry',
         ordinal: 2,
         kind: 'activity',
-        label: 'Inspecting the parser',
+        label: expect.stringMatching(/^Inspecting the parser carefully/),
       }),
       expect.objectContaining({
         id: 'later-user',
@@ -235,6 +238,9 @@ describe('session index', () => {
         label: 'Now test it',
       }),
     ]);
+    expect(
+      page.outline?.every((landmark) => landmark.label.length <= 220),
+    ).toBe(true);
     expect(JSON.stringify(page.outline)).not.toContain('tool-call');
   });
 

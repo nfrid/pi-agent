@@ -488,7 +488,7 @@ function outlineFields(
     return {
       ...identityField,
       outlineKind: 'activity',
-      outlineLabel: activity.title ?? 'Agent activity',
+      outlineLabel: compactOutlineText(activity.title) ?? 'Agent activity',
       ...timestampField,
     };
   return timestampField;
