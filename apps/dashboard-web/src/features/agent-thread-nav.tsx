@@ -256,7 +256,7 @@ export function activeThreadDetails(
   if (row.draft) {
     const model = row.draft.model;
     return [
-      model ? `${model.provider}/${model.model}` : '? model',
+      model ? model.model : '? model',
       model?.thinking ?? '? effort',
       '? ctx',
     ];
@@ -264,7 +264,7 @@ export function activeThreadDetails(
   const details: string[] = [];
   const indexed = dormantResumeMetadata(row.session, runtimes);
   const model = row.runtime?.model ?? indexed.model;
-  if (model) details.push(`${model.provider}/${model.model}`);
+  if (model) details.push(model.model);
   else
     details.push(
       row.status === 'dormant' ? 'Resumes on send' : 'Controls unavailable',
