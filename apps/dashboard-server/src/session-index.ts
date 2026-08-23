@@ -15,6 +15,7 @@ import {
   isRecord,
   redactImageData,
   type SessionIndexEntry,
+  type SessionOutlineLandmark,
   validateSessionName,
 } from '@pi-dashboard/protocol';
 import type { MetadataStore } from './metadata.js';
@@ -32,6 +33,10 @@ interface SessionLineDescriptor {
   readonly id?: string;
   readonly parentId?: unknown;
   readonly type?: string;
+  readonly outlineId?: string;
+  readonly outlineKind?: SessionOutlineLandmark['kind'];
+  readonly outlineLabel?: string;
+  readonly timestamp?: number | string;
   readonly resume?: {
     readonly model?: { readonly provider: string; readonly model: string };
     readonly thinking?: string;
@@ -53,6 +58,7 @@ interface SessionHistoryIndex {
   readonly byId: ReadonlyMap<string, SessionLineDescriptor>;
   readonly latestEntryId?: string;
   readonly groups: readonly ActivityGroup[];
+  readonly outline: readonly SessionOutlineLandmark[];
 }
 
 interface IndexedFile extends SessionIndexEntry {
@@ -76,6 +82,8 @@ export interface SessionEntriesResult {
   entries: unknown[];
   entriesComplete: boolean;
   history: SessionHistoryPage;
+  /** Complete lightweight transcript outline; payloads remain paginated. */
+  outline?: readonly SessionOutlineLandmark[];
   sourceCursor?: AuxiliarySourceCursor;
 }
 
@@ -169,6 +177,7 @@ export type SelectedBranchEntrySelector = (entry: unknown) => boolean;
 const MAX_SELECTED_BRANCH_ENTRIES = 2_048;
 const MAX_SELECTED_BRANCH_BYTES = 8 * 1024 * 1024;
 const MAX_SELECTED_BRANCH_ENTRY_BYTES = 512 * 1024;
+const MAX_SESSION_OUTLINE = 4096;
 
 interface HistoryCursor {
   version: 1;
@@ -413,6 +422,120 @@ function within(root: string, file: string): boolean {
     relative === '' ||
     (!relative.startsWith('..') && !path.isAbsolute(relative))
   );
+}
+
+function compactOutlineText(value: unknown, limit = 220): string | undefined {
+  if (typeof value === 'string') {
+    const text = value.replace(/\s+/gu, ' ').trim();
+    return text ? text.slice(0, limit) : undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const part of value) {
+      const text = compactOutlineText(part, limit);
+      if (text) return text;
+    }
+    return undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  return compactOutlineText(value.text ?? value.content, limit);
+}
+
+function outlineFields(
+  value: unknown,
+  activity: TranscriptEntry,
+): Pick<
+  SessionLineDescriptor,
+  'outlineId' | 'outlineKind' | 'outlineLabel' | 'timestamp'
+> {
+  if (!isRecord(value)) return {};
+  const message = isRecord(value.message) ? value.message : value;
+  const timestamp = message.timestamp ?? value.timestamp;
+  const timestampField =
+    typeof timestamp === 'number' || typeof timestamp === 'string'
+      ? { timestamp }
+      : {};
+  const candidateId =
+    typeof message.messageId === 'string'
+      ? message.messageId
+      : typeof message.id === 'string'
+        ? message.id
+        : typeof value.id === 'string'
+          ? value.id
+          : undefined;
+  const outlineId =
+    candidateId !== undefined &&
+    candidateId.length > 0 &&
+    candidateId.length <= 256 &&
+    ![...candidateId].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+      ? candidateId
+      : undefined;
+  const identityField = outlineId === undefined ? {} : { outlineId };
+  if (message.role === 'user') {
+    return {
+      ...identityField,
+      outlineKind: 'user',
+      outlineLabel:
+        compactOutlineText(message.content) ??
+        compactOutlineText(value.content) ??
+        'User turn',
+      ...timestampField,
+    };
+  }
+  if (activity.kind === 'assistant' && activity.titleKind === 'preamble')
+    return {
+      ...identityField,
+      outlineKind: 'activity',
+      outlineLabel: activity.title ?? 'Agent activity',
+      ...timestampField,
+    };
+  return timestampField;
+}
+
+function buildSessionOutline(
+  descriptors: readonly SessionLineDescriptor[],
+  groups: readonly ActivityGroup[],
+): SessionOutlineLandmark[] {
+  const landmarks: SessionOutlineLandmark[] = [];
+  const grouped = new Set<number>();
+  for (const group of groups) {
+    const descriptor = descriptors[group.start];
+    if (!descriptor || !descriptor.outlineLabel) continue;
+    grouped.add(group.start);
+    landmarks.push({
+      id:
+        descriptor.outlineId ?? descriptor.id ?? `entry-${descriptor.ordinal}`,
+      ordinal: descriptor.ordinal,
+      kind: 'activity',
+      label: descriptor.outlineLabel,
+      ...(descriptor.timestamp === undefined
+        ? {}
+        : { timestamp: descriptor.timestamp }),
+    });
+  }
+  for (const descriptor of descriptors) {
+    if (!descriptor.outlineLabel || grouped.has(descriptor.ordinal)) continue;
+    if (
+      descriptor.outlineKind !== 'user' &&
+      descriptor.outlineKind !== 'assistant'
+    )
+      continue;
+    landmarks.push({
+      id:
+        descriptor.outlineId ?? descriptor.id ?? `entry-${descriptor.ordinal}`,
+      ordinal: descriptor.ordinal,
+      kind: descriptor.outlineKind,
+      label: descriptor.outlineLabel,
+      ...(descriptor.timestamp === undefined
+        ? {}
+        : { timestamp: descriptor.timestamp }),
+    });
+  }
+  return landmarks
+    .sort((left, right) => left.ordinal - right.ordinal)
+    .slice(0, MAX_SESSION_OUTLINE);
 }
 
 function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
@@ -1283,6 +1406,10 @@ export class SessionIndex {
       branch.leafId === undefined && requestedLeaf === undefined
         ? index.groups
         : groupTranscript(descriptors.map((descriptor) => descriptor.activity));
+    const outline =
+      branch.leafId === undefined && requestedLeaf === undefined
+        ? index.outline
+        : buildSessionOutline(descriptors, groups);
     let end = descriptors.length;
     if (cursor) {
       const boundary = descriptors[cursor.selectedOrdinal];
@@ -1356,6 +1483,7 @@ export class SessionIndex {
       metadata,
       entries,
       entriesComplete: before === undefined && selection.start === 0,
+      outline,
       history: {
         version: 1,
         start: selection.start,
@@ -1467,7 +1595,7 @@ export class SessionIndex {
             entriesTruncated: _entriesTruncated,
             ...response
           } = result;
-          return response;
+          return { ...response, outline: indexed.historyIndex.outline };
         };
         if (!resolveLatestLeaf)
           return publicBranchResult(
@@ -1629,6 +1757,7 @@ export class SessionIndex {
         metadata,
         entries: page.map((item) => item.entry),
         entriesComplete,
+        outline: indexed.historyIndex.outline,
         history: {
           version: 1,
           start,
@@ -2320,6 +2449,7 @@ export class SessionIndex {
                 : {}),
               type: 'session',
               activity: activityEntryFromRaw(parsed),
+              ...outlineFields(parsed, activityEntryFromRaw(parsed)),
             };
             descriptors.push(descriptor);
             if (descriptor.id !== undefined) {
@@ -2350,6 +2480,7 @@ export class SessionIndex {
                 : {}),
               ...(resume ? { resume } : {}),
               activity: activityEntryFromRaw(parsed),
+              ...outlineFields(parsed, activityEntryFromRaw(parsed)),
             };
             descriptors.push(descriptor);
             if (descriptor.id !== undefined) {
@@ -2457,6 +2588,12 @@ export class SessionIndex {
           latestEntryId,
           groups: groupTranscript(
             descriptors.map((descriptor) => descriptor.activity),
+          ),
+          outline: buildSessionOutline(
+            descriptors,
+            groupTranscript(
+              descriptors.map((descriptor) => descriptor.activity),
+            ),
           ),
         };
         const id =

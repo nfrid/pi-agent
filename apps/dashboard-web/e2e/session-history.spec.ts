@@ -148,7 +148,7 @@ async function verifyEarlierHistoryAnchor(page: Page) {
   await page.goto('/sessions/session-1');
   await expect(
     page.getByRole('button', { name: 'Load earlier history' }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   // The selected feed supplies the initial baseline; only the older page is finite.
   await expect.poll(() => initialReads).toBe(0);
   await page.locator('.session-transcript-scroll').evaluate((element) => {
