@@ -66,8 +66,6 @@ export interface DelegateJobSnapshot {
   /** Optional workflow identity projected from the session-scoped model. */
   logicalId?: string;
   attemptIdentity?: string;
-  /** Immutable workflow owner used to reject sibling-branch collisions. */
-  ownerBranchId?: string;
 }
 
 interface DelegateJobRecord extends JobRecord<DelegateJobState> {
@@ -259,6 +257,11 @@ export class DelegateJobManager {
   get(id: string, ctx?: ExtensionContext): DelegateJobSnapshot | undefined {
     const job = this.registry.get(id);
     return job ? this.visibleSnapshot(job, ctx) : undefined;
+  }
+
+  /** Internal branch guard for exact workflow observation binding. */
+  getOwnerBranchId(id: string): string | undefined {
+    return this.registry.require(id).ownerBranchId;
   }
 
   list(ctx?: ExtensionContext): DelegateJobSnapshot[] {
@@ -530,6 +533,5 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
           attemptIdentity: record.workflowAttempt.identity,
         }
       : {}),
-    ...(record.ownerBranchId ? { ownerBranchId: record.ownerBranchId } : {}),
   };
 }

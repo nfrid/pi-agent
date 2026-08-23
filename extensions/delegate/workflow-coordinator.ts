@@ -921,7 +921,7 @@ export class DelegateWorkflowCoordinator {
       throw new Error(
         `Restored delegate job ${job.id} is not linked to workflow attempt ${record.attempt.identity}.`,
       );
-    if (job.ownerBranchId !== record.ownerBranchId)
+    if (this.jobs.getOwnerBranchId(job.id) !== record.ownerBranchId)
       throw new Error(
         `Restored delegate job ${job.id} is not owned by workflow branch ${record.ownerBranchId ?? 'the local branch'}.`,
       );
