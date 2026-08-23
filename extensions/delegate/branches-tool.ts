@@ -210,11 +210,17 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
             .filter(Boolean)
             .join('\n');
           const summary = outcome.merged
-            ? `Merged ${record.branch} into HEAD as ${outcome.commit?.slice(0, 12)}.`
+            ? `Merged ${record.branch} into HEAD as ${outcome.commit?.slice(0, 12)}.${outcome.superprojectWorkingTree ? ' The outer repository must commit the updated submodule pointer separately.' : ''}`
             : `Did not merge ${record.branch}. ${outcome.reason}`;
           return {
             ...text(detail ? `${summary}\n${detail}` : summary),
-            details: { action: 'merge' as const, merged: outcome.merged },
+            details: {
+              action: 'merge' as const,
+              merged: outcome.merged,
+              ...(outcome.superprojectWorkingTree
+                ? { superprojectWorkingTree: outcome.superprojectWorkingTree }
+                : {}),
+            },
           };
         }
         case 'drop': {

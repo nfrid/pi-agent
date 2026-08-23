@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import * as path from 'node:path';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { resolveArtifact } from '../shared/artifacts';
 import { type DelegateConfig, resolveDelegateRoute } from './config';
@@ -98,6 +100,21 @@ export interface BuiltDelegatePlans {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Resolve fresh model input relative to the invoking Pi session. */
+export function resolveDelegateCwd(
+  requested: string | undefined,
+  parentCwd: string,
+): string {
+  const base = path.resolve(parentCwd);
+  if (requested === undefined) return base;
+  const value = requested.trim();
+  if (value === '~') return path.resolve(process.env.HOME?.trim() || homedir());
+  if (value.startsWith('~/')) {
+    return path.resolve(process.env.HOME?.trim() || homedir(), value.slice(2));
+  }
+  return path.resolve(base, value);
 }
 
 function normalizeHandoffFrom(
@@ -298,7 +315,9 @@ export function buildDelegatePlans(
     context: task.resumed
       ? 'continuation'
       : (task.input.context ?? shared.context ?? 'fresh'),
-    requestedCwd: task.resumed?.cwd ?? task.input.cwd ?? shared.cwd ?? ctx.cwd,
+    requestedCwd: task.resumed
+      ? task.resumed.cwd
+      : resolveDelegateCwd(task.input.cwd ?? shared.cwd, ctx.cwd),
     scope: task.input.scope ?? shared.scope,
     worktreePath: task.input.worktreePath ?? shared.worktreePath,
   }));

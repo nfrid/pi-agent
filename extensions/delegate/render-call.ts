@@ -1,4 +1,5 @@
 import { Container, Text } from '@earendil-works/pi-tui';
+import { resolveDelegateCwd } from './plans';
 import {
   type DelegateCallArgs,
   fieldLine,
@@ -7,6 +8,19 @@ import {
   type ThemeLike,
   taskBlock,
 } from './render-utils';
+
+function displayedCwd(
+  requested: unknown,
+  continuation: unknown,
+  parentCwd: string | undefined,
+): unknown {
+  if (typeof parentCwd !== 'string' || continuation)
+    return requested ?? parentCwd;
+  return resolveDelegateCwd(
+    typeof requested === 'string' ? requested : undefined,
+    parentCwd,
+  );
+}
 
 export function renderDelegateCall(
   args: DelegateCallArgs,
@@ -54,7 +68,11 @@ export function renderDelegateCall(
                 allowWrites: task.allowWrites ?? args.allowWrites,
                 isolation: task.isolation ?? args.isolation,
                 worktreePath: task.worktreePath ?? args.worktreePath,
-                cwd: task.cwd ?? args.cwd ?? context?.cwd,
+                cwd: displayedCwd(
+                  task.cwd ?? args.cwd,
+                  task.continuation,
+                  context?.cwd,
+                ),
                 route: task.route ?? args.route,
                 requestedMode: true,
               },
@@ -108,7 +126,11 @@ export function renderDelegateCall(
             allowWrites: args.allowWrites,
             isolation: args.isolation,
             worktreePath: args.worktreePath,
-            cwd: args.cwd ?? context?.cwd,
+            cwd: displayedCwd(
+              args.cwd,
+              args.continuation ?? args.continue,
+              context?.cwd,
+            ),
             route: args.route,
             requestedMode: true,
           },
