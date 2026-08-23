@@ -141,7 +141,7 @@ async function main() {
       'background-jobs.sock',
     );
     const startsRuntime = mode !== 'process-host';
-    const startsProcess = mode !== 'runtime-host';
+    const startsProcess = mode !== 'runtime-host' && mode !== 'serve';
     if (startsRuntime) {
       if (
         mode !== 'runtime-host' &&
