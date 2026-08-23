@@ -218,11 +218,6 @@
   color: var(--dim);
   text-overflow: ellipsis;
 }
-.delegate-row-properties > span + span::before {
-  margin-right: 5px;
-  color: var(--dim);
-  content: "·";
-}
 .delegate-row-context {
   color: var(--muted);
 }

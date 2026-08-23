@@ -430,6 +430,7 @@ export function DelegateSurface({
                                     {context}
                                   </span>
                                 )}
+                                {context && access ? ' · ' : null}
                                 {access && (
                                   <span
                                     className={
@@ -441,6 +442,7 @@ export function DelegateSurface({
                                     {access}
                                   </span>
                                 )}
+                                {(context || access) && route ? ' · ' : null}
                                 {route && (
                                   <span className="delegate-row-route">
                                     {route}
