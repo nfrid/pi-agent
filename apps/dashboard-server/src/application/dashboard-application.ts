@@ -1481,6 +1481,9 @@ export class DashboardApplication {
       return {
         metadata,
         entries: result.entries,
+        ...(result.outline === undefined
+          ? {}
+          : { outline: [...result.outline] }),
         ...(result.history ? { history: result.history } : {}),
         entriesComplete: result.entriesComplete,
         serverId,

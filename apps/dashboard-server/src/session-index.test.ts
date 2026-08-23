@@ -221,6 +221,80 @@ describe('session index', () => {
     ).rejects.toThrow('Invalid session branch');
   });
 
+  it('returns a complete lightweight outline without transcript payloads', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-outline-'));
+    await writeFile(
+      path.join(root, 'outline.jsonl'),
+      `${[
+        { type: 'session', id: 'outline-id', cwd: '/tmp' },
+        {
+          type: 'message',
+          id: 'user-entry',
+          message: { role: 'user', content: 'Investigate the parser' },
+        },
+        {
+          type: 'message',
+          id: 'assistant-entry',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: `Inspecting the parser ${'carefully '.repeat(30)}`,
+              },
+              {
+                type: 'toolCall',
+                id: 'tool-call',
+                name: 'read',
+                arguments: {},
+              },
+            ],
+          },
+        },
+        {
+          type: 'tool',
+          id: 'tool-entry',
+          tool: { name: 'read', status: 'complete' },
+        },
+        {
+          type: 'message',
+          id: 'later-user',
+          message: { role: 'user', content: 'Now test it' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}
+`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    const page = await index.readEntries('outline-id');
+    expect(page.outline).toEqual([
+      expect.objectContaining({
+        id: 'user-entry',
+        ordinal: 1,
+        kind: 'user',
+        label: 'Investigate the parser',
+      }),
+      expect.objectContaining({
+        id: 'assistant-entry',
+        ordinal: 2,
+        kind: 'activity',
+        label: expect.stringMatching(/^Inspecting the parser carefully/),
+      }),
+      expect.objectContaining({
+        id: 'later-user',
+        ordinal: 4,
+        kind: 'user',
+        label: 'Now test it',
+      }),
+    ]);
+    expect(
+      page.outline?.every((landmark) => landmark.label.length <= 220),
+    ).toBe(true);
+    expect(JSON.stringify(page.outline)).not.toContain('tool-call');
+  });
+
   it('scans a selected branch while retaining only matching entries', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-selected-branch-'),

@@ -94,6 +94,7 @@ export function SessionView({
     historyError,
     historyLoading,
     loadEarlierHistory,
+    loadThroughOrdinal,
     cancelScrollRestore,
     completePrependRestore,
     prependAnchor,
@@ -225,7 +226,7 @@ export function SessionView({
           className="session-transcript-scroll"
           aria-label="Transcript"
         >
-          {history?.hasOlder && (
+          {historyError && (
             <SessionHistoryControl
               loading={historyLoading}
               error={historyError}
@@ -241,6 +242,12 @@ export function SessionView({
             onOutlineOpenChange={setOutlineOpen}
             onBeforeScroll={handleBeforeTranscriptNavigation}
             scrollElementRef={embedded ? undefined : transcriptScrollRef}
+            outline={data.outline}
+            onJumpToLandmark={(landmark) =>
+              landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
+                ? loadThroughOrdinal(landmark.ordinal)
+                : true
+            }
             leadingContinuation={
               history?.hasOlder ? history.leadingContinuation : undefined
             }

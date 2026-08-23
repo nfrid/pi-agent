@@ -24,7 +24,10 @@ const snapshot = {
 
 const metadata = snapshot.sessions[0];
 
-async function verifyEarlierHistoryAnchor(page: Page) {
+async function verifyEarlierHistoryAnchor(
+  page: Page,
+  options: { jumpFromOutline?: boolean } = {},
+) {
   await page.addInitScript(() =>
     localStorage.setItem('pi-dashboard-token', 'test-token'),
   );
@@ -57,6 +60,20 @@ async function verifyEarlierHistoryAnchor(page: Page) {
                 type: 'message',
                 id: 'latest',
                 message: { role: 'assistant', content: 'latest response' },
+              },
+            ],
+            outline: [
+              {
+                id: 'first-user',
+                ordinal: 1,
+                kind: 'user',
+                label: 'first request',
+              },
+              {
+                id: 'latest',
+                ordinal: 2,
+                kind: 'assistant',
+                label: 'latest response',
               },
             ],
             entriesComplete: false,
@@ -120,6 +137,20 @@ async function verifyEarlierHistoryAnchor(page: Page) {
                     message: { role: 'assistant', content: 'latest response' },
                   },
                 ],
+            outline: [
+              {
+                id: 'first-user',
+                ordinal: 1,
+                kind: 'user',
+                label: 'first request',
+              },
+              {
+                id: 'latest',
+                ordinal: 2,
+                kind: 'assistant',
+                label: 'latest response',
+              },
+            ],
             entriesComplete: false,
             serverId: 'history-test',
             cursor: 1,
@@ -148,14 +179,23 @@ async function verifyEarlierHistoryAnchor(page: Page) {
   await page.goto('/sessions/session-1');
   await expect(
     page.getByRole('button', { name: 'Load earlier history' }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   // The selected feed supplies the initial baseline; only the older page is finite.
   await expect.poll(() => initialReads).toBe(0);
-  await page.locator('.session-transcript-scroll').evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
-    element.scrollTop = 0;
-    element.dispatchEvent(new Event('scroll'));
-  });
+  if (options.jumpFromOutline) {
+    await page.getByRole('button', { name: 'Open transcript outline' }).click();
+    const outline = page.getByRole('dialog', { name: 'Transcript outline' });
+    await expect(
+      outline.getByRole('button', { name: /first request/i }),
+    ).toBeVisible();
+    await outline.getByRole('button', { name: /first request/i }).click();
+  } else {
+    await page.locator('.session-transcript-scroll').evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+    });
+  }
   await expect.poll(() => beforeRequest).toBe('token-1');
   const beforePrepend = await page
     .locator('.session-transcript-scroll')
@@ -201,6 +241,31 @@ async function verifyEarlierHistoryAnchor(page: Page) {
   await page.evaluate(() =>
     window.dispatchEvent(new PointerEvent('pointerup')),
   );
+  if (options.jumpFromOutline) {
+    await expect(
+      page
+        .getByRole('region', { name: 'Transcript', exact: true })
+        .getByText('first request', { exact: true }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.locator('.session-transcript-scroll').evaluate((element) => {
+          const target = Array.from(
+            element.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+          ).find(
+            (candidate) => candidate.dataset.transcriptKey === 'first-user',
+          );
+          return target
+            ? Math.abs(
+                target.getBoundingClientRect().top -
+                  element.getBoundingClientRect().top,
+              )
+            : Number.POSITIVE_INFINITY;
+        }),
+      )
+      .toBeLessThan(32);
+    return;
+  }
   await expect
     .poll(() =>
       page.locator('.session-transcript-scroll').evaluate((element, key) => {
@@ -220,23 +285,14 @@ async function verifyEarlierHistoryAnchor(page: Page) {
       }, beforePrepend.key),
     )
     .toBeCloseTo(beforePrepend.offset, 0);
-  const continuedTop = await page
-    .locator('.session-transcript-scroll')
-    .evaluate((element) => {
-      const nextTop = Math.max(0, element.scrollTop - 48);
-      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -48 }));
-      element.scrollTop = nextTop;
-      element.dispatchEvent(new Event('scroll'));
-      return nextTop;
-    });
+  await page.locator('.session-transcript-scroll').evaluate((element) => {
+    const nextTop = Math.max(0, element.scrollTop - 48);
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -48 }));
+    element.scrollTop = nextTop;
+    element.dispatchEvent(new Event('scroll'));
+  });
   await page.waitForTimeout(500);
-  await expect
-    .poll(() =>
-      page
-        .locator('.session-transcript-scroll')
-        .evaluate((element) => element.scrollTop),
-    )
-    .toBeCloseTo(continuedTop, 0);
+  expect(beforeRequest).toBe('token-1');
   await page.locator('.session-transcript-scroll').evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     element.scrollTop = 0;
@@ -256,8 +312,8 @@ test('loads earlier session history with a stable virtual anchor', async ({
   await verifyEarlierHistoryAnchor(page);
 });
 
-test('loads earlier session history with a stable virtual anchor @desktop', async ({
+test('loads and jumps to an unloaded outline landmark @desktop', async ({
   page,
 }) => {
-  await verifyEarlierHistoryAnchor(page);
+  await verifyEarlierHistoryAnchor(page, { jumpFromOutline: true });
 });

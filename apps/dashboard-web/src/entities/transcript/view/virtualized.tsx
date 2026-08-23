@@ -1,4 +1,7 @@
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  RuntimeSnapshot,
+  SessionOutlineLandmark,
+} from '@pi-dashboard/protocol';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   type Dispatch,
@@ -7,6 +10,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import type { TranscriptModelItem } from '../../../transcript';
 import type { TranscriptGroup } from '../activity';
@@ -28,6 +32,8 @@ export function VirtualizedTranscript({
   open,
   setOpen,
   runtime,
+  outline,
+  onJumpToLandmark,
   tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
@@ -39,6 +45,10 @@ export function VirtualizedTranscript({
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
+  outline?: readonly SessionOutlineLandmark[];
+  onJumpToLandmark?: (
+    landmark: SessionOutlineLandmark,
+  ) => Promise<boolean> | boolean;
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
@@ -51,6 +61,7 @@ export function VirtualizedTranscript({
   );
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
+  const [pendingJumpKey, setPendingJumpKey] = useState<string>();
   const virtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
@@ -88,10 +99,31 @@ export function VirtualizedTranscript({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [open, rows.length, virtualizer]);
-  const landmarks = useMemo(
+  const loadedLandmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
   );
+  const landmarks = useMemo<TranscriptLandmark[]>(() => {
+    if (outline === undefined) return loadedLandmarks;
+    return outline.map((landmark) => {
+      const loaded = loadedLandmarks.find(
+        (candidate) =>
+          candidate.key === landmark.id ||
+          candidate.key === `group-${landmark.id}`,
+      );
+      return loaded
+        ? { ...loaded, label: landmark.label }
+        : {
+            key: landmark.id,
+            label: landmark.label,
+            kind: landmark.kind,
+            itemIndex: landmark.ordinal,
+            ...(landmark.timestamp === undefined
+              ? {}
+              : { timestamp: landmark.timestamp }),
+          };
+    });
+  }, [loadedLandmarks, outline]);
   const rowIndexByKey = useMemo(() => {
     const result = new Map<string, number>();
     rows.forEach((row, index) => {
@@ -110,11 +142,39 @@ export function VirtualizedTranscript({
     });
     return result;
   }, [items, rows]);
-  const jumpToLandmark = (landmark: TranscriptLandmark) => {
-    onBeforeScroll?.();
-    const rowIndex = rowIndexByKey.get(landmark.key);
-    if (rowIndex !== undefined)
+  useLayoutEffect(() => {
+    if (!pendingJumpKey) return;
+    const rowIndex =
+      rowIndexByKey.get(pendingJumpKey) ??
+      rowIndexByKey.get(`group-${pendingJumpKey}`);
+    if (rowIndex === undefined) return;
+    setPendingJumpKey(undefined);
+    virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+    const frame = window.requestAnimationFrame(() => {
       virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingJumpKey, rowIndexByKey, virtualizer]);
+  const jumpToLandmark = async (landmark: TranscriptLandmark) => {
+    onBeforeScroll?.();
+    const loadedRowIndex =
+      rowIndexByKey.get(landmark.key) ??
+      rowIndexByKey.get(`group-${landmark.key}`);
+    if (loadedRowIndex !== undefined) {
+      virtualizer.scrollToIndex(loadedRowIndex, { align: 'start' });
+      return;
+    }
+    const target = outline?.find(
+      (candidate) =>
+        candidate.id === landmark.key ||
+        `group-${candidate.id}` === landmark.key,
+    );
+    if (!target || !onJumpToLandmark || !(await onJumpToLandmark(target)))
+      return;
+    // The async loader updates rows in a later render. Store the stable key so
+    // that render's row map, rather than this handler's stale closure, owns the
+    // actual virtualizer jump.
+    setPendingJumpKey(landmark.key);
   };
   const captureScrollAnchor =
     useVirtualTranscriptScrollRestoration(scrollElementRef);

@@ -1569,10 +1569,37 @@ export const SessionHistorySchema = Type.Object(
 );
 export type SessionHistory = Static<typeof SessionHistorySchema>;
 
+/** Lightweight, indexed transcript landmarks. Payloads never cross this boundary. */
+export const SessionOutlineLandmarkSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    ordinal: Type.Integer({ minimum: 0 }),
+    kind: Type.Union([
+      Type.Literal('user'),
+      Type.Literal('assistant'),
+      Type.Literal('activity'),
+    ]),
+    label: Type.String({ minLength: 1, maxLength: 240 }),
+    timestamp: Type.Optional(
+      Type.Union([Type.String({ maxLength: 128 }), FiniteNumberSchema]),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type SessionOutlineLandmark = Static<
+  typeof SessionOutlineLandmarkSchema
+>;
+
 export const SessionApiResponseSchema = Type.Object(
   {
     metadata: SessionIndexEntrySchema,
     entries: Type.Array(UnknownSchema),
+    /** Complete lightweight outline; transcript payloads remain paginated. */
+    outline: Type.Optional(
+      Type.Readonly(
+        Type.Array(SessionOutlineLandmarkSchema, { maxItems: 4096 }),
+      ),
+    ),
     /** Bounded history range and opaque cursor for explicit older-page loads. */
     history: Type.Optional(SessionHistorySchema),
     /** False when a new active session is not indexed and its runtime branch could not be serialized completely. */
@@ -1639,6 +1666,12 @@ export const AuthoritativeSessionSnapshotSchema = Type.Object(
   {
     metadata: SessionIndexEntrySchema,
     entries: Type.Array(UnknownSchema, { maxItems: 2048 }),
+    /** Complete lightweight outline; transcript payloads remain paginated. */
+    outline: Type.Optional(
+      Type.Readonly(
+        Type.Array(SessionOutlineLandmarkSchema, { maxItems: 4096 }),
+      ),
+    ),
     history: Type.Optional(SessionHistorySchema),
     entriesComplete: Type.Boolean(),
     serverId: IdentifierSchema,
