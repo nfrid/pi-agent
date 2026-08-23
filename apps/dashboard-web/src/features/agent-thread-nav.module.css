@@ -460,9 +460,6 @@ button.shelfHeading:focus-visible {
 .threadRow:global(.unread) {
   color: var(--fg);
 }
-.threadRow:global(.unread) .threadCopy strong {
-  font-weight: 750;
-}
 .threadGlyph {
   width: 14px;
   flex: none;
