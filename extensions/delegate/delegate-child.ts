@@ -1,6 +1,10 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
+import {
+  type BackgroundJobSnapshot,
+  BackgroundJobsClient,
+} from '@pi-agent/background-jobs';
 import { processJsonLine } from './events';
 import type { DelegatedRun } from './types';
 
@@ -28,6 +32,8 @@ export function appendTail(
 
 export interface SpawnChildOptions {
   command: string;
+  /** Bounded host display title; never contains the task or launch payload. */
+  title?: string;
   args: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -36,6 +42,12 @@ export interface SpawnChildOptions {
   checkpointLeadMs?: number;
   killGraceMs?: number;
   signal?: AbortSignal;
+  /** Parent-manager teardown signal; detaches without stopping a hosted job. */
+  detachSignal?: AbortSignal;
+  /** Stable UUID used as the process-host job ID for hosted runs. */
+  processJobId?: string;
+  /** Parent session owner required by the process host. */
+  ownerSession?: string;
   onCheckpoint?: () => void;
   onControlAck?: (id: string, kind: string, generation?: number) => void;
   onLine: () => void;
@@ -47,6 +59,8 @@ export interface SpawnChildResult {
   timedOut: boolean;
   /** A process-spawn/runner failure, distinct from a child nonzero exit. */
   spawnError?: string;
+  /** Parent manager detached and must not receive a terminal settlement. */
+  detached?: boolean;
 }
 
 /** Resolve the parent home without broadening the child environment allowlist. */
@@ -88,6 +102,174 @@ export function buildDelegateChildEnvironment(
     HOME: effectiveDelegateHome(),
     PI_DELEGATE_CHILD: '1',
   };
+}
+
+function isTerminalHostStatus(
+  status: BackgroundJobSnapshot['status'],
+): boolean {
+  return status !== 'running';
+}
+
+function hostDiagnostic(run: DelegatedRun, text: string): void {
+  run.stderr = appendTail(run.stderr, `\n${text}\n`, MAX_STDERR_BYTES);
+}
+
+/**
+ * Start a background delegate in the durable process host and replay its event
+ * journal. Host output tails are diagnostics only; transcript state comes from
+ * complete JSON event records passed through the normal parser.
+ */
+export async function runHostedDelegateChild(
+  run: DelegatedRun,
+  options: SpawnChildOptions,
+): Promise<SpawnChildResult> {
+  if (!options.ownerSession || !options.processJobId)
+    throw new Error(
+      'Hosted delegates require an owner session and process job ID.',
+    );
+  const ownerSession = options.ownerSession;
+  const processJobId = options.processJobId;
+  const client = new BackgroundJobsClient(undefined, ownerSession);
+  let detached = options.detachSignal?.aborted === true;
+  let wasAborted = options.signal?.aborted === true;
+  let stopPromise: Promise<unknown> | undefined;
+  let started = false;
+  let checkpoint: NodeJS.Timeout | undefined;
+  const stopHost = () => {
+    if (detached) return;
+    wasAborted = true;
+    if (!started || stopPromise) return;
+    stopPromise = client.stop([processJobId]).catch(() => undefined);
+  };
+  const abortHandler = () => stopHost();
+  const detachHandler = () => {
+    detached = true;
+  };
+  options.signal?.addEventListener('abort', abortHandler, { once: true });
+  options.detachSignal?.addEventListener('abort', detachHandler, {
+    once: true,
+  });
+  try {
+    const command = await client.start({
+      id: processJobId,
+      command: options.command,
+      title: options.title ?? 'Delegate',
+      cwd: options.cwd,
+      argv: options.args,
+      env: Object.fromEntries(
+        Object.entries(buildDelegateChildEnvironment(options.env)).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
+      timeoutMs: options.timeoutMs,
+      events: true,
+    });
+    started = true;
+    if (wasAborted) stopHost();
+    const checkpointLead = Math.min(
+      Math.max(0, options.checkpointLeadMs ?? 0),
+      Math.max(0, options.timeoutMs - 1),
+    );
+    if (checkpointLead > 0) {
+      checkpoint = setTimeout(
+        () => {
+          if (!detached && !stopPromise) {
+            try {
+              options.onCheckpoint?.();
+            } catch {
+              // Checkpoint delivery is best effort; host timeout remains final.
+            }
+          }
+        },
+        Math.max(1, options.timeoutMs - checkpointLead),
+      );
+      checkpoint.unref();
+    }
+    let offset = 0;
+    let eventsComplete = false;
+    let final = command;
+    while (!detached) {
+      const eventBatch = await client.events(processJobId, offset);
+      if (eventBatch.truncated) {
+        hostDiagnostic(
+          run,
+          `Process-host event history was truncated before offset ${offset}; missing transcript events were discarded.`,
+        );
+        eventsComplete = eventBatch.complete;
+      }
+      // The host journal is offset ordered; sort defensively before replay so
+      // a malformed adapter response cannot reorder transcript state.
+      for (const event of [...eventBatch.events].sort(
+        (left, right) => left.offset - right.offset,
+      )) {
+        if (event.truncated) {
+          hostDiagnostic(
+            run,
+            `Process-host ${event.stream} event at offset ${event.offset} was truncated and discarded.`,
+          );
+          continue;
+        }
+        const line = event.text;
+        let parsed: Record<string, unknown> | undefined;
+        try {
+          const value: unknown = JSON.parse(line);
+          if (value && typeof value === 'object' && !Array.isArray(value))
+            parsed = value as Record<string, unknown>;
+        } catch {
+          // Non-JSON stderr is retained as bounded diagnostics below.
+        }
+        if (
+          parsed?.type === 'delegate_control_ack' &&
+          typeof parsed.controlId === 'string' &&
+          typeof parsed.controlKind === 'string'
+        ) {
+          options.onControlAck?.(
+            parsed.controlId,
+            parsed.controlKind,
+            typeof parsed.controlGeneration === 'number'
+              ? parsed.controlGeneration
+              : undefined,
+          );
+          processJsonLine(line, run);
+        } else if (!processJsonLine(line, run) && event.stream === 'stderr') {
+          hostDiagnostic(run, line);
+        }
+        options.onLine();
+      }
+      offset = Math.max(offset, eventBatch.nextOffset);
+      eventsComplete = eventsComplete || eventBatch.complete;
+      final = (await client.inspect(processJobId)) ?? final;
+      if (isTerminalHostStatus(final.status) && eventsComplete) break;
+      if (isTerminalHostStatus(final.status)) {
+        // Reconcile one more journal read after terminal state; host stdout and
+        // stderr close events can be committed just after the status row.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } else {
+        final = await client.wait(processJobId, 100);
+      }
+    }
+    if (detached)
+      return {
+        exitCode: -1,
+        wasAborted: false,
+        timedOut: false,
+        detached: true,
+      };
+    if (stopPromise) await stopPromise;
+    final = (await client.inspect(processJobId)) ?? final;
+    if (final.timedOut)
+      return { exitCode: 124, wasAborted: false, timedOut: true };
+    if (wasAborted) return { exitCode: 130, wasAborted: true, timedOut: false };
+    return {
+      exitCode: final.exitCode ?? (final.status === 'done' ? 0 : 1),
+      wasAborted: false,
+      timedOut: false,
+    };
+  } finally {
+    if (checkpoint) clearTimeout(checkpoint);
+    options.signal?.removeEventListener('abort', abortHandler);
+    options.detachSignal?.removeEventListener('abort', detachHandler);
+  }
 }
 
 /** Spawn a detached Pi child and stream JSON events into the run record. */

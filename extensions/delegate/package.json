@@ -5,6 +5,7 @@
   "type": "commonjs",
   "main": "./index.ts",
   "dependencies": {
+    "@pi-agent/background-jobs": "workspace:*",
     "@pi-dashboard/extension-contributions": "workspace:*",
     "@pi-dashboard/worktree-manager": "workspace:*"
   }

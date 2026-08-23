@@ -7,6 +7,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import * as path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 /** Keep parent steering bounded and make control files disposable. */
@@ -46,7 +47,7 @@ export type DelegateControlLifecycleEvent =
       generation: number;
     }
   | {
-      type: 'close';
+      type: 'close' | 'detach';
       participantId: string;
       ownerSessionId?: string;
       statusId?: string;
@@ -70,6 +71,9 @@ export interface DelegateControlChannel {
     kind: DelegateControlKind,
     generation?: number,
   ) => void;
+  /** Stop parent ownership while leaving the child inbox available. */
+  detach: () => void;
+  /** Close parent ownership and unlink the private inbox. */
   close: () => void;
 }
 
@@ -98,7 +102,19 @@ function bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
-function controlPath(sessionPath: string): string {
+function controlPath(sessionPath: string, processJobId?: string): string {
+  if (processJobId !== undefined) {
+    if (!path.isAbsolute(sessionPath) || /[\\/\0]/u.test(processJobId))
+      throw new Error('Hosted delegate control path inputs are invalid.');
+    // Process-host IDs are UUIDs in production. Keep old test/runtime shims
+    // with opaque IDs on the disposable path until they provide that contract.
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+        processJobId,
+      )
+    )
+      return `${path.resolve(sessionPath)}.${processJobId}.control`;
+  }
   return `${sessionPath}.${process.pid}.${++channelCounter}.control`;
 }
 
@@ -107,8 +123,9 @@ export function createDelegateControlChannel(
   sessionPath: string,
   ownerSessionId?: string,
   runKind?: 'foreground' | 'background',
+  processJobId?: string,
 ): DelegateControlChannel {
-  const filePath = controlPath(sessionPath);
+  const filePath = controlPath(sessionPath, processJobId);
   const participantId = filePath;
   let closed = false;
   let boundStatusId: string | undefined;
@@ -206,6 +223,17 @@ export function createDelegateControlChannel(
       }
       if (kind === 'pause' && typeof generation === 'number')
         emitLifecycle({ type: 'ack', participantId, kind, generation });
+    },
+    detach() {
+      if (closed) return;
+      closed = true;
+      activeChannels.delete(participantId);
+      emitLifecycle({
+        type: 'detach',
+        participantId,
+        ...(ownerSessionId ? { ownerSessionId } : {}),
+        ...(boundStatusId ? { statusId: boundStatusId } : {}),
+      });
     },
     close() {
       if (closed) return;

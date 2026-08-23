@@ -206,6 +206,9 @@ importers:
 
   extensions/delegate:
     dependencies:
+      '@pi-agent/background-jobs':
+        specifier: workspace:*
+        version: link:../../packages/background-jobs
       '@pi-dashboard/extension-contributions':
         specifier: workspace:*
         version: link:../../packages/extension-contributions

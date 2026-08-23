@@ -764,6 +764,31 @@ describe('delegate', () => {
     );
   });
 
+  test('keeps foreground child arguments unchanged and adds dashboard control only when hosted', () => {
+    const foreground = buildChildArgs({ task: 'inspect' }, '/tmp/child.jsonl');
+    const hosted = buildChildArgs(
+      { task: 'inspect', hosted: true },
+      '/tmp/child.jsonl',
+    );
+    expect(hosted.slice(0, hosted.indexOf('--extension'))).toEqual(
+      foreground.slice(0, foreground.indexOf('--extension')),
+    );
+    const foregroundExtensions = foreground.flatMap((arg, index) =>
+      arg === '--extension' ? [foreground[index + 1]] : [],
+    );
+    const hostedExtensions = hosted.flatMap((arg, index) =>
+      arg === '--extension' ? [hosted[index + 1]] : [],
+    );
+    expect(foregroundExtensions).toHaveLength(4);
+    expect(hostedExtensions).toHaveLength(5);
+    expect(hostedExtensions[1]).toMatch(
+      /extensions[\\/]remote-control[\\/]index\.ts$/,
+    );
+    expect(
+      hostedExtensions.every((extension) => extension && existsSync(extension)),
+    ).toBe(true);
+  });
+
   test('uses persistent, minimal, read-only children with required extensions', () => {
     const args = buildChildArgs({ task: 'inspect' }, '/tmp/child.jsonl');
     expect(args).toContain('--session');

@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -26,6 +27,35 @@ afterEach(() => {
 });
 
 describe('delegate control inbox', () => {
+  test('derives a stable hosted control path and detaches without unlinking', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-detach-'));
+    roots.push(root);
+    const sessionPath = path.join(root, 'session.jsonl');
+    const processJobId = '123e4567-e89b-42d3-a456-426614174000';
+    const first = createDelegateControlChannel(
+      sessionPath,
+      'owner-session',
+      'background',
+      processJobId,
+    );
+    expect(first.filePath).toBe(
+      `${path.resolve(sessionPath)}.${processJobId}.control`,
+    );
+    expect(first.enqueue('feedback', 'keep this inbox').accepted).toBe(true);
+    expect(existsSync(first.filePath)).toBe(true);
+    first.detach();
+    expect(existsSync(first.filePath)).toBe(true);
+    const reopened = createDelegateControlChannel(
+      sessionPath,
+      'owner-session',
+      'background',
+      processJobId,
+    );
+    expect(reopened.filePath).toBe(first.filePath);
+    reopened.close();
+    expect(existsSync(first.filePath)).toBe(false);
+  });
+
   test('bounds queued feedback and removes the private inbox on close', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-'));
     roots.push(root);

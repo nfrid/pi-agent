@@ -63,11 +63,12 @@ export function createRemoteControlRuntime(
   const socketPath =
     process.env.PI_DASHBOARD_SOCKET ??
     path.join(os.homedir(), '.pi', 'agent', 'dashboard', 'bridge.sock');
+  const managedRuntimeId = process.env.PI_DASHBOARD_RUNTIME_ID?.trim();
+  const externalRuntimeId =
+    process.env.PI_DASHBOARD_EXTERNAL_RUNTIME_ID?.trim();
   const runtimeId =
-    process.env.PI_DASHBOARD_RUNTIME_ID || `runtime-${randomUUID()}`;
-  const ownership = process.env.PI_DASHBOARD_RUNTIME_ID
-    ? 'managed'
-    : 'external';
+    managedRuntimeId || externalRuntimeId || `runtime-${randomUUID()}`;
+  const ownership = managedRuntimeId ? 'managed' : 'external';
   let scopedServices: ScopedServices = getScopedServices();
   let liveSurfaceHub = scopedServices.liveSurfaceHub;
   const eventNormalizer = new LiveEventNormalizer();

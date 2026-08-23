@@ -1074,6 +1074,7 @@ export class DelegateWorkflowCoordinator {
   async cancel(
     references: string | readonly string[],
     waitForPreparation = true,
+    detachHosted = false,
   ): Promise<DelegateWorkflowAttemptSnapshot[]> {
     const requested =
       typeof references === 'string' ? [references] : references;
@@ -1127,7 +1128,11 @@ export class DelegateWorkflowCoordinator {
     await Promise.all([
       ...active
         .filter((record) => record.jobId !== undefined)
-        .map((record) => this.cancelStartedJob(record)),
+        .map((record) =>
+          detachHosted
+            ? this.detachStartedJob(record)
+            : this.cancelStartedJob(record),
+        ),
       ...waitingForLaunch,
       ...preparing,
       ...localRecords.map((record) => this.discardPrepared(record)),
@@ -1153,7 +1158,7 @@ export class DelegateWorkflowCoordinator {
     const identities = this.list()
       .filter((attempt) => !this.importedRecordIdentities.has(attempt.identity))
       .map((attempt) => attempt.identity);
-    await this.cancel(identities, true);
+    await this.cancel(identities, true, true);
     if (this.ownsJobs) await this.jobs.dispose();
     for (const detach of this.importedSourceDetachers.values()) detach();
     this.importedSourceDetachers.clear();
@@ -1563,6 +1568,21 @@ export class DelegateWorkflowCoordinator {
   private waitForCancellation(record: WorkflowRecord): Promise<void> {
     if (isTerminalWorkflowAttemptState(record.state)) return Promise.resolve();
     return new Promise((resolve) => record.cancellationWaiters.push(resolve));
+  }
+
+  private detachStartedJob(record: WorkflowRecord): Promise<void> {
+    if (record.cancellationInFlight) return record.cancellationInFlight;
+    const jobId = record.jobId;
+    if (!jobId) return this.waitForCancellation(record);
+    const work = (async () => {
+      try {
+        await this.jobs.detach([jobId]);
+      } finally {
+        this.resolveCancellationWaiters(record);
+      }
+    })();
+    record.cancellationInFlight = work;
+    return work;
   }
 
   private cancelStartedJob(record: WorkflowRecord): Promise<void> {
