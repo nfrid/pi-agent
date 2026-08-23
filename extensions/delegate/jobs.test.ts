@@ -374,6 +374,31 @@ describe('DelegateJobManager', () => {
     await manager.dispose();
   });
 
+  test('detaches hosted jobs during manager teardown without terminal delivery', async () => {
+    const onSettled = vi.fn();
+    const onTerminal = vi.fn();
+    const manager = new DelegateJobManager({ onSettled });
+    const started = manager.start({
+      mode: 'single',
+      tasks: ['hosted wait'],
+      detachOnTeardown: true,
+      onTerminal,
+      execute: (_signal, detachSignal) =>
+        new Promise<DelegateJobResult>((_resolve, reject) => {
+          detachSignal?.addEventListener(
+            'abort',
+            () => reject(detachSignal.reason),
+            { once: true },
+          );
+        }),
+    });
+
+    await manager.dispose();
+    expect(started.state).toBe('running');
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(onTerminal).not.toHaveBeenCalled();
+  });
+
   test('cancels with a manager-owned abort signal', async () => {
     const onSettled = vi.fn();
     const manager = new DelegateJobManager({ onSettled });

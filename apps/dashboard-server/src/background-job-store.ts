@@ -218,6 +218,9 @@ function snapshot(row: Record<string, unknown>): BackgroundJobStoreRow {
     ...(numberValue(row.events_enabled) === undefined
       ? {}
       : { events: numberValue(row.events_enabled) === 1 }),
+    ...(numberValue(row.exact_env) === undefined
+      ? {}
+      : { exactEnv: numberValue(row.exact_env) === 1 }),
     ...(numberValue(row.timed_out) === 1 ? { timedOut: true } : {}),
     pid: nullableNumber(row.pid),
     status: String(row.status) as BackgroundJobStatus,
@@ -262,6 +265,7 @@ export class BackgroundJobStore {
         cwd TEXT NOT NULL,
         timeout_ms INTEGER,
         events_enabled INTEGER,
+        exact_env INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         settled_at INTEGER,
@@ -285,6 +289,7 @@ export class BackgroundJobStore {
       'ALTER TABLE background_jobs ADD COLUMN completion_delivered INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE background_jobs ADD COLUMN timeout_ms INTEGER',
       'ALTER TABLE background_jobs ADD COLUMN events_enabled INTEGER',
+      'ALTER TABLE background_jobs ADD COLUMN exact_env INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE background_jobs ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0',
     ]) {
       try {
@@ -382,6 +387,8 @@ export class BackgroundJobStore {
         throw new Error('Background job fingerprint cannot be migrated.');
       if (launch.events !== undefined && typeof launch.events !== 'boolean')
         throw new Error('Background job fingerprint cannot be migrated.');
+      if (launch.exactEnv !== undefined && typeof launch.exactEnv !== 'boolean')
+        throw new Error('Background job fingerprint cannot be migrated.');
       const hash = backgroundJobsLaunchFingerprint({
         command: launch.command,
         title: launch.title,
@@ -392,6 +399,7 @@ export class BackgroundJobStore {
           ? {}
           : { timeoutMs: launch.timeoutMs }),
         ...(launch.events === undefined ? {} : { events: launch.events }),
+        ...(launch.exactEnv === true ? { exactEnv: true } : {}),
       });
       this.db
         .prepare('UPDATE background_jobs SET fingerprint = ? WHERE id = ?')
@@ -632,8 +640,8 @@ export class BackgroundJobStore {
     this.db
       .prepare(`
       INSERT INTO background_jobs
-        (id, owner_session, fingerprint, title, command, cwd, timeout_ms, events_enabled, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
+        (id, owner_session, fingerprint, title, command, cwd, timeout_ms, events_enabled, exact_env, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
     `)
       .run(
         input.id,
@@ -644,6 +652,7 @@ export class BackgroundJobStore {
         input.cwd,
         input.timeoutMs ?? null,
         input.events === undefined ? null : input.events ? 1 : 0,
+        input.exactEnv ? 1 : 0,
         createdAt,
       );
     this.protectFiles();

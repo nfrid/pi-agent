@@ -407,6 +407,8 @@ export async function runPreparedDelegateTask(
     | 'onUpdate'
     | 'onRunUpdate'
     | 'mode'
+    | 'hosted'
+    | 'detachSignal'
   > & {
     control?: RunDelegateOptions['control'];
     onWorktreeRunning?: (worktree: PreparedWorktree) => void;
@@ -444,6 +446,8 @@ export async function runPreparedDelegateTask(
     timeoutMs: options.timeoutMs,
     maxConcurrency: options.maxConcurrency,
     signal: options.signal,
+    detachSignal: options.detachSignal,
+    hosted: options.hosted,
     control: options.control,
     onUpdate: options.onUpdate,
     onRunUpdate: options.onRunUpdate,

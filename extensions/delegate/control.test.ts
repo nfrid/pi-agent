@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -26,6 +27,48 @@ afterEach(() => {
 });
 
 describe('delegate control inbox', () => {
+  test('derives a stable hosted control path and detaches without unlinking', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-detach-'));
+    roots.push(root);
+    const sessionPath = path.join(root, 'session.jsonl');
+    const processJobId = '123e4567-e89b-42d3-a456-426614174000';
+    const first = createDelegateControlChannel(
+      sessionPath,
+      'owner-session',
+      'background',
+      processJobId,
+    );
+    expect(first.filePath).toBe(
+      `${path.resolve(sessionPath)}.${processJobId}.control`,
+    );
+    expect(first.enqueue('feedback', 'keep this inbox').accepted).toBe(true);
+    expect(existsSync(first.filePath)).toBe(true);
+    first.detach();
+    expect(existsSync(first.filePath)).toBe(true);
+    const reopened = createDelegateControlChannel(
+      sessionPath,
+      'owner-session',
+      'background',
+      processJobId,
+    );
+    expect(reopened.filePath).toBe(first.filePath);
+    reopened.close();
+    expect(existsSync(first.filePath)).toBe(false);
+  });
+
+  test('rejects a supplied non-UUID hosted control ID instead of using a legacy path', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-invalid-'));
+    roots.push(root);
+    expect(() =>
+      createDelegateControlChannel(
+        path.join(root, 'session.jsonl'),
+        'owner-session',
+        'background',
+        'pid-42',
+      ),
+    ).toThrow('Hosted delegate control path inputs are invalid');
+  });
+
   test('bounds queued feedback and removes the private inbox on close', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-'));
     roots.push(root);
@@ -186,6 +229,26 @@ describe('delegate control inbox', () => {
       expect.stringContaining('checkpoint-1'),
     );
     expect(pi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('child session shutdown removes a detached control file idempotently', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-shutdown-'));
+    roots.push(root);
+    const filePath = path.join(root, 'control.jsonl');
+    writeFileSync(filePath, 'retained while child is live\n', 'utf8');
+    const handlers = new Map<string, () => unknown>();
+    const pi = {
+      on(event: string, handler: () => unknown) {
+        handlers.set(event, handler);
+      },
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+
+    registerDelegateControl(pi, filePath);
+    expect(existsSync(filePath)).toBe(true);
+    handlers.get('session_shutdown')?.();
+    handlers.get('session_shutdown')?.();
+    expect(existsSync(filePath)).toBe(false);
   });
 
   test('retries accepted feedback after sendMessage throws', () => {

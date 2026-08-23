@@ -646,6 +646,7 @@ export function registerDelegateTool(
             item.session.filePath,
             launchSessionId,
             'background',
+            item.runId,
           );
           const statusId = statusIds?.[index];
           if (statusId) control.bindStatusId(statusId);
@@ -668,13 +669,16 @@ export function registerDelegateTool(
                 route: item.plan.routing?.route,
                 allowWrites: item.allowWrites,
                 feedback: (message) => control.enqueue('feedback', message),
-                execute: async (jobSignal) => {
+                detachOnTeardown: true,
+                execute: async (jobSignal, detachSignal) => {
                   try {
                     const runs = await runPreparedDelegateExecution(
                       { ...runCtx, signal: jobSignal },
                       { mode: 'single', tasks: [item] },
                       {
                         control,
+                        hosted: true,
+                        detachSignal,
                         onRunUpdate: (run) => {
                           if (statusIds?.[index])
                             activeStatuses?.update(statusIds[index], run);
@@ -684,13 +688,15 @@ export function registerDelegateTool(
                     // The child is settled before owner-session artifact
                     // materialization; reject feedback during that recovery
                     // window rather than reporting it as delivered.
-                    control.close();
+                    if (detachSignal?.aborted) control.detach();
+                    else control.close();
                     const run = runs[0];
                     if (run && statusIds?.[index])
                       activeStatuses?.update(statusIds[index], run);
                     return materializeHandoff(ctx, runs, statusIds?.[index]);
                   } finally {
-                    control.close();
+                    if (detachSignal?.aborted) control.detach();
+                    else control.close();
                   }
                 },
                 materialize: (materializeCtx, runs) =>

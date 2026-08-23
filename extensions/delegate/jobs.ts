@@ -89,7 +89,13 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
   controller: AbortController;
-  execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
+  detachController: AbortController;
+  detached: boolean;
+  detachOnTeardown: boolean;
+  execute: (
+    signal: AbortSignal,
+    detachSignal?: AbortSignal,
+  ) => Promise<DelegateJobResult>;
   materialize?: DelegateJobMaterializer;
   onTerminal?: (
     result: DelegateJobResult,
@@ -118,7 +124,12 @@ export interface DelegateJobStartOptions {
   ownerBranchId?: string;
   mode: DelegateDetails['mode'];
   tasks: string[];
-  execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
+  execute: (
+    signal: AbortSignal,
+    detachSignal?: AbortSignal,
+  ) => Promise<DelegateJobResult>;
+  /** Hosted process jobs survive parent teardown; cancellation still stops them. */
+  detachOnTeardown?: boolean;
   materialize?: DelegateJobMaterializer;
   /** Unconditional terminal notification, including settlement observed by peek. */
   onTerminal?: (
@@ -167,9 +178,16 @@ export class DelegateJobManager {
       capacityError: `At most ${MAX_DELEGATE_JOBS} background delegate jobs may run at once.`,
       disposedError: 'Delegate job manager is shutting down.',
       teardown: async (record) => {
-        record.controller.abort(
-          new Error('Delegate session is shutting down.'),
-        );
+        if (record.detachOnTeardown) {
+          record.detached = true;
+          record.detachController.abort(
+            new Error('Delegate session detached from its hosted job.'),
+          );
+        } else {
+          record.controller.abort(
+            new Error('Delegate session is shutting down.'),
+          );
+        }
         await record.settled;
       },
       scopeId: options.scopeId,
@@ -207,6 +225,9 @@ export class DelegateJobManager {
         workflowAttempt,
         feedback: item.feedback,
         controller: new AbortController(),
+        detachController: new AbortController(),
+        detached: false,
+        detachOnTeardown: item.detachOnTeardown === true,
         execute: item.execute,
         materialize: item.materialize,
         onTerminal: item.onTerminal,
@@ -303,6 +324,39 @@ export class DelegateJobManager {
     };
   }
 
+  async detach(
+    ids: readonly string[],
+    signal?: AbortSignal,
+    ctx?: ExtensionContext,
+  ): Promise<DelegateJobSnapshot[]> {
+    const records = [...new Set(ids)].map((id) => this.registry.require(id));
+    return this.registry.observing(
+      records,
+      async () => {
+        for (const record of records) {
+          if (!this.registryActive(record)) continue;
+          if (record.detachOnTeardown) {
+            record.detached = true;
+            record.detachController.abort(
+              new Error('Delegate job detached from its parent session.'),
+            );
+          } else {
+            // Legacy/in-process records retain their original teardown
+            // cancellation semantics; only hosted records detach.
+            record.controller.abort(
+              new Error('Delegate job was cancelled during teardown.'),
+            );
+          }
+        }
+        await Promise.all(records.map((record) => record.settled));
+        return records.map((record) =>
+          this.visibleSnapshot(snapshot(record), ctx),
+        );
+      },
+      signal,
+    );
+  }
+
   async cancel(
     ids: readonly string[],
     signal?: AbortSignal,
@@ -375,7 +429,10 @@ export class DelegateJobManager {
     let state: DelegateJobState;
     let result: DelegateJobResult;
     try {
-      result = await record.execute(record.controller.signal);
+      result = await record.execute(
+        record.controller.signal,
+        record.detachController.signal,
+      );
       record.runs = result.retainedRuns ?? result.runs;
       record.snapshotRuns =
         result.retainedRuns && result.retainedRuns !== result.runs
@@ -384,6 +441,12 @@ export class DelegateJobManager {
       record.handoff = result.handoff;
       state = aggregateState(result.runs, record.controller.signal.aborted);
     } catch (error) {
+      if (record.detached) {
+        result = { runs: [], handoff: '' };
+        state = 'aborted';
+        this.registry.settle(record, state);
+        return;
+      }
       state = record.controller.signal.aborted ? 'aborted' : 'error';
       const runs = (record.tasks.length > 0 ? record.tasks : [record.name]).map(
         (task) =>
@@ -412,7 +475,7 @@ export class DelegateJobManager {
     const settled = this.registry.settle(record, state);
     // Unlike registry.onSettled, this is per-job and deliberately ignores
     // observer count so a waiting peek cannot suppress workflow readiness.
-    record.onTerminal?.(result, settled);
+    if (!record.detached) record.onTerminal?.(result, settled);
   }
 }
 

@@ -749,6 +749,31 @@ describe('remote event normalization', () => {
 });
 
 describe('Pi 0.84 runtime catalogues', () => {
+  it('derives stable external ownership without requiring a managed launch token', () => {
+    const previousManaged = process.env.PI_DASHBOARD_RUNTIME_ID;
+    const previousExternal = process.env.PI_DASHBOARD_EXTERNAL_RUNTIME_ID;
+    try {
+      delete process.env.PI_DASHBOARD_RUNTIME_ID;
+      process.env.PI_DASHBOARD_EXTERNAL_RUNTIME_ID = 'host-job-runtime';
+      const external = createRemoteControlRuntime({} as ExtensionAPI);
+      expect(external?.runtimeId).toBe('host-job-runtime');
+      expect(external?.snapshot()).toMatchObject({ ownership: 'external' });
+
+      process.env.PI_DASHBOARD_RUNTIME_ID = 'managed-runtime';
+      process.env.PI_DASHBOARD_EXTERNAL_RUNTIME_ID = 'ignored-external';
+      const managed = createRemoteControlRuntime({} as ExtensionAPI);
+      expect(managed?.runtimeId).toBe('managed-runtime');
+      expect(managed?.snapshot()).toMatchObject({ ownership: 'managed' });
+    } finally {
+      if (previousManaged === undefined)
+        delete process.env.PI_DASHBOARD_RUNTIME_ID;
+      else process.env.PI_DASHBOARD_RUNTIME_ID = previousManaged;
+      if (previousExternal === undefined)
+        delete process.env.PI_DASHBOARD_EXTERNAL_RUNTIME_ID;
+      else process.env.PI_DASHBOARD_EXTERNAL_RUNTIME_ID = previousExternal;
+    }
+  });
+
   it('advertises supported builtins and prompt/skill commands but not extensions', () => {
     const commands = composerCommandsSnapshot({
       getCommands: () => [

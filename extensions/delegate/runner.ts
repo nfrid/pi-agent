@@ -8,6 +8,7 @@ import {
 import {
   checkpointLeadMs,
   PROGRESS_UPDATE_INTERVAL_MS,
+  runHostedDelegateChild,
   spawnDelegateChild,
 } from './delegate-child';
 import {
@@ -35,6 +36,10 @@ import { type PreparedWorktree, worktreeSummary } from './worktree';
 const READ_ONLY_TOOLS = 'read,bash,grep,find,ls';
 const WRITE_TOOLS = 'read,edit,write,bash,grep,find,ls';
 const DELEGATE_EXTENSION = path.resolve(__dirname, 'index.ts');
+const REMOTE_CONTROL_EXTENSION = path.resolve(
+  __dirname,
+  '../remote-control/index.ts',
+);
 const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
@@ -112,6 +117,10 @@ export interface RunDelegateOptions {
   maxConcurrency: number;
   killGraceMs?: number;
   signal?: AbortSignal;
+  /** Manager teardown detaches a hosted process instead of stopping it. */
+  detachSignal?: AbortSignal;
+  /** Use the durable process host rather than the direct foreground spawn. */
+  hosted?: boolean;
   /** Parent-side inbox used for bounded feedback and checkpoint requests. */
   control?: DelegateControlChannel;
   onUpdate?: OnUpdate;
@@ -131,7 +140,7 @@ export function buildChildArgs(
     | 'handoffText'
     | 'scope'
     | 'resuming'
-  > & { timeoutMs?: number },
+  > & { timeoutMs?: number; hosted?: boolean },
   sessionPath: string,
 ): string[] {
   const allowWrites = options.allowWrites === true;
@@ -146,6 +155,7 @@ export function buildChildArgs(
     '--no-extensions',
     '--extension',
     DELEGATE_EXTENSION,
+    ...(options.hosted ? ['--extension', REMOTE_CONTROL_EXTENSION] : []),
     '--extension',
     SYSTEM_PROMPT_EXTENSION,
     '--extension',
@@ -176,6 +186,18 @@ export function buildChildArgs(
     }),
   );
   return args;
+}
+
+export class DetachedDelegateError extends Error {
+  constructor() {
+    super('Hosted delegate was detached from its parent session.');
+    this.name = 'DetachedDelegateError';
+  }
+}
+
+function boundedDisplayTitle(name: string | undefined): string {
+  const title = `Delegate: ${name?.trim() || 'Subagent'}`;
+  return title.length <= 240 ? title : `${title.slice(0, 239)}…`;
 }
 
 export async function runDelegate(
@@ -231,12 +253,23 @@ export async function runDelegate(
     emitUpdate();
     const { command, prefixArgs } = resolvePiSpawn();
     const args = buildChildArgs(options, options.sessionPath);
+    const dashboardEnv = options.hosted
+      ? Object.fromEntries(
+          ['PI_DASHBOARD_SOCKET', 'PI_DASHBOARD_STATE_DIR']
+            .filter((key) => process.env[key] !== undefined)
+            .map((key) => [key, process.env[key] as string]),
+        )
+      : {};
     const spawnTarget = {
       command,
       args: [...prefixArgs, ...args],
       cwd: options.cwd,
       env: {
         ...(options.worktree?.env ?? {}),
+        ...dashboardEnv,
+        ...(options.hosted
+          ? { PI_DASHBOARD_EXTERNAL_RUNTIME_ID: run.runId }
+          : {}),
         PI_DELEGATE_CONTROL_FILE: control.filePath,
       },
     };
@@ -251,8 +284,12 @@ export async function runDelegate(
         kind as import('./control').DelegateControlKind,
         generation,
       );
-    const childResult = await spawnDelegateChild(run, {
+    const childRunner = options.hosted
+      ? runHostedDelegateChild
+      : spawnDelegateChild;
+    const childResult = await childRunner(run, {
       command: spawnTarget.command,
+      title: boundedDisplayTitle(options.name),
       args: spawnTarget.args,
       cwd: spawnTarget.cwd,
       env: spawnTarget.env,
@@ -260,6 +297,9 @@ export async function runDelegate(
       checkpointLeadMs: checkpointLeadMs(options.timeoutMs),
       killGraceMs: options.killGraceMs,
       signal: options.signal,
+      detachSignal: options.detachSignal,
+      processJobId: run.runId,
+      ownerSession: options.ownerSessionId,
       onCheckpoint: () => {
         const requestedAt = Date.now();
         const queued = control.enqueue(
@@ -276,7 +316,15 @@ export async function runDelegate(
       onLine: emitUpdate,
     });
 
-    const { exitCode, wasAborted, timedOut, spawnError } = childResult;
+    if (childResult.detached) throw new DetachedDelegateError();
+    const { exitCode, wasAborted, timedOut, spawnError, hostError } =
+      childResult;
+    const lifecycleStderr = [
+      hostError ? `Process-host terminal error: ${hostError}` : '',
+      run.stderr,
+    ]
+      .filter(Boolean)
+      .join('\n');
     run.exitCode = exitCode;
     if (spawnError) {
       run.stopReason = 'error';
@@ -317,7 +365,7 @@ export async function runDelegate(
         buildLifecycleDiagnostic(
           'child-nonzero-exit',
           run.errorMessage,
-          run.stderr,
+          lifecycleStderr,
         ),
       );
     }
@@ -337,11 +385,16 @@ export async function runDelegate(
         setDelegateLifecycleText(
           run,
           'unknown',
-          buildLifecycleDiagnostic('unknown', run.errorMessage, run.stderr),
+          buildLifecycleDiagnostic(
+            'unknown',
+            run.errorMessage,
+            lifecycleStderr,
+          ),
         );
       }
     }
   } catch (error) {
+    if (error instanceof DetachedDelegateError) throw error;
     const aborted = options.signal?.aborted ?? false;
     const queued = run.state === 'queued';
     run.exitCode = aborted ? 130 : 1;
@@ -365,11 +418,15 @@ export async function runDelegate(
     run.state = aborted ? 'aborted' : 'error';
   } finally {
     if (updateTimer) clearInterval(updateTimer);
-    run.finishedAt = Date.now();
-    emitUpdate();
+    const detached = options.detachSignal?.aborted === true;
+    if (!detached) {
+      run.finishedAt = Date.now();
+      emitUpdate();
+    }
     releaseSlot?.();
     releaseSession?.();
-    control.close();
+    if (detached) control.detach();
+    else control.close();
   }
   return run;
 }

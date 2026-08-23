@@ -130,6 +130,11 @@ export interface BackgroundJobEventsSnapshot {
   readonly nextOffset: number;
 }
 
+export interface BackgroundJobsCapabilities {
+  /** Whether start exactEnv replaces the host environment. */
+  readonly exactEnv?: boolean;
+}
+
 export interface BackgroundJobSnapshot {
   readonly id: string;
   readonly ownerSession: string;
@@ -146,6 +151,8 @@ export interface BackgroundJobSnapshot {
   readonly signal?: string;
   readonly error?: string;
   readonly timedOut?: boolean;
+  /** Whether this job replaced the host environment rather than inheriting it. */
+  readonly exactEnv?: boolean;
   /** Host-persisted notification acknowledgement used across manager recreation. */
   readonly completionDelivered?: boolean;
   readonly stdout: OutputSnapshot;
@@ -155,7 +162,14 @@ export interface BackgroundJobSnapshot {
 export function backgroundJobsLaunchFingerprint(
   input: Pick<
     StartBackgroundJobInput,
-    'command' | 'title' | 'cwd' | 'argv' | 'env' | 'timeoutMs' | 'events'
+    | 'command'
+    | 'title'
+    | 'cwd'
+    | 'argv'
+    | 'env'
+    | 'timeoutMs'
+    | 'events'
+    | 'exactEnv'
   >,
 ): string {
   return createHash('sha256')
@@ -175,6 +189,7 @@ export function backgroundJobsLaunchFingerprint(
               ),
         timeoutMs: input.timeoutMs ?? null,
         events: input.events === true,
+        ...(input.exactEnv === true ? { exactEnv: true } : {}),
       }),
     )
     .digest('hex');
@@ -191,9 +206,12 @@ export interface StartBackgroundJobInput {
   readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
   readonly events?: boolean;
+  /** Replace the host environment instead of inheriting it. */
+  readonly exactEnv?: boolean;
 }
 
 type BackgroundJobsRequest =
+  | { v: 1; op: 'info' }
   | { v: 1; op: 'start'; input: StartBackgroundJobInput }
   | { v: 1; op: 'list'; ownerSession: string }
   | { v: 1; op: 'inspect'; ownerSession: string; id: string }
@@ -203,6 +221,7 @@ type BackgroundJobsRequest =
   | { v: 1; op: 'events'; ownerSession: string; id: string; offset: number };
 
 export type BackgroundJobsRequestPayload =
+  | { op: 'info' }
   | { op: 'start'; input: StartBackgroundJobInput }
   | { op: 'list'; ownerSession: string }
   | { op: 'inspect'; ownerSession: string; id: string }
@@ -216,6 +235,7 @@ export type BackgroundJobsResponse = {
   ok: boolean;
   error?: string;
   code?: string;
+  capabilities?: BackgroundJobsCapabilities;
   job?: BackgroundJobSnapshot;
   jobs?: BackgroundJobSnapshot[];
   events?: BackgroundJobEventsSnapshot;
@@ -329,6 +349,13 @@ function parseEvents(value: unknown): boolean | undefined {
   return value;
 }
 
+function parseExactEnv(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean')
+    throw new Error('Invalid exact environment option.');
+  return value;
+}
+
 export function parseBackgroundJobsRequest(
   value: unknown,
 ): BackgroundJobsRequest {
@@ -339,12 +366,15 @@ export function parseBackgroundJobsRequest(
   )
     throw new Error('Invalid background-jobs request.');
   switch (value.op) {
+    case 'info':
+      return { v: 1, op: 'info' };
     case 'start': {
       if (!record(value.input)) throw new Error('Invalid start input.');
       const argv = parseArgv(value.input.argv);
       const env = parseBackgroundJobsEnv(value.input.env);
       const timeoutMs = parseTimeout(value.input.timeoutMs);
       const events = parseEvents(value.input.events);
+      const exactEnv = parseExactEnv(value.input.exactEnv);
       return {
         v: 1,
         op: 'start',
@@ -366,6 +396,7 @@ export function parseBackgroundJobsRequest(
           ...(env === undefined ? {} : { env }),
           ...(timeoutMs === undefined ? {} : { timeoutMs }),
           ...(events === undefined ? {} : { events }),
+          ...(exactEnv === undefined ? {} : { exactEnv }),
         },
       };
     }
@@ -512,10 +543,21 @@ function parseEventsSnapshot(value: unknown): BackgroundJobEventsSnapshot {
   };
 }
 
+function parseCapabilities(value: unknown): BackgroundJobsCapabilities {
+  if (!record(value)) throw new Error('Invalid background-jobs capabilities.');
+  if (value.exactEnv !== undefined && typeof value.exactEnv !== 'boolean')
+    throw new Error('Invalid exact environment capability.');
+  return {
+    ...(value.exactEnv === undefined ? {} : { exactEnv: value.exactEnv }),
+  };
+}
+
 function parseSnapshot(value: unknown): BackgroundJobSnapshot {
   if (!record(value)) throw new Error('Invalid background job snapshot.');
   if (value.env !== undefined || value.argv !== undefined)
     throw new Error('Background job snapshot exposed launch secrets.');
+  if (value.exactEnv !== undefined && typeof value.exactEnv !== 'boolean')
+    throw new Error('Invalid exact environment mode.');
   if (value.timedOut !== undefined && typeof value.timedOut !== 'boolean')
     throw new Error('Invalid timeout fact.');
   const status = value.status;
@@ -541,6 +583,7 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
     ...(value.events === undefined
       ? {}
       : { events: parseEvents(value.events) }),
+    ...(value.exactEnv === undefined ? {} : { exactEnv: value.exactEnv }),
     ...(typeof value.pid === 'number' ? { pid: value.pid } : {}),
     status,
     createdAt,
@@ -566,6 +609,8 @@ export function parseBackgroundJobsResponse(
 ): BackgroundJobsResponse {
   if (!record(value) || value.v !== 1 || typeof value.ok !== 'boolean')
     throw new Error('Invalid background-jobs response.');
+  if (value.ok && value.capabilities !== undefined)
+    parseCapabilities(value.capabilities);
   if (value.ok && value.job !== undefined) parseSnapshot(value.job);
   if (value.ok && value.jobs !== undefined) {
     if (!Array.isArray(value.jobs))
@@ -661,6 +706,11 @@ export class BackgroundJobsClient {
     });
   }
 
+  info(): Promise<BackgroundJobsCapabilities> {
+    return this.request({ op: 'info' }).then(
+      (response) => response.capabilities ?? {},
+    );
+  }
   start(
     input: Omit<StartBackgroundJobInput, 'ownerSession'>,
   ): Promise<BackgroundJobSnapshot> {

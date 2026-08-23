@@ -11,7 +11,7 @@ import {
   buildDelegatePlans,
   resolveDelegateHandoffs,
 } from './plans';
-import { mapWithConcurrency } from './runner';
+import { DetachedDelegateError, mapWithConcurrency } from './runner';
 
 import {
   cleanupFreshPreparedTask,
@@ -213,6 +213,8 @@ type RunHooks = {
     import('./runner').RunDelegateOptions['control']
   >[];
   onWorktreeRunning?: (worktree: PreparedWorktree) => void;
+  hosted?: boolean;
+  detachSignal?: AbortSignal;
 };
 
 function errorText(error: unknown): string {
@@ -297,6 +299,8 @@ async function runPreparedWithLifecycle(
       timeoutMs: config.timeoutMs,
       maxConcurrency: config.maxConcurrency,
       signal,
+      detachSignal: hooks.detachSignal,
+      hosted: hooks.hosted,
       ownerSessionId: launchSessionId,
       control: hooks.control,
       onUpdate: hooks.onUpdate,
@@ -308,6 +312,7 @@ async function runPreparedWithLifecycle(
       },
     });
   } catch (error) {
+    if (error instanceof DetachedDelegateError) throw error;
     const cleanup = await cleanupFailedLaunch(prepared, markedRunning);
     const failed = failedLifecycleRun(
       prepared.plan.task,
@@ -467,6 +472,8 @@ export async function runPreparedDelegateExecution(
       async (item, index) => {
         const run = await runPreparedWithLifecycle(runCtx, item, 'parallel', {
           control: hooks.controls?.[index],
+          hosted: hooks.hosted,
+          detachSignal: hooks.detachSignal,
           onRunUpdate: (current) => {
             liveRuns[index] = current;
             hooks.onRunUpdate?.(current, index);
@@ -604,6 +611,7 @@ export async function prepareDelegateWorkflowLaunch(
       prepared.session.filePath,
       ownerSessionId,
       'background',
+      prepared.runId,
     );
   } catch (error) {
     await rollbackPreparedDelegateTasks([prepared]);
@@ -635,25 +643,30 @@ export async function prepareDelegateWorkflowLaunch(
       ownerBranchId: launchBranchId,
       mode: 'single',
       tasks: [finalPlan.task],
+      detachOnTeardown: true,
       route: finalPlan.routing?.route,
       allowWrites: prepared.allowWrites,
       feedback: (message) => control.enqueue('feedback', message),
-      execute: async (signal) => {
+      execute: async (signal, detachSignal) => {
         try {
           const runs = await runPreparedDelegateExecution(
             { ...runCtx, signal },
             { mode: 'single', tasks: [prepared] },
             {
               control,
+              hosted: true,
+              detachSignal,
               onRunUpdate: (run) => hooks.onRunUpdate?.(run),
             },
           );
           const finalRun = runs[0];
           if (finalRun) hooks.onRunUpdate?.(finalRun);
-          control.close();
+          if (detachSignal?.aborted) control.detach();
+          else control.close();
           return await materialize(runCtx.ctx, runs);
         } finally {
-          control.close();
+          if (detachSignal?.aborted) control.detach();
+          else control.close();
         }
       },
       materialize,

@@ -66,6 +66,7 @@ type JobResponse = {
   ok: boolean;
   error?: string;
   code?: string;
+  capabilities?: { exactEnv: boolean };
   job?: BackgroundJobSnapshot;
   jobs?: BackgroundJobSnapshot[];
   events?: BackgroundJobEventsSnapshot;
@@ -264,6 +265,8 @@ export class BackgroundJobHostService {
     request: ReturnType<typeof parseBackgroundJobsRequest>,
   ): Promise<JobResponse> {
     switch (request.op) {
+      case 'info':
+        return { v: 1, ok: true, capabilities: { exactEnv: true } };
       case 'start': {
         const job = await this.start(request.input);
         return { v: 1, ok: true, job: snapshot(job) };
@@ -359,7 +362,9 @@ export class BackgroundJobHostService {
             : input.argv;
         child = spawn('/bin/sh', ['-c', watchdog, ...launchArgs], {
           cwd: input.cwd,
-          env: { ...process.env, ...(input.env ?? {}) },
+          env: input.exactEnv
+            ? { ...(input.env ?? {}) }
+            : { ...process.env, ...(input.env ?? {}) },
           detached: process.platform !== 'win32',
           stdio: ['ignore', 'pipe', 'pipe'],
         });

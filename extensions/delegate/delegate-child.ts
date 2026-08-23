@@ -1,6 +1,10 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
+import {
+  type BackgroundJobSnapshot,
+  BackgroundJobsClient,
+} from '@pi-agent/background-jobs';
 import { processJsonLine } from './events';
 import type { DelegatedRun } from './types';
 
@@ -28,6 +32,8 @@ export function appendTail(
 
 export interface SpawnChildOptions {
   command: string;
+  /** Bounded host display title; never contains the task or launch payload. */
+  title?: string;
   args: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -36,6 +42,12 @@ export interface SpawnChildOptions {
   checkpointLeadMs?: number;
   killGraceMs?: number;
   signal?: AbortSignal;
+  /** Parent-manager teardown signal; detaches without stopping a hosted job. */
+  detachSignal?: AbortSignal;
+  /** Stable UUID used as the process-host job ID for hosted runs. */
+  processJobId?: string;
+  /** Parent session owner required by the process host. */
+  ownerSession?: string;
   onCheckpoint?: () => void;
   onControlAck?: (id: string, kind: string, generation?: number) => void;
   onLine: () => void;
@@ -47,6 +59,10 @@ export interface SpawnChildResult {
   timedOut: boolean;
   /** A process-spawn/runner failure, distinct from a child nonzero exit. */
   spawnError?: string;
+  /** Bounded terminal error reported by the durable process host. */
+  hostError?: string;
+  /** Parent manager detached and must not receive a terminal settlement. */
+  detached?: boolean;
 }
 
 /** Resolve the parent home without broadening the child environment allowlist. */
@@ -88,6 +104,233 @@ export function buildDelegateChildEnvironment(
     HOME: effectiveDelegateHome(),
     PI_DELEGATE_CHILD: '1',
   };
+}
+
+function isTerminalHostStatus(
+  status: BackgroundJobSnapshot['status'],
+): boolean {
+  return status !== 'running';
+}
+
+function isCanonicalUuid(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+      value,
+    )
+  );
+}
+
+function hostDiagnostic(run: DelegatedRun, text: string): void {
+  run.stderr = appendTail(run.stderr, `\n${text}\n`, MAX_STDERR_BYTES);
+}
+
+/**
+ * Start a background delegate in the durable process host and replay its event
+ * journal. Host output tails are diagnostics only; transcript state comes from
+ * complete JSON event records passed through the normal parser.
+ */
+export async function runHostedDelegateChild(
+  run: DelegatedRun,
+  options: SpawnChildOptions,
+): Promise<SpawnChildResult> {
+  if (!options.ownerSession || options.processJobId === undefined)
+    throw new Error(
+      'Hosted delegates require an owner session and process job ID.',
+    );
+  if (!isCanonicalUuid(options.processJobId))
+    throw new Error(
+      'Hosted delegates require a canonical UUID process job ID.',
+    );
+  const ownerSession = options.ownerSession;
+  const processJobId = options.processJobId;
+  const client = new BackgroundJobsClient(undefined, ownerSession);
+  let detached = options.detachSignal?.aborted === true;
+  let cancellationRequested = options.signal?.aborted === true;
+  let terminalObserved = false;
+  let stopPromise: Promise<void> | undefined;
+  let started = false;
+  let checkpoint: NodeJS.Timeout | undefined;
+  let final: BackgroundJobSnapshot | undefined;
+  let reportedHostError: string | undefined;
+  let terminalHostError: string | undefined;
+  const observeSnapshot = (snapshot: BackgroundJobSnapshot): void => {
+    final = snapshot;
+    if (
+      isTerminalHostStatus(snapshot.status) &&
+      snapshot.error &&
+      snapshot.error !== reportedHostError
+    ) {
+      reportedHostError = snapshot.error;
+      terminalHostError = appendTail('', snapshot.error, MAX_STDERR_BYTES);
+      hostDiagnostic(run, `Process-host terminal error: ${snapshot.error}`);
+    }
+    if (isTerminalHostStatus(snapshot.status)) terminalObserved = true;
+  };
+  const stopHost = (force = false): void => {
+    if (terminalObserved && !force) return;
+    cancellationRequested = true;
+    if (!started || stopPromise) return;
+    stopPromise = client
+      .stop([processJobId])
+      .then((jobs) => {
+        const stopped = jobs.find((job) => job.id === processJobId);
+        if (stopped) observeSnapshot(stopped);
+      })
+      .catch(() => undefined);
+  };
+  const abortHandler = () => stopHost();
+  const detachHandler = () => {
+    detached = true;
+  };
+  options.signal?.addEventListener('abort', abortHandler, { once: true });
+  options.detachSignal?.addEventListener('abort', detachHandler, {
+    once: true,
+  });
+  try {
+    const capabilities = await client.info();
+    if (capabilities.exactEnv !== true)
+      throw new Error(
+        'Hosted delegates require a process host with exactEnv support.',
+      );
+    const command = await client.start({
+      id: processJobId,
+      command: options.command,
+      title: options.title ?? 'Delegate',
+      cwd: options.cwd,
+      argv: [options.command, ...options.args],
+      env: Object.fromEntries(
+        Object.entries(buildDelegateChildEnvironment(options.env)).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
+      timeoutMs: options.timeoutMs,
+      events: true,
+      exactEnv: true,
+    });
+    started = true;
+    observeSnapshot(command);
+    if (cancellationRequested) stopHost(true);
+    const checkpointLead = Math.min(
+      Math.max(0, options.checkpointLeadMs ?? 0),
+      Math.max(0, options.timeoutMs - 1),
+    );
+    if (checkpointLead > 0) {
+      checkpoint = setTimeout(
+        () => {
+          if (!detached && !cancellationRequested && !terminalObserved) {
+            try {
+              options.onCheckpoint?.();
+            } catch {
+              // Checkpoint delivery is best effort; host timeout remains final.
+            }
+          }
+        },
+        Math.max(1, options.timeoutMs - checkpointLead),
+      );
+      checkpoint.unref();
+    }
+    let offset = 0;
+    let eventsComplete = false;
+    while (!detached) {
+      const eventBatch = await client.events(processJobId, offset);
+      if (eventBatch.truncated) {
+        hostDiagnostic(
+          run,
+          `Process-host event history was truncated before offset ${offset}; missing transcript events were discarded.`,
+        );
+        eventsComplete = eventBatch.complete;
+      }
+      // The host journal is offset ordered; sort defensively before replay so
+      // a malformed adapter response cannot reorder transcript state.
+      for (const event of [...eventBatch.events].sort(
+        (left, right) => left.offset - right.offset,
+      )) {
+        if (event.truncated) {
+          hostDiagnostic(
+            run,
+            `Process-host ${event.stream} event at offset ${event.offset} was truncated and discarded.`,
+          );
+          continue;
+        }
+        const line = event.text;
+        let parsed: Record<string, unknown> | undefined;
+        try {
+          const value: unknown = JSON.parse(line);
+          if (value && typeof value === 'object' && !Array.isArray(value))
+            parsed = value as Record<string, unknown>;
+        } catch {
+          // Non-JSON stderr is retained as bounded diagnostics below.
+        }
+        if (
+          parsed?.type === 'delegate_control_ack' &&
+          typeof parsed.controlId === 'string' &&
+          typeof parsed.controlKind === 'string'
+        ) {
+          options.onControlAck?.(
+            parsed.controlId,
+            parsed.controlKind,
+            typeof parsed.controlGeneration === 'number'
+              ? parsed.controlGeneration
+              : undefined,
+          );
+          processJsonLine(line, run);
+        } else if (!processJsonLine(line, run) && event.stream === 'stderr') {
+          hostDiagnostic(run, line);
+        }
+        options.onLine();
+      }
+      offset = Math.max(offset, eventBatch.nextOffset);
+      eventsComplete = eventsComplete || eventBatch.complete;
+      const inspected = await client.inspect(processJobId);
+      if (inspected) observeSnapshot(inspected);
+      const current = final ?? command;
+      if (isTerminalHostStatus(current.status) && eventsComplete) break;
+      if (isTerminalHostStatus(current.status)) {
+        // Reconcile one more journal read after terminal state; host stdout and
+        // stderr close events can be committed just after the status row.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } else {
+        observeSnapshot(await client.wait(processJobId, 100));
+      }
+    }
+    const detachedResult = (): SpawnChildResult => ({
+      exitCode: -1,
+      wasAborted: false,
+      timedOut: false,
+      detached: true,
+    });
+    if (stopPromise) await stopPromise;
+    if (detached) return detachedResult();
+    const inspected = await client.inspect(processJobId);
+    if (inspected) observeSnapshot(inspected);
+    if (detached) return detachedResult();
+    const settled = final ?? command;
+    if (settled.timedOut)
+      return {
+        exitCode: 124,
+        wasAborted: false,
+        timedOut: true,
+        ...(terminalHostError ? { hostError: terminalHostError } : {}),
+      };
+    if (cancellationRequested)
+      return {
+        exitCode: 130,
+        wasAborted: true,
+        timedOut: false,
+        ...(terminalHostError ? { hostError: terminalHostError } : {}),
+      };
+    return {
+      exitCode: settled.exitCode ?? (settled.status === 'done' ? 0 : 1),
+      wasAborted: false,
+      timedOut: false,
+      ...(terminalHostError ? { hostError: terminalHostError } : {}),
+    };
+  } finally {
+    if (checkpoint) clearTimeout(checkpoint);
+    options.signal?.removeEventListener('abort', abortHandler);
+    options.detachSignal?.removeEventListener('abort', detachHandler);
+  }
 }
 
 /** Spawn a detached Pi child and stream JSON events into the run record. */
