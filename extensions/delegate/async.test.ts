@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -29,7 +30,6 @@ import * as sessionModule from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
 import { createRun, type DelegatedRun } from './types';
-import { WAKE_RELOAD_ORPHAN_REASON } from './wake-coordinator';
 import * as worktreeModule from './worktree';
 
 interface RegisteredTool {
@@ -71,7 +71,7 @@ function prepared(
   token = 'continuation-token',
 ): PreparedDelegateTask {
   return {
-    runId: 'run-test',
+    runId: randomUUID(),
     plan: {
       name: `${task} agent`,
       task,
@@ -1984,12 +1984,9 @@ describe('async delegate extension', () => {
         restored.ctx,
       );
     expect(status?.details).toMatchObject({
-      wake: {
-        state: 'blocked',
-        reason: WAKE_RELOAD_ORPHAN_REASON,
-      },
+      wake: { state: 'queued' },
     });
-    expect(restored.sendMessage).not.toHaveBeenCalled();
+    expect(restored.sendMessage).toHaveBeenCalledOnce();
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
 

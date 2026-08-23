@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -316,7 +317,7 @@ function sameMetadata(
   left: DelegateWorkflowMetadataSnapshot,
   right: DelegateWorkflowMetadataSnapshot,
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return isDeepStrictEqual(left, right);
 }
 
 function isPersisted(
