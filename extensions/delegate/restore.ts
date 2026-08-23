@@ -24,6 +24,7 @@ import type {
   DelegateWorkflowAttemptSnapshot,
   DelegateWorkflowCoordinator,
 } from './workflow-coordinator';
+import { isTerminalWorkflowAttemptState } from './workflow-model';
 import {
   loadWorktree,
   type PreparedWorktree,
@@ -83,6 +84,13 @@ export class RestoreSessionError extends Error {
     super(message);
     this.name = 'RestoreSessionError';
     this.code = code;
+  }
+}
+
+export class RestoreBindingConflictError extends Error {
+  constructor(identity: string) {
+    super(`Workflow attempt "${identity}" is already being restored or bound.`);
+    this.name = 'RestoreBindingConflictError';
   }
 }
 
@@ -243,6 +251,42 @@ function cancelledObservationResult(
   return { runs: [run], handoff: buildParentHandoff([run]) };
 }
 
+function lifecycleFailureResult(
+  label: string,
+  processJobId: string,
+  session: DelegateSession,
+  attempt: DelegateWorkflowAttemptSnapshot['attempt'],
+  worktree: PreparedWorktree | undefined,
+  error: unknown,
+): DelegateJobResult {
+  const run = failedLifecycleRun(
+    label,
+    session.routing,
+    {
+      runId: processJobId,
+      name: session.name ?? label,
+      sessionId: session.sessionId,
+      lineageId: session.lineageId,
+      workflowAttempt: attempt,
+      context: 'continuation',
+      continuation: session.token,
+      allowWrites: session.allowWrites === true,
+      isolation: session.isolation,
+      ...(worktree
+        ? {
+            worktree: worktreeSummary(worktree.record),
+            warnings: [
+              'The restored worktree was retained after lifecycle materialization failed.',
+            ],
+          }
+        : {}),
+    },
+    error,
+    'lifecycle-cleanup-failure',
+  );
+  return { runs: [run], handoff: buildParentHandoff([run]) };
+}
+
 /**
  * Observe one durable hosted delegate without scheduling a new workflow or
  * sending a start request to the process host.
@@ -254,10 +298,18 @@ export function restoreHostedDelegateAttempt(
   const link = options.coordinator
     .listRestorableHostedLinks()
     .find((candidate) => candidate.identity === identity);
-  if (!link)
+  if (!link) {
+    const current = options.coordinator.get(identity);
+    if (
+      current &&
+      !isTerminalWorkflowAttemptState(current.state) &&
+      current.jobId !== undefined
+    )
+      throw new RestoreBindingConflictError(identity);
     throw new Error(
       `Workflow attempt "${identity}" has no valid local nonterminal hosted link.`,
     );
+  }
   const session = resolveTrustedDelegateSession(
     link.sessionId,
     options.parentSessionId,
@@ -360,21 +412,53 @@ export function restoreHostedDelegateAttempt(
       onRunUpdate: dependencies.onRunUpdate,
       mode: 'single',
     };
-    const materializeSynthetic = async (
-      result: DelegateJobResult,
-    ): Promise<DelegateJobResult> => {
+    const notifyRun = (result: DelegateJobResult): void => {
       const run = result.runs[0];
       if (run) dependencies.onRunUpdate?.(run);
-      return materialize(result.runs);
+    };
+    const cancellationResult = (): DelegateJobResult => {
+      const result = cancelledObservationResult(
+        label,
+        link.processJobId,
+        session,
+      );
+      notifyRun(result);
+      return result;
+    };
+    const materializeResult = async (
+      runs: DelegatedRun[],
+    ): Promise<DelegateJobResult> => {
+      if (detachSignal?.aborted) throw new DetachedDelegateError();
+      if (signal.aborted) return cancellationResult();
+      let result: DelegateJobResult;
+      try {
+        result = await materialize(runs);
+      } catch (error) {
+        // An owner artifact/materialization failure is a workflow failure, not
+        // an unreported exception after the status row has already succeeded.
+        if (detachSignal?.aborted) throw new DetachedDelegateError();
+        if (signal.aborted) return cancellationResult();
+        const failure = lifecycleFailureResult(
+          label,
+          link.processJobId,
+          session,
+          link.attempt,
+          worktree,
+          error,
+        );
+        notifyRun(failure);
+        return failure;
+      }
+      if (detachSignal?.aborted) throw new DetachedDelegateError();
+      if (signal.aborted) return cancellationResult();
+      const run = result.runs[0] ?? runs[0];
+      if (run) dependencies.onRunUpdate?.(run);
+      return result;
     };
     const finish = async (run: DelegatedRun): Promise<DelegateJobResult> => {
-      if (run.state === 'aborted' || signal.aborted) {
-        if (signal.aborted && run.state !== 'aborted')
-          return materializeSynthetic(
-            cancelledObservationResult(label, link.processJobId, session),
-          );
-        return materialize([run]);
-      }
+      if (detachSignal?.aborted) throw new DetachedDelegateError();
+      if (signal.aborted) return cancellationResult();
+      if (run.state === 'aborted') return materializeResult([run]);
       if (worktreeError) {
         // Reconciliation was still performed, but an untrusted checkout can
         // never be finalized or treated as a successful recovery.
@@ -385,10 +469,31 @@ export function restoreHostedDelegateAttempt(
           worktreeRecord,
           worktreeError,
         );
-        return materializeSynthetic(recovery);
+        return materializeResult(recovery.runs);
       }
-      if (worktree) await finalize(run, worktree, label);
-      return materialize([run]);
+      if (worktree) {
+        if (detachSignal?.aborted) throw new DetachedDelegateError();
+        if (signal.aborted) return cancellationResult();
+        try {
+          await finalize(run, worktree, label);
+        } catch (error) {
+          if (detachSignal?.aborted) throw new DetachedDelegateError();
+          if (signal.aborted) return cancellationResult();
+          const failure = lifecycleFailureResult(
+            label,
+            link.processJobId,
+            session,
+            link.attempt,
+            worktree,
+            error,
+          );
+          notifyRun(failure);
+          return failure;
+        }
+        if (detachSignal?.aborted) throw new DetachedDelegateError();
+        if (signal.aborted) return cancellationResult();
+      }
+      return materializeResult([run]);
     };
     try {
       let retryCount = 0;
@@ -396,9 +501,7 @@ export function restoreHostedDelegateAttempt(
         if (detachSignal?.aborted) throw new DetachedDelegateError();
         if (signal.aborted) {
           await stopExistingHost(link.processJobId);
-          return materializeSynthetic(
-            cancelledObservationResult(label, link.processJobId, session),
-          );
+          return cancellationResult();
         }
         const run = await observe(runOptions);
         if (!run.retryable) return finish(run);
@@ -411,9 +514,7 @@ export function restoreHostedDelegateAttempt(
         if (outcome === 'detach') throw new DetachedDelegateError();
         if (outcome === 'cancel') {
           await stopExistingHost(link.processJobId);
-          return materializeSynthetic(
-            cancelledObservationResult(label, link.processJobId, session),
-          );
+          return cancellationResult();
         }
       }
     } finally {
@@ -421,8 +522,12 @@ export function restoreHostedDelegateAttempt(
       else control.close();
     }
   };
+  let job: DelegateJobSnapshot | undefined;
+  let claimHeld = false;
   try {
-    const job = options.manager.observeExisting({
+    claimHeld = options.coordinator.claimRestoredHostedJob(identity);
+    if (!claimHeld) throw new RestoreBindingConflictError(identity);
+    job = options.manager.observeExisting({
       name: session.name ?? label,
       ownerSessionId: options.parentSessionId,
       ownerBranchId: link.ownerBranchId,
@@ -443,8 +548,11 @@ export function restoreHostedDelegateAttempt(
         ),
     });
     options.coordinator.bindRestoredHostedJob(identity, job);
+    claimHeld = false;
     return { session, control, job, ...(worktree ? { worktree } : {}) };
   } catch (error) {
+    if (job) void options.manager.cancel([job.id]).catch(() => undefined);
+    if (claimHeld) options.coordinator.releaseRestoredHostedJobClaim(identity);
     control.close();
     throw error;
   }
@@ -493,6 +601,7 @@ export function reconcileRestoredHostedAttempts(
       restored.push(observation);
       options.onRestored?.(observation, link);
     } catch (error) {
+      if (error instanceof RestoreBindingConflictError) continue;
       if (options.isGenerationActive && !options.isGenerationActive()) break;
       const failureState =
         error instanceof RestoreSessionError &&

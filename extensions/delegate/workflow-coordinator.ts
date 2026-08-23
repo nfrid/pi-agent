@@ -664,6 +664,8 @@ export class DelegateWorkflowCoordinator {
   /** Hosted jobs waiting for their queued process link to be durably acknowledged. */
   private readonly pendingHostedLaunches = new Set<AttemptIdentity>();
   private hostedLinkPersistenceAcknowledgement?: DelegateWorkflowHostedLinkPersistenceAcknowledgement;
+  /** Claims an active restored identity before an adapter record is created. */
+  private readonly restoredHostedClaims = new Set<AttemptIdentity>();
 
   constructor(options: DelegateWorkflowCoordinatorOptions = {}) {
     if (
@@ -949,6 +951,36 @@ export class DelegateWorkflowCoordinator {
   }
 
   /**
+   * Claim an active restored identity before starting an adapter observation.
+   * The claim closes the gap between manager start and workflow binding, where
+   * a duplicate reconciliation could otherwise create an orphan observer.
+   */
+  claimRestoredHostedJob(reference: string): boolean {
+    const record = this.requireRecord(reference);
+    if (this.importedRecordIdentities.has(record.attempt.identity))
+      throw new Error('Imported workflow attempts cannot be restored locally.');
+    if (
+      isTerminalWorkflowAttemptState(record.state) ||
+      record.jobId !== undefined ||
+      this.restoredHostedClaims.has(record.attempt.identity)
+    )
+      return false;
+    this.restoredHostedClaims.add(record.attempt.identity);
+    return true;
+  }
+
+  /** Release a claim when adapter creation or binding fails. */
+  releaseRestoredHostedJobClaim(reference: string): void {
+    try {
+      this.restoredHostedClaims.delete(
+        this.requireRecord(reference).attempt.identity,
+      );
+    } catch {
+      // A disposed coordinator has already discarded the claim.
+    }
+  }
+
+  /**
    * Attach an in-memory manager record to this exact workflow identity. This
    * method never launches a workflow or changes the durable process link.
    */
@@ -972,6 +1004,7 @@ export class DelegateWorkflowCoordinator {
         throw new Error(
           `Workflow attempt ${record.attempt.identity} is already bound to delegate job ${record.jobId}.`,
         );
+      this.restoredHostedClaims.delete(record.attempt.identity);
       return this.snapshotRecord(record);
     }
     if (record.state !== 'queued' && record.state !== 'running')
@@ -979,6 +1012,7 @@ export class DelegateWorkflowCoordinator {
         `Only queued or running workflow attempts can be restored (${record.attempt.identity} is ${record.state}).`,
       );
     record.jobId = job.id;
+    this.restoredHostedClaims.delete(record.attempt.identity);
     if (job.state === 'running' && record.state === 'queued') {
       record.startedAt ??= job.startedAt ?? this.now();
       this.transition(record, 'running');
@@ -1006,7 +1040,11 @@ export class DelegateWorkflowCoordinator {
     result: DelegateJobResult,
   ): void {
     const record = this.requireRecord(reference);
-    this.bindRestoredHostedJob(reference, job);
+    // A stale callback must never bind a new job or replace terminal evidence.
+    // Binding is synchronous after observeExisting returns, so a callback with
+    // no matching bound identity belongs to a failed/orphaned observation.
+    if (isTerminalWorkflowAttemptState(record.state) || record.jobId !== job.id)
+      return;
     const key = `${record.attempt.identity}:${job.id}`;
     if (this.restoredTerminalObservations.has(key)) return;
     this.restoredTerminalObservations.add(key);
@@ -1383,6 +1421,7 @@ export class DelegateWorkflowCoordinator {
     this.pendingHostedLaunches.clear();
     this.importedRecordIdentities.clear();
     this.restoredTerminalObservations.clear();
+    this.restoredHostedClaims.clear();
     this.results.clear();
     this.changed();
   }
