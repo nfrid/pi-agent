@@ -99,7 +99,7 @@ describe('live extension surface fixtures', () => {
     expect(releases.get('child-session-2')).toHaveBeenCalledTimes(1);
   });
 
-  it('labels legacy delegate transcript fallback as bounded', () => {
+  it('labels older delegate transcript fallback as limited', () => {
     const markup = renderToStaticMarkup(
       <DelegateInspectorTranscript
         isOpen={false}
@@ -124,7 +124,7 @@ describe('live extension surface fixtures', () => {
       />,
     );
     expect(markup).toContain(
-      'legacy invocation has no canonical child session',
+      'Limited transcript — this older delegate has no child session.',
     );
     expect(markup).toContain('Legacy bounded output');
   });

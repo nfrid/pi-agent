@@ -54,6 +54,19 @@ details.session-event {
 .session-event[open] .session-event-disclosure {
   transform: rotate(90deg);
 }
+.session-event.event-delegate-feedback {
+  display: block;
+  border-left-color: var(--purple);
+  padding: 0;
+  background: color-mix(in srgb, var(--purple-5) 55%, transparent);
+}
+.session-event.event-delegate-feedback .session-event-heading {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+}
 .session-event.event-delegate-result,
 .session-event.event-background-result {
   border-left-color: var(--green);
@@ -133,6 +146,11 @@ details.session-event {
 }
 .session-event-details > .markdown > :last-child {
   margin-bottom: 0;
+}
+.session-event.event-delegate-feedback .session-event-details {
+  max-height: none;
+  padding-left: 27px;
+  color: var(--fg);
 }
 .session-event-tasks {
   display: grid;

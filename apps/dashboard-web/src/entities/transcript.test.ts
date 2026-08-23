@@ -450,6 +450,40 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
+  it('shows hidden delegate feedback without exposing other provider context', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'custom_message',
+        customType: 'delegate-control',
+        display: false,
+        content:
+          'Parent feedback (address this at this checkpoint):\nUse the corrected API.',
+      },
+      {
+        type: 'custom_message',
+        customType: 'delegate-control',
+        display: false,
+        content: 'Malformed hidden delegate context',
+      },
+      {
+        type: 'custom_message',
+        customType: 'extension-context',
+        display: false,
+        content: 'Provider-only context',
+      },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      entry: { kind: 'other', continuesGroup: true },
+      event: {
+        kind: 'delegate-feedback',
+        label: 'Parent feedback',
+        content: 'Use the corrected API.',
+      },
+    });
+  });
+
   it('projects semantic session events and hides extension persistence noise', () => {
     const todo = (status: string) => ({
       type: 'custom',

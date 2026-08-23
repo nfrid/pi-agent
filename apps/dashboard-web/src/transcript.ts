@@ -52,7 +52,7 @@ export type TranscriptEvent =
       thinkingLevel?: string;
     }
   | {
-      kind: 'custom-message';
+      kind: 'custom-message' | 'delegate-feedback';
       label: string;
       content?: string;
       details?: unknown;
@@ -237,6 +237,40 @@ function todoEvent(
     kind: 'todo',
     label: ['Tasks', ...visibleChanges, ...tail].join(' · '),
     tasks,
+  };
+}
+
+function delegateControlEvent(raw: Record<string, unknown>):
+  | {
+      kind: 'delegate-feedback';
+      label: string;
+      content?: string;
+    }
+  | undefined {
+  if (
+    raw.type !== 'custom_message' ||
+    stringField(raw, 'customType') !== 'delegate-control'
+  )
+    return undefined;
+  const rawContent = contentText(raw.content).trim();
+  const feedbackPrefix = 'Parent feedback (address this at this checkpoint):\n';
+  const checkpointPrefix = 'Parent checkpoint request:\n';
+  const hasFeedback = rawContent.includes(feedbackPrefix);
+  const hasCheckpoint = rawContent.includes(checkpointPrefix);
+  if (!hasFeedback && !hasCheckpoint) return undefined;
+  const content = rawContent
+    .replaceAll(feedbackPrefix, '')
+    .replaceAll(checkpointPrefix, '')
+    .trim();
+  return {
+    kind: 'delegate-feedback',
+    label:
+      hasFeedback && hasCheckpoint
+        ? 'Parent guidance'
+        : hasCheckpoint
+          ? 'Parent checkpoint'
+          : 'Parent feedback',
+    ...(content ? { content } : {}),
   };
 }
 
@@ -425,13 +459,13 @@ export function toTranscriptEntries(
         continue;
       }
       if (raw.type === 'custom_message') {
-        const asyncEvent = asyncResultEvent(raw);
-        if (asyncEvent) {
+        const event = delegateControlEvent(raw) ?? asyncResultEvent(raw);
+        if (event) {
           result.push({
             key: item.key,
             entry: { kind: 'other', continuesGroup: true },
             raw: item.raw,
-            event: asyncEvent,
+            event,
           });
           continue;
         }

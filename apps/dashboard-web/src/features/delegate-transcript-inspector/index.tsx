@@ -110,15 +110,24 @@ export function DelegateTranscriptInspector({
           </p>
         )}
         {transcriptSessionId && (
-          <button
-            type="button"
-            className="delegate-open-session"
-            onClick={() =>
-              go(`/sessions/${encodeURIComponent(transcriptSessionId)}`)
-            }
+          <section
+            className="delegate-transcript-source"
+            aria-label="Transcript source"
           >
-            Open as session
-          </button>
+            <span>
+              <strong>Child session transcript</strong>
+              <small>Stored in a child session</small>
+            </span>
+            <button
+              type="button"
+              className="delegate-open-session"
+              onClick={() =>
+                go(`/sessions/${encodeURIComponent(transcriptSessionId)}`)
+              }
+            >
+              Open full session
+            </button>
+          </section>
         )}
         <DelegateInspectorDetails row={displayedRow} now={now} />
         <DelegateInspectorTranscript

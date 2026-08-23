@@ -85,8 +85,8 @@ function DelegateCanonicalTranscript({
         row={fallback}
         reason={
           sync?.status === 'error'
-            ? 'Bounded parent transcript — the canonical child session is unavailable.'
-            : 'Bounded parent transcript — synchronizing the canonical child session.'
+            ? 'Limited transcript — the child session is unavailable.'
+            : 'Limited transcript — connecting to the child session.'
         }
       />
     );
@@ -141,8 +141,8 @@ export function DelegateInspectorTranscript({
       row={row}
       reason={
         row.sessionId
-          ? 'Bounded parent transcript — open the inspector to acquire the canonical child session.'
-          : 'Bounded parent transcript — this legacy invocation has no canonical child session identity.'
+          ? 'Limited transcript — open this delegate to load its child session.'
+          : 'Limited transcript — this older delegate has no child session.'
       }
     />
   );

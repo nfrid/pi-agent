@@ -192,7 +192,7 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   await expect(page.getByText('Inspect the historical fixture')).toBeVisible();
   await expect(
     page.getByText(
-      'Bounded parent transcript — this legacy invocation has no canonical child session identity.',
+      'Limited transcript — this older delegate has no child session.',
     ),
   ).toBeVisible();
   await expect(

@@ -113,15 +113,16 @@
     min-width: 0;
     text-align: left;
   }
-  .delegate-row-status {
-    display: none;
-  }
   .delegate-row-properties {
-    display: block;
     max-width: none;
+    justify-content: flex-start;
   }
-  .delegate-row-mobile-elapsed {
-    display: inline;
+  .delegate-transcript-source {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .delegate-open-session {
+    align-self: flex-start;
   }
   .delegate-row-chevron {
     grid-column: 3;

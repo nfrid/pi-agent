@@ -402,7 +402,6 @@ export function DelegateSurface({
                             <span className="surface-state" aria-hidden="true">
                               {stateGlyph(state)}
                             </span>
-                            <span className="sr-only">{rawState}</span>
                             <span className="delegate-row-main">
                               <span className="delegate-row-name">
                                 <strong>{name}</strong>
@@ -422,7 +421,7 @@ export function DelegateSurface({
                               <span
                                 className={`delegate-row-status ${surfaceStateClass(state)}`}
                               >
-                                {rawState}
+                                {state}
                                 {elapsedText ? ` · ${elapsedText}` : ''}
                               </span>
                               <span className="delegate-row-properties">
@@ -445,12 +444,6 @@ export function DelegateSurface({
                                 {route && (
                                   <span className="delegate-row-route">
                                     {route}
-                                  </span>
-                                )}
-                                {elapsedText && (
-                                  <span className="delegate-row-mobile-elapsed">
-                                    {' · '}
-                                    {elapsedText}
                                   </span>
                                 )}
                               </span>

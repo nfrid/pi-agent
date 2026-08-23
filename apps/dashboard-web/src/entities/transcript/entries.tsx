@@ -56,9 +56,11 @@ function TranscriptEventEntry({
         ? '◆'
         : event.kind === 'settings'
           ? '◈'
-          : failed
-            ? '×'
-            : '✓';
+          : event.kind === 'delegate-feedback'
+            ? '↳'
+            : failed
+              ? '×'
+              : '✓';
   const metric =
     event.kind === 'compaction' && event.tokensBefore !== undefined
       ? `${formatCompactCount(event.tokensBefore)} tokens`
@@ -107,6 +109,17 @@ function TranscriptEventEntry({
       <DashboardTime className="transcript-time" timestamp={timestamp} />
     </>
   );
+  if (event.kind === 'delegate-feedback')
+    return (
+      <div className={className}>
+        <div className="session-event-heading">{heading}</div>
+        {event.content ? (
+          <div className="session-event-details">
+            <Markdown>{event.content}</Markdown>
+          </div>
+        ) : null}
+      </div>
+    );
   return hasDetails ? (
     <details
       className={className}
