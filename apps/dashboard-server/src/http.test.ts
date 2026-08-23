@@ -622,6 +622,40 @@ describe('dashboard HTTP boundary', () => {
     ).resolves.toBe(true);
   });
 
+  it('skips unchanged application catalogue projections', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-catalogue-signature-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-catalogue.sock`,
+      ),
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      application: {
+        shellProjection(): unknown;
+      };
+    };
+    const original = implementation.application.shellProjection.bind(
+      implementation.application,
+    );
+    let projections = 0;
+    implementation.application.shellProjection = () => {
+      projections += 1;
+      return original();
+    };
+
+    server.publishChange({ domain: 'orchestration' });
+
+    expect(projections).toBe(0);
+  });
+
   it('uses one online runtime consistently for session metadata overlays', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-session-overlay-'),

@@ -56,7 +56,14 @@ const children = new Set();
 let stopping = false;
 
 function run(name, args, independent = false) {
-  const child = spawn(pnpm, args, { cwd: root, env, stdio: 'inherit' });
+  const child = spawn(pnpm, args, {
+    cwd: root,
+    env,
+    stdio: 'inherit',
+    // Give each pnpm wrapper and its grandchildren one process group so a
+    // forced launchd restart cannot orphan the actual daemon or preview server.
+    detached: process.platform !== 'win32',
+  });
   children.add(child);
   child.once('exit', (code, signal) => {
     children.delete(child);
@@ -77,12 +84,24 @@ function run(name, args, independent = false) {
   });
 }
 
+function signalChildTree(child, signal) {
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      if (error?.code !== 'ESRCH') throw error;
+    }
+  }
+  child.kill(signal);
+}
+
 function stop(exitCode = 0) {
   if (stopping) return;
   stopping = true;
-  for (const child of children) child.kill('SIGTERM');
+  for (const child of children) signalChildTree(child, 'SIGTERM');
   setTimeout(() => {
-    for (const child of children) child.kill('SIGKILL');
+    for (const child of children) signalChildTree(child, 'SIGKILL');
   }, 2_000).unref();
   process.exitCode = exitCode;
 }
@@ -108,7 +127,7 @@ async function main() {
       `Dashboard environment file not found at ${envFile}; using safe local defaults. Copy .env.dashboard.example to .env.dashboard to customize it.\n`,
     );
 
-  if (mode === 'all' || mode === 'daemon') {
+  if (mode === 'all' || mode === 'daemon' || mode === 'serve') {
     const host = env.PI_DASHBOARD_HOST;
     const port = Number(env.PI_DASHBOARD_PORT);
     if (await endpointInUse({ host, port })) {

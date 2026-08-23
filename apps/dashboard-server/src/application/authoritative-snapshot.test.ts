@@ -47,6 +47,7 @@ async function fixture(
     { type: 'session', id: sessionId, cwd: '/tmp/snapshot' },
   ],
   projectAssociation?: { projectId: string | null; checkoutId: string | null },
+  onProjectResolve?: () => void,
 ): Promise<Fixture> {
   const root = await mkdtemp(
     path.join(os.tmpdir(), 'dashboard-authoritative-'),
@@ -83,7 +84,10 @@ async function fixture(
     ...(projectAssociation
       ? {
           projectResolver: {
-            resolve: () => projectAssociation,
+            resolve: () => {
+              onProjectResolve?.();
+              return projectAssociation;
+            },
           } as never,
         }
       : {}),
@@ -245,6 +249,29 @@ describe('authoritative application snapshot lifecycle', () => {
         checkoutId: checkout.id,
       },
     });
+  });
+
+  it('reuses dormant project associations across shell projections', async () => {
+    let resolutions = 0;
+    const value = await fixture(
+      'cached-project-session',
+      [
+        {
+          type: 'session',
+          id: 'cached-project-session',
+          cwd: '/tmp/snapshot',
+        },
+      ],
+      { projectId: 'project-cached', checkoutId: 'checkout-cached' },
+      () => {
+        resolutions += 1;
+      },
+    );
+
+    value.app.shellProjection();
+    value.app.shellProjection();
+
+    expect(resolutions).toBe(1);
   });
 
   it('can complete a fresh idle registration when its persisted branch is authoritative', async () => {

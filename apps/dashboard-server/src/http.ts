@@ -286,6 +286,8 @@ export class DashboardServerImpl implements DashboardServer {
   private feedSweepTimer: NodeJS.Timeout | undefined;
   /** Last concrete shell state sent for each independently coalesced patch. */
   private readonly shellPatchSignatures = new Map<string, string>();
+  /** Session-free source state used to skip unchanged catalogue projections. */
+  private applicationDomainSignature: string | undefined;
   /** Runtime signatures retain both heartbeat recency and stable shell state. */
   private readonly shellRuntimeSignatures = new Map<
     string,
@@ -1375,6 +1377,8 @@ export class DashboardServerImpl implements DashboardServer {
   private seedApplicationDomainSignatures(
     projection = this.application.shellProjection(),
   ): void {
+    this.applicationDomainSignature =
+      this.application.applicationDomainSignature();
     this.shellPatchSignatures.set(
       'orchestration',
       JSON.stringify({
@@ -1402,7 +1406,10 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   private publishApplicationDomains(): void {
+    const sourceSignature = this.application.applicationDomainSignature();
+    if (sourceSignature === this.applicationDomainSignature) return;
     const projection = this.application.shellProjection();
+    this.applicationDomainSignature = sourceSignature;
     this.publishShellPatch(
       'orchestration',
       {

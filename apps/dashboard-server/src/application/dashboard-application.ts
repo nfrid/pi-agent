@@ -729,6 +729,11 @@ export class DashboardApplication {
   private sessionMetadataBaseline?: ReadonlyMap<string, SessionIndexEntry>;
   /** Bounded, process-local live transcript projection; never persisted. */
   private readonly activeTranscripts = new Map<string, ActiveTranscriptState>();
+  private readonly dormantSessionAssociations = new Map<
+    string,
+    { cwd: string; projectId: string | null; checkoutId: string | null }
+  >();
+  private associationCatalogueSignature: string | undefined;
   readonly orchestrationService?: OrchestrationService;
   private readonly projectResolver?: ProjectResolver;
 
@@ -795,18 +800,38 @@ export class DashboardApplication {
             persistedRun.checkoutId ?? persistedThread.checkoutId ?? null,
         };
     }
-    return (
-      this.projectResolver?.resolve(session.cwd) ?? {
-        projectId: null,
-        checkoutId: null,
-      }
-    );
+    const cached = this.dormantSessionAssociations.get(session.id);
+    if (cached?.cwd === session.cwd)
+      return {
+        projectId: cached.projectId,
+        checkoutId: cached.checkoutId,
+      };
+    const resolved = this.projectResolver?.resolve(session.cwd) ?? {
+      projectId: null,
+      checkoutId: null,
+    };
+    this.dormantSessionAssociations.set(session.id, {
+      cwd: session.cwd,
+      ...resolved,
+    });
+    return resolved;
+  }
+
+  private refreshAssociationCatalogue(): void {
+    const signature = JSON.stringify({
+      projects: this.orchestration.projectSummaries(),
+      checkouts: this.orchestration.checkoutSummaries(),
+    });
+    if (signature === this.associationCatalogueSignature) return;
+    this.associationCatalogueSignature = signature;
+    this.dormantSessionAssociations.clear();
   }
 
   /** Authoritative session metadata, including live runtime overlays. */
   sessionMetadata(
     liveRuntimes = this.registry.snapshots(),
   ): SessionIndexEntry[] {
+    this.refreshAssociationCatalogue();
     const activeRuntimes = new Map(
       liveRuntimes
         .filter((runtime) => runtime.online !== false)
@@ -894,6 +919,7 @@ export class DashboardApplication {
   ): SessionMetadataDelta | undefined {
     const prior = this.sessionMetadataBaseline;
     if (!prior) return undefined;
+    this.refreshAssociationCatalogue();
     const indexed = this.sessionIndex.get(sessionId);
     const runtime = this.registry
       .snapshots()
@@ -912,6 +938,18 @@ export class DashboardApplication {
         : { upsert: [], remove: [sessionId] };
     if (previous && sameSessionMetadata(previous, current)) return undefined;
     return { upsert: [current], remove: [] };
+  }
+
+  /** Cheap change detector for shell catalogues that excludes session work. */
+  applicationDomainSignature(): string {
+    return JSON.stringify({
+      projects: this.orchestration.projectSummaries(),
+      checkouts: this.orchestration.checkoutSummaries(),
+      threads: this.orchestration.threadSummaries(),
+      runs: this.orchestration.runSummaries(),
+      usage: this.usage.cached(),
+      unread: this.metadata.unreadNotifications(),
+    });
   }
 
   /**
