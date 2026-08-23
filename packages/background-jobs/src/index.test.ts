@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BACKGROUND_JOBS_MAX_ARGV_COUNT,
   BACKGROUND_JOBS_MAX_COMMAND_BYTES,
   OutputTail,
   parseBackgroundJobsRequest,
@@ -46,6 +47,61 @@ describe('background-jobs protocol', () => {
         },
       }),
     ).toThrow(/byte counts/);
+  });
+
+  it('validates optional environment, argv, timeout, and event options', () => {
+    const request = parseBackgroundJobsRequest({
+      v: 1,
+      op: 'start',
+      input: {
+        id,
+        ownerSession: 's',
+        command: 'delegate',
+        title: 'delegate',
+        cwd: '.',
+        argv: ['/usr/bin/node', '-e', 'console.log(1)'],
+        env: { DELEGATE_TEST: 'ok' },
+        timeoutMs: 10,
+        events: true,
+      },
+    });
+    expect(request.op === 'start' ? request.input : undefined).toMatchObject({
+      argv: ['/usr/bin/node', '-e', 'console.log(1)'],
+      env: { DELEGATE_TEST: 'ok' },
+      timeoutMs: 10,
+      events: true,
+    });
+    expect(() =>
+      parseBackgroundJobsRequest({
+        v: 1,
+        op: 'start',
+        input: {
+          id,
+          ownerSession: 's',
+          command: 'delegate',
+          title: 'delegate',
+          cwd: '.',
+          env: { 'not-valid': 'x' },
+        },
+      }),
+    ).toThrow(/environment key/);
+    expect(() =>
+      parseBackgroundJobsRequest({
+        v: 1,
+        op: 'start',
+        input: {
+          id,
+          ownerSession: 's',
+          command: 'delegate',
+          title: 'delegate',
+          cwd: '.',
+          argv: Array.from(
+            { length: BACKGROUND_JOBS_MAX_ARGV_COUNT + 1 },
+            () => 'x',
+          ),
+        },
+      }),
+    ).toThrow(/too many arguments/);
   });
 
   it('keeps UTF-8 output tails bounded and counts dropped bytes', () => {

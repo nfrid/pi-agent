@@ -13,10 +13,12 @@ import {
   BACKGROUND_JOBS_LIST_ERROR_BYTES,
   BACKGROUND_JOBS_LIST_OWNER_BYTES,
   BACKGROUND_JOBS_LIST_TITLE_BYTES,
+  BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
   BACKGROUND_JOBS_MAX_LINE_BYTES,
   BACKGROUND_JOBS_MAX_OUTPUT_BYTES,
   BACKGROUND_JOBS_MAX_RESPONSE_BYTES,
   BACKGROUND_JOBS_STDERR_OUTPUT_BYTES,
+  type BackgroundJobEventsSnapshot,
   type BackgroundJobSnapshot,
   type BackgroundJobStatus,
   ensureProcessHostDirectory,
@@ -39,7 +41,18 @@ type RunningJob = {
   readonly child: ChildProcess;
   readonly stdout: OutputTail;
   readonly stderr: OutputTail;
+  readonly captureEvents: boolean;
   stopRequested: boolean;
+  timedOut: boolean;
+  timeoutHandle?: NodeJS.Timeout;
+  stdoutLine: string;
+  stderrLine: string;
+  stdoutLineBytes: number;
+  stderrLineBytes: number;
+  stdoutLineTruncated: boolean;
+  stderrLineTruncated: boolean;
+  stdoutLineActive: boolean;
+  stderrLineActive: boolean;
   settled: Promise<void>;
   resolveSettled: () => void;
   exitCode?: number;
@@ -54,6 +67,7 @@ type JobResponse = {
   code?: string;
   job?: BackgroundJobSnapshot;
   jobs?: BackgroundJobSnapshot[];
+  events?: BackgroundJobEventsSnapshot;
 };
 
 function line(value: unknown): string {
@@ -73,11 +87,16 @@ function errorResponse(error: unknown): JobResponse {
   };
 }
 function fingerprint(input: StartBackgroundJobInput): string {
-  return JSON.stringify({
+  const launch: Record<string, unknown> = {
     command: input.command,
     title: input.title,
     cwd: input.cwd,
-  });
+  };
+  if (input.argv !== undefined) launch.argv = input.argv;
+  if (input.env !== undefined) launch.env = input.env;
+  if (input.timeoutMs !== undefined) launch.timeoutMs = input.timeoutMs;
+  if (input.events !== undefined) launch.events = input.events;
+  return JSON.stringify(launch);
 }
 function snapshot(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
   const { fingerprint: _fingerprint, ...result } = row;
@@ -89,6 +108,13 @@ function boundedText(value: string, maxBytes: number): string {
   let end = maxBytes;
   while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
   return `${bytes.subarray(0, end).toString('utf8')}…`;
+}
+function boundedUtf8(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return bytes.subarray(0, end).toString('utf8');
 }
 function listSummary(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
   const result = snapshot(row);
@@ -275,6 +301,16 @@ export class BackgroundJobHostService {
       case 'ack':
         this.database().markDelivered(request.ownerSession, request.id);
         return { v: 1, ok: true };
+      case 'events':
+        return {
+          v: 1,
+          ok: true,
+          events: this.database().readEvents(
+            request.ownerSession,
+            request.id,
+            request.offset,
+          ),
+        };
       case 'stop': {
         const jobs: BackgroundJobSnapshot[] = [];
         for (const id of request.ids) {
@@ -327,16 +363,16 @@ export class BackgroundJobHostService {
       try {
         const watchdog =
           'host="$PPID"; leader="$$"; (trap "" TERM; while kill -0 "$host" 2>/dev/null; do sleep 0.2; done; kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null) </dev/null >/dev/null 2>&1 & exec "$0" "$@"';
-        child = spawn(
-          '/bin/sh',
-          ['-c', watchdog, '/bin/bash', '-c', input.command],
-          {
-            cwd: input.cwd,
-            env: process.env,
-            detached: process.platform !== 'win32',
-            stdio: ['ignore', 'pipe', 'pipe'],
-          },
-        );
+        const launchArgs =
+          input.argv === undefined
+            ? ['/bin/bash', '-c', input.command]
+            : input.argv;
+        child = spawn('/bin/sh', ['-c', watchdog, ...launchArgs], {
+          cwd: input.cwd,
+          env: { ...process.env, ...(input.env ?? {}) },
+          detached: process.platform !== 'win32',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
         await new Promise<void>((resolve, reject) => {
           child.once('spawn', () => resolve());
           child.once('error', reject);
@@ -355,6 +391,15 @@ export class BackgroundJobHostService {
       this.jobs.set(input.id, running);
       this.database().setPid(input.id, child.pid ?? 0);
       this.attach(running);
+      if (input.timeoutMs !== undefined && this.jobs.has(input.id)) {
+        running.timeoutHandle = setTimeout(() => {
+          if (!this.jobs.has(running.id)) return;
+          running.timedOut = true;
+          running.error = 'Background job timed out.';
+          void this.terminate(running);
+        }, input.timeoutMs);
+        running.timeoutHandle.unref?.();
+      }
       return this.database().get(
         input.ownerSession,
         input.id,
@@ -380,10 +425,104 @@ export class BackgroundJobHostService {
       child,
       stdout: new OutputTail(BACKGROUND_JOBS_MAX_OUTPUT_BYTES),
       stderr: new OutputTail(BACKGROUND_JOBS_STDERR_OUTPUT_BYTES),
+      captureEvents: input.events !== false,
       stopRequested: false,
+      timedOut: false,
+      stdoutLine: '',
+      stderrLine: '',
+      stdoutLineBytes: 0,
+      stderrLineBytes: 0,
+      stdoutLineTruncated: false,
+      stderrLineTruncated: false,
+      stdoutLineActive: false,
+      stderrLineActive: false,
       settled,
       resolveSettled,
     };
+  }
+
+  private appendLinePart(
+    job: RunningJob,
+    stream: 'stdout' | 'stderr',
+    value: string,
+  ): void {
+    const currentBytes =
+      stream === 'stdout' ? job.stdoutLineBytes : job.stderrLineBytes;
+    const remaining = BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES - currentBytes;
+    if (stream === 'stdout') job.stdoutLineActive = true;
+    else job.stderrLineActive = true;
+    const retained = boundedUtf8(value, Math.max(0, remaining));
+    const retainedBytes = Buffer.byteLength(retained);
+    if (stream === 'stdout') {
+      job.stdoutLine += retained;
+      job.stdoutLineBytes += retainedBytes;
+      if (retainedBytes < Buffer.byteLength(value))
+        job.stdoutLineTruncated = true;
+    } else {
+      job.stderrLine += retained;
+      job.stderrLineBytes += retainedBytes;
+      if (retainedBytes < Buffer.byteLength(value))
+        job.stderrLineTruncated = true;
+    }
+  }
+
+  private finishLine(job: RunningJob, stream: 'stdout' | 'stderr'): void {
+    const text = stream === 'stdout' ? job.stdoutLine : job.stderrLine;
+    const truncated =
+      stream === 'stdout' ? job.stdoutLineTruncated : job.stderrLineTruncated;
+    const active =
+      stream === 'stdout' ? job.stdoutLineActive : job.stderrLineActive;
+    if (active || text || truncated) {
+      try {
+        this.database().appendEvent(job.id, stream, text);
+      } catch {
+        /* Event capture must not change process supervision. */
+      }
+    }
+    if (stream === 'stdout') {
+      job.stdoutLine = '';
+      job.stdoutLineBytes = 0;
+      job.stdoutLineTruncated = false;
+      job.stdoutLineActive = false;
+    } else {
+      job.stderrLine = '';
+      job.stderrLineBytes = 0;
+      job.stderrLineTruncated = false;
+      job.stderrLineActive = false;
+    }
+  }
+
+  private captureLines(
+    job: RunningJob,
+    stream: 'stdout' | 'stderr',
+    chunk: string,
+  ): void {
+    if (!job.captureEvents) return;
+    let remaining = chunk;
+    while (remaining) {
+      const newline = remaining.indexOf('\n');
+      if (newline < 0) {
+        this.appendLinePart(job, stream, remaining);
+        return;
+      }
+      this.appendLinePart(
+        job,
+        stream,
+        remaining.slice(0, newline).replace(/\r$/u, ''),
+      );
+      this.finishLine(job, stream);
+      remaining = remaining.slice(newline + 1);
+    }
+  }
+
+  private flushLines(job: RunningJob, stream: 'stdout' | 'stderr'): void {
+    if (!job.captureEvents) return;
+    const text = stream === 'stdout' ? job.stdoutLine : job.stderrLine;
+    const truncated =
+      stream === 'stdout' ? job.stdoutLineTruncated : job.stderrLineTruncated;
+    const active =
+      stream === 'stdout' ? job.stdoutLineActive : job.stderrLineActive;
+    if (active || text || truncated) this.finishLine(job, stream);
   }
 
   private attach(job: RunningJob): void {
@@ -391,12 +530,16 @@ export class BackgroundJobHostService {
     job.child.stderr?.setEncoding('utf8');
     job.child.stdout?.on('data', (chunk: string) => {
       job.stdout.push(chunk);
+      this.captureLines(job, 'stdout', chunk);
       this.persistOutput(job);
     });
     job.child.stderr?.on('data', (chunk: string) => {
       job.stderr.push(chunk);
+      this.captureLines(job, 'stderr', chunk);
       this.persistOutput(job);
     });
+    job.child.stdout?.once('end', () => this.flushLines(job, 'stdout'));
+    job.child.stderr?.once('end', () => this.flushLines(job, 'stderr'));
     job.child.once('error', (error) => {
       job.error = error.message;
       void this.settle(job, 'failed');
@@ -406,6 +549,8 @@ export class BackgroundJobHostService {
       job.signal = signal ?? undefined;
     });
     job.child.once('close', () => {
+      this.flushLines(job, 'stdout');
+      this.flushLines(job, 'stderr');
       void this.settle(
         job,
         job.stopRequested ? 'killed' : job.exitCode === 0 ? 'done' : 'failed',
@@ -431,10 +576,16 @@ export class BackgroundJobHostService {
   ): Promise<void> {
     if (!this.jobs.has(job.id)) return;
     this.persistOutput(job);
+    if (job.timeoutHandle) clearTimeout(job.timeoutHandle);
     this.database().settle(
       job.id,
       status,
-      { exitCode: job.exitCode, signal: job.signal, error: job.error },
+      {
+        exitCode: job.exitCode,
+        signal: job.signal,
+        error: job.error,
+        timedOut: job.timedOut,
+      },
       job.stdout.snapshot(),
       job.stderr.snapshot(),
     );

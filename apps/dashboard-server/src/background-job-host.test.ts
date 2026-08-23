@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { BackgroundJobHostService } from './background-job-host.js';
 import {
   BackgroundJobStore,
+  backgroundJobEventsPath,
   HOST_RESTART_ERROR,
 } from './background-job-store.js';
 
@@ -252,6 +253,76 @@ describe('background process host', () => {
       await expect(
         client.start({ ...input, title: 'different' }),
       ).rejects.toMatchObject({ code: 'job-conflict' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('runs bounded argv with env, host timeout, and ordered fragmented events', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-events-'));
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      const script =
+        "process.stdout.write(Buffer.from([0xf0,0x9f])); setTimeout(() => { process.stderr.write('err\\n'); process.stdout.write(Buffer.from([0x99,0x82,0x0a])); process.stdout.write(process.env.BG_EVENT_ENV + '\\n'); }, 10); setInterval(() => {}, 1000);";
+      const started = await client.start({
+        id,
+        command: 'delegate',
+        title: 'delegate',
+        cwd: repositoryRoot,
+        argv: [process.execPath, '-e', script],
+        env: { BG_EVENT_ENV: 'env-ok' },
+        timeoutMs: 250,
+        events: true,
+      });
+      expect(started.command).toBe('delegate');
+      expect(
+        (
+          await client.start({
+            id,
+            command: 'delegate',
+            title: 'delegate',
+            cwd: repositoryRoot,
+            argv: [process.execPath, '-e', script],
+            env: { BG_EVENT_ENV: 'env-ok' },
+            timeoutMs: 250,
+            events: true,
+          })
+        ).id,
+      ).toBe(id);
+      await expect(
+        client.start({
+          id,
+          command: 'delegate',
+          title: 'delegate',
+          cwd: repositoryRoot,
+          argv: [process.execPath, '-e', script, 'different'],
+          env: { BG_EVENT_ENV: 'env-ok' },
+          timeoutMs: 250,
+          events: true,
+        }),
+      ).rejects.toMatchObject({ code: 'job-conflict' });
+      const settled = await client.wait(id, 2_000);
+      expect(settled).toMatchObject({ status: 'killed', timedOut: true });
+      expect(settled.env).toEqual({ BG_EVENT_ENV: 'env-ok' });
+      const first = await client.events(id, 0);
+      expect(first.events).toEqual([
+        { offset: expect.any(Number), stream: 'stderr', text: 'err' },
+        { offset: expect.any(Number), stream: 'stdout', text: '🙂' },
+        { offset: expect.any(Number), stream: 'stdout', text: 'env-ok' },
+      ]);
+      expect(first.complete).toBe(true);
+      expect(first.nextOffset).toBeGreaterThan(0);
+      const replay = await client.events(id, first.nextOffset);
+      expect(replay.events).toEqual([]);
+      expect(replay.complete).toBe(true);
+      expect(
+        (
+          await stat(
+            backgroundJobEventsPath(path.join(root, 'jobs.sqlite'), id),
+          )
+        ).mode & 0o777,
+      ).toBe(0o600);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

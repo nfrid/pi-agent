@@ -18,6 +18,18 @@ export const BACKGROUND_JOBS_MAX_OWNER_BYTES = 4 * 1024;
 export const BACKGROUND_JOBS_MAX_OUTPUT_BYTES = 256 * 1024;
 export const BACKGROUND_JOBS_STDERR_OUTPUT_BYTES = 128 * 1024;
 export const BACKGROUND_JOBS_MAX_WAIT_MS = 120_000;
+export const BACKGROUND_JOBS_MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+export const BACKGROUND_JOBS_MAX_ENV_COUNT = 64;
+export const BACKGROUND_JOBS_MAX_ENV_KEY_BYTES = 128;
+export const BACKGROUND_JOBS_MAX_ENV_VALUE_BYTES = 16 * 1024;
+export const BACKGROUND_JOBS_MAX_ENV_BYTES = 64 * 1024;
+export const BACKGROUND_JOBS_MAX_ARGV_COUNT = 128;
+export const BACKGROUND_JOBS_MAX_EXECUTABLE_BYTES = 4 * 1024;
+export const BACKGROUND_JOBS_MAX_ARG_BYTES = 64 * 1024;
+export const BACKGROUND_JOBS_MAX_ARGV_BYTES = 256 * 1024;
+export const BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES = 64 * 1024;
+export const BACKGROUND_JOBS_MAX_EVENT_BYTES = 4 * 1024 * 1024;
+export const BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES = 256 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export type BackgroundJobStatus = 'running' | 'done' | 'failed' | 'killed';
@@ -98,12 +110,32 @@ export class OutputTail {
   }
 }
 
+export type BackgroundJobEventStream = 'stdout' | 'stderr';
+
+export interface BackgroundJobEvent {
+  readonly offset: number;
+  readonly stream: BackgroundJobEventStream;
+  readonly text: string;
+}
+
+export interface BackgroundJobEventsSnapshot {
+  readonly events: BackgroundJobEvent[];
+  /** True when records before the requested offset were pruned. */
+  readonly truncated: boolean;
+  /** True when the response reached the end of a settled job's event file. */
+  readonly complete: boolean;
+  readonly nextOffset: number;
+}
+
 export interface BackgroundJobSnapshot {
   readonly id: string;
   readonly ownerSession: string;
   readonly title: string;
   readonly command: string;
   readonly cwd: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
+  readonly events?: boolean;
   readonly pid?: number;
   readonly status: BackgroundJobStatus;
   readonly createdAt: number;
@@ -111,6 +143,7 @@ export interface BackgroundJobSnapshot {
   readonly exitCode?: number;
   readonly signal?: string;
   readonly error?: string;
+  readonly timedOut?: boolean;
   /** Host-persisted notification acknowledgement used across manager recreation. */
   readonly completionDelivered?: boolean;
   readonly stdout: OutputSnapshot;
@@ -120,9 +153,14 @@ export interface BackgroundJobSnapshot {
 export interface StartBackgroundJobInput {
   readonly id: string;
   readonly ownerSession: string;
+  /** A bounded display string; argv is never copied into this field. */
   readonly command: string;
   readonly title: string;
   readonly cwd: string;
+  readonly argv?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
+  readonly events?: boolean;
 }
 
 type BackgroundJobsRequest =
@@ -131,7 +169,8 @@ type BackgroundJobsRequest =
   | { v: 1; op: 'inspect'; ownerSession: string; id: string }
   | { v: 1; op: 'wait'; ownerSession: string; id: string; waitMs: number }
   | { v: 1; op: 'stop'; ownerSession: string; ids: string[] }
-  | { v: 1; op: 'ack'; ownerSession: string; id: string };
+  | { v: 1; op: 'ack'; ownerSession: string; id: string }
+  | { v: 1; op: 'events'; ownerSession: string; id: string; offset: number };
 
 export type BackgroundJobsRequestPayload =
   | { op: 'start'; input: StartBackgroundJobInput }
@@ -139,7 +178,8 @@ export type BackgroundJobsRequestPayload =
   | { op: 'inspect'; ownerSession: string; id: string }
   | { op: 'wait'; ownerSession: string; id: string; waitMs: number }
   | { op: 'stop'; ownerSession: string; ids: string[] }
-  | { op: 'ack'; ownerSession: string; id: string };
+  | { op: 'ack'; ownerSession: string; id: string }
+  | { op: 'events'; ownerSession: string; id: string; offset: number };
 
 export type BackgroundJobsResponse = {
   v: 1;
@@ -148,6 +188,7 @@ export type BackgroundJobsResponse = {
   code?: string;
   job?: BackgroundJobSnapshot;
   jobs?: BackgroundJobSnapshot[];
+  events?: BackgroundJobEventsSnapshot;
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -176,6 +217,88 @@ function owner(value: unknown): string {
   return text(value, 'owner session', BACKGROUND_JOBS_MAX_OWNER_BYTES);
 }
 
+export function parseBackgroundJobsEnv(
+  value: unknown,
+): Readonly<Record<string, string>> | undefined {
+  if (value === undefined) return undefined;
+  if (!record(value)) throw new Error('Invalid environment.');
+  const entries = Object.entries(value);
+  if (entries.length > BACKGROUND_JOBS_MAX_ENV_COUNT)
+    throw new Error('Environment has too many entries.');
+  const result: Record<string, string> = {};
+  let totalBytes = 0;
+  for (const [key, rawValue] of entries.sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  )) {
+    if (
+      !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) ||
+      Buffer.byteLength(key) > BACKGROUND_JOBS_MAX_ENV_KEY_BYTES
+    )
+      throw new Error('Invalid environment key.');
+    if (typeof rawValue !== 'string' || rawValue.includes('\0'))
+      throw new Error('Invalid environment value.');
+    const valueBytes = Buffer.byteLength(rawValue);
+    if (valueBytes > BACKGROUND_JOBS_MAX_ENV_VALUE_BYTES)
+      throw new Error('Oversized environment value.');
+    totalBytes += Buffer.byteLength(key) + valueBytes + 2;
+    if (totalBytes > BACKGROUND_JOBS_MAX_ENV_BYTES)
+      throw new Error('Environment exceeded its byte bound.');
+    result[key] = rawValue;
+  }
+  return result;
+}
+
+function parseTimeout(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > BACKGROUND_JOBS_MAX_TIMEOUT_MS
+  )
+    throw new Error('Invalid timeout duration.');
+  return value;
+}
+
+function parseArgv(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length < 1)
+    throw new Error('Invalid argv.');
+  if (value.length > BACKGROUND_JOBS_MAX_ARGV_COUNT)
+    throw new Error('Argv has too many arguments.');
+  const result: string[] = [];
+  let totalBytes = 0;
+  for (const [index, item] of value.entries()) {
+    const maxBytes =
+      index === 0
+        ? BACKGROUND_JOBS_MAX_EXECUTABLE_BYTES
+        : BACKGROUND_JOBS_MAX_ARG_BYTES;
+    if (
+      typeof item !== 'string' ||
+      !item ||
+      item.includes('\0') ||
+      Buffer.byteLength(item) > maxBytes
+    )
+      throw new Error(
+        index === 0
+          ? 'Invalid or oversized executable.'
+          : 'Invalid or oversized argv argument.',
+      );
+    totalBytes += Buffer.byteLength(item) + 1;
+    if (totalBytes > BACKGROUND_JOBS_MAX_ARGV_BYTES)
+      throw new Error('Argv exceeded its byte bound.');
+    result.push(item);
+  }
+  return result;
+}
+
+function parseEvents(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean')
+    throw new Error('Invalid event capture option.');
+  return value;
+}
+
 export function parseBackgroundJobsRequest(
   value: unknown,
 ): BackgroundJobsRequest {
@@ -188,6 +311,10 @@ export function parseBackgroundJobsRequest(
   switch (value.op) {
     case 'start': {
       if (!record(value.input)) throw new Error('Invalid start input.');
+      const argv = parseArgv(value.input.argv);
+      const env = parseBackgroundJobsEnv(value.input.env);
+      const timeoutMs = parseTimeout(value.input.timeoutMs);
+      const events = parseEvents(value.input.events);
       return {
         v: 1,
         op: 'start',
@@ -205,6 +332,10 @@ export function parseBackgroundJobsRequest(
             BACKGROUND_JOBS_MAX_TITLE_BYTES,
           ),
           cwd: text(value.input.cwd, 'cwd', BACKGROUND_JOBS_MAX_CWD_BYTES),
+          ...(argv === undefined ? {} : { argv }),
+          ...(env === undefined ? {} : { env }),
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+          ...(events === undefined ? {} : { events }),
         },
       };
     }
@@ -256,6 +387,20 @@ export function parseBackgroundJobsRequest(
         ownerSession: owner(value.ownerSession),
         id: uuid(value.id),
       };
+    case 'events':
+      if (
+        typeof value.offset !== 'number' ||
+        !Number.isSafeInteger(value.offset) ||
+        value.offset < 0
+      )
+        throw new Error('Invalid event offset.');
+      return {
+        v: 1,
+        op: 'events',
+        ownerSession: owner(value.ownerSession),
+        id: uuid(value.id),
+        offset: value.offset,
+      };
     default:
       throw new Error('Unknown background-jobs operation.');
   }
@@ -284,8 +429,55 @@ function parseOutput(value: unknown, maxBytes: number): OutputSnapshot {
   return { text: outputText, totalBytes, droppedBytes };
 }
 
+function parseEvent(value: unknown): BackgroundJobEvent {
+  if (!record(value)) throw new Error('Invalid background job event.');
+  if (
+    typeof value.offset !== 'number' ||
+    !Number.isSafeInteger(value.offset) ||
+    value.offset < 0 ||
+    (value.stream !== 'stdout' && value.stream !== 'stderr') ||
+    typeof value.text !== 'string' ||
+    Buffer.byteLength(value.text) > BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES
+  )
+    throw new Error('Invalid background job event.');
+  return { offset: value.offset, stream: value.stream, text: value.text };
+}
+
+function parseEventsSnapshot(value: unknown): BackgroundJobEventsSnapshot {
+  if (!record(value) || !Array.isArray(value.events))
+    throw new Error('Invalid background job events response.');
+  if (
+    typeof value.truncated !== 'boolean' ||
+    typeof value.complete !== 'boolean' ||
+    typeof value.nextOffset !== 'number' ||
+    !Number.isSafeInteger(value.nextOffset) ||
+    value.nextOffset < 0
+  )
+    throw new Error('Invalid background job events bounds.');
+  const events = value.events.map(parseEvent);
+  if (
+    Buffer.byteLength(
+      JSON.stringify({
+        events,
+        truncated: value.truncated,
+        complete: value.complete,
+        nextOffset: value.nextOffset,
+      }),
+    ) > BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES
+  )
+    throw new Error('Background job events response exceeded its bound.');
+  return {
+    events,
+    truncated: value.truncated,
+    complete: value.complete,
+    nextOffset: value.nextOffset,
+  };
+}
+
 function parseSnapshot(value: unknown): BackgroundJobSnapshot {
   if (!record(value)) throw new Error('Invalid background job snapshot.');
+  if (value.timedOut !== undefined && typeof value.timedOut !== 'boolean')
+    throw new Error('Invalid timeout fact.');
   const status = value.status;
   if (
     status !== 'running' &&
@@ -303,6 +495,15 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
     title: text(value.title, 'title', BACKGROUND_JOBS_MAX_TITLE_BYTES),
     command: text(value.command, 'command', BACKGROUND_JOBS_MAX_COMMAND_BYTES),
     cwd: text(value.cwd, 'cwd', BACKGROUND_JOBS_MAX_CWD_BYTES),
+    ...(value.env === undefined
+      ? {}
+      : { env: parseBackgroundJobsEnv(value.env) }),
+    ...(value.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: parseTimeout(value.timeoutMs) }),
+    ...(value.events === undefined
+      ? {}
+      : { events: parseEvents(value.events) }),
     ...(typeof value.pid === 'number' ? { pid: value.pid } : {}),
     status,
     createdAt,
@@ -312,6 +513,9 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
     ...(typeof value.exitCode === 'number' ? { exitCode: value.exitCode } : {}),
     ...(typeof value.signal === 'string' ? { signal: value.signal } : {}),
     ...(typeof value.error === 'string' ? { error: value.error } : {}),
+    ...(typeof value.timedOut === 'boolean'
+      ? { timedOut: value.timedOut }
+      : {}),
     ...(typeof value.completionDelivered === 'boolean'
       ? { completionDelivered: value.completionDelivered }
       : {}),
@@ -331,6 +535,7 @@ export function parseBackgroundJobsResponse(
       throw new Error('Invalid background jobs response.');
     for (const job of value.jobs) parseSnapshot(job);
   }
+  if (value.ok && value.events !== undefined) parseEventsSnapshot(value.events);
   return value as BackgroundJobsResponse;
 }
 
@@ -467,6 +672,18 @@ export class BackgroundJobsClient {
       ownerSession: this.ownerSession,
       id,
     }).then(() => undefined);
+  }
+  events(id: string, offset = 0): Promise<BackgroundJobEventsSnapshot> {
+    return this.request({
+      op: 'events',
+      ownerSession: this.ownerSession,
+      id,
+      offset,
+    }).then((response) => {
+      if (!response.events)
+        throw new Error('Background-jobs host returned no events.');
+      return response.events;
+    });
   }
 }
 
