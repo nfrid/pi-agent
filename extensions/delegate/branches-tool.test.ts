@@ -1,9 +1,9 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'vitest';
 import { registerDelegateBranchesTool } from './branches-tool';
-import { repository } from './test/worktree-fixture';
+import { git, repository, root } from './test/worktree-fixture';
 import {
   finishWorktree,
   prepareWorktree,
@@ -54,13 +54,16 @@ function captureTool(): RegisteredTool {
   };
 }
 
-async function delegated(
+async function delegatedAt(
+  cwd: string,
   name: string,
   change?: string,
+  base: 'wip' | 'head' = 'wip',
 ): Promise<WorktreeRecord> {
   const preparation = await prepareWorktree({
-    cwd: repository,
+    cwd,
     name,
+    base,
     parentSessionId: PARENT_SESSION,
   });
   const worktree = preparation.worktree;
@@ -72,6 +75,10 @@ async function delegated(
     taskName: name,
     outcome: 'success',
   });
+}
+
+function delegated(name: string, change?: string): Promise<WorktreeRecord> {
+  return delegatedAt(repository, name, change);
 }
 
 function body(result: {
@@ -245,6 +252,40 @@ describe('delegate_branches', () => {
       body(await tool.execute('c3', { action: 'drop', id: record.id })),
     ).toContain('Dropped');
     expect(existsSync(record.worktreePath)).toBe(false);
+  });
+
+  test('guides submodule pointer commits after a successful merge', async () => {
+    const outer = path.join(root, 'outer');
+    const submodule = path.join(outer, 'submodule');
+    mkdirSync(outer);
+    git(outer, ['init', '-q']);
+    git(outer, ['config', 'user.email', 'test@example.invalid']);
+    git(outer, ['config', 'user.name', 'Test']);
+    git(outer, [
+      '-c',
+      'protocol.file.allow=always',
+      'submodule',
+      'add',
+      repository,
+      'submodule',
+    ]);
+    git(outer, ['commit', '-qm', 'add submodule']);
+
+    const tool = captureTool();
+    const record = await delegatedAt(
+      submodule,
+      'Submodule task',
+      'src/added.txt',
+      'head',
+    );
+    const merged = body(
+      await tool.execute('c1', { action: 'merge', id: record.id }),
+    );
+    expect(merged).toContain(
+      `The outer repository at ${outer} must commit the updated submodule pointer separately.`,
+    );
+    expect(merged).toContain('submodule pointer');
+    await tool.execute('c2', { action: 'drop', id: record.id });
   });
 
   test('selects an incremental review without changing the full default', async () => {

@@ -92,6 +92,25 @@ describe('render', () => {
     expect(lines.join('\n')).not.toContain('abc123de (checkout retired)');
   });
 
+  test('renders the resolved fresh cwd without resolving continuation input', () => {
+    const fresh = renderDelegateCall(
+      { task: 'inspect', cwd: './child' },
+      theme,
+      { cwd: '/tmp/project' },
+    );
+    expect(fresh.render(200).join('\n')).toContain('/tmp/project/child');
+
+    const continuation = renderDelegateCall(
+      { task: 'continue', continue: 'token', cwd: './persisted' },
+      theme,
+      { cwd: '/tmp/project' },
+    );
+    expect(continuation.render(200).join('\n')).toContain('./persisted');
+    expect(continuation.render(200).join('\n')).not.toContain(
+      '/tmp/project/persisted',
+    );
+  });
+
   test('renders catalog routes', () => {
     const call = renderDelegateCall(
       { task: 'inspect', route: 'quick' },

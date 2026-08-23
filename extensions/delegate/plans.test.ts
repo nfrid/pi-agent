@@ -2,11 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import {
-  assertContinuationFields,
-  buildDelegatePlans,
-  resolveDelegateCwd,
-} from './plans';
+import { resolveDelegateCwd } from './cwd';
+import { assertContinuationFields, buildDelegatePlans } from './plans';
 import { createDelegateSession, removeDelegateSession } from './session';
 import { createWorkflowModel } from './workflow-model';
 
