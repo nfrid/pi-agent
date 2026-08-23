@@ -50,11 +50,12 @@ export default defineExtension(
     });
 
     const completionKey = (id: string) => `background-process:${id}`;
-    const deliverCompletion = (snapshot: BackgroundSnapshot) => {
+    const deliverCompletion = (
+      snapshot: BackgroundSnapshot,
+      services: ScopedServices,
+    ): boolean => {
       try {
-        if (!scopedServices)
-          throw new Error('Background delivery scope is unavailable.');
-        scopedServices.backgroundDeliveries.publish({
+        services.backgroundDeliveries.publish({
           key: completionKey(snapshot.id),
           message: {
             customType: RESULT_MESSAGE_TYPE,
@@ -72,11 +73,13 @@ export default defineExtension(
             },
           },
         });
+        return true;
       } catch (error) {
         console.error(
           'background-terminals: failed to deliver completion',
           error,
         );
+        return false;
       }
     };
 
@@ -87,7 +90,7 @@ export default defineExtension(
       return new BackgroundManager({
         scopeId: services.scopeId,
         pendingProcesses: services.pendingProcesses,
-        onSettled: deliverCompletion,
+        onSettled: (snapshot) => deliverCompletion(snapshot, services),
         onChange: () => widget.sync(),
       });
     };
@@ -114,9 +117,17 @@ export default defineExtension(
     // the keyed widget at stable agent boundaries even when the count is unchanged.
     pi.on('agent_start', () => widget.reassert());
     pi.on('agent_settled', () => widget.reassert());
-    pi.on('context', (event) =>
-      scopedServices?.backgroundDeliveries.markEntered(event.messages),
-    );
+    pi.on('context', (event) => {
+      scopedServices?.backgroundDeliveries.markEntered(event.messages);
+      void manager
+        ?.acknowledgeEntered(event.messages)
+        .catch((error) =>
+          console.error(
+            'background-terminals: failed to acknowledge completion',
+            error,
+          ),
+        );
+    });
 
     pi.on('session_shutdown', async (_event, ctx) => {
       const closingScope = getSessionScopeId(ctx);

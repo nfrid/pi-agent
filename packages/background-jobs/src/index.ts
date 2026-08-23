@@ -5,6 +5,7 @@ import path from 'node:path';
 
 export const BACKGROUND_JOBS_PROTOCOL_VERSION = 1;
 export const BACKGROUND_JOBS_MAX_LINE_BYTES = 1024 * 1024;
+export const BACKGROUND_JOBS_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const BACKGROUND_JOBS_MAX_COMMAND_BYTES = 256 * 1024;
 export const BACKGROUND_JOBS_MAX_TITLE_BYTES = 8 * 1024;
 export const BACKGROUND_JOBS_MAX_CWD_BYTES = 16 * 1024;
@@ -380,7 +381,7 @@ export class BackgroundJobsClient {
       connection.setEncoding('utf8');
       connection.on('data', (chunk: string) => {
         buffer += chunk;
-        if (Buffer.byteLength(buffer) > BACKGROUND_JOBS_MAX_LINE_BYTES) {
+        if (Buffer.byteLength(buffer) > BACKGROUND_JOBS_MAX_RESPONSE_BYTES) {
           clearTimeout(timer);
           connection.destroy();
           reject(new Error('Background-jobs response exceeded its bound.'));

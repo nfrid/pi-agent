@@ -21,6 +21,7 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/index.js",
     "runtime-host": "tsx src/runtime-host-main.ts",
+    "process-host": "tsx src/process-host-main.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"

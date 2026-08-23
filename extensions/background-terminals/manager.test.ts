@@ -35,10 +35,11 @@ async function waitUntil(
   }
 }
 
+let testScope = 0;
 async function withManager(
   run: (manager: BackgroundManager) => Promise<void>,
 ): Promise<void> {
-  const manager = new BackgroundManager();
+  const manager = new BackgroundManager({ scopeId: `test-${++testScope}` });
   try {
     await run(manager);
   } finally {
@@ -137,7 +138,10 @@ describe('BackgroundManager', () => {
 
   it('suppresses asynchronous settlement while peek is observing it', async () => {
     const onSettled = vi.fn();
-    const manager = new BackgroundManager({ onSettled });
+    const manager = new BackgroundManager({
+      onSettled,
+      scopeId: `test-${++testScope}`,
+    });
     try {
       const started = await manager.start({
         command: nodeCommand('setTimeout(() => {}, 20)'),
@@ -155,7 +159,10 @@ describe('BackgroundManager', () => {
 
   it('suppresses asynchronous settlement while stop is observing it', async () => {
     const onSettled = vi.fn();
-    const manager = new BackgroundManager({ onSettled });
+    const manager = new BackgroundManager({
+      onSettled,
+      scopeId: `test-${++testScope}`,
+    });
     try {
       const started = await manager.start({
         command: nodeCommand('setInterval(() => {}, 1000)'),
@@ -177,7 +184,10 @@ describe('BackgroundManager', () => {
       resolveDelivery = resolve;
     });
     const onSettled = vi.fn(resolveDelivery);
-    const manager = new BackgroundManager({ onSettled });
+    const manager = new BackgroundManager({
+      onSettled,
+      scopeId: `test-${++testScope}`,
+    });
     try {
       const started = await manager.start({
         command: nodeCommand('process.exitCode = 3'),
@@ -234,7 +244,8 @@ describe('BackgroundManager', () => {
 
   it('disposes running processes without delivering completion', async () => {
     const onSettled = vi.fn();
-    const manager = new BackgroundManager({ onSettled });
+    const owner = `test-${++testScope}`;
+    const manager = new BackgroundManager({ onSettled, scopeId: owner });
     const started = await manager.start({
       command: nodeCommand('setInterval(() => {}, 1000)'),
       title: 'server',
@@ -247,13 +258,11 @@ describe('BackgroundManager', () => {
     expect(manager.get(started.id)).toBeUndefined();
     expect(
       (
-        await new BackgroundJobsClient(host.socketPath, 'default').inspect(
+        await new BackgroundJobsClient(host.socketPath, owner).inspect(
           started.id,
         )
       )?.status,
     ).toBe('running');
-    await new BackgroundJobsClient(host.socketPath, 'default').stop([
-      started.id,
-    ]);
+    await new BackgroundJobsClient(host.socketPath, owner).stop([started.id]);
   });
 });

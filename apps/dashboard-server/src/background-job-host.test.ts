@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { BackgroundJobsClient } from '@pi-agent/background-jobs';
@@ -27,6 +27,82 @@ afterEach(async () => {
 });
 
 describe('background process host', () => {
+  it('does not mutate the database on duplicate socket startup', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-duplicate-'));
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      const input = {
+        id,
+        command: 'sleep 60',
+        title: 'job',
+        cwd: process.cwd(),
+      };
+      await client.start(input);
+      const duplicate = new BackgroundJobHostService(
+        host.socketPath,
+        path.join(root, 'jobs.sqlite'),
+      );
+      await expect(duplicate.listen()).rejects.toMatchObject({
+        code: 'EADDRINUSE',
+      });
+      expect((await client.inspect(id))?.status).toBe('running');
+    } finally {
+      await Promise.all(hosts.splice(0).map((host) => host.close()));
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('kills TERM-ignoring descendants after the shell leader closes', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-tree-'));
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      await client.start({
+        id,
+        command:
+          'trap "" TERM; (trap "" TERM; while :; do sleep 1; done) & wait',
+        title: 'tree',
+        cwd: process.cwd(),
+      });
+      const [stopped] = await client.stop([id]);
+      expect(stopped?.status).toBe('killed');
+    } finally {
+      await Promise.all(hosts.splice(0).map((host) => host.close()));
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('closes with terminal state and owner-only SQLite files', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-close-'));
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      await client.start({
+        id,
+        command: 'sleep 60',
+        title: 'job',
+        cwd: process.cwd(),
+      });
+      await host.close();
+      expect((await stat(root)).mode & 0o777).toBe(0o700);
+      expect((await stat(path.join(root, 'jobs.sqlite'))).mode & 0o777).toBe(
+        0o600,
+      );
+      const reopened = await createHost(root);
+      expect(
+        (
+          await new BackgroundJobsClient(
+            reopened.socketPath,
+            'session',
+          ).inspect(id)
+        )?.status,
+      ).toBe('killed');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('captures both streams, exit status, and idempotent starts', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'background-host-'));
     try {

@@ -6,9 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] ?? 'all';
-if (!['all', 'daemon', 'web', 'serve', 'runtime-host'].includes(mode)) {
+if (
+  !['all', 'daemon', 'web', 'serve', 'runtime-host', 'process-host'].includes(
+    mode,
+  )
+) {
   process.stderr.write(
-    'Usage: node scripts/dashboard-dev.mjs [all|daemon|web|serve|runtime-host]\n',
+    'Usage: node scripts/dashboard-dev.mjs [all|daemon|web|serve|runtime-host|process-host]\n',
   );
   process.exit(2);
 }
@@ -51,18 +55,18 @@ const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const children = new Set();
 let stopping = false;
 
-function run(name, args) {
+function run(name, args, independent = false) {
   const child = spawn(pnpm, args, { cwd: root, env, stdio: 'inherit' });
   children.add(child);
   child.once('exit', (code, signal) => {
     children.delete(child);
-    if (stopping) return;
+    if (stopping || independent) return;
     if (mode === 'all' || mode === 'serve') stop(code ?? (signal ? 1 : 0));
     else process.exitCode = code ?? (signal ? 1 : 0);
   });
   child.once('error', (error) => {
     process.stderr.write(`[dashboard:${name}] ${error.message}\n`);
-    stop(1);
+    if (!independent) stop(1);
   });
 }
 
@@ -114,7 +118,8 @@ async function main() {
     mode === 'all' ||
     mode === 'daemon' ||
     mode === 'serve' ||
-    mode === 'runtime-host'
+    mode === 'runtime-host' ||
+    mode === 'process-host'
   ) {
     const runtimeHostSocket =
       env.PI_DASHBOARD_RUNTIME_HOST_SOCKET ??
@@ -128,13 +133,33 @@ async function main() {
         path.join(env.HOME ?? process.cwd(), '.pi', 'agent', 'dashboard'),
       'background-jobs.sock',
     );
-    if (
-      mode !== 'runtime-host' &&
-      (await endpointInUse({ path: runtimeHostSocket }))
-    )
-      process.stderr.write(`Reusing runtime host at ${runtimeHostSocket}.\n`);
-    else
-      run('runtime-host', ['--filter', '@pi-dashboard/server', 'runtime-host']);
+    const startsRuntime = mode !== 'process-host';
+    const startsProcess = mode !== 'runtime-host';
+    if (startsRuntime) {
+      if (
+        mode !== 'runtime-host' &&
+        (await endpointInUse({ path: runtimeHostSocket }))
+      )
+        process.stderr.write(`Reusing runtime host at ${runtimeHostSocket}.\n`);
+      else
+        run(
+          'runtime-host',
+          ['--filter', '@pi-dashboard/server', 'runtime-host'],
+          true,
+        );
+    }
+    if (startsProcess) {
+      if (await endpointInUse({ path: env.PI_PROCESS_HOST_SOCKET }))
+        process.stderr.write(
+          `Reusing process host at ${env.PI_PROCESS_HOST_SOCKET}.\n`,
+        );
+      else
+        run(
+          'process-host',
+          ['--filter', '@pi-dashboard/server', 'process-host'],
+          true,
+        );
+    }
   }
   if (mode === 'all' || mode === 'web')
     run('web', ['--filter', '@pi-dashboard/web', 'dev']);

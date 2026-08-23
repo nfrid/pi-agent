@@ -42,7 +42,7 @@ export interface BackgroundJobsTransport {
 export interface BackgroundManagerOptions {
   readonly scopeId?: SessionScopeId;
   readonly pendingProcesses?: PendingProcessAccounting;
-  readonly onSettled?: (snapshot: BackgroundSnapshot) => void;
+  readonly onSettled?: (snapshot: BackgroundSnapshot) => unknown;
   readonly onChange?: () => void;
   readonly client?: BackgroundJobsTransport;
   readonly socketPath?: string;
@@ -87,8 +87,8 @@ export class BackgroundManager {
   private readonly records = new Map<string, BackgroundSnapshot>();
   private readonly observing = new Set<string>();
   private readonly notified = new Set<string>();
-  private readonly ready: Promise<void>;
-  private readonly onSettled?: (snapshot: BackgroundSnapshot) => void;
+  private generation = 0;
+  private readonly onSettled?: (snapshot: BackgroundSnapshot) => unknown;
   private readonly onChange?: () => void;
   private pollTimer?: NodeJS.Timeout;
   private disposed = false;
@@ -104,23 +104,16 @@ export class BackgroundManager {
     this.pendingProcesses = options.pendingProcesses;
     this.onSettled = options.onSettled;
     this.onChange = options.onChange;
-    this.ready = this.refresh(true);
-    void this.ready.then(
-      () => {
-        if (this.disposed) return;
-        this.pollTimer = setInterval(() => {
-          void this.refresh(true).catch(() => undefined);
-        }, 250);
-        this.pollTimer.unref?.();
-      },
-      () => {
-        /* Public manager operations report an unavailable sidecar. */
-      },
-    );
+    void this.refresh(true, this.generation).catch(() => undefined);
+    this.pollTimer = setInterval(() => {
+      void this.refresh(true, this.generation).catch(() => undefined);
+    }, 250);
+    this.pollTimer.unref?.();
   }
 
   async start(options: StartOptions): Promise<BackgroundSnapshot> {
-    await this.ready;
+    const generation = this.generation;
+    await this.refresh(true, generation);
     this.assertAccepting();
     const snapshot = await this.client.start({
       id: newBackgroundJobId(),
@@ -128,8 +121,8 @@ export class BackgroundManager {
       title: displayCommand(options.title),
       cwd: options.cwd,
     });
+    if (this.disposed || generation !== this.generation) return snapshot;
     this.accept(snapshot, true);
-    if (snapshot.status !== 'running') await this.acknowledge(snapshot.id);
     return this.records.get(snapshot.id) ?? snapshot;
   }
 
@@ -139,15 +132,18 @@ export class BackgroundManager {
   }
 
   async inspect(id: string): Promise<BackgroundSnapshot | undefined> {
-    await this.ready;
+    const generation = this.generation;
+    await this.refresh(false, generation);
     const snapshot = await this.client.inspect(id);
-    if (snapshot) this.accept(snapshot, false);
+    if (snapshot && !this.disposed && generation === this.generation)
+      this.accept(snapshot, false);
     return snapshot ? displaySnapshot(snapshot) : undefined;
   }
 
   async list(): Promise<BackgroundSnapshot[]> {
-    await this.ready;
-    return this.refresh(true).then(() => [...this.records.values()]);
+    const generation = this.generation;
+    await this.refresh(true, generation);
+    return generation === this.generation ? [...this.records.values()] : [];
   }
 
   async peek(
@@ -155,13 +151,16 @@ export class BackgroundManager {
     waitMs = 0,
     signal?: AbortSignal,
   ): Promise<BackgroundSnapshot> {
-    await this.ready;
+    const generation = this.generation;
+    await this.refresh(false, generation);
     this.observing.add(id);
     try {
       const snapshot = await withAbort(
         this.client.wait(id, Math.max(0, Math.floor(waitMs))),
         signal,
       );
+      if (this.disposed || generation !== this.generation)
+        return displaySnapshot(snapshot);
       this.accept(snapshot, false);
       if (snapshot.status !== 'running') {
         this.notified.add(id);
@@ -177,11 +176,14 @@ export class BackgroundManager {
     ids: readonly string[],
     signal?: AbortSignal,
   ): Promise<BackgroundSnapshot[]> {
-    await this.ready;
+    const generation = this.generation;
+    await this.refresh(false, generation);
     const unique = [...new Set(ids)];
     for (const id of unique) this.observing.add(id);
     try {
       const snapshots = await withAbort(this.client.stop(unique), signal);
+      if (this.disposed || generation !== this.generation)
+        return snapshots.map(displaySnapshot);
       for (const snapshot of snapshots) {
         this.accept(snapshot, false);
         if (snapshot.status !== 'running') {
@@ -198,6 +200,7 @@ export class BackgroundManager {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.generation++;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = undefined;
     this.records.clear();
@@ -221,18 +224,14 @@ export class BackgroundManager {
       );
   }
 
-  private async refresh(notify: boolean): Promise<void> {
+  private async refresh(
+    notify: boolean,
+    generation = this.generation,
+  ): Promise<void> {
     const snapshots = await this.client.list();
-    if (this.disposed) return;
+    if (this.disposed || generation !== this.generation) return;
     for (const snapshot of snapshots) this.accept(snapshot, notify);
-    await Promise.all(
-      snapshots
-        .filter(
-          (snapshot) =>
-            snapshot.status !== 'running' && !snapshot.completionDelivered,
-        )
-        .map((snapshot) => this.acknowledge(snapshot.id)),
-    );
+
     const known = new Set(snapshots.map((snapshot) => snapshot.id));
     for (const id of this.records.keys())
       if (!known.has(id)) this.records.delete(id);
@@ -250,13 +249,21 @@ export class BackgroundManager {
       !this.notified.has(displayed.id) &&
       !this.observing.has(displayed.id)
     ) {
-      this.notified.add(displayed.id);
-      this.onSettled?.(displayed);
+      const delivered = this.onSettled?.(displayed);
+      if (delivered !== false) this.notified.add(displayed.id);
     }
   }
 
-  private async acknowledge(id: string): Promise<void> {
-    await this.client.markDelivered?.(id);
+  async acknowledgeEntered(messages: readonly unknown[]): Promise<void> {
+    const ids = new Set<string>();
+    for (const message of messages) {
+      if (!message || typeof message !== 'object') continue;
+      const details = (message as { details?: unknown }).details;
+      if (!details || typeof details !== 'object') continue;
+      const id = (details as { id?: unknown }).id;
+      if (typeof id === 'string') ids.add(id);
+    }
+    await Promise.all([...ids].map((id) => this.client.markDelivered?.(id)));
   }
 
   private syncPending(): void {

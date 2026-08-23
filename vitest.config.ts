@@ -4,6 +4,9 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@pi-agent/background-jobs': path.resolve(
+        'packages/background-jobs/src/index.ts',
+      ),
       '@pi-dashboard/client': path.resolve(
         'packages/dashboard-client/src/index.ts',
       ),

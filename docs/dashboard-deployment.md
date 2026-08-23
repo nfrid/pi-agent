@@ -1,6 +1,6 @@
 # Dashboard deployment
 
-The production dashboard is served from generated `dist/` directories by the macOS LaunchAgent `com.pi.dashboard`; managed headless children and phase-1 durable shell jobs are owned by the separate `com.pi.dashboard-runtime-host` LaunchAgent. The shell-job control socket is `PI_PROCESS_HOST_SOCKET`, separate from both the runtime bridge and dashboard HTTP. Changes under `apps/dashboard-*`, `packages/dashboard-*`, `packages/background-jobs`, `packages/activity-model`, or `packages/codex-usage` are not deployed until the production bundles are rebuilt and the service is restarted. Ordinary dashboard deploy must not restart the runtime host.
+The production dashboard is served from generated `dist/` directories by the macOS LaunchAgent `com.pi.dashboard`; managed headless children are owned by `com.pi.dashboard-runtime-host`; phase-1 durable shell jobs are owned by the separate `com.pi.dashboard-process-host` LaunchAgent. The shell-job control socket is `PI_PROCESS_HOST_SOCKET`, separate from both the runtime bridge and dashboard HTTP. Changes under `apps/dashboard-*`, `packages/dashboard-*`, `packages/background-jobs`, `packages/activity-model`, or `packages/codex-usage` are not deployed until the production bundles are rebuilt and the service is restarted. Ordinary dashboard deploy must not restart the runtime host.
 
 ## Browser-test guidance
 
@@ -19,7 +19,7 @@ After validating a dashboard-affecting change:
 
 1. Build every dashboard workspace dependency and restart the production dashboard service from the repository root so both the server and web preview load the new bundles:
    `pnpm run dashboard:deploy`
-   The deploy script runs `workspace:build` before restarting `com.pi.dashboard`; if the build fails, the running service is not restarted. Install and start `deploy/com.pi.dashboard-runtime-host.plist` separately once; do not include it in ordinary dashboard deploy restarts.
+   The deploy script runs `workspace:build` before restarting `com.pi.dashboard`; if the build fails, the running service is not restarted. Install and start `deploy/com.pi.dashboard-runtime-host.plist` and `deploy/com.pi.dashboard-process-host.plist` separately once; do not include either in ordinary dashboard deploy restarts.
 2. Source `.env.dashboard` without printing its token, then wait for both the bridge socket and HTTP health endpoint:
    `set -a; [ ! -f .env.dashboard ] || . ./.env.dashboard; set +a; ready=; for i in $(seq 1 50); do [ -S dashboard/bridge.sock ] && curl -fsS --max-time 1 "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/api/health" >/dev/null && { ready=1; break; }; sleep 0.2; done; [ "$ready" = 1 ]`
 3. Verify the web entrypoint returns `200`, the authenticated protocol-v3 browser queries load over POST, and the removed finite/session endpoints remain gone. The API enforces the production web origin even for token-authenticated probes:

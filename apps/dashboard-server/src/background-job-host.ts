@@ -10,6 +10,7 @@ import path from 'node:path';
 import {
   BACKGROUND_JOBS_MAX_LINE_BYTES,
   BACKGROUND_JOBS_MAX_OUTPUT_BYTES,
+  BACKGROUND_JOBS_MAX_RESPONSE_BYTES,
   BACKGROUND_JOBS_STDERR_OUTPUT_BYTES,
   type BackgroundJobSnapshot,
   type BackgroundJobStatus,
@@ -77,11 +78,28 @@ function snapshot(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
   const { fingerprint: _fingerprint, ...result } = row;
   return result;
 }
-function processGroupSignal(child: ChildProcess, signal: NodeJS.Signals): void {
+function listSummary(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
+  const result = snapshot(row);
+  return {
+    ...result,
+    command:
+      result.command.length <= 1_000
+        ? result.command
+        : `${result.command.slice(0, 1_000)}…`,
+    stdout: { ...result.stdout, text: '' },
+    stderr: { ...result.stderr, text: '' },
+  };
+}
+function processGroupSignal(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+  directFallback = true,
+): void {
   if (!child.pid) return;
   try {
     process.kill(-child.pid, signal);
   } catch {
+    if (!directFallback) return;
     try {
       child.kill(signal);
     } catch {
@@ -102,12 +120,16 @@ function waitFor(job: RunningJob, timeoutMs: number): Promise<void> {
 
 /** Owner-only Unix-socket service for durable shell process ownership. */
 export class BackgroundJobHostService {
-  readonly store: BackgroundJobStore;
+  private store?: BackgroundJobStore;
   private server?: Server;
   private closing = false;
   private readonly jobs = new Map<string, RunningJob>();
   private readonly startLocks = new Map<string, Promise<void>>();
-  private readonly cleanupTimers = new Map<string, NodeJS.Timeout>();
+  private readonly cleanupHandles = new Map<
+    string,
+    { child: ChildProcess; timer: NodeJS.Timeout }
+  >();
+  private readonly databasePath: string;
 
   constructor(
     readonly socketPath: string,
@@ -116,7 +138,13 @@ export class BackgroundJobHostService {
       'background-jobs.sqlite',
     ),
   ) {
-    this.store = new BackgroundJobStore(databasePath);
+    this.databasePath = databasePath;
+  }
+
+  private database(): BackgroundJobStore {
+    if (!this.store)
+      throw new Error('Background process host is not listening.');
+    return this.store;
   }
 
   async listen(): Promise<void> {
@@ -138,26 +166,31 @@ export class BackgroundJobHostService {
       });
     });
     await chmod(this.socketPath, 0o600).catch(() => undefined);
+    // The database is opened only after the socket is exclusively owned. A
+    // duplicate host therefore cannot reconcile or otherwise mutate rows.
+    this.store = new BackgroundJobStore(this.databasePath);
   }
 
-  /** Closing the control plane deliberately does not kill owned jobs. */
+  /** Gracefully terminate all owned groups before releasing durable state. */
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    for (const timer of this.cleanupTimers.values()) clearTimeout(timer);
-    this.cleanupTimers.clear();
-    for (const job of this.jobs.values()) {
-      job.child.removeAllListeners();
-      job.child.stdout?.removeAllListeners();
-      job.child.stderr?.removeAllListeners();
+    await Promise.all([...this.startLocks.values()]);
+    await Promise.all(
+      [...this.jobs.values()].map((job) => this.terminate(job)),
+    );
+    for (const handle of this.cleanupHandles.values()) {
+      clearTimeout(handle.timer);
+      processGroupSignal(handle.child, 'SIGKILL');
     }
-    this.jobs.clear();
+    this.cleanupHandles.clear();
     await new Promise<void>(
       (resolve) => this.server?.close(() => resolve()) ?? resolve(),
     );
     this.server = undefined;
     await unlink(this.socketPath).catch(() => undefined);
-    this.store.close();
+    this.store?.close();
+    this.store = undefined;
   }
 
   private accept(socket: Socket): void {
@@ -183,7 +216,10 @@ export class BackgroundJobHostService {
     try {
       const request = parseBackgroundJobsRequest(JSON.parse(raw));
       const response = await this.dispatch(request);
-      socket.end(line(response));
+      const encoded = line(response);
+      if (Buffer.byteLength(encoded) > BACKGROUND_JOBS_MAX_RESPONSE_BYTES)
+        throw new Error('Background-jobs response exceeded its bound.');
+      socket.end(encoded);
     } catch (error) {
       socket.end(line(errorResponse(error)));
     }
@@ -201,33 +237,34 @@ export class BackgroundJobHostService {
         return {
           v: 1,
           ok: true,
-          jobs: this.store.list(request.ownerSession).map(snapshot),
+          jobs: this.database().list(request.ownerSession).map(listSummary),
         };
       case 'inspect': {
-        const job = this.store.get(request.ownerSession, request.id);
+        const job = this.database().get(request.ownerSession, request.id);
         return { v: 1, ok: true, ...(job ? { job: snapshot(job) } : {}) };
       }
       case 'wait': {
         const job = this.jobs.get(request.id);
-        const stored = this.store.get(request.ownerSession, request.id);
+        const stored = this.database().get(request.ownerSession, request.id);
         if (!stored) throw new Error(`Unknown background job "${request.id}".`);
         if (stored.status === 'running' && job)
           await waitFor(job, request.waitMs);
-        const result = this.store.get(request.ownerSession, request.id);
+        const result = this.database().get(request.ownerSession, request.id);
         if (!result) throw new Error(`Unknown background job "${request.id}".`);
         return { v: 1, ok: true, job: snapshot(result) };
       }
       case 'ack':
-        this.store.markDelivered(request.ownerSession, request.id);
+        this.database().markDelivered(request.ownerSession, request.id);
         return { v: 1, ok: true };
       case 'stop': {
         const jobs: BackgroundJobSnapshot[] = [];
         for (const id of request.ids) {
-          const stored = this.store.get(request.ownerSession, id);
+          await this.startLocks.get(id);
+          const stored = this.database().get(request.ownerSession, id);
           if (!stored) throw new Error(`Unknown background job "${id}".`);
           const running = this.jobs.get(id);
           if (running) await this.terminate(running);
-          const result = this.store.get(request.ownerSession, id);
+          const result = this.database().get(request.ownerSession, id);
           if (result) jobs.push(snapshot(result));
         }
         return { v: 1, ok: true, jobs };
@@ -246,7 +283,9 @@ export class BackgroundJobHostService {
     this.startLocks.set(input.id, lock);
     await previous;
     try {
-      const existing = this.store.getById(input.id);
+      if (this.closing)
+        throw new Error('Background process host is shutting down.');
+      const existing = this.database().getById(input.id);
       if (existing) {
         if (
           existing.ownerSession !== input.ownerSession ||
@@ -258,16 +297,20 @@ export class BackgroundJobHostService {
           );
         return existing;
       }
-      if (this.store.activeCount(input.ownerSession) >= MAX_RUNNING_PER_OWNER)
+      if (
+        this.database().activeCount(input.ownerSession) >= MAX_RUNNING_PER_OWNER
+      )
         throw new Error(
           `At most ${MAX_RUNNING_PER_OWNER} background jobs may run at once.`,
         );
-      const row = this.store.create(input, fingerprint(input));
+      const row = this.database().create(input, fingerprint(input));
       let child: ChildProcess;
       try {
+        const watchdog =
+          'host="$PPID"; leader="$$"; (while kill -0 "$host" 2>/dev/null && kill -0 "$leader" 2>/dev/null; do sleep 0.2; done; if ! kill -0 "$host" 2>/dev/null; then kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null; fi) & exec "$0" "$@"';
         child = spawn(
-          process.platform === 'win32' ? 'bash.exe' : '/bin/bash',
-          ['-c', input.command],
+          '/bin/sh',
+          ['-c', watchdog, '/bin/bash', '-c', input.command],
           {
             cwd: input.cwd,
             env: process.env,
@@ -280,7 +323,7 @@ export class BackgroundJobHostService {
           child.once('error', reject);
         });
       } catch (error) {
-        this.store.settle(
+        this.database().settle(
           input.id,
           'failed',
           { error: error instanceof Error ? error.message : String(error) },
@@ -291,9 +334,9 @@ export class BackgroundJobHostService {
       }
       const running = this.makeRunning(input, child);
       this.jobs.set(input.id, running);
-      this.store.setPid(input.id, child.pid ?? 0);
+      this.database().setPid(input.id, child.pid ?? 0);
       this.attach(running);
-      return this.store.get(
+      return this.database().get(
         input.ownerSession,
         input.id,
       ) as BackgroundJobStoreRow;
@@ -353,7 +396,7 @@ export class BackgroundJobHostService {
 
   private persistOutput(job: RunningJob): void {
     try {
-      this.store.setOutput(
+      this.database().setOutput(
         job.id,
         job.stdout.snapshot(),
         job.stderr.snapshot(),
@@ -369,7 +412,7 @@ export class BackgroundJobHostService {
   ): Promise<void> {
     if (!this.jobs.has(job.id)) return;
     this.persistOutput(job);
-    this.store.settle(
+    this.database().settle(
       job.id,
       status,
       { exitCode: job.exitCode, signal: job.signal, error: job.error },
@@ -378,23 +421,30 @@ export class BackgroundJobHostService {
     );
     job.resolveSettled();
     this.jobs.delete(job.id);
-    if (!job.stopRequested) {
-      processGroupSignal(job.child, 'SIGTERM');
-      const timer = setTimeout(() => {
-        this.cleanupTimers.delete(job.id);
-        processGroupSignal(job.child, 'SIGKILL');
-      }, TERM_GRACE_MS);
-      timer.unref?.();
-      this.cleanupTimers.set(job.id, timer);
-    }
+    processGroupSignal(job.child, 'SIGTERM', false);
+    const timer = setTimeout(() => {
+      this.cleanupHandles.delete(job.id);
+      processGroupSignal(job.child, 'SIGKILL', false);
+    }, TERM_GRACE_MS);
+    timer.unref?.();
+    this.cleanupHandles.set(job.id, { child: job.child, timer });
+  }
+
+  private killCleanup(id: string): void {
+    const handle = this.cleanupHandles.get(id);
+    if (!handle) return;
+    clearTimeout(handle.timer);
+    this.cleanupHandles.delete(id);
+    processGroupSignal(handle.child, 'SIGKILL', false);
   }
 
   private async terminate(job: RunningJob): Promise<BackgroundJobSnapshot> {
     if (!this.jobs.has(job.id))
-      return snapshot(this.store.getById(job.id) as BackgroundJobStoreRow);
+      return snapshot(this.database().getById(job.id) as BackgroundJobStoreRow);
     job.stopRequested = true;
     processGroupSignal(job.child, 'SIGTERM');
     await waitFor(job, TERM_GRACE_MS);
+    this.killCleanup(job.id);
     if (this.jobs.has(job.id)) {
       processGroupSignal(job.child, 'SIGKILL');
       await waitFor(job, KILL_GRACE_MS);
@@ -403,7 +453,7 @@ export class BackgroundJobHostService {
       job.error = 'Process did not report closure after SIGKILL.';
       await this.settle(job, 'killed');
     }
-    return snapshot(this.store.getById(job.id) as BackgroundJobStoreRow);
+    return snapshot(this.database().getById(job.id) as BackgroundJobStoreRow);
   }
 }
 

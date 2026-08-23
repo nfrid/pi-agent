@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type {
@@ -100,7 +100,24 @@ export class BackgroundJobStore {
     } catch {
       /* Existing databases already have the phase-1 column. */
     }
+    this.protectFiles();
     this.reconcileStaleActive();
+    this.protectFiles();
+  }
+
+  private protectFiles(): void {
+    chmodSync(path.dirname(this.databasePath), 0o700);
+    for (const file of [
+      this.databasePath,
+      `${this.databasePath}-wal`,
+      `${this.databasePath}-shm`,
+    ]) {
+      try {
+        chmodSync(file, 0o600);
+      } catch {
+        /* SQLite creates WAL/SHM lazily. */
+      }
+    }
   }
 
   close(): void {
@@ -191,6 +208,7 @@ export class BackgroundJobStore {
         input.cwd,
         createdAt,
       );
+    this.protectFiles();
     return this.get(input.ownerSession, input.id) as BackgroundJobStoreRow;
   }
 
@@ -200,6 +218,7 @@ export class BackgroundJobStore {
         "UPDATE background_jobs SET pid = ? WHERE id = ? AND status = 'running'",
       )
       .run(pid, id);
+    this.protectFiles();
   }
 
   setOutput(id: string, stdout: OutputSnapshot, stderr: OutputSnapshot): void {
@@ -219,6 +238,7 @@ export class BackgroundJobStore {
         stderr.droppedBytes,
         id,
       );
+    this.protectFiles();
   }
 
   settle(
@@ -253,6 +273,7 @@ export class BackgroundJobStore {
       );
     const row = this.getById(id);
     if (row) this.prune(row.ownerSession);
+    this.protectFiles();
     return row;
   }
 
@@ -262,6 +283,7 @@ export class BackgroundJobStore {
         "UPDATE background_jobs SET completion_delivered = 1 WHERE owner_session = ? AND id = ? AND status <> 'running'",
       )
       .run(ownerSession, id);
+    this.protectFiles();
   }
 
   prune(ownerSession: string): void {
@@ -275,6 +297,7 @@ export class BackgroundJobStore {
       )
     `)
       .run(ownerSession, ownerSession, this.maxSettled);
+    this.protectFiles();
   }
 }
 

@@ -154,21 +154,23 @@ provider payloads.
 - the Unix socket and persisted credentials are owner-only.
 
 Opaque runtime locations and hashed credentials persist in SQLite so reconnects
-survive dashboard socket churn and daemon restart. The runtime host owns child
-process groups, drains RPC pipes, and force-closes them on shutdown or crash;
-children are never adopted. The dashboard never becomes a second agent protocol.
+survive dashboard socket churn and daemon restart. The runtime host owns managed
+Pi child process groups, drains RPC pipes, and force-closes them on shutdown or
+crash; children are never adopted. The dashboard never becomes a second agent
+protocol.
 
 ### Durable background jobs (phase 1)
 
 `@pi-agent/background-jobs` defines a bounded, versioned JSONL protocol over the
-separate `PI_PROCESS_HOST_SOCKET`. The stable runtime-host sidecar owns Bash jobs
+separate `PI_PROCESS_HOST_SOCKET`. The separate process-host sidecar (`process-host-main.ts`) owns Bash jobs
 and stores their identity, launch facts, status, exit details, and bounded
 stdout/stderr tails in `background-jobs.sqlite`. Job IDs are UUIDs: retrying the
 same ID and launch facts is idempotent, while different facts conflict.
 
-Jobs survive parent Pi session shutdown and recreation. The extension manager
-therefore detaches on disposal; users must explicitly run `background stop` to
-terminate a job. A host restart marks persisted active rows failed with an
+Jobs survive parent Pi session shutdown and recreation. Completion is
+acknowledged only after its keyed message enters Pi context; queued messages
+remain retryable across shutdown. The extension manager therefore detaches on
+disposal; users must explicitly run `background stop` to terminate a job. A host restart marks persisted active rows failed with an
 explicit host-restart diagnostic and never adopts a PID by itself. Settled jobs
 are retained per owner session with active jobs plus at most 32 settled rows.
 Delegate execution is not migrated in phase 1; delegate migration remains

@@ -25,6 +25,7 @@
     "dashboard:serve": "node scripts/dashboard-dev.mjs serve",
     "dashboard:daemon": "node scripts/dashboard-dev.mjs daemon",
     "dashboard:runtime-host": "node scripts/dashboard-dev.mjs runtime-host",
+    "dashboard:process-host": "node scripts/dashboard-dev.mjs process-host",
     "dashboard:web": "node scripts/dashboard-dev.mjs web",
     "dashboard:web:build": "pnpm -r --filter './apps/dashboard-web' build",
     "dashboard:deploy": "pnpm run workspace:build && launchctl kickstart -k \"gui/$(id -u)/com.pi.dashboard\"",
