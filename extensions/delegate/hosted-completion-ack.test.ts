@@ -151,6 +151,11 @@ describe('hosted completion acknowledgement', () => {
     await expect(ackFailure.acker.entered(['hosted@1'])).rejects.toThrow(
       'socket reset',
     );
+    // A failed ACK remains retryable, but unrelated context sources do not
+    // select the previously failed process job.
+    await ackFailure.acker.entered(['unrelated@1']);
+    expect(ackFailure.inspect).toHaveBeenCalledTimes(1);
+    expect(ackFailure.markDelivered).toHaveBeenCalledTimes(1);
     await ackFailure.acker.entered(['hosted@1']);
     expect(ackFailure.inspect).toHaveBeenCalledTimes(2);
     expect(ackFailure.markDelivered).toHaveBeenCalledTimes(2);

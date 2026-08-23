@@ -29,12 +29,14 @@ describe('wake delivery', () => {
       expect(workflow.require(attempt.identity).settledAt).toBeDefined(),
     );
     const sendMessage = vi.fn();
+    const entered = vi.fn();
     const pi = { sendMessage } as unknown as ExtensionAPI;
     let active: WakeCoordinator | undefined;
     const delivery = createWakeDelivery({
       pi,
       getRuntimeActive: () => true,
       getActiveCoordinator: () => active,
+      onEntered: entered,
     });
     active = new WakeCoordinator({
       workflow,
@@ -57,6 +59,11 @@ describe('wake delivery', () => {
     const message = sendMessage.mock.calls[0]?.[0];
     delivery.markContextEntered([message, message]);
     expect(active.require('ready').state).toBe('entered');
+    expect(entered).toHaveBeenCalledOnce();
+    expect(entered).toHaveBeenCalledWith(
+      [attempt.identity],
+      expect.objectContaining({ id: 'ready', state: 'entered' }),
+    );
     await workflow.dispose();
   });
 
@@ -167,6 +174,9 @@ describe('wake delivery', () => {
     expect(restored.require('reload-wake').state).toBe('queued');
     expect(restoredDelivery.filterContext([message])).toEqual([message]);
     expect(restored.require('reload-wake').state).toBe('entered');
+    // Activation recovery uses this durable entry boundary, rather than a
+    // later unrelated context event, to retry its exact persisted sources.
+    expect(restored.enteredSourceIdentities()).toEqual([attempt.identity]);
     expect(restoredDelivery.filterContext([message])).toEqual([]);
 
     await sourceWorkflow.dispose();

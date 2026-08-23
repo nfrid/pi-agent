@@ -865,16 +865,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getScopedServices(scopeId).backgroundDeliveries.markEntered(event.messages);
     const currentMessages = delivery.filterContext(event.messages);
     delivery.markAutomaticDeliveriesEntered(currentMessages);
-    const enteredMessages = wakeDelivery.filterContext(currentMessages);
-    void hostedCompletionAcker
-      ?.entered(activeWake?.coordinator.enteredSourceIdentities() ?? [])
-      .catch((error) =>
-        console.error(
-          'delegate: failed to retry hosted completion acknowledgement',
-          error,
-        ),
-      );
-    return { messages: enteredMessages };
+    return { messages: wakeDelivery.filterContext(currentMessages) };
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component
