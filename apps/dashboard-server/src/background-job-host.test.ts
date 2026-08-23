@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BackgroundJobHostService } from './background-job-host.js';
@@ -11,6 +11,7 @@ import {
   HOST_RESTART_ERROR,
 } from './background-job-store.js';
 
+const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const hosts: BackgroundJobHostService[] = [];
 const id = '123e4567-e89b-12d3-a456-426614174010';
 
@@ -49,16 +50,22 @@ describe('background process host', () => {
       subprocessTsconfig,
       JSON.stringify({
         compilerOptions: {
-          baseUrl: process.cwd(),
+          baseUrl: repositoryRoot,
           paths: {
             '@pi-agent/background-jobs': [
-              path.resolve('packages/background-jobs/src/index.ts'),
+              path.join(
+                repositoryRoot,
+                'packages/background-jobs/src/index.ts',
+              ),
             ],
           },
         },
       }),
     );
-    const tsxRoot = path.resolve('apps/dashboard-server/node_modules/tsx/dist');
+    const tsxRoot = path.join(
+      repositoryRoot,
+      'apps/dashboard-server/node_modules/tsx/dist',
+    );
     const processHost = spawn(
       process.execPath,
       [
@@ -66,10 +73,13 @@ describe('background process host', () => {
         path.join(tsxRoot, 'preflight.cjs'),
         '--import',
         pathToFileURL(path.join(tsxRoot, 'loader.mjs')).href,
-        path.resolve('apps/dashboard-server/src/process-host-main.ts'),
+        path.join(
+          repositoryRoot,
+          'apps/dashboard-server/src/process-host-main.ts',
+        ),
       ],
       {
-        cwd: process.cwd(),
+        cwd: repositoryRoot,
         env: {
           ...process.env,
           TSX_TSCONFIG_PATH: subprocessTsconfig,
@@ -96,7 +106,7 @@ describe('background process host', () => {
         id,
         command: `node -e ${JSON.stringify("const {spawn}=require('node:child_process'); const c=spawn(process.execPath,['-e','process.on(\\\"SIGTERM\\\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(c.pid);")}`,
         title: 'abrupt',
-        cwd: process.cwd(),
+        cwd: repositoryRoot,
       });
       let pid = 0;
       const outputDeadline = Date.now() + 3_000;
