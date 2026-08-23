@@ -139,6 +139,10 @@ export interface DelegateJobStartOptions {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  /** Canonical Pi child session linked to a hosted process job. */
+  sessionId?: string;
+  /** Durable process-host job identity; equals the prepared run ID. */
+  processJobId?: string;
   workflowAttempt?: WorkflowAttempt;
   feedback?: (
     message: string,

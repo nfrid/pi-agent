@@ -7,6 +7,8 @@ export const MAX_ATTEMPT_ORDINAL = 999_999_999;
 export const MAX_WORKFLOW_DEPENDENCIES = 32;
 
 const LOGICAL_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const CANONICAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const EXACT_REFERENCE_PATTERN =
   /^(?<logicalId>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)@(?<ordinal>[1-9][0-9]{0,8})$/;
 
@@ -112,6 +114,11 @@ export function isLogicalId(value: string): boolean {
     value.length <= MAX_LOGICAL_ID_LENGTH &&
     LOGICAL_ID_PATTERN.test(value)
   );
+}
+
+/** Whether a value is a canonical UUID accepted by durable process hosts. */
+export function isCanonicalUuid(value: unknown): value is string {
+  return typeof value === 'string' && CANONICAL_UUID_PATTERN.test(value);
 }
 
 /** Whether a value is a canonical exact attempt identity. */

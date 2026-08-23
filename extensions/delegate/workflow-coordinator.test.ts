@@ -132,6 +132,39 @@ describe('DelegateWorkflowCoordinator', () => {
     await manager.dispose();
   });
 
+  test('persists a hosted process link before the adapter can execute', async () => {
+    const manager = new DelegateJobManager();
+    const events: string[] = [];
+    let coordinator!: DelegateWorkflowCoordinator;
+    const processJobId = '123e4567-e89b-42d3-a456-426614174000';
+    const execute = vi.fn(async () => {
+      events.push('execute');
+      return result('hosted');
+    });
+    coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      onChange: () => {
+        const metadata = coordinator.metadataSnapshot().attempts[0];
+        if (metadata?.state === 'queued')
+          events.push(`persist:${metadata.sessionId}:${metadata.processJobId}`);
+      },
+    });
+
+    coordinator.schedule({
+      ...scheduleOptions('hosted', execute),
+      sessionId: 'child-session',
+      processJobId,
+    });
+
+    await settle(coordinator);
+    expect(events).toContain(`persist:child-session:${processJobId}`);
+    expect(
+      events.indexOf(`persist:child-session:${processJobId}`),
+    ).toBeLessThan(events.indexOf('execute'));
+    await coordinator.dispose();
+    await manager.dispose();
+  });
+
   test('launches a fresh attempt immediately without dependencies', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });

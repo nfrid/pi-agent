@@ -404,6 +404,7 @@ export async function runPreparedDelegateTask(
     | 'maxConcurrency'
     | 'signal'
     | 'ownerSessionId'
+    | 'processJobId'
     | 'onUpdate'
     | 'onRunUpdate'
     | 'mode'
@@ -423,6 +424,7 @@ export async function runPreparedDelegateTask(
   if (prepared.worktree) options.onWorktreeRunning?.(prepared.worktree);
   const run = await runDelegate({
     runId: prepared.runId,
+    processJobId: options.processJobId ?? prepared.runId,
     sessionId: prepared.session.sessionId,
     lineageId: prepared.session.lineageId,
     cwd: prepared.cwd,

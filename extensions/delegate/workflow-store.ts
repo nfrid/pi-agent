@@ -9,6 +9,7 @@ import type {
   DelegateWorkflowMetadataSnapshot,
 } from './workflow-coordinator';
 import {
+  isCanonicalUuid,
   isCanonicalWorkflowAttemptReference,
   isLogicalId,
   MAX_ATTEMPT_ORDINAL,
@@ -191,6 +192,16 @@ function validAttempt(
     return false;
   if (value.sessionId !== undefined && !validBoundedText(value.sessionId, 256))
     return false;
+  if (value.processJobId !== undefined && !isCanonicalUuid(value.processJobId))
+    return false;
+  const hasSession = value.sessionId !== undefined;
+  const hasProcessJob = value.processJobId !== undefined;
+  if (hasProcessJob && !hasSession) return false;
+  if (
+    (value.state === 'queued' || value.state === 'running') &&
+    hasSession !== hasProcessJob
+  )
+    return false;
   return true;
 }
 
@@ -284,6 +295,9 @@ function boundedState(
       ...(attempt.sessionId === undefined
         ? {}
         : { sessionId: attempt.sessionId }),
+      ...(attempt.processJobId === undefined
+        ? {}
+        : { processJobId: attempt.processJobId }),
       ...(attempt.reason === undefined ? {} : { reason: attempt.reason }),
     }),
   );

@@ -646,6 +646,8 @@ export async function prepareDelegateWorkflowLaunch(
       detachOnTeardown: true,
       route: finalPlan.routing?.route,
       allowWrites: prepared.allowWrites,
+      sessionId: prepared.session.sessionId,
+      processJobId: prepared.runId,
       feedback: (message) => control.enqueue('feedback', message),
       execute: async (signal, detachSignal) => {
         try {

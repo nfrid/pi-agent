@@ -7,6 +7,7 @@ import {
 } from '@pi-agent/background-jobs';
 import { processJsonLine } from './events';
 import type { DelegatedRun } from './types';
+import { isCanonicalUuid } from './workflow-model';
 
 export const SIGKILL_TIMEOUT_MS = 5000;
 /** Reserve a bounded final window for a child to checkpoint before hard stop. */
@@ -46,6 +47,8 @@ export interface SpawnChildOptions {
   detachSignal?: AbortSignal;
   /** Stable UUID used as the process-host job ID for hosted runs. */
   processJobId?: string;
+  /** Reattach to an existing owner-scoped host job; never send start. */
+  observeExisting?: boolean;
   /** Parent session owner required by the process host. */
   ownerSession?: string;
   onCheckpoint?: () => void;
@@ -110,15 +113,6 @@ function isTerminalHostStatus(
   status: BackgroundJobSnapshot['status'],
 ): boolean {
   return status !== 'running';
-}
-
-function isCanonicalUuid(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-      value,
-    )
-  );
 }
 
 function hostDiagnostic(run: DelegatedRun, text: string): void {
@@ -193,23 +187,35 @@ export async function runHostedDelegateChild(
       throw new Error(
         'Hosted delegates require a process host with exactEnv support.',
       );
-    const command = await client.start({
-      id: processJobId,
-      command: options.command,
-      title: options.title ?? 'Delegate',
-      cwd: options.cwd,
-      argv: [options.command, ...options.args],
-      env: Object.fromEntries(
-        Object.entries(buildDelegateChildEnvironment(options.env)).filter(
-          (entry): entry is [string, string] => entry[1] !== undefined,
+    let command: BackgroundJobSnapshot;
+    if (options.observeExisting) {
+      const inspected = await client.inspect(processJobId);
+      if (!inspected)
+        throw new Error(`Unknown hosted process job "${processJobId}".`);
+      // The known row is the only launch fact trusted during reattachment.
+      // Never reconstruct or resend the original command/argv/env.
+      command = inspected;
+      started = true;
+      observeSnapshot(command);
+    } else {
+      command = await client.start({
+        id: processJobId,
+        command: options.command,
+        title: options.title ?? 'Delegate',
+        cwd: options.cwd,
+        argv: [options.command, ...options.args],
+        env: Object.fromEntries(
+          Object.entries(buildDelegateChildEnvironment(options.env)).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined,
+          ),
         ),
-      ),
-      timeoutMs: options.timeoutMs,
-      events: true,
-      exactEnv: true,
-    });
-    started = true;
-    observeSnapshot(command);
+        timeoutMs: options.timeoutMs,
+        events: true,
+        exactEnv: true,
+      });
+      started = true;
+      observeSnapshot(command);
+    }
     if (cancellationRequested) stopHost(true);
     const checkpointLead = Math.min(
       Math.max(0, options.checkpointLeadMs ?? 0),

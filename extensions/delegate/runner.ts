@@ -91,6 +91,8 @@ function progressText(run: DelegatedRun): string {
 export interface RunDelegateOptions {
   /** Stable invocation identity allocated during preparation. */
   runId?: string;
+  /** Durable process-host job identity; normally the prepared run ID. */
+  processJobId?: string;
   /** Canonical Pi child session used by dashboard session APIs. */
   sessionId?: string;
   /** Stable child-session lineage from the prepared durable session. */
@@ -121,6 +123,8 @@ export interface RunDelegateOptions {
   detachSignal?: AbortSignal;
   /** Use the durable process host rather than the direct foreground spawn. */
   hosted?: boolean;
+  /** Reattach to an already-started durable host job; never sends start. */
+  observeExisting?: boolean;
   /** Parent-side inbox used for bounded feedback and checkpoint requests. */
   control?: DelegateControlChannel;
   onUpdate?: OnUpdate;
@@ -298,8 +302,9 @@ export async function runDelegate(
       killGraceMs: options.killGraceMs,
       signal: options.signal,
       detachSignal: options.detachSignal,
-      processJobId: run.runId,
+      processJobId: options.processJobId ?? run.runId,
       ownerSession: options.ownerSessionId,
+      observeExisting: options.observeExisting,
       onCheckpoint: () => {
         const requestedAt = Date.now();
         const queued = control.enqueue(
