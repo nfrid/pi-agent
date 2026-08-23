@@ -155,7 +155,11 @@ const TaskSchema = Type.String({
   maxLength: 32 * 1024,
   description: 'Focused task or continuation feedback',
 });
-const CwdSchema = Type.String({ maxLength: 4096 });
+const CwdSchema = Type.String({
+  maxLength: 4096,
+  description:
+    'Fresh delegates inherit ctx.cwd when omitted. Relative paths resolve against ctx.cwd; ~ and ~/ paths expand using the effective home directory; absolute paths are supported. Continuations retain their persisted cwd and must omit this field.',
+});
 const ContextNoteSchema = Type.String({
   maxLength: 64 * 1024,
   description: 'Curated context from the parent agent',

@@ -1,6 +1,7 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { resolveArtifact } from '../shared/artifacts';
 import { type DelegateConfig, resolveDelegateRoute } from './config';
+import { resolveDelegateCwd } from './cwd';
 import {
   assertDistinctContinuationTokens,
   invalidParams,
@@ -298,7 +299,9 @@ export function buildDelegatePlans(
     context: task.resumed
       ? 'continuation'
       : (task.input.context ?? shared.context ?? 'fresh'),
-    requestedCwd: task.resumed?.cwd ?? task.input.cwd ?? shared.cwd ?? ctx.cwd,
+    requestedCwd: task.resumed
+      ? task.resumed.cwd
+      : resolveDelegateCwd(task.input.cwd ?? shared.cwd, ctx.cwd),
     scope: task.input.scope ?? shared.scope,
     worktreePath: task.input.worktreePath ?? shared.worktreePath,
   }));
