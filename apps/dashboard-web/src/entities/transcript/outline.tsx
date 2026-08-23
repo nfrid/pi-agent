@@ -39,10 +39,7 @@ export function TranscriptOutline({
   onJump: (landmark: TranscriptLandmark) => void;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
-  const outlineLandmarks = useMemo(
-    () => sampleTranscriptLandmarks(landmarks, 160),
-    [landmarks],
-  );
+  const outlineLandmarks = useMemo(() => [...landmarks], [landmarks]);
   const minimapLandmarks = useMemo(
     () => sampleTranscriptLandmarks(landmarks, 48),
     [landmarks],

@@ -1,4 +1,7 @@
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  RuntimeSnapshot,
+  SessionOutlineLandmark,
+} from '@pi-dashboard/protocol';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   type Dispatch,
@@ -28,6 +31,8 @@ export function VirtualizedTranscript({
   open,
   setOpen,
   runtime,
+  outline,
+  onJumpToLandmark,
   tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
@@ -39,6 +44,10 @@ export function VirtualizedTranscript({
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
+  outline?: readonly SessionOutlineLandmark[];
+  onJumpToLandmark?: (
+    landmark: SessionOutlineLandmark,
+  ) => Promise<boolean> | boolean;
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
@@ -88,10 +97,31 @@ export function VirtualizedTranscript({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [open, rows.length, virtualizer]);
-  const landmarks = useMemo(
+  const loadedLandmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
   );
+  const landmarks = useMemo<TranscriptLandmark[]>(() => {
+    if (outline === undefined) return loadedLandmarks;
+    return outline.map((landmark) => {
+      const loaded = loadedLandmarks.find(
+        (candidate) =>
+          candidate.key === landmark.id ||
+          candidate.key === `group-${landmark.id}`,
+      );
+      return loaded
+        ? { ...loaded, label: landmark.label }
+        : {
+            key: landmark.id,
+            label: landmark.label,
+            kind: landmark.kind,
+            itemIndex: landmark.ordinal,
+            ...(landmark.timestamp === undefined
+              ? {}
+              : { timestamp: landmark.timestamp }),
+          };
+    });
+  }, [loadedLandmarks, outline]);
   const rowIndexByKey = useMemo(() => {
     const result = new Map<string, number>();
     rows.forEach((row, index) => {
@@ -110,9 +140,22 @@ export function VirtualizedTranscript({
     });
     return result;
   }, [items, rows]);
-  const jumpToLandmark = (landmark: TranscriptLandmark) => {
+  const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
-    const rowIndex = rowIndexByKey.get(landmark.key);
+    const target = outline?.find(
+      (candidate) =>
+        candidate.id === landmark.key ||
+        `group-${candidate.id}` === landmark.key,
+    );
+    if (target && onJumpToLandmark) {
+      if (!(await onJumpToLandmark(target))) return;
+      await new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      );
+    }
+    const rowIndex =
+      rowIndexByKey.get(landmark.key) ??
+      rowIndexByKey.get(`group-${landmark.key}`);
     if (rowIndex !== undefined)
       virtualizer.scrollToIndex(rowIndex, { align: 'start' });
   };

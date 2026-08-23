@@ -70,6 +70,7 @@ function DelegateCanonicalTranscript({
     historyError,
     historyLoading,
     loadEarlierHistory,
+    loadThroughOrdinal,
     completePrependRestore,
     prependAnchor,
   } = useOlderSessionHistory({
@@ -103,13 +104,19 @@ function DelegateCanonicalTranscript({
             onLoad={() => void loadEarlierHistory()}
           />
         ) : (
-          <p className="delegate-transcript-loading" role="status">
+          <output className="delegate-transcript-loading">
             Loading earlier child session history…
-          </p>
+          </output>
         ))}
       <Transcript
         projection={projection}
         runtime={runtime}
+        outline={snapshot?.outline}
+        onJumpToLandmark={(landmark) =>
+          landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
+            ? loadThroughOrdinal(landmark.ordinal).then(() => true)
+            : true
+        }
         leadingContinuation={
           history?.hasOlder ? history.leadingContinuation : undefined
         }

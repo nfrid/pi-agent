@@ -1,6 +1,9 @@
 import { projectActivityGroups } from '@pi-dashboard/activity-model';
 import type { TranscriptProjection } from '@pi-dashboard/domain';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  RuntimeSnapshot,
+  SessionOutlineLandmark,
+} from '@pi-dashboard/protocol';
 import {
   type RefObject,
   useLayoutEffect,
@@ -25,6 +28,8 @@ export function Transcript({
   entries,
   projection,
   runtime,
+  outline,
+  onJumpToLandmark,
   tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
@@ -40,6 +45,10 @@ export function Transcript({
   /** Preferred canonical domain projection input. */
   projection?: TranscriptProjection;
   runtime?: RuntimeSnapshot;
+  outline?: readonly SessionOutlineLandmark[];
+  onJumpToLandmark?: (
+    landmark: SessionOutlineLandmark,
+  ) => Promise<boolean> | boolean;
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
@@ -117,20 +126,54 @@ export function Transcript({
     restoredRevisionRef.current = prependAnchor.revision;
     onPrependAnchorRestored?.(prependAnchor.revision);
   }, [onPrependAnchorRestored, prependAnchor, transcriptScrollElementRef]);
-  const landmarks = useMemo(
+  const loadedLandmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
   );
-  const jumpToLandmark = (landmark: TranscriptLandmark) => {
+  const landmarks = useMemo<TranscriptLandmark[]>(() => {
+    if (outline === undefined) return loadedLandmarks;
+    return outline.map((landmark) => {
+      const loaded = loadedLandmarks.find(
+        (candidate) =>
+          candidate.key === landmark.id ||
+          candidate.key === `group-${landmark.id}`,
+      );
+      return loaded
+        ? { ...loaded, label: landmark.label }
+        : {
+            key: landmark.id,
+            label: landmark.label,
+            kind: landmark.kind,
+            itemIndex: landmark.ordinal,
+            ...(landmark.timestamp === undefined
+              ? {}
+              : { timestamp: landmark.timestamp }),
+          };
+    });
+  }, [loadedLandmarks, outline]);
+  const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
+    if (onJumpToLandmark) {
+      const target = outline?.find(
+        (candidate) =>
+          candidate.id === landmark.key ||
+          `group-${candidate.id}` === landmark.key,
+      );
+      if (target && !(await onJumpToLandmark(target))) return;
+      if (target)
+        await new Promise<void>((resolve) =>
+          window.requestAnimationFrame(() => resolve()),
+        );
+    }
     const scrollElement = transcriptScrollElementRef?.current;
+    const keys = new Set([landmark.key, `group-${landmark.key}`]);
     const target = scrollElement
       ? Array.from(
           scrollElement.querySelectorAll<HTMLElement>('[data-transcript-key]'),
-        ).find((element) => element.dataset.transcriptKey === landmark.key)
-      : document.querySelector<HTMLElement>(
-          `[data-transcript-key="${CSS.escape(landmark.key)}"]`,
-        );
+        ).find((element) => keys.has(element.dataset.transcriptKey ?? ''))
+      : Array.from(
+          document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+        ).find((element) => keys.has(element.dataset.transcriptKey ?? ''));
     if (!target) return;
     if (!scrollElement) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -153,6 +196,8 @@ export function Transcript({
       <VirtualizedTranscript
         items={items}
         groups={groups}
+        outline={outline}
+        onJumpToLandmark={onJumpToLandmark}
         open={open}
         setOpen={setOpen}
         runtime={runtime}
