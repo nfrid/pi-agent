@@ -62,7 +62,9 @@ function setup(
   state: 'running' | 'success' = 'success',
   processJobId: string | null = PROCESS_JOB_ID,
 ) {
-  const workflow = new DelegateWorkflowCoordinator();
+  const workflow = new DelegateWorkflowCoordinator({
+    ownerBranchId: 'branch-hosted',
+  });
   workflow.restoreMetadata(metadata(state, processJobId));
   const inspect = vi.fn<
     (id: string) => Promise<BackgroundJobSnapshot | undefined>
