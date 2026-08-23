@@ -96,6 +96,11 @@ export class OrchestrationService implements OrchestrationHost {
     string,
     { commandId: string; task: Promise<unknown> }
   >();
+  private readonly settleTasks = new Map<
+    string,
+    { commandId: string; task: Promise<Thread> }
+  >();
+  private readonly threadActivityRevisions = new Map<string, number>();
   private readonly tools = new Map<
     string,
     {
@@ -228,7 +233,30 @@ export class OrchestrationService implements OrchestrationHost {
   }
 
   async settleThread(threadId: string, commandId: string): Promise<Thread> {
-    return settleThreadLifecycle(this, threadId, commandId);
+    const current = this.settleTasks.get(threadId);
+    if (current) {
+      if (current.commandId === commandId) return current.task;
+      await current.task;
+    }
+    const task = settleThreadLifecycle(this, threadId, commandId);
+    this.settleTasks.set(threadId, { commandId, task });
+    try {
+      return await task;
+    } finally {
+      if (this.settleTasks.get(threadId)?.task === task)
+        this.settleTasks.delete(threadId);
+    }
+  }
+
+  noteThreadActivity(threadId: string): void {
+    this.threadActivityRevisions.set(
+      threadId,
+      this.threadActivityRevision(threadId) + 1,
+    );
+  }
+
+  threadActivityRevision(threadId: string): number {
+    return this.threadActivityRevisions.get(threadId) ?? 0;
   }
 
   async unsettleThread(threadId: string, commandId: string): Promise<Thread> {

@@ -283,22 +283,17 @@ export function agentThreadRows(
     });
   }
   return [...rows.values()].sort(
-    (left, right) =>
-      inactiveRank(left.status) - inactiveRank(right.status) ||
-      activeUnindexedRank(left) - activeUnindexedRank(right) ||
-      (right.startedAt ?? 0) - (left.startedAt ?? 0) ||
-      left.title.localeCompare(right.title),
+    (left, right) => (right.startedAt ?? 0) - (left.startedAt ?? 0),
   );
 }
 
-function inactiveRank(status: AgentThreadRow['status']): number {
-  return status === 'offline' || status === 'dormant' ? 1 : 0;
-}
-
-function activeUnindexedRank(row: AgentThreadRow): number {
-  return !isUnavailableThread(row) && row.session?.startedAt === undefined
-    ? -1
-    : 0;
+export function canSettleThread(row: AgentThreadRow): boolean {
+  return Boolean(
+    row.durableThread &&
+      row.durableThread.archivedAt === undefined &&
+      row.durableThread.settledAt === undefined &&
+      ['idle', 'failed', 'offline', 'dormant'].includes(row.status),
+  );
 }
 
 export function filterAgentThreadRows(

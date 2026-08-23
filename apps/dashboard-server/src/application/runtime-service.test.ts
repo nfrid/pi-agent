@@ -12,15 +12,28 @@ describe('RuntimeService runtime command receipts', () => {
       recordCommandReceipt: (receipt: Record<string, unknown>) => {
         receipts.set(receipt.idempotencyKey as string, receipt);
       },
+      getSessionThreadLink: vi.fn(),
+      getThread: vi.fn(),
+      unsettleThread: vi.fn(),
     };
     const sendCommand = vi.fn(async () => ({ accepted: true }));
+    const registry = { get: vi.fn(), sendCommand };
+    const onThreadActivity = vi.fn();
     const service = new RuntimeService(
-      { sendCommand } as never,
+      registry as never,
       {} as never,
       {} as never,
       repository as never,
+      onThreadActivity,
     );
-    return { receipts, repository, sendCommand, service };
+    return {
+      onThreadActivity,
+      receipts,
+      registry,
+      repository,
+      sendCommand,
+      service,
+    };
   }
 
   it('replays an acknowledged command after a lost response', async () => {
@@ -45,13 +58,40 @@ describe('RuntimeService runtime command receipts', () => {
     expect(sendCommand).toHaveBeenCalledOnce();
   });
 
+  it('unsettles the linked thread after a message is acknowledged', async () => {
+    const value = fixture();
+    value.registry.get.mockReturnValue({ session: { id: 'session-1' } });
+    value.repository.getSessionThreadLink.mockReturnValue({
+      threadId: 'thread-1',
+    });
+    value.repository.getThread.mockReturnValue({
+      id: 'thread-1',
+      settledAt: 10,
+    });
+
+    await value.service.commandWithReceipt('runtime-1', {
+      id: 'message-1',
+      type: 'prompt',
+      text: 'Continue',
+    });
+
+    expect(value.repository.unsettleThread).toHaveBeenCalledWith(
+      'thread-activity-message-1',
+      'thread-1',
+    );
+    expect(value.onThreadActivity).toHaveBeenCalledOnce();
+  });
+
   it('stores only a bounded fingerprint for a large command payload', async () => {
     const db = new DatabaseSync(':memory:');
     try {
       runMigrations(db);
       const repository = new SqliteOrchestrationRepository(db);
       const service = new RuntimeService(
-        { sendCommand: vi.fn(async () => ({ accepted: true })) } as never,
+        {
+          get: vi.fn(() => undefined),
+          sendCommand: vi.fn(async () => ({ accepted: true })),
+        } as never,
         {} as never,
         {} as never,
         repository,
@@ -134,6 +174,9 @@ describe('RuntimeService lifecycle mutation receipts', () => {
       recordCommandReceipt: (receipt: Record<string, unknown>) => {
         receipts.set(receipt.idempotencyKey as string, receipt);
       },
+      getSessionThreadLink: vi.fn(),
+      getThread: vi.fn(),
+      unsettleThread: vi.fn(),
     };
     const snapshots: unknown[] = [];
     const registry = {
@@ -147,13 +190,23 @@ describe('RuntimeService lifecycle mutation receipts', () => {
       stop: vi.fn(async () => undefined),
     };
     const sessions = { rename: vi.fn(async () => ({ id: 'dormant' })) };
+    const onThreadActivity = vi.fn();
     const service = new RuntimeService(
       registry as never,
       manager as never,
       sessions as never,
       repository as never,
+      onThreadActivity,
     );
-    return { manager, registry, sessions, service, snapshots };
+    return {
+      manager,
+      onThreadActivity,
+      registry,
+      repository,
+      sessions,
+      service,
+      snapshots,
+    };
   }
 
   it('executes start once across concurrent and response-loss retries', async () => {
@@ -166,7 +219,11 @@ describe('RuntimeService lifecycle mutation receipts', () => {
       await blocked;
       return { runtimeId: 'runtime-started' };
     });
-    const input = { commandId: 'start-once', workspaceId: 'workspace-1' };
+    const input = {
+      commandId: 'start-once',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+    };
     const first = fixture.service.startWithReceipt(input);
     const concurrent = fixture.service.startWithReceipt(input);
     release();
@@ -181,6 +238,32 @@ describe('RuntimeService lifecycle mutation receipts', () => {
       result: { runtimeId: 'runtime-started' },
     });
     expect(fixture.manager.launch).toHaveBeenCalledOnce();
+  });
+
+  it('waits for resumed session activity before unsetting settlement', async () => {
+    const fixture = lifecycleFixture();
+    fixture.repository.getSessionThreadLink.mockReturnValue({
+      threadId: 'thread-1',
+    });
+    fixture.repository.getThread.mockReturnValue({
+      id: 'thread-1',
+      settledAt: 10,
+    });
+
+    await fixture.service.startWithReceipt({
+      commandId: 'resume-1',
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+      sessionId: 'session-1',
+    });
+    expect(fixture.repository.unsettleThread).not.toHaveBeenCalled();
+
+    fixture.service.activateSession('session-1', 'working-1');
+    expect(fixture.repository.unsettleThread).toHaveBeenCalledWith(
+      'thread-activity-working-1',
+      'thread-1',
+    );
+    expect(fixture.onThreadActivity).toHaveBeenCalledOnce();
   });
 
   it('replays restart and rejects a force-stop payload conflict', async () => {

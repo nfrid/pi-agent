@@ -286,6 +286,39 @@ export async function settleThread(
   threadId: string,
   commandId: string,
 ): Promise<Thread> {
+  const prior = host.receipt(commandId, 'thread.settle');
+  if (prior) return host.repository.settleThread(commandId, threadId).thread;
+
+  host.requireThread(threadId);
+  const activityRevision = host.threadActivityRevision(threadId);
+  const linkedSessionId =
+    host.repository.getSessionThreadLinkByThreadId(threadId)?.sessionId;
+  const runRuntimeIds = new Set(
+    host.repository
+      .listRuns(threadId)
+      .flatMap((run) => (run.runtimeId ? [run.runtimeId] : [])),
+  );
+  const runtimeIds = new Set(
+    host.registry
+      .snapshots()
+      .filter(
+        (runtime) =>
+          runtime.session.id === linkedSessionId ||
+          runRuntimeIds.has(runtime.runtimeId),
+      )
+      .map((runtime) => runtime.runtimeId),
+  );
+  const manager = host.manager as typeof host.manager & {
+    hasLaunch?: (runtimeId: string) => boolean;
+  };
+  for (const runtimeId of runRuntimeIds) {
+    if (host.registry.get(runtimeId) || manager.hasLaunch?.(runtimeId))
+      runtimeIds.add(runtimeId);
+  }
+  for (const runtimeId of runtimeIds) await host.manager.stop(runtimeId, false);
+
+  if (host.threadActivityRevision(threadId) !== activityRevision)
+    return host.requireThread(threadId);
   const result = host.repository.settleThread(commandId, threadId);
   host.changed();
   return result.thread;

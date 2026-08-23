@@ -5,6 +5,7 @@ import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DurableThreadActions,
+  QuickSettleThreadAction,
   refreshDurableThreadMetadata,
   runtimeLifecycleActionAvailability,
 } from './runtime-actions';
@@ -39,6 +40,34 @@ describe('runtime lifecycle action availability', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: dashboardQueryKeys.sessionThreadLinks(),
     });
+  });
+
+  it('invokes the quick settle action without navigating the row', async () => {
+    const client = new QueryClient();
+    const settle = vi
+      .spyOn(dashboardHttpClient, 'settleThread')
+      .mockResolvedValue({ id: 'thread-1' } as never);
+    const stopPropagation = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <QueryClientProvider client={client}>
+          <QuickSettleThreadAction
+            threadId="thread-1"
+            title="Finished thread"
+          />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      tree.root.findByType('button').props.onClick({ stopPropagation });
+    });
+
+    expect(stopPropagation).toHaveBeenCalledOnce();
+    expect(settle).toHaveBeenCalledWith('thread-1', expect.anything());
+    act(() => tree.unmount());
+    settle.mockRestore();
   });
 
   it('renders and invokes Settle, while archived rows do not offer it', async () => {

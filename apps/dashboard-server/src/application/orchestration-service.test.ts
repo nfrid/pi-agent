@@ -255,6 +255,56 @@ it('keeps lifecycle controls out of runtime and run execution', async () => {
   }
 });
 
+it('stops the linked runtime before settling a thread', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    await fixture.service.cancelRun(fixture.runId, 'cancel-before-settle');
+    fixture.setLive({
+      runtimeId: 'runtime-to-settle',
+      ownership: 'external',
+      pid: 1,
+      cwd: fixture.root,
+      liveState: 'idle',
+      online: true,
+      session: { id: 'settle-session', entries: [] },
+    });
+    const adopted = await fixture.service.adoptSession(
+      fixture.projectId,
+      'settle-session',
+      { commandId: 'adopt-settle-session' },
+    );
+
+    let release!: () => void;
+    const stopping = new Promise<undefined>((resolve) => {
+      release = () => resolve(undefined);
+    });
+    fixture.manager.stop.mockImplementation(async () => stopping);
+    const first = fixture.service.settleThread(
+      adopted.thread.id,
+      'settle-service',
+    );
+    const concurrent = fixture.service.settleThread(
+      adopted.thread.id,
+      'settle-service',
+    );
+    await vi.waitFor(() => expect(fixture.manager.stop).toHaveBeenCalledOnce());
+    release();
+
+    await expect(first).resolves.toMatchObject({
+      settledAt: expect.any(Number),
+    });
+    await expect(concurrent).resolves.toMatchObject({
+      settledAt: expect.any(Number),
+    });
+    expect(fixture.manager.stop).toHaveBeenCalledWith(
+      'runtime-to-settle',
+      false,
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 it('adopts an inactive legacy session without launching or duplicating rows', async () => {
   const fixture = await orchestrationFixture();
   try {

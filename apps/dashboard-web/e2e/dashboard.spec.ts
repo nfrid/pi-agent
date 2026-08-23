@@ -601,7 +601,7 @@ test('desktop project thread form stays readable @desktop', async ({
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
 });
 
-test('durable lifecycle controls require an exact persisted run mapping', async ({
+test('durable lifecycle controls require an exact persisted run mapping @desktop', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 900, height: 700 });
@@ -788,8 +788,25 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   });
   await expect(durableRow).toBeVisible();
   await expect(conflictingRow).toBeVisible();
+  const durableThreadLink = durableRow.getByRole('button', {
+    name: /^Durable session /u,
+  });
+  const conflictingThreadLink = conflictingRow.getByRole('button', {
+    name: /^Conflicting session /u,
+  });
+  const quickSettle = durableRow.getByRole('button', {
+    name: 'Settle Durable session',
+  });
+  await expect(quickSettle).toHaveCSS('opacity', '0');
+  await durableRow.hover();
+  await expect(quickSettle).toHaveCSS('opacity', '1');
+  await expect(
+    conflictingRow.getByRole('button', {
+      name: 'Settle Conflicting session',
+    }),
+  ).toHaveCount(0);
 
-  await durableRow.getByRole('button').click({ button: 'right' });
+  await durableThreadLink.click({ button: 'right' });
   const durableMenu = page.getByRole('menu', {
     name: 'Actions for Durable session',
   });
@@ -808,7 +825,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   );
   await expect(durableRow.getByRole('img', { name: 'Pinned' })).toBeVisible();
 
-  await durableRow.getByRole('button').press('ContextMenu');
+  await durableThreadLink.press('ContextMenu');
   await expect(
     page
       .getByRole('menu', { name: 'Actions for Durable session' })
@@ -816,7 +833,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   ).toBeVisible();
   await page.keyboard.press('Escape');
 
-  await durableRow.getByRole('button').click({ button: 'right' });
+  await durableThreadLink.click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Actions for Durable session' })
     .getByRole('menuitem', { name: 'Archive' })
@@ -833,7 +850,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
     'datetime',
     new Date(7).toISOString(),
   );
-  await durableRow.getByRole('button').click({ button: 'right' });
+  await durableThreadLink.click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Actions for Durable session' })
     .getByRole('menuitem', { name: 'Restore' })
@@ -843,12 +860,12 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
   ).toHaveCount(0);
   await expect(durableRow).toBeVisible();
 
-  await durableRow.getByRole('button').click({ button: 'right' });
+  await durableThreadLink.click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Actions for Durable session' })
     .getByRole('menuitem', { name: 'Unpin' })
     .click();
-  await durableRow.getByRole('button').click({ button: 'right' });
+  await durableThreadLink.click({ button: 'right' });
   await page
     .getByRole('menu', { name: 'Actions for Durable session' })
     .getByRole('menuitem', { name: 'Settle' })
@@ -868,7 +885,7 @@ test('durable lifecycle controls require an exact persisted run mapping', async 
     )
     .toBe('none');
 
-  await conflictingRow.getByRole('button').click({ button: 'right' });
+  await conflictingThreadLink.click({ button: 'right' });
   const conflictingMenu = page.getByRole('menu', {
     name: 'Actions for Conflicting session',
   });

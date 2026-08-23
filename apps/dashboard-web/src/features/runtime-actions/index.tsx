@@ -88,14 +88,50 @@ type RuntimeLifecycleActionsProps = {
   ) => ReactNode;
 };
 
+export function QuickSettleThreadAction({
+  threadId,
+  title,
+}: {
+  threadId: string;
+  title: string;
+}) {
+  const queryClient = useQueryClient();
+  const settle = useMutation(settleThreadMutationOptions(dashboardHttpClient));
+  const [error, setError] = useState<string>();
+
+  return (
+    <button
+      type="button"
+      className={navStyles.quickSettle}
+      aria-label={`Settle ${title}`}
+      disabled={settle.isPending}
+      title={error ?? 'Settle thread'}
+      onClick={(event) => {
+        event.stopPropagation();
+        setError(undefined);
+        void settle
+          .mutateAsync({ threadId })
+          .then(() => refreshDurableThreadMetadata(queryClient))
+          .catch((cause) =>
+            setError(`Unable to settle ${title}: ${errorMessage(cause)}`),
+          );
+      }}
+    >
+      <span aria-hidden="true">✓</span> Settle
+    </button>
+  );
+}
+
 export function DurableThreadActions({
   thread,
   title,
   closeMenu,
+  canSettle = true,
 }: {
   thread: DurableThreadMetadata;
   title: string;
   closeMenu: () => void;
+  canSettle?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string>();
@@ -158,7 +194,7 @@ export function DurableThreadActions({
       >
         {pinned ? 'Unpin' : 'Pin'}
       </button>
-      {!archived && (
+      {!archived && (settled || canSettle) && (
         <button
           type="button"
           role="menuitem"

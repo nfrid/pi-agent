@@ -21,6 +21,7 @@ import { formatCompactCount } from '../shared/lib/format';
 import {
   type AgentThreadRow,
   agentThreadRows,
+  canSettleThread,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
   isArchivedThread,
@@ -45,6 +46,7 @@ import { deleteDraft, draftPath, useDrafts } from './drafts';
 import {
   AgentThreadActionMenu,
   DurableThreadActions,
+  QuickSettleThreadAction,
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,
 } from './runtime-actions';
@@ -602,6 +604,7 @@ export function AgentThreadNav({
             thread={row.durableThread}
             title={row.title}
             closeMenu={closeMenu}
+            canSettle={canSettleThread(row)}
           />
         )}
         {!row.draft && (
@@ -638,17 +641,25 @@ export function AgentThreadNav({
       lifecycleProps?: RuntimeLifecycleThreadProps,
       lifecycleStatus?: 'restarting',
     ) => (
-      <AgentThreadLink
-        row={row}
-        selected={selected}
-        unread={unread}
-        activeResult={activeResult}
-        density={density}
-        onSelect={() => select(row.id)}
-        lifecycleProps={lifecycleProps}
-        lifecycleStatus={lifecycleStatus}
-        runtimes={snapshot.runtimes}
-      />
+      <>
+        <AgentThreadLink
+          row={row}
+          selected={selected}
+          unread={unread}
+          activeResult={activeResult}
+          density={density}
+          onSelect={() => select(row.id)}
+          lifecycleProps={lifecycleProps}
+          lifecycleStatus={lifecycleStatus}
+          runtimes={snapshot.runtimes}
+        />
+        {canSettleThread(row) && row.durableThread && (
+          <QuickSettleThreadAction
+            threadId={row.durableThread.threadId}
+            title={row.title}
+          />
+        )}
+      </>
     );
     if (row.draft) {
       return (
