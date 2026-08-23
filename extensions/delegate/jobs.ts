@@ -66,6 +66,8 @@ export interface DelegateJobSnapshot {
   /** Optional workflow identity projected from the session-scoped model. */
   logicalId?: string;
   attemptIdentity?: string;
+  /** Immutable workflow owner used to reject sibling-branch collisions. */
+  ownerBranchId?: string;
 }
 
 interface DelegateJobRecord extends JobRecord<DelegateJobState> {
@@ -202,6 +204,17 @@ export class DelegateJobManager {
   }
 
   start(options: DelegateJobStartOptions): DelegateJobSnapshot {
+    const [job] = this.startMany([options]);
+    return job;
+  }
+
+  /**
+   * Register an observation of work that already exists in the durable host.
+   * The manager still owns an ordinary in-memory record, but the supplied
+   * execute function is responsible for observing it; this method never
+   * creates a host process itself.
+   */
+  observeExisting(options: DelegateJobStartOptions): DelegateJobSnapshot {
     const [job] = this.startMany([options]);
     return job;
   }
@@ -517,5 +530,6 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
           attemptIdentity: record.workflowAttempt.identity,
         }
       : {}),
+    ...(record.ownerBranchId ? { ownerBranchId: record.ownerBranchId } : {}),
   };
 }

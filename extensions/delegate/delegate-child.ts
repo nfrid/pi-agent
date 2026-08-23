@@ -64,8 +64,34 @@ export interface SpawnChildResult {
   spawnError?: string;
   /** Bounded terminal error reported by the durable process host. */
   hostError?: string;
+  /** A socket/transport failure that can be retried without relaunching. */
+  retryable?: boolean;
   /** Parent manager detached and must not receive a terminal settlement. */
   detached?: boolean;
+}
+
+/** Classify transport failures without treating unknown jobs or host terminals as retryable. */
+export function isTransientHostSocketError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === 'string' ? candidate.code : '';
+  const message =
+    typeof candidate.message === 'string' ? candidate.message : String(error);
+  if (
+    [
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'EPIPE',
+      'ETIMEDOUT',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'ENOENT',
+    ].includes(code)
+  )
+    return true;
+  return /(?:fetch failed|socket|connection reset|connection refused|transport.*(?:closed|failed|unavailable)|timed out|timeout|(?:ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOENT))/iu.test(
+    message,
+  );
 }
 
 /** Resolve the parent home without broadening the child environment allowlist. */
@@ -331,6 +357,18 @@ export async function runHostedDelegateChild(
       wasAborted: false,
       timedOut: false,
       ...(terminalHostError ? { hostError: terminalHostError } : {}),
+    };
+  } catch (error) {
+    if (!isTransientHostSocketError(error)) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    const hostError = appendTail('', message, MAX_STDERR_BYTES);
+    hostDiagnostic(run, `Retryable process-host transport error: ${hostError}`);
+    return {
+      exitCode: 1,
+      wasAborted: false,
+      timedOut: false,
+      hostError,
+      retryable: true,
     };
   } finally {
     if (checkpoint) clearTimeout(checkpoint);

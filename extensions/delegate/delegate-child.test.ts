@@ -482,6 +482,26 @@ describe('delegate child environment', () => {
     );
   });
 
+  test('returns a retryable result for a transient process-host socket failure', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-hosted-retry-'));
+    vi.stubEnv('PI_PROCESS_HOST_SOCKET', path.join(root, 'missing.sock'));
+    const run = createRun('retryable host observation');
+    const result = await runHostedDelegateChild(run, {
+      command: 'must-not-be-started',
+      args: [],
+      cwd: process.cwd(),
+      env: {},
+      ownerSession: 'parent-session',
+      processJobId: hostedJobId,
+      observeExisting: true,
+      timeoutMs: 100,
+      onLine: vi.fn(),
+    });
+    expect(result).toMatchObject({ retryable: true, exitCode: 1 });
+    expect(run.stderr).toContain('Retryable process-host transport error');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test('fails closed when an observed host job is unknown', async () => {
     await withHostedCase(
       { status: 'done', unknownJob: true },

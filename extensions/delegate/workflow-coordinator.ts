@@ -151,6 +151,17 @@ export interface DelegateWorkflowSnapshot {
   readonly attempts: readonly DelegateWorkflowAttemptSnapshot[];
 }
 
+/** A local hosted link that can be safely considered for process reattachment. */
+export interface DelegateRestorableHostedLink {
+  readonly attempt: WorkflowAttempt;
+  readonly identity: AttemptIdentity;
+  readonly logicalId: string;
+  readonly state: 'queued' | 'running';
+  readonly sessionId: string;
+  readonly processJobId: string;
+  readonly ownerBranchId?: string;
+}
+
 /** Metadata-only projection suitable for durable session history. */
 export interface DelegateWorkflowMetadataSnapshot {
   /** Bounded immutable branch marker used only for ancestry checks. */
@@ -448,6 +459,7 @@ function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
       ? { artifact: copyArtifact(run.artifact) }
       : {}),
     ...(compactLifecycle ? { lifecycle: compactLifecycle } : {}),
+    ...(run.retryable ? { retryable: true } : {}),
     ...(run.queuedAt === undefined ? {} : { queuedAt: run.queuedAt }),
     ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
     ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
@@ -557,6 +569,7 @@ function publicRunFromCompact(
     ...(run.allowWrites === undefined ? {} : { allowWrites: run.allowWrites }),
     ...(run.isolation ? { isolation: run.isolation } : {}),
     ...(run.continuation ? { continuation: run.continuation } : {}),
+    ...(run.retryable ? { retryable: true } : {}),
     ...(run.queuedAt === undefined ? {} : { queuedAt: run.queuedAt }),
     ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
     ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
@@ -566,6 +579,7 @@ function publicRunFromCompact(
     ...(includeArtifacts && run.artifact
       ? { artifact: { ...run.artifact } }
       : {}),
+    ...(run.retryable ? { retryable: true } : {}),
   };
   if (run.lifecycle) {
     const lifecycle = cloneDelegateLifecycle(run.lifecycle, {
@@ -641,6 +655,8 @@ export class DelegateWorkflowCoordinator {
     DelegateWorkflowCoordinator,
     () => void
   >();
+  /** Guards the one terminal callback belonging to each restored observation. */
+  private readonly restoredTerminalObservations = new Set<string>();
 
   constructor(options: DelegateWorkflowCoordinatorOptions = {}) {
     if (
@@ -851,6 +867,108 @@ export class DelegateWorkflowCoordinator {
       .attempts.map((attempt) => this.records.get(attempt.identity))
       .filter((record): record is WorkflowRecord => record !== undefined)
       .map((record) => this.snapshotRecord(record));
+  }
+
+  /**
+   * Enumerate only locally-owned active attempts with a complete hosted link.
+   * Imported records and terminal tombstones are deliberately excluded.
+   */
+  listRestorableHostedLinks(): DelegateRestorableHostedLink[] {
+    return this.model
+      .snapshot()
+      .attempts.map((attempt) => this.records.get(attempt.identity))
+      .filter(
+        (record): record is WorkflowRecord =>
+          record !== undefined &&
+          !this.importedRecordIdentities.has(record.attempt.identity) &&
+          (record.state === 'queued' || record.state === 'running') &&
+          record.sessionId !== undefined &&
+          record.processJobId !== undefined &&
+          validProcessLink(record.sessionId, record.processJobId),
+      )
+      .map((record) =>
+        Object.freeze({
+          attempt: copyAttempt(record.attempt),
+          identity: record.attempt.identity,
+          logicalId: record.attempt.logicalId,
+          state: record.state as 'queued' | 'running',
+          sessionId: record.sessionId as string,
+          processJobId: record.processJobId as string,
+          ...(record.ownerBranchId
+            ? { ownerBranchId: record.ownerBranchId }
+            : {}),
+        }),
+      );
+  }
+
+  /** Alias used by restore adapters at integration boundaries. */
+  enumerateRestorableHostedLinks(): DelegateRestorableHostedLink[] {
+    return this.listRestorableHostedLinks();
+  }
+
+  /**
+   * Attach an in-memory manager record to this exact workflow identity. This
+   * method never launches a workflow or changes the durable process link.
+   */
+  bindRestoredHostedJob(
+    reference: string,
+    job: DelegateJobSnapshot,
+  ): DelegateWorkflowAttemptSnapshot {
+    const record = this.requireRecord(reference);
+    if (this.importedRecordIdentities.has(record.attempt.identity))
+      throw new Error('Imported workflow attempts cannot be restored locally.');
+    if (job.attemptIdentity !== record.attempt.identity)
+      throw new Error(
+        `Restored delegate job ${job.id} is not linked to workflow attempt ${record.attempt.identity}.`,
+      );
+    if (job.ownerBranchId !== record.ownerBranchId)
+      throw new Error(
+        `Restored delegate job ${job.id} is not owned by workflow branch ${record.ownerBranchId ?? 'the local branch'}.`,
+      );
+    if (record.jobId !== undefined) {
+      if (record.jobId !== job.id)
+        throw new Error(
+          `Workflow attempt ${record.attempt.identity} is already bound to delegate job ${record.jobId}.`,
+        );
+      return this.snapshotRecord(record);
+    }
+    if (record.state !== 'queued' && record.state !== 'running')
+      throw new Error(
+        `Only queued or running workflow attempts can be restored (${record.attempt.identity} is ${record.state}).`,
+      );
+    record.jobId = job.id;
+    if (job.state === 'running' && record.state === 'queued') {
+      record.startedAt ??= job.startedAt ?? this.now();
+      this.transition(record, 'running');
+    }
+    this.changed();
+    return this.snapshotRecord(record);
+  }
+
+  /** Short name for adapters that call the manager record an observation. */
+  bindRestoredObservation(
+    reference: string,
+    job: DelegateJobSnapshot,
+  ): DelegateWorkflowAttemptSnapshot {
+    return this.bindRestoredHostedJob(reference, job);
+  }
+
+  /**
+   * Deliver the observation's terminal result through the canonical reducer.
+   * The job identity and exact workflow identity are checked before the
+   * reducer is called, and duplicate notifications are ignored.
+   */
+  acceptRestoredHostedTerminal(
+    reference: string,
+    job: DelegateJobSnapshot,
+    result: DelegateJobResult,
+  ): void {
+    const record = this.requireRecord(reference);
+    this.bindRestoredHostedJob(reference, job);
+    const key = `${record.attempt.identity}:${job.id}`;
+    if (this.restoredTerminalObservations.has(key)) return;
+    this.restoredTerminalObservations.add(key);
+    this.handleTerminal(record, result, job);
   }
 
   snapshot(): DelegateWorkflowSnapshot {
@@ -1198,6 +1316,7 @@ export class DelegateWorkflowCoordinator {
     this.importedSources.clear();
     this.records.clear();
     this.importedRecordIdentities.clear();
+    this.restoredTerminalObservations.clear();
     this.results.clear();
     this.changed();
   }

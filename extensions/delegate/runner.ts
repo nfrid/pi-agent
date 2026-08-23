@@ -256,7 +256,12 @@ export async function runDelegate(
     run.startedAt = Date.now();
     emitUpdate();
     const { command, prefixArgs } = resolvePiSpawn();
-    const args = buildChildArgs(options, options.sessionPath);
+    // An observed host row supplies the already-running command. Avoid even
+    // reconstructing a prompt/argv from restored metadata; the host adapter
+    // ignores these placeholders and must never receive a fresh start.
+    const args = options.observeExisting
+      ? []
+      : buildChildArgs(options, options.sessionPath);
     const dashboardEnv = options.hosted
       ? Object.fromEntries(
           ['PI_DASHBOARD_SOCKET', 'PI_DASHBOARD_STATE_DIR']
@@ -322,8 +327,9 @@ export async function runDelegate(
     });
 
     if (childResult.detached) throw new DetachedDelegateError();
-    const { exitCode, wasAborted, timedOut, spawnError, hostError } =
+    const { exitCode, wasAborted, timedOut, spawnError, hostError, retryable } =
       childResult;
+    if (retryable) run.retryable = true;
     const lifecycleStderr = [
       hostError ? `Process-host terminal error: ${hostError}` : '',
       run.stderr,
@@ -363,7 +369,9 @@ export async function runDelegate(
       // observed nonzero exit is still the stable lifecycle cause; that text
       // is evidence only, bounded inside the diagnostic.
       run.stopReason = 'error';
-      run.errorMessage ||= `Child Pi exited with code ${exitCode}.`;
+      run.errorMessage ||= retryable
+        ? `Retryable process-host error: ${hostError ?? `child exited with code ${exitCode}`}.`
+        : `Child Pi exited with code ${exitCode}.`;
       setDelegateLifecycleText(
         run,
         'child-nonzero-exit',
