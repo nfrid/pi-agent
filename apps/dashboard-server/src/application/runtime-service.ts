@@ -61,6 +61,7 @@ export class RuntimeService {
     private readonly manager: RuntimeManager,
     private readonly sessions: SessionIndex,
     private readonly repository?: OrchestrationRepository,
+    private readonly onThreadActivity?: (threadId: string) => void,
   ) {}
 
   snapshots(): RuntimeSnapshot[] {
@@ -72,7 +73,39 @@ export class RuntimeService {
   }
 
   async command(runtimeId: string, input: unknown): Promise<unknown> {
-    return this.registry.sendCommand(runtimeId, input);
+    const sessionId = this.messageSessionId(runtimeId, input);
+    const result = await this.registry.sendCommand(runtimeId, input);
+    if (sessionId) {
+      const id = (input as { id?: unknown }).id;
+      this.unsettleSessionThread(
+        sessionId,
+        typeof id === 'string' ? id : `runtime-${Date.now()}`,
+      );
+    }
+    return result;
+  }
+
+  private messageSessionId(
+    runtimeId: string,
+    input: unknown,
+  ): string | undefined {
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      return undefined;
+    const type = (input as { type?: unknown }).type;
+    if (type !== 'prompt' && type !== 'steer') return undefined;
+    return this.registry.get(runtimeId)?.session.id;
+  }
+
+  private unsettleSessionThread(sessionId: string, commandId: string): void {
+    const repository = this.repository;
+    if (!repository) return;
+    const link = repository.getSessionThreadLink(sessionId);
+    if (!link) return;
+    const thread = repository.getThread(link.threadId);
+    if (!thread) return;
+    this.onThreadActivity?.(thread.id);
+    if (thread.settledAt === undefined) return;
+    repository.unsettleThread(`thread-activity-${commandId}`, thread.id);
   }
 
   /**
@@ -166,10 +199,12 @@ export class RuntimeService {
       execute: async () => {
         // Registry lookup and connection selection happen only at execution
         // time; a receipt never authorizes a replacement runtime generation.
+        const sessionId = this.messageSessionId(runtimeId, command);
         const acknowledged = await this.registry.sendCommand(
           runtimeId,
           command,
         );
+        if (sessionId) this.unsettleSessionThread(sessionId, command.id);
         return acknowledged === undefined ? null : acknowledged;
       },
     });
@@ -179,6 +214,10 @@ export class RuntimeService {
       status: completion.status,
       result: completion.result,
     };
+  }
+
+  activateSession(sessionId: string, activityId: string): void {
+    this.unsettleSessionThread(sessionId, activityId);
   }
 
   async startWithReceipt(value: unknown): Promise<StartRuntimeMutationOutput> {

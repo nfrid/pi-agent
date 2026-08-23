@@ -3,6 +3,7 @@ import { draftPath } from '../drafts';
 import type { AgentThreadRow } from './model';
 import {
   agentThreadRows,
+  canSettleThread,
   durableThreadForSession,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
@@ -224,6 +225,36 @@ describe('agent thread view model', () => {
     expect(
       second.map(({ startedAt, updatedAt }) => [startedAt, updatedAt]),
     ).toEqual(first.map(({ startedAt, updatedAt }) => [startedAt, updatedAt]));
+  });
+
+  it('sorts solely by creation timestamp regardless of runtime status', () => {
+    const rows = agentThreadRows({
+      runtimes: [
+        {
+          runtimeId: 'runtime-working',
+          liveState: 'working',
+          online: true,
+          cwd: '/work/app',
+          session: { id: 'working', entries: [] },
+        },
+      ],
+      sessions: [
+        {
+          id: 'working',
+          cwd: '/work/app',
+          startedAt: 10,
+          updatedAt: 30,
+        },
+        {
+          id: 'newer-dormant',
+          cwd: '/work/app',
+          startedAt: 20,
+          updatedAt: 20,
+        },
+      ],
+    } as never);
+
+    expect(rows.map(({ id }) => id)).toEqual(['newer-dormant', 'working']);
   });
 
   it('lets indexed chronology replace the neutral runtime fallback', () => {
@@ -486,6 +517,49 @@ describe('agent thread view model', () => {
     expect(sections.pinned.map(({ id }) => id)).toEqual(['pinned']);
     expect(sections.active.map(({ id }) => id)).toEqual(['normal']);
     expect(sections.archived.map(({ id }) => id)).toEqual(['archived']);
+  });
+
+  it('offers quick settle only for durable finished threads', () => {
+    const durable = {
+      threadId: 'thread-1',
+      hasActiveRun: false,
+    };
+    expect(
+      canSettleThread({
+        ...row('idle', 'Dashboard', 'idle'),
+        durableThread: durable,
+      }),
+    ).toBe(true);
+    expect(
+      canSettleThread({
+        ...row('failed', 'Dashboard', 'failed'),
+        durableThread: durable,
+      }),
+    ).toBe(true);
+    expect(
+      canSettleThread({
+        ...row('dormant', 'Dashboard', 'dormant'),
+        durableThread: durable,
+      }),
+    ).toBe(true);
+    expect(
+      canSettleThread({
+        ...row('working', 'Dashboard'),
+        durableThread: durable,
+      }),
+    ).toBe(false);
+    expect(
+      canSettleThread({
+        ...row('waiting', 'Dashboard', 'waiting'),
+        durableThread: durable,
+      }),
+    ).toBe(false);
+    expect(
+      canSettleThread({
+        ...row('settled', 'Dashboard', 'idle'),
+        durableThread: { ...durable, settledAt: 10 },
+      }),
+    ).toBe(false);
   });
 
   it('uses compact distinct glyphs for passive waiting and input', () => {

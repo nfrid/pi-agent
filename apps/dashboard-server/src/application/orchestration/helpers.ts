@@ -116,6 +116,8 @@ export interface OrchestrationHost {
     { commandId: string; task: Promise<unknown> }
   >;
 
+  threadActivityRevision(threadId: string): number;
+
   started: boolean;
   draining: boolean;
 

@@ -380,6 +380,41 @@ button.shelfHeading:focus-visible {
   outline: 2px solid var(--purple);
   outline-offset: 1px;
 }
+.quickSettle {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-alt) 92%, var(--purple));
+  color: var(--muted);
+  padding: 0 12px;
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  transform: translateY(-50%);
+  transition: opacity 150ms ease;
+}
+.threadRow:hover .quickSettle,
+.quickSettle:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.quickSettle:hover,
+.quickSettle:focus-visible {
+  color: var(--fg);
+  outline: 1px solid var(--purple);
+}
+.quickSettle:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
 .lifecycleActionsMenu {
   position: fixed;
   z-index: 100;

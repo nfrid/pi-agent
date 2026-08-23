@@ -752,6 +752,10 @@ export class DashboardApplication {
       options.manager,
       options.sessions,
       options.metadata.orchestration,
+      (threadId) => {
+        options.orchestration?.noteThreadActivity(threadId);
+        options.onChange?.();
+      },
     );
     this.sessions = new SessionService(options.sessions);
     this.notifications = new NotificationService(
@@ -1495,6 +1499,15 @@ export class DashboardApplication {
 
   onRegistryChange(change: RegistryChange): ApplicationChange {
     this.updateActiveTranscript(change);
+    if (
+      change.kind === 'event' &&
+      change.event.type === 'runtime.stateChanged' &&
+      change.event.state === 'working'
+    )
+      this.runtime.activateSession(
+        change.snapshot.session.id,
+        `${change.runtimeId}-${change.runtimeEpoch ?? 'epoch'}-${change.runtimeSeq ?? Date.now()}`,
+      );
     this.orchestrationService?.onRegistryChange(change);
     if (this.notifications.shouldPersistRuntime(change))
       this.metadata.saveRuntime(change.snapshot);

@@ -2,6 +2,7 @@
 export {
   AgentThreadActionMenu,
   DurableThreadActions,
+  QuickSettleThreadAction,
   type RuntimeLifecycleActionAvailability,
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,

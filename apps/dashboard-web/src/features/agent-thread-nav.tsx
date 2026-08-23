@@ -21,6 +21,7 @@ import { formatCompactCount } from '../shared/lib/format';
 import {
   type AgentThreadRow,
   agentThreadRows,
+  canSettleThread,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
   isArchivedThread,
@@ -45,6 +46,7 @@ import { deleteDraft, draftPath, useDrafts } from './drafts';
 import {
   AgentThreadActionMenu,
   DurableThreadActions,
+  QuickSettleThreadAction,
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,
 } from './runtime-actions';
@@ -254,7 +256,7 @@ export function activeThreadDetails(
   if (row.draft) {
     const model = row.draft.model;
     return [
-      model ? `${model.provider}/${model.model}` : '? model',
+      model ? model.model : '? model',
       model?.thinking ?? '? effort',
       '? ctx',
     ];
@@ -262,7 +264,7 @@ export function activeThreadDetails(
   const details: string[] = [];
   const indexed = dormantResumeMetadata(row.session, runtimes);
   const model = row.runtime?.model ?? indexed.model;
-  if (model) details.push(`${model.provider}/${model.model}`);
+  if (model) details.push(model.model);
   else
     details.push(
       row.status === 'dormant' ? 'Resumes on send' : 'Controls unavailable',
@@ -602,6 +604,7 @@ export function AgentThreadNav({
             thread={row.durableThread}
             title={row.title}
             closeMenu={closeMenu}
+            canSettle={canSettleThread(row)}
           />
         )}
         {!row.draft && (
@@ -638,17 +641,25 @@ export function AgentThreadNav({
       lifecycleProps?: RuntimeLifecycleThreadProps,
       lifecycleStatus?: 'restarting',
     ) => (
-      <AgentThreadLink
-        row={row}
-        selected={selected}
-        unread={unread}
-        activeResult={activeResult}
-        density={density}
-        onSelect={() => select(row.id)}
-        lifecycleProps={lifecycleProps}
-        lifecycleStatus={lifecycleStatus}
-        runtimes={snapshot.runtimes}
-      />
+      <>
+        <AgentThreadLink
+          row={row}
+          selected={selected}
+          unread={unread}
+          activeResult={activeResult}
+          density={density}
+          onSelect={() => select(row.id)}
+          lifecycleProps={lifecycleProps}
+          lifecycleStatus={lifecycleStatus}
+          runtimes={snapshot.runtimes}
+        />
+        {canSettleThread(row) && row.durableThread && (
+          <QuickSettleThreadAction
+            threadId={row.durableThread.threadId}
+            title={row.title}
+          />
+        )}
+      </>
     );
     if (row.draft) {
       return (
