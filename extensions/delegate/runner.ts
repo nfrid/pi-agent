@@ -91,6 +91,8 @@ function progressText(run: DelegatedRun): string {
 export interface RunDelegateOptions {
   /** Stable invocation identity allocated during preparation. */
   runId?: string;
+  /** Session-scoped workflow identity used by restored status hooks. */
+  workflowAttempt?: import('./workflow-model').WorkflowAttempt;
   /** Durable process-host job identity; normally the prepared run ID. */
   processJobId?: string;
   /** Canonical Pi child session used by dashboard session APIs. */
@@ -127,6 +129,8 @@ export interface RunDelegateOptions {
   observeExisting?: boolean;
   /** Parent-side inbox used for bounded feedback and checkpoint requests. */
   control?: DelegateControlChannel;
+  /** Keep the supplied control inbox open after a retryable host transport error. */
+  preserveControlOnRetry?: boolean;
   onUpdate?: OnUpdate;
   /** In-process live status hook; raw runs never enter public tool details. */
   onRunUpdate?: (run: DelegatedRun) => void;
@@ -211,6 +215,7 @@ export async function runDelegate(
   const allowWrites = options.allowWrites === true;
   const run = createRun(options.task, options.routing, {
     runId: options.runId,
+    workflowAttempt: options.workflowAttempt,
     sessionId: options.sessionId,
     lineageId: options.lineageId,
     name: options.name,
@@ -439,7 +444,8 @@ export async function runDelegate(
     releaseSlot?.();
     releaseSession?.();
     if (detached) control.detach();
-    else control.close();
+    else if (!(options.preserveControlOnRetry && run.retryable))
+      control.close();
   }
   return run;
 }

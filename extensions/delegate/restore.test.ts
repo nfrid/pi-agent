@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { DelegateJobManager, type DelegateJobResult } from './jobs';
 import {
   type RestoreSessionError,
+  reconcileRestoredHostedAttempts,
   resolveTrustedDelegateSession,
   restoreHostedDelegateAttempt,
 } from './restore';
@@ -194,7 +195,7 @@ describe('restored delegate adapter', () => {
     managers.push(manager);
     coordinators.push(coordinator);
     coordinator.restoreMetadata(metadata(child.token));
-    const runDelegate = vi.fn();
+    const runDelegate = vi.fn(async () => finishedRun('restore'));
     restoreHostedDelegateAttempt({
       parentSessionId: PARENT,
       attempt: 'restore@1',
@@ -205,8 +206,51 @@ describe('restored delegate adapter', () => {
     await vi.waitFor(() =>
       expect(coordinator.require('restore@1').state).toBe('error'),
     );
-    expect(runDelegate).not.toHaveBeenCalled();
+    expect(runDelegate).toHaveBeenCalledTimes(1);
+    expect(coordinator.getResult('restore@1')?.runs[0]?.runId).toBe(
+      PROCESS_JOB_ID,
+    );
     expect(coordinator.get('restore@1')?.reason).toContain('missing worktree');
+    await cleanup();
+  });
+
+  test('reconcile settles a missing session as bounded blocked state and releases dependants once', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    let dependentRuns = 0;
+    coordinator.schedule({
+      logicalId: 'dependent',
+      after: ['restore@1'],
+      mode: 'single',
+      tasks: ['dependent'],
+      execute: async () => {
+        dependentRuns++;
+        return result('dependent');
+      },
+    });
+    removeDelegateSession(child);
+    reconcileRestoredHostedAttempts({
+      parentSessionId: PARENT,
+      manager,
+      coordinator,
+    });
+    expect(coordinator.require('restore@1').state).toBe('blocked');
+    expect(coordinator.require('restore@1').reason).toContain('missing');
+    await vi.waitFor(() => expect(dependentRuns).toBe(1));
+    reconcileRestoredHostedAttempts({
+      parentSessionId: PARENT,
+      manager,
+      coordinator,
+    });
+    expect(dependentRuns).toBe(1);
     await cleanup();
   });
 
@@ -279,6 +323,91 @@ describe('restored delegate adapter', () => {
         code: 'missing-session',
       }),
     );
+  });
+
+  test('retries a transient observation with the same control and process run ID', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    let calls = 0;
+    let firstControl: unknown;
+    restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: {
+        runDelegate: async (options) => {
+          expect(options.runId).toBe(PROCESS_JOB_ID);
+          expect(options.processJobId).toBe(PROCESS_JOB_ID);
+          calls++;
+          firstControl ??= options.control;
+          expect(options.control).toBe(firstControl);
+          const run = finishedRun('restore', calls === 1 ? 'error' : 'success');
+          run.runId = PROCESS_JOB_ID;
+          if (calls === 1) run.retryable = true;
+          return run;
+        },
+      },
+    });
+    expect(
+      reconcileRestoredHostedAttempts({
+        parentSessionId: PARENT,
+        manager,
+        coordinator,
+      }),
+    ).toEqual([]);
+    await vi.waitFor(() =>
+      expect(coordinator.require('restore@1').state).toBe('success'),
+    );
+    expect(calls).toBe(2);
+    expect(coordinator.getResult('restore@1')?.runs[0]?.runId).toBe(
+      PROCESS_JOB_ID,
+    );
+    await cleanup();
+  });
+
+  test('detach during retry backoff stops observation without settling the workflow', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    let calls = 0;
+    const restored = restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: {
+        runDelegate: async () => {
+          calls++;
+          const run = finishedRun('restore', 'error');
+          run.retryable = true;
+          run.runId = PROCESS_JOB_ID;
+          return run;
+        },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require('restore@1').jobId).toBeDefined(),
+    );
+    await manager.detach([restored.job.id]);
+    expect(calls).toBe(1);
+    expect(coordinator.require('restore@1').state).toBe('running');
+    await cleanup();
   });
 
   test('host restart settles as an error without relaunch', async () => {

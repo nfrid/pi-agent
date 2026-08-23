@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
+import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import {
   createDelegateControlChannel,
   type DelegateControlChannel,
@@ -11,9 +12,13 @@ import type {
   DelegateJobSnapshot,
 } from './jobs';
 import { buildParentHandoff } from './output';
-import { type RunDelegateOptions, runDelegate } from './runner';
+import {
+  DetachedDelegateError,
+  type RunDelegateOptions,
+  runDelegate,
+} from './runner';
 import { type DelegateSession, resolveDelegateSession } from './session';
-import type { DelegatedRun, DelegateRouteState } from './types';
+import { createRun, type DelegatedRun, type DelegateRouteState } from './types';
 import type {
   DelegateRestorableHostedLink,
   DelegateWorkflowAttemptSnapshot,
@@ -41,6 +46,8 @@ export interface RestoredDelegateDependencies {
   finalizeWorktreeRun?: typeof finalizeWorktreeRun;
   /** Existing owner-session artifact/handoff materialization seam. */
   materialize?: (runs: DelegatedRun[]) => Promise<DelegateJobResult>;
+  /** Feed restored live activity into the existing status store. */
+  onRunUpdate?: (run: DelegatedRun) => void;
 }
 
 export interface RestoreHostedDelegateAttemptOptions {
@@ -51,6 +58,8 @@ export interface RestoreHostedDelegateAttemptOptions {
   /** Stable metadata label only; it is never used as a new child prompt. */
   logicalAttemptLabel?: string;
   dependencies?: RestoredDelegateDependencies;
+  /** Stop an already-hosted process when explicit cancellation wins a retry backoff. */
+  stopExistingHost?: (processJobId: string) => Promise<void>;
 }
 
 export interface RestoredHostedDelegateAttempt {
@@ -137,8 +146,13 @@ function pathInside(root: string, candidate: string): boolean {
   );
 }
 
+const MAX_OBSERVE_RETRIES = 5;
+const OBSERVE_RETRY_INITIAL_MS = 100;
+const OBSERVE_RETRY_MAX_MS = 2_000;
+
 function invalidWorktreeResult(
   label: string,
+  processJobId: string,
   session: DelegateSession,
   record: WorktreeRecord | undefined,
   error: unknown,
@@ -147,7 +161,7 @@ function invalidWorktreeResult(
     label,
     session.routing,
     {
-      runId: session.sessionId,
+      runId: processJobId,
       name: session.name ?? label,
       sessionId: session.sessionId,
       lineageId: session.lineageId,
@@ -172,6 +186,60 @@ function fallbackMaterialize(runs: DelegatedRun[]): Promise<DelegateJobResult> {
     retainedRuns: runs,
     handoff: buildParentHandoff(runs),
   });
+}
+
+function retryDelay(attempt: number): number {
+  return Math.min(
+    OBSERVE_RETRY_MAX_MS,
+    OBSERVE_RETRY_INITIAL_MS * 2 ** Math.max(0, attempt - 1),
+  );
+}
+
+async function waitForRetry(
+  delayMs: number,
+  signal: AbortSignal,
+  detachSignal: AbortSignal | undefined,
+): Promise<'retry' | 'cancel' | 'detach'> {
+  if (detachSignal?.aborted) return 'detach';
+  if (signal.aborted) return 'cancel';
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (outcome: 'retry' | 'cancel' | 'detach') => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener('abort', cancel);
+      detachSignal?.removeEventListener('abort', detach);
+      resolve(outcome);
+    };
+    const cancel = () => finish('cancel');
+    const detach = () => finish('detach');
+    signal.addEventListener('abort', cancel, { once: true });
+    detachSignal?.addEventListener('abort', detach, { once: true });
+    timer = setTimeout(() => finish('retry'), delayMs);
+    timer.unref();
+  });
+}
+
+function cancelledObservationResult(
+  label: string,
+  processJobId: string,
+  session: DelegateSession,
+): DelegateJobResult {
+  const run = createRun(label, session.routing, {
+    runId: processJobId,
+    name: session.name ?? label,
+    sessionId: session.sessionId,
+    lineageId: session.lineageId,
+    context: 'continuation',
+    continuation: session.token,
+    allowWrites: session.allowWrites === true,
+    isolation: session.isolation,
+  });
+  run.state = 'aborted';
+  run.exitCode = 130;
+  run.stopReason = 'aborted';
+  run.errorMessage = 'Delegated task was aborted.';
+  run.finishedAt = Date.now();
+  return { runs: [run], handoff: buildParentHandoff([run]) };
 }
 
 /**
@@ -231,55 +299,6 @@ export function restoreHostedDelegateAttempt(
       }
     }
   }
-  if (worktreeError) {
-    // Do not remove, rewrite, or rehydrate an untrusted binding.
-    const control = createDelegateControlChannel(
-      session.filePath,
-      options.parentSessionId,
-      'background',
-      link.processJobId,
-    );
-    try {
-      const job = options.manager.observeExisting({
-        name: session.name ?? label,
-        ownerSessionId: options.parentSessionId,
-        ownerBranchId: link.ownerBranchId,
-        mode: 'single',
-        tasks: [label],
-        workflowAttempt: link.attempt,
-        detachOnTeardown: true,
-        processJobId: link.processJobId,
-        sessionId: session.sessionId,
-        allowWrites: session.allowWrites,
-        route: session.routing?.route,
-        execute: async (_signal, detachSignal) => {
-          try {
-            return invalidWorktreeResult(
-              label,
-              session,
-              worktreeRecord,
-              worktreeError,
-            );
-          } finally {
-            if (detachSignal?.aborted) control.detach();
-            else control.close();
-          }
-        },
-        onTerminal: (result, snapshot) =>
-          options.coordinator.acceptRestoredHostedTerminal(
-            identity,
-            snapshot,
-            result,
-          ),
-      });
-      options.coordinator.bindRestoredHostedJob(identity, job);
-      return { session, control, job, worktree: undefined };
-    } catch (error) {
-      control.close();
-      throw error;
-    }
-  }
-
   const control = createDelegateControlChannel(
     session.filePath,
     options.parentSessionId,
@@ -287,12 +306,24 @@ export function restoreHostedDelegateAttempt(
     link.processJobId,
   );
   const materialize = dependencies.materialize ?? fallbackMaterialize;
+  const stopExistingHost =
+    options.stopExistingHost ??
+    (async (processJobId: string) => {
+      try {
+        await new BackgroundJobsClient(undefined, options.parentSessionId).stop(
+          [processJobId],
+        );
+      } catch {
+        // Cancellation remains authoritative even when the host socket is down.
+      }
+    });
   const execute = async (
     signal: AbortSignal,
     detachSignal?: AbortSignal,
   ): Promise<DelegateJobResult> => {
     const runOptions: RunDelegateOptions = {
-      runId: session.sessionId,
+      runId: link.processJobId,
+      workflowAttempt: link.attempt,
       processJobId: link.processJobId,
       sessionId: session.sessionId,
       lineageId: session.lineageId,
@@ -324,12 +355,67 @@ export function restoreHostedDelegateAttempt(
       hosted: true,
       observeExisting: true,
       control,
+      preserveControlOnRetry: true,
+      onRunUpdate: dependencies.onRunUpdate,
       mode: 'single',
     };
-    try {
-      const run = await observe(runOptions);
+    const materializeSynthetic = async (
+      result: DelegateJobResult,
+    ): Promise<DelegateJobResult> => {
+      const run = result.runs[0];
+      if (run) dependencies.onRunUpdate?.(run);
+      return materialize(result.runs);
+    };
+    const finish = async (run: DelegatedRun): Promise<DelegateJobResult> => {
+      if (run.state === 'aborted' || signal.aborted) {
+        if (signal.aborted && run.state !== 'aborted')
+          return materializeSynthetic(
+            cancelledObservationResult(label, link.processJobId, session),
+          );
+        return materialize([run]);
+      }
+      if (worktreeError) {
+        // Reconciliation was still performed, but an untrusted checkout can
+        // never be finalized or treated as a successful recovery.
+        const recovery = invalidWorktreeResult(
+          label,
+          link.processJobId,
+          session,
+          worktreeRecord,
+          worktreeError,
+        );
+        return materializeSynthetic(recovery);
+      }
       if (worktree) await finalize(run, worktree, label);
-      return await materialize([run]);
+      return materialize([run]);
+    };
+    try {
+      let retryCount = 0;
+      while (true) {
+        if (detachSignal?.aborted) throw new DetachedDelegateError();
+        if (signal.aborted) {
+          await stopExistingHost(link.processJobId);
+          return materializeSynthetic(
+            cancelledObservationResult(label, link.processJobId, session),
+          );
+        }
+        const run = await observe(runOptions);
+        if (!run.retryable) return finish(run);
+        if (retryCount >= MAX_OBSERVE_RETRIES) return finish(run);
+        retryCount++;
+        const outcome = await waitForRetry(
+          retryDelay(retryCount),
+          signal,
+          detachSignal,
+        );
+        if (outcome === 'detach') throw new DetachedDelegateError();
+        if (outcome === 'cancel') {
+          await stopExistingHost(link.processJobId);
+          return materializeSynthetic(
+            cancelledObservationResult(label, link.processJobId, session),
+          );
+        }
+      }
     } finally {
       if (detachSignal?.aborted) control.detach();
       else control.close();
@@ -362,6 +448,66 @@ export function restoreHostedDelegateAttempt(
     control.close();
     throw error;
   }
+}
+
+export interface ReconcileRestoredHostedAttemptsOptions {
+  parentSessionId: string;
+  manager: DelegateJobManager;
+  coordinator: DelegateWorkflowCoordinator;
+  /** False when a replaced session runtime must stop mutating its records. */
+  isGenerationActive?: () => boolean;
+  logicalAttemptLabel?: (link: DelegateRestorableHostedLink) => string;
+  dependencies?: RestoredDelegateDependencies;
+  stopExistingHost?: (processJobId: string) => Promise<void>;
+  onRestored?: (
+    restored: RestoredHostedDelegateAttempt,
+    link: DelegateRestorableHostedLink,
+  ) => void;
+  onFailure?: (
+    link: DelegateRestorableHostedLink,
+    attempt: DelegateWorkflowAttemptSnapshot,
+  ) => void;
+}
+
+/**
+ * Reconcile the active owner's persisted links once. Validation failures are
+ * reduced to bounded workflow failures; imported/foreign records are never
+ * reachable through the coordinator link enumeration.
+ */
+export function reconcileRestoredHostedAttempts(
+  options: ReconcileRestoredHostedAttemptsOptions,
+): RestoredHostedDelegateAttempt[] {
+  const restored: RestoredHostedDelegateAttempt[] = [];
+  for (const link of options.coordinator.listRestorableHostedLinks()) {
+    if (options.isGenerationActive && !options.isGenerationActive()) break;
+    try {
+      const observation = restoreHostedDelegateAttempt({
+        parentSessionId: options.parentSessionId,
+        attempt: link.identity,
+        manager: options.manager,
+        coordinator: options.coordinator,
+        logicalAttemptLabel: options.logicalAttemptLabel?.(link),
+        dependencies: options.dependencies,
+        stopExistingHost: options.stopExistingHost,
+      });
+      restored.push(observation);
+      options.onRestored?.(observation, link);
+    } catch (error) {
+      if (options.isGenerationActive && !options.isGenerationActive()) break;
+      const failureState =
+        error instanceof RestoreSessionError &&
+        (error.code === 'missing-session' || error.code === 'foreign-session')
+          ? 'blocked'
+          : 'error';
+      const attempt = options.coordinator.settleRestoredFailure(
+        link.identity,
+        failureState,
+        error instanceof Error ? error.message : String(error),
+      );
+      options.onFailure?.(link, attempt);
+    }
+  }
+  return restored;
 }
 
 /** Short integration name retained for the parent runtime adapter. */

@@ -882,6 +882,7 @@ export class DelegateWorkflowCoordinator {
           record !== undefined &&
           !this.importedRecordIdentities.has(record.attempt.identity) &&
           (record.state === 'queued' || record.state === 'running') &&
+          record.jobId === undefined &&
           record.sessionId !== undefined &&
           record.processJobId !== undefined &&
           validProcessLink(record.sessionId, record.processJobId),
@@ -969,6 +970,20 @@ export class DelegateWorkflowCoordinator {
     if (this.restoredTerminalObservations.has(key)) return;
     this.restoredTerminalObservations.add(key);
     this.handleTerminal(record, result, job);
+  }
+
+  /** Settle a synchronous restore validation failure without launching anything. */
+  settleRestoredFailure(
+    reference: string,
+    state: 'blocked' | 'error',
+    reason: string,
+  ): DelegateWorkflowAttemptSnapshot {
+    const record = this.requireRecord(reference);
+    if (this.importedRecordIdentities.has(record.attempt.identity))
+      throw new Error('Imported workflow attempts cannot be settled locally.');
+    if (!isTerminalWorkflowAttemptState(record.state))
+      this.settle(record, state, boundedReason(reason));
+    return this.snapshotRecord(record);
   }
 
   snapshot(): DelegateWorkflowSnapshot {

@@ -52,12 +52,19 @@ import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { clearDelegateSurface, publishDelegateSurface } from './live';
 import { registerDelegateCapability } from './register-capability';
+import {
+  type RestoredDelegateDependencies,
+  reconcileRestoredHostedAttempts,
+} from './restore';
+import { serializeDelegateRunForPublic } from './serialize';
 import { pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
 
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
+import { buildSessionBoundArtifactBackedHandoff } from './tool-result';
 import { registerDelegateTranscriptCommand } from './transcript';
+import { createRun, type DelegatedRun } from './types';
 import { WakeCoordinator } from './wake-coordinator';
 import {
   createWakeDelivery,
@@ -638,6 +645,111 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     setDelegateToolActive(pi, 'delegate_branches', false);
     if (branchEntries.length > 0) activateBranchesTool();
     activateWakeBranch(ctx, wakeBranchKey, true);
+
+    // Reattach durable hosted links only after the owner workflow/store and
+    // tools are live. The generation guard prevents a replaced session from
+    // mutating the new runtime while an old reconciliation is still running.
+    const restoredStatusIds = new Map<string, string>();
+    const pendingRestoredRuns = new Map<string, DelegatedRun>();
+    const restoreDependencies: RestoredDelegateDependencies = {
+      materialize: async (runs) => {
+        const ownerActive =
+          generation === runtimeGeneration &&
+          runtimeActive &&
+          activeRuntime?.branchId === initialRuntime.branchId;
+        const handoff = await buildSessionBoundArtifactBackedHandoff(
+          pi,
+          ctx,
+          sessionScopeId,
+          runs,
+          initialRuntime.branchId,
+          () =>
+            generation === runtimeGeneration &&
+            runtimeActive &&
+            activeRuntime?.branchId === initialRuntime.branchId,
+        );
+        const publicRuns = runs.map((run) =>
+          serializeDelegateRunForPublic(run, {
+            includeArtifacts: ownerActive,
+          }),
+        );
+        return {
+          runs: ownerActive
+            ? publicRuns
+            : publicRuns.map(({ artifact: _artifact, ...run }) => run),
+          retainedRuns: runs,
+          handoff,
+        };
+      },
+      onRunUpdate: (run) => {
+        const identity = run.workflowAttempt?.identity;
+        if (!identity) return;
+        const statusId = restoredStatusIds.get(identity);
+        if (statusId) statuses?.update(statusId, run);
+        else pendingRestoredRuns.set(identity, run);
+      },
+    };
+    reconcileRestoredHostedAttempts({
+      parentSessionId: sessionScopeId,
+      manager: jobs,
+      coordinator: initialRuntime.workflow,
+      isGenerationActive: () =>
+        generation === runtimeGeneration &&
+        runtimeActive &&
+        activeRuntime?.branchId === initialRuntime.branchId,
+      dependencies: restoreDependencies,
+      onRestored: (restored, link) => {
+        const initialRun = createRun(
+          `${link.logicalId}@${link.attempt.ordinal}`,
+          restored.session.routing,
+          {
+            runId: link.processJobId,
+            workflowAttempt: link.attempt,
+            sessionId: restored.session.sessionId,
+            lineageId: restored.session.lineageId,
+            name: restored.session.name ?? link.identity,
+            context: 'continuation',
+            allowWrites: restored.session.allowWrites === true,
+            isolation: restored.session.isolation,
+          },
+        );
+        const statusId = statuses?.start([initialRun], 'background')[0];
+        if (!statusId) return;
+        restoredStatusIds.set(link.identity, statusId);
+        statuses?.setJobId(statusId, restored.job.id);
+        statuses?.setWorkflow(
+          statusId,
+          initialRuntime.workflow.require(link.identity),
+        );
+        const pending = pendingRestoredRuns.get(link.identity);
+        if (pending) {
+          pendingRestoredRuns.delete(link.identity);
+          statuses?.update(statusId, pending);
+        }
+      },
+      onFailure: (link, attempt) => {
+        const failedRun = createRun(
+          `${link.logicalId}@${link.attempt.ordinal}`,
+          undefined,
+          {
+            runId: link.processJobId,
+            workflowAttempt: link.attempt,
+            sessionId: link.sessionId,
+            name: link.identity,
+            context: 'continuation',
+            isolation: 'shared',
+          },
+        );
+        failedRun.state = 'error';
+        failedRun.exitCode = 1;
+        failedRun.stopReason = 'error';
+        failedRun.errorMessage = attempt.reason;
+        failedRun.finishedAt = Date.now();
+        const statusId = statuses?.start([failedRun], 'background')[0];
+        if (statusId) statuses?.setWorkflow(statusId, attempt);
+      },
+    });
+    syncWorkflowSurface();
     syncWidget();
   });
 
