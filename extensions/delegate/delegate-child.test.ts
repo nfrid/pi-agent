@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import net from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -7,6 +8,7 @@ import {
   checkpointLeadMs,
   effectiveDelegateHome,
   MAX_STDERR_BYTES,
+  runHostedDelegateChild,
   spawnDelegateChild,
 } from './delegate-child';
 import { createRun } from './types';
@@ -25,6 +27,103 @@ function systemHomeWithoutEnvironment(): string {
 afterEach(() => {
   vi.unstubAllEnvs();
 });
+
+const hostedJobId = '123e4567-e89b-42d3-a456-426614174000';
+
+type HostedCase = {
+  eventResponse?: {
+    events: Array<{
+      offset: number;
+      stream: 'stdout' | 'stderr';
+      text: string;
+      truncated: boolean;
+    }>;
+    truncated: boolean;
+    complete: boolean;
+    nextOffset: number;
+  };
+  status: 'running' | 'done' | 'failed' | 'killed';
+  exitCode?: number;
+  timedOut?: boolean;
+};
+
+async function withHostedCase<T>(
+  setup: HostedCase,
+  work: (calls: string[]) => Promise<T>,
+): Promise<T> {
+  const root = mkdtempSync(path.join(tmpdir(), 'delegate-hosted-test-'));
+  const socketPath = path.join(root, 'process-host.sock');
+  const calls: string[] = [];
+  let stopped = false;
+  const snapshot = (status = setup.status) => ({
+    id: hostedJobId,
+    ownerSession: 'parent-session',
+    title: 'Delegate: Review',
+    command: 'pi',
+    cwd: process.cwd(),
+    status,
+    createdAt: 1,
+    ...(setup.exitCode === undefined ? {} : { exitCode: setup.exitCode }),
+    ...(setup.timedOut === undefined ? {} : { timedOut: setup.timedOut }),
+    stdout: { text: '', totalBytes: 0, droppedBytes: 0 },
+    stderr: { text: '', totalBytes: 0, droppedBytes: 0 },
+  });
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) return;
+      const request = JSON.parse(buffer.slice(0, newline)) as { op: string };
+      calls.push(request.op);
+      if (request.op === 'stop') stopped = true;
+      const response =
+        request.op === 'start'
+          ? { v: 1, ok: true, job: snapshot() }
+          : request.op === 'events'
+            ? {
+                v: 1,
+                ok: true,
+                events: stopped
+                  ? {
+                      events: [],
+                      truncated: false,
+                      complete: true,
+                      nextOffset: 0,
+                    }
+                  : (setup.eventResponse ?? {
+                      events: [],
+                      truncated: false,
+                      complete: setup.status !== 'running',
+                      nextOffset: 0,
+                    }),
+              }
+            : request.op === 'stop' || request.op === 'wait'
+              ? {
+                  v: 1,
+                  ok: true,
+                  job: snapshot(stopped ? 'killed' : setup.status),
+                }
+              : request.op === 'inspect'
+                ? {
+                    v: 1,
+                    ok: true,
+                    job: snapshot(stopped ? 'killed' : setup.status),
+                  }
+                : { v: 1, ok: true };
+      socket.end(`${JSON.stringify(response)}\n`);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  vi.stubEnv('PI_PROCESS_HOST_SOCKET', socketPath);
+  try {
+    return await work(calls);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 describe('delegate child environment', () => {
   test('scales the checkpoint window without moving the hard deadline', () => {
@@ -206,6 +305,129 @@ describe('delegate child environment', () => {
     expect(result.exitCode).toBe(0);
     expect(JSON.stringify(run.messages)).toContain('café');
     expect(JSON.stringify(run.messages)).not.toContain('�');
+  });
+
+  test.each([
+    ['success', 'done', 0, false],
+    ['nonzero', 'failed', 7, false],
+    ['timeout', 'killed', undefined, true],
+  ] as const)('reconciles hosted %s terminal state', async (_label, status, exitCode, timedOut) => {
+    const message = JSON.stringify({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hosted result' }],
+      },
+    });
+    await withHostedCase(
+      {
+        status,
+        ...(exitCode === undefined ? {} : { exitCode }),
+        timedOut,
+        eventResponse: {
+          events: [
+            { offset: 2, stream: 'stdout', text: message, truncated: false },
+            {
+              offset: 1,
+              stream: 'stdout',
+              text: JSON.stringify({
+                type: 'delegate_control_ack',
+                controlId: 'checkpoint-1',
+                controlKind: 'checkpoint',
+              }),
+              truncated: false,
+            },
+          ],
+          truncated: false,
+          complete: true,
+          nextOffset: 3,
+        },
+      },
+      async (calls) => {
+        const run = createRun('hosted');
+        run.checkpoint = { requestedAt: 1, state: 'requested' };
+        const acknowledgements: string[] = [];
+        const result = await runHostedDelegateChild(run, {
+          command: 'pi',
+          title: 'Delegate: Review',
+          args: ['--mode', 'json'],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          timeoutMs: 100,
+          onControlAck: (id) => acknowledgements.push(id),
+          onLine: vi.fn(),
+        });
+        expect(calls).toEqual(['start', 'events', 'inspect', 'inspect']);
+        expect(acknowledgements).toEqual(['checkpoint-1']);
+        expect(run.messages).toHaveLength(1);
+        expect(result).toMatchObject({
+          exitCode: timedOut ? 124 : (exitCode ?? 0),
+          timedOut,
+          wasAborted: false,
+        });
+      },
+    );
+  });
+
+  test('stops the host process for explicit cancellation', async () => {
+    await withHostedCase({ status: 'done', exitCode: 0 }, async (calls) => {
+      const controller = new AbortController();
+      controller.abort();
+      const result = await runHostedDelegateChild(createRun('cancel'), {
+        command: 'pi',
+        args: [],
+        cwd: process.cwd(),
+        env: {},
+        ownerSession: 'parent-session',
+        processJobId: hostedJobId,
+        timeoutMs: 100,
+        signal: controller.signal,
+        onLine: vi.fn(),
+      });
+      expect(calls).toContain('stop');
+      expect(result).toMatchObject({ exitCode: 130, wasAborted: true });
+    });
+  });
+
+  test('diagnoses truncated hosted event history without treating tails as transcript', async () => {
+    await withHostedCase(
+      {
+        status: 'done',
+        exitCode: 0,
+        eventResponse: {
+          events: [
+            {
+              offset: 4,
+              stream: 'stdout',
+              text: '{"type":"message_end"',
+              truncated: true,
+            },
+          ],
+          truncated: true,
+          complete: true,
+          nextOffset: 5,
+        },
+      },
+      async (calls) => {
+        const run = createRun('truncated hosted');
+        const result = await runHostedDelegateChild(run, {
+          command: 'pi',
+          args: [],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          timeoutMs: 100,
+          onLine: vi.fn(),
+        });
+        expect(calls).toEqual(['start', 'events', 'inspect', 'inspect']);
+        expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+        expect(run.messages).toEqual([]);
+        expect(run.stderr).toContain('truncated');
+      },
+    );
   });
 
   test('resolves a bounded temp home in a child command without touching the real home', async () => {
