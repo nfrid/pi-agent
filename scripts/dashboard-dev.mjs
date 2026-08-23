@@ -123,6 +123,11 @@ async function main() {
           path.join(env.HOME ?? process.cwd(), '.pi', 'agent', 'dashboard'),
         'runtime-host.sock',
       );
+    env.PI_PROCESS_HOST_SOCKET ??= path.join(
+      env.PI_DASHBOARD_STATE_DIR ??
+        path.join(env.HOME ?? process.cwd(), '.pi', 'agent', 'dashboard'),
+      'background-jobs.sock',
+    );
     if (
       mode !== 'runtime-host' &&
       (await endpointInUse({ path: runtimeHostSocket }))

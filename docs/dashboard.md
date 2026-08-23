@@ -75,6 +75,7 @@ For production build and restart instructions, see
 | `PI_DASHBOARD_VAPID_PUBLIC_KEY`, `PI_DASHBOARD_VAPID_PRIVATE_KEY`, `PI_DASHBOARD_VAPID_SUBJECT` | Optional Web Push configuration. |
 | `PI_DASHBOARD_NOTIFY_SETTLED=1` | Opt in to settled-run notifications. |
 | `PI_DASHBOARD_RUNTIME_HOST_SOCKET` | Owner-private Unix socket for the stable headless runtime-host sidecar. |
+| `PI_PROCESS_HOST_SOCKET` | Separate owner-private Unix socket for durable shell jobs; defaults to `background-jobs.sock` under the state directory. |
 | `PI_EXECUTABLE` | Optional Pi executable override for the runtime host; the launchd template pins `/opt/homebrew/bin/pi`. |
 
 ## Architecture
@@ -156,6 +157,22 @@ Opaque runtime locations and hashed credentials persist in SQLite so reconnects
 survive dashboard socket churn and daemon restart. The runtime host owns child
 process groups, drains RPC pipes, and force-closes them on shutdown or crash;
 children are never adopted. The dashboard never becomes a second agent protocol.
+
+### Durable background jobs (phase 1)
+
+`@pi-agent/background-jobs` defines a bounded, versioned JSONL protocol over the
+separate `PI_PROCESS_HOST_SOCKET`. The stable runtime-host sidecar owns Bash jobs
+and stores their identity, launch facts, status, exit details, and bounded
+stdout/stderr tails in `background-jobs.sqlite`. Job IDs are UUIDs: retrying the
+same ID and launch facts is idempotent, while different facts conflict.
+
+Jobs survive parent Pi session shutdown and recreation. The extension manager
+therefore detaches on disposal; users must explicitly run `background stop` to
+terminate a job. A host restart marks persisted active rows failed with an
+explicit host-restart diagnostic and never adopts a PID by itself. Settled jobs
+are retained per owner session with active jobs plus at most 32 settled rows.
+Delegate execution is not migrated in phase 1; delegate migration remains
+pending.
 
 ## Browser surface
 

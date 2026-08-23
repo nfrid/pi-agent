@@ -1,5 +1,10 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { BackgroundJobHostService } from '../../apps/dashboard-server/src/background-job-host';
 import backgroundTerminals from './index';
 import type { BackgroundParameters } from './schema';
 
@@ -42,12 +47,35 @@ interface RegisteredTool {
 type Handler = (...args: unknown[]) => unknown;
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
-beforeAll(() => {
+const originalProcessSocket = process.env.PI_PROCESS_HOST_SOCKET;
+let host: BackgroundJobHostService;
+let hostRoot: string;
+beforeAll(async () => {
   process.env.PI_CODING_AGENT_DIR = process.cwd();
+  hostRoot = await mkdtemp(path.join(os.tmpdir(), 'background-index-'));
+  const socket = path.join(hostRoot, 'jobs.sock');
+  process.env.PI_PROCESS_HOST_SOCKET = socket;
+  host = new BackgroundJobHostService(
+    socket,
+    path.join(hostRoot, 'jobs.sqlite'),
+  );
+  await host.listen();
 });
-afterAll(() => {
+afterAll(async () => {
+  for (const owner of ['default', 'scope-A', 'scope-B']) {
+    const client = new BackgroundJobsClient(host.socketPath, owner);
+    const running = (await client.list())
+      .filter((job) => job.status === 'running')
+      .map((job) => job.id);
+    if (running.length) await client.stop(running);
+  }
+  await host.close();
+  await rm(hostRoot, { recursive: true, force: true });
   if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+  if (originalProcessSocket === undefined)
+    delete process.env.PI_PROCESS_HOST_SOCKET;
+  else process.env.PI_PROCESS_HOST_SOCKET = originalProcessSocket;
 });
 
 describe('background terminals extension', () => {
@@ -83,6 +111,7 @@ describe('background terminals extension', () => {
     );
     expect(tool?.promptGuidelines).toEqual([
       'When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.',
+      'Background jobs survive parent Pi session shutdown and recreation; use `background stop` explicitly when a job should terminate.',
     ]);
 
     handlers.get('session_start')?.(

@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.84.1",
+    "@pi-agent/background-jobs": "workspace:*",
     "@pi-dashboard/activity-model": "workspace:*",
     "@pi-dashboard/codex-usage": "workspace:*",
     "@pi-dashboard/domain": "workspace:*",

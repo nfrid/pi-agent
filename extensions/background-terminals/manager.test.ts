@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { BackgroundJobsClient } from '@pi-agent/background-jobs';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { BackgroundJobHostService } from '../../apps/dashboard-server/src/background-job-host';
 import { BackgroundManager } from './manager';
 
 function quoteShell(value: string): string {
@@ -37,14 +42,41 @@ async function withManager(
   try {
     await run(manager);
   } finally {
+    const running = (await manager.list())
+      .filter((snapshot) => snapshot.status === 'running')
+      .map((snapshot) => snapshot.id);
+    if (running.length) await manager.stop(running);
     await manager.dispose();
   }
 }
 
+let host: BackgroundJobHostService;
+let hostRoot: string;
+const originalProcessSocket = process.env.PI_PROCESS_HOST_SOCKET;
+
+beforeAll(async () => {
+  hostRoot = await mkdtemp(path.join(os.tmpdir(), 'background-manager-'));
+  const socket = path.join(hostRoot, 'jobs.sock');
+  process.env.PI_PROCESS_HOST_SOCKET = socket;
+  host = new BackgroundJobHostService(
+    socket,
+    path.join(hostRoot, 'jobs.sqlite'),
+  );
+  await host.listen();
+});
+
+afterAll(async () => {
+  await host.close();
+  await rm(hostRoot, { recursive: true, force: true });
+  if (originalProcessSocket === undefined)
+    delete process.env.PI_PROCESS_HOST_SOCKET;
+  else process.env.PI_PROCESS_HOST_SOCKET = originalProcessSocket;
+});
+
 describe('BackgroundManager', () => {
   it('executes commands with Bash rather than the login shell', async () => {
     await withManager(async (manager) => {
-      const started = manager.start({
+      const started = await manager.start({
         command: 'printf %s "$BASH_VERSION"',
         title: 'shell check',
         cwd: process.cwd(),
@@ -58,7 +90,7 @@ describe('BackgroundManager', () => {
 
   it('captures stdout and stderr separately and reports a successful exit', async () => {
     await withManager(async (manager) => {
-      const started = manager.start({
+      const started = await manager.start({
         command: nodeCommand(
           "process.stdout.write('hello'); process.stderr.write('warning')",
         ),
@@ -76,7 +108,7 @@ describe('BackgroundManager', () => {
 
   it('returns a running snapshot when peek times out', async () => {
     await withManager(async (manager) => {
-      const started = manager.start({
+      const started = await manager.start({
         command: nodeCommand('setInterval(() => {}, 1000)'),
         title: 'server',
         cwd: process.cwd(),
@@ -89,7 +121,7 @@ describe('BackgroundManager', () => {
 
   it('lets an aborted peek leave the process running', async () => {
     await withManager(async (manager) => {
-      const started = manager.start({
+      const started = await manager.start({
         command: nodeCommand('setInterval(() => {}, 1000)'),
         title: 'server',
         cwd: process.cwd(),
@@ -107,7 +139,7 @@ describe('BackgroundManager', () => {
     const onSettled = vi.fn();
     const manager = new BackgroundManager({ onSettled });
     try {
-      const started = manager.start({
+      const started = await manager.start({
         command: nodeCommand('setTimeout(() => {}, 20)'),
         title: 'short task',
         cwd: process.cwd(),
@@ -125,7 +157,7 @@ describe('BackgroundManager', () => {
     const onSettled = vi.fn();
     const manager = new BackgroundManager({ onSettled });
     try {
-      const started = manager.start({
+      const started = await manager.start({
         command: nodeCommand('setInterval(() => {}, 1000)'),
         title: 'server',
         cwd: process.cwd(),
@@ -147,7 +179,7 @@ describe('BackgroundManager', () => {
     const onSettled = vi.fn(resolveDelivery);
     const manager = new BackgroundManager({ onSettled });
     try {
-      const started = manager.start({
+      const started = await manager.start({
         command: nodeCommand('process.exitCode = 3'),
         title: 'failure',
         cwd: process.cwd(),
@@ -169,7 +201,7 @@ describe('BackgroundManager', () => {
     'cleans up descendants after the shell exits',
     async () => {
       await withManager(async (manager) => {
-        const started = manager.start({
+        const started = await manager.start({
           command: nodeCommand(
             "const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(child.pid); child.unref()",
           ),
@@ -188,7 +220,7 @@ describe('BackgroundManager', () => {
 
   it('bounds the retained display command', async () => {
     await withManager(async (manager) => {
-      const started = manager.start({
+      const started = await manager.start({
         command: `printf %s ${quoteShell('x'.repeat(2_000))}`,
         title: 'large command',
         cwd: process.cwd(),
@@ -203,7 +235,7 @@ describe('BackgroundManager', () => {
   it('disposes running processes without delivering completion', async () => {
     const onSettled = vi.fn();
     const manager = new BackgroundManager({ onSettled });
-    const started = manager.start({
+    const started = await manager.start({
       command: nodeCommand('setInterval(() => {}, 1000)'),
       title: 'server',
       cwd: process.cwd(),
@@ -213,5 +245,15 @@ describe('BackgroundManager', () => {
 
     expect(onSettled).not.toHaveBeenCalled();
     expect(manager.get(started.id)).toBeUndefined();
+    expect(
+      (
+        await new BackgroundJobsClient(host.socketPath, 'default').inspect(
+          started.id,
+        )
+      )?.status,
+    ).toBe('running');
+    await new BackgroundJobsClient(host.socketPath, 'default').stop([
+      started.id,
+    ]);
   });
 });

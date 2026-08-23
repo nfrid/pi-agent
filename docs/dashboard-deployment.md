@@ -1,6 +1,6 @@
 # Dashboard deployment
 
-The production dashboard is served from generated `dist/` directories by the macOS LaunchAgent `com.pi.dashboard`; managed headless children are owned by the separate `com.pi.dashboard-runtime-host` LaunchAgent. Changes under `apps/dashboard-*`, `packages/dashboard-*`, `packages/activity-model`, or `packages/codex-usage` are not deployed until the production bundles are rebuilt and the service is restarted. Ordinary dashboard deploy must not restart the runtime host.
+The production dashboard is served from generated `dist/` directories by the macOS LaunchAgent `com.pi.dashboard`; managed headless children and phase-1 durable shell jobs are owned by the separate `com.pi.dashboard-runtime-host` LaunchAgent. The shell-job control socket is `PI_PROCESS_HOST_SOCKET`, separate from both the runtime bridge and dashboard HTTP. Changes under `apps/dashboard-*`, `packages/dashboard-*`, `packages/background-jobs`, `packages/activity-model`, or `packages/codex-usage` are not deployed until the production bundles are rebuilt and the service is restarted. Ordinary dashboard deploy must not restart the runtime host.
 
 ## Browser-test guidance
 
@@ -26,7 +26,7 @@ After validating a dashboard-affecting change:
    `origin="http://127.0.0.1:${PI_DASHBOARD_WEB_PORT:-4174}"; curl -fsS -o /dev/null "$origin/" && curl -fsS -H "origin: $origin" -H "content-type: application/json" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" -H "x-dashboard-protocol-version: 3" --data 'null' "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/trpc/protocolInfo" >/dev/null && curl -fsS -H "origin: $origin" -H "content-type: application/json" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" -H "x-dashboard-protocol-version: 3" --data '{"protocolVersion":3}' "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/trpc/shellSnapshot" >/dev/null && test "$(curl -s -o /dev/null -w '%{http_code}' -H "origin: $origin" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D")" = 404 && test "$(curl -s -o /dev/null -w '%{http_code}' -H "origin: $origin" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/api/sessions/example")" = 404`
 4. If startup fails, inspect `dashboard/serve.log` and `dashboard/serve.error.log` before making further changes.
 
-Do not delete or clean `apps/**/dist` or `packages/**/dist` while the production service is running: the preview server returns `404` without its bundle. Do not run tests or temporary dashboard servers against the production `dashboard/bridge.sock`; always provide an isolated `stateDir` or `socketPath`. A successful build alone is not a deployment, and a web `200` alone does not prove the bridge daemon is healthy.
+Phase 1 does not migrate delegate execution; that remains pending. Do not delete or clean `apps/**/dist` or `packages/**/dist` while the production service is running: the preview server returns `404` without its bundle. Do not run tests or temporary dashboard servers against the production `dashboard/bridge.sock`; always provide an isolated `stateDir` or `socketPath`. A successful build alone is not a deployment, and a web `200` alone does not prove the bridge daemon is healthy.
 
 ## Project catalogue cutover gate
 

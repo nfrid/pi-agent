@@ -20,6 +20,9 @@ importers:
       '@mozilla/readability':
         specifier: ^0.6.0
         version: 0.6.0
+      '@pi-agent/background-jobs':
+        specifier: workspace:*
+        version: link:packages/background-jobs
       '@pi-dashboard/activity-model':
         specifier: workspace:*
         version: link:packages/activity-model
@@ -75,6 +78,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.1
         version: 0.84.1(ws@8.21.0)(zod@4.4.3)
+      '@pi-agent/background-jobs':
+        specifier: workspace:*
+        version: link:../../packages/background-jobs
       '@pi-dashboard/activity-model':
         specifier: workspace:*
         version: link:../../packages/activity-model
@@ -221,6 +227,8 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 0.84.1
         version: 0.84.1(ws@8.21.0)(zod@4.4.3)
+
+  packages/background-jobs: {}
 
   packages/codex-usage: {}
 

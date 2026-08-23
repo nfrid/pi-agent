@@ -1,1 +1,2 @@
 - When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.
+- Background jobs survive parent Pi session shutdown and recreation; use `background stop` explicitly when a job should terminate.

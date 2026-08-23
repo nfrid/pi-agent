@@ -13,7 +13,7 @@ export function registerBackgroundCommands(
   pi.registerCommand('ps', {
     description: 'List and inspect background processes',
     handler: async (_args, ctx) => {
-      const snapshots = getManager().list();
+      const snapshots = await getManager().list();
       if (snapshots.length === 0) {
         if (ctx.hasUI) ctx.ui.notify('No background processes.', 'info');
         return;
