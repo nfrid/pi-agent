@@ -89,6 +89,7 @@ describe('background process host', () => {
         stdio: 'ignore',
       },
     );
+    let hostPid = 0;
     try {
       const client = new BackgroundJobsClient(socket, 'abrupt');
       const startupDeadline = Date.now() + 5_000;
@@ -102,6 +103,12 @@ describe('background process host', () => {
           await new Promise((resolve) => setTimeout(resolve, 25));
         }
       }
+      hostPid = Number(
+        execFileSync('lsof', ['-t', socket], { encoding: 'utf8' })
+          .trim()
+          .split('\n')[0],
+      );
+      expect(hostPid).toBeGreaterThan(0);
       const started = await client.start({
         id,
         command: `node -e ${JSON.stringify("const {spawn}=require('node:child_process'); const c=spawn(process.execPath,['-e','process.on(\\\"SIGTERM\\\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(c.pid);")}`,
@@ -118,8 +125,7 @@ describe('background process host', () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       expect(pid).toBeGreaterThan(0);
-      if (!processHost.pid) throw new Error('Process host has no PID.');
-      process.kill(processHost.pid, 'SIGKILL');
+      process.kill(hostPid, 'SIGKILL');
       await waitUntil(() => {
         try {
           const state = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], {
@@ -131,6 +137,13 @@ describe('background process host', () => {
         }
       });
     } finally {
+      if (hostPid > 0) {
+        try {
+          process.kill(hostPid, 'SIGKILL');
+        } catch {
+          /* exited */
+        }
+      }
       try {
         processHost.kill('SIGKILL');
       } catch {
