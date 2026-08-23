@@ -315,7 +315,14 @@ export async function runDelegate(
     });
 
     if (childResult.detached) throw new DetachedDelegateError();
-    const { exitCode, wasAborted, timedOut, spawnError } = childResult;
+    const { exitCode, wasAborted, timedOut, spawnError, hostError } =
+      childResult;
+    const lifecycleStderr = [
+      hostError ? `Process-host terminal error: ${hostError}` : '',
+      run.stderr,
+    ]
+      .filter(Boolean)
+      .join('\n');
     run.exitCode = exitCode;
     if (spawnError) {
       run.stopReason = 'error';
@@ -356,7 +363,7 @@ export async function runDelegate(
         buildLifecycleDiagnostic(
           'child-nonzero-exit',
           run.errorMessage,
-          run.stderr,
+          lifecycleStderr,
         ),
       );
     }
@@ -376,7 +383,11 @@ export async function runDelegate(
         setDelegateLifecycleText(
           run,
           'unknown',
-          buildLifecycleDiagnostic('unknown', run.errorMessage, run.stderr),
+          buildLifecycleDiagnostic(
+            'unknown',
+            run.errorMessage,
+            lifecycleStderr,
+          ),
         );
       }
     }

@@ -56,6 +56,19 @@ describe('delegate control inbox', () => {
     expect(existsSync(first.filePath)).toBe(false);
   });
 
+  test('rejects a supplied non-UUID hosted control ID instead of using a legacy path', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-invalid-'));
+    roots.push(root);
+    expect(() =>
+      createDelegateControlChannel(
+        path.join(root, 'session.jsonl'),
+        'owner-session',
+        'background',
+        'pid-42',
+      ),
+    ).toThrow('Hosted delegate control path inputs are invalid');
+  });
+
   test('bounds queued feedback and removes the private inbox on close', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-'));
     roots.push(root);

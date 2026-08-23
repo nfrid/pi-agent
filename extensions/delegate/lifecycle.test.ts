@@ -186,6 +186,41 @@ describe('delegate lifecycle failure projection', () => {
     });
   });
 
+  test('retains a hosted terminal error without classifying it as a spawn failure', async () => {
+    const hostRestartError = 'HOST_RESTART_ERROR';
+    vi.spyOn(delegateChild, 'runHostedDelegateChild').mockImplementation(
+      async (run) => {
+        run.stderr = 'raw host output '.repeat(10_000);
+        return {
+          exitCode: 1,
+          wasAborted: false,
+          timedOut: false,
+          hostError: hostRestartError,
+        };
+      },
+    );
+
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'host restart diagnostic',
+      context: 'fresh',
+      sessionPath: '/tmp/lifecycle-hosted-error.jsonl',
+      isolation: 'shared',
+      timeoutMs: 5_000,
+      maxConcurrency: 1,
+      hosted: true,
+      ownerSessionId: 'parent-session',
+      mode: 'single',
+    });
+
+    expect(
+      getDelegateLifecycle(run, { includeBoundedFallback: true }),
+    ).toMatchObject({
+      reason: 'child-nonzero-exit',
+      diagnostic: expect.stringContaining(hostRestartError),
+    });
+  });
+
   test('classifies a nonzero exit even when a child error event populated the message', async () => {
     vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
       async (run) => {

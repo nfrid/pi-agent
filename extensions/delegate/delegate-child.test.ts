@@ -43,17 +43,29 @@ type HostedCase = {
     nextOffset: number;
   };
   status: 'running' | 'done' | 'failed' | 'killed';
+  startStatus?: 'running' | 'done' | 'failed' | 'killed';
   exitCode?: number;
   timedOut?: boolean;
+  error?: string;
+  onRequest?: (operation: string) => void;
+};
+
+type HostedStartInput = {
+  command?: string;
+  argv?: string[];
 };
 
 async function withHostedCase<T>(
   setup: HostedCase,
-  work: (calls: string[]) => Promise<T>,
+  work: (
+    calls: string[],
+    startInput: () => HostedStartInput | undefined,
+  ) => Promise<T>,
 ): Promise<T> {
   const root = mkdtempSync(path.join(tmpdir(), 'delegate-hosted-test-'));
   const socketPath = path.join(root, 'process-host.sock');
   const calls: string[] = [];
+  let startInput: HostedStartInput | undefined;
   let stopped = false;
   const snapshot = (status = setup.status) => ({
     id: hostedJobId,
@@ -65,6 +77,7 @@ async function withHostedCase<T>(
     createdAt: 1,
     ...(setup.exitCode === undefined ? {} : { exitCode: setup.exitCode }),
     ...(setup.timedOut === undefined ? {} : { timedOut: setup.timedOut }),
+    ...(setup.error === undefined ? {} : { error: setup.error }),
     stdout: { text: '', totalBytes: 0, droppedBytes: 0 },
     stderr: { text: '', totalBytes: 0, droppedBytes: 0 },
   });
@@ -75,12 +88,21 @@ async function withHostedCase<T>(
       buffer += chunk;
       const newline = buffer.indexOf('\n');
       if (newline < 0) return;
-      const request = JSON.parse(buffer.slice(0, newline)) as { op: string };
+      const request = JSON.parse(buffer.slice(0, newline)) as {
+        op: string;
+        input?: HostedStartInput;
+      };
       calls.push(request.op);
+      setup.onRequest?.(request.op);
+      if (request.op === 'start') startInput = request.input;
       if (request.op === 'stop') stopped = true;
       const response =
         request.op === 'start'
-          ? { v: 1, ok: true, job: snapshot() }
+          ? {
+              v: 1,
+              ok: true,
+              job: snapshot(setup.startStatus ?? setup.status),
+            }
           : request.op === 'events'
             ? {
                 v: 1,
@@ -118,7 +140,7 @@ async function withHostedCase<T>(
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   vi.stubEnv('PI_PROCESS_HOST_SOCKET', socketPath);
   try {
-    return await work(calls);
+    return await work(calls, () => startInput);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(root, { recursive: true, force: true });
@@ -343,7 +365,7 @@ describe('delegate child environment', () => {
           nextOffset: 3,
         },
       },
-      async (calls) => {
+      async (calls, startInput) => {
         const run = createRun('hosted');
         run.checkpoint = { requestedAt: 1, state: 'requested' };
         const acknowledgements: string[] = [];
@@ -360,6 +382,10 @@ describe('delegate child environment', () => {
           onLine: vi.fn(),
         });
         expect(calls).toEqual(['start', 'events', 'inspect', 'inspect']);
+        expect(startInput()).toMatchObject({
+          command: 'pi',
+          argv: ['pi', '--mode', 'json'],
+        });
         expect(acknowledgements).toEqual(['checkpoint-1']);
         expect(run.messages).toHaveLength(1);
         expect(result).toMatchObject({
@@ -369,6 +395,46 @@ describe('delegate child environment', () => {
         });
       },
     );
+  });
+
+  test('preserves terminal host errors as bounded diagnostics, not spawn failures', async () => {
+    const hostRestartError =
+      'Background job was marked failed because the process host restarted; the process was not adopted by PID.';
+    await withHostedCase(
+      { status: 'failed', error: hostRestartError },
+      async (_calls) => {
+        const run = createRun('host restart');
+        const result = await runHostedDelegateChild(run, {
+          command: 'pi',
+          args: [],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          timeoutMs: 100,
+          onLine: vi.fn(),
+        });
+        expect(result).toMatchObject({ exitCode: 1, timedOut: false });
+        expect(result.spawnError).toBeUndefined();
+        expect(result.hostError).toBe(hostRestartError);
+        expect(run.stderr).toContain(hostRestartError);
+      },
+    );
+  });
+
+  test('rejects a supplied non-UUID hosted process job ID before launch', async () => {
+    await expect(
+      runHostedDelegateChild(createRun('invalid id'), {
+        command: 'pi',
+        args: [],
+        cwd: process.cwd(),
+        env: {},
+        ownerSession: 'parent-session',
+        processJobId: 'legacy-pid-42',
+        timeoutMs: 100,
+        onLine: vi.fn(),
+      }),
+    ).rejects.toThrow('canonical UUID');
   });
 
   test('stops the host process for explicit cancellation', async () => {
@@ -389,6 +455,101 @@ describe('delegate child environment', () => {
       expect(calls).toContain('stop');
       expect(result).toMatchObject({ exitCode: 130, wasAborted: true });
     });
+  });
+
+  test('does not map an abort after terminal success to 130', async () => {
+    const controller = new AbortController();
+    let inspections = 0;
+    await withHostedCase(
+      {
+        status: 'done',
+        startStatus: 'running',
+        exitCode: 0,
+        onRequest(operation) {
+          if (operation === 'inspect' && ++inspections === 2)
+            controller.abort();
+        },
+      },
+      async (calls) => {
+        const result = await runHostedDelegateChild(createRun('late abort'), {
+          command: 'pi',
+          args: [],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          timeoutMs: 100,
+          signal: controller.signal,
+          onLine: vi.fn(),
+        });
+        expect(calls).not.toContain('stop');
+        expect(result).toMatchObject({ exitCode: 0, wasAborted: false });
+      },
+    );
+  });
+
+  test('stops cancellation before terminal even when detach wins the race', async () => {
+    const controller = new AbortController();
+    const detach = new AbortController();
+    let raced = false;
+    await withHostedCase(
+      {
+        status: 'running',
+        onRequest(operation) {
+          if (operation !== 'inspect' || raced) return;
+          raced = true;
+          controller.abort();
+          detach.abort();
+        },
+      },
+      async (calls) => {
+        const result = await runHostedDelegateChild(createRun('cancel race'), {
+          command: 'pi',
+          args: [],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          timeoutMs: 100,
+          signal: controller.signal,
+          detachSignal: detach.signal,
+          onLine: vi.fn(),
+        });
+        expect(calls).toContain('stop');
+        expect(result.detached).toBe(true);
+      },
+    );
+  });
+
+  test('detach alone leaves the hosted process running', async () => {
+    const detach = new AbortController();
+    let detached = false;
+    await withHostedCase(
+      {
+        status: 'running',
+        onRequest(operation) {
+          if (operation === 'inspect' && !detached) {
+            detached = true;
+            detach.abort();
+          }
+        },
+      },
+      async (calls) => {
+        const result = await runHostedDelegateChild(createRun('detach'), {
+          command: 'pi',
+          args: [],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          timeoutMs: 100,
+          detachSignal: detach.signal,
+          onLine: vi.fn(),
+        });
+        expect(calls).not.toContain('stop');
+        expect(result.detached).toBe(true);
+      },
+    );
   });
 
   test('diagnoses truncated hosted event history without treating tails as transcript', async () => {

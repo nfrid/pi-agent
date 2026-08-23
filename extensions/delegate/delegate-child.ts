@@ -59,6 +59,8 @@ export interface SpawnChildResult {
   timedOut: boolean;
   /** A process-spawn/runner failure, distinct from a child nonzero exit. */
   spawnError?: string;
+  /** Bounded terminal error reported by the durable process host. */
+  hostError?: string;
   /** Parent manager detached and must not receive a terminal settlement. */
   detached?: boolean;
 }
@@ -110,6 +112,15 @@ function isTerminalHostStatus(
   return status !== 'running';
 }
 
+function isCanonicalUuid(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+      value,
+    )
+  );
+}
+
 function hostDiagnostic(run: DelegatedRun, text: string): void {
   run.stderr = appendTail(run.stderr, `\n${text}\n`, MAX_STDERR_BYTES);
 }
@@ -123,23 +134,50 @@ export async function runHostedDelegateChild(
   run: DelegatedRun,
   options: SpawnChildOptions,
 ): Promise<SpawnChildResult> {
-  if (!options.ownerSession || !options.processJobId)
+  if (!options.ownerSession || options.processJobId === undefined)
     throw new Error(
       'Hosted delegates require an owner session and process job ID.',
+    );
+  if (!isCanonicalUuid(options.processJobId))
+    throw new Error(
+      'Hosted delegates require a canonical UUID process job ID.',
     );
   const ownerSession = options.ownerSession;
   const processJobId = options.processJobId;
   const client = new BackgroundJobsClient(undefined, ownerSession);
   let detached = options.detachSignal?.aborted === true;
-  let wasAborted = options.signal?.aborted === true;
-  let stopPromise: Promise<unknown> | undefined;
+  let cancellationRequested = options.signal?.aborted === true;
+  let terminalObserved = false;
+  let stopPromise: Promise<void> | undefined;
   let started = false;
   let checkpoint: NodeJS.Timeout | undefined;
-  const stopHost = () => {
-    if (detached) return;
-    wasAborted = true;
+  let final: BackgroundJobSnapshot | undefined;
+  let reportedHostError: string | undefined;
+  let terminalHostError: string | undefined;
+  const observeSnapshot = (snapshot: BackgroundJobSnapshot): void => {
+    final = snapshot;
+    if (
+      isTerminalHostStatus(snapshot.status) &&
+      snapshot.error &&
+      snapshot.error !== reportedHostError
+    ) {
+      reportedHostError = snapshot.error;
+      terminalHostError = appendTail('', snapshot.error, MAX_STDERR_BYTES);
+      hostDiagnostic(run, `Process-host terminal error: ${snapshot.error}`);
+    }
+    if (isTerminalHostStatus(snapshot.status)) terminalObserved = true;
+  };
+  const stopHost = (force = false): void => {
+    if (terminalObserved && !force) return;
+    cancellationRequested = true;
     if (!started || stopPromise) return;
-    stopPromise = client.stop([processJobId]).catch(() => undefined);
+    stopPromise = client
+      .stop([processJobId])
+      .then((jobs) => {
+        const stopped = jobs.find((job) => job.id === processJobId);
+        if (stopped) observeSnapshot(stopped);
+      })
+      .catch(() => undefined);
   };
   const abortHandler = () => stopHost();
   const detachHandler = () => {
@@ -155,7 +193,7 @@ export async function runHostedDelegateChild(
       command: options.command,
       title: options.title ?? 'Delegate',
       cwd: options.cwd,
-      argv: options.args,
+      argv: [options.command, ...options.args],
       env: Object.fromEntries(
         Object.entries(buildDelegateChildEnvironment(options.env)).filter(
           (entry): entry is [string, string] => entry[1] !== undefined,
@@ -165,7 +203,8 @@ export async function runHostedDelegateChild(
       events: true,
     });
     started = true;
-    if (wasAborted) stopHost();
+    observeSnapshot(command);
+    if (cancellationRequested) stopHost(true);
     const checkpointLead = Math.min(
       Math.max(0, options.checkpointLeadMs ?? 0),
       Math.max(0, options.timeoutMs - 1),
@@ -173,7 +212,7 @@ export async function runHostedDelegateChild(
     if (checkpointLead > 0) {
       checkpoint = setTimeout(
         () => {
-          if (!detached && !stopPromise) {
+          if (!detached && !cancellationRequested && !terminalObserved) {
             try {
               options.onCheckpoint?.();
             } catch {
@@ -187,7 +226,6 @@ export async function runHostedDelegateChild(
     }
     let offset = 0;
     let eventsComplete = false;
-    let final = command;
     while (!detached) {
       const eventBatch = await client.events(processJobId, offset);
       if (eventBatch.truncated) {
@@ -238,32 +276,52 @@ export async function runHostedDelegateChild(
       }
       offset = Math.max(offset, eventBatch.nextOffset);
       eventsComplete = eventsComplete || eventBatch.complete;
-      final = (await client.inspect(processJobId)) ?? final;
-      if (isTerminalHostStatus(final.status) && eventsComplete) break;
-      if (isTerminalHostStatus(final.status)) {
+      const inspected = await client.inspect(processJobId);
+      if (inspected) observeSnapshot(inspected);
+      const current = final ?? command;
+      if (isTerminalHostStatus(current.status) && eventsComplete) break;
+      if (isTerminalHostStatus(current.status)) {
         // Reconcile one more journal read after terminal state; host stdout and
         // stderr close events can be committed just after the status row.
         await new Promise((resolve) => setTimeout(resolve, 0));
       } else {
-        final = await client.wait(processJobId, 100);
+        observeSnapshot(await client.wait(processJobId, 100));
       }
     }
-    if (detached)
+    if (detached) {
+      // Detach alone leaves the host process running. A cancellation observed
+      // before this race still owns a deterministic stop completion.
+      if (cancellationRequested && stopPromise) await stopPromise;
       return {
         exitCode: -1,
         wasAborted: false,
         timedOut: false,
         detached: true,
       };
+    }
     if (stopPromise) await stopPromise;
-    final = (await client.inspect(processJobId)) ?? final;
-    if (final.timedOut)
-      return { exitCode: 124, wasAborted: false, timedOut: true };
-    if (wasAborted) return { exitCode: 130, wasAborted: true, timedOut: false };
+    const inspected = await client.inspect(processJobId);
+    if (inspected) observeSnapshot(inspected);
+    const settled = final ?? command;
+    if (settled.timedOut)
+      return {
+        exitCode: 124,
+        wasAborted: false,
+        timedOut: true,
+        ...(terminalHostError ? { hostError: terminalHostError } : {}),
+      };
+    if (cancellationRequested)
+      return {
+        exitCode: 130,
+        wasAborted: true,
+        timedOut: false,
+        ...(terminalHostError ? { hostError: terminalHostError } : {}),
+      };
     return {
-      exitCode: final.exitCode ?? (final.status === 'done' ? 0 : 1),
+      exitCode: settled.exitCode ?? (settled.status === 'done' ? 0 : 1),
       wasAborted: false,
       timedOut: false,
+      ...(terminalHostError ? { hostError: terminalHostError } : {}),
     };
   } finally {
     if (checkpoint) clearTimeout(checkpoint);

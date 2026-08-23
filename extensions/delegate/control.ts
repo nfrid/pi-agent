@@ -102,18 +102,20 @@ function bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
+function isCanonicalUuid(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+      value,
+    )
+  );
+}
+
 function controlPath(sessionPath: string, processJobId?: string): string {
   if (processJobId !== undefined) {
-    if (!path.isAbsolute(sessionPath) || /[\\/\0]/u.test(processJobId))
+    if (!path.isAbsolute(sessionPath) || !isCanonicalUuid(processJobId))
       throw new Error('Hosted delegate control path inputs are invalid.');
-    // Process-host IDs are UUIDs in production. Keep old test/runtime shims
-    // with opaque IDs on the disposable path until they provide that contract.
-    if (
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-        processJobId,
-      )
-    )
-      return `${path.resolve(sessionPath)}.${processJobId}.control`;
+    return `${path.resolve(sessionPath)}.${processJobId}.control`;
   }
   return `${sessionPath}.${process.pid}.${++channelCounter}.control`;
 }
