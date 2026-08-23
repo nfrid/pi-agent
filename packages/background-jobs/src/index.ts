@@ -116,6 +116,8 @@ export interface BackgroundJobEvent {
   readonly offset: number;
   readonly stream: BackgroundJobEventStream;
   readonly text: string;
+  /** The retained line text was clipped at the per-line bound. */
+  readonly truncated: boolean;
 }
 
 export interface BackgroundJobEventsSnapshot {
@@ -133,7 +135,6 @@ export interface BackgroundJobSnapshot {
   readonly title: string;
   readonly command: string;
   readonly cwd: string;
-  readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
   readonly events?: boolean;
   readonly pid?: number;
@@ -253,7 +254,7 @@ function parseTimeout(value: unknown): number | undefined {
   if (
     typeof value !== 'number' ||
     !Number.isSafeInteger(value) ||
-    value < 0 ||
+    value < 1 ||
     value > BACKGROUND_JOBS_MAX_TIMEOUT_MS
   )
     throw new Error('Invalid timeout duration.');
@@ -437,10 +438,16 @@ function parseEvent(value: unknown): BackgroundJobEvent {
     value.offset < 0 ||
     (value.stream !== 'stdout' && value.stream !== 'stderr') ||
     typeof value.text !== 'string' ||
-    Buffer.byteLength(value.text) > BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES
+    Buffer.byteLength(value.text) > BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES ||
+    typeof value.truncated !== 'boolean'
   )
     throw new Error('Invalid background job event.');
-  return { offset: value.offset, stream: value.stream, text: value.text };
+  return {
+    offset: value.offset,
+    stream: value.stream,
+    text: value.text,
+    truncated: value.truncated,
+  };
 }
 
 function parseEventsSnapshot(value: unknown): BackgroundJobEventsSnapshot {
@@ -476,6 +483,8 @@ function parseEventsSnapshot(value: unknown): BackgroundJobEventsSnapshot {
 
 function parseSnapshot(value: unknown): BackgroundJobSnapshot {
   if (!record(value)) throw new Error('Invalid background job snapshot.');
+  if (value.env !== undefined || value.argv !== undefined)
+    throw new Error('Background job snapshot exposed launch secrets.');
   if (value.timedOut !== undefined && typeof value.timedOut !== 'boolean')
     throw new Error('Invalid timeout fact.');
   const status = value.status;
@@ -495,9 +504,6 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
     title: text(value.title, 'title', BACKGROUND_JOBS_MAX_TITLE_BYTES),
     command: text(value.command, 'command', BACKGROUND_JOBS_MAX_COMMAND_BYTES),
     cwd: text(value.cwd, 'cwd', BACKGROUND_JOBS_MAX_CWD_BYTES),
-    ...(value.env === undefined
-      ? {}
-      : { env: parseBackgroundJobsEnv(value.env) }),
     ...(value.timeoutMs === undefined
       ? {}
       : { timeoutMs: parseTimeout(value.timeoutMs) }),

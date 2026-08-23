@@ -21,7 +21,6 @@ import {
   BACKGROUND_JOBS_MAX_EVENT_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES,
-  parseBackgroundJobsEnv,
 } from '@pi-agent/background-jobs';
 
 const HOST_RESTART_ERROR =
@@ -64,40 +63,46 @@ function boundedUtf8(value: string, maxBytes: number): string {
 }
 
 type StoredEvent = { event: BackgroundJobEvent; endOffset: number };
+type EventWriteState = { bytes: number; nextOffset: number };
 
 function parseEventRecords(bytes: Buffer): StoredEvent[] {
   const records: StoredEvent[] = [];
   let start = 0;
   while (start < bytes.byteLength) {
     const newline = bytes.indexOf(0x0a, start);
-    if (newline < 0) break;
+    if (newline < 0) throw new Error('Corrupt background job event file.');
+    let parsed: {
+      offset?: unknown;
+      stream?: unknown;
+      text?: unknown;
+      truncated?: unknown;
+    };
     try {
-      const parsed = JSON.parse(
+      parsed = JSON.parse(
         bytes.subarray(start, newline).toString('utf8'),
-      ) as {
-        offset?: unknown;
-        stream?: unknown;
-        text?: unknown;
-      };
-      if (
-        typeof parsed.offset === 'number' &&
-        Number.isSafeInteger(parsed.offset) &&
-        parsed.offset >= 0 &&
-        (parsed.stream === 'stdout' || parsed.stream === 'stderr') &&
-        typeof parsed.text === 'string' &&
-        Buffer.byteLength(parsed.text) <= BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES
-      )
-        records.push({
-          event: {
-            offset: parsed.offset,
-            stream: parsed.stream,
-            text: parsed.text,
-          },
-          endOffset: parsed.offset + newline + 1 - start,
-        });
+      ) as typeof parsed;
     } catch {
-      /* Ignore a corrupt record rather than making the host unavailable. */
+      throw new Error('Corrupt background job event file.');
     }
+    if (
+      typeof parsed.offset !== 'number' ||
+      !Number.isSafeInteger(parsed.offset) ||
+      parsed.offset < 0 ||
+      (parsed.stream !== 'stdout' && parsed.stream !== 'stderr') ||
+      typeof parsed.text !== 'string' ||
+      Buffer.byteLength(parsed.text) > BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES ||
+      typeof parsed.truncated !== 'boolean'
+    )
+      throw new Error('Corrupt background job event file.');
+    records.push({
+      event: {
+        offset: parsed.offset,
+        stream: parsed.stream,
+        text: parsed.text,
+        truncated: parsed.truncated,
+      },
+      endOffset: parsed.offset + newline + 1 - start,
+    });
     start = newline + 1;
   }
   return records;
@@ -120,22 +125,12 @@ function retainEventBytes(bytes: Buffer, maxBytes: number): Buffer {
 }
 
 function snapshot(row: Record<string, unknown>): BackgroundJobStoreRow {
-  let env: Readonly<Record<string, string>> | undefined;
-  const storedEnv = textValue(row.env_json);
-  if (storedEnv) {
-    try {
-      env = parseBackgroundJobsEnv(JSON.parse(storedEnv));
-    } catch {
-      env = undefined;
-    }
-  }
   return {
     id: String(row.id),
     ownerSession: String(row.owner_session),
     title: String(row.title),
     command: String(row.command),
     cwd: String(row.cwd),
-    ...(env === undefined ? {} : { env }),
     ...(nullableNumber(row.timeout_ms) === undefined
       ? {}
       : { timeoutMs: nullableNumber(row.timeout_ms) }),
@@ -168,6 +163,7 @@ function snapshot(row: Record<string, unknown>): BackgroundJobStoreRow {
 /** Durable execution metadata; the database is never used to adopt a PID. */
 export class BackgroundJobStore {
   readonly db: DatabaseSync;
+  private readonly eventWrites = new Map<string, EventWriteState>();
   constructor(
     readonly databasePath: string,
     private readonly maxSettled = 32,
@@ -183,7 +179,6 @@ export class BackgroundJobStore {
         title TEXT NOT NULL,
         command TEXT NOT NULL,
         cwd TEXT NOT NULL,
-        env_json TEXT,
         timeout_ms INTEGER,
         events_enabled INTEGER,
         status TEXT NOT NULL,
@@ -207,10 +202,10 @@ export class BackgroundJobStore {
     `);
     for (const statement of [
       'ALTER TABLE background_jobs ADD COLUMN completion_delivered INTEGER NOT NULL DEFAULT 0',
-      'ALTER TABLE background_jobs ADD COLUMN env_json TEXT',
       'ALTER TABLE background_jobs ADD COLUMN timeout_ms INTEGER',
       'ALTER TABLE background_jobs ADD COLUMN events_enabled INTEGER',
       'ALTER TABLE background_jobs ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE background_jobs DROP COLUMN env_json',
     ]) {
       try {
         this.db.exec(statement);
@@ -252,6 +247,7 @@ export class BackgroundJobStore {
   }
 
   close(): void {
+    this.eventWrites.clear();
     this.db.close();
   }
 
@@ -263,6 +259,7 @@ export class BackgroundJobStore {
     id: string,
     stream: BackgroundJobEvent['stream'],
     text: string,
+    truncated = false,
   ): void {
     const bounded = boundedUtf8(text, BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES);
     const file = this.eventPath(id);
@@ -270,22 +267,32 @@ export class BackgroundJobStore {
       recursive: true,
       mode: 0o700,
     });
-    const current = existsSync(file) ? readFileSync(file) : Buffer.alloc(0);
-    const offset = nextEventOffset(current);
+    let state = this.eventWrites.get(id);
+    if (!state) {
+      const current = existsSync(file) ? readFileSync(file) : Buffer.alloc(0);
+      state = {
+        bytes: current.byteLength,
+        nextOffset: nextEventOffset(current),
+      };
+      this.eventWrites.set(id, state);
+    }
     const encoded = Buffer.from(
-      `${JSON.stringify({ offset, stream, text: bounded })}\n`,
+      `${JSON.stringify({ offset: state.nextOffset, stream, text: bounded, truncated })}\n`,
       'utf8',
     );
     appendFileSync(file, encoded, { mode: 0o600 });
     chmodSync(file, 0o600);
-    const complete = Buffer.concat([current, encoded]);
-    if (complete.byteLength > BACKGROUND_JOBS_MAX_EVENT_BYTES) {
+    state.bytes += encoded.byteLength;
+    state.nextOffset += encoded.byteLength;
+    if (state.bytes > BACKGROUND_JOBS_MAX_EVENT_BYTES) {
+      const complete = readFileSync(file);
       const retained = retainEventBytes(
         complete,
-        BACKGROUND_JOBS_MAX_EVENT_BYTES,
+        Math.floor(BACKGROUND_JOBS_MAX_EVENT_BYTES / 2),
       );
       writeFileSync(file, retained, { mode: 0o600 });
       chmodSync(file, 0o600);
+      state.bytes = retained.byteLength;
     }
   }
 
@@ -403,11 +410,17 @@ export class BackgroundJobStore {
         );
       return existing;
     }
+    this.eventWrites.delete(input.id);
+    try {
+      unlinkSync(this.eventPath(input.id));
+    } catch {
+      /* A pruned row may leave no event file. */
+    }
     this.db
       .prepare(`
       INSERT INTO background_jobs
-        (id, owner_session, fingerprint, title, command, cwd, env_json, timeout_ms, events_enabled, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
+        (id, owner_session, fingerprint, title, command, cwd, timeout_ms, events_enabled, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
     `)
       .run(
         input.id,
@@ -416,7 +429,6 @@ export class BackgroundJobStore {
         input.title,
         input.command,
         input.cwd,
-        input.env === undefined ? null : JSON.stringify(input.env),
         input.timeoutMs ?? null,
         input.events === undefined ? null : input.events ? 1 : 0,
         createdAt,
@@ -491,6 +503,7 @@ export class BackgroundJobStore {
         id,
       );
     const row = this.getById(id);
+    this.eventWrites.delete(id);
     if (row) this.prune(row.ownerSession);
     this.protectFiles();
     return row;

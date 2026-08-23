@@ -3,7 +3,10 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BackgroundJobsClient } from '@pi-agent/background-jobs';
+import {
+  BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
+  BackgroundJobsClient,
+} from '@pi-agent/background-jobs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BackgroundJobHostService } from './background-job-host.js';
 import {
@@ -251,6 +254,9 @@ describe('background process host', () => {
       expect(settled.stdout.text).toBe('out');
       expect(settled.stderr.text).toBe('err');
       await expect(
+        stat(backgroundJobEventsPath(path.join(root, 'jobs.sqlite'), id)),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(
         client.start({ ...input, title: 'different' }),
       ).rejects.toMatchObject({ code: 'job-conflict' });
     } finally {
@@ -304,12 +310,30 @@ describe('background process host', () => {
       ).rejects.toMatchObject({ code: 'job-conflict' });
       const settled = await client.wait(id, 2_000);
       expect(settled).toMatchObject({ status: 'killed', timedOut: true });
-      expect(settled.env).toEqual({ BG_EVENT_ENV: 'env-ok' });
+      expect(settled).not.toHaveProperty('env');
+      const persisted = new BackgroundJobStore(path.join(root, 'jobs.sqlite'));
+      expect(persisted.getById(id)?.fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+      persisted.close();
       const first = await client.events(id, 0);
       expect(first.events).toEqual([
-        { offset: expect.any(Number), stream: 'stderr', text: 'err' },
-        { offset: expect.any(Number), stream: 'stdout', text: '🙂' },
-        { offset: expect.any(Number), stream: 'stdout', text: 'env-ok' },
+        {
+          offset: expect.any(Number),
+          stream: 'stderr',
+          text: 'err',
+          truncated: false,
+        },
+        {
+          offset: expect.any(Number),
+          stream: 'stdout',
+          text: '🙂',
+          truncated: false,
+        },
+        {
+          offset: expect.any(Number),
+          stream: 'stdout',
+          text: 'env-ok',
+          truncated: false,
+        },
       ]);
       expect(first.complete).toBe(true);
       expect(first.nextOffset).toBeGreaterThan(0);
@@ -323,6 +347,31 @@ describe('background process host', () => {
           )
         ).mode & 0o777,
       ).toBe(0o600);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('marks clipped event lines explicitly', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-event-line-'),
+    );
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      await client.start({
+        id,
+        command: `node -e ${JSON.stringify(`process.stdout.write('x'.repeat(${BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES + 1}) + '\\n')`)}`,
+        title: 'line bound',
+        cwd: repositoryRoot,
+        events: true,
+      });
+      await client.wait(id, 2_000);
+      const [event] = (await client.events(id, 0)).events;
+      expect(event).toMatchObject({ stream: 'stdout', truncated: true });
+      expect(Buffer.byteLength(event?.text ?? '')).toBeLessThanOrEqual(
+        BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

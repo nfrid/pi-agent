@@ -49,6 +49,21 @@ describe('background-jobs protocol', () => {
     ).toThrow(/byte counts/);
   });
 
+  it('rejects event records without an explicit truncation flag', () => {
+    expect(() =>
+      parseBackgroundJobsResponse({
+        v: 1,
+        ok: true,
+        events: {
+          events: [{ offset: 0, stream: 'stdout', text: 'clipped' }],
+          truncated: false,
+          complete: true,
+          nextOffset: 10,
+        },
+      }),
+    ).toThrow(/event/);
+  });
+
   it('validates optional environment, argv, timeout, and event options', () => {
     const request = parseBackgroundJobsRequest({
       v: 1,
@@ -71,6 +86,20 @@ describe('background-jobs protocol', () => {
       timeoutMs: 10,
       events: true,
     });
+    expect(() =>
+      parseBackgroundJobsRequest({
+        v: 1,
+        op: 'start',
+        input: {
+          id,
+          ownerSession: 's',
+          command: 'delegate',
+          title: 'delegate',
+          cwd: '.',
+          timeoutMs: 0,
+        },
+      }),
+    ).toThrow(/timeout/);
     expect(() =>
       parseBackgroundJobsRequest({
         v: 1,

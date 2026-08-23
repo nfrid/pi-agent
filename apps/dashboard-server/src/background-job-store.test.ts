@@ -1,4 +1,5 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -34,7 +35,7 @@ describe('background job event store', () => {
     try {
       const row = store.create(input(firstId), 'fingerprint');
       store.appendEvent(firstId, 'stdout', 'first');
-      store.appendEvent(firstId, 'stderr', 'second');
+      store.appendEvent(firstId, 'stderr', 'second', true);
       store.settle(
         firstId,
         'killed',
@@ -45,10 +46,14 @@ describe('background job event store', () => {
       expect(store.get('owner', firstId)).toMatchObject({ timedOut: true });
       const first = store.readEvents('owner', firstId, 0);
       expect(
-        first.events.map(({ stream, text }) => ({ stream, text })),
+        first.events.map(({ stream, text, truncated }) => ({
+          stream,
+          text,
+          truncated,
+        })),
       ).toEqual([
-        { stream: 'stdout', text: 'first' },
-        { stream: 'stderr', text: 'second' },
+        { stream: 'stdout', text: 'first', truncated: false },
+        { stream: 'stderr', text: 'second', truncated: true },
       ]);
       expect(first.complete).toBe(true);
       expect(first.truncated).toBe(false);
@@ -92,6 +97,42 @@ describe('background job event store', () => {
       expect(page.truncated).toBe(true);
       expect(page.complete).toBe(false);
       expect(page.nextOffset).toBeGreaterThan(0);
+      store.appendEvent(firstId, 'stderr', 'tail');
+      const lines = (
+        await readFile(backgroundJobEventsPath(database, firstId), 'utf8')
+      )
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { offset: number });
+      expect(lines.at(-1)?.offset).toBeGreaterThan(lines.at(-2)?.offset ?? -1);
+      expect(
+        store.db
+          .prepare('PRAGMA table_info(background_jobs)')
+          .all()
+          .map((column) => column.name),
+      ).not.toContain('env_json');
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resets stale event files when a pruned id is reused', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-event-reuse-'),
+    );
+    const database = path.join(root, 'jobs.sqlite');
+    const store = new BackgroundJobStore(database, 0);
+    try {
+      const row = store.create(input(firstId), 'old');
+      store.settle(firstId, 'done', { exitCode: 0 }, row.stdout, row.stderr);
+      writeFileSync(backgroundJobEventsPath(database, firstId), 'stale\n', {
+        mode: 0o600,
+      });
+      store.create(input(firstId), 'new');
+      await expect(
+        stat(backgroundJobEventsPath(database, firstId)),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       store.close();
       await rm(root, { recursive: true, force: true });

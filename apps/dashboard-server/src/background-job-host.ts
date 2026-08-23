@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmod, unlink } from 'node:fs/promises';
 import {
   createConnection,
@@ -91,12 +92,19 @@ function fingerprint(input: StartBackgroundJobInput): string {
     command: input.command,
     title: input.title,
     cwd: input.cwd,
+    argv: input.argv ?? null,
+    env: input.env ?? null,
+    timeoutMs: input.timeoutMs ?? null,
+    events: input.events === true,
   };
-  if (input.argv !== undefined) launch.argv = input.argv;
-  if (input.env !== undefined) launch.env = input.env;
-  if (input.timeoutMs !== undefined) launch.timeoutMs = input.timeoutMs;
-  if (input.events !== undefined) launch.events = input.events;
-  return JSON.stringify(launch);
+  return createHash('sha256').update(JSON.stringify(launch)).digest('hex');
+}
+function legacyFingerprint(input: StartBackgroundJobInput): string {
+  return JSON.stringify({
+    command: input.command,
+    title: input.title,
+    cwd: input.cwd,
+  });
 }
 function snapshot(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
   const { fingerprint: _fingerprint, ...result } = row;
@@ -344,7 +352,12 @@ export class BackgroundJobHostService {
       if (existing) {
         if (
           existing.ownerSession !== input.ownerSession ||
-          existing.fingerprint !== fingerprint(input)
+          (existing.fingerprint !== fingerprint(input) &&
+            (input.argv !== undefined ||
+              input.env !== undefined ||
+              input.timeoutMs !== undefined ||
+              input.events === true ||
+              existing.fingerprint !== legacyFingerprint(input)))
         )
           throw Object.assign(
             new Error('Job ID is already owned by a different launch.'),
@@ -425,7 +438,7 @@ export class BackgroundJobHostService {
       child,
       stdout: new OutputTail(BACKGROUND_JOBS_MAX_OUTPUT_BYTES),
       stderr: new OutputTail(BACKGROUND_JOBS_STDERR_OUTPUT_BYTES),
-      captureEvents: input.events !== false,
+      captureEvents: input.events === true,
       stopRequested: false,
       timedOut: false,
       stdoutLine: '',
@@ -474,7 +487,7 @@ export class BackgroundJobHostService {
       stream === 'stdout' ? job.stdoutLineActive : job.stderrLineActive;
     if (active || text || truncated) {
       try {
-        this.database().appendEvent(job.id, stream, text);
+        this.database().appendEvent(job.id, stream, text, truncated);
       } catch {
         /* Event capture must not change process supervision. */
       }
