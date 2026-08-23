@@ -512,6 +512,37 @@ describe('feed registry routing', () => {
     registry.close();
   });
 
+  it('gives recreated feeds distinct cursor generations', async () => {
+    const registry = new SessionFeedRegistry({
+      ...bounds,
+      generation: 'daemon-generation',
+    });
+    const first = registry.get('recreated');
+    first.publishEvent({
+      type: 'session.compacted',
+      sessionId: 'recreated',
+      entry: { value: 1 },
+    });
+    const staleCursor = first.currentId;
+    registry.invalidate('recreated');
+
+    const replacement = registry.get('recreated');
+    replacement.publishEvent({
+      type: 'session.compacted',
+      sessionId: 'recreated',
+      entry: { value: 2 },
+    });
+    expect(replacement.currentId).not.toBe(staleCursor);
+    const resumed = replacement.subscribe({
+      lastEventId: staleCursor,
+      buildSnapshot: async (sequence) => ({ sequence }) as never,
+    });
+    expect(await next(resumed)).toMatchObject({ kind: 'snapshot' });
+    expect(replacement.metrics().snapshotFallbacks.foreign).toBe(1);
+    await resumed.return(undefined);
+    registry.close();
+  });
+
   it('creates and pins feeds for active runtimes before their first event', () => {
     const registry = new SessionFeedRegistry(bounds);
     const now = Date.now();

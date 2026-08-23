@@ -1074,6 +1074,158 @@ describe('dashboard HTTP boundary', () => {
     for (const bridge of bridges) bridge.destroy();
   });
 
+  it('rebases an open session feed after its runtime bridge reconnects', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-runtime-reconnect-feed-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    const file = path.join(sessionDir, 'reconnect-session.jsonl');
+    await mkdir(sessionDir, { recursive: true });
+    const header = {
+      type: 'session',
+      id: 'reconnect-session',
+      cwd: '/tmp',
+    };
+    await writeFile(file, `${JSON.stringify(header)}\n`);
+    const registry = new RuntimeRegistry({
+      allowExternalWithoutToken: true,
+      disconnectGraceMs: 1_000,
+      onChange: (change) =>
+        (
+          server as unknown as
+            | { handleRegistryChange(value: unknown): void }
+            | undefined
+        )?.handleRegistryChange(change),
+    });
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-reconnect.sock`,
+      ),
+      registry,
+    });
+    await server.start();
+    const internals = server as unknown as {
+      sessions: { refresh(): Promise<void> };
+      sessionFeeds: {
+        get(id: string): {
+          subscribe(options: {
+            lastEventId?: string;
+            buildSnapshot: (sequence: number) => Promise<unknown>;
+          }): AsyncGenerator<{
+            id: string;
+            kind: string;
+            snapshot?: { entries: unknown[] };
+          }>;
+        };
+      };
+      buildSessionSnapshot(
+        id: string,
+        before: string | undefined,
+        sequence: number,
+      ): Promise<unknown>;
+    };
+    const runtime = {
+      runtimeId: 'reconnect-runtime',
+      ownership: 'external' as const,
+      pid: 1,
+      cwd: '/tmp',
+      liveState: 'idle' as const,
+      session: {
+        id: 'reconnect-session',
+        file,
+        cwd: '/tmp',
+        entries: [header],
+        entriesComplete: true,
+      },
+    };
+    const connect = async (entries: readonly unknown[]) => {
+      const bridge = net.createConnection(server?.socketPath ?? '');
+      await new Promise<void>((resolve, reject) => {
+        bridge.once('connect', resolve);
+        bridge.once('error', reject);
+      });
+      bridge.write(
+        serializeFrame({
+          kind: 'event',
+          seq: 1,
+          event: {
+            type: 'runtime.hello',
+            protocolVersion: 1,
+            capabilities: { heartbeat: true },
+            snapshot: {
+              ...runtime,
+              session: { ...runtime.session, entries },
+            },
+          },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return bridge;
+    };
+
+    const firstBridge = await connect([header]);
+    const firstFeed = internals.sessionFeeds.get('reconnect-session');
+    const firstStream = firstFeed.subscribe({
+      buildSnapshot: (sequence) =>
+        internals.buildSessionSnapshot(
+          'reconnect-session',
+          undefined,
+          sequence,
+        ),
+    });
+    await firstStream.next();
+    const caughtUp = await firstStream.next();
+    const lastEventId = caughtUp.value?.id;
+    expect(lastEventId).toBeDefined();
+    const disconnected = expect(firstStream.next()).rejects.toThrow(
+      'Feed closed.',
+    );
+    firstBridge.destroy();
+
+    const wake = {
+      type: 'custom_message',
+      id: 'persisted-wake',
+      customType: 'delegate-wake-result',
+      content: '# Delegate wake ready',
+      display: true,
+      details: { dedupeKey: 'wake-1' },
+    };
+    await writeFile(
+      file,
+      `${JSON.stringify(header)}\n${JSON.stringify(wake)}\n`,
+    );
+    await internals.sessions.refresh();
+    const replacement = await connect([header, wake]);
+
+    await disconnected;
+    const replacementFeed = internals.sessionFeeds.get('reconnect-session');
+    expect(replacementFeed).not.toBe(firstFeed);
+    const resumed = replacementFeed.subscribe({
+      lastEventId,
+      buildSnapshot: (sequence) =>
+        internals.buildSessionSnapshot(
+          'reconnect-session',
+          undefined,
+          sequence,
+        ),
+    });
+    const snapshot = await resumed.next();
+    expect(snapshot.value).toMatchObject({ kind: 'snapshot' });
+    expect(snapshot.value?.snapshot?.entries).toContainEqual(
+      expect.objectContaining({
+        id: 'persisted-wake',
+        customType: 'delegate-wake-result',
+      }),
+    );
+    await resumed.return(undefined);
+    replacement.destroy();
+  });
+
   it('marks a retained offline runtime feed inactive', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-runtime-offline-feed-'),

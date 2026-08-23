@@ -1177,6 +1177,13 @@ export class DashboardServerImpl implements DashboardServer {
         (runtime) =>
           runtime.session.id === sessionId && runtime.online !== false,
       );
+    if (change.kind === 'registered' && change.reconnected) {
+      // The bridge may have missed terminal transcript events while offline.
+      // Replace the feed so connected browsers resume through one
+      // authoritative snapshot instead of remaining live on an incomplete
+      // sequence that cannot describe those persisted entries.
+      this.sessionFeeds.invalidate(sessionId);
+    }
     try {
       this.sessionFeeds.setActive(sessionId, sessionActive);
     } catch {

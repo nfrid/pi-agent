@@ -102,6 +102,8 @@ export class SessionFeed extends BoundedFeed<
 export class SessionFeedRegistry {
   private readonly feeds = new Map<string, SessionFeed>();
   private readonly options: Partial<LiveFeedOptions>;
+  /** Distinguishes recreated feeds within one daemon generation. */
+  private feedGeneration = 0;
 
   constructor(options: Partial<LiveFeedOptions> = {}) {
     this.options = options;
@@ -118,7 +120,15 @@ export class SessionFeedRegistry {
       this.evictForCapacity();
       if (this.feeds.size >= MAX_SESSION_FEEDS)
         throw new Error('Session feed capacity is reserved for active feeds.');
-      feed = new SessionFeed(sessionId, this.options);
+      const configuredGeneration = this.options.generation;
+      feed = new SessionFeed(sessionId, {
+        ...this.options,
+        ...(configuredGeneration === undefined
+          ? {}
+          : {
+              generation: `${configuredGeneration}.${++this.feedGeneration}`,
+            }),
+      });
       this.feeds.set(sessionId, feed);
     }
     feed.lastPublishedAt = Date.now();
