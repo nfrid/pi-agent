@@ -85,6 +85,9 @@ vi.mock('./shell', () => ({
       >
         Attach
       </button>
+      {props.mode as never}
+      {props.controls as never}
+      {props.footer as never}
     </div>
   ),
 }));
@@ -202,6 +205,73 @@ describe('Composer dormant resume transition', () => {
     ).toBe(false);
   });
 
+  it('uses active-style controls and launches with dormant selections', async () => {
+    const runtime = {
+      runtimeId: 'runtime-catalog',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'careful', thinking: 'low' },
+      modelCatalog: [
+        { provider: 'test', model: 'careful', name: 'Careful' },
+        { provider: 'test', model: 'fast', name: 'Fast' },
+      ],
+      thinkingLevels: ['low', 'high'],
+      contextUsage: { tokens: 80, contextWindow: 100, percent: 80 },
+      session: { id: 'other-session', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={undefined}
+          runtimes={[runtime]}
+          session={{
+            id: 'session-1',
+            file: '',
+            cwd: '/tmp',
+            updatedAt: 1,
+            lastKnownModel: { provider: 'test', model: 'careful' },
+            lastKnownThinking: 'low',
+            lastKnownContextTokens: 42,
+          }}
+          sessionId="session-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
+        />,
+      );
+    });
+
+    expect(renderer.root.findByProps({ 'aria-label': 'Model' })).toBeTruthy();
+    expect(
+      renderer.root.findByProps({ 'aria-label': 'Thinking level' }),
+    ).toBeTruthy();
+    expect(
+      renderer.root.findByProps({
+        'aria-label': 'Context window 42% [42/100]',
+      }),
+    ).toBeTruthy();
+    await act(async () => {
+      renderer.root
+        .findByProps({ 'aria-label': 'Model' })
+        .props.onChange({ target: { value: 'test/fast' } });
+      renderer.root
+        .findByProps({ 'aria-label': 'Thinking level' })
+        .props.onChange({ target: { value: 'high' } });
+    });
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    expect(mutateAsync).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+      sessionId: 'session-1',
+      initialPrompt: 'resume me',
+      model: { provider: 'test', model: 'fast', thinking: 'high' },
+    });
+  });
+
   it('starts dormant image resumes without initialPrompt and sends once', async () => {
     mockedAttachments = [
       { file: { name: 'image.png' } as File, previewUrl: 'preview' },
@@ -249,6 +319,7 @@ describe('Composer dormant resume transition', () => {
       projectId: 'project-1',
       checkoutId: 'checkout-1',
       sessionId: 'session-1',
+      model: { provider: 'test', model: 'vision' },
     });
     expect(sendCommandWithImages).toHaveBeenCalledOnce();
     expect(clearAttachments).toHaveBeenCalledOnce();

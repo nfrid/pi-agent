@@ -5,8 +5,10 @@ import {
   composerMode,
   composerSubmissionPolicy,
   contextIndicatorData,
+  dormantContextUsage,
   dormantResumeMetadata,
   formatContextTokens,
+  modelSupportsImages,
   resumeRuntimeRequest,
   runtimeSupportsImages,
 } from './runtime';
@@ -30,6 +32,11 @@ describe('composer runtime model', () => {
         percent: null,
       }),
     ).toEqual({ percent: undefined, text: '?% [?/272k]', level: 'normal' });
+    expect(contextIndicatorData({ tokens: 4200, contextWindow: 0 })).toEqual({
+      percent: undefined,
+      text: '?% [4.2k/?]',
+      level: 'normal',
+    });
   });
 
   it('routes explicit settled background waiting as a prompt', () => {
@@ -76,27 +83,30 @@ describe('composer runtime model', () => {
       model: { provider: 'test', model: 'vision' },
       thinking: 'high',
       contextTokens: 4200,
-      supportsImages: true,
     });
     expect(
-      dormantResumeMetadata(
-        { lastKnownModel: { provider: 'unknown', model: 'vision' } } as never,
-        [runtime],
-      ).supportsImages,
+      modelSupportsImages({ provider: 'unknown', model: 'vision' }, [runtime]),
     ).toBe(false);
-    expect(dormantResumeMetadata(undefined, [runtime]).supportsImages).toBe(
-      false,
-    );
+    expect(
+      modelSupportsImages({ provider: 'test', model: 'vision' }, [runtime]),
+    ).toBe(true);
   });
 
   it('builds resume requests and checks image capability explicitly', () => {
     expect(
-      resumeRuntimeRequest('project-1', 'checkout-1', 'session-1', 'resume me'),
+      resumeRuntimeRequest(
+        'project-1',
+        'checkout-1',
+        'session-1',
+        'resume me',
+        { provider: 'test', model: 'careful', thinking: 'high' },
+      ),
     ).toEqual({
       projectId: 'project-1',
       checkoutId: 'checkout-1',
       sessionId: 'session-1',
       initialPrompt: 'resume me',
+      model: { provider: 'test', model: 'careful', thinking: 'high' },
     });
     expect(
       resumeRuntimeRequest('project-1', 'checkout-1', 'session-1'),
@@ -108,6 +118,25 @@ describe('composer runtime model', () => {
     expect(
       resumeRuntimeRequest(undefined, 'checkout-1', 'session-1'),
     ).toBeUndefined();
+    expect(
+      dormantContextUsage(
+        { lastKnownContextTokens: 42 } as never,
+        { provider: 'test', model: 'careful' },
+        [
+          {
+            model: { provider: 'test', model: 'careful' },
+            contextUsage: { tokens: 80, contextWindow: 100, percent: 80 },
+          } as never,
+        ],
+      ),
+    ).toEqual({ tokens: 42, contextWindow: 100, percent: 42 });
+    expect(
+      dormantContextUsage(
+        { lastKnownContextTokens: 42 } as never,
+        undefined,
+        [],
+      ),
+    ).toEqual({ tokens: 42, contextWindow: 0, percent: null });
     expect(
       runtimeSupportsImages({
         model: { provider: 'test', model: 'vision', supportsImages: true },

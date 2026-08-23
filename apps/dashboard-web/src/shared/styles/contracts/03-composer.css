@@ -9,34 +9,6 @@
   box-shadow: 0 8px 28px #0006;
   padding: 9px;
 }
-.composer-notice {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 2px;
-  margin: 0 0 6px;
-  border: 1px solid var(--line-soft);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--purple) 7%, transparent);
-  padding: 6px 8px;
-  color: var(--muted);
-  font-size: 10px;
-}
-.composer-notice strong {
-  color: var(--fg);
-  font-size: 11px;
-}
-.composer-notice p {
-  margin: 0;
-}
-.composer-resume-metadata {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .composer-secondary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

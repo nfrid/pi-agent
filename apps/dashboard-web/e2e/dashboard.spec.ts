@@ -1517,6 +1517,11 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
             model: 'careful',
             thinking: 'high',
           },
+          modelCatalog: [
+            { provider: 'test', model: 'careful', name: 'Careful' },
+            { provider: 'test', model: 'fast', name: 'Fast' },
+          ],
+          thinkingLevels: ['off', 'high'],
           contextUsage: {
             tokens: 32,
             contextWindow: 100,
@@ -1564,6 +1569,9 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           checkoutId: 'tmp-checkout',
           title: 'Dormant thread',
           updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
+          lastKnownModel: { provider: 'test', model: 'careful' },
+          lastKnownThinking: 'high',
+          lastKnownContextTokens: 42,
         },
       ],
       unread: [],
@@ -1582,6 +1590,9 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
             checkoutId: 'tmp-checkout',
             title: 'Dormant thread',
             updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
+            lastKnownModel: { provider: 'test', model: 'careful' },
+            lastKnownThinking: 'high',
+            lastKnownContextTokens: 42,
           },
           entries: [
             ...Array.from({ length: 80 }, (_, index) => ({
@@ -1733,7 +1744,9 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     0,
   );
   await expect(dormantCard).toContainText('Dormant thread');
-  await expect(dormantCard).toContainText('Resumes on send');
+  await expect(
+    dormantCard.locator('[data-row-content="details"]'),
+  ).toContainText('test/careful · high · 42 ctx');
   await expect(dormantCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     agentNav.locator('.agent-thread-row.status-idle .agent-thread-glyph'),
@@ -1760,21 +1773,20 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     .getByRole('button', { name: 'Dormant thread dormant' })
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-dormant$/u);
-  await expect(
-    page.getByText('This session is dormant', { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText(
-      'Sending a message will resume Pi in this project checkout.',
-      {
-        exact: true,
-      },
-    ),
-  ).toBeVisible();
-  const dormantNotice = page.locator('.composer-notice');
   const dormantComposer = page.locator('form.composer');
-  await expect(dormantNotice).toBeVisible();
   await expect(dormantComposer).toBeVisible();
+  await expect(
+    dormantComposer.getByLabel('Model', { exact: true }),
+  ).toHaveValue('test/careful');
+  await expect(dormantComposer.getByLabel('Thinking level')).toHaveValue(
+    'high',
+  );
+  await expect(
+    dormantComposer.getByRole('img', {
+      name: 'Context window 42% [42/100]',
+    }),
+  ).toBeVisible();
+  await expect(page.locator('.composer-notice')).toHaveCount(0);
   await transcriptScroll(page).evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     element.scrollTop = 0;
@@ -1787,10 +1799,10 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const dormantJumpBottom = await dormantJumpLatest.evaluate(
     (button) => button.getBoundingClientRect().bottom,
   );
-  const dormantNoticeTop = await dormantNotice.evaluate(
-    (notice) => notice.getBoundingClientRect().top,
+  const dormantComposerTop = await dormantComposer.evaluate(
+    (composerElement) => composerElement.getBoundingClientRect().top,
   );
-  expect(dormantJumpBottom).toBeLessThanOrEqual(dormantNoticeTop);
+  expect(dormantJumpBottom).toBeLessThanOrEqual(dormantComposerTop);
   await dormantJumpLatest.click();
   await expect(page.getByText('Dormant latest')).toBeVisible();
   await expect(page.locator('.session-page')).not.toHaveAttribute(

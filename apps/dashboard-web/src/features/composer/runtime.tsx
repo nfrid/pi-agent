@@ -40,6 +40,7 @@ export function resumeRuntimeRequest(
   checkoutId: string | undefined,
   sessionId: string,
   initialPrompt?: string,
+  model?: StartRuntimeRequest['model'],
 ): StartRuntimeRequest | undefined {
   if (!projectId || !checkoutId) return undefined;
   return {
@@ -47,6 +48,7 @@ export function resumeRuntimeRequest(
     checkoutId,
     sessionId,
     ...(initialPrompt ? { initialPrompt } : {}),
+    ...(model ? { model } : {}),
   };
 }
 
@@ -59,9 +61,9 @@ export function contextIndicatorData(
 ):
   | { percent?: number; text: string; level: 'normal' | 'warning' | 'error' }
   | undefined {
-  if (!usage?.contextWindow) return undefined;
+  if (!usage) return undefined;
   const percent =
-    usage.tokens === null
+    usage.tokens === null || !usage.contextWindow
       ? undefined
       : Math.round(usage.percent ?? (usage.tokens / usage.contextWindow) * 100);
   const level =
@@ -73,7 +75,9 @@ export function contextIndicatorData(
   const used = usage.tokens === null ? '?' : formatContextTokens(usage.tokens);
   return {
     percent,
-    text: `${percent ?? '?'}% [${used}/${formatContextTokens(usage.contextWindow)}]`,
+    text: `${percent ?? '?'}% [${used}/${
+      usage.contextWindow ? formatContextTokens(usage.contextWindow) : '?'
+    }]`,
     level,
   };
 }
@@ -86,10 +90,9 @@ export type DormantResumeMetadata = {
   model?: RuntimeModelOption;
   thinking?: string;
   contextTokens?: number;
-  supportsImages: boolean;
 };
 
-function currentModelSupportsImages(
+export function modelSupportsImages(
   model: RuntimeModelOption | undefined,
   runtimes: readonly RuntimeSnapshot[],
 ): boolean {
@@ -115,9 +118,12 @@ export function dormantResumeMetadata(
 ): DormantResumeMetadata {
   const persistedModel = session?.lastKnownModel;
   const model = persistedModel ?? configuredModelOptions(runtimes)[0];
-  const thinkingLevels = runtimes.flatMap(
-    (runtime) => runtime.thinkingLevels ?? [],
-  );
+  const thinkingLevels = [
+    ...new Set([
+      ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),
+      ...(session?.lastKnownThinking ? [session.lastKnownThinking] : []),
+    ]),
+  ];
   const thinking = session?.lastKnownThinking ?? thinkingLevels[0];
   return {
     ...(model ? { model } : {}),
@@ -125,7 +131,32 @@ export function dormantResumeMetadata(
     ...(session?.lastKnownContextTokens === undefined
       ? {}
       : { contextTokens: session.lastKnownContextTokens }),
-    supportsImages: currentModelSupportsImages(persistedModel, runtimes),
+  };
+}
+
+export function dormantContextUsage(
+  session: SessionIndexEntry | undefined,
+  model: RuntimeModelOption | undefined,
+  runtimes: readonly RuntimeSnapshot[],
+): RuntimeSnapshot['contextUsage'] {
+  const value = model
+    ? modelOptionValue(model.provider, model.model)
+    : undefined;
+  const contextWindow = value
+    ? runtimes.find(
+        (runtime) =>
+          runtime.model &&
+          modelOptionValue(runtime.model.provider, runtime.model.model) ===
+            value &&
+          runtime.contextUsage?.contextWindow,
+      )?.contextUsage?.contextWindow
+    : undefined;
+  const tokens = session?.lastKnownContextTokens ?? null;
+  return {
+    tokens,
+    contextWindow: contextWindow ?? 0,
+    percent:
+      tokens === null || !contextWindow ? null : (tokens / contextWindow) * 100,
   };
 }
 

@@ -15,9 +15,14 @@ import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
 import { ProgressBar } from '../../shared/ui/progress-bar';
-
+import {
+  configuredModelOptions,
+  modelOptionValue,
+  parseModelOptionValue,
+} from '../model-option';
 import { hasSettledBackground } from '../presentation-status';
 import { useImageAttachments } from './attachments';
+import { ComposerModelControl, ComposerThinkingControl } from './controls';
 import { useComposerDraft } from './draft';
 import {
   newQueueId,
@@ -31,8 +36,9 @@ import {
   composerMode,
   composerSubmissionPolicy,
   contextIndicatorData,
+  dormantContextUsage,
   dormantResumeMetadata,
-  formatContextTokens,
+  modelSupportsImages,
   resumeRuntimeRequest,
   runtimeSupportsImages,
   waitForStartedRuntime,
@@ -121,9 +127,29 @@ export function Composer({
     ? disabled
     : !projectId || !checkoutId || resumeMutation.isPending || resumePending;
   const dormantMetadata = dormantResumeMetadata(session, runtimes);
+  const [resumeModel, setResumeModel] = useState(dormantMetadata.model);
+  const [resumeThinking, setResumeThinking] = useState(
+    dormantMetadata.thinking,
+  );
+  const configuredModels = configuredModelOptions(runtimes);
+  const resumeModels =
+    resumeModel &&
+    !configuredModels.some(
+      (model) =>
+        modelOptionValue(model.provider, model.model) ===
+        modelOptionValue(resumeModel.provider, resumeModel.model),
+    )
+      ? [resumeModel, ...configuredModels]
+      : configuredModels;
+  const thinkingLevels = [
+    ...new Set([
+      ...runtimes.flatMap((candidate) => candidate.thinkingLevels ?? []),
+      ...(resumeThinking ? [resumeThinking] : []),
+    ]),
+  ];
   const attachmentsEnabled = runtime
     ? runtime.liveState !== 'compacting' && runtimeSupportsImages(runtime)
-    : dormantMetadata.supportsImages;
+    : modelSupportsImages(resumeModel, runtimes);
   const {
     attachments,
     dragging,
@@ -156,8 +182,13 @@ export function Composer({
     setMode(defaultMode);
   }, [defaultMode]);
   useEffect(() => {
-    if (runtime) setResumePending(false);
-  }, [runtime]);
+    if (runtime) {
+      setResumePending(false);
+      return;
+    }
+    setResumeModel((current) => current ?? dormantMetadata.model);
+    setResumeThinking((current) => current ?? dormantMetadata.thinking);
+  }, [dormantMetadata.model, dormantMetadata.thinking, runtime]);
   useEffect(() => {
     if (runtime && attachments.length === 0)
       dormantImageAttemptRef.current = false;
@@ -180,6 +211,13 @@ export function Composer({
         checkoutId,
         sessionId,
         hasImages ? undefined : trimmedText,
+        resumeModel
+          ? {
+              provider: resumeModel.provider,
+              model: resumeModel.model,
+              ...(resumeThinking ? { thinking: resumeThinking } : {}),
+            }
+          : undefined,
       );
       if (!request) {
         setResumeError('This session has no project checkout association.');
@@ -279,67 +317,7 @@ export function Composer({
       if (mountedRef.current) setBusy(false);
     }
   };
-  if (!runtime)
-    return (
-      <ComposerShell
-        ariaLabel="Send a message"
-        onSubmit={(event) => void submit(event)}
-        dragging={dragging}
-        onDragEnter={onDragEnter}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        attachmentsEnabled={attachmentsEnabled}
-        attachmentsBusy={submissionDisabled || busy || resumePending}
-        fileInputRef={fileInputRef}
-        attachments={attachments}
-        onSelectImages={selectImages}
-        onRemoveImage={removeImage}
-        onPasteCapture={onPasteCapture}
-        editorRef={editorRef}
-        initialMarkdown={initialDraft}
-        commands={composerCommands}
-        onChange={updateText}
-        placeholder="Message Pi…"
-        readOnly={submissionDisabled || busy}
-        submissionDisabled={submissionDisabled || busy}
-        sendDisabled={
-          submissionDisabled || busy || (!text.trim() && !attachments.length)
-        }
-        sendAriaLabel="Send message"
-        mode={<span>Prompt</span>}
-        controls={
-          <span className="composer-resume-metadata">
-            {dormantMetadata.model
-              ? `${dormantMetadata.model.provider}/${dormantMetadata.model.model}`
-              : '? model'}{' '}
-            · {dormantMetadata.thinking ?? '? effort'} ·{' '}
-            {dormantMetadata.contextTokens === undefined
-              ? '? ctx'
-              : `${formatContextTokens(dormantMetadata.contextTokens)} ctx`}
-          </span>
-        }
-        notice={
-          <div className="composer-notice" role="note">
-            <strong>This session is dormant</strong>
-            <p>Sending a message will resume Pi in this project checkout.</p>
-            {resumePending && <output>Resuming…</output>}
-          </div>
-        }
-        footer={
-          !projectId || !checkoutId ? (
-            <p className="error composer-error" role="alert">
-              This session has no project checkout association.
-            </p>
-          ) : resumeError ? (
-            <p className="error composer-error" role="alert">
-              {resumeError}
-            </p>
-          ) : undefined
-        }
-      />
-    );
-  if (runtime.online === false)
+  if (runtime?.online === false)
     return (
       <div className="composer disabled">
         <p>Runtime offline; controls are unavailable.</p>
@@ -354,7 +332,7 @@ export function Composer({
       </div>
     );
   const abortTurn = async () => {
-    if (busy || commandMutation.isPending) return;
+    if (!runtime || busy || commandMutation.isPending) return;
     setError(undefined);
     try {
       await commandMutation.mutateAsync({
@@ -367,17 +345,18 @@ export function Composer({
   };
   return (
     <>
-      {shouldShowQueuePanel(
-        runtime.liveState,
-        queue.length,
-        settledBackground,
-      ) && (
-        <QueuePanel
-          runtimeId={runtime.runtimeId}
-          items={queue}
-          onItemsChange={setQueue}
-        />
-      )}
+      {runtime &&
+        shouldShowQueuePanel(
+          runtime.liveState,
+          queue.length,
+          settledBackground,
+        ) && (
+          <QueuePanel
+            runtimeId={runtime.runtimeId}
+            items={queue}
+            onItemsChange={setQueue}
+          />
+        )}
       <ComposerShell
         ariaLabel="Send a message"
         onSubmit={(event) => void submit(event)}
@@ -387,7 +366,11 @@ export function Composer({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         attachmentsEnabled={attachmentsEnabled}
-        attachmentsBusy={disabled || busy}
+        attachmentsBusy={
+          runtime
+            ? disabled || busy
+            : submissionDisabled || busy || resumePending
+        }
         fileInputRef={fileInputRef}
         attachments={attachments}
         onSelectImages={selectImages}
@@ -396,23 +379,33 @@ export function Composer({
         editorRef={editorRef}
         initialMarkdown={initialDraft}
         commands={
-          runtime.liveState === 'working' && !settledBackground
+          runtime?.liveState === 'working' && !settledBackground
             ? composerCommands?.filter(
                 (command) => command.source !== 'builtin',
               )
             : composerCommands
         }
         onChange={updateText}
-        placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'}
-        readOnly={disabled || busy}
+        placeholder={
+          runtime && disabled ? 'Agent is waiting for input' : 'Message Pi…'
+        }
+        readOnly={(runtime ? disabled : submissionDisabled) || busy}
         submissionDisabled={submissionDisabled || busy}
         sendDisabled={
           submissionDisabled || busy || (!text.trim() && !attachments.length)
         }
-        sendAriaLabel={queuesCurrentMessage ? 'Queue message' : 'Send'}
-        sendSrOnly={queuesCurrentMessage ? 'Queue' : 'Send'}
+        sendAriaLabel={
+          runtime
+            ? queuesCurrentMessage
+              ? 'Queue message'
+              : 'Send'
+            : 'Send message'
+        }
+        sendSrOnly={
+          runtime ? (queuesCurrentMessage ? 'Queue' : 'Send') : undefined
+        }
         actionExtras={
-          runtime.liveState === 'working' && !settledBackground ? (
+          runtime?.liveState === 'working' && !settledBackground ? (
             <AriaButton
               type="button"
               className="composer-abort"
@@ -426,7 +419,7 @@ export function Composer({
         }
         mode={
           <>
-            {runtime.liveState === 'working' && !settledBackground && (
+            {runtime?.liveState === 'working' && !settledBackground && (
               <>
                 <span>Mode:</span>
                 <AriaButton
@@ -444,24 +437,63 @@ export function Composer({
                 </AriaButton>
               </>
             )}
-            {(runtime.liveState === 'idle' || settledBackground) && (
-              <span>Prompt</span>
-            )}
-            {runtime.liveState === 'waiting' && <span>Answer above</span>}
-            <ContextIndicator usage={runtime.contextUsage} />
+            {(!runtime ||
+              runtime.liveState === 'idle' ||
+              settledBackground) && <span>Prompt</span>}
+            {runtime?.liveState === 'waiting' && <span>Answer above</span>}
+            <ContextIndicator
+              usage={
+                runtime?.contextUsage ??
+                dormantContextUsage(session, resumeModel, runtimes)
+              }
+            />
           </>
         }
         controls={
-          <>
-            <RuntimeModelControl runtime={runtime} runtimes={runtimes} />
-            <RuntimeThinkingControl runtime={runtime} />
-          </>
+          runtime ? (
+            <>
+              <RuntimeModelControl runtime={runtime} runtimes={runtimes} />
+              <RuntimeThinkingControl runtime={runtime} />
+            </>
+          ) : (
+            <>
+              <ComposerModelControl
+                models={resumeModels}
+                value={
+                  resumeModel
+                    ? modelOptionValue(resumeModel.provider, resumeModel.model)
+                    : ''
+                }
+                disabled={submissionDisabled || busy}
+                onChange={(value) => {
+                  const selected = parseModelOptionValue(value);
+                  if (selected) setResumeModel(selected);
+                }}
+              />
+              <ComposerThinkingControl
+                levels={thinkingLevels}
+                value={resumeThinking ?? thinkingLevels[0] ?? ''}
+                disabled={submissionDisabled || busy || !resumeModel}
+                onChange={setResumeThinking}
+              />
+            </>
+          )
         }
         footer={
-          error ? (
+          !runtime && (!projectId || !checkoutId) ? (
+            <p className="error composer-error" role="alert">
+              This session has no project checkout association.
+            </p>
+          ) : !runtime && resumeError ? (
+            <p className="error composer-error" role="alert">
+              {resumeError}
+            </p>
+          ) : error ? (
             <p className="error composer-error" role="alert">
               {error}
             </p>
+          ) : resumePending ? (
+            <output>Resuming…</output>
           ) : undefined
         }
       />
