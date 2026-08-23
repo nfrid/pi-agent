@@ -452,10 +452,6 @@ button.shelfHeading:focus-visible {
   color: var(--fg);
   box-shadow: inset 2px 0 var(--purple);
 }
-.threadRow:global(.status-working):not(:global(.selected)),
-.threadRow:global(.status-compacting):not(:global(.selected)) {
-  opacity: 0.68;
-}
 .threadRow:global(.active-result) {
   opacity: 1;
 }
