@@ -383,7 +383,7 @@ button.shelfHeading:focus-visible {
 .quickSettle {
   position: absolute;
   z-index: 2;
-  top: 50%;
+  top: 12px;
   right: 6px;
   display: inline-flex;
   align-items: center;
@@ -392,7 +392,7 @@ button.shelfHeading:focus-visible {
   border-radius: 4px;
   background: color-mix(in srgb, var(--bg-alt) 92%, var(--purple));
   color: var(--muted);
-  padding: 4px 6px;
+  padding: 0 12px;
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
