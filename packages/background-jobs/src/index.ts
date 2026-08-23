@@ -146,6 +146,8 @@ export interface BackgroundJobSnapshot {
   readonly signal?: string;
   readonly error?: string;
   readonly timedOut?: boolean;
+  /** Whether this job replaced the host environment rather than inheriting it. */
+  readonly exactEnv?: boolean;
   /** Host-persisted notification acknowledgement used across manager recreation. */
   readonly completionDelivered?: boolean;
   readonly stdout: OutputSnapshot;
@@ -155,7 +157,14 @@ export interface BackgroundJobSnapshot {
 export function backgroundJobsLaunchFingerprint(
   input: Pick<
     StartBackgroundJobInput,
-    'command' | 'title' | 'cwd' | 'argv' | 'env' | 'timeoutMs' | 'events'
+    | 'command'
+    | 'title'
+    | 'cwd'
+    | 'argv'
+    | 'env'
+    | 'timeoutMs'
+    | 'events'
+    | 'exactEnv'
   >,
 ): string {
   return createHash('sha256')
@@ -175,6 +184,7 @@ export function backgroundJobsLaunchFingerprint(
               ),
         timeoutMs: input.timeoutMs ?? null,
         events: input.events === true,
+        ...(input.exactEnv === true ? { exactEnv: true } : {}),
       }),
     )
     .digest('hex');
@@ -191,6 +201,8 @@ export interface StartBackgroundJobInput {
   readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
   readonly events?: boolean;
+  /** Replace the host environment instead of inheriting it. */
+  readonly exactEnv?: boolean;
 }
 
 type BackgroundJobsRequest =
@@ -329,6 +341,13 @@ function parseEvents(value: unknown): boolean | undefined {
   return value;
 }
 
+function parseExactEnv(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean')
+    throw new Error('Invalid exact environment option.');
+  return value;
+}
+
 export function parseBackgroundJobsRequest(
   value: unknown,
 ): BackgroundJobsRequest {
@@ -345,6 +364,7 @@ export function parseBackgroundJobsRequest(
       const env = parseBackgroundJobsEnv(value.input.env);
       const timeoutMs = parseTimeout(value.input.timeoutMs);
       const events = parseEvents(value.input.events);
+      const exactEnv = parseExactEnv(value.input.exactEnv);
       return {
         v: 1,
         op: 'start',
@@ -366,6 +386,7 @@ export function parseBackgroundJobsRequest(
           ...(env === undefined ? {} : { env }),
           ...(timeoutMs === undefined ? {} : { timeoutMs }),
           ...(events === undefined ? {} : { events }),
+          ...(exactEnv === undefined ? {} : { exactEnv }),
         },
       };
     }
@@ -516,6 +537,8 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
   if (!record(value)) throw new Error('Invalid background job snapshot.');
   if (value.env !== undefined || value.argv !== undefined)
     throw new Error('Background job snapshot exposed launch secrets.');
+  if (value.exactEnv !== undefined && typeof value.exactEnv !== 'boolean')
+    throw new Error('Invalid exact environment mode.');
   if (value.timedOut !== undefined && typeof value.timedOut !== 'boolean')
     throw new Error('Invalid timeout fact.');
   const status = value.status;
@@ -541,6 +564,7 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
     ...(value.events === undefined
       ? {}
       : { events: parseEvents(value.events) }),
+    ...(value.exactEnv === undefined ? {} : { exactEnv: value.exactEnv }),
     ...(typeof value.pid === 'number' ? { pid: value.pid } : {}),
     status,
     createdAt,

@@ -53,6 +53,7 @@ type HostedCase = {
 type HostedStartInput = {
   command?: string;
   argv?: string[];
+  exactEnv?: boolean;
 };
 
 async function withHostedCase<T>(
@@ -385,6 +386,7 @@ describe('delegate child environment', () => {
         expect(startInput()).toMatchObject({
           command: 'pi',
           argv: ['pi', '--mode', 'json'],
+          exactEnv: true,
         });
         expect(acknowledgements).toEqual(['checkpoint-1']);
         expect(run.messages).toHaveLength(1);

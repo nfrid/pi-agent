@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BACKGROUND_JOBS_MAX_ARGV_COUNT,
   BACKGROUND_JOBS_MAX_COMMAND_BYTES,
+  backgroundJobsLaunchFingerprint,
   OutputTail,
   parseBackgroundJobsRequest,
   parseBackgroundJobsResponse,
@@ -78,6 +79,7 @@ describe('background-jobs protocol', () => {
         env: { DELEGATE_TEST: 'ok' },
         timeoutMs: 10,
         events: true,
+        exactEnv: true,
       },
     });
     expect(request.op === 'start' ? request.input : undefined).toMatchObject({
@@ -85,6 +87,7 @@ describe('background-jobs protocol', () => {
       env: { DELEGATE_TEST: 'ok' },
       timeoutMs: 10,
       events: true,
+      exactEnv: true,
     });
     expect(() =>
       parseBackgroundJobsRequest({
@@ -100,6 +103,20 @@ describe('background-jobs protocol', () => {
         },
       }),
     ).toThrow(/timeout/);
+    expect(() =>
+      parseBackgroundJobsRequest({
+        v: 1,
+        op: 'start',
+        input: {
+          id,
+          ownerSession: 's',
+          command: 'delegate',
+          title: 'delegate',
+          cwd: '.',
+          exactEnv: 'yes',
+        },
+      }),
+    ).toThrow(/exact environment/);
     expect(() =>
       parseBackgroundJobsRequest({
         v: 1,
@@ -131,6 +148,25 @@ describe('background-jobs protocol', () => {
         },
       }),
     ).toThrow(/too many arguments/);
+  });
+
+  it('fingerprints exact environment mode without including launch values', () => {
+    const base = {
+      command: 'delegate',
+      title: 'delegate',
+      cwd: '.',
+      argv: ['/usr/bin/node', '-e', 'secret prompt'],
+      env: { SECRET_ENV: 'secret value' },
+    } as const;
+    expect(backgroundJobsLaunchFingerprint(base)).not.toBe(
+      backgroundJobsLaunchFingerprint({ ...base, exactEnv: true }),
+    );
+    const inherited = backgroundJobsLaunchFingerprint(base);
+    expect(inherited).toMatch(/^[a-f0-9]{64}$/u);
+    expect(inherited).not.toContain('secret');
+    expect(
+      backgroundJobsLaunchFingerprint({ ...base, exactEnv: true }),
+    ).not.toContain('secret');
   });
 
   it('keeps UTF-8 output tails bounded and counts dropped bytes', () => {

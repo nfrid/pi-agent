@@ -231,6 +231,26 @@ describe('delegate control inbox', () => {
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
+  test('child session shutdown removes a detached control file idempotently', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-shutdown-'));
+    roots.push(root);
+    const filePath = path.join(root, 'control.jsonl');
+    writeFileSync(filePath, 'retained while child is live\n', 'utf8');
+    const handlers = new Map<string, () => unknown>();
+    const pi = {
+      on(event: string, handler: () => unknown) {
+        handlers.set(event, handler);
+      },
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+
+    registerDelegateControl(pi, filePath);
+    expect(existsSync(filePath)).toBe(true);
+    handlers.get('session_shutdown')?.();
+    handlers.get('session_shutdown')?.();
+    expect(existsSync(filePath)).toBe(false);
+  });
+
   test('retries accepted feedback after sendMessage throws', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-retry-'));
     roots.push(root);

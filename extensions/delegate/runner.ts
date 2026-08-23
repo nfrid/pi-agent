@@ -253,11 +253,13 @@ export async function runDelegate(
     emitUpdate();
     const { command, prefixArgs } = resolvePiSpawn();
     const args = buildChildArgs(options, options.sessionPath);
-    const dashboardEnv = Object.fromEntries(
-      ['PI_DASHBOARD_SOCKET', 'PI_DASHBOARD_STATE_DIR']
-        .filter((key) => process.env[key] !== undefined)
-        .map((key) => [key, process.env[key] as string]),
-    );
+    const dashboardEnv = options.hosted
+      ? Object.fromEntries(
+          ['PI_DASHBOARD_SOCKET', 'PI_DASHBOARD_STATE_DIR']
+            .filter((key) => process.env[key] !== undefined)
+            .map((key) => [key, process.env[key] as string]),
+        )
+      : {};
     const spawnTarget = {
       command,
       args: [...prefixArgs, ...args],

@@ -356,6 +356,13 @@ export function registerDelegateControl(
   filePath: string | undefined,
 ): void {
   if (!filePath?.trim()) return;
+  pi.on('session_shutdown', () => {
+    try {
+      unlinkSync(filePath);
+    } catch {
+      // Parent close, detach cleanup, or an earlier shutdown may have removed it.
+    }
+  });
   const state = { seenIds: new Set<string>() };
   let pausedGeneration: number | undefined;
   let pendingPause: DelegateControlRequest | undefined;

@@ -28,7 +28,10 @@ function diagnosticArtifact(size: number) {
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe('delegate lifecycle failure projection', () => {
   test('is harness-authored and ignores a child-shaped lifecycle field', () => {
@@ -183,6 +186,53 @@ describe('delegate lifecycle failure projection', () => {
     expect(run.errorMessage).toContain('acknowledged a pre-timeout checkpoint');
     expect(makeDetails('single', [run]).runs[0]?.checkpoint).toMatchObject({
       state: 'acknowledged',
+    });
+  });
+
+  test('forwards dashboard environment only to hosted children', async () => {
+    vi.stubEnv('PI_DASHBOARD_SOCKET', '/tmp/dashboard.sock');
+    vi.stubEnv('PI_DASHBOARD_STATE_DIR', '/tmp/dashboard-state');
+    const foregroundEnvs: NodeJS.ProcessEnv[] = [];
+    const hostedEnvs: NodeJS.ProcessEnv[] = [];
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (_run, options) => {
+        foregroundEnvs.push(options.env);
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      },
+    );
+    await runDelegate({
+      cwd: '/tmp',
+      task: 'foreground environment',
+      context: 'fresh',
+      sessionPath: '/tmp/lifecycle-foreground-env.jsonl',
+      isolation: 'shared',
+      timeoutMs: 5_000,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+    vi.spyOn(delegateChild, 'runHostedDelegateChild').mockImplementation(
+      async (_run, options) => {
+        hostedEnvs.push(options.env);
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      },
+    );
+    await runDelegate({
+      cwd: '/tmp',
+      task: 'hosted environment',
+      context: 'fresh',
+      sessionPath: '/tmp/lifecycle-hosted-env.jsonl',
+      isolation: 'shared',
+      timeoutMs: 5_000,
+      maxConcurrency: 1,
+      hosted: true,
+      ownerSessionId: 'parent-session',
+      mode: 'single',
+    });
+    expect(foregroundEnvs[0]).not.toHaveProperty('PI_DASHBOARD_SOCKET');
+    expect(foregroundEnvs[0]).not.toHaveProperty('PI_DASHBOARD_STATE_DIR');
+    expect(hostedEnvs[0]).toMatchObject({
+      PI_DASHBOARD_SOCKET: '/tmp/dashboard.sock',
+      PI_DASHBOARD_STATE_DIR: '/tmp/dashboard-state',
     });
   });
 

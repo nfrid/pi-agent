@@ -359,7 +359,9 @@ export class BackgroundJobHostService {
             : input.argv;
         child = spawn('/bin/sh', ['-c', watchdog, ...launchArgs], {
           cwd: input.cwd,
-          env: { ...process.env, ...(input.env ?? {}) },
+          env: input.exactEnv
+            ? { ...(input.env ?? {}) }
+            : { ...process.env, ...(input.env ?? {}) },
           detached: process.platform !== 'win32',
           stdio: ['ignore', 'pipe', 'pipe'],
         });

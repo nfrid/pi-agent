@@ -264,6 +264,87 @@ describe('background process host', () => {
     }
   });
 
+  it('keeps ordinary shell jobs inheriting the host environment', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-inherit-env-'),
+    );
+    const key = 'BACKGROUND_HOST_SENTINEL';
+    const previous = process.env[key];
+    process.env[key] = 'host-sentinel';
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      await client.start({
+        id,
+        command: `node -e ${JSON.stringify(`process.stdout.write(process.env.${key} ?? '')`)}`,
+        title: 'inherit environment',
+        cwd: repositoryRoot,
+      });
+      const settled = await client.wait(id, 2_000);
+      expect(settled.stdout.text).toBe('host-sentinel');
+      expect(settled.exactEnv).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('replaces host environment for exact children without leaking managed tokens', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-exact-env-'));
+    const sentinel = 'BACKGROUND_HOST_SENTINEL';
+    const runtimeId = 'PI_DASHBOARD_RUNTIME_ID';
+    const launchId = 'PI_DASHBOARD_LAUNCH_ID';
+    const externalId = 'PI_DASHBOARD_EXTERNAL_RUNTIME_ID';
+    const previous = Object.fromEntries(
+      [sentinel, runtimeId, launchId, externalId].map((key) => [
+        key,
+        process.env[key],
+      ]),
+    );
+    Object.assign(process.env, {
+      [sentinel]: 'host-secret',
+      [runtimeId]: 'host-runtime',
+      [launchId]: 'host-launch',
+      [externalId]: 'host-external',
+    });
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      const script = `const names=${JSON.stringify([sentinel, runtimeId, launchId, externalId, 'CHILD_ONLY'])}; process.stdout.write(JSON.stringify(Object.fromEntries(names.map(name => [name, process.env[name] ?? null]))))`;
+      await client.start({
+        id,
+        command: 'delegate',
+        title: 'exact environment',
+        cwd: repositoryRoot,
+        argv: [process.execPath, '-e', script],
+        env: {
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+          CHILD_ONLY: 'child-value',
+          [externalId]: 'delegate-external',
+        },
+        exactEnv: true,
+      });
+      const settled = await client.wait(id, 2_000);
+      expect(JSON.parse(settled.stdout.text)).toEqual({
+        [sentinel]: null,
+        [runtimeId]: null,
+        [launchId]: null,
+        [externalId]: 'delegate-external',
+        CHILD_ONLY: 'child-value',
+      });
+      expect(settled.exactEnv).toBe(true);
+      expect(settled).not.toHaveProperty('env');
+      expect(settled).not.toHaveProperty('argv');
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('runs bounded argv with env, host timeout, and ordered fragmented events', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'background-events-'));
     try {

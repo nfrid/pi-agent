@@ -201,6 +201,7 @@ export async function runHostedDelegateChild(
       ),
       timeoutMs: options.timeoutMs,
       events: true,
+      exactEnv: true,
     });
     started = true;
     observeSnapshot(command);
