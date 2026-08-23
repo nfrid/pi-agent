@@ -325,7 +325,7 @@ describe('restored delegate adapter', () => {
     );
   });
 
-  test('retries a transient observation with the same control and process run ID', async () => {
+  test('retries beyond the old finite limit with the same control and process run ID', async () => {
     const child = session();
     sessions.push(child);
     const manager = new DelegateJobManager();
@@ -350,11 +350,12 @@ describe('restored delegate adapter', () => {
           calls++;
           firstControl ??= options.control;
           expect(options.control).toBe(firstControl);
-          const run = finishedRun('restore', calls === 1 ? 'error' : 'success');
+          const run = finishedRun('restore', calls <= 6 ? 'error' : 'success');
           run.runId = PROCESS_JOB_ID;
-          if (calls === 1) run.retryable = true;
+          if (calls <= 6) run.retryable = true;
           return run;
         },
+        waitForRetry: async () => 'retry',
       },
     });
     expect(
@@ -367,7 +368,7 @@ describe('restored delegate adapter', () => {
     await vi.waitFor(() =>
       expect(coordinator.require('restore@1').state).toBe('success'),
     );
-    expect(calls).toBe(2);
+    expect(calls).toBe(7);
     expect(coordinator.getResult('restore@1')?.runs[0]?.runId).toBe(
       PROCESS_JOB_ID,
     );

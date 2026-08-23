@@ -48,6 +48,8 @@ export interface RestoredDelegateDependencies {
   materialize?: (runs: DelegatedRun[]) => Promise<DelegateJobResult>;
   /** Feed restored live activity into the existing status store. */
   onRunUpdate?: (run: DelegatedRun) => void;
+  /** Injectable bounded backoff seam for deterministic recovery tests. */
+  waitForRetry?: typeof waitForRetry;
 }
 
 export interface RestoreHostedDelegateAttemptOptions {
@@ -146,7 +148,6 @@ function pathInside(root: string, candidate: string): boolean {
   );
 }
 
-const MAX_OBSERVE_RETRIES = 5;
 const OBSERVE_RETRY_INITIAL_MS = 100;
 const OBSERVE_RETRY_MAX_MS = 2_000;
 
@@ -401,9 +402,8 @@ export function restoreHostedDelegateAttempt(
         }
         const run = await observe(runOptions);
         if (!run.retryable) return finish(run);
-        if (retryCount >= MAX_OBSERVE_RETRIES) return finish(run);
         retryCount++;
-        const outcome = await waitForRetry(
+        const outcome = await (dependencies.waitForRetry ?? waitForRetry)(
           retryDelay(retryCount),
           signal,
           detachSignal,

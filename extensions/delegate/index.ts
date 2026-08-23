@@ -48,6 +48,7 @@ import {
   registerDelegateControl,
   subscribeDelegateControlLifecycle,
 } from './control';
+import { HostedCompletionAcker } from './hosted-completion-ack';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { clearDelegateSurface, publishDelegateSurface } from './live';
@@ -137,6 +138,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     | ReturnType<typeof createDelegateWorkflowCoordinator>
     | undefined;
   let statuses: DelegateStatusStore | undefined;
+  let hostedCompletionAcker: HostedCompletionAcker | undefined;
   let ui: ExtensionUIContext | undefined;
   type BranchRuntime = {
     readonly branchId: string;
@@ -174,7 +176,17 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getRuntimeActive: () => runtimeActive,
     getActiveCoordinator: () => activeWake?.coordinator,
     getDeliveryBroker: () => getScopedServices(scopeId).backgroundDeliveries,
-    onEntered: (sources) => statuses?.markWorkflowDelivered(sources),
+    onEntered: (sources) => {
+      statuses?.markWorkflowDelivered(sources);
+      void hostedCompletionAcker
+        ?.entered(sources)
+        .catch((error) =>
+          console.error(
+            'delegate: failed to acknowledge hosted completion',
+            error,
+          ),
+        );
+    },
   });
   registerDelegateWakeTool(pi, () => activeWake?.coordinator, {
     onCancelled: (wake) =>
@@ -388,6 +400,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     activeWake = branch;
     branch.detachStore = attachWakeStore(branch.coordinator, pi);
     branch.coordinator.setDispatchHandler(wakeDelivery.dispatch);
+    void hostedCompletionAcker
+      ?.entered(branch.coordinator.enteredSourceIdentities())
+      .catch((error) =>
+        console.error(
+          'delegate: failed to retry hosted completion acknowledgement',
+          error,
+        ),
+      );
     syncWorkflowSurface();
   };
 
@@ -525,6 +545,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = undefined;
     workflow = undefined;
     statuses = undefined;
+    hostedCompletionAcker = undefined;
     activeRuntime = undefined;
     activeContext = undefined;
     for (const runtime of closingRuntimes) runtime.detachStore?.();
@@ -597,6 +618,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const initialRuntime = activateWorkflowRuntime(ctx, initialBranchId);
     if (!initialRuntime)
       throw new Error('Delegate branch runtime unavailable.');
+    hostedCompletionAcker = new HostedCompletionAcker({
+      ownerSessionId: sessionScopeId,
+      getWorkflow: () => workflow,
+    });
     scopedServices.delegateWorkflow = initialRuntime.workflow;
     registerDelegateTool(
       pi,
@@ -840,7 +865,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getScopedServices(scopeId).backgroundDeliveries.markEntered(event.messages);
     const currentMessages = delivery.filterContext(event.messages);
     delivery.markAutomaticDeliveriesEntered(currentMessages);
-    return { messages: wakeDelivery.filterContext(currentMessages) };
+    const enteredMessages = wakeDelivery.filterContext(currentMessages);
+    void hostedCompletionAcker
+      ?.entered(activeWake?.coordinator.enteredSourceIdentities() ?? [])
+      .catch((error) =>
+        console.error(
+          'delegate: failed to retry hosted completion acknowledgement',
+          error,
+        ),
+      );
+    return { messages: enteredMessages };
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component
@@ -894,6 +928,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = undefined;
     workflow = undefined;
     statuses = undefined;
+    hostedCompletionAcker = undefined;
     activeRuntime = undefined;
     activeContext = undefined;
     for (const runtime of closingRuntimes) runtime.detachStore?.();

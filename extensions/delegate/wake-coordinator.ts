@@ -837,6 +837,25 @@ export class WakeCoordinator {
     return this.markEntered(id, acknowledgement);
   }
 
+  /** Exact workflow sources whose payloads have entered parent model context. */
+  enteredSourceIdentities(): AttemptIdentity[] {
+    const sources = new Set<AttemptIdentity>();
+    for (const record of this.records.values()) {
+      if (record.state !== 'entered' || !record.readyReferences?.length)
+        continue;
+      for (const selector of record.payloadSelectors) {
+        const selected =
+          selector.node === undefined
+            ? record.readyReferences
+            : [selector.node as AttemptIdentity];
+        for (const identity of selected) {
+          if (record.readyReferences.includes(identity)) sources.add(identity);
+        }
+      }
+    }
+    return [...sources];
+  }
+
   cancel(id: string, reason = 'Wake subscription cancelled.'): WakeSnapshot {
     const record = this.requireRecord(id);
     if (isWakeTerminal(record.state)) return copySnapshot(record);
@@ -1330,7 +1349,7 @@ export class WakeCoordinator {
       return undefined;
     let readyReferences: readonly AttemptIdentity[] | undefined;
     try {
-      if (state === 'ready' || state === 'queued') {
+      if (state === 'ready' || state === 'queued' || state === 'entered') {
         if (value.readyReferences !== undefined) {
           if (
             !Array.isArray(value.readyReferences) ||
@@ -1356,9 +1375,13 @@ export class WakeCoordinator {
           )
             return undefined;
           readyReferences = Object.freeze(restored);
+        } else if (state === 'entered') {
+          // An old entered `any` wake does not prove which source actually
+          // reached parent context, so completion acknowledgement fails closed.
+          return undefined;
         } else {
-          // Older entries may not have captured readiness sources. Recompute
-          // only from the already-exact condition refs; never bind a bare alias.
+          // Older ready/queued entries may not have captured readiness sources.
+          // Recompute only from exact condition refs; never bind a bare alias.
           const current = normalized.references.filter((reference) => {
             const attempt = this.workflow.get(reference);
             return attempt !== undefined && this.isTerminalAttempt(attempt);
