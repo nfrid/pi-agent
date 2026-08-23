@@ -47,6 +47,10 @@ type HostedCase = {
   exitCode?: number;
   timedOut?: boolean;
   error?: string;
+  exactEnvCapability?: boolean;
+  infoResponse?: 'unknown' | 'missing';
+  delayStopMs?: number;
+  delayInspectMs?: number;
   onRequest?: (operation: string) => void;
 };
 
@@ -98,44 +102,66 @@ async function withHostedCase<T>(
       if (request.op === 'start') startInput = request.input;
       if (request.op === 'stop') stopped = true;
       const response =
-        request.op === 'start'
-          ? {
-              v: 1,
-              ok: true,
-              job: snapshot(setup.startStatus ?? setup.status),
-            }
-          : request.op === 'events'
+        request.op === 'info'
+          ? setup.infoResponse === 'unknown'
+            ? { v: 1, ok: false, error: 'Unknown background-jobs operation.' }
+            : {
+                v: 1,
+                ok: true,
+                ...(setup.infoResponse === 'missing'
+                  ? {}
+                  : {
+                      capabilities: {
+                        exactEnv: setup.exactEnvCapability ?? true,
+                      },
+                    }),
+              }
+          : request.op === 'start'
             ? {
                 v: 1,
                 ok: true,
-                events: stopped
-                  ? {
-                      events: [],
-                      truncated: false,
-                      complete: true,
-                      nextOffset: 0,
-                    }
-                  : (setup.eventResponse ?? {
-                      events: [],
-                      truncated: false,
-                      complete: setup.status !== 'running',
-                      nextOffset: 0,
-                    }),
+                job: snapshot(setup.startStatus ?? setup.status),
               }
-            : request.op === 'stop' || request.op === 'wait'
+            : request.op === 'events'
               ? {
                   v: 1,
                   ok: true,
-                  job: snapshot(stopped ? 'killed' : setup.status),
+                  events: stopped
+                    ? {
+                        events: [],
+                        truncated: false,
+                        complete: true,
+                        nextOffset: 0,
+                      }
+                    : (setup.eventResponse ?? {
+                        events: [],
+                        truncated: false,
+                        complete: setup.status !== 'running',
+                        nextOffset: 0,
+                      }),
                 }
-              : request.op === 'inspect'
+              : request.op === 'stop' || request.op === 'wait'
                 ? {
                     v: 1,
                     ok: true,
                     job: snapshot(stopped ? 'killed' : setup.status),
                   }
-                : { v: 1, ok: true };
-      socket.end(`${JSON.stringify(response)}\n`);
+                : request.op === 'inspect'
+                  ? {
+                      v: 1,
+                      ok: true,
+                      job: snapshot(stopped ? 'killed' : setup.status),
+                    }
+                  : { v: 1, ok: true };
+      const delayMs =
+        request.op === 'stop'
+          ? (setup.delayStopMs ?? 0)
+          : request.op === 'inspect'
+            ? (setup.delayInspectMs ?? 0)
+            : 0;
+      if (delayMs > 0)
+        setTimeout(() => socket.end(`${JSON.stringify(response)}\n`), delayMs);
+      else socket.end(`${JSON.stringify(response)}\n`);
     });
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
@@ -382,7 +408,13 @@ describe('delegate child environment', () => {
           onControlAck: (id) => acknowledgements.push(id),
           onLine: vi.fn(),
         });
-        expect(calls).toEqual(['start', 'events', 'inspect', 'inspect']);
+        expect(calls).toEqual([
+          'info',
+          'start',
+          'events',
+          'inspect',
+          'inspect',
+        ]);
         expect(startInput()).toMatchObject({
           command: 'pi',
           argv: ['pi', '--mode', 'json'],
@@ -397,6 +429,29 @@ describe('delegate child environment', () => {
         });
       },
     );
+  });
+
+  test.each([
+    ['unknown operation', { infoResponse: 'unknown' as const }],
+    ['missing capability', { infoResponse: 'missing' as const }],
+    ['false capability', { exactEnvCapability: false }],
+  ])('fails closed when the process host has no exactEnv capability (%s)', async (_label, capability) => {
+    const setup: HostedCase = { status: 'done', ...capability };
+    await withHostedCase(setup, async (calls) => {
+      await expect(
+        runHostedDelegateChild(createRun('capability negotiation'), {
+          command: 'pi',
+          args: [],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          timeoutMs: 100,
+          onLine: vi.fn(),
+        }),
+      ).rejects.toThrow();
+      expect(calls).toEqual(['info']);
+    });
   });
 
   test('preserves terminal host errors as bounded diagnostics, not spawn failures', async () => {
@@ -486,6 +541,90 @@ describe('delegate child environment', () => {
         });
         expect(calls).not.toContain('stop');
         expect(result).toMatchObject({ exitCode: 0, wasAborted: false });
+      },
+    );
+  });
+
+  test('returns detached when detach fires during a delayed stop', async () => {
+    const controller = new AbortController();
+    const detach = new AbortController();
+    await withHostedCase(
+      {
+        status: 'running',
+        delayStopMs: 25,
+        onRequest(operation) {
+          if (operation === 'inspect' && !controller.signal.aborted)
+            controller.abort();
+          if (operation === 'stop') detach.abort();
+        },
+      },
+      async (calls) => {
+        const result = await runHostedDelegateChild(
+          createRun('delayed stop detach'),
+          {
+            command: 'pi',
+            args: [],
+            cwd: process.cwd(),
+            env: {},
+            ownerSession: 'parent-session',
+            processJobId: hostedJobId,
+            timeoutMs: 100,
+            signal: controller.signal,
+            detachSignal: detach.signal,
+            onLine: vi.fn(),
+          },
+        );
+        expect(calls).toContain('stop');
+        expect(result).toEqual({
+          exitCode: -1,
+          wasAborted: false,
+          timedOut: false,
+          detached: true,
+        });
+      },
+    );
+  });
+
+  test('returns detached when detach fires during a delayed final inspect', async () => {
+    const detach = new AbortController();
+    let inspections = 0;
+    await withHostedCase(
+      {
+        status: 'done',
+        exitCode: 0,
+        delayInspectMs: 25,
+        onRequest(operation) {
+          if (operation === 'inspect' && ++inspections === 2) detach.abort();
+        },
+      },
+      async (calls) => {
+        const result = await runHostedDelegateChild(
+          createRun('delayed final inspect detach'),
+          {
+            command: 'pi',
+            args: [],
+            cwd: process.cwd(),
+            env: {},
+            ownerSession: 'parent-session',
+            processJobId: hostedJobId,
+            timeoutMs: 100,
+            detachSignal: detach.signal,
+            onLine: vi.fn(),
+          },
+        );
+        expect(calls).toEqual([
+          'info',
+          'start',
+          'events',
+          'inspect',
+          'inspect',
+        ]);
+        expect(result).toEqual({
+          exitCode: -1,
+          wasAborted: false,
+          timedOut: false,
+          detached: true,
+        });
       },
     );
   });
@@ -585,7 +724,13 @@ describe('delegate child environment', () => {
           timeoutMs: 100,
           onLine: vi.fn(),
         });
-        expect(calls).toEqual(['start', 'events', 'inspect', 'inspect']);
+        expect(calls).toEqual([
+          'info',
+          'start',
+          'events',
+          'inspect',
+          'inspect',
+        ]);
         expect(result).toMatchObject({ exitCode: 0, timedOut: false });
         expect(run.messages).toEqual([]);
         expect(run.stderr).toContain('truncated');

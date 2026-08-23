@@ -188,6 +188,11 @@ export async function runHostedDelegateChild(
     once: true,
   });
   try {
+    const capabilities = await client.info();
+    if (capabilities.exactEnv !== true)
+      throw new Error(
+        'Hosted delegates require a process host with exactEnv support.',
+      );
     const command = await client.start({
       id: processJobId,
       command: options.command,
@@ -289,20 +294,17 @@ export async function runHostedDelegateChild(
         observeSnapshot(await client.wait(processJobId, 100));
       }
     }
-    if (detached) {
-      // Detach alone leaves the host process running. A cancellation observed
-      // before this race still owns a deterministic stop completion.
-      if (cancellationRequested && stopPromise) await stopPromise;
-      return {
-        exitCode: -1,
-        wasAborted: false,
-        timedOut: false,
-        detached: true,
-      };
-    }
+    const detachedResult = (): SpawnChildResult => ({
+      exitCode: -1,
+      wasAborted: false,
+      timedOut: false,
+      detached: true,
+    });
     if (stopPromise) await stopPromise;
+    if (detached) return detachedResult();
     const inspected = await client.inspect(processJobId);
     if (inspected) observeSnapshot(inspected);
+    if (detached) return detachedResult();
     const settled = final ?? command;
     if (settled.timedOut)
       return {

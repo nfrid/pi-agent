@@ -30,6 +30,27 @@ describe('background-jobs protocol', () => {
     ).toThrow(/oversized command/);
   });
 
+  it('parses the bounded capability probe and response', () => {
+    expect(parseBackgroundJobsRequest({ v: 1, op: 'info' })).toEqual({
+      v: 1,
+      op: 'info',
+    });
+    expect(
+      parseBackgroundJobsResponse({
+        v: 1,
+        ok: true,
+        capabilities: { exactEnv: true },
+      }),
+    ).toMatchObject({ capabilities: { exactEnv: true } });
+    expect(() =>
+      parseBackgroundJobsResponse({
+        v: 1,
+        ok: true,
+        capabilities: { exactEnv: 'yes' },
+      }),
+    ).toThrow(/exact environment capability/);
+  });
+
   it('validates bounded snapshots in responses', () => {
     expect(() =>
       parseBackgroundJobsResponse({

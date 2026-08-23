@@ -66,6 +66,7 @@ type JobResponse = {
   ok: boolean;
   error?: string;
   code?: string;
+  capabilities?: { exactEnv: boolean };
   job?: BackgroundJobSnapshot;
   jobs?: BackgroundJobSnapshot[];
   events?: BackgroundJobEventsSnapshot;
@@ -264,6 +265,8 @@ export class BackgroundJobHostService {
     request: ReturnType<typeof parseBackgroundJobsRequest>,
   ): Promise<JobResponse> {
     switch (request.op) {
+      case 'info':
+        return { v: 1, ok: true, capabilities: { exactEnv: true } };
       case 'start': {
         const job = await this.start(request.input);
         return { v: 1, ok: true, job: snapshot(job) };

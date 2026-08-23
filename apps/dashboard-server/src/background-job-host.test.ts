@@ -46,6 +46,17 @@ afterEach(async () => {
 });
 
 describe('background process host', () => {
+  it('advertises exactEnv support through the bounded info operation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-info-'));
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      expect(await client.info()).toEqual({ exactEnv: true });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('watchdog kills a descendant after abrupt process-host death', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'background-abrupt-'));
     const socket = path.join(root, 'jobs.sock');

@@ -130,6 +130,11 @@ export interface BackgroundJobEventsSnapshot {
   readonly nextOffset: number;
 }
 
+export interface BackgroundJobsCapabilities {
+  /** Whether start exactEnv replaces the host environment. */
+  readonly exactEnv?: boolean;
+}
+
 export interface BackgroundJobSnapshot {
   readonly id: string;
   readonly ownerSession: string;
@@ -206,6 +211,7 @@ export interface StartBackgroundJobInput {
 }
 
 type BackgroundJobsRequest =
+  | { v: 1; op: 'info' }
   | { v: 1; op: 'start'; input: StartBackgroundJobInput }
   | { v: 1; op: 'list'; ownerSession: string }
   | { v: 1; op: 'inspect'; ownerSession: string; id: string }
@@ -215,6 +221,7 @@ type BackgroundJobsRequest =
   | { v: 1; op: 'events'; ownerSession: string; id: string; offset: number };
 
 export type BackgroundJobsRequestPayload =
+  | { op: 'info' }
   | { op: 'start'; input: StartBackgroundJobInput }
   | { op: 'list'; ownerSession: string }
   | { op: 'inspect'; ownerSession: string; id: string }
@@ -228,6 +235,7 @@ export type BackgroundJobsResponse = {
   ok: boolean;
   error?: string;
   code?: string;
+  capabilities?: BackgroundJobsCapabilities;
   job?: BackgroundJobSnapshot;
   jobs?: BackgroundJobSnapshot[];
   events?: BackgroundJobEventsSnapshot;
@@ -358,6 +366,8 @@ export function parseBackgroundJobsRequest(
   )
     throw new Error('Invalid background-jobs request.');
   switch (value.op) {
+    case 'info':
+      return { v: 1, op: 'info' };
     case 'start': {
       if (!record(value.input)) throw new Error('Invalid start input.');
       const argv = parseArgv(value.input.argv);
@@ -533,6 +543,15 @@ function parseEventsSnapshot(value: unknown): BackgroundJobEventsSnapshot {
   };
 }
 
+function parseCapabilities(value: unknown): BackgroundJobsCapabilities {
+  if (!record(value)) throw new Error('Invalid background-jobs capabilities.');
+  if (value.exactEnv !== undefined && typeof value.exactEnv !== 'boolean')
+    throw new Error('Invalid exact environment capability.');
+  return {
+    ...(value.exactEnv === undefined ? {} : { exactEnv: value.exactEnv }),
+  };
+}
+
 function parseSnapshot(value: unknown): BackgroundJobSnapshot {
   if (!record(value)) throw new Error('Invalid background job snapshot.');
   if (value.env !== undefined || value.argv !== undefined)
@@ -590,6 +609,8 @@ export function parseBackgroundJobsResponse(
 ): BackgroundJobsResponse {
   if (!record(value) || value.v !== 1 || typeof value.ok !== 'boolean')
     throw new Error('Invalid background-jobs response.');
+  if (value.ok && value.capabilities !== undefined)
+    parseCapabilities(value.capabilities);
   if (value.ok && value.job !== undefined) parseSnapshot(value.job);
   if (value.ok && value.jobs !== undefined) {
     if (!Array.isArray(value.jobs))
@@ -685,6 +706,11 @@ export class BackgroundJobsClient {
     });
   }
 
+  info(): Promise<BackgroundJobsCapabilities> {
+    return this.request({ op: 'info' }).then(
+      (response) => response.capabilities ?? {},
+    );
+  }
   start(
     input: Omit<StartBackgroundJobInput, 'ownerSession'>,
   ): Promise<BackgroundJobSnapshot> {
