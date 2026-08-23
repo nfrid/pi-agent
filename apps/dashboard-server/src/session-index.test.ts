@@ -100,6 +100,57 @@ describe('session index', () => {
     expect(index.isAuxiliary('child')).toBe(true);
   });
 
+  it('pages an auxiliary snapshot with the legacy cursor emitted by its source cut', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-aux-page-'),
+    );
+    const auxiliary = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-aux-page-child-'),
+    );
+    const entries = [
+      {
+        type: 'session',
+        id: 'paged-child',
+        cwd: '/tmp/project',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent',
+      },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        type: 'message',
+        id: `child-message-${index}`,
+        message: { role: 'assistant', content: 'x'.repeat(150_000) },
+      })),
+    ];
+    await writeFile(
+      path.join(auxiliary, 'paged-child.jsonl'),
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root, undefined, undefined, auxiliary);
+    await index.rebuild();
+
+    const sourceCursor = await index.readAppendCursor('paged-child');
+    const recent = await index.readEntries(
+      'paged-child',
+      undefined,
+      undefined,
+      { sourceCursor },
+    );
+    expect(recent.history.nextBefore).toBeTruthy();
+    const decoded = JSON.parse(
+      Buffer.from(recent.history.nextBefore ?? '', 'base64url').toString(
+        'utf8',
+      ),
+    ) as { version?: unknown };
+    expect(decoded.version).toBe(1);
+
+    const older = await index.readEntries(
+      'paged-child',
+      recent.history.nextBefore,
+    );
+    expect(older.history.end).toBe(recent.history.start);
+    expect(older.history.start).toBeLessThan(older.history.end);
+  });
+
   it('does not expose unlinked auxiliary sessions', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-unlinked-'),

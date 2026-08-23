@@ -407,6 +407,16 @@ function decodeHistoryCursorV2(value: string): HistoryCursorV2 {
   }
 }
 
+function isLegacyHistoryCursor(value: string): boolean {
+  try {
+    decodeHistoryCursor(value);
+    return true;
+  } catch {
+    decodeHistoryCursorV2(value);
+    return false;
+  }
+}
+
 function within(root: string, file: string): boolean {
   const relative = path.relative(root, file);
   return (
@@ -1391,9 +1401,8 @@ export class SessionIndex {
   }
 
   /**
-   * Read an indexed page. Auxiliary exact-cut reads retain their dedicated
-   * append cursor implementation; browser history never enters the legacy
-   * streaming path below.
+   * Read an indexed page. Auxiliary exact-cut reads and the V1 history cursors
+   * they emit retain their dedicated legacy streaming path below.
    */
   async readEntries(
     id: string,
@@ -1401,7 +1410,10 @@ export class SessionIndex {
     leafId?: string,
     options: SessionReadOptions = {},
   ): Promise<SessionEntriesResult> {
-    if (options.sourceCursor !== undefined)
+    if (
+      options.sourceCursor !== undefined ||
+      (before !== undefined && isLegacyHistoryCursor(before))
+    )
       return this.readEntriesLegacy(id, before, leafId, options);
     return this.readIndexedEntries(id, before, leafId, options);
   }
