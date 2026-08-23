@@ -859,7 +859,7 @@ export function AgentThreadNav({
             : 's'}
         </button>
       )}
-      <footer className={styles.footer}>
+      <footer className={`agent-nav-footer ${styles.footer}`}>
         <UsageCapsule usage={snapshot.usage} />
         <button
           type="button"

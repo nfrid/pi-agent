@@ -704,6 +704,7 @@ button.shelfHeading:focus-visible {
 .settingsButton {
   display: inline-grid;
   width: 32px;
+  margin-left: auto;
   height: 32px;
   flex: 0 0 auto;
   place-items: center;

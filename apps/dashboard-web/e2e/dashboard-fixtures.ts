@@ -10,6 +10,7 @@ export type DashboardFixtureOptions = {
   sessionSnapshot?: Record<string, unknown>;
   sessionSnapshots?: Record<string, Record<string, unknown>>;
   sessionSubscribeDelayMs?: number;
+  usage?: unknown;
 };
 
 export function trpcData(data: unknown): string {
@@ -88,7 +89,7 @@ export async function installDashboardBootstrap(
   await page.route('**/trpc/usage*', async (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: trpcData({}),
+      body: trpcData(options.usage ?? {}),
     }),
   );
   await page.route('**/trpc/shellSubscribe*', async (route) => {

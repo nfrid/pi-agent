@@ -80,7 +80,6 @@ export function PushButton() {
   return (
     <button
       type="button"
-      className="push-button"
       onClick={() => void enable().catch(() => setStatus('unavailable'))}
       disabled={status === 'on'}
     >
