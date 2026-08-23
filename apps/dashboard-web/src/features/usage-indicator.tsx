@@ -225,15 +225,7 @@ function WindowSummary({
   );
 }
 
-export type UsageCapsuleVariant = 'toolbar' | 'sidebar';
-
-export function UsageCapsule({
-  usage,
-  variant = 'toolbar',
-}: {
-  usage: BrowserSnapshot['usage'];
-  variant?: UsageCapsuleVariant;
-}) {
+export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
   const limits = parseUsage(usage);
   const first = limits[0];
   const windows = first
@@ -270,7 +262,7 @@ export function UsageCapsule({
   if (!first || !urgent) return null;
   return (
     <div
-      className={`${styles.capsule} global-usage ${variant === 'sidebar' ? styles.sidebar : ''}`}
+      className={`${styles.capsule} usage-capsule ${styles.sidebar}`}
       ref={capsuleRef}
     >
       <button

@@ -325,8 +325,7 @@
 }
 body:has(.session-page) .global-new-agent,
 body:has(.session-page) .global-tools > .push-button,
-body:has(.session-page) .global-tools > .palette-trigger,
-body:has(.session-page) .global-tools > .global-usage {
+body:has(.session-page) .global-tools > .palette-trigger {
   display: none;
 }
 @keyframes drawer-slide-in {

@@ -9,7 +9,6 @@ import {
   ProjectNewThreadView,
   ProjectsView,
   ProjectView,
-  SessionsView,
 } from './dashboard';
 import { newProjectThreadPath, useDashboardNavigate } from './navigation';
 import { RuntimeView } from './runtime';
@@ -101,13 +100,6 @@ export function ProjectPendingThreadRoute() {
       snapshot={dashboard.snapshot}
       store={dashboard.store}
     />
-  ) : null;
-}
-
-export function SessionsRoute() {
-  const dashboard = useDashboardContext();
-  return dashboard.snapshot ? (
-    <SessionsView snapshot={dashboard.snapshot} />
   ) : null;
 }
 

@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { SettingsView } from './settings';
 
 const snapshot = {
-  unread: [],
   projects: [
     {
       id: 'project-1',
@@ -24,8 +23,11 @@ describe('settings drawer', () => {
       </QueryClientProvider>,
     );
     expect(markup).toContain('Alert delivery');
-    expect(markup).toContain('Push notifications');
-    expect(markup).toContain('Browser alerts');
+    expect(markup).toContain('Browser push');
+    expect(markup).toContain('Enable push');
+    expect(markup).not.toContain('Read all');
+    expect(markup).not.toContain('Notifications');
+    expect(markup).not.toContain('Browser alerts');
     expect(markup).toContain('Projects');
     expect(markup).toContain('Dashboard');
     expect(markup).toContain('Rename');

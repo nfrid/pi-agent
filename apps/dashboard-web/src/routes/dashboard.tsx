@@ -12,7 +12,6 @@ export {
 export {
   Dashboard,
   RuntimeCard,
-  SessionsView,
 } from '../features/dashboard-overview';
 export { Header, runtimeStatusCounts } from '../features/navigation';
 export { ProjectsView, ProjectView } from '../features/project-catalogue';

@@ -859,19 +859,17 @@ export function AgentThreadNav({
             : 's'}
         </button>
       )}
-      {mode === 'session' && (
-        <footer className={styles.footer}>
-          <UsageCapsule usage={snapshot.usage} variant="sidebar" />
-          <button
-            type="button"
-            className={styles.settingsButton}
-            aria-label="Open settings"
-            onClick={openSettings}
-          >
-            <span aria-hidden="true">⚙</span>
-          </button>
-        </footer>
-      )}
+      <footer className={styles.footer}>
+        <UsageCapsule usage={snapshot.usage} />
+        <button
+          type="button"
+          className={styles.settingsButton}
+          aria-label="Open settings"
+          onClick={openSettings}
+        >
+          <span aria-hidden="true">⚙</span>
+        </button>
+      </footer>
     </aside>
   );
   if (mode === 'home') return nav;

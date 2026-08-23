@@ -1,8 +1,5 @@
-import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { BrowserAlertsButton, NotificationList } from './notifications';
 import {
   formatResetCountdown,
   parseUsage,
@@ -10,14 +7,6 @@ import {
   UsageCapsule,
   usageTone,
 } from './usage-indicator';
-
-const notifications = Array.from({ length: 10 }, (_, index) => ({
-  id: `notice-${index}`,
-  kind: 'settled' as const,
-  title: `Notice ${index}`,
-  body: 'A useful update',
-  createdAt: Date.parse('2026-08-05T18:42:00.000Z') + index,
-})) as BrowserSnapshot['unread'];
 
 describe('usage parsing and formatting', () => {
   it('normalizes both windows and seconds or milliseconds reset timestamps', () => {
@@ -60,22 +49,8 @@ describe('usage parsing and formatting', () => {
       'in 1h 1m',
     );
   });
-});
 
-describe('dashboard notification and usage previews', () => {
-  it('discloses the bounded notification slice', () => {
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <NotificationList notifications={notifications} />
-      </QueryClientProvider>,
-    );
-    expect(markup).toContain('newest of 10 unread notifications');
-    expect(markup.match(/<article/g)).toHaveLength(8);
-    expect(markup).toContain('Notice 7');
-    expect(markup).not.toContain('Notice 8');
-  });
-
-  it('renders an accessible capsule with both usage windows', () => {
+  it('renders both windows and their reset countdowns', () => {
     const markup = renderToStaticMarkup(
       <UsageCapsule
         usage={{
@@ -105,12 +80,5 @@ describe('dashboard notification and usage previews', () => {
     expect(markup).toContain('in 1h');
     expect(markup).toContain('in 2h');
     expect(markup).toContain('Codex usage');
-  });
-
-  it('exposes browser alert setup separately from the unread list', () => {
-    const markup = renderToStaticMarkup(
-      <BrowserAlertsButton notifications={notifications.slice(0, 1)} />,
-    );
-    expect(markup).toContain('Browser alerts');
   });
 });

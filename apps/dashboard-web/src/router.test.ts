@@ -12,7 +12,7 @@ describe('dashboard route tree', () => {
     });
     await router.load();
     expect(router.state.location.pathname).toBe('/projects/project-1/new');
-    for (const path of ['/projects', '/sessions'] as const) {
+    for (const path of ['/projects'] as const) {
       await router.navigate({ to: path });
       expect(router.state.location.pathname).toBe(path);
     }

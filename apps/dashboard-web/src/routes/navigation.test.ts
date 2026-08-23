@@ -32,9 +32,7 @@ describe('dashboard view transition navigation policy', () => {
     ],
     ['legacy new current redirect', '/new', '/projects/project-1/new', false],
     ['legacy new target redirect', '/projects', '/new', false],
-    ['current sessions route', '/sessions', '/projects', false],
     ['current session surface', '/sessions/one', '/projects', false],
-    ['target sessions route', '/projects', '/sessions', false],
     ['target session surface', '/projects', '/sessions/one', false],
     ['draft surface', '/projects', '/drafts/draft-1', false],
   ])('opts out for %s', (_reason, currentPath, targetPath, reducedMotion) => {

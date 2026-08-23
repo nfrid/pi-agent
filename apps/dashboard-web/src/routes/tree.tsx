@@ -15,7 +15,6 @@ import {
   ProjectsRoute,
   RuntimeRoute,
   SessionRoute,
-  SessionsRoute,
 } from './components';
 
 const rootRoute = createRootRoute({ component: RouteShell });
@@ -23,11 +22,6 @@ const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: HomeRoute,
-});
-const sessionsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/sessions',
-  component: SessionsRoute,
 });
 const sessionRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -77,7 +71,6 @@ const legacyNewRoute = createRoute({
 
 export const dashboardRouteTree = rootRoute.addChildren([
   homeRoute,
-  sessionsRoute,
   sessionRoute,
   projectsRoute,
   projectRoute,

@@ -5,7 +5,6 @@ import {
   useDashboardNavigate,
 } from '../routes/navigation';
 import { CommandPalette } from './command-palette';
-import { UsageCapsule } from './usage-indicator';
 
 export function runtimeStatusCounts(snapshot: BrowserSnapshot) {
   return {
@@ -36,9 +35,6 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
     !pathname.startsWith('/sessions/') &&
     !pathname.endsWith('/new') &&
     !pathname.includes('/new/pending/');
-  const activeSessionId = pathname.startsWith('/sessions/')
-    ? decodeURIComponent(pathname.split('/')[2] ?? '')
-    : undefined;
   const paletteDisabled = false;
   return (
     <header className="navigation-shell">
@@ -62,9 +58,6 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
           >
             +
           </button>
-        )}
-        {!activeSessionId && (
-          <UsageCapsule usage={snapshot.usage} variant="toolbar" />
         )}
         <CommandPalette snapshot={snapshot} disabled={paletteDisabled} />
       </div>

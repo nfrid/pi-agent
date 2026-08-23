@@ -103,18 +103,6 @@
   color: var(--dim);
   font-size: 9px;
 }
-.settings :global(.notifications) {
-  margin-top: 2px;
-}
-.settings :global(.notification) {
-  padding: 8px 2px;
-}
-.settings :global(.notification p) {
-  display: none;
-}
-.settings :global(.notificationTruncation) {
-  margin-inline: 2px;
-}
 @media (max-width: 360px) {
   .controls {
     grid-template-columns: 1fr;

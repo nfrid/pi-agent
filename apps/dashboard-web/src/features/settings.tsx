@@ -7,11 +7,7 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { errorMessage } from '../shared/lib/error-message';
-import {
-  BrowserAlertsButton,
-  NotificationList,
-  PushButton,
-} from './notifications';
+import { PushButton } from './notifications';
 import styles from './settings.module.css';
 
 export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -23,12 +19,9 @@ export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
       >
         <h3 id="settings-alerts-heading">Alert delivery</h3>
         <div className={styles.controls}>
-          <span>Push notifications</span>
+          <span>Browser push</span>
           <PushButton />
-          <span>Browser alerts</span>
-          <BrowserAlertsButton notifications={snapshot.unread} />
         </div>
-        <NotificationList notifications={snapshot.unread} />
       </section>
       <ProjectAdministration snapshot={snapshot} />
     </section>
