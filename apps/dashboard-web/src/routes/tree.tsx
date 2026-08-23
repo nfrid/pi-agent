@@ -8,7 +8,6 @@ import {
   DraftPendingThreadRoute,
   DraftRoute,
   HomeRoute,
-  InboxRoute,
   LegacyNewRoute,
   ProjectNewThreadRoute,
   ProjectPendingThreadRoute,
@@ -65,11 +64,6 @@ const draftPendingThreadRoute = createRoute({
   path: '/drafts/$draftId/pending/$threadId',
   component: DraftPendingThreadRoute,
 });
-const inboxRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/inbox',
-  component: InboxRoute,
-});
 const runtimeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/runtimes/$runtimeId',
@@ -91,7 +85,6 @@ export const dashboardRouteTree = rootRoute.addChildren([
   projectPendingThreadRoute,
   draftRoute,
   draftPendingThreadRoute,
-  inboxRoute,
   runtimeRoute,
   legacyNewRoute,
 ]);

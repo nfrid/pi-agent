@@ -127,8 +127,7 @@
     display: none;
   }
   .global-tools .palette-trigger,
-  .global-new-agent,
-  .global-notifications {
+  .global-new-agent {
     width: 32px;
     padding: 6px 4px;
     justify-content: center;
@@ -140,9 +139,6 @@
   }
   .global-new-agent {
     font-size: 17px;
-  }
-  .global-notifications span {
-    font-size: 13px;
   }
   body:has(.agent-nav-drawer.open) .navigation-shell {
     z-index: 33;
@@ -328,7 +324,6 @@
   }
 }
 body:has(.session-page) .global-new-agent,
-body:has(.session-page) .global-notifications,
 body:has(.session-page) .global-tools > .push-button,
 body:has(.session-page) .global-tools > .palette-trigger,
 body:has(.session-page) .global-tools > .global-usage {

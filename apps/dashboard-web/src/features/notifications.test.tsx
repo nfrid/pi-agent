@@ -2,7 +2,7 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { NotificationList, UsagePanel } from './notifications';
+import { BrowserAlertsButton, NotificationList } from './notifications';
 import {
   formatResetCountdown,
   parseUsage,
@@ -83,8 +83,16 @@ describe('dashboard notification and usage previews', () => {
             {
               limitId: 'codex',
               limitName: 'Codex',
-              primary: { usedPercent: 25, windowMinutes: 300 },
-              secondary: { usedPercent: 75, windowMinutes: 10_080 },
+              primary: {
+                usedPercent: 25,
+                windowMinutes: 300,
+                resetAfterSeconds: 3_600,
+              },
+              secondary: {
+                usedPercent: 75,
+                windowMinutes: 10_080,
+                resetAfterSeconds: 7_200,
+              },
             },
           ],
         }}
@@ -94,33 +102,15 @@ describe('dashboard notification and usage previews', () => {
     expect(markup).toContain('aria-label="Usage limits"');
     expect(markup).toContain('5h');
     expect(markup).toContain('wk');
+    expect(markup).toContain('in 1h');
+    expect(markup).toContain('in 2h');
     expect(markup).toContain('Codex usage');
   });
 
-  it('shows a rate-limit reset time when the provider reports one', () => {
+  it('exposes browser alert setup separately from the unread list', () => {
     const markup = renderToStaticMarkup(
-      <UsagePanel
-        usage={{
-          snapshots: [
-            {
-              limitId: 'codex',
-              primary: {
-                used_percent: 25,
-                reset_at: Date.parse('2026-08-05T19:00:00.000Z') / 1_000,
-              },
-              secondary: {
-                usedPercent: 60,
-                resetsAt: Date.parse('2026-08-12T19:00:00.000Z'),
-              },
-            },
-          ],
-        }}
-      />,
+      <BrowserAlertsButton notifications={notifications.slice(0, 1)} />,
     );
-    expect(markup).toContain('25% used');
-    expect(markup).toContain('resets');
-    expect(markup).toContain('2026-08-05T19:00:00.000Z');
-    expect(markup).toContain('60% used');
-    expect(markup).toContain('2026-08-12T19:00:00.000Z');
+    expect(markup).toContain('Browser alerts');
   });
 });

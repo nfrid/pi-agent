@@ -563,10 +563,9 @@ export function AgentThreadNav({
       select(activeResultId);
     }
   };
-  const openUtility = (panel: 'sessions' | 'inbox', fallbackPath: string) => {
+  const openSettings = () => {
     onOpenChange?.(false);
-    if (utility) utility.openPanel(panel);
-    else go(fallbackPath);
+    utility?.openPanel('settings');
   };
   const openNewThread = () => {
     if (projects.length === 0) {
@@ -861,46 +860,18 @@ export function AgentThreadNav({
         </button>
       )}
       {mode === 'session' && (
-        <div className={styles.usageRow}>
+        <footer className={styles.footer}>
           <UsageCapsule usage={snapshot.usage} variant="sidebar" />
-        </div>
+          <button
+            type="button"
+            className={styles.settingsButton}
+            aria-label="Open settings"
+            onClick={openSettings}
+          >
+            <span aria-hidden="true">⚙</span>
+          </button>
+        </footer>
       )}
-      <footer
-        className={`${styles.footer} ${mode === 'session' ? styles.sessionFooter : ''}`}
-      >
-        <button
-          type="button"
-          className={styles.utility}
-          onClick={() => {
-            onOpenChange?.(false);
-            go('/projects');
-          }}
-        >
-          <span aria-hidden="true">⌂</span>
-          <span>Projects</span>
-        </button>
-        <button
-          type="button"
-          className={styles.utility}
-          onClick={() => openUtility('sessions', '/sessions')}
-        >
-          <span aria-hidden="true">▤</span>
-          <span>History</span>
-        </button>
-        <button
-          type="button"
-          className={styles.utility}
-          onClick={() => openUtility('inbox', '/inbox')}
-        >
-          <span aria-hidden="true">✉</span>
-          <span>Inbox</span>
-          {snapshot.unread.length > 0 && (
-            <b>
-              {snapshot.unread.length > 99 ? '99+' : snapshot.unread.length}
-            </b>
-          )}
-        </button>
-      </footer>
     </aside>
   );
   if (mode === 'home') return nav;

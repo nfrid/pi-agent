@@ -157,7 +157,7 @@
     display: none;
   }
   .sidebar .reset {
-    display: inline;
+    display: none;
   }
   .window {
     gap: 3px;

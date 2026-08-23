@@ -122,7 +122,7 @@ function parseWindow(
   };
 }
 
-/** Converts provider variants into the one shape shared by the toolbar and Inbox. */
+/** Converts provider variants into the shape shared by dashboard usage views. */
 export function parseUsage(usage: unknown): UsageLimit[] {
   const root = record(usage);
   const nested = record(root?.usage);

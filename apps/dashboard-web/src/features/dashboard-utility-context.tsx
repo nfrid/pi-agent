@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 
-export type DashboardUtilityPanel = 'sessions' | 'inbox';
+export type DashboardUtilityPanel = 'settings';
 
 export type DashboardUtilityContextValue = {
   panel: DashboardUtilityPanel | undefined;
