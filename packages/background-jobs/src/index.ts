@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { createConnection, type Socket } from 'node:net';
 import path from 'node:path';
@@ -30,6 +30,7 @@ export const BACKGROUND_JOBS_MAX_ARGV_BYTES = 256 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES = 64 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_BYTES = 4 * 1024 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES = 256 * 1024;
+export const BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export type BackgroundJobStatus = 'running' | 'done' | 'failed' | 'killed';
@@ -149,6 +150,34 @@ export interface BackgroundJobSnapshot {
   readonly completionDelivered?: boolean;
   readonly stdout: OutputSnapshot;
   readonly stderr: OutputSnapshot;
+}
+
+export function backgroundJobsLaunchFingerprint(
+  input: Pick<
+    StartBackgroundJobInput,
+    'command' | 'title' | 'cwd' | 'argv' | 'env' | 'timeoutMs' | 'events'
+  >,
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        command: input.command,
+        title: input.title,
+        cwd: input.cwd,
+        argv: input.argv ?? null,
+        env:
+          input.env === undefined
+            ? null
+            : Object.fromEntries(
+                Object.keys(input.env)
+                  .sort()
+                  .map((key) => [key, input.env?.[key]]),
+              ),
+        timeoutMs: input.timeoutMs ?? null,
+        events: input.events === true,
+      }),
+    )
+    .digest('hex');
 }
 
 export interface StartBackgroundJobInput {
@@ -439,7 +468,9 @@ function parseEvent(value: unknown): BackgroundJobEvent {
     (value.stream !== 'stdout' && value.stream !== 'stderr') ||
     typeof value.text !== 'string' ||
     Buffer.byteLength(value.text) > BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES ||
-    typeof value.truncated !== 'boolean'
+    typeof value.truncated !== 'boolean' ||
+    Buffer.byteLength(JSON.stringify(value)) >
+      BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES
   )
     throw new Error('Invalid background job event.');
   return {

@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { chmodSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -76,6 +76,85 @@ describe('background job event store', () => {
     }
   });
 
+  it('clips control-heavy records so the first page always advances', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-event-control-'),
+    );
+    const database = path.join(root, 'jobs.sqlite');
+    const store = new BackgroundJobStore(database);
+    try {
+      const row = store.create(input(firstId), 'control');
+      store.appendEvent(
+        firstId,
+        'stdout',
+        '\0'.repeat(BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES),
+      );
+      store.settle(firstId, 'done', { exitCode: 0 }, row.stdout, row.stderr);
+      const page = store.readEvents('owner', firstId, 0);
+      expect(page.events[0]?.truncated).toBe(true);
+      expect(page.nextOffset).toBeGreaterThan(0);
+      expect(page.complete).toBe(true);
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates legacy launch fingerprints without retaining launch plaintext', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-fingerprint-'),
+    );
+    const database = path.join(root, 'jobs.sqlite');
+    const launch = {
+      ...input(firstId),
+      command: 'delegate display',
+      argv: ['/usr/bin/node', 'secret prompt'],
+      env: { SECRET_ENV: 'secret value' },
+      timeoutMs: 100,
+      events: true,
+    } as const;
+    const first = new BackgroundJobStore(database);
+    try {
+      first.create(launch, 'ignored');
+      first.db.exec('ALTER TABLE background_jobs ADD COLUMN env_json TEXT');
+      first.db
+        .prepare(
+          'UPDATE background_jobs SET fingerprint = ?, env_json = ? WHERE id = ?',
+        )
+        .run(
+          JSON.stringify({
+            command: launch.command,
+            title: launch.title,
+            cwd: launch.cwd,
+            argv: launch.argv,
+            env: launch.env,
+            timeoutMs: launch.timeoutMs,
+            events: launch.events,
+          }),
+          JSON.stringify({ SECRET_ENV: 'secret value' }),
+          firstId,
+        );
+    } finally {
+      first.close();
+    }
+    const reopened = new BackgroundJobStore(database);
+    try {
+      const fingerprint = reopened.getById(firstId)?.fingerprint;
+      expect(fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+      expect(fingerprint).not.toContain('secret');
+      expect(
+        reopened.db
+          .prepare('PRAGMA table_info(background_jobs)')
+          .all()
+          .map((column) => column.name),
+      ).not.toContain('env_json');
+      expect(reopened.create(launch, 'different').id).toBe(firstId);
+    } finally {
+      reopened.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('bounds event files and reports retained-history truncation', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'background-event-bounds-'),
@@ -113,6 +192,61 @@ describe('background job event store', () => {
       ).not.toContain('env_json');
     } finally {
       store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('repairs orphan, oversized, and permission-drifted event files on startup', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-event-repair-'),
+    );
+    const database = path.join(root, 'jobs.sqlite');
+    const first = new BackgroundJobStore(database);
+    const row = first.create(input(firstId), 'repair');
+    first.appendEvent(firstId, 'stdout', 'known');
+    first.settle(firstId, 'done', { exitCode: 0 }, row.stdout, row.stderr);
+    first.close();
+    const knownPath = backgroundJobEventsPath(database, firstId);
+    const orphanPath = backgroundJobEventsPath(database, secondId);
+    writeFileSync(
+      knownPath,
+      Buffer.alloc(BACKGROUND_JOBS_MAX_EVENT_BYTES + 1, 0x78),
+    );
+    chmodSync(knownPath, 0o644);
+    writeFileSync(orphanPath, 'orphan\n', { mode: 0o644 });
+    const reopened = new BackgroundJobStore(database);
+    try {
+      expect((await stat(knownPath)).size).toBeLessThanOrEqual(
+        BACKGROUND_JOBS_MAX_EVENT_BYTES,
+      );
+      expect((await stat(knownPath)).mode & 0o777).toBe(0o600);
+      await expect(stat(orphanPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      reopened.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects corrupt non-contiguous event offsets', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-event-corrupt-'),
+    );
+    const database = path.join(root, 'jobs.sqlite');
+    const first = new BackgroundJobStore(database);
+    first.create(input(firstId), 'corrupt');
+    first.close();
+    writeFileSync(
+      backgroundJobEventsPath(database, firstId),
+      `${JSON.stringify({ offset: 0, stream: 'stdout', text: 'a', truncated: false })}\n${JSON.stringify({ offset: 0, stream: 'stderr', text: 'b', truncated: false })}\n`,
+      { mode: 0o600 },
+    );
+    const reopened = new BackgroundJobStore(database);
+    try {
+      expect(() => reopened.readEvents('owner', firstId, 0)).toThrow(
+        /corrupt/i,
+      );
+    } finally {
+      reopened.close();
       await rm(root, { recursive: true, force: true });
     }
   });

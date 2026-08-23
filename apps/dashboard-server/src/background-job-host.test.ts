@@ -282,6 +282,8 @@ describe('background process host', () => {
         events: true,
       });
       expect(started.command).toBe('delegate');
+      expect(started).not.toHaveProperty('argv');
+      expect(started).not.toHaveProperty('env');
       expect(
         (
           await client.start({
@@ -372,6 +374,27 @@ describe('background process host', () => {
       expect(Buffer.byteLength(event?.text ?? '')).toBeLessThanOrEqual(
         BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('normalizes CRLF split across output chunks', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-crlf-'));
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      await client.start({
+        id,
+        command: `node -e ${JSON.stringify("process.stdout.write('split\\r'); setTimeout(() => process.stdout.write('\\n'), 10)")}`,
+        title: 'crlf',
+        cwd: repositoryRoot,
+        events: true,
+      });
+      await client.wait(id, 2_000);
+      expect((await client.events(id, 0)).events).toMatchObject([
+        { stream: 'stdout', text: 'split', truncated: false },
+      ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -1,5 +1,4 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { chmod, unlink } from 'node:fs/promises';
 import {
   createConnection,
@@ -22,6 +21,7 @@ import {
   type BackgroundJobEventsSnapshot,
   type BackgroundJobSnapshot,
   type BackgroundJobStatus,
+  backgroundJobsLaunchFingerprint,
   ensureProcessHostDirectory,
   OutputTail,
   parseBackgroundJobsRequest,
@@ -87,25 +87,7 @@ function errorResponse(error: unknown): JobResponse {
       : {}),
   };
 }
-function fingerprint(input: StartBackgroundJobInput): string {
-  const launch: Record<string, unknown> = {
-    command: input.command,
-    title: input.title,
-    cwd: input.cwd,
-    argv: input.argv ?? null,
-    env: input.env ?? null,
-    timeoutMs: input.timeoutMs ?? null,
-    events: input.events === true,
-  };
-  return createHash('sha256').update(JSON.stringify(launch)).digest('hex');
-}
-function legacyFingerprint(input: StartBackgroundJobInput): string {
-  return JSON.stringify({
-    command: input.command,
-    title: input.title,
-    cwd: input.cwd,
-  });
-}
+const fingerprint = backgroundJobsLaunchFingerprint;
 function snapshot(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
   const { fingerprint: _fingerprint, ...result } = row;
   return result;
@@ -352,12 +334,7 @@ export class BackgroundJobHostService {
       if (existing) {
         if (
           existing.ownerSession !== input.ownerSession ||
-          (existing.fingerprint !== fingerprint(input) &&
-            (input.argv !== undefined ||
-              input.env !== undefined ||
-              input.timeoutMs !== undefined ||
-              input.events === true ||
-              existing.fingerprint !== legacyFingerprint(input)))
+          existing.fingerprint !== fingerprint(input)
         )
           throw Object.assign(
             new Error('Job ID is already owned by a different launch.'),
@@ -480,7 +457,8 @@ export class BackgroundJobHostService {
   }
 
   private finishLine(job: RunningJob, stream: 'stdout' | 'stderr'): void {
-    const text = stream === 'stdout' ? job.stdoutLine : job.stderrLine;
+    const rawText = stream === 'stdout' ? job.stdoutLine : job.stderrLine;
+    const text = rawText.endsWith('\r') ? rawText.slice(0, -1) : rawText;
     const truncated =
       stream === 'stdout' ? job.stdoutLineTruncated : job.stderrLineTruncated;
     const active =
