@@ -37,6 +37,7 @@ import {
   parseModelOptionValue,
 } from './model-option';
 import { latestRunForThread, threadTitle } from './project-new-thread';
+import { useSessionNavigation } from './session-navigation-context';
 
 export function draftModelSelection(
   runtimes: readonly RuntimeSnapshot[],
@@ -97,7 +98,10 @@ export function DraftThreadView({
   const go = useDashboardNavigate();
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
-  const [agentNavOpen, setAgentNavOpen] = useState(false);
+  const sessionNavigation = useSessionNavigation();
+  const [localAgentNavOpen, setLocalAgentNavOpen] = useState(false);
+  const agentNavOpen = sessionNavigation?.open ?? localAgentNavOpen;
+  const setAgentNavOpen = sessionNavigation?.setOpen ?? setLocalAgentNavOpen;
   const editorRef = useRef<MDXEditorMethods>(null);
   const createMutation = useMutation(
     createThreadMutationOptions(dashboardHttpClient),
@@ -160,13 +164,19 @@ export function DraftThreadView({
 
   if (!fallbackDraft || !project) {
     return (
-      <div className="session-layout">
-        <AgentThreadNav
-          snapshot={snapshot}
-          mode="session"
-          open={agentNavOpen}
-          onOpenChange={setAgentNavOpen}
-        />
+      <div
+        className={
+          sessionNavigation ? 'session-route-content' : 'session-layout'
+        }
+      >
+        {!sessionNavigation && (
+          <AgentThreadNav
+            snapshot={snapshot}
+            mode="session"
+            open={agentNavOpen}
+            onOpenChange={setAgentNavOpen}
+          />
+        )}
         <section className={`session-page${agentNavOpen ? ' modal-open' : ''}`}>
           <div className="draft-empty-transcript" aria-live="polite">
             <p className="eyebrow">Draft deleted</p>
@@ -229,14 +239,18 @@ export function DraftThreadView({
   };
 
   return (
-    <div className="session-layout">
-      <AgentThreadNav
-        snapshot={snapshot}
-        mode="session"
-        currentDraftId={fallbackDraft.id}
-        open={agentNavOpen}
-        onOpenChange={setAgentNavOpen}
-      />
+    <div
+      className={sessionNavigation ? 'session-route-content' : 'session-layout'}
+    >
+      {!sessionNavigation && (
+        <AgentThreadNav
+          snapshot={snapshot}
+          mode="session"
+          currentDraftId={fallbackDraft.id}
+          open={agentNavOpen}
+          onOpenChange={setAgentNavOpen}
+        />
+      )}
       <section className={`session-page${agentNavOpen ? ' modal-open' : ''}`}>
         <div className="session-context-slot">
           <header className="session-context session-heading">

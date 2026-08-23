@@ -765,6 +765,44 @@ export class DashboardApplication {
     this.notifications.setPush(push);
   }
 
+  private sessionAssociation(
+    session: Pick<SessionIndexEntry, 'id' | 'cwd'>,
+    runtime?: RuntimeSnapshot,
+    persistedAssociation?: {
+      projectId: string;
+      checkoutId: string;
+    } | null,
+  ): Pick<SessionIndexEntry, 'projectId' | 'checkoutId'> {
+    if (runtime)
+      return {
+        projectId: runtime.projectId ?? null,
+        checkoutId: runtime.checkoutId ?? null,
+      };
+    if (persistedAssociation)
+      return {
+        projectId: persistedAssociation.projectId,
+        checkoutId: persistedAssociation.checkoutId,
+      };
+    if (persistedAssociation === undefined) {
+      const persistedRun = this.orchestration.getRunByPiSessionId(session.id);
+      const persistedThread = persistedRun
+        ? this.orchestration.getThread(persistedRun.threadId)
+        : undefined;
+      if (persistedRun && persistedThread)
+        return {
+          projectId: persistedThread.projectId,
+          checkoutId:
+            persistedRun.checkoutId ?? persistedThread.checkoutId ?? null,
+        };
+    }
+    return (
+      this.projectResolver?.resolve(session.cwd) ?? {
+        projectId: null,
+        checkoutId: null,
+      }
+    );
+  }
+
   /** Authoritative session metadata, including live runtime overlays. */
   sessionMetadata(
     liveRuntimes = this.registry.snapshots(),
@@ -774,26 +812,31 @@ export class DashboardApplication {
         .filter((runtime) => runtime.online !== false)
         .map((runtime) => [runtime.session.id, runtime]),
     );
+    const persistedAssociations = this.orchestration.sessionRunAssociations();
     return this.sessions
       .list()
       .map((session) =>
-        this.sessionMetadataEntry(session, activeRuntimes.get(session.id)),
+        this.sessionMetadataEntry(
+          session,
+          activeRuntimes.get(session.id),
+          persistedAssociations.get(session.id) ?? null,
+        ),
       );
   }
 
   private sessionMetadataEntry(
     session: SessionIndexEntry,
     runtime?: RuntimeSnapshot,
+    persistedAssociation?: {
+      projectId: string;
+      checkoutId: string;
+    } | null,
   ): SessionIndexEntry {
-    const association = runtime
-      ? {
-          projectId: runtime.projectId ?? null,
-          checkoutId: runtime.checkoutId ?? null,
-        }
-      : (this.projectResolver?.resolve(session.cwd) ?? {
-          projectId: null,
-          checkoutId: null,
-        });
+    const association = this.sessionAssociation(
+      session,
+      runtime,
+      persistedAssociation,
+    );
     return {
       ...session,
       ...association,
@@ -1377,9 +1420,13 @@ export class DashboardApplication {
         resolvedCapture.runtimeEpoch ?? resolvedCapture.state?.runtimeEpoch;
       const runtimeSeq =
         resolvedCapture.runtimeSeq ?? resolvedCapture.state?.runtimeSeq;
-      const metadata = resolvedCapture.runtime
+      const baseMetadata = resolvedCapture.runtime
         ? runtimeMetadata(resolvedCapture.runtime, result.metadata)
         : result.metadata;
+      const metadata = {
+        ...baseMetadata,
+        ...this.sessionAssociation(baseMetadata, resolvedCapture.runtime),
+      };
       const completeThroughCursor =
         before === undefined &&
         result.entriesComplete &&

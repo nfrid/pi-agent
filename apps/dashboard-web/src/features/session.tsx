@@ -27,6 +27,7 @@ import {
   SessionLoadingCurtain,
   SessionLoadingHeader,
 } from './session/views';
+import { useSessionNavigation } from './session-navigation-context';
 
 export { visualViewportKeyboardInset } from './session/viewport';
 
@@ -55,7 +56,10 @@ export function SessionView({
     store,
     selectSessionReplacement(id),
   );
-  const [agentNavOpen, setAgentNavOpen] = useState(false);
+  const sessionNavigation = useSessionNavigation();
+  const [localAgentNavOpen, setLocalAgentNavOpen] = useState(false);
+  const agentNavOpen = sessionNavigation?.open ?? localAgentNavOpen;
+  const setAgentNavOpen = sessionNavigation?.setOpen ?? setLocalAgentNavOpen;
   const [outlineOpen, setOutlineOpen] = useState(false);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
@@ -136,9 +140,9 @@ export function SessionView({
   if (!data || !projection || waitingForInitialHistory) {
     return (
       <div
-        className={`session-layout${embedded ? ' embedded-session-layout' : ''}`}
+        className={`${sessionNavigation ? 'session-route-content' : 'session-layout'}${embedded ? ' embedded-session-layout' : ''}`}
       >
-        {!embedded && (
+        {!embedded && !sessionNavigation && (
           <AgentThreadNav
             snapshot={snapshot}
             mode="session"
@@ -175,9 +179,9 @@ export function SessionView({
     runtime?.checkoutId ?? data.metadata.checkoutId ?? undefined;
   return (
     <div
-      className={`session-layout${embedded ? ' embedded-session-layout' : ''}`}
+      className={`${sessionNavigation ? 'session-route-content' : 'session-layout'}${embedded ? ' embedded-session-layout' : ''}`}
     >
-      {!embedded && (
+      {!embedded && !sessionNavigation && (
         <AgentThreadNav
           snapshot={snapshot}
           mode="session"

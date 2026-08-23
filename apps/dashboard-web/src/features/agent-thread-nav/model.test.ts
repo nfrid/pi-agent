@@ -131,6 +131,15 @@ describe('agent thread view model', () => {
         runtimes: [{ session: { id: 'session-live' } }],
       } as never),
     ).not.toBe(first);
+    expect(
+      sessionThreadIdentityKey({
+        sessions: [{ id: 'session-a' }, { id: 'session-b' }],
+        runtimes: [
+          { runtimeId: 'runtime-new', session: { id: 'session-new' } },
+        ],
+        runs: [{ runtimeId: 'runtime-new', threadId: 'thread-new' }],
+      } as never),
+    ).toBe('indexed:session-a\nindexed:session-b');
   });
 
   it('uses the server-owned project association for indexed sessions', () => {

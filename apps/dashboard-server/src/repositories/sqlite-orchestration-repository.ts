@@ -666,6 +666,35 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return row === undefined ? undefined : runFromRow(row);
   }
 
+  sessionRunAssociations(): Map<
+    string,
+    { projectId: string; checkoutId: string }
+  > {
+    const result = new Map<string, { projectId: string; checkoutId: string }>();
+    const values = rows<Record<string, unknown>>(
+      this.db
+        .prepare(
+          `SELECT COALESCE(r.pi_session_id,o.pi_session_id) AS session_id,
+                  t.project_id,r.checkout_id
+           FROM orchestration_run r
+           JOIN thread t ON t.id=r.thread_id
+           LEFT JOIN orchestration_runtime o ON o.run_id=r.id
+           WHERE r.pi_session_id IS NOT NULL OR o.pi_session_id IS NOT NULL
+           ORDER BY r.created_at,r.id`,
+        )
+        .all(),
+    );
+    for (const row of values) {
+      const sessionId = optionalString(row, 'session_id');
+      if (!sessionId || result.has(sessionId)) continue;
+      result.set(sessionId, {
+        projectId: stringValue(row, 'project_id'),
+        checkoutId: stringValue(row, 'checkout_id'),
+      });
+    }
+    return result;
+  }
+
   getRunByPiSessionId(piSessionId: string): Run | undefined {
     const row = this.db
       .prepare(

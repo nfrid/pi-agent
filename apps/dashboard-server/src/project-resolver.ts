@@ -8,6 +8,8 @@ export interface RuntimeAssociation {
   checkoutId: string | null;
 }
 
+const MAX_RESOLVED_CWD_CACHE = 4096;
+
 function canonical(value: string): string {
   try {
     return realpathSync.native(value);
@@ -113,7 +115,7 @@ export class ProjectResolver {
   private rememberGitIdentity(cwd: string, identity: string | null): void {
     this.gitIdentityByCwd.delete(cwd);
     this.gitIdentityByCwd.set(cwd, identity);
-    if (this.gitIdentityByCwd.size <= 512) return;
+    if (this.gitIdentityByCwd.size <= MAX_RESOLVED_CWD_CACHE) return;
     const oldest = this.gitIdentityByCwd.keys().next().value;
     if (oldest !== undefined) this.gitIdentityByCwd.delete(oldest);
   }

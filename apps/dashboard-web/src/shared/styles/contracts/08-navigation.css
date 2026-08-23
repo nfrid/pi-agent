@@ -85,6 +85,12 @@
   gap: 24px;
   min-width: 0;
 }
+.session-route-view,
+.session-route-content {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
 .session-transcript-loading {
   min-height: min(46vh, 420px);
   display: grid;

@@ -16,6 +16,7 @@ interface Fixture {
   root: string;
   file: string;
   app: DashboardApplication;
+  metadata: MetadataStore;
   sessions: SessionIndex;
   register(
     runtime: RuntimeSnapshot,
@@ -92,6 +93,7 @@ async function fixture(
     root,
     file,
     app,
+    metadata,
     sessions,
     register(runtime, epoch = 'epoch-1', reconnected = false) {
       current = [runtime];
@@ -185,6 +187,63 @@ describe('authoritative application snapshot lifecycle', () => {
       projectId: null,
       checkoutId: null,
       activeRuntimeId: 'runtime-project-session',
+    });
+  });
+
+  it('prefers a persisted run association for a dormant managed session', async () => {
+    const value = await fixture(
+      'managed-session',
+      [{ type: 'session', id: 'managed-session', cwd: '/missing/worktree' }],
+      { projectId: null, checkoutId: null },
+    );
+    const project = value.metadata.orchestration.createProject({
+      id: 'managed-project',
+      title: 'Managed project',
+      rootPath: '/missing/project',
+    });
+    const checkout = value.metadata.orchestration.createCheckout({
+      id: 'managed-checkout',
+      projectId: project.id,
+      kind: 'worktree',
+      path: '/missing/recorded-worktree',
+    });
+    const thread = value.metadata.orchestration.createThread({
+      id: 'managed-thread',
+      projectId: project.id,
+      checkoutId: checkout.id,
+      title: 'Managed thread',
+    });
+    value.metadata.orchestration.createRun({
+      id: 'managed-run',
+      threadId: thread.id,
+      checkoutId: checkout.id,
+      piSessionId: 'managed-session',
+      initialPrompt: 'Keep the exact association.',
+    });
+
+    expect(
+      value.app.sessionMetadataDeltaForSession('managed-session'),
+    ).toMatchObject({
+      upsert: [
+        {
+          id: 'managed-session',
+          projectId: project.id,
+          checkoutId: checkout.id,
+        },
+      ],
+      remove: [],
+    });
+    expect(value.app.sessionMetadata()[0]).toMatchObject({
+      projectId: project.id,
+      checkoutId: checkout.id,
+    });
+    await expect(
+      value.app.sessionSnapshot('generation-1', 'managed-session'),
+    ).resolves.toMatchObject({
+      metadata: {
+        projectId: project.id,
+        checkoutId: checkout.id,
+      },
     });
   });
 
