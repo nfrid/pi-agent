@@ -1,3 +1,4 @@
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,18 @@ import {
 
 const hosts: BackgroundJobHostService[] = [];
 const id = '123e4567-e89b-12d3-a456-426614174010';
+
+async function waitUntil(
+  check: () => boolean,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() >= deadline)
+      throw new Error('Timed out waiting for process.');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
 
 async function createHost(root: string): Promise<BackgroundJobHostService> {
   const host = new BackgroundJobHostService(
@@ -27,6 +40,86 @@ afterEach(async () => {
 });
 
 describe('background process host', () => {
+  it('watchdog kills a descendant after abrupt process-host death', async () => {
+    execFileSync('pnpm', ['--filter', '@pi-agent/background-jobs', 'build'], {
+      cwd: process.cwd(),
+      stdio: 'ignore',
+    });
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-abrupt-'));
+    const socket = path.join(root, 'jobs.sock');
+    const processHost = spawn(
+      'pnpm',
+      ['--filter', '@pi-dashboard/server', 'process-host'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PI_PROCESS_HOST_SOCKET: socket,
+          PI_DASHBOARD_STATE_DIR: root,
+        },
+        stdio: 'ignore',
+      },
+    );
+    try {
+      const client = new BackgroundJobsClient(socket, 'abrupt');
+      // Wait for the subprocess-owned socket explicitly.
+      for (;;) {
+        try {
+          await client.list();
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+      const started = await client.start({
+        id,
+        command: `node -e ${JSON.stringify("const {spawn}=require('node:child_process'); const c=spawn(process.execPath,['-e','process.on(\\\"SIGTERM\\\",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(c.pid);")}`,
+        title: 'abrupt',
+        cwd: process.cwd(),
+      });
+      let descendant = 0;
+      await waitUntil(() => {
+        try {
+          const output = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], {
+            encoding: 'utf8',
+          });
+          const matches = output
+            .split('\n')
+            .filter((line) => line.includes('process-host-main'));
+          if (matches.length)
+            descendant = Number(matches.at(-1)?.trim().split(/\s+/u)[0]);
+          return Boolean(descendant);
+        } catch {
+          return false;
+        }
+      });
+      let pid = 0;
+      for (;;) {
+        const job = await client.inspect(started.id);
+        pid = Number(job?.stdout.text.trim());
+        if (pid > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(pid).toBeGreaterThan(0);
+      process.kill(descendant, 'SIGKILL');
+      await waitUntil(() => {
+        try {
+          process.kill(pid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      });
+    } finally {
+      try {
+        processHost.kill('SIGKILL');
+      } catch {
+        /* exited */
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('does not mutate the database on duplicate socket startup', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'background-duplicate-'));
     try {

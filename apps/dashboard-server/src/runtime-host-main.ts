@@ -21,5 +21,13 @@ process.once('unhandledRejection', (error) => {
   process.stderr.write(`${String(error)}\n`);
   stop();
 });
-await host.listen();
+try {
+  await host.listen();
+} catch (error) {
+  process.stderr.write(
+    `${error instanceof Error ? error.stack || error.message : String(error)}\n`,
+  );
+  await host.close();
+  process.exit(1);
+}
 process.stdout.write(`Runtime host listening on ${socketPath}\n`);

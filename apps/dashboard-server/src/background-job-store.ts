@@ -106,7 +106,11 @@ export class BackgroundJobStore {
   }
 
   private protectFiles(): void {
-    chmodSync(path.dirname(this.databasePath), 0o700);
+    try {
+      chmodSync(path.dirname(this.databasePath), 0o700);
+    } catch {
+      return;
+    }
     for (const file of [
       this.databasePath,
       `${this.databasePath}-wal`,

@@ -60,13 +60,20 @@ function run(name, args, independent = false) {
   children.add(child);
   child.once('exit', (code, signal) => {
     children.delete(child);
-    if (stopping || independent) return;
-    if (mode === 'all' || mode === 'serve') stop(code ?? (signal ? 1 : 0));
-    else process.exitCode = code ?? (signal ? 1 : 0);
+    if (stopping) return;
+    const exitCode = code ?? (signal ? 1 : 0);
+    if (independent && (mode === 'runtime-host' || mode === 'process-host')) {
+      process.exitCode = exitCode;
+      return;
+    }
+    if (mode === 'all' || mode === 'daemon' || mode === 'serve') stop(exitCode);
+    else process.exitCode = exitCode;
   });
   child.once('error', (error) => {
     process.stderr.write(`[dashboard:${name}] ${error.message}\n`);
-    if (!independent) stop(1);
+    if (independent && (mode === 'runtime-host' || mode === 'process-host'))
+      process.exitCode = 1;
+    else stop(1);
   });
 }
 

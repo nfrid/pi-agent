@@ -8,6 +8,11 @@ import {
 } from 'node:net';
 import path from 'node:path';
 import {
+  BACKGROUND_JOBS_LIST_COMMAND_BYTES,
+  BACKGROUND_JOBS_LIST_CWD_BYTES,
+  BACKGROUND_JOBS_LIST_ERROR_BYTES,
+  BACKGROUND_JOBS_LIST_OWNER_BYTES,
+  BACKGROUND_JOBS_LIST_TITLE_BYTES,
   BACKGROUND_JOBS_MAX_LINE_BYTES,
   BACKGROUND_JOBS_MAX_OUTPUT_BYTES,
   BACKGROUND_JOBS_MAX_RESPONSE_BYTES,
@@ -78,14 +83,28 @@ function snapshot(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
   const { fingerprint: _fingerprint, ...result } = row;
   return result;
 }
+function boundedText(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return `${bytes.subarray(0, end).toString('utf8')}…`;
+}
 function listSummary(row: BackgroundJobStoreRow): BackgroundJobSnapshot {
   const result = snapshot(row);
   return {
     ...result,
-    command:
-      result.command.length <= 1_000
-        ? result.command
-        : `${result.command.slice(0, 1_000)}…`,
+    ownerSession: boundedText(
+      result.ownerSession,
+      BACKGROUND_JOBS_LIST_OWNER_BYTES,
+    ),
+    title: boundedText(result.title, BACKGROUND_JOBS_LIST_TITLE_BYTES),
+    command: boundedText(result.command, BACKGROUND_JOBS_LIST_COMMAND_BYTES),
+    cwd: boundedText(result.cwd, BACKGROUND_JOBS_LIST_CWD_BYTES),
+    ...(result.error
+      ? { error: boundedText(result.error, BACKGROUND_JOBS_LIST_ERROR_BYTES) }
+      : {}),
+    signal: result.signal ? boundedText(result.signal, 128) : undefined,
     stdout: { ...result.stdout, text: '' },
     stderr: { ...result.stderr, text: '' },
   };
@@ -307,7 +326,7 @@ export class BackgroundJobHostService {
       let child: ChildProcess;
       try {
         const watchdog =
-          'host="$PPID"; leader="$$"; (while kill -0 "$host" 2>/dev/null && kill -0 "$leader" 2>/dev/null; do sleep 0.2; done; if ! kill -0 "$host" 2>/dev/null; then kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null; fi) & exec "$0" "$@"';
+          'host="$PPID"; leader="$$"; (while kill -0 "$host" 2>/dev/null; do sleep 0.2; done; kill -KILL -"$leader" 2>/dev/null || kill -KILL "$leader" 2>/dev/null) </dev/null >/dev/null 2>&1 & exec "$0" "$@"';
         child = spawn(
           '/bin/sh',
           ['-c', watchdog, '/bin/bash', '-c', input.command],

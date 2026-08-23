@@ -112,6 +112,7 @@ export class BackgroundManager {
   }
 
   async start(options: StartOptions): Promise<BackgroundSnapshot> {
+    this.assertLive();
     const generation = this.generation;
     await this.refresh(true, generation);
     this.assertAccepting();
@@ -121,7 +122,8 @@ export class BackgroundManager {
       title: displayCommand(options.title),
       cwd: options.cwd,
     });
-    if (this.disposed || generation !== this.generation) return snapshot;
+    if (this.disposed || generation !== this.generation)
+      throw new Error('Background manager is shut down.');
     this.accept(snapshot, true);
     return this.records.get(snapshot.id) ?? snapshot;
   }
@@ -132,15 +134,18 @@ export class BackgroundManager {
   }
 
   async inspect(id: string): Promise<BackgroundSnapshot | undefined> {
+    this.assertLive();
     const generation = this.generation;
     await this.refresh(false, generation);
     const snapshot = await this.client.inspect(id);
-    if (snapshot && !this.disposed && generation === this.generation)
-      this.accept(snapshot, false);
+    if (this.disposed || generation !== this.generation)
+      throw new Error('Background manager is shut down.');
+    if (snapshot) this.accept(snapshot, false);
     return snapshot ? displaySnapshot(snapshot) : undefined;
   }
 
   async list(): Promise<BackgroundSnapshot[]> {
+    this.assertLive();
     const generation = this.generation;
     await this.refresh(true, generation);
     return generation === this.generation ? [...this.records.values()] : [];
@@ -151,6 +156,7 @@ export class BackgroundManager {
     waitMs = 0,
     signal?: AbortSignal,
   ): Promise<BackgroundSnapshot> {
+    this.assertLive();
     const generation = this.generation;
     await this.refresh(false, generation);
     this.observing.add(id);
@@ -160,7 +166,7 @@ export class BackgroundManager {
         signal,
       );
       if (this.disposed || generation !== this.generation)
-        return displaySnapshot(snapshot);
+        throw new Error('Background manager is shut down.');
       this.accept(snapshot, false);
       if (snapshot.status !== 'running') {
         this.notified.add(id);
@@ -176,6 +182,7 @@ export class BackgroundManager {
     ids: readonly string[],
     signal?: AbortSignal,
   ): Promise<BackgroundSnapshot[]> {
+    this.assertLive();
     const generation = this.generation;
     await this.refresh(false, generation);
     const unique = [...new Set(ids)];
@@ -183,7 +190,7 @@ export class BackgroundManager {
     try {
       const snapshots = await withAbort(this.client.stop(unique), signal);
       if (this.disposed || generation !== this.generation)
-        return snapshots.map(displaySnapshot);
+        throw new Error('Background manager is shut down.');
       for (const snapshot of snapshots) {
         this.accept(snapshot, false);
         if (snapshot.status !== 'running') {
@@ -216,8 +223,12 @@ export class BackgroundManager {
     return count;
   }
 
+  private assertLive(): void {
+    if (this.disposed) throw new Error('Background manager is shut down.');
+  }
+
   private assertAccepting(): void {
-    if (this.disposed) throw new Error('Background manager is shutting down.');
+    this.assertLive();
     if (this.runningCount >= MAX_RUNNING)
       throw new Error(
         `At most ${MAX_RUNNING} background processes may run at once.`,
@@ -228,8 +239,11 @@ export class BackgroundManager {
     notify: boolean,
     generation = this.generation,
   ): Promise<void> {
+    if (this.disposed || generation !== this.generation)
+      throw new Error('Background manager is shut down.');
     const snapshots = await this.client.list();
-    if (this.disposed || generation !== this.generation) return;
+    if (this.disposed || generation !== this.generation)
+      throw new Error('Background manager is shut down.');
     for (const snapshot of snapshots) this.accept(snapshot, notify);
 
     const known = new Set(snapshots.map((snapshot) => snapshot.id));
@@ -255,15 +269,38 @@ export class BackgroundManager {
   }
 
   async acknowledgeEntered(messages: readonly unknown[]): Promise<void> {
+    if (this.disposed) return;
+    const generation = this.generation;
     const ids = new Set<string>();
     for (const message of messages) {
       if (!message || typeof message !== 'object') continue;
-      const details = (message as { details?: unknown }).details;
-      if (!details || typeof details !== 'object') continue;
-      const id = (details as { id?: unknown }).id;
-      if (typeof id === 'string') ids.add(id);
+      const value = message as {
+        customType?: unknown;
+        details?: unknown;
+      };
+      if (value.customType !== 'background-terminal-result') continue;
+      if (!value.details || typeof value.details !== 'object') continue;
+      const details = value.details as {
+        id?: unknown;
+        dedupeKey?: unknown;
+        status?: unknown;
+      };
+      if (
+        typeof details.id !== 'string' ||
+        details.dedupeKey !== details.id ||
+        (details.status !== 'done' &&
+          details.status !== 'failed' &&
+          details.status !== 'killed') ||
+        this.records.get(details.id)?.status === 'running' ||
+        !this.records.has(details.id)
+      )
+        continue;
+      ids.add(details.id);
     }
-    await Promise.all([...ids].map((id) => this.client.markDelivered?.(id)));
+    for (const id of ids) {
+      if (this.disposed || generation !== this.generation) return;
+      await this.client.markDelivered?.(id);
+    }
   }
 
   private syncPending(): void {
