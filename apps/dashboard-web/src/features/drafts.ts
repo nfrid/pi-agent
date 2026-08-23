@@ -3,6 +3,10 @@ import { useSyncExternalStore } from 'react';
 import { readComposerDraft, writeComposerDraft } from './composer/draft';
 
 export type DraftIsolation = 'worktree' | 'main';
+export type DraftLocation =
+  | { kind: 'current' }
+  | { kind: 'worktree'; base: 'work' | 'head' | 'branch'; baseRef?: string }
+  | { kind: 'checkout'; checkoutId: string };
 
 export type DraftMetadata = {
   id: string;
@@ -10,6 +14,8 @@ export type DraftMetadata = {
   createdAt: number;
   updatedAt: number;
   isolation: DraftIsolation;
+  /** Persisted picker state; absent legacy drafts use isolation as a fallback. */
+  location?: DraftLocation;
   title?: string;
   promotedThreadId?: string;
   promotionAttempt?: number;
@@ -37,6 +43,26 @@ function validModel(value: unknown): value is ModelSelection {
   );
 }
 
+function validLocation(value: unknown): value is DraftLocation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const location = value as Record<string, unknown>;
+  if (location.kind === 'current') return true;
+  if (location.kind === 'checkout')
+    return (
+      typeof location.checkoutId === 'string' && location.checkoutId.length > 0
+    );
+  return (
+    location.kind === 'worktree' &&
+    (location.base === 'work' ||
+      location.base === 'head' ||
+      location.base === 'branch') &&
+    (location.baseRef === undefined ||
+      (typeof location.baseRef === 'string' &&
+        location.baseRef.length > 0 &&
+        location.baseRef.length <= 512))
+  );
+}
+
 function validDraft(value: unknown): value is DraftMetadata {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const draft = value as Record<string, unknown>;
@@ -50,6 +76,7 @@ function validDraft(value: unknown): value is DraftMetadata {
     typeof draft.updatedAt === 'number' &&
     Number.isFinite(draft.updatedAt) &&
     (draft.isolation === 'worktree' || draft.isolation === 'main') &&
+    (draft.location === undefined || validLocation(draft.location)) &&
     (draft.title === undefined ||
       (typeof draft.title === 'string' && draft.title.length <= 96)) &&
     (draft.promotedThreadId === undefined ||
@@ -140,6 +167,10 @@ export function createDraft(
     createdAt: now,
     updatedAt: now,
     isolation,
+    location:
+      isolation === 'main'
+        ? { kind: 'current' }
+        : { kind: 'worktree', base: 'work' },
   } satisfies DraftMetadata;
   persistDrafts([...freshDrafts(), draft]);
   return draft;
@@ -185,6 +216,28 @@ export function updateDraft(draftId: string, title?: string): void {
             ...(title === undefined ? {} : { title }),
           }
         : candidate,
+    ),
+  );
+}
+
+export function setDraftLocation(
+  draftId: string,
+  location: DraftLocation,
+): void {
+  const drafts = freshDrafts();
+  persistDrafts(
+    drafts.map((draft) =>
+      draft.id === draftId
+        ? {
+            ...draft,
+            location,
+            isolation:
+              location.kind === 'current' || location.kind === 'checkout'
+                ? 'main'
+                : 'worktree',
+            updatedAt: Date.now(),
+          }
+        : draft,
     ),
   );
 }

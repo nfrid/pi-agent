@@ -4,6 +4,7 @@ import type {
   BrowserSnapshot,
   DelegateHistoryResponse,
   DelegateHistoryRunDetailResponse,
+  GitContext,
   ProjectAdoptCommand,
   ProjectCreateCommand,
   ProjectRenameCommand,
@@ -55,6 +56,7 @@ export const dashboardQueryKeys = {
   sessionThreadLinks: () => ['dashboard', 'session-threads'] as const,
   runs: () => ['dashboard', 'runs'] as const,
   project: (id: string) => ['dashboard', 'project', id] as const,
+  gitContext: (id: string) => ['dashboard', 'git-context', id] as const,
   checkout: (id: string) => ['dashboard', 'checkout', id] as const,
   thread: (id: string) => ['dashboard', 'thread', id] as const,
   run: (id: string) => ['dashboard', 'run', id] as const,
@@ -445,6 +447,19 @@ export function renameProjectMutationOptions(client: DashboardHttpClient) {
         withMutationCommandId<ProjectRenameCommand>('project-rename', command),
       ),
     retry: false,
+  });
+}
+
+export function gitContextQueryOptions(
+  client: DashboardHttpClient,
+  projectId: string,
+) {
+  return queryOptions<GitContext>({
+    queryKey: dashboardQueryKeys.gitContext(projectId),
+    queryFn: ({ signal }) => client.gitContext(projectId, signal),
+    staleTime: 15_000,
+    retry: networkRetry,
+    enabled: Boolean(projectId),
   });
 }
 

@@ -38,6 +38,8 @@ import {
   DelegateTranscriptEntrySchema,
   type FeedCursor,
   FeedCursorSchema,
+  type GitContext,
+  GitContextSchema,
   type LiveDiagnosticsRequest,
   LiveDiagnosticsRequestSchema,
   type LiveDiagnosticsResponse,
@@ -114,6 +116,12 @@ import {
 export function parseProtocolInfo(value: unknown): ProtocolInfo {
   return parseSchema(ProtocolInfoSchema, value, 'protocol info');
 }
+
+export function parseGitContext(value: unknown): GitContext {
+  return parseSchema(GitContextSchema, value, 'git context');
+}
+export const tryParseGitContext = (value: unknown): GitContext | undefined =>
+  tryParseSchema(GitContextSchema, value);
 
 export function parseLiveDiagnosticsRequest(
   value: unknown,

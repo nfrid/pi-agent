@@ -10,6 +10,7 @@ import {
   getOrCreateDraft,
   markDraftPromoted,
   readDrafts,
+  setDraftLocation,
   setDraftModel,
   updateDraft,
 } from './drafts';
@@ -91,6 +92,27 @@ describe('browser-local draft metadata', () => {
       attempt: 1,
       commandId: draftRetryCommandId(draft.id, 1),
     });
+  });
+
+  it('persists the selected checkout location', () => {
+    installStorage();
+    const draft = createDraft('location-project', 'main', 123);
+    setDraftLocation(draft.id, {
+      kind: 'worktree',
+      base: 'branch',
+      baseRef: 'develop',
+    });
+    expect(readDrafts()).toContainEqual(
+      expect.objectContaining({
+        id: draft.id,
+        isolation: 'worktree',
+        location: {
+          kind: 'worktree',
+          base: 'branch',
+          baseRef: 'develop',
+        },
+      }),
+    );
   });
 
   it('persists the selected model and effort', () => {

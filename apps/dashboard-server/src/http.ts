@@ -43,6 +43,7 @@ import type {
   DashboardDependencies,
   DashboardServerOptions,
 } from './composition.js';
+import { readGitContext } from './git-context.js';
 import { BridgeListener } from './http/bridge-listener.js';
 import {
   MAX_SESSION_FEEDS,
@@ -496,6 +497,12 @@ export class DashboardServerImpl implements DashboardServer {
           projectId,
           command as Parameters<typeof service.createThread>[1],
         );
+      },
+      gitContext: async (projectId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        const project = service.requireProject(projectId);
+        return readGitContext(project.rootPath);
       },
       adoptSession: (projectId, sessionId, command) => {
         const service = this.application.orchestrationService;

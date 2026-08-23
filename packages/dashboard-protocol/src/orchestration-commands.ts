@@ -76,6 +76,17 @@ export const ThreadCreateCommandSchema = Type.Object(
     isolation: Type.Optional(
       Type.Union([Type.Literal('worktree'), Type.Literal('main')]),
     ),
+    /** Worktree source: WIP (default), a durable current HEAD, or a validated local ref. */
+    base: Type.Optional(
+      Type.Union([Type.Literal('work'), Type.Literal('head')]),
+    ),
+    baseRef: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 512,
+        pattern: '^[^\\u0000-\\u001F\\u007F]+$',
+      }),
+    ),
     mode: Type.Optional(
       Type.Union([Type.Literal('read'), Type.Literal('write')]),
     ),

@@ -584,6 +584,66 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('resolves a selected local branch once and persists its commit base', async () => {
+    const fixture = await isolatedServiceFixture({ defaultBaseBranch: 'main' });
+    try {
+      await git(fixture.root, 'branch', 'develop');
+      await git(fixture.root, 'switch', 'develop');
+      await writeFile(path.join(fixture.root, 'tracked.txt'), 'develop\n');
+      await git(fixture.root, 'add', '.');
+      await git(fixture.root, 'commit', '-m', 'develop change');
+      const developSha = (
+        await gitOutput(fixture.root, 'rev-parse', 'HEAD')
+      ).trim();
+      await git(fixture.root, 'switch', 'main');
+      await fixture.service.start();
+      await fixture.service.createThread(fixture.projectId, {
+        commandId: 'selected-branch-thread',
+        title: 'From develop',
+        prompt: 'Use develop.',
+        isolation: 'worktree',
+        baseRef: 'develop',
+      });
+      await waitFor(() => fixture.launches.length === 1);
+      const launchPath = fixture.launches[0]?.checkoutCwd;
+      if (typeof launchPath !== 'string')
+        throw new Error('Missing launch cwd.');
+      expect(await readFile(path.join(launchPath, 'tracked.txt'), 'utf8')).toBe(
+        'develop\n',
+      );
+      const checkout = fixture.metadata.orchestration
+        .listCheckouts(fixture.projectId)
+        .find((item) => item.kind === 'worktree');
+      expect(checkout?.baseSha).toBe(developSha);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('lets an explicit current-work base carry WIP over a configured project branch', async () => {
+    const fixture = await isolatedServiceFixture({ defaultBaseBranch: 'main' });
+    try {
+      await writeFile(path.join(fixture.root, 'tracked.txt'), 'wip\n');
+      await fixture.service.start();
+      await fixture.service.createThread(fixture.projectId, {
+        commandId: 'current-work-thread',
+        title: 'Current work',
+        prompt: 'Carry WIP.',
+        isolation: 'worktree',
+        base: 'work',
+      });
+      await waitFor(() => fixture.launches.length === 1);
+      const launchPath = fixture.launches[0]?.checkoutCwd;
+      if (typeof launchPath !== 'string')
+        throw new Error('Missing launch cwd.');
+      expect(await readFile(path.join(launchPath, 'tracked.txt'), 'utf8')).toBe(
+        'wip\n',
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('rejects new work and execution on a retired checkout without launching', async () => {
     const fixture = await orchestrationFixture();
     try {

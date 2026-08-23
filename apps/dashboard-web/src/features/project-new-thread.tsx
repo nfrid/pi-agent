@@ -81,10 +81,9 @@ export function ProjectNewThreadView({
 
   useEffect(() => {
     if (!pendingThreadId && project && resolvedProjectId) {
-      const draft = getOrCreateDraft(
-        project.id,
-        project.defaultIsolation ?? 'worktree',
-      );
+      // New threads begin in the persisted main checkout. Isolation is an
+      // explicit draft choice, not a project-wide default.
+      const draft = getOrCreateDraft(project.id, 'main');
       go(draftPath(draft.id), { replace: true });
     }
   }, [go, pendingThreadId, project, resolvedProjectId]);

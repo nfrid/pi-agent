@@ -10,6 +10,7 @@ import {
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
+  type GitContext,
   type PinThreadCommand,
   type Project,
   type ProjectAdoptCommand,
@@ -39,6 +40,7 @@ import {
   tryParseBrowserSnapshot,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
+  tryParseGitContext,
   tryParseProject,
   tryParseProtocolInfo,
   tryParseRuntimeCommandOutput,
@@ -671,6 +673,20 @@ export class DashboardHttpClient {
       method: 'POST',
       body: JSON.stringify(command),
     });
+  }
+
+  async gitContext(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<GitContext> {
+    const value = await this.request<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}/git-context`,
+      signal ? { signal } : {},
+    );
+    const context = tryParseGitContext(value);
+    if (!context)
+      throw malformedOutput('Dashboard returned invalid Git context.', value);
+    return context;
   }
 
   async createThread(
