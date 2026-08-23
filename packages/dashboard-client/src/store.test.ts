@@ -2270,6 +2270,61 @@ describe('DashboardLiveStore', () => {
     );
   });
 
+  it('loads more than the former 32-page history cap without rebasing', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.beginSessionSync('session-1', 1);
+    const initial = {
+      ...sessionResponse(1),
+      entries: [
+        {
+          type: 'message',
+          id: 'newest-message',
+          message: { role: 'assistant', content: 'newest' },
+        },
+      ],
+      history: {
+        version: 1 as const,
+        start: 40,
+        end: 41,
+        hasOlder: true,
+        nextBefore: 'before-40',
+      },
+    };
+    expect(store.acceptSessionSnapshot(initial, 1, 1, true)).toBe(true);
+    const pages = Array.from({ length: 40 }, (_, offset) => {
+      const index = 39 - offset;
+      return {
+        ...initial,
+        entries: [
+          {
+            type: 'message',
+            id: `old-message-${index}`,
+            message: {
+              role: 'assistant',
+              content: 'x'.repeat(150_000),
+            },
+          },
+        ],
+        history: {
+          version: 1 as const,
+          start: index,
+          end: index + 1,
+          hasOlder: index > 0,
+          ...(index > 0 ? { nextBefore: `before-${index}` } : {}),
+        },
+      };
+    });
+
+    expect(store.prependSessionHistoryPages(pages, 'session-1')).toBeDefined();
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1']?.pageCount,
+    ).toBe(41);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toHaveLength(41);
+  });
+
   it('exports and restores a settled transcript cache at the current generation', () => {
     const source = new DashboardLiveStore();
     source.installSnapshot(snapshot('daemon-1', 1));

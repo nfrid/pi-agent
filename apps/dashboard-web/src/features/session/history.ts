@@ -65,6 +65,8 @@ type HistoryRequest = {
   requestId: number;
   controller: AbortController;
   intentRevision: number;
+  completion: Promise<void>;
+  resolveCompletion: () => void;
   anchor?: ScrollAnchor;
   targetOrdinal?: number;
 };
@@ -112,6 +114,15 @@ function jsonByteLength(value: unknown): number {
   } catch {
     return Number.POSITIVE_INFINITY;
   }
+}
+
+function isTransientHistoryCursorError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return (
+    code === 'stale-history-cursor' ||
+    /^(?:stale|invalid) history cursor\.?$/iu.test(error.message)
+  );
 }
 
 export function useOlderSessionHistory({
@@ -337,7 +348,18 @@ export function useOlderSessionHistory({
 
   const loadEarlierHistory = useCallback(
     async (targetOrdinal?: number) => {
-      if (historyRequestRef.current || historySessionRef.current !== id) return;
+      const activeRequest = historyRequestRef.current;
+      if (activeRequest) {
+        if (activeRequest.id !== id) return;
+        if (targetOrdinal !== undefined)
+          activeRequest.targetOrdinal =
+            activeRequest.targetOrdinal === undefined
+              ? targetOrdinal
+              : Math.min(activeRequest.targetOrdinal, targetOrdinal);
+        await activeRequest.completion;
+        return;
+      }
+      if (historySessionRef.current !== id) return;
       const initialHistory = historyRef.current ?? currentHistory;
       if (
         targetOrdinal !== undefined &&
@@ -349,12 +371,18 @@ export function useOlderSessionHistory({
       const capturedAnchor = scrollElementRef?.current
         ? captureScrollOffset(scrollElementRef.current)
         : undefined;
+      let resolveCompletion!: () => void;
+      const completion = new Promise<void>((resolve) => {
+        resolveCompletion = resolve;
+      });
       const request: HistoryRequest = {
         id,
         generation: historyGenerationRef.current,
         requestId: historyRequestSequenceRef.current + 1,
         controller: new AbortController(),
         intentRevision: scrollIntentRevisionRef.current,
+        completion,
+        resolveCompletion,
         ...(capturedAnchor ? { anchor: capturedAnchor } : {}),
         ...(targetOrdinal === undefined ? {} : { targetOrdinal }),
       };
@@ -504,6 +532,13 @@ export function useOlderSessionHistory({
         if (!isCurrent()) return;
         if (loadError instanceof Error && loadError.name === 'AbortError')
           return;
+        if (isTransientHistoryCursorError(loadError)) {
+          // A cursor is tied to the indexed file/version. Rebase before the
+          // autoload effect can issue the same invalid request again.
+          preserveErrorOnCoverageRef.current = true;
+          store.resetSessionHistoryToNewest(id);
+          store.reconnectSession(id);
+        }
         setHistoryError(
           loadError instanceof Error
             ? loadError.message
@@ -514,6 +549,7 @@ export function useOlderSessionHistory({
           historyRequestRef.current = undefined;
           setHistoryLoading(false);
         }
+        request.resolveCompletion();
       }
     },
     [currentHistory, id, scrollElementRef, store],

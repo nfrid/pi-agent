@@ -126,7 +126,7 @@ export function buildTranscriptLandmarks(
   return result;
 }
 
-export function sampleTranscriptLandmarks(
+function evenlySampleLandmarks(
   landmarks: readonly TranscriptLandmark[],
   maximum: number,
 ): TranscriptLandmark[] {
@@ -145,4 +145,34 @@ export function sampleTranscriptLandmarks(
       sampled.push(landmark);
   }
   return sampled;
+}
+
+/** Sample the drawer with a deterministic preference for user landmarks. */
+export function sampleTranscriptLandmarks(
+  landmarks: readonly TranscriptLandmark[],
+  maximum: number,
+): TranscriptLandmark[] {
+  if (maximum <= 0 || landmarks.length === 0) return [];
+  if (landmarks.length <= maximum) return [...landmarks];
+  const users = landmarks.filter((landmark) => landmark.kind === 'user');
+  const selected =
+    users.length >= maximum
+      ? evenlySampleLandmarks(users, maximum)
+      : [
+          ...users,
+          ...evenlySampleLandmarks(
+            landmarks.filter((landmark) => landmark.kind !== 'user'),
+            maximum - users.length,
+          ),
+        ];
+  const selectedKeys = new Set(selected.map((landmark) => landmark.key));
+  return landmarks.filter((landmark) => selectedKeys.has(landmark.key));
+}
+
+/** The minimap has its own smaller, role-neutral density cap. */
+export function sampleTranscriptMinimapLandmarks(
+  landmarks: readonly TranscriptLandmark[],
+  maximum: number,
+): TranscriptLandmark[] {
+  return evenlySampleLandmarks(landmarks, maximum);
 }

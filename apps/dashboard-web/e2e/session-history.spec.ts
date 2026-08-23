@@ -26,8 +26,9 @@ const metadata = snapshot.sessions[0];
 
 async function verifyEarlierHistoryAnchor(
   page: Page,
-  options: { jumpFromOutline?: boolean } = {},
+  options: { jumpFromOutline?: boolean; entryCount?: number } = {},
 ) {
+  const entryCount = options.entryCount ?? 90;
   await page.addInitScript(() =>
     localStorage.setItem('pi-dashboard-token', 'test-token'),
   );
@@ -51,7 +52,7 @@ async function verifyEarlierHistoryAnchor(
           snapshot: {
             metadata,
             entries: [
-              ...Array.from({ length: 90 }, (_, index) => ({
+              ...Array.from({ length: entryCount }, (_, index) => ({
                 type: 'message',
                 id: `history-${index}`,
                 message: { role: 'user', content: `history ${index}` },
@@ -123,7 +124,7 @@ async function verifyEarlierHistoryAnchor(
                   },
                 ]
               : [
-                  ...Array.from({ length: 90 }, (_, index) => ({
+                  ...Array.from({ length: entryCount }, (_, index) => ({
                     type: 'message',
                     id: `history-${index}`,
                     message: {
@@ -316,4 +317,13 @@ test('loads and jumps to an unloaded outline landmark @desktop', async ({
   page,
 }) => {
   await verifyEarlierHistoryAnchor(page, { jumpFromOutline: true });
+});
+
+test('loads an unloaded outline landmark in the regular transcript', async ({
+  page,
+}) => {
+  await verifyEarlierHistoryAnchor(page, {
+    jumpFromOutline: true,
+    entryCount: 70,
+  });
 });
