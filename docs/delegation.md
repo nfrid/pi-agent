@@ -78,6 +78,16 @@ For normal workflow calls, the parent remains available while children run. `del
 
 `Blocked:` is extracted into the handoff envelope rather than left in the body, so it sits next to the continuation token and survives truncation — a question that reaches the parent without its answer route is no use. Everything a default and a stated assumption can cover stays a default and a stated assumption.
 
+## Durable delegate sessions and dashboard links
+
+Fresh delegates persist an immutable `parentSessionId`, `sessionKind`, display
+name, and lineage in both durable metadata and the Pi session header. These
+fields survive continuation, routing, and worktree rewrites; older sessions
+remain readable. The dashboard exposes linked delegate transcripts as
+read-only sessions, with links from a delegate to its parent and from a parent
+to its delegate children. Delegate auxiliary files remain path-redacted and do
+not become ordinary durable thread links.
+
 ## What the parent sees
 
 Every run contributes an envelope — process status, outcome, conclusion, continuation, blocker, artifact, worktree metadata, evidence, risks, and truncation — before any report body is allocated. The original child report is then appended as the body and straightforwardly byte-truncated if necessary. Small duplication between the envelope and body is intentional: it keeps the handoff simple and preserves the original report when it fits.

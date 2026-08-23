@@ -55,6 +55,30 @@ function SessionProjectLink({
   );
 }
 
+function SessionLink({ session }: { session: SessionIndexEntry }) {
+  const go = useDashboardNavigate();
+  const href = `/sessions/${encodeURIComponent(session.id)}`;
+  return (
+    <a
+      href={href}
+      onClick={(event) => {
+        if (
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
+        event.preventDefault();
+        go(href);
+      }}
+    >
+      {sessionDisplayTitle(session)}
+    </a>
+  );
+}
+
 function SessionHeaderFrame({
   projectLabel,
   projectId,
@@ -143,48 +167,81 @@ export function SessionHeader({
   outlineTriggerRef,
   onOpenOutline,
   store,
+  sessions,
 }: {
   id: string;
   projectName: string;
   projectId?: string;
-  data: Parameters<typeof sessionDisplayTitle>[0];
+  data: Parameters<typeof sessionDisplayTitle>[0] &
+    Pick<SessionIndexEntry, 'sessionKind' | 'parentSessionId'>;
   entries: readonly unknown[];
   status: string;
   statusLabel: string;
   outlineTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenOutline: () => void;
   store: DashboardLiveStore;
+  sessions: readonly SessionIndexEntry[];
 }) {
   const title = sessionDisplayTitle(data, entries);
+  const children = sessions.filter((session) => session.parentSessionId === id);
+  const parent = data.parentSessionId
+    ? sessions.find((session) => session.id === data.parentSessionId)
+    : undefined;
   return (
-    <SessionHeaderFrame
-      projectLabel={projectName}
-      projectId={projectId}
-      title={
-        <InlineSessionRename
-          id={id}
-          title={title}
-          store={store}
-          onRenamed={(name) => store.updateSessionMetadata(id, { name })}
-        />
-      }
-      status={status}
-      statusLabel={statusLabel}
-      actions={
-        <button
-          type="button"
-          ref={outlineTriggerRef}
-          className="session-icon-button outline-trigger"
-          aria-label="Open transcript outline"
-          aria-haspopup="dialog"
-          onClick={onOpenOutline}
-        >
-          <span className="session-icon-glyph" aria-hidden="true">
-            ≡
-          </span>
-        </button>
-      }
-    />
+    <>
+      <SessionHeaderFrame
+        projectLabel={projectName}
+        projectId={projectId}
+        title={
+          data.sessionKind === 'delegate' ? (
+            <h1>{title}</h1>
+          ) : (
+            <InlineSessionRename
+              id={id}
+              title={title}
+              store={store}
+              onRenamed={(name) => store.updateSessionMetadata(id, { name })}
+            />
+          )
+        }
+        status={status}
+        statusLabel={statusLabel}
+        actions={
+          <button
+            type="button"
+            ref={outlineTriggerRef}
+            className="session-icon-button outline-trigger"
+            aria-label="Open transcript outline"
+            aria-haspopup="dialog"
+            onClick={onOpenOutline}
+          >
+            <span className="session-icon-glyph" aria-hidden="true">
+              ≡
+            </span>
+          </button>
+        }
+      />
+      {(parent || children.length > 0) && (
+        <div className="session-delegate-links">
+          {parent && (
+            <span>
+              Parent: <SessionLink session={parent} />
+            </span>
+          )}
+          {children.length > 0 && (
+            <span>
+              Delegates:{' '}
+              {children.map((child, index) => (
+                <span key={child.id}>
+                  {index > 0 ? ', ' : ''}
+                  <SessionLink session={child} />
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

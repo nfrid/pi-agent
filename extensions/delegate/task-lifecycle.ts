@@ -301,6 +301,7 @@ export async function prepareDelegateTask(
         cwd: state.cwd,
         name: plan.name,
         snapshotJsonl: plan.snapshotJsonl,
+        parentSessionId,
         worktreeId: state.worktree?.record.id,
         allowWrites: state.allowWrites,
         isolation: state.isolation,

@@ -1181,6 +1181,86 @@ describe('DelegateWorkflowCoordinator', () => {
     await coordinator.dispose();
   });
 
+  test('uses a restored predecessor session as the continuation token', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'branch-reloaded',
+    });
+    coordinator.restoreMetadata({
+      version: 1,
+      attempts: [
+        {
+          ownerBranchId: 'branch-reloaded',
+          logicalId: 'lineage',
+          attempt: 1,
+          identity: 'lineage@1',
+          state: 'success',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 1,
+          scheduledAt: 1,
+          settledAt: 2,
+          sessionId: 'restored-child-session',
+        },
+      ],
+    });
+    let token: string | undefined;
+    const continuation = coordinator.schedule({
+      logicalId: 'lineage',
+      continuation: true,
+      prepare: async (context) => {
+        token = context.continuationToken;
+        return {
+          mode: 'single' as const,
+          tasks: ['continued'],
+          execute: async () => result('continued'),
+        };
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(continuation.identity).state).toBe('success'),
+    );
+    expect(token).toBe('restored-child-session');
+    await coordinator.dispose();
+  });
+
+  test('blocks a restored continuation with no token or session identity', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'branch-blocked',
+    });
+    coordinator.restoreMetadata({
+      version: 1,
+      attempts: [
+        {
+          ownerBranchId: 'branch-blocked',
+          logicalId: 'lineage',
+          attempt: 1,
+          identity: 'lineage@1',
+          state: 'success',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 1,
+          scheduledAt: 1,
+          settledAt: 2,
+        },
+      ],
+    });
+    const prepare = vi.fn(async () => ({
+      mode: 'single' as const,
+      tasks: ['should-not-launch'],
+      execute: async () => result('should-not-launch'),
+    }));
+    const continuation = coordinator.schedule({
+      logicalId: 'lineage',
+      continuation: true,
+      prepare,
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(continuation.identity).state).toBe('error'),
+    );
+    expect(prepare).not.toHaveBeenCalled();
+    await coordinator.dispose();
+  });
+
   test('retains continuation tokens through setup failure for the latest attempt', async () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const firstResult = result('first');

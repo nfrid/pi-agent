@@ -83,6 +83,8 @@ export interface SessionMetadataDelta {
 const SESSION_METADATA_FIELDS = [
   'file',
   'cwd',
+  'sessionKind',
+  'parentSessionId',
   'projectId',
   'checkoutId',
   'name',
@@ -920,7 +922,9 @@ export class DashboardApplication {
     const prior = this.sessionMetadataBaseline;
     if (!prior) return undefined;
     this.refreshAssociationCatalogue();
-    const indexed = this.sessionIndex.get(sessionId);
+    const indexed = this.sessionIndex
+      .list()
+      .find((session) => session.id === sessionId);
     const runtime = this.registry
       .snapshots()
       .find((item) => item.session.id === sessionId && item.online !== false);

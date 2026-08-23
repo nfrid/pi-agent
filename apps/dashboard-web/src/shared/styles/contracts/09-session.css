@@ -164,6 +164,35 @@
   font-size: 8px;
   font-style: normal;
 }
+.session-delegate-links {
+  position: fixed;
+  z-index: 43;
+  top: 49px;
+  right: max(
+    calc(max(0px, (100% - 1240px) / 2) + clamp(16px, 4vw, 56px)),
+    calc(50% - 546px)
+  );
+  left: max(
+    calc(max(0px, (100% - 1240px) / 2) + clamp(16px, 4vw, 56px) + 272px),
+    calc(50% - 274px)
+  );
+  display: flex;
+  gap: 12px;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.session-delegate-links a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.session-delegate-links a:hover,
+.session-delegate-links a:focus-visible {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .session-heading-actions {
   display: flex;
   align-items: center;

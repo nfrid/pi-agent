@@ -209,6 +209,7 @@ export function SessionView({
           outlineTriggerRef={outlineTriggerRef}
           onOpenOutline={() => setOutlineOpen(true)}
           store={store}
+          sessions={snapshot.sessions}
         />
         <section
           ref={transcriptScrollRef}
@@ -239,24 +240,26 @@ export function SessionView({
             virtualize={!embedded}
           />
         </section>
-        <SessionControlLayer
-          controlLayerRef={controlLayerRef}
-          awayFromLatest={awayFromLatest}
-          onJumpToLatest={handleJumpToLatest}
-          Composer={Composer}
-          runtime={runtime}
-          sessionChange={sessionChange}
-          store={store}
-          runtimes={snapshot.runtimes}
-          session={data.metadata}
-          sessionId={id}
-          projectId={projectId}
-          checkoutId={checkoutId}
-          onPromptSubmitted={(text) => {
-            cancelScrollRestore();
-            store.optimisticallyTitleSession(id, text);
-          }}
-        />
+        {data.metadata.sessionKind !== 'delegate' && (
+          <SessionControlLayer
+            controlLayerRef={controlLayerRef}
+            awayFromLatest={awayFromLatest}
+            onJumpToLatest={handleJumpToLatest}
+            Composer={Composer}
+            runtime={runtime}
+            sessionChange={sessionChange}
+            store={store}
+            runtimes={snapshot.runtimes}
+            session={data.metadata}
+            sessionId={id}
+            projectId={projectId}
+            checkoutId={checkoutId}
+            onPromptSubmitted={(text) => {
+              cancelScrollRestore();
+              store.optimisticallyTitleSession(id, text);
+            }}
+          />
+        )}
       </section>
       {!embedded && tailReadySessionId !== id && (
         <SessionLoadingCurtain

@@ -57,6 +57,70 @@ describe('session index', () => {
     expect(JSON.stringify(session.entries)).not.toContain('base64-bytes');
   });
 
+  it('projects linked delegate auxiliary sessions without exposing their paths', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-linked-'));
+    const auxiliary = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-linked-aux-'),
+    );
+    await writeFile(
+      path.join(root, 'parent.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'parent', cwd: '/tmp/project' })}\n`,
+    );
+    const childFile = path.join(auxiliary, 'child.jsonl');
+    await writeFile(
+      childFile,
+      `${JSON.stringify({
+        type: 'session',
+        id: 'child',
+        cwd: '/tmp/project',
+        sessionKind: 'delegate',
+        name: 'Nested review',
+        lineageId: 'lineage',
+        parentSessionId: 'parent',
+      })}\n`,
+    );
+    const index = new SessionIndex(root, undefined, undefined, auxiliary);
+    await index.rebuild();
+    expect(index.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'parent',
+          file: path.join(root, 'parent.jsonl'),
+        }),
+        expect.objectContaining({
+          id: 'child',
+          file: '',
+          sessionKind: 'delegate',
+          parentSessionId: 'parent',
+          name: 'Nested review',
+        }),
+      ]),
+    );
+    expect(index.get('child')).toMatchObject({ id: 'child', file: '' });
+    expect(index.isAuxiliary('child')).toBe(true);
+  });
+
+  it('does not expose unlinked auxiliary sessions', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-unlinked-'),
+    );
+    const auxiliary = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-unlinked-aux-'),
+    );
+    await writeFile(
+      path.join(auxiliary, 'child.jsonl'),
+      `${JSON.stringify({
+        type: 'session',
+        id: 'unlinked',
+        cwd: '/tmp/project',
+        sessionKind: 'delegate',
+      })}\n`,
+    );
+    const index = new SessionIndex(root, undefined, undefined, auxiliary);
+    await index.rebuild();
+    expect(index.list()).toEqual([]);
+  });
+
   it('filters active history to a valid leaf ancestry and rejects ambiguous leaves', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-branch-'));
     const file = path.join(root, 'branched.jsonl');

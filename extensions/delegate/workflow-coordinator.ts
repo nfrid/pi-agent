@@ -478,8 +478,15 @@ function emptyResult(reason: string): DelegateWorkflowResultRecord {
 }
 
 function canonicalContinuationToken(
-  result: DelegateWorkflowResultRecord,
+  result: DelegateWorkflowResultRecord | undefined,
+  predecessorSessionId?: string,
 ): string | undefined {
+  if (!result) {
+    if (predecessorSessionId) return predecessorSessionId;
+    throw new WorkflowInputBlockedError(
+      'Logical continuation is unavailable: the predecessor session identity was not retained.',
+    );
+  }
   if (result.continuationUnavailable)
     throw new WorkflowInputBlockedError(
       'Logical continuation is unavailable: the predecessor token exceeded the workflow input cap.',
@@ -488,11 +495,11 @@ function canonicalContinuationToken(
     throw new WorkflowInputBlockedError(
       'Logical continuation is ambiguous across predecessor runs.',
     );
-  if (!result.continuationToken)
-    throw new WorkflowInputBlockedError(
-      'Logical continuation is unavailable: the predecessor retained no continuation token.',
-    );
-  return result.continuationToken;
+  if (result.continuationToken) return result.continuationToken;
+  if (predecessorSessionId) return predecessorSessionId;
+  throw new WorkflowInputBlockedError(
+    'Logical continuation is unavailable: the predecessor retained no continuation token or session identity.',
+  );
 }
 
 function normalizePreparedLaunch(
@@ -1320,8 +1327,11 @@ export class DelegateWorkflowCoordinator {
       const predecessorResult = predecessor
         ? this.results.get(predecessor)
         : undefined;
-      const continuationToken = predecessorResult
-        ? canonicalContinuationToken(predecessorResult)
+      const continuationToken = predecessor
+        ? canonicalContinuationToken(
+            predecessorResult,
+            this.records.get(predecessor)?.sessionId,
+          )
         : undefined;
       record.continuationToken = continuationToken;
       this.rememberChildSession(record, continuationToken);

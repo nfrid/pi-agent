@@ -575,15 +575,13 @@ export class SessionIndex {
 
   list(): SessionIndexEntry[] {
     return [...this.files.values()]
-      .filter((file) => !this.isAuxiliaryFile(file.file))
-      .map(
-        ({
-          header: _header,
-          lastEntryId: _lastEntryId,
-          historyIndex: _historyIndex,
-          ...entry
-        }) => entry,
+      .filter(
+        (file) =>
+          !this.isAuxiliaryFile(file.file) ||
+          (file.sessionKind === 'delegate' &&
+            file.parentSessionId !== undefined),
       )
+      .map((file) => this.publicEntry(file))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -2472,10 +2470,39 @@ export class SessionIndex {
             return;
           this.fileIds.delete(previous.file);
         }
+        const auxiliaryDelegate =
+          this.isAuxiliaryFile(resolved) && header.sessionKind === 'delegate';
+        const headerParentSessionId =
+          auxiliaryDelegate &&
+          typeof header.parentSessionId === 'string' &&
+          header.parentSessionId.trim().length > 0 &&
+          header.parentSessionId.length <= 256 &&
+          ![...header.parentSessionId].some((character) => {
+            const code = character.charCodeAt(0);
+            return code < 32 || code === 127;
+          })
+            ? header.parentSessionId.trim()
+            : undefined;
+        const headerDelegateName =
+          auxiliaryDelegate &&
+          typeof header.name === 'string' &&
+          header.name.trim().length > 0 &&
+          header.name.length <= 512 &&
+          ![...header.name].some((character) => {
+            const code = character.charCodeAt(0);
+            return code < 32 || code === 127;
+          })
+            ? header.name.trim()
+            : undefined;
         const entry: IndexedFile = {
           id,
           file: resolved,
           cwd: header.cwd,
+          ...(auxiliaryDelegate ? { sessionKind: 'delegate' as const } : {}),
+          ...(headerParentSessionId
+            ? { parentSessionId: headerParentSessionId }
+            : {}),
+          ...(headerDelegateName ? { name: headerDelegateName } : {}),
           ...(sawSessionInfo && name ? { name } : {}),
           title: deriveSessionTitle(
             firstUserEntry === undefined ? [] : [firstUserEntry],

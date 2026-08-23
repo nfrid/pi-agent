@@ -627,6 +627,7 @@ describe('delegate', () => {
     const session = createDelegateSession({
       cwd: '/tmp/project',
       name: 'Original agent',
+      parentSessionId: 'parent-session',
       routing: {
         route: 'quick-high',
         provider: 'openai-codex',
@@ -657,11 +658,20 @@ describe('delegate', () => {
       const metadata = JSON.parse(
         readFileSync(session.filePath.replace(/\.jsonl$/, '.json'), 'utf8'),
       ) as Record<string, unknown>;
-      expect(metadata.lineageId).toBe(session.lineageId);
+      expect(metadata).toMatchObject({
+        sessionKind: 'delegate',
+        name: 'Original agent',
+        lineageId: session.lineageId,
+        parentSessionId: 'parent-session',
+      });
       expect(header).toMatchObject({
         type: 'session',
         id: session.token,
         cwd: '/tmp/project',
+        sessionKind: 'delegate',
+        name: 'Original agent',
+        lineageId: session.lineageId,
+        parentSessionId: 'parent-session',
       });
       expect(resolveDelegateSession('../../not-a-token')).toBeNull();
     } finally {

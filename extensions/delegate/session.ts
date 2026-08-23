@@ -25,6 +25,8 @@ export interface DelegateSession {
   sessionId: string;
   /** Stable child-session lineage shared by all continuations. */
   lineageId: string;
+  /** Immutable original parent session for nested delegates. */
+  parentSessionId?: string;
   filePath: string;
   cwd: string;
   /** The original fresh-run display name; absent only on legacy metadata. */
@@ -43,6 +45,10 @@ interface DelegateSessionMetadata {
   token: string;
   /** Absent only in metadata written before lineage identities existed. */
   lineageId?: string;
+  /** Immutable original parent session for nested delegates. */
+  parentSessionId?: string;
+  /** Durable marker used by the dashboard auxiliary-session projection. */
+  sessionKind?: 'delegate';
   cwd: string;
   createdAt: string;
   /** Persisted for new sessions so continuations can omit their name. */
@@ -80,19 +86,35 @@ function initialSessionJsonl(
   token: string,
   cwd: string,
   createdAt: string,
-  snapshotJsonl?: string,
+  options: {
+    snapshotJsonl?: string;
+    name?: string;
+    lineageId: string;
+    parentSessionId?: string;
+  },
 ): string {
-  if (!snapshotJsonl?.trim()) {
+  const delegateHeader = {
+    sessionKind: 'delegate' as const,
+    ...(options.name ? { name: options.name } : {}),
+    lineageId: options.lineageId,
+    ...(options.parentSessionId
+      ? { parentSessionId: options.parentSessionId }
+      : {}),
+  };
+  if (!options.snapshotJsonl?.trim()) {
     return `${JSON.stringify({
       type: 'session',
       version: SESSION_VERSION,
       id: token,
       timestamp: createdAt,
       cwd,
+      ...delegateHeader,
     })}\n`;
   }
 
-  const lines = snapshotJsonl.split(/\r?\n/).filter((line) => line.trim());
+  const lines = options.snapshotJsonl
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
   const parsed = lines.map((line) => JSON.parse(line) as unknown);
   const headerIndex = parsed.findIndex(
     (entry) =>
@@ -108,6 +130,7 @@ function initialSessionJsonl(
     id: token,
     timestamp: createdAt,
     cwd,
+    ...delegateHeader,
   };
   return `${parsed.map((entry) => JSON.stringify(entry)).join('\n')}\n`;
 }
@@ -123,6 +146,8 @@ export function createDelegateSession(options: {
   isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
+  /** Original parent Pi session; immutable across continuations and rewrites. */
+  parentSessionId?: string;
 }): DelegateSession {
   const token = randomUUID();
   const lineageId = createOpaqueId();
@@ -134,12 +159,21 @@ export function createDelegateSession(options: {
   try {
     writeFileSync(
       filePath,
-      initialSessionJsonl(token, options.cwd, createdAt, options.snapshotJsonl),
+      initialSessionJsonl(token, options.cwd, createdAt, {
+        snapshotJsonl: options.snapshotJsonl,
+        name,
+        lineageId,
+        parentSessionId: options.parentSessionId,
+      }),
       { encoding: 'utf8', mode: 0o600, flag: 'wx' },
     );
     const metadata: DelegateSessionMetadata = {
       token,
+      sessionKind: 'delegate',
       lineageId,
+      ...(options.parentSessionId
+        ? { parentSessionId: options.parentSessionId }
+        : {}),
       cwd: options.cwd,
       createdAt,
       ...(name ? { name } : {}),
@@ -164,6 +198,9 @@ export function createDelegateSession(options: {
     token,
     sessionId: token,
     lineageId,
+    ...(options.parentSessionId
+      ? { parentSessionId: options.parentSessionId }
+      : {}),
     filePath,
     cwd: options.cwd,
     ...(name ? { name } : {}),
@@ -198,6 +235,10 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
         typeof metadata.lineageId === 'string' && metadata.lineageId.trim()
           ? metadata.lineageId.trim()
           : deriveCompatibilityLineageId(token),
+      ...(typeof metadata.parentSessionId === 'string' &&
+      metadata.parentSessionId.trim()
+        ? { parentSessionId: metadata.parentSessionId.trim() }
+        : {}),
       filePath,
       cwd: metadata.cwd,
       ...(typeof metadata.name === 'string' && metadata.name.trim()

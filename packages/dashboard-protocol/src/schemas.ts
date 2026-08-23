@@ -1290,6 +1290,10 @@ export const SessionIndexEntrySchema = Type.Object(
     id: IdentifierSchema,
     file: Type.String({ maxLength: MAX_PATH }),
     cwd: Type.String({ maxLength: MAX_PATH }),
+    /** Auxiliary delegate identity; omitted for ordinary sessions and legacy files. */
+    sessionKind: Type.Optional(Type.Literal('delegate')),
+    /** Immutable original parent session for nested delegates. */
+    parentSessionId: Type.Optional(IdentifierSchema),
     /** Server-resolved durable project association; null means unassigned. */
     projectId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
     checkoutId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
