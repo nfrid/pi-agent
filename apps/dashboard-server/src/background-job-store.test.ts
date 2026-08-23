@@ -151,8 +151,17 @@ describe('background job event store', () => {
       expect(reopened.create(launch, 'different').id).toBe(firstId);
     } finally {
       reopened.close();
-      await rm(root, { recursive: true, force: true });
     }
+    const rawFiles = await Promise.all(
+      [database, `${database}-wal`, `${database}-shm`].map((file) =>
+        readFile(file).catch(() => Buffer.alloc(0)),
+      ),
+    );
+    for (const bytes of rawFiles) {
+      expect(bytes.includes(Buffer.from('secret prompt'))).toBe(false);
+      expect(bytes.includes(Buffer.from('secret value'))).toBe(false);
+    }
+    await rm(root, { recursive: true, force: true });
   });
 
   it('bounds event files and reports retained-history truncation', async () => {

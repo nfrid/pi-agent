@@ -293,22 +293,22 @@ export class BackgroundJobStore {
         /* Existing databases already have this column. */
       }
     }
+    const hadEnvColumn = this.hasEnvColumn();
     try {
       this.db.exec('ALTER TABLE background_jobs DROP COLUMN env_json');
     } catch {
       /* New databases and already-migrated databases have no such column. */
     }
-    if (
-      this.db
-        .prepare('PRAGMA table_info(background_jobs)')
-        .all()
-        .some((column) => column.name === 'env_json')
-    ) {
+    if (this.hasEnvColumn()) {
       this.db.close();
       throw new Error('Background job store still contains env_json.');
     }
-    this.migrateFingerprints();
+    const migratedFingerprints = this.migrateFingerprints();
     this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    if (hadEnvColumn || migratedFingerprints) {
+      this.db.exec('VACUUM');
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    }
     mkdirSync(backgroundJobEventsDirectory(databasePath), {
       recursive: true,
       mode: 0o700,
@@ -319,7 +319,15 @@ export class BackgroundJobStore {
     this.protectFiles();
   }
 
-  private migrateFingerprints(): void {
+  private hasEnvColumn(): boolean {
+    return this.db
+      .prepare('PRAGMA table_info(background_jobs)')
+      .all()
+      .some((column) => column.name === 'env_json');
+  }
+
+  private migrateFingerprints(): boolean {
+    let migrated = false;
     const rows = this.db
       .prepare('SELECT id, fingerprint FROM background_jobs')
       .all();
@@ -388,7 +396,9 @@ export class BackgroundJobStore {
       this.db
         .prepare('UPDATE background_jobs SET fingerprint = ? WHERE id = ?')
         .run(hash, row.id);
+      migrated = true;
     }
+    return migrated;
   }
 
   private repairEventFiles(): void {
