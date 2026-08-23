@@ -774,29 +774,37 @@ export class DashboardApplication {
         .filter((runtime) => runtime.online !== false)
         .map((runtime) => [runtime.session.id, runtime]),
     );
-    return this.sessions.list().map((session) => {
-      const runtime = activeRuntimes.get(session.id);
-      const association = runtime
-        ? {
-            projectId: runtime.projectId ?? null,
-            checkoutId: runtime.checkoutId ?? null,
-          }
-        : (this.projectResolver?.resolve(session.cwd) ?? {
-            projectId: null,
-            checkoutId: null,
-          });
-      return {
-        ...session,
-        ...association,
-        ...(runtime?.session.name !== undefined
-          ? { name: runtime.session.name }
-          : {}),
-        ...(runtime?.session.title !== undefined
-          ? { title: runtime.session.title }
-          : {}),
-        activeRuntimeId: runtime?.runtimeId,
-      };
-    });
+    return this.sessions
+      .list()
+      .map((session) =>
+        this.sessionMetadataEntry(session, activeRuntimes.get(session.id)),
+      );
+  }
+
+  private sessionMetadataEntry(
+    session: SessionIndexEntry,
+    runtime?: RuntimeSnapshot,
+  ): SessionIndexEntry {
+    const association = runtime
+      ? {
+          projectId: runtime.projectId ?? null,
+          checkoutId: runtime.checkoutId ?? null,
+        }
+      : (this.projectResolver?.resolve(session.cwd) ?? {
+          projectId: null,
+          checkoutId: null,
+        });
+    return {
+      ...session,
+      ...association,
+      ...(runtime?.session.name !== undefined
+        ? { name: runtime.session.name }
+        : {}),
+      ...(runtime?.session.title !== undefined
+        ? { title: runtime.session.title }
+        : {}),
+      activeRuntimeId: runtime?.runtimeId,
+    };
   }
 
   private setSessionMetadataBaseline(
@@ -835,6 +843,32 @@ export class DashboardApplication {
     const remove = [...prior.keys()].filter((id) => !currentById.has(id));
     if (upsert.length === 0 && remove.length === 0) return undefined;
     return { upsert, remove };
+  }
+
+  /** Compare only the session affected by one registry change. */
+  sessionMetadataDeltaForSession(
+    sessionId: string,
+  ): SessionMetadataDelta | undefined {
+    const prior = this.sessionMetadataBaseline;
+    if (!prior) return undefined;
+    const indexed = this.sessionIndex.get(sessionId);
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === sessionId && item.online !== false);
+    const current = indexed
+      ? this.sessionMetadataEntry(indexed, runtime)
+      : undefined;
+    const next = new Map(prior);
+    if (current) next.set(sessionId, current);
+    else next.delete(sessionId);
+    this.sessionMetadataBaseline = next;
+    const previous = prior.get(sessionId);
+    if (!current)
+      return previous === undefined
+        ? undefined
+        : { upsert: [], remove: [sessionId] };
+    if (previous && sameSessionMetadata(previous, current)) return undefined;
+    return { upsert: [current], remove: [] };
   }
 
   /**

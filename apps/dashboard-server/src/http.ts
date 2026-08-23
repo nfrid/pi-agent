@@ -1227,7 +1227,9 @@ export class DashboardServerImpl implements DashboardServer {
       }
     }
 
-    this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
+    this.publishSessionIndexDelta(
+      this.application.sessionMetadataDeltaForSession(sessionId),
+    );
     if (runtimeGone) {
       const runtimeKey = `runtime:${change.snapshot.runtimeId}`;
       this.shellRuntimeSignatures.delete(runtimeKey);
@@ -1243,10 +1245,16 @@ export class DashboardServerImpl implements DashboardServer {
         sessionId,
         change.kind === 'event' && !transcriptOnlyShellEvent(change.event),
       );
-    // Registry callbacks may also update notifications or orchestration. The
-    // concrete signatures suppress host.changed() amplification when they do
-    // not alter shell-visible state.
-    this.publishApplicationDomains();
+    // Orchestration publishes through its own change relay. Only rebuild the
+    // remaining catalogues when this callback can create a notification.
+    if (
+      change.kind === 'offline' ||
+      (change.kind === 'event' &&
+        (change.event.type === 'runtime.goodbye' ||
+          (change.event.type === 'agent.settled' &&
+            process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1')))
+    )
+      this.publishApplicationDomains();
   }
 
   public publishChange(message?: unknown): void {
@@ -1313,14 +1321,14 @@ export class DashboardServerImpl implements DashboardServer {
       delta.remove.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
       Buffer.byteLength(JSON.stringify(delta), 'utf8') >=
         MAX_SESSION_INDEX_DELTA_BYTES;
-    const sessions = this.application.sessionMetadata();
-    if (sessions.length > MAX_SHELL_INDEX_ITEMS)
+    const sessions = tooLarge ? this.application.sessionMetadata() : undefined;
+    if (sessions && sessions.length > MAX_SHELL_INDEX_ITEMS)
       throw new Error(
         'The authoritative session index exceeds shell capacity.',
       );
     const data: ShellFeedData = (
       tooLarge
-        ? { kind: 'replace', sessions }
+        ? { kind: 'replace', sessions: sessions ?? [] }
         : {
             kind: 'delta',
             upsert: delta.upsert,
