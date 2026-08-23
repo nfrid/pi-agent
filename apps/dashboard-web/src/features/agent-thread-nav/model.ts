@@ -50,17 +50,28 @@ export type AgentThreadSections = {
 
 export const MAX_VISIBLE_ACTIVE_THREADS = 40;
 
-/** Stable exact identity set used to refresh persisted session links. */
+/** Stable unmatched identity set used to refresh persisted session links. */
 export function sessionThreadIdentityKey(
-  snapshot: Pick<BrowserSnapshot, 'sessions' | 'runtimes'>,
+  snapshot: Pick<BrowserSnapshot, 'sessions' | 'runtimes' | 'runs'>,
 ): string {
   const indexed = new Set(snapshot.sessions.map((session) => session.id));
+  const managed = new Set(
+    (snapshot.runs ?? []).flatMap((run) => {
+      if (run.piSessionId) return [run.piSessionId];
+      if (!run.runtimeId) return [];
+      const runtime = snapshot.runtimes.find(
+        (candidate) => candidate.runtimeId === run.runtimeId,
+      );
+      return runtime ? [runtime.session.id] : [];
+    }),
+  );
   return [
     ...new Set([
       ...snapshot.sessions.map((session) => session.id),
       ...snapshot.runtimes.map((runtime) => runtime.session.id),
     ]),
   ]
+    .filter((sessionId) => !managed.has(sessionId))
     .sort()
     .map(
       (sessionId) =>

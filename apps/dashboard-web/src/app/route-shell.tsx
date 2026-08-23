@@ -1,14 +1,29 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
+import { useState } from 'react';
+import { AgentThreadNav } from '../features/agent-thread-nav';
 import {
   DashboardUtilityProvider,
   useDashboardUtility,
 } from '../features/dashboard-utility-context';
+import { SessionNavigationContext } from '../features/session-navigation-context';
 import { SurfaceDrawer } from '../features/surface-drawer';
 import { Header, InboxView, SessionsView } from '../routes/dashboard';
 import { useDashboardContext } from './dashboard-context';
 
+function routeIdentity(pathname: string, prefix: string): string | undefined {
+  if (!pathname.startsWith(prefix)) return undefined;
+  const value = pathname.slice(prefix.length).split('/')[0];
+  if (!value) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export function RouteShell() {
   const dashboard = useDashboardContext();
+  const [agentNavOpen, setAgentNavOpen] = useState(false);
   const routeState = useRouterState({
     select: (state) => ({
       isSession: state.matches.some(
@@ -23,6 +38,29 @@ export function RouteShell() {
     }),
   });
   if (!dashboard.snapshot) return null;
+  const currentSessionId = routeIdentity(routeState.pathname, '/sessions/');
+  const currentDraftId = routeIdentity(routeState.pathname, '/drafts/');
+  const routeContent = routeState.isSession ? (
+    <div className="session-layout">
+      <AgentThreadNav
+        snapshot={dashboard.snapshot}
+        mode="session"
+        currentSessionId={currentSessionId}
+        currentDraftId={currentDraftId}
+        open={agentNavOpen}
+        onOpenChange={setAgentNavOpen}
+      />
+      <SessionNavigationContext.Provider
+        value={{ open: agentNavOpen, setOpen: setAgentNavOpen }}
+      >
+        <div className="session-route-view">
+          <Outlet />
+        </div>
+      </SessionNavigationContext.Provider>
+    </div>
+  ) : (
+    <Outlet />
+  );
   return (
     <div className="app">
       <DashboardUtilityProvider
@@ -41,7 +79,7 @@ export function RouteShell() {
         <main
           className={`shell route-content ${routeState.isSession ? 'session-shell' : ''}`}
         >
-          <Outlet />
+          {routeContent}
         </main>
         <DashboardUtilityOverlay
           snapshot={dashboard.snapshot}

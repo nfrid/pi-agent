@@ -300,6 +300,21 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     name: 'Agents and threads',
   });
   await expect(draftNav).toBeVisible();
+  await draftNav.evaluate((element) => {
+    element.setAttribute('data-route-continuity', 'draft-nav');
+  });
+  await draftNav
+    .getByRole('button', {
+      name: 'A deliberately long session title that must wrap safely offline',
+    })
+    .click();
+  await expect(page).toHaveURL(/\/sessions\/ghost-session$/u);
+  await expect(page.locator('[data-route-continuity="draft-nav"]')).toHaveCount(
+    1,
+  );
+  await page.goBack();
+  await expect(page).toHaveURL(draftUrl);
+  await page.getByRole('button', { name: 'Open agent list' }).click();
   const draftRow = draftNav.locator('.agent-thread-row.selected');
   await draftRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Delete draft' }).click();
