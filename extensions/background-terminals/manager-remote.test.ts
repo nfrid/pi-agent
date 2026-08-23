@@ -117,6 +117,123 @@ describe('BackgroundManager remote lifecycle', () => {
     expect(transport.ackCalls).toEqual([]);
   });
 
+  it('ignores incompatible wait responses that arrive after disposal', async () => {
+    let resolveWait!: (value: BackgroundSnapshot) => void;
+    const transport = fakeTransport(
+      snapshot({ status: 'running', settledAt: undefined }),
+    );
+    transport.wait = () =>
+      new Promise((resolve) => {
+        resolveWait = resolve;
+      });
+    const onChange = vi.fn();
+    const manager = new BackgroundManager({
+      client: transport,
+      scopeId: 'late-wait',
+      onChange,
+    });
+    await manager.list();
+    const pending = manager.peek(snapshot().id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await manager.dispose();
+    const changeCallsAfterDispose = onChange.mock.calls.length;
+
+    resolveWait(snapshot({ exactEnv: true }));
+    await expect(pending).rejects.toThrow(/shut down/);
+    expect(onChange).toHaveBeenCalledTimes(changeCallsAfterDispose);
+  });
+
+  it.each([
+    'peek',
+    'stop',
+  ] as const)('fails closed when disposal occurs during a %s completion ACK', async (operation) => {
+    let resolveAck!: () => void;
+    const initial = snapshot({
+      status: operation === 'stop' ? 'running' : 'done',
+      ...(operation === 'stop' ? { settledAt: undefined } : {}),
+    });
+    const transport = fakeTransport(initial);
+    if (operation === 'stop')
+      transport.stop = async () => [snapshot({ status: 'done' })];
+    transport.markDelivered = () =>
+      new Promise<void>((resolve) => {
+        resolveAck = resolve;
+      });
+    const onChange = vi.fn();
+    const manager = new BackgroundManager({
+      client: transport,
+      scopeId: `late-${operation}-ack`,
+      onChange,
+    });
+    await manager.list();
+    const pending =
+      operation === 'peek'
+        ? manager.peek(initial.id)
+        : manager.stop([initial.id]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await manager.dispose();
+    const changeCallsAfterDispose = onChange.mock.calls.length;
+
+    resolveAck();
+    await expect(pending).rejects.toThrow(/shut down/);
+    expect(onChange).toHaveBeenCalledTimes(changeCallsAfterDispose);
+  });
+
+  it('does not adopt or control exact-environment delegate jobs', async () => {
+    const delegate = snapshot({ exactEnv: true });
+    const transport = fakeTransport(delegate);
+    const onSettled = vi.fn();
+    const inspect = vi.spyOn(transport, 'inspect');
+    const wait = vi.spyOn(transport, 'wait');
+    const stop = vi.spyOn(transport, 'stop');
+    const manager = new BackgroundManager({
+      client: transport,
+      scopeId: 'shared-owner',
+      onSettled,
+    });
+
+    await expect(manager.list()).resolves.toEqual([]);
+    await expect(manager.inspect(delegate.id)).resolves.toBeUndefined();
+    await expect(manager.peek(delegate.id)).rejects.toThrow(
+      /Unknown background process/,
+    );
+    await expect(manager.stop([delegate.id])).resolves.toEqual([]);
+    await manager.acknowledgeEntered([
+      {
+        customType: 'background-terminal-result',
+        details: {
+          id: delegate.id,
+          dedupeKey: delegate.id,
+          status: 'done',
+        },
+      },
+    ]);
+
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(inspect).not.toHaveBeenCalled();
+    expect(wait).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(transport.ackCalls).toEqual([]);
+    await manager.dispose();
+  });
+
+  it('fails closed when a stop response changes to exact environment', async () => {
+    const shell = snapshot({ status: 'running', settledAt: undefined });
+    const transport = fakeTransport(shell);
+    transport.stop = vi.fn(async () => [snapshot({ exactEnv: true })]);
+    const manager = new BackgroundManager({
+      client: transport,
+      scopeId: 'raced-owner',
+    });
+
+    await expect(manager.list()).resolves.toHaveLength(1);
+    await expect(manager.stop([shell.id])).resolves.toEqual([]);
+    expect(manager.get(shell.id)).toBeUndefined();
+    expect(manager.runningCount).toBe(0);
+    expect(transport.ackCalls).toEqual([]);
+    await manager.dispose();
+  });
+
   it('ACKs only trusted entered completion messages', async () => {
     const done = snapshot();
     const transport = fakeTransport(done);

@@ -58,6 +58,13 @@ function displaySnapshot(snapshot: BackgroundSnapshot): BackgroundSnapshot {
   return { ...snapshot, command: displayCommand(snapshot.command) };
 }
 
+function isBackgroundTerminalSnapshot(snapshot: BackgroundSnapshot): boolean {
+  // Exact-environment rows are owned by the delegate adapter. They share the
+  // process host, but must never be adopted, controlled, delivered, or ACKed
+  // through the ordinary background-terminal lifecycle.
+  return snapshot.exactEnv !== true;
+}
+
 function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted)
@@ -124,6 +131,8 @@ export class BackgroundManager {
     });
     if (this.disposed || generation !== this.generation)
       throw new Error('Background manager is shut down.');
+    if (!isBackgroundTerminalSnapshot(snapshot))
+      throw new Error('Process host returned an incompatible background job.');
     this.accept(snapshot, true);
     return this.records.get(snapshot.id) ?? snapshot;
   }
@@ -137,11 +146,18 @@ export class BackgroundManager {
     this.assertLive();
     const generation = this.generation;
     await this.refresh(false, generation);
+    if (!this.records.has(id)) return undefined;
     const snapshot = await this.client.inspect(id);
     if (this.disposed || generation !== this.generation)
       throw new Error('Background manager is shut down.');
-    if (snapshot) this.accept(snapshot, false);
-    return snapshot ? displaySnapshot(snapshot) : undefined;
+    if (!snapshot) return undefined;
+    this.accept(snapshot, false);
+    if (!isBackgroundTerminalSnapshot(snapshot)) {
+      this.syncPending();
+      this.onChange?.();
+      return undefined;
+    }
+    return displaySnapshot(snapshot);
   }
 
   async list(): Promise<BackgroundSnapshot[]> {
@@ -159,6 +175,8 @@ export class BackgroundManager {
     this.assertLive();
     const generation = this.generation;
     await this.refresh(false, generation);
+    if (!this.records.has(id))
+      throw new Error(`Unknown background process "${id}".`);
     this.observing.add(id);
     try {
       const snapshot = await withAbort(
@@ -167,10 +185,18 @@ export class BackgroundManager {
       );
       if (this.disposed || generation !== this.generation)
         throw new Error('Background manager is shut down.');
+      if (!isBackgroundTerminalSnapshot(snapshot)) {
+        this.accept(snapshot, false);
+        this.syncPending();
+        this.onChange?.();
+        throw new Error(`Unknown background process "${id}".`);
+      }
       this.accept(snapshot, false);
       if (snapshot.status !== 'running') {
         this.notified.add(id);
         await this.client.markDelivered?.(id);
+        if (this.disposed || generation !== this.generation)
+          throw new Error('Background manager is shut down.');
       }
       return displaySnapshot(snapshot);
     } finally {
@@ -185,19 +211,28 @@ export class BackgroundManager {
     this.assertLive();
     const generation = this.generation;
     await this.refresh(false, generation);
-    const unique = [...new Set(ids)];
+    const unique = [...new Set(ids)].filter((id) => this.records.has(id));
+    if (unique.length === 0) return [];
     for (const id of unique) this.observing.add(id);
     try {
-      const snapshots = await withAbort(this.client.stop(unique), signal);
+      const responses = await withAbort(this.client.stop(unique), signal);
       if (this.disposed || generation !== this.generation)
         throw new Error('Background manager is shut down.');
+      for (const snapshot of responses)
+        if (!isBackgroundTerminalSnapshot(snapshot))
+          this.accept(snapshot, false);
+      const snapshots = responses.filter(isBackgroundTerminalSnapshot);
       for (const snapshot of snapshots) {
         this.accept(snapshot, false);
         if (snapshot.status !== 'running') {
           this.notified.add(snapshot.id);
           await this.client.markDelivered?.(snapshot.id);
+          if (this.disposed || generation !== this.generation)
+            throw new Error('Background manager is shut down.');
         }
       }
+      this.syncPending();
+      this.onChange?.();
       return snapshots.map(displaySnapshot);
     } finally {
       for (const id of unique) this.observing.delete(id);
@@ -241,7 +276,9 @@ export class BackgroundManager {
   ): Promise<void> {
     if (this.disposed || generation !== this.generation)
       throw new Error('Background manager is shut down.');
-    const snapshots = await this.client.list();
+    const snapshots = (await this.client.list()).filter(
+      isBackgroundTerminalSnapshot,
+    );
     if (this.disposed || generation !== this.generation)
       throw new Error('Background manager is shut down.');
     for (const snapshot of snapshots) this.accept(snapshot, notify);
@@ -254,6 +291,10 @@ export class BackgroundManager {
   }
 
   private accept(snapshot: BackgroundSnapshot, notify: boolean): void {
+    if (!isBackgroundTerminalSnapshot(snapshot)) {
+      this.records.delete(snapshot.id);
+      return;
+    }
     const displayed = displaySnapshot(snapshot);
     this.records.set(displayed.id, displayed);
     if (displayed.completionDelivered) this.notified.add(displayed.id);
