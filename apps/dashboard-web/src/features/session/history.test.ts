@@ -632,6 +632,7 @@ describe('useOlderSessionHistory', () => {
       expect(sessionBefore).toHaveBeenCalledTimes(1);
       expect(reset).toHaveBeenCalledTimes(1);
       expect(reconnect).toHaveBeenCalledTimes(1);
+      expect(controls.historyError).toBeUndefined();
     } finally {
       sessionBefore.mockRestore();
       reset.mockRestore();

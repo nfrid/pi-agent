@@ -209,6 +209,8 @@ export function Transcript({
         outlineOpen={outlineOpen}
         onOutlineOpenChange={onOutlineOpenChange}
         onBeforeScroll={onBeforeScroll}
+        pendingJumpKey={pendingJumpKey}
+        onPendingJumpHandled={() => setPendingJumpKey(undefined)}
         scrollElementRef={transcriptScrollElementRef}
       />
     );

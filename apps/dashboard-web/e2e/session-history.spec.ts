@@ -26,9 +26,14 @@ const metadata = snapshot.sessions[0];
 
 async function verifyEarlierHistoryAnchor(
   page: Page,
-  options: { jumpFromOutline?: boolean; entryCount?: number } = {},
+  options: {
+    jumpFromOutline?: boolean;
+    entryCount?: number;
+    olderEntryCount?: number;
+  } = {},
 ) {
   const entryCount = options.entryCount ?? 90;
+  const olderEntryCount = options.olderEntryCount ?? 0;
   await page.addInitScript(() =>
     localStorage.setItem('pi-dashboard-token', 'test-token'),
   );
@@ -108,6 +113,19 @@ async function verifyEarlierHistoryAnchor(
     const older = beforeRequest !== undefined;
     if (!older) initialReads += 1;
     if (older) await olderResponse;
+    const olderEntries = [
+      { type: 'session', id: 'session-1', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'first-user',
+        message: { role: 'user', content: 'first request' },
+      },
+      ...Array.from({ length: olderEntryCount }, (_, index) => ({
+        type: 'message',
+        id: `older-${index}`,
+        message: { role: 'assistant', content: `older ${index}` },
+      })),
+    ];
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -115,14 +133,7 @@ async function verifyEarlierHistoryAnchor(
           data: {
             metadata,
             entries: older
-              ? [
-                  { type: 'session', id: 'session-1', cwd: '/tmp' },
-                  {
-                    type: 'message',
-                    id: 'first-user',
-                    message: { role: 'user', content: 'first request' },
-                  },
-                ]
+              ? olderEntries
               : [
                   ...Array.from({ length: entryCount }, (_, index) => ({
                     type: 'message',
@@ -319,11 +330,12 @@ test('loads and jumps to an unloaded outline landmark @desktop', async ({
   await verifyEarlierHistoryAnchor(page, { jumpFromOutline: true });
 });
 
-test('loads an unloaded outline landmark in the regular transcript', async ({
+test('crosses into virtualization while loading an outline landmark', async ({
   page,
 }) => {
   await verifyEarlierHistoryAnchor(page, {
     jumpFromOutline: true,
     entryCount: 70,
+    olderEntryCount: 15,
   });
 });

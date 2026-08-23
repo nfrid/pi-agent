@@ -38,6 +38,8 @@ export function VirtualizedTranscript({
   outlineOpen,
   onOutlineOpenChange,
   onBeforeScroll,
+  pendingJumpKey,
+  onPendingJumpHandled,
   scrollElementRef,
 }: {
   items: readonly TranscriptModelItem[];
@@ -53,6 +55,9 @@ export function VirtualizedTranscript({
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
+  /** A jump requested before a regular-to-virtualized renderer transition. */
+  pendingJumpKey?: string;
+  onPendingJumpHandled?: () => void;
   scrollElementRef: RefObject<HTMLDivElement | null>;
 }) {
   const rows = useMemo(
@@ -61,7 +66,8 @@ export function VirtualizedTranscript({
   );
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
-  const [pendingJumpKey, setPendingJumpKey] = useState<string>();
+  const [localPendingJumpKey, setLocalPendingJumpKey] = useState<string>();
+  const requestedJumpKey = pendingJumpKey ?? localPendingJumpKey;
   const virtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
@@ -143,18 +149,25 @@ export function VirtualizedTranscript({
     return result;
   }, [items, rows]);
   useLayoutEffect(() => {
-    if (!pendingJumpKey) return;
+    if (!requestedJumpKey) return;
     const rowIndex =
-      rowIndexByKey.get(pendingJumpKey) ??
-      rowIndexByKey.get(`group-${pendingJumpKey}`);
+      rowIndexByKey.get(requestedJumpKey) ??
+      rowIndexByKey.get(`group-${requestedJumpKey}`);
     if (rowIndex === undefined) return;
-    setPendingJumpKey(undefined);
+    if (pendingJumpKey !== undefined) onPendingJumpHandled?.();
+    else setLocalPendingJumpKey(undefined);
     virtualizer.scrollToIndex(rowIndex, { align: 'start' });
     const frame = window.requestAnimationFrame(() => {
       virtualizer.scrollToIndex(rowIndex, { align: 'start' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [pendingJumpKey, rowIndexByKey, virtualizer]);
+  }, [
+    onPendingJumpHandled,
+    pendingJumpKey,
+    requestedJumpKey,
+    rowIndexByKey,
+    virtualizer,
+  ]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
     const loadedRowIndex =
@@ -174,7 +187,7 @@ export function VirtualizedTranscript({
     // The async loader updates rows in a later render. Store the stable key so
     // that render's row map, rather than this handler's stale closure, owns the
     // actual virtualizer jump.
-    setPendingJumpKey(landmark.key);
+    setLocalPendingJumpKey(landmark.key);
   };
   const captureScrollAnchor =
     useVirtualTranscriptScrollRestoration(scrollElementRef);

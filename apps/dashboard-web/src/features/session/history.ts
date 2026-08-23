@@ -534,10 +534,13 @@ export function useOlderSessionHistory({
           return;
         if (isTransientHistoryCursorError(loadError)) {
           // A cursor is tied to the indexed file/version. Rebase before the
-          // autoload effect can issue the same invalid request again.
+          // autoload effect can issue the same invalid request again. The
+          // reconnect owns transient recovery; do not surface its stale
+          // cursor error in inspectors.
           preserveErrorOnCoverageRef.current = true;
           store.resetSessionHistoryToNewest(id);
           store.reconnectSession(id);
+          return;
         }
         setHistoryError(
           loadError instanceof Error
