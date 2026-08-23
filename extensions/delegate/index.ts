@@ -724,6 +724,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         activeRuntime?.branchId === initialRuntime.branchId,
       dependencies: restoreDependencies,
       onRestored: (restored, link) => {
+        activateJobsTool();
         const initialRun = createRun(
           `${link.logicalId}@${link.attempt.ordinal}`,
           restored.session.routing,
@@ -753,6 +754,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         }
       },
       onFailure: (link, attempt) => {
+        activateJobsTool();
         const failedRun = createRun(
           `${link.logicalId}@${link.attempt.ordinal}`,
           undefined,

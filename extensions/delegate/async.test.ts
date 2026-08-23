@@ -1974,6 +1974,7 @@ describe('async delegate extension', () => {
       entries: persistedEntries,
       leafId: 'leaf-after-pending-reload',
     });
+    expect(restored.activeTools).toContain('delegate_jobs');
     const status = await restored.tools
       .get('delegate_wake')
       ?.execute(
