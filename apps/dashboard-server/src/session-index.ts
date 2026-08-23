@@ -502,12 +502,12 @@ function buildSessionOutline(
   const grouped = new Set<number>();
   for (const group of groups) {
     const descriptor = descriptors[group.start];
-    if (!descriptor || !descriptor.outlineLabel) continue;
+    if (!descriptor?.outlineLabel) continue;
     grouped.add(group.start);
     landmarks.push({
       id:
         descriptor.outlineId ?? descriptor.id ?? `entry-${descriptor.ordinal}`,
-      ordinal: descriptor.ordinal,
+      ordinal: group.start,
       kind: 'activity',
       label: descriptor.outlineLabel,
       ...(descriptor.timestamp === undefined
@@ -515,24 +515,24 @@ function buildSessionOutline(
         : { timestamp: descriptor.timestamp }),
     });
   }
-  for (const descriptor of descriptors) {
-    if (!descriptor.outlineLabel || grouped.has(descriptor.ordinal)) continue;
+  descriptors.forEach((descriptor, index) => {
+    if (!descriptor.outlineLabel || grouped.has(index)) return;
     if (
       descriptor.outlineKind !== 'user' &&
       descriptor.outlineKind !== 'assistant'
     )
-      continue;
+      return;
     landmarks.push({
       id:
         descriptor.outlineId ?? descriptor.id ?? `entry-${descriptor.ordinal}`,
-      ordinal: descriptor.ordinal,
+      ordinal: index,
       kind: descriptor.outlineKind,
       label: descriptor.outlineLabel,
       ...(descriptor.timestamp === undefined
         ? {}
         : { timestamp: descriptor.timestamp }),
     });
-  }
+  });
   return landmarks
     .sort((left, right) => left.ordinal - right.ordinal)
     .slice(0, MAX_SESSION_OUTLINE);
@@ -2434,6 +2434,7 @@ export class SessionIndex {
             }
             header = parsed;
             const entry = redactImageData(parsed);
+            const activity = activityEntryFromRaw(parsed);
             const descriptor: SessionLineDescriptor = {
               ordinal,
               start,
@@ -2448,8 +2449,8 @@ export class SessionIndex {
                 ? { parentId: parsed.parentId }
                 : {}),
               type: 'session',
-              activity: activityEntryFromRaw(parsed),
-              ...outlineFields(parsed, activityEntryFromRaw(parsed)),
+              activity,
+              ...outlineFields(parsed, activity),
             };
             descriptors.push(descriptor);
             if (descriptor.id !== undefined) {
@@ -2460,6 +2461,7 @@ export class SessionIndex {
             ordinal += 1;
           } else {
             const entry = redactImageData(parsed);
+            const activity = activityEntryFromRaw(parsed);
             const descriptor: SessionLineDescriptor = {
               ordinal,
               start,
@@ -2479,8 +2481,8 @@ export class SessionIndex {
                 ? { type: parsed.type }
                 : {}),
               ...(resume ? { resume } : {}),
-              activity: activityEntryFromRaw(parsed),
-              ...outlineFields(parsed, activityEntryFromRaw(parsed)),
+              activity,
+              ...outlineFields(parsed, activity),
             };
             descriptors.push(descriptor);
             if (descriptor.id !== undefined) {
@@ -2575,6 +2577,9 @@ export class SessionIndex {
           this.removeFile(resolved);
           return;
         }
+        const groups = groupTranscript(
+          descriptors.map((descriptor) => descriptor.activity),
+        );
         const historyIndex: SessionHistoryIndex = {
           dev: endStat.dev,
           ino: endStat.ino,
@@ -2586,15 +2591,8 @@ export class SessionIndex {
           descriptors,
           byId,
           latestEntryId,
-          groups: groupTranscript(
-            descriptors.map((descriptor) => descriptor.activity),
-          ),
-          outline: buildSessionOutline(
-            descriptors,
-            groupTranscript(
-              descriptors.map((descriptor) => descriptor.activity),
-            ),
-          ),
+          groups,
+          outline: buildSessionOutline(descriptors, groups),
         };
         const id =
           typeof header.id === 'string' ? header.id : this.idForPath(resolved);

@@ -114,7 +114,7 @@ function DelegateCanonicalTranscript({
         outline={snapshot?.outline}
         onJumpToLandmark={(landmark) =>
           landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
-            ? loadThroughOrdinal(landmark.ordinal).then(() => true)
+            ? loadThroughOrdinal(landmark.ordinal)
             : true
         }
         leadingContinuation={

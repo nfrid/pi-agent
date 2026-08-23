@@ -519,7 +519,10 @@ export function useOlderSessionHistory({
     [currentHistory, id, scrollElementRef, store],
   );
   const loadThroughOrdinal = useCallback(
-    (ordinal: number) => loadEarlierHistory(ordinal),
+    async (ordinal: number) => {
+      await loadEarlierHistory(ordinal);
+      return (historyRef.current?.start ?? Number.POSITIVE_INFINITY) <= ordinal;
+    },
     [loadEarlierHistory],
   );
   loadEarlierHistoryRef.current = loadEarlierHistory;
