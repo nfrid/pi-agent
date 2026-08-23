@@ -191,10 +191,6 @@
 .utility-drawer .session-row strong {
   font-size: 12px;
 }
-.utility-drawer .inbox-preferences {
-  margin-bottom: 18px;
-  padding: 13px;
-}
 
 /* Calm composer: the textarea is the visual lead, controls share one surface. */
 .composer {

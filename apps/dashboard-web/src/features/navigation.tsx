@@ -5,8 +5,6 @@ import {
   useDashboardNavigate,
 } from '../routes/navigation';
 import { CommandPalette } from './command-palette';
-import { useDashboardUtility } from './dashboard-utility-context';
-import { UsageCapsule } from './usage-indicator';
 
 export function runtimeStatusCounts(snapshot: BrowserSnapshot) {
   return {
@@ -29,7 +27,6 @@ export function runtimeStatusCounts(snapshot: BrowserSnapshot) {
 /** Contextual agent/thread navigation replaces the old permanent destination rail. */
 export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   const go = useDashboardNavigate();
-  const utility = useDashboardUtility();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
@@ -38,9 +35,6 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
     !pathname.startsWith('/sessions/') &&
     !pathname.endsWith('/new') &&
     !pathname.includes('/new/pending/');
-  const activeSessionId = pathname.startsWith('/sessions/')
-    ? decodeURIComponent(pathname.split('/')[2] ?? '')
-    : undefined;
   const paletteDisabled = false;
   return (
     <header className="navigation-shell">
@@ -64,25 +58,6 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
           >
             +
           </button>
-        )}
-        <button
-          type="button"
-          className="global-notifications"
-          aria-label={`Open notifications${snapshot.unread.length ? ` (${snapshot.unread.length} unread)` : ''}`}
-          onClick={() => {
-            if (utility) utility.openPanel('inbox');
-            else go('/inbox');
-          }}
-        >
-          <span aria-hidden="true">✉</span>
-          {snapshot.unread.length > 0 && (
-            <b>
-              {snapshot.unread.length > 99 ? '99+' : snapshot.unread.length}
-            </b>
-          )}
-        </button>
-        {!activeSessionId && (
-          <UsageCapsule usage={snapshot.usage} variant="toolbar" />
         )}
         <CommandPalette snapshot={snapshot} disabled={paletteDisabled} />
       </div>

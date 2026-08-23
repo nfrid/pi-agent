@@ -138,31 +138,6 @@
 .session-row > span:first-child {
   gap: 5px;
 }
-.inbox-preferences {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin: 0 0 28px;
-  border: var(--border-soft);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--bg-alt) 70%, transparent);
-  padding: 16px 18px;
-}
-.inbox-preferences strong {
-  font-size: 13px;
-}
-.inbox-preferences p {
-  margin: 3px 0 0;
-}
-.inbox-preferences .push-button {
-  flex: none;
-  margin: 0;
-  border: 1px solid var(--purple);
-  border-radius: 7px;
-  color: var(--purple);
-  padding: 8px 11px;
-}
 .subsection-heading {
   display: flex;
   align-items: center;

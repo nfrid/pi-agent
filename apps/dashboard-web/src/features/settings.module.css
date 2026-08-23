@@ -1,0 +1,113 @@
+.settings {
+  display: grid;
+  gap: 18px;
+}
+.section {
+  display: grid;
+  gap: 9px;
+}
+.section h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 12px;
+}
+.controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.controls button {
+  min-height: 27px;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.controls button:hover:not(:disabled) {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.controls button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.addForm {
+  display: flex;
+  gap: 6px;
+}
+.addForm input,
+.projectRow input {
+  min-width: 0;
+  flex: 1;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 11px;
+}
+.addForm button,
+.projectRow button {
+  flex: none;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.addForm button:hover:not(:disabled),
+.projectRow button:hover:not(:disabled) {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.projects {
+  display: grid;
+  gap: 4px;
+}
+.projectRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 6px 0;
+}
+.projectRow > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+.projectRow strong,
+.projectRow small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.projectRow strong {
+  color: var(--fg);
+  font-size: 11px;
+}
+.projectRow small {
+  color: var(--dim);
+  font-size: 9px;
+}
+@media (max-width: 360px) {
+  .controls {
+    grid-template-columns: 1fr;
+  }
+  .controls button {
+    justify-self: start;
+  }
+}

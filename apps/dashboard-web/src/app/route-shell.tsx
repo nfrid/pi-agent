@@ -7,7 +7,7 @@ import {
 } from '../features/dashboard-utility-context';
 import { SessionNavigationContext } from '../features/session-navigation-context';
 import { SurfaceDrawer } from '../features/surface-drawer';
-import { Header, InboxView, SessionsView } from '../routes/dashboard';
+import { Header, SettingsView } from '../routes/dashboard';
 import { useDashboardContext } from './dashboard-context';
 
 function routeIdentity(pathname: string, prefix: string): string | undefined {
@@ -81,10 +81,7 @@ export function RouteShell() {
         >
           {routeContent}
         </main>
-        <DashboardUtilityOverlay
-          snapshot={dashboard.snapshot}
-          usageError={dashboard.usageError}
-        />
+        <DashboardUtilityOverlay snapshot={dashboard.snapshot} />
       </DashboardUtilityProvider>
     </div>
   );
@@ -92,18 +89,12 @@ export function RouteShell() {
 
 function DashboardUtilityOverlay({
   snapshot,
-  usageError,
 }: {
   snapshot: NonNullable<ReturnType<typeof useDashboardContext>['snapshot']>;
-  usageError?: string;
 }) {
   const utility = useDashboardUtility();
   const title =
-    utility?.panel === 'sessions'
-      ? 'History'
-      : utility?.panel === 'inbox'
-        ? 'Inbox'
-        : 'Dashboard utility';
+    utility?.panel === 'settings' ? 'Settings' : 'Dashboard utility';
   return (
     <SurfaceDrawer
       title={title}
@@ -112,10 +103,7 @@ function DashboardUtilityOverlay({
       isOpen={Boolean(utility?.open && utility.panel)}
       onClose={() => utility?.close()}
     >
-      {utility?.panel === 'sessions' && <SessionsView snapshot={snapshot} />}
-      {utility?.panel === 'inbox' && (
-        <InboxView snapshot={snapshot} usageError={usageError} />
-      )}
+      {utility?.panel === 'settings' && <SettingsView snapshot={snapshot} />}
     </SurfaceDrawer>
   );
 }
