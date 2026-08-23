@@ -91,6 +91,10 @@ function progressText(run: DelegatedRun): string {
 export interface RunDelegateOptions {
   /** Stable invocation identity allocated during preparation. */
   runId?: string;
+  /** Session-scoped workflow identity used by restored status hooks. */
+  workflowAttempt?: import('./workflow-model').WorkflowAttempt;
+  /** Durable process-host job identity; normally the prepared run ID. */
+  processJobId?: string;
   /** Canonical Pi child session used by dashboard session APIs. */
   sessionId?: string;
   /** Stable child-session lineage from the prepared durable session. */
@@ -121,8 +125,12 @@ export interface RunDelegateOptions {
   detachSignal?: AbortSignal;
   /** Use the durable process host rather than the direct foreground spawn. */
   hosted?: boolean;
+  /** Reattach to an already-started durable host job; never sends start. */
+  observeExisting?: boolean;
   /** Parent-side inbox used for bounded feedback and checkpoint requests. */
   control?: DelegateControlChannel;
+  /** Keep the supplied control inbox open after a retryable host transport error. */
+  preserveControlOnRetry?: boolean;
   onUpdate?: OnUpdate;
   /** In-process live status hook; raw runs never enter public tool details. */
   onRunUpdate?: (run: DelegatedRun) => void;
@@ -207,6 +215,7 @@ export async function runDelegate(
   const allowWrites = options.allowWrites === true;
   const run = createRun(options.task, options.routing, {
     runId: options.runId,
+    workflowAttempt: options.workflowAttempt,
     sessionId: options.sessionId,
     lineageId: options.lineageId,
     name: options.name,
@@ -252,7 +261,12 @@ export async function runDelegate(
     run.startedAt = Date.now();
     emitUpdate();
     const { command, prefixArgs } = resolvePiSpawn();
-    const args = buildChildArgs(options, options.sessionPath);
+    // An observed host row supplies the already-running command. Avoid even
+    // reconstructing a prompt/argv from restored metadata; the host adapter
+    // ignores these placeholders and must never receive a fresh start.
+    const args = options.observeExisting
+      ? []
+      : buildChildArgs(options, options.sessionPath);
     const dashboardEnv = options.hosted
       ? Object.fromEntries(
           ['PI_DASHBOARD_SOCKET', 'PI_DASHBOARD_STATE_DIR']
@@ -298,8 +312,9 @@ export async function runDelegate(
       killGraceMs: options.killGraceMs,
       signal: options.signal,
       detachSignal: options.detachSignal,
-      processJobId: run.runId,
+      processJobId: options.processJobId ?? run.runId,
       ownerSession: options.ownerSessionId,
+      observeExisting: options.observeExisting,
       onCheckpoint: () => {
         const requestedAt = Date.now();
         const queued = control.enqueue(
@@ -317,8 +332,9 @@ export async function runDelegate(
     });
 
     if (childResult.detached) throw new DetachedDelegateError();
-    const { exitCode, wasAborted, timedOut, spawnError, hostError } =
+    const { exitCode, wasAborted, timedOut, spawnError, hostError, retryable } =
       childResult;
+    if (retryable) run.retryable = true;
     const lifecycleStderr = [
       hostError ? `Process-host terminal error: ${hostError}` : '',
       run.stderr,
@@ -358,7 +374,9 @@ export async function runDelegate(
       // observed nonzero exit is still the stable lifecycle cause; that text
       // is evidence only, bounded inside the diagnostic.
       run.stopReason = 'error';
-      run.errorMessage ||= `Child Pi exited with code ${exitCode}.`;
+      run.errorMessage ||= retryable
+        ? `Retryable process-host error: ${hostError ?? `child exited with code ${exitCode}`}.`
+        : `Child Pi exited with code ${exitCode}.`;
       setDelegateLifecycleText(
         run,
         'child-nonzero-exit',
@@ -426,7 +444,8 @@ export async function runDelegate(
     releaseSlot?.();
     releaseSession?.();
     if (detached) control.detach();
-    else control.close();
+    else if (!(options.preserveControlOnRetry && run.retryable))
+      control.close();
   }
   return run;
 }

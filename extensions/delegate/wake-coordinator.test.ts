@@ -514,6 +514,60 @@ describe('WakeCoordinator', () => {
     await workflow.dispose();
   });
 
+  test('restores exact entered any-wake sources and rejects ambiguous old entries', async () => {
+    let finishA!: (value: DelegateJobResult) => void;
+    let finishB!: (value: DelegateJobResult) => void;
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule(
+      options('entered-a', () => new Promise((resolve) => (finishA = resolve))),
+    );
+    const b = workflow.schedule(
+      options('entered-b', () => new Promise((resolve) => (finishB = resolve))),
+    );
+    let wake!: WakeCoordinator;
+    wake = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'entered-owner',
+      ownerEpoch: 3,
+      dispatch: (dispatch) => {
+        wake.markEntered(dispatch.wake.id, dispatch.acknowledgement);
+      },
+    });
+    wake.register({
+      id: 'entered-any',
+      condition: { any: [a.identity, b.identity] },
+      payload: ['metadata'],
+    });
+    finishA(result('entered-a'));
+    await vi.waitFor(() =>
+      expect(wake.require('entered-any').state).toBe('entered'),
+    );
+    expect(wake.enteredSourceIdentities()).toEqual([a.identity]);
+
+    const snapshot = wake.snapshot();
+    const restored = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'entered-owner',
+      ownerEpoch: 3,
+    });
+    expect(restored.restore(snapshot)).toBe(true);
+    expect(restored.enteredSourceIdentities()).toEqual([a.identity]);
+
+    const ambiguous = JSON.parse(JSON.stringify(snapshot)) as {
+      wakes: Array<{ readyReferences?: readonly string[] }>;
+    };
+    delete ambiguous.wakes[0].readyReferences;
+    const rejected = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'entered-owner',
+      ownerEpoch: 3,
+    });
+    expect(rejected.restore(ambiguous)).toBe(false);
+    expect(rejected.enteredSourceIdentities()).toEqual([]);
+    finishB(result('entered-b'));
+    await workflow.dispose();
+  });
+
   test('validates stable IDs, empty/duplicate references, and duplicate subscriptions', () => {
     const workflow = new DelegateWorkflowCoordinator();
     workflow.schedule(options('build', async () => result('build')));

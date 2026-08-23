@@ -158,6 +158,48 @@ describe('workflow store', () => {
     expect(entries).toHaveLength(0);
   });
 
+  test('persists a hosted process link while queued and after settlement', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const entries: unknown[] = [];
+    attachWorkflowStore(coordinator, piFor(entries));
+    const processJobId = '123e4567-e89b-42d3-a456-426614174000';
+    coordinator.schedule({
+      logicalId: 'hosted',
+      mode: 'single',
+      tasks: ['hosted'],
+      sessionId: 'child-session',
+      processJobId,
+      execute: async () => ({ runs: [], handoff: '' }),
+    });
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            kind: 'delta',
+            state: expect.objectContaining({
+              attempts: expect.arrayContaining([
+                expect.objectContaining({
+                  identity: 'hosted@1',
+                  state: 'queued',
+                  sessionId: 'child-session',
+                  processJobId,
+                }),
+              ]),
+            }),
+          }),
+        }),
+      ]),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require('hosted@1').state).toBe('success'),
+    );
+    expect(latestWorkflowState(branch(entries))?.attempts[0]).toMatchObject({
+      sessionId: 'child-session',
+      processJobId,
+    });
+    await coordinator.dispose();
+  });
+
   test('persists the canonical child session identity on settled attempts', async () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const entries: unknown[] = [];
@@ -291,6 +333,16 @@ describe('workflow store', () => {
       attempt({ dependencies: ['Gate@1'] }),
       attempt({ dependencies: ['gate@1', 'gate@1'] }),
       attempt({ waitingFor: ['other@1'] }),
+      attempt({ state: 'running', sessionId: 'child-session' }),
+      attempt({
+        state: 'running',
+        sessionId: 'child-session',
+        processJobId: 'not-a-uuid',
+      }),
+      attempt({
+        state: 'running',
+        processJobId: '123e4567-e89b-42d3-a456-426614174000',
+      }),
       attempt({
         dependencies: Array.from(
           { length: 33 },

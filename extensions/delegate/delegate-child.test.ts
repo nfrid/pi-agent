@@ -49,6 +49,7 @@ type HostedCase = {
   error?: string;
   exactEnvCapability?: boolean;
   infoResponse?: 'unknown' | 'missing';
+  unknownJob?: boolean;
   delayStopMs?: number;
   delayInspectMs?: number;
   onRequest?: (operation: string) => void;
@@ -147,11 +148,13 @@ async function withHostedCase<T>(
                     job: snapshot(stopped ? 'killed' : setup.status),
                   }
                 : request.op === 'inspect'
-                  ? {
-                      v: 1,
-                      ok: true,
-                      job: snapshot(stopped ? 'killed' : setup.status),
-                    }
+                  ? setup.unknownJob
+                    ? { v: 1, ok: true }
+                    : {
+                        v: 1,
+                        ok: true,
+                        job: snapshot(stopped ? 'killed' : setup.status),
+                      }
                   : { v: 1, ok: true };
       const delayMs =
         request.op === 'stop'
@@ -427,6 +430,125 @@ describe('delegate child environment', () => {
           timedOut,
           wasAborted: false,
         });
+      },
+    );
+  });
+
+  test('observes an existing host job without sending start', async () => {
+    const message = JSON.stringify({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'reattached result' }],
+      },
+    });
+    await withHostedCase(
+      {
+        status: 'done',
+        exitCode: 0,
+        eventResponse: {
+          events: [
+            { offset: 1, stream: 'stdout', text: message, truncated: false },
+          ],
+          truncated: false,
+          complete: true,
+          nextOffset: 2,
+        },
+      },
+      async (calls) => {
+        const run = createRun('reattach');
+        const result = await runHostedDelegateChild(run, {
+          command: 'must-not-be-started',
+          args: ['original', 'launch', 'payload'],
+          cwd: process.cwd(),
+          env: { SECRET: 'must-not-be-read' },
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          observeExisting: true,
+          timeoutMs: 100,
+          onLine: vi.fn(),
+        });
+        expect(calls).toEqual([
+          'info',
+          'inspect',
+          'events',
+          'inspect',
+          'inspect',
+        ]);
+        expect(calls).not.toContain('start');
+        expect(run.messages).toHaveLength(1);
+        expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+      },
+    );
+  });
+
+  test('returns a retryable result for a transient process-host socket failure', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-hosted-retry-'));
+    vi.stubEnv('PI_PROCESS_HOST_SOCKET', path.join(root, 'missing.sock'));
+    const run = createRun('retryable host observation');
+    const result = await runHostedDelegateChild(run, {
+      command: 'must-not-be-started',
+      args: [],
+      cwd: process.cwd(),
+      env: {},
+      ownerSession: 'parent-session',
+      processJobId: hostedJobId,
+      observeExisting: true,
+      timeoutMs: 100,
+      onLine: vi.fn(),
+    });
+    expect(result).toMatchObject({ retryable: true, exitCode: 1 });
+    expect(run.stderr).toContain('Retryable process-host transport error');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('fails closed when an observed host job is unknown', async () => {
+    await withHostedCase(
+      { status: 'done', unknownJob: true },
+      async (calls) => {
+        await expect(
+          runHostedDelegateChild(createRun('unknown reattach'), {
+            command: 'must-not-be-started',
+            args: [],
+            cwd: process.cwd(),
+            env: {},
+            ownerSession: 'parent-session',
+            processJobId: hostedJobId,
+            observeExisting: true,
+            timeoutMs: 100,
+            onLine: vi.fn(),
+          }),
+        ).rejects.toThrow('Unknown hosted process job');
+        expect(calls).toEqual(['info', 'inspect']);
+      },
+    );
+  });
+
+  test('retains a host-restart error while observing without relaunch', async () => {
+    const hostRestartError =
+      'Background job was marked failed because the process host restarted; the process was not adopted by PID.';
+    await withHostedCase(
+      { status: 'failed', error: hostRestartError },
+      async (calls) => {
+        const run = createRun('observed host restart');
+        const result = await runHostedDelegateChild(run, {
+          command: 'must-not-be-started',
+          args: [],
+          cwd: process.cwd(),
+          env: {},
+          ownerSession: 'parent-session',
+          processJobId: hostedJobId,
+          observeExisting: true,
+          timeoutMs: 100,
+          onLine: vi.fn(),
+        });
+        expect(calls).not.toContain('start');
+        expect(result).toMatchObject({
+          exitCode: 1,
+          timedOut: false,
+          hostError: hostRestartError,
+        });
+        expect(run.stderr).toContain(hostRestartError);
       },
     );
   });

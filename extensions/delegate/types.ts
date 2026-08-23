@@ -149,6 +149,8 @@ export interface DelegateRunMetadata {
   artifact?: ArtifactMetadata;
   /** A bounded pre-timeout checkpoint request and its observed outcome. */
   checkpoint?: DelegateCheckpoint;
+  /** The host transport failed transiently; a later observation may retry. */
+  retryable?: boolean;
   /** Public projection; authored by the harness and ignored from child input. */
   lifecycle?: DelegateLifecycleProjection;
 }
@@ -208,6 +210,7 @@ export interface DelegateWorkflowRunProjection {
   readonly worktree?: DelegateWorkflowBranchDescriptor;
   readonly artifact?: ArtifactMetadata;
   readonly lifecycle?: DelegateLifecycleProjection;
+  readonly retryable?: boolean;
   readonly queuedAt?: number;
   readonly startedAt?: number;
   readonly finishedAt?: number;

@@ -139,6 +139,10 @@ export interface DelegateJobStartOptions {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  /** Canonical Pi child session linked to a hosted process job. */
+  sessionId?: string;
+  /** Durable process-host job identity; equals the prepared run ID. */
+  processJobId?: string;
   workflowAttempt?: WorkflowAttempt;
   feedback?: (
     message: string,
@@ -202,6 +206,17 @@ export class DelegateJobManager {
     return job;
   }
 
+  /**
+   * Register an observation of work that already exists in the durable host.
+   * The manager still owns an ordinary in-memory record, but the supplied
+   * execute function is responsible for observing it; this method never
+   * creates a host process itself.
+   */
+  observeExisting(options: DelegateJobStartOptions): DelegateJobSnapshot {
+    const [job] = this.startMany([options]);
+    return job;
+  }
+
   startMany(options: DelegateJobStartOptions[]): DelegateJobSnapshot[] {
     this.registry.assertAccepting(options.length);
     const validated = options.map((item) => ({
@@ -242,6 +257,11 @@ export class DelegateJobManager {
   get(id: string, ctx?: ExtensionContext): DelegateJobSnapshot | undefined {
     const job = this.registry.get(id);
     return job ? this.visibleSnapshot(job, ctx) : undefined;
+  }
+
+  /** Internal branch guard for exact workflow observation binding. */
+  getOwnerBranchId(id: string): string | undefined {
+    return this.registry.require(id).ownerBranchId;
   }
 
   list(ctx?: ExtensionContext): DelegateJobSnapshot[] {
