@@ -620,6 +620,96 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('prepares from the exact selected commit even after the branch advances', async () => {
+    let releasePreparation!: () => void;
+    let preparationStarted!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const fixture = await isolatedServiceFixture({
+      beforeWorktreePreparation: async () => {
+        preparationStarted();
+        await gate;
+      },
+    });
+    try {
+      await git(fixture.root, 'branch', 'develop');
+      await git(fixture.root, 'switch', 'develop');
+      await writeFile(path.join(fixture.root, 'tracked.txt'), 'develop-v1\n');
+      await git(fixture.root, 'add', '.');
+      await git(fixture.root, 'commit', '-m', 'develop v1');
+      const selectedSha = (
+        await gitOutput(fixture.root, 'rev-parse', 'HEAD')
+      ).trim();
+      await git(fixture.root, 'switch', 'main');
+      await fixture.service.start();
+      await fixture.service.createThread(fixture.projectId, {
+        commandId: 'branch-advance-thread',
+        title: 'Pinned branch base',
+        prompt: 'Use the selected commit.',
+        isolation: 'worktree',
+        baseRef: 'develop',
+      });
+      await preparation;
+      await git(fixture.root, 'switch', 'develop');
+      await writeFile(path.join(fixture.root, 'tracked.txt'), 'develop-v2\n');
+      await git(fixture.root, 'add', '.');
+      await git(fixture.root, 'commit', '-m', 'develop v2');
+      await git(fixture.root, 'switch', 'main');
+      releasePreparation();
+      await waitFor(() => fixture.launches.length === 1);
+      const launchPath = fixture.launches[0]?.checkoutCwd;
+      if (typeof launchPath !== 'string')
+        throw new Error('Missing launch cwd.');
+      expect(await readFile(path.join(launchPath, 'tracked.txt'), 'utf8')).toBe(
+        'develop-v1\n',
+      );
+      const checkout = fixture.metadata.orchestration
+        .listCheckouts(fixture.projectId)
+        .find((item) => item.kind === 'worktree');
+      expect(checkout?.baseSha).toBe(selectedSha);
+    } finally {
+      releasePreparation?.();
+      await fixture.close();
+    }
+  });
+
+  it('rejects stale and unsafe branch refs before allocating a checkout', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      await git(fixture.root, 'branch', 'gone');
+      await git(fixture.root, 'branch', '-D', 'gone');
+      await expect(
+        fixture.service.createThread(fixture.projectId, {
+          commandId: 'stale-branch-thread',
+          title: 'Stale branch',
+          prompt: 'Must fail.',
+          isolation: 'worktree',
+          baseRef: 'gone',
+        }),
+      ).rejects.toThrow('selected branch no longer exists locally');
+      await expect(
+        fixture.service.createThread(fixture.projectId, {
+          commandId: 'unsafe-branch-thread',
+          title: 'Unsafe branch',
+          prompt: 'Must fail.',
+          isolation: 'worktree',
+          baseRef: '../main',
+        }),
+      ).rejects.toThrow('Invalid branch/ref');
+      expect(
+        fixture.metadata.orchestration
+          .listCheckouts(fixture.projectId)
+          .filter((checkout) => checkout.kind === 'worktree'),
+      ).toHaveLength(0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('lets an explicit current-work base carry WIP over a configured project branch', async () => {
     const fixture = await isolatedServiceFixture({ defaultBaseBranch: 'main' });
     try {

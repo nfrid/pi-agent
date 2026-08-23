@@ -38,7 +38,8 @@ function locationForDraft(draft: {
   isolation: 'worktree' | 'main';
   location?:
     | { kind: 'current' }
-    | { kind: 'worktree'; base: 'work' | 'head' | 'branch'; baseRef?: string }
+    | { kind: 'worktree'; base: 'work' | 'head' }
+    | { kind: 'worktree'; base: 'branch'; baseRef: string }
     | { kind: 'checkout'; checkoutId: string };
 }) {
   return (
@@ -77,18 +78,6 @@ export function draftModelSelection(
     };
   const first = models[0];
   return first ? { provider: first.provider, model: first.model } : undefined;
-}
-
-export function draftThinkingLevels(
-  runtimes: readonly RuntimeSnapshot[],
-  selected?: ModelSelection,
-): string[] {
-  return [
-    ...new Set([
-      ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),
-      ...(selected?.thinking ? [selected.thinking] : []),
-    ]),
-  ];
 }
 
 export function DraftThreadView({
@@ -219,6 +208,13 @@ export function DraftThreadView({
         liveDraft.model,
       );
       const location = locationForDraft(liveDraft);
+      if (
+        !liveDraft.promotedThreadId &&
+        location.kind === 'worktree' &&
+        location.base === 'branch' &&
+        !location.baseRef.trim()
+      )
+        throw new Error('Choose a branch before starting the worktree.');
       if (liveDraft.promotedThreadId) {
         const retry = beginDraftRetry(draftId);
         if (!retry)
@@ -264,8 +260,8 @@ export function DraftThreadView({
                     : location.base === 'work' && liveDraft.location
                       ? { base: 'work' as const }
                       : {}),
-                  ...(location.base === 'branch' && location.baseRef
-                    ? { baseRef: location.baseRef }
+                  ...(location.base === 'branch'
+                    ? { baseRef: location.baseRef.trim() }
                     : {}),
                 }),
           ...(submissionModel ? { model: submissionModel } : {}),

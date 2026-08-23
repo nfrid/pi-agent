@@ -414,8 +414,27 @@
   font-weight: 700;
 }
 .draft-picker-heading {
+  position: sticky;
+  top: -7px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   color: var(--fg);
   font-size: 12px;
+}
+.draft-picker-close {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.draft-picker-close:hover {
+  color: var(--fg);
 }
 .draft-picker-option {
   display: flex;

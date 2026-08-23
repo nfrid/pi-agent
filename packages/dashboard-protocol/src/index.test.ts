@@ -25,6 +25,7 @@ import {
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
   parseFrame,
+  parseGitContext,
   parseLiveDiagnosticsRequest,
   parseLiveDiagnosticsResponse,
   parseNormalizedMessagePayload,
@@ -55,6 +56,30 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('accepts bounded Git context and rejects unknown fields', () => {
+    expect(
+      parseGitContext({
+        branch: 'main',
+        dirty: true,
+        changedFileCount: 2,
+        localBranches: ['main', 'develop'],
+      }),
+    ).toEqual({
+      branch: 'main',
+      dirty: true,
+      changedFileCount: 2,
+      localBranches: ['main', 'develop'],
+    });
+    expect(() =>
+      parseGitContext({
+        branch: 'main',
+        dirty: false,
+        localBranches: ['main'],
+        extra: true,
+      }),
+    ).toThrow();
+  });
+
   it('validates the exact session/thread projection without association fields elsewhere', () => {
     expect(
       parseSessionThreadLinks([

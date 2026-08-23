@@ -8,7 +8,7 @@ import type {
   RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { type DraftLocation, setDraftLocation, setDraftModel } from '../drafts';
 import { configuredModelOptions, modelOptionValue } from '../model-option';
@@ -87,12 +87,27 @@ export function DraftLocationPicker({
     location.kind === 'worktree' && location.base === 'branch'
       ? location.baseRef
       : undefined;
-  const choose = (next: DraftLocation) => {
-    setDraftLocation(draftId, next);
+  const close = () => {
     setOpen(false);
     setShowBranches(false);
     setBranchSearch('');
   };
+  const choose = (next: DraftLocation) => {
+    setDraftLocation(draftId, next);
+    close();
+  };
+  useEffect(() => {
+    if (!open || typeof globalThis.addEventListener !== 'function') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        setShowBranches(false);
+        setBranchSearch('');
+      }
+    };
+    globalThis.addEventListener('keydown', onKeyDown);
+    return () => globalThis.removeEventListener?.('keydown', onKeyDown);
+  }, [open]);
   const branches = (context.data?.localBranches ?? []).filter((branch) =>
     branch.toLowerCase().includes(branchSearch.trim().toLowerCase()),
   );
@@ -123,7 +138,16 @@ export function DraftLocationPicker({
           role="dialog"
           aria-label="Checkout location"
         >
-          <div className="draft-picker-heading">Location</div>
+          <div className="draft-picker-heading">
+            <span>Location</span>
+            <Button
+              type="button"
+              className="draft-picker-close"
+              onPress={close}
+            >
+              Done
+            </Button>
+          </div>
           <LocationRow
             label="Current checkout"
             detail={
@@ -140,29 +164,25 @@ export function DraftLocationPicker({
           <LocationRow
             label="Current work"
             detail="Carry uncommitted work"
-            onPress={() =>
-              setDraftLocation(draftId, { kind: 'worktree', base: 'work' })
-            }
+            onPress={() => choose({ kind: 'worktree', base: 'work' })}
           />
           <LocationRow
             label="Current HEAD"
             detail="Start from the current commit"
-            onPress={() =>
-              setDraftLocation(draftId, { kind: 'worktree', base: 'head' })
-            }
+            onPress={() => choose({ kind: 'worktree', base: 'head' })}
           />
           <LocationRow
             label="Choose a branch"
             detail={selectedBranch ? `from ${selectedBranch}` : undefined}
             onPress={() => {
-              setDraftLocation(draftId, { kind: 'worktree', base: 'branch' });
               setShowBranches(true);
+              setBranchSearch('');
             }}
           />
-          {location.kind === 'worktree' && (
+          {(location.kind === 'worktree' || showBranches) && (
             <div className="draft-picker-subsection">
               <div className="draft-picker-section">Start from</div>
-              {location.base === 'branch' && showBranches && (
+              {showBranches && (
                 <>
                   <input
                     className="draft-picker-search"
@@ -256,12 +276,21 @@ export function DraftAgentPicker({
   const selectedValue = model
     ? modelOptionValue(model.provider, model.model)
     : '';
+  const close = () => setOpen(false);
   const updateModel = (next: ModelSelection) => {
     setDraftModel(draftId, {
       ...next,
       ...(model?.thinking ? { thinking: model.thinking } : {}),
     });
   };
+  useEffect(() => {
+    if (!open || typeof globalThis.addEventListener !== 'function') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    globalThis.addEventListener('keydown', onKeyDown);
+    return () => globalThis.removeEventListener?.('keydown', onKeyDown);
+  }, [open]);
   return (
     <div className="draft-picker draft-agent-picker">
       <Button
@@ -282,7 +311,16 @@ export function DraftAgentPicker({
           role="dialog"
           aria-label="Agent and thinking"
         >
-          <div className="draft-picker-heading">Agent</div>
+          <div className="draft-picker-heading">
+            <span>Agent</span>
+            <Button
+              type="button"
+              className="draft-picker-close"
+              onPress={close}
+            >
+              Done
+            </Button>
+          </div>
           {models.map((item) => {
             const value = modelOptionValue(item.provider, item.model);
             return (
@@ -305,10 +343,11 @@ export function DraftAgentPicker({
                   label={level}
                   detail={model?.thinking === level ? 'Selected' : undefined}
                   disabled={!model}
-                  onPress={() =>
-                    model &&
-                    setDraftModel(draftId, { ...model, thinking: level })
-                  }
+                  onPress={() => {
+                    if (!model) return;
+                    setDraftModel(draftId, { ...model, thinking: level });
+                    close();
+                  }}
                 />
               ))}
             </>

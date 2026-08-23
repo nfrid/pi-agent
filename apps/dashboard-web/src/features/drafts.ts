@@ -5,7 +5,8 @@ import { readComposerDraft, writeComposerDraft } from './composer/draft';
 export type DraftIsolation = 'worktree' | 'main';
 export type DraftLocation =
   | { kind: 'current' }
-  | { kind: 'worktree'; base: 'work' | 'head' | 'branch'; baseRef?: string }
+  | { kind: 'worktree'; base: 'work' | 'head' }
+  | { kind: 'worktree'; base: 'branch'; baseRef: string }
   | { kind: 'checkout'; checkoutId: string };
 
 export type DraftMetadata = {
@@ -51,15 +52,13 @@ function validLocation(value: unknown): value is DraftLocation {
     return (
       typeof location.checkoutId === 'string' && location.checkoutId.length > 0
     );
+  if (location.kind !== 'worktree') return false;
+  if (location.base === 'work' || location.base === 'head') return true;
   return (
-    location.kind === 'worktree' &&
-    (location.base === 'work' ||
-      location.base === 'head' ||
-      location.base === 'branch') &&
-    (location.baseRef === undefined ||
-      (typeof location.baseRef === 'string' &&
-        location.baseRef.length > 0 &&
-        location.baseRef.length <= 512))
+    location.base === 'branch' &&
+    typeof location.baseRef === 'string' &&
+    location.baseRef.trim().length > 0 &&
+    location.baseRef.length <= 512
   );
 }
 
