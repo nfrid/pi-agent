@@ -187,6 +187,9 @@ export function SessionView({
   const projectId = runtime?.projectId ?? data.metadata.projectId ?? undefined;
   const checkoutId =
     runtime?.checkoutId ?? data.metadata.checkoutId ?? undefined;
+  const checkout = snapshot.checkouts?.find(
+    (candidate) => candidate.id === checkoutId,
+  );
   return (
     <div
       className={`${sessionNavigation ? 'session-route-content' : 'session-layout'}${embedded ? ' embedded-session-layout' : ''}`}
@@ -270,6 +273,7 @@ export function SessionView({
             sessionId={id}
             projectId={projectId}
             checkoutId={checkoutId}
+            checkout={checkout}
             onPromptSubmitted={(text) => {
               cancelScrollRestore();
               store.optimisticallyTitleSession(id, text);

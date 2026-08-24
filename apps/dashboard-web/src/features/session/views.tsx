@@ -1,5 +1,6 @@
 import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type {
+  CheckoutSummary,
   RuntimeSnapshot,
   SessionIndexEntry,
 } from '@pi-dashboard/protocol';
@@ -20,6 +21,7 @@ export type SessionComposerProps = {
   sessionId: string;
   projectId?: string;
   checkoutId?: string;
+  checkout?: CheckoutSummary;
   onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 };
@@ -304,6 +306,7 @@ export function SessionControlLayer({
   sessionId,
   projectId,
   checkoutId,
+  checkout,
   onPromptSubmitted,
 }: {
   controlLayerRef: RefObject<HTMLDivElement | null>;
@@ -318,6 +321,7 @@ export function SessionControlLayer({
   sessionId: string;
   projectId: string | undefined;
   checkoutId: string | undefined;
+  checkout?: CheckoutSummary;
   onPromptSubmitted: (text: string) => void;
 }) {
   return (
@@ -352,6 +356,7 @@ export function SessionControlLayer({
         sessionId={sessionId}
         projectId={projectId}
         checkoutId={checkoutId}
+        checkout={checkout}
         onMessageSubmitted={onJumpToLatest}
         onPromptSubmitted={onPromptSubmitted}
       />

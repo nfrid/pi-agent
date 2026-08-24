@@ -57,8 +57,27 @@ vi.mock('./queue', () => ({
   }),
 }));
 vi.mock('./runtime-controls', () => ({
-  RuntimeModelControl: () => null,
-  RuntimeThinkingControl: () => null,
+  RuntimeAgentControl: () => null,
+}));
+vi.mock('./draft-pickers', () => ({
+  AgentPicker: (props: {
+    onModelChange: (model: { provider: string; model: string }) => void;
+    onThinkingChange: (level: string) => void;
+  }) => (
+    <>
+      <button
+        type="button"
+        aria-label="Choose agent"
+        onClick={() => props.onModelChange({ provider: 'test', model: 'fast' })}
+      />
+      <button
+        type="button"
+        aria-label="Choose thinking"
+        onClick={() => props.onThinkingChange('high')}
+      />
+    </>
+  ),
+  ThreadLocationIndicator: () => <span>Thread checkout</span>,
 }));
 vi.mock('./shell', () => ({
   ComposerShell: (props: Record<string, unknown>) => (
@@ -242,9 +261,11 @@ describe('Composer dormant resume transition', () => {
       );
     });
 
-    expect(renderer.root.findByProps({ 'aria-label': 'Model' })).toBeTruthy();
     expect(
-      renderer.root.findByProps({ 'aria-label': 'Thinking level' }),
+      renderer.root.findByProps({ 'aria-label': 'Choose agent' }),
+    ).toBeTruthy();
+    expect(
+      renderer.root.findByProps({ 'aria-label': 'Choose thinking' }),
     ).toBeTruthy();
     expect(
       renderer.root.findByProps({
@@ -253,11 +274,11 @@ describe('Composer dormant resume transition', () => {
     ).toBeTruthy();
     await act(async () => {
       renderer.root
-        .findByProps({ 'aria-label': 'Model' })
-        .props.onChange({ target: { value: 'test/fast' } });
+        .findByProps({ 'aria-label': 'Choose agent' })
+        .props.onClick();
       renderer.root
-        .findByProps({ 'aria-label': 'Thinking level' })
-        .props.onChange({ target: { value: 'high' } });
+        .findByProps({ 'aria-label': 'Choose thinking' })
+        .props.onClick();
     });
     await act(async () => {
       renderer.root.findByProps({ children: 'Send' }).props.onClick();

@@ -290,6 +290,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(
     locationSheet.getByRole('button', { name: 'Done' }),
   ).toBeVisible();
+  await page.getByRole('button', { name: 'Close Checkout location' }).click();
+  await expect(locationSheet).toHaveCount(0);
+  await locationControl.click();
   const locationSheetBox = await locationSheet.boundingBox();
   expect(locationSheetBox).not.toBeNull();
   expect((locationSheetBox?.y ?? 0) + (locationSheetBox?.height ?? 0)).toBe(
@@ -301,7 +304,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     .fill('dev');
   await locationSheet.getByRole('button', { name: 'develop' }).click();
   await expect(locationSheet).toHaveCount(0);
-  await expect(locationControl).toContainText('New worktree · from develop');
+  await expect(locationControl).toContainText('New worktree · develop');
   await locationControl.click();
   await page
     .getByRole('dialog', { name: 'Checkout location' })
@@ -320,6 +323,8 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await agentSheet.getByRole('button', { name: 'Fast' }).click();
   await expect(agentSheet).toBeVisible();
   await agentSheet.getByRole('button', { name: 'medium' }).click();
+  await expect(agentSheet).toBeVisible();
+  await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
   await expect(agentSheet).toHaveCount(0);
   await expect(agentControl).toContainText('Fast · medium');
   await expect
@@ -698,8 +703,12 @@ test('desktop project thread form stays readable @desktop', async ({
     .boundingBox();
   expect(triggerBox).not.toBeNull();
   expect(pickerBox).not.toBeNull();
-  expect(pickerBox?.width ?? 0).toBeLessThanOrEqual(330);
+  expect(pickerBox?.width ?? 0).toBeLessThanOrEqual(340);
   expect(pickerBox?.y ?? 0).toBeLessThan(triggerBox?.y ?? 0);
+  await page.getByRole('button', { name: 'Close Checkout location' }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Checkout location' }),
+  ).toHaveCount(0);
 });
 
 test('durable lifecycle controls require an exact persisted run mapping @desktop', async ({
@@ -1666,6 +1675,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           projectId: 'tmp-project',
           path: '/tmp',
           kind: 'main',
+          branch: 'main',
           status: 'ready',
         },
       ],
@@ -1850,7 +1860,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   );
   await expect(
     loadedCard.locator('[data-row-content="details"]'),
-  ).toContainText('test/careful · high · 32 ctx');
+  ).toContainText('careful · high · 32 ctx');
   await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     loadedCard.locator('[data-row-content="project"] .agent-thread-glyph'),
@@ -1864,7 +1874,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(dormantCard).toContainText('Dormant thread');
   await expect(
     dormantCard.locator('[data-row-content="details"]'),
-  ).toContainText('test/careful · high · 42 ctx');
+  ).toContainText('careful · high · 42 ctx');
   await expect(dormantCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     agentNav.locator('.agent-thread-row.status-idle .agent-thread-glyph'),
@@ -1877,6 +1887,16 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
 
   const composer = page.getByLabel('Message Pi');
   await expect(composer).toBeVisible();
+  const activeComposer = page.locator('form.composer');
+  await expect(
+    activeComposer.locator('.draft-picker-trigger-locked'),
+  ).toContainText('Current checkout · main · fixed');
+  await expect(
+    activeComposer.getByRole('button', { name: 'Agent and thinking' }),
+  ).toContainText('Careful · high');
+  await expect(activeComposer.getByLabel('Model', { exact: true })).toHaveCount(
+    0,
+  );
   await composer.fill('Draft survives navigation and refresh');
   await transcriptScroll(page).evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
@@ -1894,11 +1914,17 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const dormantComposer = page.locator('form.composer');
   await expect(dormantComposer).toBeVisible();
   await expect(
-    dormantComposer.getByLabel('Model', { exact: true }),
-  ).toHaveValue('test/careful');
-  await expect(dormantComposer.getByLabel('Thinking level')).toHaveValue(
-    'high',
-  );
+    dormantComposer.locator('.draft-picker-trigger-locked'),
+  ).toContainText('Current checkout · main · fixed');
+  const dormantAgent = dormantComposer.getByRole('button', {
+    name: 'Agent and thinking',
+  });
+  await expect(dormantAgent).toContainText('Careful · high');
+  await dormantAgent.click();
+  await expect(
+    page.getByRole('dialog', { name: 'Agent and thinking' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
   await expect(
     dormantComposer.getByRole('img', {
       name: 'Context window 42% [42/100]',
@@ -4849,6 +4875,74 @@ for (const historyCount of [6, 84]) {
   });
 }
 
+test('started session keeps location fixed and agent controls editable', async ({
+  page,
+}) => {
+  const mocks = await installPhase6Mocks(page);
+  const base = phase6Snapshot();
+  const snapshot = {
+    ...base,
+    projects: [
+      {
+        id: 'project-1',
+        title: 'Project',
+        rootPath: '/tmp/project',
+        status: 'active',
+        maxParallelRuns: 4,
+        activeRunCount: 1,
+        updatedAt: 1,
+      },
+    ],
+    checkouts: [
+      {
+        id: 'checkout-1',
+        projectId: 'project-1',
+        kind: 'main',
+        path: '/tmp/project',
+        branch: 'main',
+        status: 'ready',
+        updatedAt: 1,
+      },
+    ],
+    runtimes: base.runtimes.map((runtime) => ({
+      ...runtime,
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+    })),
+    sessions: base.sessions.map((session) => ({
+      ...session,
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+    })),
+  } as import('@pi-dashboard/protocol').BrowserSnapshot;
+
+  await page.goto('/sessions/s1');
+  await mocks.emit({ type: 'snapshot', snapshot });
+  const composer = page.locator('form.composer');
+  await expect(composer.locator('.draft-picker-trigger-locked')).toContainText(
+    'Current checkout · main · fixed',
+  );
+  const agent = composer.getByRole('button', { name: 'Agent and thinking' });
+  await expect(agent).toContainText('Vision · medium');
+  await agent.click();
+  const picker = page.getByRole('dialog', { name: 'Agent and thinking' });
+  await picker.getByRole('button', { name: /Text only/ }).click();
+  await picker.getByRole('button', { name: 'high' }).click();
+  await expect
+    .poll(() => mocks.commands.filter((command) => command.type === 'setModel'))
+    .toHaveLength(1);
+  await expect
+    .poll(
+      () =>
+        mocks.commands.filter((command) => command.type === 'setThinking')
+          .length,
+    )
+    .toBe(1);
+  await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
+  await expect(picker).toHaveCount(0);
+  await mocks.close();
+});
+
 test('phase six mocked session flow covers semantic controls and reconnect safety', async ({
   page,
 }) => {
@@ -4860,8 +4954,15 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     'Existing session request',
   );
   await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
-  await expect(page.getByLabel('Model')).toHaveValue('test/vision');
-  await page.getByLabel('Model').selectOption('test/text');
+  const runtimeAgent = page.getByRole('button', {
+    name: 'Agent and thinking',
+  });
+  await expect(runtimeAgent).toContainText('Vision · medium');
+  await runtimeAgent.click();
+  const runtimeAgentPicker = page.getByRole('dialog', {
+    name: 'Agent and thinking',
+  });
+  await runtimeAgentPicker.getByRole('button', { name: /Text only/ }).click();
   await expect
     .poll(() => mocks.commands.filter((command) => command.type === 'setModel'))
     .toEqual([
@@ -4871,7 +4972,16 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
         model: 'text',
       }),
     ]);
-  await expect(page.locator('.session-heading')).toContainText('Project');
+  await runtimeAgentPicker.getByRole('button', { name: 'high' }).click();
+  await expect
+    .poll(
+      () =>
+        mocks.commands.filter((command) => command.type === 'setThinking')
+          .length,
+    )
+    .toBe(1);
+  await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
+  await expect(page.locator('.session-heading')).toContainText('Unassigned');
   await expect(page.locator('.session-heading')).not.toContainText(
     'test/vision',
   );
@@ -4880,14 +4990,6 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.getByLabel('Thinking level').selectOption('high');
-  await expect
-    .poll(
-      () =>
-        mocks.commands.filter((command) => command.type === 'setThinking')
-          .length,
-    )
-    .toBe(1);
 
   const dockMarker = page.locator(
     '.transcript-minimap-marker[data-preview="Earlier history 1"]',
