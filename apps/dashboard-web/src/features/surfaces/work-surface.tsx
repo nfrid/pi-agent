@@ -26,6 +26,12 @@ export function WorkSurface({
   drawerClassName = 'surface-drawer work-surface-drawer',
   headerStats,
   paused = false,
+  drawerTitle,
+  drawerEyebrow,
+  drawerSummary,
+  drawerHeaderContent,
+  drawerContent,
+  onDrawerClose,
   children,
 }: {
   title: string;
@@ -37,6 +43,12 @@ export function WorkSurface({
   drawerClassName?: string;
   headerStats?: ReactNode;
   paused?: boolean;
+  drawerTitle?: string;
+  drawerEyebrow?: string;
+  drawerSummary?: ReactNode;
+  drawerHeaderContent?: ReactNode;
+  drawerContent?: ReactNode;
+  onDrawerClose?: () => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -80,17 +92,20 @@ export function WorkSurface({
         </AriaButton>
       </article>
       <SurfaceDrawer
-        title={title}
-        eyebrow={label}
-        hideTitle
-        headerSummary={summary}
+        title={drawerTitle ?? title}
+        eyebrow={drawerEyebrow ?? label}
+        hideTitle={!drawerTitle}
+        headerSummary={drawerSummary ?? summary}
         className={drawerClassName}
-        headerContent={headerStats}
+        headerContent={drawerHeaderContent ?? headerStats}
         isOpen={open}
         paused={paused}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          setOpen(false);
+          onDrawerClose?.();
+        }}
       >
-        <div className="work-surface-content">{children}</div>
+        <div className="work-surface-content">{drawerContent ?? children}</div>
       </SurfaceDrawer>
     </>
   );

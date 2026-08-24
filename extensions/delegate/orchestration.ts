@@ -585,8 +585,25 @@ export async function prepareDelegateWorkflowLaunch(
     throw new Error(
       'Combined delegate handoff evidence exceeds the workflow input limit.',
     );
+  const inputEvidence = workflow.inputs.map((input) => ({
+    identity: input.identity,
+    kind: input.kind,
+    label: input.label,
+    ...(input.evidence === undefined ? {} : { content: input.evidence }),
+    ...(input.branch
+      ? {
+          branch: {
+            branch: input.branch.branch,
+            worktreePath: input.branch.worktreePath,
+            base: input.branch.workBase,
+            headCommit: input.branch.headCommit,
+          },
+        }
+      : {}),
+  }));
   const finalPlan = {
     ...resolvedTask.plan,
+    ...(inputEvidence.length ? { inputEvidence } : {}),
     ...(handoffParts.length ? { handoffText: handoffParts.join('\n\n') } : {}),
   };
   let prepared: PreparedDelegateTask;

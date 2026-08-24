@@ -4,7 +4,12 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { resolveDelegateCwd } from './cwd';
 import { assertContinuationFields, buildDelegatePlans } from './plans';
-import { createDelegateSession, removeDelegateSession } from './session';
+import {
+  createDelegateSession,
+  removeDelegateSession,
+  resolveDelegateSession,
+  updateDelegateSessionScope,
+} from './session';
 import { createWorkflowModel } from './workflow-model';
 
 const config = {
@@ -82,6 +87,7 @@ describe('delegate cwd resolution', () => {
     const session = createDelegateSession({
       cwd: '../persisted-relative',
       name: 'continued',
+      scope: ['old-area'],
       routing: {
         route: 'quick',
         provider: 'test',
@@ -102,6 +108,35 @@ describe('delegate cwd resolution', () => {
         () => '{}',
       );
       expect(built.tasks[0]?.plan.requestedCwd).toBe('../persisted-relative');
+      const replaced = buildDelegatePlans(
+        {
+          task: 'narrow continuation',
+          continuation: session.token,
+          route: 'quick',
+          scope: ['new-area'],
+        },
+        ctx,
+        config,
+        () => '{}',
+      );
+      expect(replaced.tasks[0]?.plan.scope).toEqual(['new-area']);
+      expect(
+        updateDelegateSessionScope(session.token, ['new-area'])?.scope,
+      ).toEqual(['new-area']);
+      expect(resolveDelegateSession(session.token)?.scope).toEqual([
+        'new-area',
+      ]);
+      const inherited = buildDelegatePlans(
+        {
+          task: 'inherit continuation',
+          continuation: session.token,
+          route: 'quick',
+        },
+        ctx,
+        config,
+        () => '{}',
+      );
+      expect(inherited.tasks[0]?.plan.scope).toEqual(['new-area']);
     } finally {
       removeDelegateSession(session);
       rmSync(agentDir, { recursive: true, force: true });
@@ -110,7 +145,7 @@ describe('delegate cwd resolution', () => {
 });
 
 describe('delegate continuation parameter preflight', () => {
-  test('rejects inherited replacements without advancing the lineage', () => {
+  test('rejects immutable replacements but permits advisory scope replacement', () => {
     const model = createWorkflowModel();
     model.createFresh('lineage');
 
@@ -118,11 +153,18 @@ describe('delegate continuation parameter preflight', () => {
       assertContinuationFields(
         'lineage',
         { cwd: '/tmp/other-project' },
-        'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
+        'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
       ),
     ).toThrow(
-      'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
+      'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
     );
+    expect(() =>
+      assertContinuationFields(
+        'lineage',
+        { scope: ['new-area'] },
+        'scope may be replaced',
+      ),
+    ).not.toThrow();
     expect(model.snapshot().attempts.map(({ identity }) => identity)).toEqual([
       'lineage@1',
     ]);

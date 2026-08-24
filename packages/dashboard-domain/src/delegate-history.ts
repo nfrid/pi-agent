@@ -13,6 +13,8 @@ import {
   MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
   MAX_DELEGATE_HISTORY_DETAIL_TEXT,
   MAX_DELEGATE_HISTORY_GROUPS,
+  MAX_DELEGATE_HISTORY_INPUT_EVIDENCE,
+  MAX_DELEGATE_HISTORY_PROMPT,
   MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
   MAX_DELEGATE_HISTORY_SUMMARY_BYTES,
   MAX_DELEGATE_HISTORY_TASK,
@@ -300,6 +302,116 @@ function boundedActivity(
   return activity;
 }
 
+function validHistoryIsolation(
+  value: unknown,
+): 'shared' | 'worktree' | undefined {
+  return value === 'shared' || value === 'worktree' ? value : undefined;
+}
+
+function safeDisplayString(
+  value: unknown,
+  max: number,
+  budget: DetailBudget,
+): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    [...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    return undefined;
+  return boundedString(value, max, budget);
+}
+
+function publicWorktree(
+  value: unknown,
+  budget: DetailBudget,
+): RecordValue | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: RecordValue = {};
+  for (const [key, max] of [
+    ['branch', 512],
+    ['worktreePath', 4096],
+    ['repositoryRoot', 4096],
+    ['baseHead', 256],
+    ['baseRef', 512],
+    ['workBase', 256],
+  ] as const) {
+    const text = safeDisplayString(value[key], max, budget);
+    if (text) result[key] = text;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function publicInputEvidence(
+  run: RecordValue,
+  budget: DetailBudget,
+): RecordValue[] | undefined {
+  const source = Array.isArray(run.inputEvidence)
+    ? run.inputEvidence
+    : isRecord(run.workflow) && Array.isArray(run.workflow.inputs)
+      ? run.workflow.inputs
+      : undefined;
+  if (!source) return undefined;
+  const result: RecordValue[] = [];
+  for (const input of source.slice(0, 8)) {
+    if (!isRecord(input)) continue;
+    const identity = safeDisplayString(input.identity, 80, budget);
+    const kind =
+      input.kind === 'report' ||
+      input.kind === 'handoff' ||
+      input.kind === 'branch' ||
+      input.kind === 'metadata'
+        ? input.kind
+        : Array.isArray(input.include) &&
+            (input.include[0] === 'report' ||
+              input.include[0] === 'handoff' ||
+              input.include[0] === 'branch' ||
+              input.include[0] === 'metadata')
+          ? input.include[0]
+          : 'report';
+    const label =
+      safeDisplayString(input.label, 120, budget) ??
+      safeDisplayString(input.node, 80, budget);
+    if (!identity || !kind || !label) continue;
+    const content = safeDisplayString(
+      input.content ?? input.evidence,
+      MAX_DELEGATE_HISTORY_INPUT_EVIDENCE,
+      budget,
+    );
+    const branch = isRecord(input.branch)
+      ? publicInputBranch(input.branch, budget)
+      : undefined;
+    result.push({
+      identity,
+      kind,
+      label,
+      ...(content ? { content } : {}),
+      ...(branch ? { branch } : {}),
+    });
+    if (budget.remaining <= 0) break;
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+function publicInputBranch(
+  value: RecordValue,
+  budget: DetailBudget,
+): RecordValue | undefined {
+  const result: RecordValue = {};
+  for (const [key, max] of [
+    ['branch', 512],
+    ['worktreePath', 4096],
+    ['base', 256],
+    ['headCommit', 256],
+  ] as const) {
+    const text = safeDisplayString(value[key], max, budget);
+    if (text) result[key] = text;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function publicDetails(run: RecordValue): DelegateHistoryDetails {
   const projected = (run as ProjectedRun)[PROJECTED_DETAILS];
   if (projected) return projected;
@@ -310,6 +422,50 @@ function publicDetails(run: RecordValue): DelegateHistoryDetails {
   const details: RecordValue = {};
   const task = boundedString(run.task, MAX_DELEGATE_HISTORY_TASK, budget);
   if (task) details.task = task;
+  const setup: RecordValue = {};
+  const cwd = safeDisplayString(run.cwd, 4096, budget);
+  const isolation = validHistoryIsolation(run.isolation);
+  const worktree = publicWorktree(run.worktree, budget);
+  if (cwd) setup.cwd = cwd;
+  if (isolation) setup.isolation = isolation;
+  if (worktree) setup.worktree = worktree;
+  if (Object.keys(setup).length > 0) details.setup = setup;
+  const runConfig: RecordValue = {};
+  const scope = Array.isArray(run.scope)
+    ? run.scope.slice(0, 128).flatMap((value) => {
+        const text = safeDisplayString(value, 4096, budget);
+        return text ? [text] : [];
+      })
+    : undefined;
+  const inputEvidence = publicInputEvidence(run, budget);
+  const inputIdentities = new Set(
+    (inputEvidence ?? []).map((input) => input.identity),
+  );
+  const workflow = isRecord(run.workflow) ? run.workflow : undefined;
+  const after = Array.isArray(workflow?.dependencies)
+    ? workflow.dependencies.flatMap((value) => {
+        const text = safeDisplayString(value, 80, budget);
+        return text && !inputIdentities.has(text) ? [text] : [];
+      })
+    : undefined;
+  if (scope?.length) runConfig.scope = scope;
+  if (after?.length) runConfig.after = after;
+  if (inputEvidence) runConfig.inputs = inputEvidence;
+  const contextNote = safeDisplayString(
+    run.contextNote,
+    MAX_DELEGATE_HISTORY_DETAIL_TEXT,
+    budget,
+  );
+  if (contextNote) runConfig.parentContextNote = contextNote;
+  if (run.refreshSource === 'wip' || run.refreshSource === 'head')
+    runConfig.refreshSource = run.refreshSource;
+  const renderedPrompt = safeDisplayString(
+    run.renderedPrompt,
+    MAX_DELEGATE_HISTORY_PROMPT,
+    budget,
+  );
+  if (Object.keys(runConfig).length > 0) details.runConfig = runConfig;
+  if (renderedPrompt) details.renderedPrompt = renderedPrompt;
   const response = boundedString(
     assistantResponse(run),
     MAX_DELEGATE_HISTORY_DETAIL_TEXT,
@@ -355,10 +511,15 @@ function publicDetails(run: RecordValue): DelegateHistoryDetails {
     }
   }
   if (Array.isArray(run.warnings)) {
-    details.warnings = run.warnings.slice(0, 32).flatMap((warning) => {
+    const warnings = run.warnings.slice(0, 32).flatMap((warning) => {
       const text = boundedString(warning, 512, budget);
       return text ? [text] : [];
     });
+    details.warnings = warnings;
+    if (warnings.length > 0) {
+      const existing = isRecord(details.runConfig) ? details.runConfig : {};
+      details.runConfig = { ...existing, warnings };
+    }
     if (run.warnings.length > 32) budget.truncated = true;
   }
   details.truncated = budget.truncated;
@@ -594,6 +755,8 @@ function projectRun(
   const context = validContext(run.context);
   if (context) projected.context = context;
   if (run.allowWrites === true) projected.allowWrites = true;
+  if (run.isolation === 'shared' || run.isolation === 'worktree')
+    projected.isolation = run.isolation;
   const hasError =
     typeof run.errorMessage === 'string' && run.errorMessage.trim().length > 0;
   if (hasError) projected.errorMessage = 'error';
@@ -1589,6 +1752,11 @@ function invocation(
   const task = stringValue(occurrence.run.task, MAX_DELEGATE_HISTORY_TASK);
   const allowWrites =
     occurrence.run.allowWrites === true || occurrence.job?.allowWrites === true;
+  const isolation =
+    occurrence.run.isolation === 'shared' ||
+    occurrence.run.isolation === 'worktree'
+      ? occurrence.run.isolation
+      : undefined;
   const wakeSource = isRecord(occurrence.run.wake)
     ? occurrence.run.wake
     : undefined;
@@ -1670,6 +1838,7 @@ function invocation(
     ...(route === undefined ? {} : { route }),
     ...(context === undefined ? {} : { context }),
     allowWrites,
+    ...(isolation === undefined ? {} : { isolation }),
     ...(workflow
       ? { workflow: workflow as DelegateHistoryInvocation['workflow'] }
       : {}),
@@ -1718,6 +1887,9 @@ function aggregateHistoryGroup(
     ...(current.route === undefined ? {} : { route: current.route }),
     ...(current.context === undefined ? {} : { context: current.context }),
     allowWrites: current.allowWrites,
+    ...(current.isolation === undefined
+      ? {}
+      : { isolation: current.isolation }),
     ...(current.workflow ? { workflow: current.workflow } : {}),
     ...(current.wake ? { wake: current.wake } : {}),
     runCount: runs.length,

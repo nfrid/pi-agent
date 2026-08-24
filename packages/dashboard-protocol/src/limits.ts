@@ -22,3 +22,7 @@ export const MAX_DELEGATE_HISTORY_TASK = 20_000;
 export const MAX_DELEGATE_HISTORY_DETAIL_TEXT = 8_000;
 export const MAX_DELEGATE_HISTORY_DETAIL_ENTRIES = 128;
 export const MAX_DELEGATE_HISTORY_DETAIL_BYTES = 512 * 1024;
+/** Exact bounded prompt retained for one selected delegate invocation. */
+export const MAX_DELEGATE_HISTORY_PROMPT = 100_000;
+/** Aggregate bounded upstream evidence retained for one selected invocation. */
+export const MAX_DELEGATE_HISTORY_INPUT_EVIDENCE = 48 * 1024;

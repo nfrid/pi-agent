@@ -11,5 +11,5 @@
 - **Fan-out/fan-in:** schedule two or more independent scans with exact routes; schedule `synthesis` after them with symbolic report `inputs`; register one wake for `synthesis` and settle.
 - **Implementation → review:** schedule writable `impl`; schedule `review` after `impl` with `inputs: [{ "node": "impl", "include": ["report", "branch"] }]` and the exact symbolic branch reference; wake on `review` and the branch decision.
 - **Hidden exploration:** give `explore` a named question or repository area; pipe its symbolic report to a focused `plan` or `impl`; wake only on the focused conclusion. Do not dump exploration into the parent context.
-- **Continuation:** use `continue: "impl"` after review feedback, pipe the reviewer report with `inputs`, and let the runtime preserve the original route, scope, worktree, and write access.
+- **Continuation:** use `continue: "impl"` after review feedback, pipe the reviewer report with `inputs`, and let the runtime preserve the original route, worktree, and write access. Omit `scope` to inherit the latest scope; provide `scope` to replace the advisory scope for this run and future continuations.
 - **Do not delegate:** keep short edits, obvious check loops, and tasks requiring repeated parent judgement in the parent.

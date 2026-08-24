@@ -202,23 +202,30 @@ export function SessionHeader({
   sessions: readonly SessionIndexEntry[];
 }) {
   const title = sessionDisplayTitle(data, entries);
-  const { parent, children } = sessionRelationships(id, data, sessions);
+  const { parent } = sessionRelationships(id, data, sessions);
   return (
     <>
       <SessionHeaderFrame
         projectLabel={projectName}
         projectId={projectId}
         title={
-          data.sessionKind === 'delegate' ? (
-            <h1>{title}</h1>
-          ) : (
-            <InlineSessionRename
-              id={id}
-              title={title}
-              store={store}
-              onRenamed={(name) => store.updateSessionMetadata(id, { name })}
-            />
-          )
+          <div className="session-title-with-parent">
+            {data.sessionKind === 'delegate' ? (
+              <h1>{title}</h1>
+            ) : (
+              <InlineSessionRename
+                id={id}
+                title={title}
+                store={store}
+                onRenamed={(name) => store.updateSessionMetadata(id, { name })}
+              />
+            )}
+            {parent && (
+              <span className="session-parent-link">
+                ← Parent: <SessionLink session={parent} />
+              </span>
+            )}
+          </div>
         }
         status={status}
         statusLabel={statusLabel}
@@ -237,26 +244,6 @@ export function SessionHeader({
           </button>
         }
       />
-      {(parent || children.length > 0) && (
-        <div className="session-delegate-links">
-          {parent && (
-            <span>
-              Parent: <SessionLink session={parent} />
-            </span>
-          )}
-          {children.length > 0 && (
-            <span>
-              Delegates:{' '}
-              {children.map((child, index) => (
-                <span key={child.id}>
-                  {index > 0 ? ', ' : ''}
-                  <SessionLink session={child} />
-                </span>
-              ))}
-            </span>
-          )}
-        </div>
-      )}
     </>
   );
 }

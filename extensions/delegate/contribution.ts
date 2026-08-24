@@ -244,6 +244,10 @@ export const DelegateStatusSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    /** Immutable workspace mode; absent only on legacy live records. */
+    isolation: Type.Optional(
+      Type.Union([Type.Literal('shared'), Type.Literal('worktree')]),
+    ),
     pauseState: Type.Optional(
       Type.Union([Type.Literal('pausing'), Type.Literal('paused')]),
     ),

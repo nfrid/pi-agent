@@ -5,6 +5,7 @@ import type {
   DelegateContext,
   DelegatedActivity,
   DelegatedRun,
+  DelegateIsolation,
   DelegateLifecycleProjection,
   DelegateRunState,
 } from './types';
@@ -97,6 +98,7 @@ export interface DelegateStatusSnapshot {
   route?: string;
   context?: DelegateContext;
   allowWrites: boolean;
+  isolation?: DelegateIsolation;
   activity?: DelegatedActivity;
   /** Invocation count within one continuation lineage. */
   runCount?: number;
@@ -350,6 +352,7 @@ export class DelegateStatusStore {
         route: run.routing?.route,
         context: run.context,
         allowWrites: run.allowWrites === true,
+        isolation: run.isolation,
         activity: displayActivity(run, undefined),
         transcript: transcript(run, inputRun.activities),
         lifecycle: cloneDelegateLifecycle(run.lifecycle),
@@ -384,6 +387,7 @@ export class DelegateStatusStore {
     record.route = run.routing?.route;
     record.context = run.context;
     record.allowWrites = run.allowWrites === true;
+    record.isolation = run.isolation;
     record.activity = displayActivity(run, record.activity);
     record.transcript = transcript(run, inputRun.activities);
     record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
@@ -413,6 +417,7 @@ export class DelegateStatusStore {
       record.route = run.routing?.route;
       record.context = run.context;
       record.allowWrites = run.allowWrites === true;
+      record.isolation = run.isolation;
       record.activity = displayActivity(run, record.activity);
       record.transcript = transcript(run, inputRun.activities);
       record.lifecycle = cloneDelegateLifecycle(run.lifecycle);

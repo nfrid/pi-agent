@@ -114,7 +114,10 @@ export interface RunDelegateOptions {
   contextNote?: string;
   /** Resolved upstream evidence, never included in parent-visible run details. */
   handoffText?: string;
+  /** Bounded evidence metadata used to explain the resolved prompt inputs. */
+  inputEvidence?: readonly import('./types').DelegateInputEvidence[];
   scope?: string[];
+  refreshSource?: import('./worktree/model').WorktreeBase;
   continuation?: string;
   resuming?: boolean;
   timeoutMs: number;
@@ -230,6 +233,8 @@ export async function runDelegate(
     contextNote: options.contextNote,
     scope: options.scope,
     continuation: options.continuation,
+    inputEvidence: options.inputEvidence,
+    refreshSource: options.refreshSource,
   });
   const control =
     options.control ??
@@ -267,6 +272,10 @@ export async function runDelegate(
     const args = options.observeExisting
       ? []
       : buildChildArgs(options, options.sessionPath);
+    if (!options.observeExisting) {
+      const renderedPrompt = args.at(-1);
+      if (renderedPrompt) run.renderedPrompt = renderedPrompt;
+    }
     const dashboardEnv = options.hosted
       ? Object.fromEntries(
           ['PI_DASHBOARD_SOCKET', 'PI_DASHBOARD_STATE_DIR']

@@ -123,7 +123,6 @@ export function assertContinuationFields(
     continuation &&
     (fields.cwd !== undefined ||
       fields.context !== undefined ||
-      fields.scope !== undefined ||
       fields.from !== undefined ||
       fields.worktreePath !== undefined)
   )
@@ -226,8 +225,8 @@ export function buildDelegatePlans(
       input.continuation,
       input,
       parallel
-        ? 'A continuation task cannot replace cwd, context, scope, or base.'
-        : 'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
+        ? 'A continuation task cannot replace cwd, context, or base.'
+        : 'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
     );
     const resumed = input.continuation
       ? resolveDelegateSession(input.continuation)
@@ -262,13 +261,12 @@ export function buildDelegatePlans(
     namedTasks.some((task) => task.resumed) &&
     (shared.cwd !== undefined ||
       shared.context !== undefined ||
-      shared.scope !== undefined ||
       shared.from !== undefined ||
       shared.refresh !== undefined ||
       shared.worktreePath !== undefined)
   )
     invalidParams(
-      'Parallel continuations reuse their original cwd, history, scope, and base; do not provide top-level replacements.',
+      'Parallel continuations reuse their original cwd, history, and base; do not provide top-level replacements.',
     );
 
   namedTasks = namedTasks.map((task) => {
@@ -302,7 +300,9 @@ export function buildDelegatePlans(
     requestedCwd: task.resumed
       ? task.resumed.cwd
       : resolveDelegateCwd(task.input.cwd ?? shared.cwd, ctx.cwd),
-    scope: task.input.scope ?? shared.scope,
+    // A continuation may replace the advisory scope. When omitted, inherit the
+    // latest scope persisted on the child session.
+    scope: task.input.scope ?? shared.scope ?? task.resumed?.scope,
     worktreePath: task.input.worktreePath ?? shared.worktreePath,
   }));
 
