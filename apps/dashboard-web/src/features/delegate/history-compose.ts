@@ -15,6 +15,7 @@ import type {
   DelegatedActivity,
   DelegateLifecycleReason,
 } from '../../../../../extensions/delegate/types';
+import { delegateSettlementKey } from './runtime-surfaces';
 
 /** Extra inspection facts which are only present on the persisted adapter. */
 export type DelegateInspectionStatus = DelegateStatus & {
@@ -309,6 +310,16 @@ export function isActiveDelegateStatus(row: DelegateStatus): boolean {
 export function delegateHistorySettledRunIds(
   history: DelegateHistoryResponse | undefined,
 ): ReadonlySet<string> {
+  const workflowOwners = new Map<string, Set<string>>();
+  for (const group of history?.groups ?? []) {
+    for (const run of group.runs) {
+      const facts = workflowFacts(run);
+      if (!facts.identity) continue;
+      const owners = workflowOwners.get(facts.identity) ?? new Set<string>();
+      owners.add(facts.owner ?? '');
+      workflowOwners.set(facts.identity, owners);
+    }
+  }
   return new Set(
     history?.groups.flatMap((group) => {
       const groupSettled =
@@ -319,7 +330,15 @@ export function delegateHistorySettledRunIds(
             (run.state !== 'queued' && run.state !== 'running') ||
             (groupSettled && run.runId === group.runId),
         )
-        .map((run) => run.runId);
+        .flatMap((run) => {
+          const identity = workflowFacts(run).identity;
+          return [
+            run.runId,
+            ...(identity && (workflowOwners.get(identity)?.size ?? 0) <= 1
+              ? [delegateSettlementKey(run)]
+              : []),
+          ];
+        });
     }) ?? [],
   );
 }
@@ -422,18 +441,17 @@ function groupMatchesLive(
   );
 }
 
-function workflowPlaceholderIndex(
+function workflowIdentityIndex(
   runs: readonly DelegateCompositeRun[],
   live: DelegateStatus,
 ): number {
-  const identity = liveWorkflowFacts(live).identity;
-  if (!identity) return -1;
+  const liveFacts = liveWorkflowFacts(live);
+  if (!liveFacts.identity) return -1;
   return runs.findIndex((run) => {
     const facts = workflowFacts(run.row);
     return (
-      facts.identity === identity &&
-      (run.row.lineageId === run.row.workflow?.logicalId ||
-        run.row.lineageId.startsWith('workflow:'))
+      facts.identity === liveFacts.identity &&
+      (!facts.owner || !liveFacts.owner || facts.owner === liveFacts.owner)
     );
   });
 }
@@ -441,7 +459,6 @@ function workflowPlaceholderIndex(
 function groupModel(
   group: DelegateHistoryGroup,
   live: DelegateStatus | undefined,
-  replacePlaceholder = false,
 ): DelegateCompositeGroup {
   const durableRuns: DelegateCompositeRun[] = group.runs.map((run) => {
     const row = delegateHistoryInvocationToStatus(run);
@@ -461,12 +478,12 @@ function groupModel(
           (live.jobId !== undefined && run.row.jobId === live.jobId),
       )
     : -1;
-  const livePlaceholderIndex =
-    live && replacePlaceholder
-      ? workflowPlaceholderIndex(durableRuns, live)
+  const liveWorkflowIndex =
+    live && liveDurableIndex < 0
+      ? workflowIdentityIndex(durableRuns, live)
       : -1;
   const matchedLiveIndex =
-    livePlaceholderIndex >= 0 ? livePlaceholderIndex : liveDurableIndex;
+    liveDurableIndex >= 0 ? liveDurableIndex : liveWorkflowIndex;
   const liveRow = live
     ? augmentLiveStatus(
         live,
@@ -481,7 +498,9 @@ function groupModel(
   if (incompleteLiveRow) {
     if (matchedLiveIndex >= 0) {
       runs[matchedLiveIndex] = {
-        id: incompleteLiveRow.runId,
+        // Keep the durable ID as the selected-run/detail lookup authority.
+        // The overlaid row still carries the live runtime ID for presentation.
+        id: runs[matchedLiveIndex]?.id ?? incompleteLiveRow.runId,
         label: '',
         persisted: true,
         live: true,
@@ -498,7 +517,9 @@ function groupModel(
     }
   }
   const currentIndex = incompleteLiveRow
-    ? runs.findIndex((run) => run.id === incompleteLiveRow.runId)
+    ? matchedLiveIndex >= 0
+      ? matchedLiveIndex
+      : runs.length - 1
     : runs.length - 1;
   const labeledRuns = runs.map((run, index) => ({
     ...run,
@@ -585,7 +606,6 @@ export function composeDelegateHistory(
   );
   for (const group of durableGroups) {
     let live = liveByLineage.get(group.lineageId);
-    let replacePlaceholder = false;
     if (!live && groupWorkflowFacts(group).identity) {
       const candidates = [...liveByLineage.values()].filter((candidate) =>
         groupMatchesLive(group, candidate),
@@ -600,11 +620,8 @@ export function composeDelegateHistory(
           ? candidate
           : undefined;
       live = uniqueCandidate;
-      replacePlaceholder = live !== undefined;
     }
-    groups.push(
-      annotateWake(groupModel(group, live, replacePlaceholder), wakes),
-    );
+    groups.push(annotateWake(groupModel(group, live), wakes));
     if (live) liveByLineage.delete(live.lineageId);
   }
   for (const live of liveByLineage.values())

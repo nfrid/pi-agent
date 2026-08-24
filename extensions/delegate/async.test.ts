@@ -1760,6 +1760,86 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
+  test('arms one implicit all-settled wake when the parent idles without an explicit wake', async () => {
+    const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
+      await createAsyncHarness('implicit-wake-parent');
+    await tools
+      .get('delegate')
+      ?.execute(
+        'implicit-call',
+        { id: 'implicit-worker', task: 'implicit task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    await vi.waitFor(() => expect(hasFinish('implicit task')).toBe(true));
+
+    handlers.get('agent_settled')?.({}, ctx);
+    handlers.get('agent_settled')?.({}, ctx);
+    const listed = await tools
+      .get('delegate_wake')
+      ?.execute('implicit-list', { action: 'list' }, undefined, undefined, ctx);
+    expect(listed?.content[0]?.text).toContain('implicit-all-');
+    expect(listed?.content[0]?.text).toContain('implicit-worker@1');
+
+    finish('implicit task');
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: false });
+    expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
+      customType: 'pi-keyed-turn-control',
+      details: { timing: 'followUp' },
+    });
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('an explicit wake supersedes an armed implicit fallback', async () => {
+    const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
+      await createAsyncHarness('explicit-supersedes-implicit-parent');
+    await tools
+      .get('delegate')
+      ?.execute(
+        'superseded-call',
+        { id: 'superseded-worker', task: 'superseded task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    await vi.waitFor(() => expect(hasFinish('superseded task')).toBe(true));
+    handlers.get('agent_settled')?.({}, ctx);
+    await tools.get('delegate_wake')?.execute(
+      'explicit-wake',
+      {
+        action: 'register',
+        id: 'explicit-ready',
+        condition: { node: 'superseded-worker@1' },
+        payload: ['metadata'],
+        nonObstructive: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const listed = (await tools
+      .get('delegate_wake')
+      ?.execute(
+        'explicit-list',
+        { action: 'list' },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details?: { wakes?: Array<{ id: string }> } } | undefined;
+    expect(listed?.details?.wakes?.map((wake) => wake.id)).toEqual([
+      'explicit-ready',
+    ]);
+
+    finish('superseded task');
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    expect(JSON.stringify(sendMessage.mock.calls[0]?.[0])).toContain(
+      'explicit-ready',
+    );
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
   test('does not append unchanged workflow checkpoints on repeated tip activation', async () => {
     const { ctx, pi, finish, hasFinish, handlers, tools } =
       await createAsyncHarness();

@@ -6,6 +6,7 @@ import type {
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
+import { composeDelegateHistory } from './delegate/history-compose';
 import {
   delegateHistoryInvocationToStatus,
   delegateHistorySettledRunIds,
@@ -17,6 +18,7 @@ import {
   delegateDetailHasError,
   delegateTranscriptItems,
   delegateTranscriptSessionId,
+  omitDelegateRenderedPrompt,
   selectedDelegateRunId,
 } from './delegate-transcript-inspector';
 import {
@@ -304,7 +306,44 @@ describe('live extension surface fixtures', () => {
     }
   });
 
-  it('fetches legacy persisted detail but uses canonical child transcripts when available', () => {
+  it('omits only the initial rendered prompt from a canonical child transcript', () => {
+    const projection = {
+      sessionId: 'child',
+      order: ['prompt', 'answer', 'follow-up'],
+      items: {
+        prompt: {
+          kind: 'message' as const,
+          messageId: 'prompt',
+          role: 'user',
+          content: 'full rendered prompt',
+          status: 'finished' as const,
+        },
+        answer: {
+          kind: 'message' as const,
+          messageId: 'answer',
+          role: 'assistant',
+          content: 'done',
+          status: 'finished' as const,
+        },
+        'follow-up': {
+          kind: 'message' as const,
+          messageId: 'follow-up',
+          role: 'user',
+          content: 'continue',
+          status: 'finished' as const,
+        },
+      },
+      lastCursor: 3,
+      lastRuntimeSeq: 0,
+      retiredEpochs: [],
+    };
+    const filtered = omitDelegateRenderedPrompt(projection);
+    expect(filtered.order).toEqual(['answer', 'follow-up']);
+    expect(filtered.items.prompt).toBeUndefined();
+    expect(filtered.items['follow-up']).toBeDefined();
+  });
+
+  it('fetches persisted detail alongside canonical child transcripts', () => {
     const row = {
       id: 'lineage-1',
       runId: 'run-1',
@@ -324,7 +363,7 @@ describe('live extension surface fixtures', () => {
         live: true,
         row: { ...row, sessionId: 'child-session' },
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldFetchDelegateDetail({
         persisted: true,
@@ -373,7 +412,6 @@ describe('live extension surface fixtures', () => {
         fetching: false,
         persistedRunExists: true,
         liveActive: false,
-        canonicalTranscript: false,
       }),
     ).toBe(true);
     expect(
@@ -382,33 +420,96 @@ describe('live extension surface fixtures', () => {
         ownerMatches: true,
         fetching: false,
         persistedRunExists: true,
-        liveActive: false,
-        canonicalTranscript: true,
-      }),
-    ).toBe(false);
-    expect(
-      shouldPromoteDelegateDetailSelection({
-        shouldFetch: false,
-        ownerMatches: true,
-        fetching: false,
-        persistedRunExists: true,
         liveActive: true,
-        canonicalTranscript: false,
       }),
     ).toBe(false);
+  });
+
+  it('overlays an exact-lineage live run by workflow identity when run IDs differ', () => {
+    const durableRun = {
+      runId: 'persisted-run',
+      lineageId: 'child-lineage',
+      name: 'Review',
+      kind: 'background' as const,
+      state: 'running' as const,
+      createdAt: 1,
+      allowWrites: false,
+      workflow: {
+        logicalId: 'review',
+        attempt: 1,
+        identity: 'review@1',
+        state: 'running' as const,
+        dependencies: [],
+        createdAt: 1,
+        scheduledAt: 1,
+      },
+    };
+    const history = {
+      version: 2 as const,
+      sessionId: 'parent',
+      groups: [
+        {
+          id: 'child-lineage',
+          ...durableRun,
+          runCount: 1,
+          runs: [durableRun],
+        },
+      ],
+    };
+    const live = {
+      ...delegateHistoryInvocationToStatus(durableRun),
+      id: 'live-status',
+      runId: 'live-run',
+      historical: undefined,
+    };
+
+    const model = composeDelegateHistory(history, [live]);
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0]?.runs).toHaveLength(1);
+    expect(model.groups[0]?.runs[0]).toMatchObject({
+      id: 'persisted-run',
+      persisted: true,
+      live: true,
+      row: { runId: 'live-run' },
+    });
+
+    const settlementKey = 'session:workflow:review@1';
+    const transition = reconcileDelegateLiveRuns(
+      'session',
+      new Map([[settlementKey, 'running']]),
+      [{ ...live, state: 'success' }],
+    );
+    const settledHistory = delegateHistorySettledRunIds({
+      ...history,
+      groups: [
+        {
+          ...history.groups[0],
+          state: 'success',
+          runs: [
+            {
+              ...durableRun,
+              state: 'success',
+              workflow: { ...durableRun.workflow, state: 'success' },
+            },
+          ],
+        },
+      ],
+    });
+    expect(transition.settledRunIds).toEqual(['workflow:review@1']);
+    expect(settledHistory.has(transition.settledRunIds[0] ?? '')).toBe(true);
   });
 
   it('invalidates once for settled transitions and every disappeared run', () => {
     const transitioned = reconcileDelegateLiveRuns(
       'session-1',
       new Map([['session-1:active', 'running']]),
-      [{ runId: 'active', state: 'success' }],
+      [{ runId: 'active', lineageId: 'lineage-active', state: 'success' }],
     );
     expect(transitioned.shouldInvalidate).toBe(true);
     const settledAgain = reconcileDelegateLiveRuns(
       'session-1',
       transitioned.next,
-      [{ runId: 'active', state: 'success' }],
+      [{ runId: 'active', lineageId: 'lineage-active', state: 'success' }],
     );
     expect(settledAgain.shouldInvalidate).toBe(false);
 

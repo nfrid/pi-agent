@@ -105,13 +105,21 @@ function isActiveDelegateState(state: string, pauseState?: string): boolean {
   );
 }
 
+export function delegateSettlementKey(row: {
+  runId: string;
+  workflow?: { identity?: string };
+}): string {
+  const identity = row.workflow?.identity;
+  return identity ? `workflow:${identity}` : row.runId;
+}
+
 /** Reconcile one session's live run keys without retaining removed overlays. */
 export function reconcileDelegateLiveRuns(
   sessionId: string,
   previous: ReadonlyMap<string, string>,
   liveRows: readonly Pick<
     DelegateStatusViewModel['statuses'][number],
-    'runId' | 'state' | 'pauseState'
+    'runId' | 'lineageId' | 'workflow' | 'state' | 'pauseState'
   >[],
 ): {
   next: Map<string, string>;
@@ -123,7 +131,8 @@ export function reconcileDelegateLiveRuns(
   const settledRunIds: string[] = [];
   let shouldInvalidate = false;
   for (const row of liveRows) {
-    const key = `${sessionId}:${row.runId}`;
+    const settlementKey = delegateSettlementKey(row);
+    const key = `${sessionId}:${settlementKey}`;
     currentKeys.add(key);
     const prior = next.get(key);
     const current = row.pauseState ?? row.state;
@@ -133,7 +142,7 @@ export function reconcileDelegateLiveRuns(
       !isActiveDelegateState(current)
     ) {
       shouldInvalidate = true;
-      settledRunIds.push(row.runId);
+      settledRunIds.push(settlementKey);
     }
     next.set(key, current);
   }
@@ -226,7 +235,7 @@ export function shouldFetchDelegateDetail(
     'persisted' | 'live' | 'row'
   >,
 ): boolean {
-  if (run.persisted !== true || run.row.sessionId) return false;
+  if (run.persisted !== true) return false;
   return !(
     run.live === true &&
     isActiveDelegateState(run.row.state, run.row.pauseState)
@@ -249,11 +258,9 @@ export function shouldPromoteDelegateDetailSelection(options: {
   fetching: boolean;
   persistedRunExists: boolean;
   liveActive: boolean;
-  canonicalTranscript: boolean;
 }): boolean {
   return (
     !options.shouldFetch &&
-    !options.canonicalTranscript &&
     options.ownerMatches &&
     !options.fetching &&
     options.persistedRunExists &&

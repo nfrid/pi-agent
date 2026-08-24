@@ -56,7 +56,7 @@ export function DelegateTranscriptInspector({
   const inspectedRow = selectedRun?.row ?? row;
   const selectedDetail =
     detail?.run &&
-    detail.run.runId === inspectedRow.runId &&
+    detail.run.runId === (selectedRun?.id ?? inspectedRow.runId) &&
     detail.run.lineageId === inspectedRow.lineageId
       ? delegateHistoryInvocationToStatus(detail.run.run)
       : undefined;
@@ -102,7 +102,7 @@ export function DelegateTranscriptInspector({
             <button
               type="button"
               key={run.id}
-              aria-pressed={run.id === inspectedRow.runId}
+              aria-pressed={run.id === selectedRunId}
               onClick={() => {
                 setSelectedRunId(run.id);
                 onRunSelected?.(run);
@@ -179,7 +179,10 @@ export function DelegateTranscriptInspector({
 }
 
 export { DelegateTranscript, delegateTranscriptItems } from './adaptation';
-export { DelegateInspectorTranscript } from './canonical-transcript';
+export {
+  DelegateInspectorTranscript,
+  omitDelegateRenderedPrompt,
+} from './canonical-transcript';
 export {
   type DelegateInspectorDetailState,
   DelegateInspectorDetails,

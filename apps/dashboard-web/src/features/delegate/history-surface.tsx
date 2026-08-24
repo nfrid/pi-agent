@@ -133,8 +133,8 @@ export function DelegateHistorySurface({
     sessionId: string;
     lineageId: string;
     runId: string;
+    liveRunId: string;
     shouldFetch: boolean;
-    canonicalTranscript: boolean;
   }>();
   const summaryLeafId = historyQuery.data?.leafId;
   const selectionOwnerMatches = detailSelection?.sessionId === id;
@@ -144,7 +144,7 @@ export function DelegateHistorySurface({
       liveRows.some(
         (row) =>
           row.lineageId === detailSelection.lineageId &&
-          row.runId === detailSelection.runId,
+          row.runId === detailSelection.liveRunId,
       ),
   );
   const selectedPersistedRunExists = Boolean(
@@ -211,7 +211,7 @@ export function DelegateHistorySurface({
     if (!detailSelection) return;
     const liveActive = liveRows.some(
       (row) =>
-        row.runId === detailSelection.runId &&
+        row.runId === detailSelection.liveRunId &&
         row.lineageId === detailSelection.lineageId &&
         isActiveDelegateState(row.state, row.pauseState),
     );
@@ -224,7 +224,6 @@ export function DelegateHistorySurface({
         fetching: historyQuery.isFetching,
         persistedRunExists: selectedPersistedRunExists,
         liveActive,
-        canonicalTranscript: detailSelection.canonicalTranscript,
       })
     )
       setDetailSelection((current) =>
@@ -321,8 +320,8 @@ export function DelegateHistorySurface({
             sessionId: id,
             lineageId: run.row.lineageId,
             runId: run.id,
+            liveRunId: run.row.runId,
             shouldFetch: shouldFetchDelegateDetail(run),
-            canonicalTranscript: Boolean(run.row.sessionId),
           });
         }}
         detail={

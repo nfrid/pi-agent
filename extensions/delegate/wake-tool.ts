@@ -150,7 +150,10 @@ function textResult(text: string, details: Record<string, unknown>) {
 export function registerDelegateWakeTool(
   pi: ExtensionAPI,
   getCoordinator: () => WakeCoordinator | undefined,
-  options: { onCancelled?: (wake: WakeSnapshot) => void } = {},
+  options: {
+    onRegistered?: (wake: WakeSnapshot, coordinator: WakeCoordinator) => void;
+    onCancelled?: (wake: WakeSnapshot) => void;
+  } = {},
 ): void {
   pi.registerTool<typeof Parameters, Record<string, unknown>>({
     name: 'delegate_wake',
@@ -171,14 +174,20 @@ export function registerDelegateWakeTool(
         case 'subscribe':
         case 'register': {
           if (!params.condition) throw new Error('condition is required.');
+          const id = requireId(params.id);
+          if (id.startsWith('implicit-all-'))
+            throw new Error(
+              'Wake IDs beginning with "implicit-all-" are reserved.',
+            );
           const wake = coordinator.register({
-            id: requireId(params.id),
+            id,
             condition: params.condition as WakeCondition,
             ...(params.payload
               ? { payload: params.payload as WakePayloadSelector[] }
               : {}),
             nonObstructive: params.nonObstructive === true,
           });
+          options.onRegistered?.(wake, coordinator);
           return textResult(
             `Wake registered immediately: ${snapshotText(wake)}`,
             { action: params.action, wake: metadata(wake) },

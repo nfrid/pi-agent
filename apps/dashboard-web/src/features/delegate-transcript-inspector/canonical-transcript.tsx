@@ -5,6 +5,7 @@ import {
   selectTranscript,
   useDashboardStore,
 } from '@pi-dashboard/client';
+import type { TranscriptProjection } from '@pi-dashboard/domain';
 import { type RefObject, useEffect, useRef } from 'react';
 import { Transcript } from '../../entities/transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
@@ -43,6 +44,23 @@ function DelegateBoundedFallback({
       )}
     </section>
   );
+}
+
+/** The initial child user message is the rendered delegate prompt shown above as a disclosure. */
+export function omitDelegateRenderedPrompt(
+  projection: TranscriptProjection,
+): TranscriptProjection {
+  const promptId = projection.order.find((id) => {
+    const item = projection.items[id];
+    return item?.kind === 'message' && item.role === 'user';
+  });
+  if (!promptId) return projection;
+  const { [promptId]: _prompt, ...items } = projection.items;
+  return {
+    ...projection,
+    order: projection.order.filter((id) => id !== promptId),
+    items,
+  };
 }
 
 function DelegateCanonicalTranscript({
@@ -125,7 +143,7 @@ function DelegateCanonicalTranscript({
           </output>
         ))}
       <Transcript
-        projection={projection}
+        projection={omitDelegateRenderedPrompt(projection)}
         runtime={runtime}
         tailScrollRequest={follow.tailScrollRequest}
         onBeforeScroll={follow.stopFollowing}

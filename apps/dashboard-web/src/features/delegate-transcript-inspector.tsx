@@ -13,5 +13,6 @@ export {
   delegateDetailHasError,
   delegateTranscriptItems,
   delegateTranscriptSessionId,
+  omitDelegateRenderedPrompt,
   selectedDelegateRunId,
 } from './delegate-transcript-inspector/index';

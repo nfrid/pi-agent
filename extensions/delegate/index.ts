@@ -50,6 +50,7 @@ import {
   subscribeDelegateControlLifecycle,
 } from './control';
 import { HostedCompletionAcker } from './hosted-completion-ack';
+import { registerImplicitAllSettledWake } from './implicit-wake';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { clearDelegateSurface, publishDelegateSurface } from './live';
@@ -190,6 +191,20 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     },
   });
   registerDelegateWakeTool(pi, () => activeWake?.coordinator, {
+    onRegistered: (registered, coordinator) => {
+      if (registered.id.startsWith('implicit-all-')) return;
+      for (const wake of coordinator
+        .list()
+        .filter((candidate) => candidate.id.startsWith('implicit-all-'))) {
+        const cancelled = coordinator.cancel(
+          wake.id,
+          'Superseded by an explicit wake subscription.',
+        );
+        getScopedServices(scopeId).backgroundDeliveries.cancel(
+          `delegate-wake:${cancelled.deliveryKey}`,
+        );
+      }
+    },
     onCancelled: (wake) =>
       getScopedServices(scopeId).backgroundDeliveries.cancel(
         `delegate-wake:${wake.deliveryKey}`,
@@ -926,6 +941,15 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     // inspection must remain able to return the retained handoff.
     delivery.clearUnenteredAutomaticDeliveries();
     if (genuinelySettled) statuses?.parentSettled();
+    // Pending workflow delegates are why a normal parent settlement is not
+    // considered "genuine" above. Arm their fallback at the idle boundary
+    // regardless; legacy automatic deliveries remain outside this workflow.
+    if (activeRuntime && activeWake)
+      registerImplicitAllSettledWake({
+        workflow: activeRuntime.workflow,
+        wakes: activeWake.coordinator,
+        ownerBranchId: activeRuntime.branchId,
+      });
     syncWidget();
   });
   pi.on('session_shutdown', async (_event, ctx) => {

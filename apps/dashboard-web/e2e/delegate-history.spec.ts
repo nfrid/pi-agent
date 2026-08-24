@@ -222,21 +222,22 @@ async function inspectPersistedDelegate(
   await expect(delegateLauncher).toBeVisible();
   await delegateLauncher.click();
   await page.getByRole('button', { name: /Offline historical worker/ }).click();
-  if (!canonicalTranscript) {
-    await expect(
-      page.getByLabel('Task').getByText('Inspect the historical fixture'),
-    ).toBeVisible();
-    await expect(page.getByText('apps/dashboard-web')).toBeVisible();
-    await expect(page.getByText('Keep the review concise.')).toBeVisible();
-    await page.getByText('Source report').click();
-    await expect(
-      page.getByText('The source delegate completed its scan.'),
-    ).toBeVisible();
-    await page.getByText('Rendered prompt').click();
-    await expect(page.getByText('You are a coding subagent.')).toBeVisible();
-  }
+  await expect(
+    page.getByLabel('Task').getByText('Inspect the historical fixture'),
+  ).toBeVisible();
+  await expect(page.getByText('apps/dashboard-web')).toBeVisible();
+  await expect(page.getByText('Keep the review concise.')).toBeVisible();
+  await page.getByText('Source report').click();
+  await expect(
+    page.getByText('The source delegate completed its scan.'),
+  ).toBeVisible();
+  const renderedPrompt = page.getByText('You are a coding subagent.');
+  await expect(renderedPrompt).toBeHidden();
+  await page.getByText('Rendered prompt').click();
+  await expect(renderedPrompt).toBeVisible();
   if (canonicalTranscript) {
     const body = page.locator('.delegate-transcript-inspector-body');
+    await expect(body.getByText('Show persisted delegate work')).toHaveCount(0);
     await expect
       .poll(() =>
         body.evaluate((element) => element.scrollHeight - element.clientHeight),
