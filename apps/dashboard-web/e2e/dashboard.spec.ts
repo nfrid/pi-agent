@@ -519,11 +519,27 @@ test('sidebar New thread handles one and zero project fallbacks @desktop', async
     unread: [],
   } as never);
   await page.goto('/');
-  await page
-    .getByRole('complementary', { name: 'Agents and threads' })
-    .getByRole('button', { name: /New thread/ })
-    .click();
+  const nav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  await nav.getByRole('button', { name: /New thread/ }).click();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
+  const draftRow = nav.locator('.agent-thread-row.status-draft');
+  const quickDelete = draftRow.getByRole('button', {
+    name: /^Delete draft /u,
+  });
+  await expect(draftRow.locator('.agent-thread-glyph')).toHaveText('✎');
+  await expect(quickDelete).toHaveCSS('opacity', '0');
+  await quickDelete.hover();
+  await expect(quickDelete).toHaveCSS('opacity', '1');
+  await quickDelete.click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        JSON.parse(localStorage.getItem('pi-dashboard-drafts:v1') ?? '[]'),
+      ),
+    )
+    .toEqual([]);
 
   const zeroPage = await page.context().newPage();
   await routeSidebarData(zeroPage);

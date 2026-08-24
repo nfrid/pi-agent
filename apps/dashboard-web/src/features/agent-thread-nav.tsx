@@ -285,6 +285,29 @@ export function activeThreadDetails(
 }
 
 // Per-row actions are rendered in the shared accessible context menu below.
+function QuickDeleteDraftAction({
+  draftId,
+  title,
+}: {
+  draftId: string;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={styles.quickDeleteDraft}
+      aria-label={`Delete draft ${title}`}
+      title="Delete draft"
+      onClick={(event) => {
+        event.stopPropagation();
+        deleteDraft(draftId);
+      }}
+    >
+      <span aria-hidden="true">×</span>
+    </button>
+  );
+}
+
 function AgentThreadLink({
   row,
   selected,
@@ -652,6 +675,9 @@ export function AgentThreadNav({
           lifecycleStatus={lifecycleStatus}
           runtimes={snapshot.runtimes}
         />
+        {row.draft && (
+          <QuickDeleteDraftAction draftId={row.id} title={row.title} />
+        )}
         {canSettleThread(row) && row.durableThread && (
           <QuickSettleThreadAction
             threadId={row.durableThread.threadId}
