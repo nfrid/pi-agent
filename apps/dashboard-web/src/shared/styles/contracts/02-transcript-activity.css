@@ -141,6 +141,10 @@
   color: var(--cyan);
 }
 .activity-tool-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 1px solid color-mix(in srgb, var(--cyan) 42%, transparent);
   border-radius: 3px;
   padding: 1px 5px;

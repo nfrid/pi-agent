@@ -2885,7 +2885,8 @@ test('dense mobile session keeps conversation and activity readable', async ({
                       name: 'bash',
                       arguments: {
                         command: 'false',
-                        description: 'Run the expected failing command',
+                        description:
+                          'Run the expected failing command while preserving the complete mobile activity layout',
                       },
                     },
                   ],
@@ -3124,11 +3125,37 @@ test('dense mobile session keeps conversation and activity readable', async ({
   );
   await failedActivity.click();
   const failedActivityGroup = failedActivity.locator('xpath=../..');
-  await expect(
-    failedActivityGroup.getByText('Run the expected failing command', {
-      exact: true,
-    }),
-  ).toBeVisible();
+  const describedAction = failedActivityGroup.locator(
+    '.activity-tool-name-described',
+  );
+  await expect(describedAction).toHaveText(
+    'Run the expected failing command while preserving the complete mobile activity layout',
+  );
+  const describedActionLayout = await describedAction.evaluate((element) => {
+    const row = element.closest('.activity-step');
+    if (!row) throw new Error('described activity row missing');
+    const style = getComputedStyle(element);
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      right: element.getBoundingClientRect().right,
+      rowRight: row.getBoundingClientRect().right,
+      overflow: style.overflow,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(describedActionLayout.scrollWidth).toBeGreaterThan(
+    describedActionLayout.clientWidth,
+  );
+  expect(describedActionLayout.right).toBeLessThanOrEqual(
+    describedActionLayout.rowRight,
+  );
+  expect(describedActionLayout).toMatchObject({
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  });
   const failedExpandedDot = failedActivityGroup.locator(
     '.tool-detail.step-failed .activity-step-dot',
   );

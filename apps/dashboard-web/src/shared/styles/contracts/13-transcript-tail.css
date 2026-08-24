@@ -10,7 +10,7 @@
 }
 .tool-detail > summary.activity-step {
   display: grid;
-  grid-template-columns: 14px max-content minmax(0, 1fr) auto;
+  grid-template-columns: 14px minmax(0, max-content) minmax(0, 1fr) auto;
   align-items: center;
   min-width: 0;
   padding: 8px 0;
