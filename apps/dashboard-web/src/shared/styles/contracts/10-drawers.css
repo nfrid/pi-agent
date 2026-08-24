@@ -407,10 +407,14 @@
   text-overflow: ellipsis;
 }
 .draft-picker-trigger::after {
-  content: "⌄";
+  content: "";
   flex: none;
-  margin-left: 3px;
-  color: var(--muted);
+  width: 5px;
+  height: 5px;
+  margin: -3px 1px 0 5px;
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  transform: rotate(45deg);
 }
 .draft-picker-trigger-locked {
   cursor: default;
