@@ -1,8 +1,8 @@
 import type { DashboardLiveStore } from '@pi-dashboard/client';
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../../routes/navigation';
+import { delegateDisplayName } from '../delegate/display-name';
 import { delegateHistoryInvocationToStatus } from '../delegate/history-compose';
-import { surfaceText } from '../delegate/surface-state';
 import { SurfaceDrawer } from '../surface-drawer';
 import { DelegateInspectorTranscript } from './canonical-transcript';
 import {
@@ -157,7 +157,7 @@ export function DelegateTranscriptInspector({
           </button>
           <div className="surface-drawer-heading">
             <p className="eyebrow">Delegate</p>
-            <h2>{surfaceText(displayedRow.name, 'Subagent')}</h2>
+            <h2>{delegateDisplayName(displayedRow)}</h2>
           </div>
           {headerContent}
           <button
@@ -174,7 +174,7 @@ export function DelegateTranscriptInspector({
     );
   return (
     <SurfaceDrawer
-      title={`Delegate · ${surfaceText(displayedRow.name, 'Subagent')}`}
+      title={`Delegate · ${delegateDisplayName(displayedRow)}`}
       eyebrow="Delegate"
       headerContent={headerContent}
       className="surface-drawer delegate-transcript-drawer"

@@ -53,6 +53,7 @@ export const MAX_WORKFLOW_ATTEMPTS = 256;
 export const WORKFLOW_RELOAD_ORPHAN_REASON =
   'Workflow blocked: execution state unavailable after reload.' as const;
 const MAX_WORKFLOW_REASON_LENGTH = 256;
+const MAX_WORKFLOW_NAME_LENGTH = 2_000;
 const MAX_WORKFLOW_TOKEN_BYTES = 16 * 1024;
 const MAX_TERMINAL_FIELD_BYTES = 1024;
 const DEFAULT_PREPARATION_GRACE_MS = 100;
@@ -122,6 +123,8 @@ export interface DelegateWorkflowInputSnapshot {
 
 export interface DelegateWorkflowAttemptSnapshot {
   readonly attempt: WorkflowAttempt;
+  /** Bounded invocation display name, retained for live and durable history. */
+  readonly name?: string;
   /** Immutable internal owner; omitted from public/dashboard projections. */
   readonly ownerBranchId?: string;
   readonly logicalId: string;
@@ -166,6 +169,8 @@ export interface DelegateRestorableHostedLink {
 export interface DelegateWorkflowMetadataSnapshot {
   /** Bounded immutable branch marker used only for ancestry checks. */
   readonly ownerBranchId?: string;
+  /** Invocation display name; absent only on legacy persisted records. */
+  readonly name?: string;
   readonly logicalId: string;
   readonly attempt: number;
   readonly identity: AttemptIdentity;
@@ -231,6 +236,7 @@ interface WorkflowRecord {
   route?: string;
   routing?: DelegateRouteState;
   allowWrites?: boolean;
+  name?: string;
   jobId?: string;
   processJobId?: string;
   reason?: string;
@@ -281,6 +287,19 @@ function copyRouting(
   routing: DelegateRouteState | undefined,
 ): DelegateRouteState | undefined {
   return routing ? Object.freeze({ ...routing }) : undefined;
+}
+
+function boundedWorkflowName(value: unknown, fallback = 'Subagent'): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return fallback;
+  if (
+    [...text].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    return fallback;
+  return text.slice(0, MAX_WORKFLOW_NAME_LENGTH);
 }
 
 function boundedReason(value: unknown): string {
@@ -731,6 +750,7 @@ export class DelegateWorkflowCoordinator {
     const record: WorkflowRecord = {
       attempt: copyAttempt(plan.attempt),
       ownerBranchId: this.ownerBranchId,
+      name: boundedWorkflowName(options.name),
       dependencies: Object.freeze([...dependencies]),
       state: 'scheduled',
       createdAt: timestamp,
@@ -842,6 +862,7 @@ export class DelegateWorkflowCoordinator {
               ...(record.ownerBranchId
                 ? { ownerBranchId: record.ownerBranchId }
                 : {}),
+              ...(record.name ? { name: record.name } : {}),
               logicalId: record.attempt.logicalId,
               attempt: record.attempt.ordinal,
               identity: record.attempt.identity,
@@ -1184,6 +1205,9 @@ export class DelegateWorkflowCoordinator {
         settledAt,
         route: metadata.route,
         allowWrites: metadata.allowWrites,
+        ...(metadata.name === undefined
+          ? {}
+          : { name: boundedWorkflowName(metadata.name) }),
         jobId: undefined,
         processJobId: validLink ? metadata.processJobId : undefined,
         reason: orphaned ? WORKFLOW_RELOAD_ORPHAN_REASON : metadata.reason,
@@ -1634,6 +1658,10 @@ export class DelegateWorkflowCoordinator {
         return;
       }
       this.validatePreparedLaunch(normalized.launch);
+      record.name = boundedWorkflowName(
+        normalized.launch.name,
+        record.name ?? 'Subagent',
+      );
       if (normalized.launch.route !== undefined)
         record.route = normalized.launch.route;
       this.startJob(record, normalized.launch);
@@ -2013,6 +2041,7 @@ export class DelegateWorkflowCoordinator {
     return Object.freeze({
       attempt,
       ...(record.ownerBranchId ? { ownerBranchId: record.ownerBranchId } : {}),
+      ...(record.name ? { name: record.name } : {}),
       logicalId: attempt.logicalId,
       ordinal: attempt.ordinal,
       identity: attempt.identity,

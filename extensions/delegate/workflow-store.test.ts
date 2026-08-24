@@ -267,6 +267,41 @@ describe('workflow store', () => {
     await coordinator.dispose();
   });
 
+  test('persists the bounded invocation display name and restores it', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    const entries: unknown[] = [];
+    attachWorkflowStore(coordinator, piFor(entries));
+    coordinator.schedule({
+      logicalId: 'review',
+      name: 'API review',
+      mode: 'single',
+      tasks: ['review'],
+      execute: async () => ({ runs: [], handoff: 'secret report' }),
+    });
+    expect(coordinator.metadataSnapshot().attempts[0]).toMatchObject({
+      identity: 'review@1',
+      name: 'API review',
+    });
+    expect(latestWorkflowState(branch(entries))?.attempts[0]).toMatchObject({
+      identity: 'review@1',
+      name: 'API review',
+    });
+    const restored = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    const state = latestWorkflowState(branch(entries));
+    if (!state) throw new Error('missing persisted workflow state');
+    restored.restoreMetadata(state);
+    expect(restored.metadataSnapshot().attempts[0]).toMatchObject({
+      identity: 'review@1',
+      name: 'API review',
+    });
+    await restored.dispose();
+    await coordinator.dispose();
+  });
+
   test('persists the canonical child session identity on settled attempts', async () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const entries: unknown[] = [];
@@ -392,6 +427,7 @@ describe('workflow store', () => {
     });
     const malformed = [
       attempt({ logicalId: 'Foo', identity: 'Foo@1' }),
+      attempt({ name: 'x'.repeat(2_001) }),
       attempt({ logicalId: 'foo\u0000bar', identity: 'foo\u0000bar@1' }),
       attempt({ identity: 'foo@2' }),
       attempt({ attempt: 0, identity: 'foo@0' }),

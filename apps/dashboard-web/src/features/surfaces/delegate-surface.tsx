@@ -6,6 +6,10 @@ import type {
   DelegateStatusViewModel,
 } from '../../../../../extensions/delegate/contribution';
 import {
+  delegateDisplayName,
+  humanizeDelegateLogicalId,
+} from '../delegate/display-name';
+import {
   composeDelegateHistory,
   type DelegateCompositeGroup,
   type DelegateCompositeRun,
@@ -16,7 +20,6 @@ import {
   surfaceElapsed,
   surfaceStateClass,
   surfaceStateLabel,
-  surfaceText,
 } from '../delegate/surface-state';
 import {
   type DelegateInspectorDetailState,
@@ -83,8 +86,35 @@ function delegateConsurfaceText(row: DelegateStatus): string | undefined {
   return row.context;
 }
 
+export { delegateDisplayName, humanizeDelegateLogicalId };
+
+export function delegateReferenceLabel(
+  reference: string,
+  rows: readonly DelegateInspectionStatus[],
+): string {
+  const logicalId = reference.replace(/@\d+$/, '');
+  const row = rows.find(
+    (candidate) => candidate.workflow?.identity === reference,
+  );
+  return row ? delegateDisplayName(row) : humanizeDelegateLogicalId(logicalId);
+}
+
+function delegateReferencesLabel(
+  references: readonly string[],
+  rows?: readonly DelegateInspectionStatus[],
+): string {
+  return references
+    .map((reference) =>
+      rows
+        ? delegateReferenceLabel(reference, rows)
+        : humanizeDelegateLogicalId(reference),
+    )
+    .join(', ');
+}
+
 function delegateWaitingRelationship(
   row: DelegateInspectionStatus,
+  rows?: readonly DelegateInspectionStatus[],
 ): string | undefined {
   const workflow = row.workflow;
   if (!workflow) return undefined;
@@ -95,7 +125,9 @@ function delegateWaitingRelationship(
   const after = dependencies.filter(
     (dependency) => !inputIdentities.has(dependency),
   );
-  return after.length ? `after ${after.join(', ')}` : undefined;
+  return after.length
+    ? `after ${delegateReferencesLabel(after, rows)}`
+    : undefined;
 }
 
 export function delegateActivityLabel(
@@ -103,21 +135,27 @@ export function delegateActivityLabel(
   runState: string,
   pauseState?: string,
   includeRelationships = true,
+  referenceRows?: readonly DelegateInspectionStatus[],
 ): string {
   if (pauseState === 'paused') return 'Paused at a safe boundary';
   if (pauseState === 'pausing') return 'Pausing at a safe boundary';
   if (includeRelationships) {
-    const waitingRelationship = delegateWaitingRelationship(row);
+    const waitingRelationship = delegateWaitingRelationship(row, referenceRows);
     if (waitingRelationship) return waitingRelationship;
   }
   // Historical rows carry wake metadata on the invocation rather than in the
   // live wake list; keep this as a wait/action fallback, not a node state.
-  if (includeRelationships && row.wake)
+  if (includeRelationships && row.wake) {
+    const references = delegateReferencesLabel(
+      row.wake.references,
+      referenceRows,
+    );
     return row.wake.state === 'entered'
-      ? `delivered for ${row.wake.references.join(', ')}`
+      ? `delivered for ${references}`
       : row.wake.state === 'pending' || row.wake.state === 'ready'
-        ? `waiting for ${row.wake.references.join(', ')}`
-        : `wake ${row.wake.state} · ${row.wake.references.join(', ')}`;
+        ? `waiting for ${references}`
+        : `wake ${row.wake.state} · ${references}`;
+  }
   if (row.workflow?.state === 'blocked' && row.workflow.reason)
     return `blocked: ${row.workflow.reason}`;
   if (row.activity?.latestText || row.activity?.label)
@@ -133,9 +171,16 @@ export function delegateRowActivityLabel(
   wakes: readonly DelegateWakePresentation[] | undefined,
   runState: string,
   pauseState?: string,
+  referenceRows?: readonly DelegateInspectionStatus[],
 ): string {
-  const waitingRelationship = delegateWaitingRelationship(row);
-  const action = delegateActivityLabel(row, runState, pauseState, false);
+  const waitingRelationship = delegateWaitingRelationship(row, referenceRows);
+  const action = delegateActivityLabel(
+    row,
+    runState,
+    pauseState,
+    false,
+    referenceRows,
+  );
   return [waitingRelationship ?? action, delegateWakeEffect(row, wakes)]
     .filter((value): value is string => Boolean(value))
     .join(' · ');
@@ -226,24 +271,51 @@ export function DelegateSurface({
   const inspectorRuns: readonly DelegateInspectorRunOption[] | undefined =
     selectedGroup?.runs;
   const title = 'Delegates';
-  const active = rows.find(
+  const activeRows = rows.filter(
     (row) =>
       row.pauseState !== undefined ||
       ['running', 'queued'].includes(surfaceStateLabel(workflowState(row))),
   );
-  const summary = historyLoading
+  const fallbackSummary = stats.failed
+    ? `${stats.failed} need attention`
+    : stats.aborted
+      ? `${stats.aborted} stopped`
+      : 'All delegates complete';
+  const summaryText = historyLoading
     ? 'Loading delegate history…'
     : historyError
       ? 'Delegate history unavailable'
       : historyIncomplete
         ? 'History incomplete · some work omitted'
-        : active
-          ? short(surfaceText(active.name, 'Subagent'), 42)
-          : stats.failed
-            ? `${stats.failed} need attention`
-            : stats.aborted
-              ? `${stats.aborted} stopped`
-              : 'All delegates complete';
+        : activeRows.length
+          ? `${activeRows.length} active`
+          : fallbackSummary;
+  const summary =
+    !historyLoading &&
+    !historyError &&
+    !historyIncomplete &&
+    activeRows.length ? (
+      <span className="surface-launcher-items">
+        {activeRows.map((row) => {
+          const state = row.pauseState ?? surfaceStateLabel(workflowState(row));
+          return (
+            <span
+              className={`surface-launcher-item ${surfaceStateClass(state)}`}
+              key={`${row.lineageId}:${row.runId}`}
+            >
+              <span className="surface-launcher-item-state" aria-hidden="true">
+                {stateGlyph(state)}
+              </span>
+              <span className="surface-launcher-item-copy">
+                <span>{delegateDisplayName(row)}</span>
+              </span>
+            </span>
+          );
+        })}
+      </span>
+    ) : (
+      summaryText
+    );
   const statsView = (
     <SurfaceStats
       className="work-header-stats"
@@ -296,21 +368,7 @@ export function DelegateSurface({
       title={title}
       label="Delegates"
       summary={summary}
-      summaryDetail={
-        active ? (
-          <small className="surface-summary-detail">
-            {short(
-              delegateRowActivityLabel(
-                active,
-                wakes,
-                surfaceStateLabel(workflowState(active)),
-                active.pauseState,
-              ),
-              100,
-            )}
-          </small>
-        ) : undefined
-      }
+      drawerSummary={summaryText}
       count={
         <span
           role="status"
@@ -342,7 +400,7 @@ export function DelegateSurface({
       paused={pausedAt !== undefined}
       drawerTitle={
         inspectorRow && inspectorOpen
-          ? `Delegate · ${surfaceText(inspectorRow.name, 'Subagent')}`
+          ? `Delegate · ${delegateDisplayName(inspectorRow)}`
           : undefined
       }
       drawerContent={inspectorContent}
@@ -384,9 +442,12 @@ export function DelegateSurface({
                   <strong>Resume condition</strong>
                   <span>
                     {ready}/{wake.references.length} ready · waiting for{' '}
-                    {waitingFor.join(', ')}
+                    {waitingFor
+                      .map((reference) =>
+                        delegateReferenceLabel(reference, rows),
+                      )
+                      .join(', ')}
                   </span>
-                  <small>{wake.references.join(', ')}</small>
                 </aside>
               );
             })}
@@ -416,10 +477,11 @@ export function DelegateSurface({
                         wakes,
                         runState,
                         pauseState,
+                        rows,
                       ),
                       140,
                     );
-                    const name = short(row.name, 70);
+                    const name = delegateDisplayName(row);
                     const route = row.route ?? row.workflow?.route ?? '';
                     const context = delegateConsurfaceText(row) ?? '';
                     const access =

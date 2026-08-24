@@ -26,10 +26,12 @@ export function ExtensionSurfaceStack({
   runtime,
   placement = 'main',
   excludeDelegate = false,
+  slotsOnly = false,
 }: {
   runtime: RuntimeSnapshot | undefined;
   placement?: SurfacePlacement;
   excludeDelegate?: boolean;
+  slotsOnly?: boolean;
 }) {
   const surfaces = useMemo(
     () =>
@@ -53,28 +55,31 @@ export function ExtensionSurfaceStack({
     [excludeDelegate, runtime, placement],
   );
   if (!surfaces.length) return null;
-  return (
+  const slots = surfaces.map((surface) => {
+    const context: DashboardRendererContext = {
+      surfaceId: surface.id,
+      rendererId: surface.rendererId,
+      placement: surface.placement,
+      pausedAt: runtimePauseStatus(runtime)?.pausedAt,
+    };
+    return (
+      <div className="extension-surface-slot" key={surface.id}>
+        {renderDashboardContribution(
+          surface.rendererId,
+          surface.viewModel,
+          context,
+        )}
+      </div>
+    );
+  });
+  return slotsOnly ? (
+    slots
+  ) : (
     <section
       className="extension-surfaces"
       aria-label="Live extension surfaces"
     >
-      {surfaces.map((surface) => {
-        const context: DashboardRendererContext = {
-          surfaceId: surface.id,
-          rendererId: surface.rendererId,
-          placement: surface.placement,
-          pausedAt: runtimePauseStatus(runtime)?.pausedAt,
-        };
-        return (
-          <div className="extension-surface-slot" key={surface.id}>
-            {renderDashboardContribution(
-              surface.rendererId,
-              surface.viewModel,
-              context,
-            )}
-          </div>
-        );
-      })}
+      {slots}
     </section>
   );
 }

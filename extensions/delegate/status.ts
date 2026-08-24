@@ -48,6 +48,8 @@ export interface DelegateWorkflowStatusInput {
 }
 
 export interface DelegateWorkflowStatus {
+  /** Missing only for legacy live workflow records. */
+  name?: string;
   logicalId: string;
   attempt: number;
   identity: string;
@@ -227,6 +229,7 @@ function workflowStatusFromAttempt(
   previous?: DelegateWorkflowStatus,
 ): DelegateWorkflowStatus {
   return {
+    ...(attempt.name ? { name: attempt.name } : {}),
     logicalId: attempt.logicalId,
     attempt: attempt.ordinal,
     identity: attempt.identity,
@@ -272,6 +275,11 @@ function workflowStatusFromRun(
   previous?: DelegateWorkflowStatus,
 ): DelegateWorkflowStatus {
   return {
+    ...(run.name
+      ? { name: run.name }
+      : previous?.name
+        ? { name: previous.name }
+        : {}),
     logicalId: attempt.logicalId,
     attempt: attempt.ordinal,
     identity: attempt.identity,

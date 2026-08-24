@@ -9,7 +9,7 @@ import {
   surfaceText,
 } from '../delegate/surface-state';
 import { SurfaceStats } from '../surface-drawer';
-import { short, stateGlyph } from './state-glyphs';
+import { stateGlyph } from './state-glyphs';
 import { WorkSurface } from './work-surface';
 
 function taskRows(model: TaskStateViewModel): readonly TaskSurfaceTask[] {
@@ -36,43 +36,60 @@ export function TasksSurface({
   const blocked = rows.find(
     (row) => surfaceStateLabel(row.status) === 'blocked',
   );
+  const running = rows.filter((row) =>
+    ['running', 'blocked'].includes(surfaceStateLabel(row.status)),
+  );
   const current =
     blocked ??
-    rows.find((row) => surfaceStateLabel(row.status) === 'running') ??
-    rows.find((row) =>
-      ['queued', 'todo'].includes(surfaceStateLabel(row.status)),
-    );
-  const summary = blocked
-    ? `Blocked: ${short(surfaceText(blocked.text, 'Task blocked'), 34)}`
-    : current
-      ? short(surfaceText(current.text, 'Task in progress'), 42)
-      : completed === total
-        ? 'All tasks complete'
-        : model.stats.active === 0
-          ? 'No active tasks'
-          : `${model.stats.active} remaining`;
+    running[0] ??
+    rows.find((row) => surfaceStateLabel(row.status) === 'queued');
+  const launcherTasks = running.length > 0 ? running : current ? [current] : [];
+  const fallbackSummary =
+    completed === total
+      ? 'All tasks complete'
+      : model.stats.active === 0
+        ? 'No active tasks'
+        : 'Tasks pending';
+  const summary = launcherTasks.length ? (
+    <span className="surface-launcher-items">
+      {launcherTasks.map((row) => {
+        const state = surfaceStateLabel(row.status);
+        return (
+          <span
+            className={`surface-launcher-item ${surfaceStateClass(state)}`}
+            key={row.id}
+          >
+            <span className="surface-launcher-item-state" aria-hidden="true">
+              {stateGlyph(state)}
+            </span>
+            <span className="surface-launcher-item-copy">
+              <b>{row.id}</b>
+              <span>{surfaceText(row.text, 'Untitled task')}</span>
+            </span>
+          </span>
+        );
+      })}
+    </span>
+  ) : (
+    fallbackSummary
+  );
   return (
     <WorkSurface
       title={title}
       label="Tasks"
       summary={summary}
-      summaryDetail={
-        current ? (
-          <small className="surface-summary-detail">
-            {blocked
-              ? 'Blocked task'
-              : `${Math.max(0, total - completed)} remaining`}
-          </small>
-        ) : undefined
-      }
+      drawerSummary={`${completed} of ${total} complete`}
       count={
         <span
           role="status"
           className="surface-counter-strip"
           aria-label={`${completed} of ${total} tasks complete`}
         >
-          <span className="surface-done" aria-hidden="true">
-            ✓ {completed}/{total}
+          <span
+            className={completed === total ? 'surface-done' : 'surface-queued'}
+            aria-hidden="true"
+          >
+            {completed === total ? '✓' : '○'} {completed}/{total}
           </span>
         </span>
       }
@@ -125,7 +142,7 @@ export function TasksSurface({
               <span className="sr-only">{state}</span>
               <span className="task-row-main">
                 <strong>{id}</strong>
-                <span>{short(row.text || 'Untitled task', 180)}</span>
+                <span>{row.text || 'Untitled task'}</span>
               </span>
               <span className="task-row-meta">
                 {priority && (

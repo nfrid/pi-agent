@@ -38,7 +38,10 @@ import {
 import {
   DelegateSurface,
   delegateActivityLabel,
+  delegateDisplayName,
+  delegateReferenceLabel,
   delegateRowActivityLabel,
+  humanizeDelegateLogicalId,
   selectedDelegateInspectionRow,
 } from './live-surface-renderers';
 
@@ -593,12 +596,8 @@ describe('live extension surface fixtures', () => {
       id: 'review-ready',
       references: ['review@1'],
     });
-    expect(delegateActivityLabel(pending, 'queued')).toBe(
-      'waiting for review@1',
-    );
-    expect(delegateActivityLabel(entered, 'done')).toBe(
-      'delivered for review@1',
-    );
+    expect(delegateActivityLabel(pending, 'queued')).toBe('waiting for Review');
+    expect(delegateActivityLabel(entered, 'done')).toBe('delivered for Review');
   });
 
   it('renders wake history inline without wake-owned rows or counts', () => {
@@ -705,6 +704,51 @@ describe('live extension surface fixtures', () => {
       'aria-label="0 running, 0 queued, 0 need attention, 0 done"',
     );
     expect(markup).not.toContain('delegate-row-toggle');
+  });
+
+  it('resolves resume references to delegate titles and humanizes missing titles', () => {
+    const rows = [
+      {
+        id: 'review',
+        runId: 'review-run',
+        lineageId: 'review-lineage',
+        name: 'Review implementation',
+        kind: 'background' as const,
+        state: 'success' as const,
+        createdAt: 1,
+        allowWrites: false,
+        workflow: {
+          logicalId: 'review',
+          attempt: 1,
+          identity: 'review@1',
+          state: 'success' as const,
+          dependencies: [],
+          createdAt: 1,
+          scheduledAt: 1,
+        },
+      },
+    ];
+    expect(delegateReferenceLabel('review@1', rows)).toBe(
+      'Review implementation',
+    );
+    expect(delegateReferenceLabel('review@2', rows)).toBe('Review');
+    expect(delegateReferenceLabel('missing-step@2', rows)).toBe('Missing Step');
+    expect(
+      delegateDisplayName({
+        name: 'legacy-review',
+        workflow: { logicalId: 'legacy-review' },
+      }),
+    ).toBe('Legacy Review');
+    expect(
+      delegateDisplayName({
+        name: 'legacy-review@2',
+        workflow: {
+          logicalId: 'legacy-review',
+          identity: 'legacy-review@2',
+        },
+      }),
+    ).toBe('Legacy Review');
+    expect(humanizeDelegateLogicalId('build_ui@3')).toBe('Build Ui');
   });
 
   it('uses a truthful fallback for settled historical rows without activity', () => {
@@ -835,7 +879,7 @@ describe('live extension surface fixtures', () => {
             id: 'd1',
             runId: 'run-d1',
             lineageId: 'lineage-d1',
-            name: 'Compact delegate',
+            name: 'Compact delegate title that should remain complete when space allows',
             kind: 'background',
             state: 'running',
             createdAt: 1,
@@ -853,7 +897,7 @@ describe('live extension surface fixtures', () => {
         tasks: [
           {
             id: 'T1',
-            text: 'Compact task',
+            text: 'Compact task title that should remain complete when space allows',
             status: 'doing',
             dependsOn: [],
             createdAt: 1,
@@ -871,14 +915,112 @@ describe('live extension surface fixtures', () => {
       </>,
     );
     expect(markup).toContain('aria-expanded="false"');
-    expect(markup).toContain('<strong>Compact delegate</strong>');
-    expect(markup).toContain('<strong>Compact task</strong>');
+    expect(markup).toContain(
+      'Compact delegate title that should remain complete when space allows',
+    );
+    expect(markup).toContain('<b>T1</b>');
+    expect(markup).toContain(
+      'Compact task title that should remain complete when space allows',
+    );
     expect(markup).toContain(
       'aria-label="1 running, 0 queued, 0 need attention, 0 done"',
     );
     expect(markup).toContain('aria-label="0 of 1 tasks complete"');
+    expect(markup).toContain('○ 0/1');
+    expect(markup).not.toContain('✓ 0/1');
     expect(markup).not.toContain('luna-high');
     expect(markup).not.toContain('task-progress');
+  });
+
+  it('lists every concurrently active task and delegate in launchers', () => {
+    const delegate = renderLiveExtensionSurface({
+      id: 'delegate-active',
+      rendererId: 'delegate.status',
+      viewModel: {
+        version: 1,
+        statuses: [
+          {
+            id: 'd1',
+            runId: 'run-d1',
+            lineageId: 'lineage-d1',
+            name: 'First active delegate',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+          },
+          {
+            id: 'd2',
+            runId: 'run-d2',
+            lineageId: 'lineage-d2',
+            name: 'Second active delegate',
+            kind: 'background',
+            state: 'queued',
+            createdAt: 1,
+            allowWrites: false,
+          },
+          {
+            id: 'd3',
+            runId: 'run-d3',
+            lineageId: 'lineage-d3',
+            name: 'Finished delegate',
+            kind: 'background',
+            state: 'success',
+            createdAt: 1,
+            allowWrites: false,
+          },
+        ],
+      },
+    });
+    const tasks = renderLiveExtensionSurface({
+      id: 'tasks-active',
+      rendererId: 'tasks.current',
+      viewModel: {
+        version: 1,
+        tasks: [
+          {
+            id: 'T1',
+            text: 'First active task',
+            status: 'doing',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: 'T2',
+            text: 'Second active task',
+            status: 'doing',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: 'T3',
+            text: 'Queued task',
+            status: 'todo',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        stats: { total: 3, active: 3, done: 0, blocked: 0, ready: 1 },
+      },
+    });
+    const markup = renderToStaticMarkup(
+      <>
+        {tasks}
+        {delegate}
+      </>,
+    );
+
+    expect(markup).toContain('<b>T1</b>');
+    expect(markup).toContain('First active task');
+    expect(markup).toContain('<b>T2</b>');
+    expect(markup).toContain('Second active task');
+    expect(markup).not.toContain('Queued task');
+    expect(markup).toContain('First active delegate');
+    expect(markup).toContain('Second active delegate');
+    expect(markup).not.toContain('Finished delegate');
   });
 
   it('orders tasks left of delegates and retains every row for scrolling', () => {
@@ -927,7 +1069,9 @@ describe('live extension surface fixtures', () => {
     expect(markup.indexOf('aria-label="Tasks"')).toBeLessThan(
       markup.indexOf('aria-label="Delegates"'),
     );
-    expect(markup).toContain('12 remaining');
+    expect(markup).toContain('<b>T1</b>');
+    expect(markup).toContain('Task 1');
+    expect(markup).not.toContain('remaining');
     expect(markup).not.toContain('0 of 12 complete');
     expect(markup).not.toContain('more tasks');
   });
@@ -952,7 +1096,9 @@ describe('live extension surface fixtures', () => {
     const markup = renderToStaticMarkup(tasks);
 
     expect(markup).toContain('22/150');
-    expect(markup).toContain('128 remaining');
+    expect(markup).toContain('<b>T1</b>');
+    expect(markup).toContain('Visible task 1');
+    expect(markup).not.toContain('remaining');
     expect(markup).not.toContain('0/128');
   });
 
@@ -1243,7 +1389,7 @@ describe('live extension surface fixtures', () => {
       },
     ];
     expect(delegateRowActivityLabel(row, wakes, 'queued')).toBe(
-      'after impl@1 · resumes parent',
+      'after Impl · resumes parent',
     );
     const markup = renderToStaticMarkup(
       <DelegateSurface

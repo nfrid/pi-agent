@@ -20,21 +20,35 @@ export function SurfaceStats({
   className?: string;
   showZero?: boolean;
 }) {
+  const visibleStats = stats.filter((stat) => showZero || stat.value > 0);
   return (
     <div
       className={`surface-stats${className ? ` ${className}` : ''}`}
       role="status"
-      aria-label="Status summary"
+      aria-label={visibleStats
+        .map((stat) => `${stat.value} ${stat.label}`)
+        .join(', ')}
     >
-      {stats
-        .filter((stat) => showZero || stat.value > 0)
-        .map((stat) => (
-          <span className={stat.tone} key={stat.label}>
-            <strong>{stat.value}</strong> {stat.label}
+      {visibleStats.map((stat) => (
+        <span className={stat.tone} key={stat.label} aria-hidden="true">
+          <span className="surface-stat-glyph">
+            {surfaceStatGlyph(stat.label)}
           </span>
-        ))}
+          <strong>{stat.value}</strong>{' '}
+          <span className="surface-stat-label">{stat.label}</span>
+        </span>
+      ))}
     </div>
   );
+}
+
+function surfaceStatGlyph(label: string): string {
+  if (label === 'running' || label === 'active') return '●';
+  if (label === 'queued') return '○';
+  if (label === 'failed') return '!';
+  if (label === 'stopped') return '■';
+  if (label === 'done' || label === 'finished') return '✓';
+  return '•';
 }
 
 export function SurfaceDrawer({
