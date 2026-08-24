@@ -15,11 +15,11 @@ import { useDashboardNavigate } from '../routes/navigation';
 import { errorMessage } from '../shared/lib/error-message';
 import { AgentThreadNav } from './agent-thread-nav';
 import { useImageAttachments } from './composer/attachments';
-import {
-  ComposerModelControl,
-  ComposerThinkingControl,
-} from './composer/controls';
 import { useComposerDraft } from './composer/draft';
+import {
+  DraftAgentPicker,
+  DraftLocationPicker,
+} from './composer/draft-pickers';
 import { ComposerShell } from './composer/shell';
 import {
   beginDraftRetry,
@@ -27,17 +27,28 @@ import {
   draftPromotionCommandId,
   markDraftPromoted,
   readDrafts,
-  setDraftModel,
   updateDraft,
   useDrafts,
 } from './drafts';
-import {
-  configuredModelOptions,
-  modelOptionValue,
-  parseModelOptionValue,
-} from './model-option';
+import { configuredModelOptions, modelOptionValue } from './model-option';
 import { latestRunForThread, threadTitle } from './project-new-thread';
 import { useSessionNavigation } from './session-navigation-context';
+
+function locationForDraft(draft: {
+  isolation: 'worktree' | 'main';
+  location?:
+    | { kind: 'current' }
+    | { kind: 'worktree'; base: 'work' | 'head' }
+    | { kind: 'worktree'; base: 'branch'; baseRef: string }
+    | { kind: 'checkout'; checkoutId: string };
+}) {
+  return (
+    draft.location ??
+    (draft.isolation === 'main'
+      ? { kind: 'current' as const }
+      : { kind: 'worktree' as const, base: 'work' as const })
+  );
+}
 
 export function draftModelSelection(
   runtimes: readonly RuntimeSnapshot[],
@@ -67,18 +78,6 @@ export function draftModelSelection(
     };
   const first = models[0];
   return first ? { provider: first.provider, model: first.model } : undefined;
-}
-
-export function draftThinkingLevels(
-  runtimes: readonly RuntimeSnapshot[],
-  selected?: ModelSelection,
-): string[] {
-  return [
-    ...new Set([
-      ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),
-      ...(selected?.thinking ? [selected.thinking] : []),
-    ]),
-  ];
 }
 
 export function DraftThreadView({
@@ -116,12 +115,13 @@ export function DraftThreadView({
     busy: submitting,
     onError: setError,
   });
-  const modelOptions = configuredModelOptions(snapshot.runtimes);
   const selectedModel = draftModelSelection(
     snapshot.runtimes,
     fallbackDraft?.model,
   );
-  const thinkingLevels = draftThinkingLevels(snapshot.runtimes, selectedModel);
+  const selectedLocation = fallbackDraft
+    ? locationForDraft(fallbackDraft)
+    : { kind: 'current' as const };
   const promotedThreadId = fallbackDraft?.promotedThreadId;
   const pendingRun = promotedThreadId
     ? latestRunForThread(snapshot.runs ?? [], promotedThreadId)
@@ -207,6 +207,14 @@ export function DraftThreadView({
         snapshot.runtimes,
         liveDraft.model,
       );
+      const location = locationForDraft(liveDraft);
+      if (
+        !liveDraft.promotedThreadId &&
+        location.kind === 'worktree' &&
+        location.base === 'branch' &&
+        !location.baseRef.trim()
+      )
+        throw new Error('Choose a branch before starting the worktree.');
       if (liveDraft.promotedThreadId) {
         const retry = beginDraftRetry(draftId);
         if (!retry)
@@ -227,7 +235,35 @@ export function DraftThreadView({
           commandId: draftPromotionCommandId(draftId),
           title: threadTitle(prompt),
           prompt,
-          isolation: liveDraft.isolation,
+          ...(location.kind === 'current'
+            ? {
+                ...(snapshot.checkouts?.find(
+                  (checkout) =>
+                    checkout.projectId === liveDraft.projectId &&
+                    checkout.kind === 'main',
+                )?.id
+                  ? {
+                      checkoutId: snapshot.checkouts.find(
+                        (checkout) =>
+                          checkout.projectId === liveDraft.projectId &&
+                          checkout.kind === 'main',
+                      )?.id,
+                    }
+                  : { isolation: 'main' as const }),
+              }
+            : location.kind === 'checkout'
+              ? { checkoutId: location.checkoutId }
+              : {
+                  isolation: 'worktree' as const,
+                  ...(location.base === 'head'
+                    ? { base: 'head' as const }
+                    : location.base === 'work' && liveDraft.location
+                      ? { base: 'work' as const }
+                      : {}),
+                  ...(location.base === 'branch'
+                    ? { baseRef: location.baseRef.trim() }
+                    : {}),
+                }),
           ...(submissionModel ? { model: submissionModel } : {}),
         },
       });
@@ -307,41 +343,25 @@ export function DraftThreadView({
             submissionDisabled={submitting}
             sendDisabled={submitting || !text.trim()}
             sendAriaLabel="Send message"
-            mode={<span>Prompt</span>}
+            mode={
+              <DraftLocationPicker
+                draftId={draftId}
+                location={selectedLocation}
+                projectId={project.id}
+                projectRoot={project.rootPath}
+                checkouts={(snapshot.checkouts ?? []).filter(
+                  (checkout) => checkout.projectId === project.id,
+                )}
+                disabled={submitting}
+              />
+            }
             controls={
-              <>
-                <ComposerModelControl
-                  models={modelOptions}
-                  value={
-                    selectedModel
-                      ? modelOptionValue(
-                          selectedModel.provider,
-                          selectedModel.model,
-                        )
-                      : ''
-                  }
-                  disabled={submitting}
-                  onChange={(value) => {
-                    const model = parseModelOptionValue(value);
-                    if (!model) return;
-                    setDraftModel(draftId, {
-                      ...model,
-                      ...(selectedModel?.thinking
-                        ? { thinking: selectedModel.thinking }
-                        : {}),
-                    });
-                  }}
-                />
-                <ComposerThinkingControl
-                  levels={thinkingLevels}
-                  value={selectedModel?.thinking ?? thinkingLevels[0] ?? ''}
-                  disabled={submitting || !selectedModel}
-                  onChange={(thinking) => {
-                    if (!selectedModel) return;
-                    setDraftModel(draftId, { ...selectedModel, thinking });
-                  }}
-                />
-              </>
+              <DraftAgentPicker
+                draftId={draftId}
+                model={selectedModel}
+                runtimes={snapshot.runtimes}
+                disabled={submitting}
+              />
             }
             footer={
               error ? (

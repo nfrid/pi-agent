@@ -11,6 +11,7 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   DelegateHistoryRunQuerySchema,
+  GitContextSchema,
   PinThreadCommandSchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
@@ -145,6 +146,7 @@ export interface DashboardRouteContext {
   adoptProject?(command: unknown): Promise<unknown>;
   renameProject?(projectId: string, command: unknown): Promise<unknown>;
   createThread?(projectId: string, command: unknown): Promise<unknown>;
+  gitContext?(projectId: string): Promise<unknown>;
   adoptSession?(
     projectId: string,
     sessionId: string,
@@ -385,6 +387,19 @@ export const dashboardRoutes: FastifyPluginAsync<{
         return await requireOperation(context.renameProject)(
           request.params.projectId,
           request.body,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/git-context',
+    { schema: { response: { 200: GitContextSchema } } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.gitContext)(
+          request.params.projectId,
         );
       } catch (error) {
         return sendError(reply, error);

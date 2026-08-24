@@ -354,3 +354,167 @@
   border: 0;
   padding: 0;
 }
+
+/* Draft controls use quiet buttons and an anchored menu rather than native
+   select chrome. The same surface becomes a bottom sheet on narrow screens. */
+.draft-picker {
+  position: relative;
+  min-width: 0;
+}
+.draft-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim);
+  padding: 3px 5px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.draft-picker-trigger:hover,
+.draft-picker-trigger[aria-expanded="true"] {
+  border-color: var(--line);
+  color: var(--fg);
+}
+.draft-picker-trigger > span + span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.draft-picker-trigger::after {
+  content: "⌄";
+  flex: none;
+  margin-left: 2px;
+  color: var(--muted);
+}
+.draft-picker-location-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
+.draft-picker-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 100;
+  display: flex;
+  width: min(330px, calc(100vw - 24px));
+  max-height: min(500px, 70vh);
+  flex-direction: column;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-alt);
+  box-shadow: 0 12px 36px #0008;
+  padding: 7px;
+}
+.draft-location-picker .draft-picker-popover {
+  right: auto;
+  left: 0;
+}
+.draft-picker-heading,
+.draft-picker-section {
+  padding: 5px 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.draft-picker-heading {
+  position: sticky;
+  top: -7px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--fg);
+  font-size: 12px;
+}
+.draft-picker-close {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.draft-picker-close:hover {
+  color: var(--fg);
+}
+.draft-picker-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  padding: 7px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.draft-picker-option:hover:not([aria-disabled="true"]),
+.draft-picker-option:focus-visible {
+  background: color-mix(in srgb, var(--purple) 20%, transparent);
+}
+.draft-picker-option[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.draft-picker-option small,
+.draft-picker-error,
+.draft-picker-results small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.draft-picker-subsection {
+  border-left: 1px solid var(--line);
+  margin: 2px 0 5px 7px;
+  padding-left: 5px;
+}
+.draft-picker-search {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 6px;
+  font: inherit;
+  font-size: 11px;
+}
+.draft-picker-results {
+  max-height: 170px;
+  overflow: auto;
+}
+.draft-picker-error {
+  display: block;
+  padding: 6px;
+}
+@media (max-width: 600px) {
+  .draft-picker-popover,
+  .draft-location-picker .draft-picker-popover {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-height: min(70vh, 560px);
+    border-radius: 12px 12px 0 0;
+    padding: 12px max(12px, env(safe-area-inset-left))
+      max(12px, env(safe-area-inset-bottom));
+  }
+}

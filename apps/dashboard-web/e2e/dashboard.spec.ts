@@ -85,6 +85,17 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
+  await page.route('**/api/projects/p/git-context', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        branch: 'main',
+        dirty: true,
+        changedFileCount: 2,
+        localBranches: ['main', 'develop'],
+      }),
+    }),
+  );
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-mobile',
     revision: 1,
@@ -129,6 +140,18 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         rootPath:
           '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
         status: 'active',
+      },
+    ],
+    checkouts: [
+      {
+        id: 'checkout-main',
+        projectId: 'p',
+        kind: 'main',
+        path: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
+        branch: 'main',
+        status: 'dirty',
+        changedFileCount: 2,
+        updatedAt: 1,
       },
     ],
     sessions: [],
@@ -256,24 +279,62 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     0,
   );
   await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
-  const modelControl = page.getByRole('combobox', { name: 'Model' });
-  const thinkingControl = page.getByRole('combobox', {
-    name: 'Thinking level',
+  const locationControl = page.getByRole('button', {
+    name: 'Checkout location',
   });
-  await expect(modelControl).toHaveValue('test/careful');
-  await expect(thinkingControl).toHaveValue('high');
-  await modelControl.selectOption('test/fast');
-  await thinkingControl.selectOption('medium');
+  await expect(locationControl).toContainText('Current checkout · main');
+  await locationControl.click();
+  const locationSheet = page.getByRole('dialog', {
+    name: 'Checkout location',
+  });
+  await expect(
+    locationSheet.getByRole('button', { name: 'Done' }),
+  ).toBeVisible();
+  const locationSheetBox = await locationSheet.boundingBox();
+  expect(locationSheetBox).not.toBeNull();
+  expect((locationSheetBox?.y ?? 0) + (locationSheetBox?.height ?? 0)).toBe(
+    720,
+  );
+  await locationSheet.getByRole('button', { name: /Choose a branch/ }).click();
+  await locationSheet
+    .getByRole('textbox', { name: 'Search local branches' })
+    .fill('dev');
+  await locationSheet.getByRole('button', { name: 'develop' }).click();
+  await expect(locationSheet).toHaveCount(0);
+  await expect(locationControl).toContainText('New worktree · from develop');
+  await locationControl.click();
+  await page
+    .getByRole('dialog', { name: 'Checkout location' })
+    .getByRole('button', { name: /Current checkout/ })
+    .click();
+  await expect(locationControl).toContainText('Current checkout · main');
+
+  const agentControl = page.getByRole('button', {
+    name: 'Agent and thinking',
+  });
+  await expect(agentControl).toContainText('Careful · high');
+  await agentControl.click();
+  const agentSheet = page.getByRole('dialog', {
+    name: 'Agent and thinking',
+  });
+  await agentSheet.getByRole('button', { name: 'Fast' }).click();
+  await expect(agentSheet).toBeVisible();
+  await agentSheet.getByRole('button', { name: 'medium' }).click();
+  await expect(agentSheet).toHaveCount(0);
+  await expect(agentControl).toContainText('Fast · medium');
   await expect
     .poll(() =>
       page.evaluate(() => {
         const drafts = JSON.parse(
           localStorage.getItem('pi-dashboard-drafts:v1') ?? '[]',
-        ) as Array<{ model?: unknown }>;
-        return drafts[0]?.model;
+        ) as Array<{ location?: unknown; model?: unknown }>;
+        return { location: drafts[0]?.location, model: drafts[0]?.model };
       }),
     )
-    .toEqual({ provider: 'test', model: 'fast', thinking: 'medium' });
+    .toEqual({
+      location: { kind: 'current' },
+      model: { provider: 'test', model: 'fast', thinking: 'medium' },
+    });
   const emptyState = page.getByText('New conversation');
   const transcript = page.getByRole('region', { name: 'Transcript' });
   const [emptyBox, transcriptBox] = await Promise.all([
@@ -574,6 +635,17 @@ test('desktop project thread form stays readable @desktop', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route('**/api/projects/one/git-context', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        branch: 'main',
+        dirty: false,
+        changedFileCount: 0,
+        localBranches: ['main'],
+      }),
+    }),
+  );
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-project-thread-geometry',
     revision: 1,
@@ -581,6 +653,17 @@ test('desktop project thread form stays readable @desktop', async ({
     runtimes: [],
     projects: [
       { id: 'one', title: 'One', rootPath: '/work/one', status: 'active' },
+    ],
+    checkouts: [
+      {
+        id: 'checkout-one-main',
+        projectId: 'one',
+        kind: 'main',
+        path: '/work/one',
+        branch: 'main',
+        status: 'ready',
+        updatedAt: 1,
+      },
     ],
     sessions: [],
     unread: [],
@@ -599,6 +682,24 @@ test('desktop project thread form stays readable @desktop', async ({
   });
   expect(geometry.width).toBeLessThanOrEqual(832);
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
+  await expect(page.getByRole('combobox', { name: 'Model' })).toHaveCount(0);
+  const locationControl = page.getByRole('button', {
+    name: 'Checkout location',
+  });
+  const agentControl = page.getByRole('button', {
+    name: 'Agent and thinking',
+  });
+  await expect(locationControl).toContainText('Current checkout · main');
+  await expect(agentControl).toHaveText(/Agent/u);
+  const triggerBox = await locationControl.boundingBox();
+  await locationControl.click();
+  const pickerBox = await page
+    .getByRole('dialog', { name: 'Checkout location' })
+    .boundingBox();
+  expect(triggerBox).not.toBeNull();
+  expect(pickerBox).not.toBeNull();
+  expect(pickerBox?.width ?? 0).toBeLessThanOrEqual(330);
+  expect(pickerBox?.y ?? 0).toBeLessThan(triggerBox?.y ?? 0);
 });
 
 test('durable lifecycle controls require an exact persisted run mapping @desktop', async ({
