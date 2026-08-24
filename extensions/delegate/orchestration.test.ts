@@ -744,7 +744,7 @@ describe('buildDelegatePlans', () => {
         config,
         () => null,
       ),
-    ).toThrow('do not provide replacements');
+    ).toThrow('reuses its original cwd, context, capabilities, and base');
   });
 
   test('normalizes the single-task handoff object shorthand to one ordered item', () => {

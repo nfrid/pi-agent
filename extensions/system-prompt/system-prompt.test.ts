@@ -161,6 +161,20 @@ describe('canonical prompt composition', () => {
     ).not.toContain('This main agent is running in an isolated Git worktree.');
   });
 
+  it('teaches JSON-mode delegate children to announce activity preambles', () => {
+    const previousDelegateChild = process.env.PI_DELEGATE_CHILD;
+    process.env.PI_DELEGATE_CHILD = '1';
+    try {
+      expect(buildSystemPrompt(options(), 'json')).toContain(
+        'When you begin a distinct phase of work, write a short active preamble',
+      );
+    } finally {
+      if (previousDelegateChild === undefined)
+        delete process.env.PI_DELEGATE_CHILD;
+      else process.env.PI_DELEGATE_CHILD = previousDelegateChild;
+    }
+  });
+
   it('does not support direct prompt replacement or append inputs', () => {
     const prompt = buildSystemPrompt(
       options({
@@ -232,10 +246,22 @@ describe('canonical prompt composition', () => {
   });
 
   it('includes bilingual active micro-plan guidance only in transcript-rendering modes', () => {
-    const tuiPrompt = buildSystemPrompt(options(), 'tui');
-    const rpcPrompt = buildSystemPrompt(options(), 'rpc');
-    const defaultPrompt = buildSystemPrompt(options());
-    const headlessPrompt = buildSystemPrompt(options(), 'json');
+    const previousDelegateChild = process.env.PI_DELEGATE_CHILD;
+    delete process.env.PI_DELEGATE_CHILD;
+    let tuiPrompt: string;
+    let rpcPrompt: string;
+    let defaultPrompt: string;
+    let headlessPrompt: string;
+    try {
+      tuiPrompt = buildSystemPrompt(options(), 'tui');
+      rpcPrompt = buildSystemPrompt(options(), 'rpc');
+      defaultPrompt = buildSystemPrompt(options());
+      headlessPrompt = buildSystemPrompt(options(), 'json');
+    } finally {
+      if (previousDelegateChild === undefined)
+        delete process.env.PI_DELEGATE_CHILD;
+      else process.env.PI_DELEGATE_CHILD = previousDelegateChild;
+    }
 
     for (const prompt of [tuiPrompt, rpcPrompt, defaultPrompt]) {
       expect(prompt).toContain(

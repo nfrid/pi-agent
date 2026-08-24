@@ -999,6 +999,7 @@ describe('delegate history adapter', () => {
                 scheduledAt: 1,
                 settledAt: 3,
                 route: 'review',
+                capabilities: ['web'],
                 inputs: [
                   {
                     node: 'gate',
@@ -1021,6 +1022,7 @@ describe('delegate history adapter', () => {
         identity: 'later@1',
         dependencies: ['gate@1'],
         route: 'review',
+        capabilities: ['web'],
         inputs: [
           {
             node: 'gate',
@@ -1031,6 +1033,10 @@ describe('delegate history adapter', () => {
         ],
       },
       route: 'review',
+      capabilities: ['web'],
+    });
+    expect(response.groups[0]?.runs[0]).toMatchObject({
+      capabilities: ['web'],
     });
     expect(response.groups[0]?.runs[0]).not.toHaveProperty('jobId');
     expect(JSON.stringify(response)).not.toContain('secret report');
@@ -1426,12 +1432,39 @@ describe('delegate history adapter', () => {
     ).not.toContain('payload');
   });
 
+  it('retains web capability metadata in validated history summaries', () => {
+    const history = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'web-entry',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'web-run',
+                lineageId: 'web-lineage',
+                capabilities: ['web'],
+              }),
+            ],
+          },
+        },
+      },
+    ]);
+    expect(history.groups[0]?.capabilities).toEqual(['web']);
+    expect(history.groups[0]?.runs[0]?.capabilities).toEqual(['web']);
+    expect(parseDelegateHistoryResponse(history)).toEqual(history);
+  });
+
   it('projects bounded setup, run configuration, input evidence, and exact prompt only for selected detail', () => {
     const run = oldRun({
       runId: 'rich-run',
       lineageId: 'rich-lineage',
       cwd: '/repo/child',
       scope: ['extensions/delegate'],
+      capabilities: ['web'],
       isolation: 'worktree',
       contextNote: 'Parent note\nwith another line',
       refreshSource: 'head',
@@ -1481,6 +1514,7 @@ describe('delegate history adapter', () => {
       'rich-lineage',
     );
     expect(detail.run).toMatchObject({
+      capabilities: ['web'],
       isolation: 'worktree',
       details: {
         task: 'inspect the change',

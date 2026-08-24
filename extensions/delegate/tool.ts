@@ -67,6 +67,12 @@ const AllowWritesSchema = Type.Boolean({
   description:
     'Let a task edit files. This does not sandbox shell commands; continuations inherit it when omitted and cannot change it explicitly.',
 });
+const CapabilitiesSchema = Type.Array(StringEnum(['web'] as const), {
+  maxItems: 1,
+  uniqueItems: true,
+  description:
+    'Optional child tool bundles. web enables web_search, fetch_content, and get_search_content. Fresh delegates only; continuations inherit the original list.',
+});
 const IsolationSchema = StringEnum(['shared', 'worktree'] as const, {
   description:
     'Repository workspace mode. Worktrees isolate checkout files, not shell or external side effects; fresh read-only tasks default to shared and writable tasks to worktree. Writable shared tasks are rejected. Continuations inherit this when omitted and cannot change it explicitly.',
@@ -180,6 +186,7 @@ const TaskItem = Type.Object({
   scope: Type.Optional(ScopeSchema),
   continuation: Type.Optional(ContinuationSchema),
   allowWrites: Type.Optional(AllowWritesSchema),
+  capabilities: Type.Optional(CapabilitiesSchema),
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
@@ -198,6 +205,7 @@ const DelegateCommonParamProperties = {
   contextNote: Type.Optional(ContextNoteSchema),
   scope: Type.Optional(ScopeSchema),
   allowWrites: Type.Optional(AllowWritesSchema),
+  capabilities: Type.Optional(CapabilitiesSchema),
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
@@ -394,7 +402,7 @@ export function registerDelegateTool(
           assertContinuationFields(
             continuationReference,
             params,
-            'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
+            'A continuation reuses its original cwd, context, base, and capabilities; scope may be replaced for this run.',
           );
           activeWorkflow.require(continuationReference);
         }
@@ -478,6 +486,7 @@ export function registerDelegateTool(
             : (params.context ?? 'fresh'),
           allowWrites: params.allowWrites,
           writeRequested: params.allowWrites,
+          capabilities: params.capabilities ? [...params.capabilities] : [],
           isolation: params.isolation,
         });
         let statusIds: string[] = [];
@@ -497,6 +506,9 @@ export function registerDelegateTool(
             route: routing.route,
             routing,
             allowWrites: params.allowWrites,
+            capabilities: params.capabilities
+              ? [...params.capabilities]
+              : undefined,
             ...(capturedWip ? { preparationCleanup: releaseCapturedWip } : {}),
 
             prepare: async (workflowContext) => {
@@ -673,6 +685,9 @@ export function registerDelegateTool(
                 deliveryEpoch: backgroundRuntime.getDeliveryEpoch(),
                 route: item.plan.routing?.route,
                 allowWrites: item.allowWrites,
+                capabilities: item.capabilities
+                  ? [...item.capabilities]
+                  : undefined,
                 feedback: (message) => control.enqueue('feedback', message),
                 detachOnTeardown: true,
                 execute: async (jobSignal, detachSignal) => {

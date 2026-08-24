@@ -636,6 +636,7 @@ describe('delegate', () => {
       cwd: '/tmp/project',
       name: 'Original agent',
       parentSessionId: 'parent-session',
+      capabilities: ['web'],
       routing: {
         route: 'quick-high',
         provider: 'openai-codex',
@@ -671,6 +672,7 @@ describe('delegate', () => {
         name: 'Original agent',
         lineageId: session.lineageId,
         parentSessionId: 'parent-session',
+        capabilities: ['web'],
       });
       expect(header).toMatchObject({
         type: 'session',
@@ -864,6 +866,22 @@ describe('delegate', () => {
     expect(tools).toBe('read,bash,grep,find,ls');
     expect(tools).not.toContain('write');
     expect(tools).not.toContain('edit');
+  });
+
+  test('loads web tools only when the parent grants the web capability', () => {
+    const args = buildChildArgs(
+      { task: 'research', capabilities: ['web'] },
+      '/tmp/child.jsonl',
+    );
+    const extensionPaths = args.flatMap((arg, index) =>
+      arg === '--extension' ? [args[index + 1]] : [],
+    );
+    expect(extensionPaths).toContainEqual(
+      expect.stringMatching(/extensions[\\/]web[\\/]index\.ts$/),
+    );
+    expect(args[args.indexOf('--tools') + 1]).toBe(
+      'read,bash,grep,find,ls,web_search,fetch_content,get_search_content',
+    );
   });
 
   test('keeps delegate framing out of the canonical system prompt', () => {

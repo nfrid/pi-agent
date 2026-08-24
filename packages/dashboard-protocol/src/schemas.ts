@@ -812,6 +812,11 @@ export const DelegateWorkflowMetadataSchema = Type.Object(
     reason: Type.Optional(Type.String({ maxLength: 256 })),
     route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     allowWrites: Type.Optional(Type.Boolean()),
+    capabilities: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Literal('web'), { maxItems: 1, uniqueItems: true }),
+      ),
+    ),
     createdAt: FiniteNumberSchema,
     scheduledAt: FiniteNumberSchema,
     queuedAt: Type.Optional(FiniteNumberSchema),
@@ -880,6 +885,11 @@ const DelegateLiveRunSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    capabilities: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Literal('web'), { maxItems: 1, uniqueItems: true }),
+      ),
+    ),
     pauseState: Type.Optional(
       Type.Union([Type.Literal('pausing'), Type.Literal('paused')]),
     ),
@@ -1944,6 +1954,11 @@ const DelegateHistoryInvocationSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    capabilities: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Literal('web'), { maxItems: 1, uniqueItems: true }),
+      ),
+    ),
     isolation: Type.Optional(DelegateHistoryIsolationSchema),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
     wake: Type.Optional(DelegateWakeMetadataSchema),
@@ -1979,6 +1994,11 @@ export const DelegateHistoryRunDetailSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    capabilities: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Literal('web'), { maxItems: 1, uniqueItems: true }),
+      ),
+    ),
     isolation: Type.Optional(DelegateHistoryIsolationSchema),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
     wake: Type.Optional(DelegateWakeMetadataSchema),
@@ -2014,6 +2034,11 @@ const DelegateHistoryGroupSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    capabilities: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Literal('web'), { maxItems: 1, uniqueItems: true }),
+      ),
+    ),
     isolation: Type.Optional(DelegateHistoryIsolationSchema),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
     wake: Type.Optional(DelegateWakeMetadataSchema),

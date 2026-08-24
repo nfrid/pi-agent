@@ -302,6 +302,63 @@ describe('workflow store', () => {
     await coordinator.dispose();
   });
 
+  test('persists web capability metadata, inherits it on continuation, and restores it', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    const entries: unknown[] = [];
+    attachWorkflowStore(coordinator, piFor(entries));
+    coordinator.schedule({
+      logicalId: 'research',
+      capabilities: ['web'],
+      mode: 'single',
+      tasks: ['research'],
+      execute: async () => ({ runs: [], handoff: '' }),
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require('research@1').state).toBe('success'),
+    );
+    coordinator.schedule({
+      logicalId: 'research',
+      continuation: true,
+      mode: 'single',
+      tasks: ['continue research'],
+      execute: async () => ({ runs: [], handoff: '' }),
+    });
+    expect(coordinator.metadataSnapshot().attempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          identity: 'research@1',
+          capabilities: ['web'],
+        }),
+        expect.objectContaining({
+          identity: 'research@2',
+          capabilities: ['web'],
+        }),
+      ]),
+    );
+    const state = latestWorkflowState(branch(entries));
+    if (!state) throw new Error('missing persisted workflow state');
+    const restored = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    restored.restoreMetadata(state);
+    expect(restored.metadataSnapshot().attempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          identity: 'research@1',
+          capabilities: ['web'],
+        }),
+        expect.objectContaining({
+          identity: 'research@2',
+          capabilities: ['web'],
+        }),
+      ]),
+    );
+    await restored.dispose();
+    await coordinator.dispose();
+  });
+
   test('persists the canonical child session identity on settled attempts', async () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const entries: unknown[] = [];

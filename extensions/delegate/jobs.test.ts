@@ -299,6 +299,7 @@ describe('DelegateJobManager', () => {
         ordinal: 1,
         identity: 'impl@1',
       },
+      capabilities: ['web'],
       execute: async () => {
         throw new Error('launch failed');
       },
@@ -309,8 +310,10 @@ describe('DelegateJobManager', () => {
       state: 'error',
       logicalId: 'impl',
       attemptIdentity: 'impl@1',
+      capabilities: ['web'],
       runs: [
         {
+          capabilities: ['web'],
           workflowAttempt: {
             logicalId: 'impl',
             ordinal: 1,

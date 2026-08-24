@@ -69,6 +69,14 @@ function finiteNumber(value: unknown): number | undefined {
     : undefined;
 }
 
+function childCapabilities(value: unknown): ['web'] | undefined {
+  return Array.isArray(value) &&
+    value.includes('web') &&
+    value.every((capability) => capability === 'web')
+    ? ['web']
+    : undefined;
+}
+
 function serializedBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
@@ -702,6 +710,15 @@ function projectWorkflow(
   )
     return undefined;
   if (source.inputs !== undefined && inputs === undefined) return undefined;
+  const capabilities = childCapabilities(source.capabilities);
+  if (
+    source.capabilities !== undefined &&
+    (!Array.isArray(source.capabilities) ||
+      source.capabilities.length > 1 ||
+      new Set(source.capabilities).size !== source.capabilities.length ||
+      source.capabilities.some((capability) => capability !== 'web'))
+  )
+    return undefined;
   const reason =
     source.reason === undefined
       ? undefined
@@ -723,6 +740,7 @@ function projectWorkflow(
     ...(inputs?.length ? { inputs } : {}),
     ...(reason ? { reason } : {}),
     ...(canonicalRoute ? { route: canonicalRoute } : {}),
+    ...(capabilities ? { capabilities } : {}),
     createdAt,
     scheduledAt: finiteNumber(source.scheduledAt) ?? createdAt,
     ...(finiteNumber(source.queuedAt) === undefined
@@ -796,6 +814,8 @@ function projectRun(
   const context = validContext(run.context);
   if (context) projected.context = context;
   if (run.allowWrites === true) projected.allowWrites = true;
+  const capabilities = childCapabilities(run.capabilities);
+  if (capabilities) projected.capabilities = capabilities;
   if (run.isolation === 'shared' || run.isolation === 'worktree')
     projected.isolation = run.isolation;
   const hasError =
@@ -908,6 +928,14 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
   if (value.name !== undefined && name === undefined) return undefined;
   if (value.allowWrites !== undefined && typeof value.allowWrites !== 'boolean')
     return undefined;
+  if (
+    value.capabilities !== undefined &&
+    (!Array.isArray(value.capabilities) ||
+      value.capabilities.length > 1 ||
+      new Set(value.capabilities).size !== value.capabilities.length ||
+      value.capabilities.some((capability) => capability !== 'web'))
+  )
+    return undefined;
   const result: RecordValue = {
     ...(ownerBranchId ? { ownerBranchId } : {}),
     ...(name ? { name } : {}),
@@ -928,6 +956,8 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
   if (route) result.route = route;
   if (typeof value.allowWrites === 'boolean')
     result.allowWrites = value.allowWrites;
+  if (Array.isArray(value.capabilities) && value.capabilities.length > 0)
+    result.capabilities = [...value.capabilities];
   if (reason) result.reason = reason;
   const sessionId = stringValue(value.sessionId, 256);
   if (sessionId && validWorkflowText(sessionId, 256))
@@ -999,6 +1029,10 @@ function workflowStoreAttemptRun(metadata: RecordValue): RecordValue {
       ? {}
       : { finishedAt: metadata.settledAt }),
     allowWrites: metadata.allowWrites === true,
+    ...(Array.isArray(metadata.capabilities) &&
+    metadata.capabilities.includes('web')
+      ? { capabilities: ['web'] }
+      : {}),
     ...(stringValue(metadata.sessionId, 256)
       ? { sessionId: metadata.sessionId }
       : {}),
@@ -1798,6 +1832,7 @@ function invocation(
   const task = stringValue(occurrence.run.task, MAX_DELEGATE_HISTORY_TASK);
   const allowWrites =
     occurrence.run.allowWrites === true || occurrence.job?.allowWrites === true;
+  const capabilities = childCapabilities(occurrence.run.capabilities);
   const isolation =
     occurrence.run.isolation === 'shared' ||
     occurrence.run.isolation === 'worktree'
@@ -1820,6 +1855,7 @@ function invocation(
   const workflowName = validWorkflowText(workflowSource?.name, 2_000);
   const workflowAttempt = workflowSource?.attempt ?? workflowSource?.ordinal;
   const workflowInputs = projectWorkflowInputs(workflowSource?.inputs);
+  const workflowCapabilities = childCapabilities(workflowSource?.capabilities);
   const workflow =
     workflowSource &&
     workflowLogicalId &&
@@ -1868,6 +1904,9 @@ function invocation(
           ...(typeof workflowSource.allowWrites === 'boolean'
             ? { allowWrites: workflowSource.allowWrites }
             : {}),
+          ...(workflowCapabilities
+            ? { capabilities: workflowCapabilities }
+            : {}),
           ...(route === undefined ? {} : { route }),
         }
       : undefined;
@@ -1887,6 +1926,7 @@ function invocation(
     ...(route === undefined ? {} : { route }),
     ...(context === undefined ? {} : { context }),
     allowWrites,
+    ...(capabilities === undefined ? {} : { capabilities }),
     ...(isolation === undefined ? {} : { isolation }),
     ...(workflow
       ? { workflow: workflow as DelegateHistoryInvocation['workflow'] }
@@ -1936,6 +1976,9 @@ function aggregateHistoryGroup(
     ...(current.route === undefined ? {} : { route: current.route }),
     ...(current.context === undefined ? {} : { context: current.context }),
     allowWrites: current.allowWrites,
+    ...(current.capabilities === undefined
+      ? {}
+      : { capabilities: current.capabilities }),
     ...(current.isolation === undefined
       ? {}
       : { isolation: current.isolation }),

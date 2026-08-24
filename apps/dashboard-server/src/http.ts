@@ -184,6 +184,10 @@ function activeDelegateTranscriptBaseline(
           ? { context: value.context as DelegateLiveRun['context'] }
           : {}),
         allowWrites: value.allowWrites,
+        ...(Array.isArray(value.capabilities) &&
+        value.capabilities.includes('web')
+          ? { capabilities: ['web' as const] }
+          : {}),
         ...(pauseState === 'pausing' || pauseState === 'paused'
           ? { pauseState }
           : {}),

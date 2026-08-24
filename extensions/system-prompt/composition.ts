@@ -187,7 +187,12 @@ export function buildSystemPrompt(
     if (normalized.length > 0) addGuidelines(normalized);
   }
 
-  if (mode === undefined || mode === 'tui' || mode === 'rpc') {
+  if (
+    mode === undefined ||
+    mode === 'tui' ||
+    mode === 'rpc' ||
+    process.env.PI_DELEGATE_CHILD === '1'
+  ) {
     addGuidelines(loadGuidelines('extensions/activity-groups/instructions.md'));
   }
 

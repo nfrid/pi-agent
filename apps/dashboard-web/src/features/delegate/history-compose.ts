@@ -191,6 +191,9 @@ export function delegateHistoryInvocationToStatus(
     ...(run.route === undefined ? {} : { route: run.route }),
     ...(run.context === undefined ? {} : { context: run.context }),
     allowWrites: run.allowWrites,
+    ...(run.capabilities === undefined
+      ? {}
+      : { capabilities: [...run.capabilities] }),
     ...(run.isolation === undefined ? {} : { isolation: run.isolation }),
     ...(run.workflow
       ? {

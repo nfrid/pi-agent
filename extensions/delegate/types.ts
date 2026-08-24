@@ -92,6 +92,8 @@ export interface DelegateRouteState {
 }
 
 export type DelegateContext = 'branch' | 'fresh' | 'continuation';
+/** Optional child tool bundles selected by the parent for a fresh lineage. */
+export type DelegateChildCapability = 'web';
 /** Whether a delegate shares the parent checkout or receives a worktree. */
 export type DelegateIsolation = 'shared' | 'worktree';
 export type DelegateInputEvidenceKind =
@@ -155,6 +157,8 @@ export interface DelegateRunMetadata {
   contextNote?: string;
   allowWrites?: boolean;
   writeRequested?: boolean;
+  /** Effective optional tool bundles inherited by continuations. */
+  capabilities?: DelegateChildCapability[];
   /** Effective workspace isolation, independent from write capability. */
   isolation?: DelegateIsolation;
   scope?: string[];
@@ -229,6 +233,7 @@ export interface DelegateWorkflowRunProjection {
   readonly lineageId?: string;
   readonly context?: DelegateContext;
   readonly allowWrites?: boolean;
+  readonly capabilities?: readonly DelegateChildCapability[];
   readonly isolation?: DelegateIsolation;
   readonly continuation?: string;
   readonly worktree?: DelegateWorkflowBranchDescriptor;

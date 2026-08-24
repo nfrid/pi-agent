@@ -14,7 +14,11 @@ import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { atomicWriteFileSync, atomicWriteJsonSync } from '../shared/fs/atomic';
 import { createOpaqueId, deriveCompatibilityLineageId } from './identity';
-import type { DelegateIsolation, DelegateRouteState } from './types';
+import type {
+  DelegateChildCapability,
+  DelegateIsolation,
+  DelegateRouteState,
+} from './types';
 
 interface SessionSnapshotSource {
   getHeader: () => unknown;
@@ -34,8 +38,10 @@ export interface DelegateSession {
   /** The original fresh-run display name; absent only on legacy metadata. */
   name?: string;
   worktreeId?: string;
-  /** The original task capability; continuations inherit it when omitted. */
+  /** The original write capability; continuations inherit it when omitted. */
   allowWrites?: boolean;
+  /** Optional child tool bundles inherited by continuations. */
+  capabilities?: DelegateChildCapability[];
   /** The original workspace mode; continuations reuse its checkout. */
   isolation: DelegateIsolation;
   /** Advisory paths the parent named; replayed so continuations keep them. */
@@ -57,6 +63,7 @@ interface DelegateSessionMetadata {
   name?: string;
   worktreeId?: string;
   allowWrites?: boolean;
+  capabilities?: DelegateChildCapability[];
   isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
@@ -160,6 +167,7 @@ export function createDelegateSession(options: {
   snapshotJsonl?: string;
   worktreeId?: string;
   allowWrites?: boolean;
+  capabilities?: DelegateChildCapability[];
   isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
@@ -201,6 +209,9 @@ export function createDelegateSession(options: {
       ...(name ? { name } : {}),
       ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
       allowWrites: options.allowWrites ?? false,
+      ...(options.capabilities?.length
+        ? { capabilities: [...options.capabilities] }
+        : {}),
       isolation:
         options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
       ...(options.scope?.length ? { scope: options.scope } : {}),
@@ -228,6 +239,9 @@ export function createDelegateSession(options: {
     ...(name ? { name } : {}),
     ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
     allowWrites: options.allowWrites ?? false,
+    ...(options.capabilities?.length
+      ? { capabilities: [...options.capabilities] }
+      : {}),
     isolation:
       options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
     ...(options.scope?.length ? { scope: options.scope } : {}),
@@ -270,6 +284,10 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
         : {}),
       ...(typeof metadata.allowWrites === 'boolean'
         ? { allowWrites: metadata.allowWrites }
+        : {}),
+      ...(Array.isArray(metadata.capabilities) &&
+      metadata.capabilities.every((capability) => capability === 'web')
+        ? { capabilities: [...new Set(metadata.capabilities)] }
         : {}),
       // Sessions from before isolation persistence used a worktree exactly
       // when they carried a worktree id.

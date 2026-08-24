@@ -27,6 +27,7 @@ function metadata(
   sessionId: string,
   state: 'queued' | 'running' = 'running',
   logicalId = 'restore',
+  capabilities?: ['web'],
 ): DelegateWorkflowMetadataHistory {
   const now = Date.now();
   return {
@@ -47,6 +48,7 @@ function metadata(
           : { queuedAt: now, startedAt: now }),
         sessionId,
         processJobId: PROCESS_JOB_ID,
+        ...(capabilities ? { capabilities } : {}),
       },
     ],
   };
@@ -72,12 +74,13 @@ function result(
   return { runs: [run], handoff: `Outcome: ${state}` };
 }
 
-function session(worktreeId?: string) {
+function session(worktreeId?: string, capabilities?: ['web']) {
   return createDelegateSession({
     cwd: '/tmp/restored-delegate',
     name: 'Persisted delegate',
     parentSessionId: PARENT,
     ...(worktreeId ? { worktreeId, isolation: 'worktree' as const } : {}),
+    ...(capabilities ? { capabilities } : {}),
   });
 }
 
@@ -436,7 +439,7 @@ describe('restored delegate adapter', () => {
   });
 
   test('materialization failure updates status with canonical failed run before workflow error', async () => {
-    const child = session();
+    const child = session(undefined, ['web']);
     sessions.push(child);
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({
@@ -445,7 +448,9 @@ describe('restored delegate adapter', () => {
     });
     managers.push(manager);
     coordinators.push(coordinator);
-    coordinator.restoreMetadata(metadata(child.token));
+    coordinator.restoreMetadata(
+      metadata(child.token, 'running', 'restore', ['web']),
+    );
     const updates: DelegatedRun[] = [];
     restoreHostedDelegateAttempt({
       parentSessionId: PARENT,
@@ -468,8 +473,12 @@ describe('restored delegate adapter', () => {
       state: 'error',
       workflowAttempt: { identity: 'restore@1' },
       errorMessage: expect.stringContaining('artifact publication failed'),
+      capabilities: ['web'],
     });
-    expect(coordinator.getResult('restore@1')?.runs[0]?.state).toBe('error');
+    expect(coordinator.getResult('restore@1')?.runs[0]).toMatchObject({
+      state: 'error',
+      capabilities: ['web'],
+    });
     await cleanup();
   });
 

@@ -14,6 +14,7 @@ import {
 import { buildParentHandoff } from './output';
 
 import {
+  type DelegateChildCapability,
   type DelegatedRun,
   type DelegateRouteState,
   type DelegateWorkflowBranchDescriptor,
@@ -142,6 +143,7 @@ export interface DelegateWorkflowAttemptSnapshot {
   readonly settledAt?: number;
   readonly route?: string;
   readonly allowWrites?: boolean;
+  readonly capabilities?: readonly DelegateChildCapability[];
   /** Internal adapter job identity, once the attempt has launched. */
   readonly jobId?: string;
   /** Durable process-host job identity for hosted attempts. */
@@ -186,6 +188,7 @@ export interface DelegateWorkflowMetadataSnapshot {
   readonly settledAt?: number;
   readonly route?: string;
   readonly allowWrites?: boolean;
+  readonly capabilities?: readonly DelegateChildCapability[];
   /** Canonical Pi child session shared by this node's continuations. */
   readonly sessionId?: string;
   /** Durable process-host job identity for hosted attempts. */
@@ -236,6 +239,7 @@ interface WorkflowRecord {
   route?: string;
   routing?: DelegateRouteState;
   allowWrites?: boolean;
+  capabilities?: readonly DelegateChildCapability[];
   name?: string;
   jobId?: string;
   processJobId?: string;
@@ -472,6 +476,9 @@ function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
       : {}),
     ...(run.context ? { context: run.context } : {}),
     ...(run.allowWrites === undefined ? {} : { allowWrites: run.allowWrites }),
+    ...(run.capabilities?.length
+      ? { capabilities: Object.freeze([...run.capabilities]) }
+      : {}),
     ...(run.isolation ? { isolation: run.isolation } : {}),
     ...(continuation &&
     Buffer.byteLength(continuation, 'utf8') <= MAX_WORKFLOW_TOKEN_BYTES
@@ -590,6 +597,9 @@ function publicRunFromCompact(
     ...(run.lineageId ? { lineageId: run.lineageId } : {}),
     ...(run.context ? { context: run.context } : {}),
     ...(run.allowWrites === undefined ? {} : { allowWrites: run.allowWrites }),
+    ...(run.capabilities?.length
+      ? { capabilities: [...run.capabilities] }
+      : {}),
     ...(run.isolation ? { isolation: run.isolation } : {}),
     ...(run.continuation ? { continuation: run.continuation } : {}),
     ...(run.retryable ? { retryable: true } : {}),
@@ -639,6 +649,7 @@ function setupFailureResult(
       name: record.launch?.name ?? record.attempt.identity,
       backgroundJobId: record.jobId,
       workflowAttempt: record.attempt,
+      capabilities: record.capabilities ? [...record.capabilities] : [],
       warnings: [],
     },
     reason,
@@ -747,6 +758,10 @@ export class DelegateWorkflowCoordinator {
     if (this.dependenciesReady(dependencies)) this.jobs.assertAccepting();
 
     const timestamp = this.now();
+    const inheritedCapabilities = plan.predecessor
+      ? this.records.get(plan.predecessor.identity)?.capabilities
+      : undefined;
+    const capabilities = options.capabilities ?? inheritedCapabilities;
     const record: WorkflowRecord = {
       attempt: copyAttempt(plan.attempt),
       ownerBranchId: this.ownerBranchId,
@@ -758,6 +773,7 @@ export class DelegateWorkflowCoordinator {
       route: options.routing?.route ?? options.route,
       routing: copyRouting(options.routing),
       allowWrites: options.allowWrites,
+      capabilities: capabilities ? Object.freeze([...capabilities]) : undefined,
       launched: false,
       cancellationRequested: false,
       cancellationWaiters: [],
@@ -779,6 +795,7 @@ export class DelegateWorkflowCoordinator {
               deliveryEpoch: options.deliveryEpoch,
               route: options.route,
               allowWrites: options.allowWrites,
+              capabilities: capabilities ? [...capabilities] : undefined,
               sessionId: options.sessionId,
               processJobId: options.processJobId,
               feedback: options.feedback,
@@ -884,6 +901,9 @@ export class DelegateWorkflowCoordinator {
               ...(record.allowWrites === undefined
                 ? {}
                 : { allowWrites: record.allowWrites }),
+              ...(record.capabilities?.length
+                ? { capabilities: Object.freeze([...record.capabilities]) }
+                : {}),
               ...(boundedSessionId(record.sessionId)
                 ? { sessionId: record.sessionId }
                 : {}),
@@ -1205,6 +1225,9 @@ export class DelegateWorkflowCoordinator {
         settledAt,
         route: metadata.route,
         allowWrites: metadata.allowWrites,
+        capabilities: metadata.capabilities
+          ? Object.freeze([...metadata.capabilities])
+          : undefined,
         ...(metadata.name === undefined
           ? {}
           : { name: boundedWorkflowName(metadata.name) }),
@@ -2075,6 +2098,9 @@ export class DelegateWorkflowCoordinator {
       settledAt: record.settledAt,
       route: record.route,
       allowWrites: record.allowWrites,
+      capabilities: record.capabilities
+        ? Object.freeze([...record.capabilities])
+        : undefined,
       jobId: record.jobId,
       processJobId: record.processJobId,
       reason: record.reason,

@@ -177,6 +177,7 @@ function invalidWorktreeResult(
       context: 'continuation',
       continuation: session.token,
       allowWrites: session.allowWrites === true,
+      capabilities: session.capabilities ? [...session.capabilities] : [],
       isolation: session.isolation,
       worktree: record ? worktreeSummary(record) : undefined,
       warnings: [
@@ -241,6 +242,7 @@ function cancelledObservationResult(
     context: 'continuation',
     continuation: session.token,
     allowWrites: session.allowWrites === true,
+    capabilities: session.capabilities ? [...session.capabilities] : [],
     isolation: session.isolation,
   });
   run.state = 'aborted';
@@ -271,6 +273,7 @@ function lifecycleFailureResult(
       context: 'continuation',
       continuation: session.token,
       allowWrites: session.allowWrites === true,
+      capabilities: session.capabilities ? [...session.capabilities] : [],
       isolation: session.isolation,
       ...(worktree
         ? {
@@ -396,6 +399,7 @@ export function restoreHostedDelegateAttempt(
       routing: session.routing as DelegateRouteState | undefined,
       allowWrites: session.allowWrites === true,
       writeRequested: session.allowWrites === true,
+      capabilities: session.capabilities ? [...session.capabilities] : [],
       isolation: session.isolation,
       worktree,
       continuation: session.token,
@@ -538,6 +542,9 @@ export function restoreHostedDelegateAttempt(
       processJobId: link.processJobId,
       sessionId: session.sessionId,
       allowWrites: session.allowWrites,
+      capabilities: session.capabilities
+        ? [...session.capabilities]
+        : undefined,
       route: session.routing?.route,
       feedback: (message) => control.enqueue('feedback', message),
       execute,

@@ -2,6 +2,7 @@ import { cloneDelegateLifecycle } from './lifecycle';
 import { serializeDelegateRunForPublic } from './serialize';
 
 import type {
+  DelegateChildCapability,
   DelegateContext,
   DelegatedActivity,
   DelegatedRun,
@@ -100,6 +101,7 @@ export interface DelegateStatusSnapshot {
   route?: string;
   context?: DelegateContext;
   allowWrites: boolean;
+  capabilities?: DelegateChildCapability[];
   isolation?: DelegateIsolation;
   activity?: DelegatedActivity;
   /** Invocation count within one continuation lineage. */
@@ -360,6 +362,7 @@ export class DelegateStatusStore {
         route: run.routing?.route,
         context: run.context,
         allowWrites: run.allowWrites === true,
+        capabilities: run.capabilities ? [...run.capabilities] : undefined,
         isolation: run.isolation,
         activity: displayActivity(run, undefined),
         transcript: transcript(run, inputRun.activities),
@@ -395,6 +398,7 @@ export class DelegateStatusStore {
     record.route = run.routing?.route;
     record.context = run.context;
     record.allowWrites = run.allowWrites === true;
+    record.capabilities = run.capabilities ? [...run.capabilities] : undefined;
     record.isolation = run.isolation;
     record.activity = displayActivity(run, record.activity);
     record.transcript = transcript(run, inputRun.activities);
@@ -425,6 +429,9 @@ export class DelegateStatusStore {
       record.route = run.routing?.route;
       record.context = run.context;
       record.allowWrites = run.allowWrites === true;
+      record.capabilities = run.capabilities
+        ? [...run.capabilities]
+        : undefined;
       record.isolation = run.isolation;
       record.activity = displayActivity(run, record.activity);
       record.transcript = transcript(run, inputRun.activities);

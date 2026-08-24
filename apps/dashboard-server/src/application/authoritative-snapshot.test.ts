@@ -302,6 +302,7 @@ describe('authoritative application snapshot lifecycle', () => {
                 state: 'running',
                 createdAt: 1,
                 allowWrites: false,
+                capabilities: ['web'],
                 transcript: [
                   {
                     id: 'd'.repeat(300),
@@ -355,6 +356,7 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(snapshot.active.tools).toMatchObject([
       { toolCallId: 'tool-1', status: 'running', timestamp: 100 },
     ]);
+    expect(snapshot.active.delegates[0]?.capabilities).toEqual(['web']);
     expect(snapshot.active.delegates[0]?.transcript[0]?.id).toBe(
       'd'.repeat(300),
     );

@@ -52,6 +52,11 @@ export function DelegateInspectorMetadata({
           {row.isolation} workspace
         </span>
       )}
+      {row.capabilities?.map((capability) => (
+        <span className="delegate-meta-capability" key={capability}>
+          {capability}
+        </span>
+      ))}
       {row.context && (
         <span className="delegate-meta-context">{row.context}</span>
       )}

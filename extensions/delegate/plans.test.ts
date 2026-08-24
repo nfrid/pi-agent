@@ -88,6 +88,7 @@ describe('delegate cwd resolution', () => {
       cwd: '../persisted-relative',
       name: 'continued',
       scope: ['old-area'],
+      capabilities: ['web'],
       routing: {
         route: 'quick',
         provider: 'test',
@@ -108,6 +109,7 @@ describe('delegate cwd resolution', () => {
         () => '{}',
       );
       expect(built.tasks[0]?.plan.requestedCwd).toBe('../persisted-relative');
+      expect(built.tasks[0]?.plan.capabilities).toEqual(['web']);
       const replaced = buildDelegatePlans(
         {
           task: 'narrow continuation',
@@ -153,11 +155,18 @@ describe('delegate continuation parameter preflight', () => {
       assertContinuationFields(
         'lineage',
         { cwd: '/tmp/other-project' },
-        'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
+        'A continuation reuses its original cwd, context, capabilities, and base; scope may be replaced for this run.',
       ),
     ).toThrow(
-      'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
+      'A continuation reuses its original cwd, context, capabilities, and base; scope may be replaced for this run.',
     );
+    expect(() =>
+      assertContinuationFields(
+        'lineage',
+        { capabilities: ['web'] },
+        'capabilities are immutable',
+      ),
+    ).toThrow('capabilities are immutable');
     expect(() =>
       assertContinuationFields(
         'lineage',

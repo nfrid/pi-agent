@@ -193,6 +193,14 @@ function validAttempt(
   if (value.allowWrites !== undefined && typeof value.allowWrites !== 'boolean')
     return false;
   if (
+    value.capabilities !== undefined &&
+    (!Array.isArray(value.capabilities) ||
+      value.capabilities.length > 1 ||
+      new Set(value.capabilities).size !== value.capabilities.length ||
+      value.capabilities.some((capability) => capability !== 'web'))
+  )
+    return false;
+  if (
     value.reason !== undefined &&
     !validBoundedText(value.reason, MAX_WORKFLOW_HISTORY_REASON)
   )
@@ -300,6 +308,9 @@ function boundedState(
       ...(attempt.allowWrites === undefined
         ? {}
         : { allowWrites: attempt.allowWrites }),
+      ...(attempt.capabilities?.length
+        ? { capabilities: Object.freeze([...attempt.capabilities]) }
+        : {}),
       ...(attempt.sessionId === undefined
         ? {}
         : { sessionId: attempt.sessionId }),

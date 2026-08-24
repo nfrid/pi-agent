@@ -33,8 +33,21 @@ import { type PreparedWorktree, worktreeSummary } from './worktree';
 
 // Read-only is an intent signal, not an enforced boundary: the child still has
 // bash, so it can inspect the repository the same way any agent would.
-const READ_ONLY_TOOLS = 'read,bash,grep,find,ls';
-const WRITE_TOOLS = 'read,edit,write,bash,grep,find,ls';
+const READ_ONLY_TOOLS = ['read', 'bash', 'grep', 'find', 'ls'] as const;
+const WRITE_TOOLS = [
+  'read',
+  'edit',
+  'write',
+  'bash',
+  'grep',
+  'find',
+  'ls',
+] as const;
+const WEB_TOOLS = [
+  'web_search',
+  'fetch_content',
+  'get_search_content',
+] as const;
 const DELEGATE_EXTENSION = path.resolve(__dirname, 'index.ts');
 const REMOTE_CONTROL_EXTENSION = path.resolve(
   __dirname,
@@ -44,6 +57,7 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
 );
+const WEB_EXTENSION = path.resolve(__dirname, '../web/index.ts');
 const MID_RUN_COMPACTION_EXTENSION = path.resolve(
   __dirname,
   '../mid-run-compaction/index.ts',
@@ -109,6 +123,7 @@ export interface RunDelegateOptions {
   routing?: DelegateRouteState;
   allowWrites?: boolean;
   writeRequested?: boolean;
+  capabilities?: import('./types').DelegateChildCapability[];
   isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
   contextNote?: string;
@@ -146,6 +161,7 @@ export function buildChildArgs(
     | 'task'
     | 'routing'
     | 'allowWrites'
+    | 'capabilities'
     | 'worktree'
     | 'contextNote'
     | 'handoffText'
@@ -158,7 +174,8 @@ export function buildChildArgs(
   if (allowWrites && !options.worktree)
     throw new Error('Writable delegates require a prepared worktree.');
   const baseTools = allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS;
-  const tools = baseTools;
+  const webEnabled = options.capabilities?.includes('web') === true;
+  const tools = [...baseTools, ...(webEnabled ? WEB_TOOLS : [])].join(',');
   const args = [
     '--mode',
     'json',
@@ -169,6 +186,7 @@ export function buildChildArgs(
     ...(options.hosted ? ['--extension', REMOTE_CONTROL_EXTENSION] : []),
     '--extension',
     SYSTEM_PROMPT_EXTENSION,
+    ...(webEnabled ? ['--extension', WEB_EXTENSION] : []),
     '--extension',
     MID_RUN_COMPACTION_EXTENSION,
     '--extension',
@@ -226,6 +244,7 @@ export async function runDelegate(
     context: options.context,
     allowWrites,
     writeRequested,
+    capabilities: options.capabilities ? [...options.capabilities] : [],
     isolation: options.isolation,
     worktree: options.worktree
       ? worktreeSummary(options.worktree.record)

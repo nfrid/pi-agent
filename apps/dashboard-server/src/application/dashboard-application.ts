@@ -453,6 +453,10 @@ function activeDelegateRuns(runtime: RuntimeSnapshot): {
         ? { context: value.context }
         : {}),
       allowWrites: value.allowWrites,
+      ...(Array.isArray(value.capabilities) &&
+      value.capabilities.includes('web')
+        ? { capabilities: ['web' as const] }
+        : {}),
       ...(pauseState === 'pausing' || pauseState === 'paused'
         ? { pauseState }
         : {}),

@@ -11,6 +11,7 @@ import {
 } from './session';
 import type { DelegateHandoffFrom } from './tool';
 import type {
+  DelegateChildCapability,
   DelegateContext,
   DelegatedRun,
   DelegateIsolation,
@@ -41,6 +42,7 @@ export interface DelegateTaskPlan {
   context: DelegateContext;
   contextNote?: string;
   scope?: string[];
+  capabilities?: DelegateChildCapability[];
   base?: WorktreeBase;
   /** Exact immutable commit/ref supplied by a symbolic branch input. */
   baseRef?: string;
@@ -73,6 +75,7 @@ export interface DelegateTaskPlan {
 export interface ContinuationPreflight {
   cwd: string;
   scope?: string[];
+  capabilities?: DelegateChildCapability[];
   allowWrites: boolean;
   isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
@@ -97,6 +100,7 @@ export function preflightDelegateContinuation(
   const state: ContinuationPreflight = {
     cwd: plan.requestedCwd,
     scope: plan.scope,
+    capabilities: [...(plan.capabilities ?? plan.resumed?.capabilities ?? [])],
     allowWrites: plan.writeRequested,
     isolation: plan.isolation,
     warnings: [...plan.warnings],
@@ -308,6 +312,7 @@ export async function prepareDelegateTask(
         parentSessionId,
         worktreeId: state.worktree?.record.id,
         allowWrites: state.allowWrites,
+        capabilities: state.capabilities,
         isolation: state.isolation,
         scope: state.scope,
         routing: plan.routing,
@@ -458,6 +463,7 @@ export async function runPreparedDelegateTask(
     routing: prepared.plan.routing,
     writeRequested: prepared.plan.writeRequested,
     allowWrites: prepared.allowWrites,
+    capabilities: prepared.capabilities ?? prepared.session.capabilities ?? [],
     isolation: prepared.isolation,
     worktree: prepared.worktree,
     timeoutMs: options.timeoutMs,

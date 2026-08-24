@@ -131,6 +131,9 @@ function statusSnapshot(
         })()
       : {}),
     allowWrites: status.allowWrites,
+    ...(status.capabilities?.length
+      ? { capabilities: [...status.capabilities] }
+      : {}),
     ...(status.pauseState ? { pauseState: status.pauseState } : {}),
     ...(status.pausedAt === undefined ? {} : { pausedAt: status.pausedAt }),
     ...(status.activity

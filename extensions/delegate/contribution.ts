@@ -246,6 +246,11 @@ export const DelegateStatusSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    capabilities: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Literal('web'), { maxItems: 1, uniqueItems: true }),
+      ),
+    ),
     /** Immutable workspace mode; absent only on legacy live records. */
     isolation: Type.Optional(
       Type.Union([Type.Literal('shared'), Type.Literal('worktree')]),

@@ -19,6 +19,7 @@ import type {
   DelegateHandoffInput,
   DelegateParams,
 } from './tool';
+import type { DelegateChildCapability } from './types';
 import {
   frameWorkflowEvidence,
   WORKFLOW_INPUT_CAPS,
@@ -42,6 +43,7 @@ interface TaskInput {
   scope?: string[];
   continuation?: string;
   allowWrites?: boolean;
+  capabilities?: DelegateChildCapability[];
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
@@ -60,6 +62,7 @@ interface SharedDefaults {
   contextNote?: string;
   scope?: string[];
   allowWrites?: boolean;
+  capabilities?: DelegateChildCapability[];
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
@@ -114,6 +117,7 @@ export function assertContinuationFields(
     cwd?: unknown;
     context?: unknown;
     scope?: unknown;
+    capabilities?: unknown;
     from?: unknown;
     worktreePath?: unknown;
   },
@@ -123,6 +127,7 @@ export function assertContinuationFields(
     continuation &&
     (fields.cwd !== undefined ||
       fields.context !== undefined ||
+      fields.capabilities !== undefined ||
       fields.from !== undefined ||
       fields.worktreePath !== undefined)
   )
@@ -143,6 +148,7 @@ function normalizeInputs(params: DelegateParams): {
       contextNote: params.contextNote,
       scope: params.scope,
       allowWrites: params.allowWrites,
+      capabilities: params.capabilities,
       isolation: params.isolation,
       from: params.from,
       refresh: params.refresh,
@@ -176,6 +182,7 @@ function normalizeInputs(params: DelegateParams): {
         scope: params.scope,
         continuation: params.continuation,
         allowWrites: params.allowWrites,
+        capabilities: params.capabilities,
         isolation: params.isolation,
         from: params.from,
         refresh: params.refresh,
@@ -225,8 +232,8 @@ export function buildDelegatePlans(
       input.continuation,
       input,
       parallel
-        ? 'A continuation task cannot replace cwd, context, or base.'
-        : 'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
+        ? 'A continuation task cannot replace cwd, context, capabilities, or base.'
+        : 'A continuation reuses its original cwd, context, capabilities, and base; scope may be replaced for this run.',
     );
     const resumed = input.continuation
       ? resolveDelegateSession(input.continuation)
@@ -261,12 +268,13 @@ export function buildDelegatePlans(
     namedTasks.some((task) => task.resumed) &&
     (shared.cwd !== undefined ||
       shared.context !== undefined ||
+      shared.capabilities !== undefined ||
       shared.from !== undefined ||
       shared.refresh !== undefined ||
       shared.worktreePath !== undefined)
   )
     invalidParams(
-      'Parallel continuations reuse their original cwd, history, and base; do not provide top-level replacements.',
+      'Parallel continuations reuse their original cwd, history, capabilities, and base; do not provide top-level replacements.',
     );
 
   namedTasks = namedTasks.map((task) => {
@@ -408,6 +416,11 @@ export function buildDelegatePlans(
       context: task.context,
       contextNote: task.input.contextNote ?? shared.contextNote,
       scope: task.scope,
+      capabilities:
+        task.input.capabilities ??
+        shared.capabilities ??
+        task.resumed?.capabilities ??
+        [],
       base: task.input.from ?? shared.from,
       refresh: task.input.refresh ?? shared.refresh,
       worktreePath: task.worktreePath,

@@ -759,6 +759,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
             name: restored.session.name ?? link.identity,
             context: 'continuation',
             allowWrites: restored.session.allowWrites === true,
+            capabilities: restored.session.capabilities
+              ? [...restored.session.capabilities]
+              : [],
             isolation: restored.session.isolation,
           },
         );
@@ -787,6 +790,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
             sessionId: link.sessionId,
             name: link.identity,
             context: 'continuation',
+            capabilities: attempt.capabilities ? [...attempt.capabilities] : [],
             isolation: 'shared',
           },
         );

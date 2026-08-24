@@ -570,12 +570,14 @@ describe('DelegateWorkflowCoordinator', () => {
     }));
     const blocked = coordinator.schedule({
       logicalId: 'blocked',
+      capabilities: ['web'],
       inputs: [{ node: 'impl', include: ['report'] }],
       prepare: blockedPrepare,
     });
     expect(coordinator.require(blocked.identity).state).toBe('blocked');
     expect(blockedPrepare).not.toHaveBeenCalled();
     const blockedRun = coordinator.getResult(blocked.identity)?.runs[0];
+    expect(blockedRun).toMatchObject({ capabilities: ['web'] });
     expect(blockedRun && getDelegateLifecycle(blockedRun)).toMatchObject({
       reason: 'setup-failure',
     });
@@ -585,6 +587,7 @@ describe('DelegateWorkflowCoordinator', () => {
     });
     const errored = coordinator.schedule({
       logicalId: 'errored',
+      capabilities: ['web'],
       inputs: [{ node: 'impl', include: ['metadata'] }],
       prepare: errorPrepare,
     });
@@ -595,6 +598,7 @@ describe('DelegateWorkflowCoordinator', () => {
       'preparation exploded',
     );
     const erroredRun = coordinator.getResult(errored.identity)?.runs[0];
+    expect(erroredRun).toMatchObject({ capabilities: ['web'] });
     expect(erroredRun && getDelegateLifecycle(erroredRun)).toMatchObject({
       reason: 'setup-failure',
     });

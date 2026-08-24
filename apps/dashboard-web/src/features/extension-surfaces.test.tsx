@@ -1277,6 +1277,7 @@ describe('live extension surface fixtures', () => {
           startedAt: 1,
           finishedAt: 2_000,
           allowWrites: true,
+          capabilities: ['web'],
           runCount: 2,
           lifecycle: {
             reason: 'timeout',
@@ -1292,6 +1293,7 @@ describe('live extension surface fixtures', () => {
 
     expect(markup).toContain('aria-label="Delegate details"');
     expect(markup).toContain('2 attempts');
+    expect(markup).toContain('web');
     expect(markup).toContain('snapshot retained');
     expect(markup).not.toContain('continuation ready');
     expect(markup).not.toContain('diagnostic available');

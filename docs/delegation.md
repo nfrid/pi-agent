@@ -142,6 +142,10 @@ interpreted as lifecycle metadata.
 
 A read-only delegate gets `read`, `bash`, `grep`, `find`, and `ls`, and is told in its prompt to inspect and report rather than edit. This is an intent signal, not an enforced boundary: the child has an ordinary shell and can do everything any agent with a shell can do. Use it when you want an answer, not a change.
 
+Fresh delegates may request `capabilities: ["web"]`. This loads the web extension and activates `web_search`, `fetch_content`, and `get_search_content` for that child lineage. Web access is off by default. Continuations inherit the original capability list and cannot replace it. The effective list is retained in delegate run metadata and shown by the dashboard inspector. This controls Pi tool availability, not network access through `bash`.
+
+Delegate children also receive the activity-preamble guidance used by the TUI and dashboard. Their preambles remain in the child transcript for activity grouping; parent handoffs still contain only the bounded delegate report and harness metadata.
+
 ## Writable delegates
 
 `allowWrites: true` gives the task `edit` and `write` alongside the shell, and runs it in its own git worktree on a fresh `pi/<task-name>` branch under `.worktrees/`. Parallel writable tasks therefore never collide, even on the same files — that, not security, is what the worktree is for.

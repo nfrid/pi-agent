@@ -192,6 +192,7 @@ export function pendingRuns(
       scope: item.scope,
       writeRequested: item.plan.writeRequested,
       allowWrites: item.allowWrites,
+      capabilities: [...(item.capabilities ?? item.session.capabilities ?? [])],
       isolation: item.isolation,
       worktree: item.worktree
         ? worktreeSummary(item.worktree.record)
@@ -284,6 +285,8 @@ async function runPreparedWithLifecycle(
         scope: prepared.scope,
         writeRequested: prepared.plan.writeRequested,
         allowWrites: prepared.allowWrites,
+        capabilities:
+          prepared.capabilities ?? prepared.session.capabilities ?? [],
         isolation: prepared.isolation,
         continuation: prepared.plan.resumed?.token,
         warnings: prepared.warnings,
@@ -328,6 +331,8 @@ async function runPreparedWithLifecycle(
         scope: prepared.scope,
         writeRequested: prepared.plan.writeRequested,
         allowWrites: prepared.allowWrites,
+        capabilities:
+          prepared.capabilities ?? prepared.session.capabilities ?? [],
         isolation: prepared.isolation,
         ...continuationOnFailure(prepared, markedRunning, parallel),
         warnings: [...prepared.warnings, ...cleanup.warnings],
@@ -663,6 +668,9 @@ export async function prepareDelegateWorkflowLaunch(
       detachOnTeardown: true,
       route: finalPlan.routing?.route,
       allowWrites: prepared.allowWrites,
+      capabilities: prepared.capabilities
+        ? [...prepared.capabilities]
+        : undefined,
       sessionId: prepared.session.sessionId,
       processJobId: prepared.runId,
       feedback: (message) => control.enqueue('feedback', message),

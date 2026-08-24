@@ -10,7 +10,11 @@ import {
   serializeDelegateRunForPublic,
   serializeDelegateRunForStaleSession,
 } from './serialize';
-import type { DelegateDetails, DelegatedRun } from './types';
+import type {
+  DelegateChildCapability,
+  DelegateDetails,
+  DelegatedRun,
+} from './types';
 import { getRunState, isRunError } from './types';
 import {
   normalizeWorkflowAttempt,
@@ -63,6 +67,7 @@ export interface DelegateJobSnapshot {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  capabilities?: DelegateChildCapability[];
   /** Optional workflow identity projected from the session-scoped model. */
   logicalId?: string;
   attemptIdentity?: string;
@@ -84,6 +89,7 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  capabilities?: DelegateChildCapability[];
   workflowAttempt?: WorkflowAttempt;
   feedback?: (
     message: string,
@@ -139,6 +145,7 @@ export interface DelegateJobStartOptions {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  capabilities?: DelegateChildCapability[];
   /** Canonical Pi child session linked to a hosted process job. */
   sessionId?: string;
   /** Durable process-host job identity; equals the prepared run ID. */
@@ -237,6 +244,7 @@ export class DelegateJobManager {
         deliveryEpoch: item.deliveryEpoch,
         route: item.route,
         allowWrites: item.allowWrites,
+        capabilities: item.capabilities ? [...item.capabilities] : undefined,
         workflowAttempt,
         feedback: item.feedback,
         controller: new AbortController(),
@@ -477,6 +485,7 @@ export class DelegateJobManager {
               name: record.name,
               backgroundJobId: record.id,
               workflowAttempt: record.workflowAttempt,
+              capabilities: record.capabilities ? [...record.capabilities] : [],
               warnings: [],
             },
             error,
@@ -527,6 +536,7 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     deliveryEpoch: record.deliveryEpoch,
     route: record.route,
     allowWrites: record.allowWrites,
+    capabilities: record.capabilities ? [...record.capabilities] : undefined,
     ...(record.workflowAttempt
       ? {
           logicalId: record.workflowAttempt.logicalId,
