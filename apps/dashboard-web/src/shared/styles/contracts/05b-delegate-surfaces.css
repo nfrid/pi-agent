@@ -462,6 +462,22 @@ ol.delegate-inspector-runs > li small {
 .delegate-transcript-follow-control > * {
   pointer-events: auto;
 }
+.delegate-transcript-follow-control > .jump-latest {
+  display: flex;
+  width: 10em;
+  height: auto;
+  border-color: var(--dim);
+  border-radius: 1em;
+  padding: 3px;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  box-shadow: 0 7px 20px #0004;
+  color: var(--dim);
+  font-size: 0.8em;
+}
+.delegate-transcript-follow-control > .jump-latest::after {
+  margin-left: 0.5em;
+  content: "↓";
+}
 .delegate-transcript-follow-control:empty {
   display: none;
 }

@@ -274,6 +274,18 @@
       margin-left: 0;
     }
   }
+  .delegate-transcript-follow-control > .jump-latest {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    padding: 0;
+    box-shadow: 0 7px 20px #0008;
+    font-size: 0;
+  }
+  .delegate-transcript-follow-control > .jump-latest::after {
+    margin-left: 0;
+    font-size: 22px;
+  }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
   }
