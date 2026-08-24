@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import {
   getMarkdownTheme,
   keyHint,
@@ -256,7 +257,7 @@ export function usage(run: DelegatedRun): string {
 
 export function compactPath(value: unknown): string {
   if (typeof value !== 'string' || !value) return '.';
-  const home = process.env.HOME;
+  const home = process.env.HOME?.trim() || homedir();
   return home && (value === home || value.startsWith(`${home}/`))
     ? `~${value.slice(home.length)}`
     : value;

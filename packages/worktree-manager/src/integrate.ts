@@ -22,6 +22,7 @@ export const MAX_REVIEW_PATCH_BUDGET = MAX_REVIEW_DIFF_CHARS;
 const MAX_REVIEW_PATHS = 80;
 const MAX_REVIEW_SELECTOR_CHARS = 4_096;
 const MAX_REVIEW_SELECTOR_TOTAL_CHARS = 16_384;
+const MAX_SUPERPROJECT_PATH_CHARS = 4_096;
 
 export interface WorktreeGit {
   git: typeof defaultGit;
@@ -94,6 +95,8 @@ export interface MergeOutcome {
   blockedPaths?: string[];
   /** The parent HEAD commit after successful integration. */
   commit?: string;
+  /** Non-empty when this repository is a submodule of an outer checkout. */
+  superprojectWorkingTree?: string;
 }
 
 export type BranchReviewMode = 'full' | 'incremental';
@@ -771,6 +774,8 @@ export function createWorktreeIntegrator(
     blockedPaths?: string[];
     /** The parent HEAD commit after successful integration. */
     commit?: string;
+    /** Non-empty when this repository is a submodule of an outer checkout. */
+    superprojectWorkingTree?: string;
   }
 
   /**
@@ -872,9 +877,21 @@ export function createWorktreeIntegrator(
           ? ['cherry-pick', '--no-edit', ...taskCommits]
           : ['merge', '--no-ff', '--no-edit', record.branch],
       );
+      const superprojectWorkingTree = await gitText(root, [
+        'rev-parse',
+        '--show-superproject-working-tree',
+      ]).catch(() => '');
       return {
         merged: true,
         commit: await gitText(root, ['rev-parse', 'HEAD']),
+        ...(superprojectWorkingTree
+          ? {
+              superprojectWorkingTree: superprojectWorkingTree.slice(
+                0,
+                MAX_SUPERPROJECT_PATH_CHARS,
+              ),
+            }
+          : {}),
       };
     } catch (error) {
       const conflicted = await paths(root, [

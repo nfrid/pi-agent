@@ -18,6 +18,38 @@ const record: WorktreeRecord = {
 };
 
 describe('worktree review bounds', () => {
+  it('reports the outer checkout after a successful submodule merge', async () => {
+    const integrator = createWorktreeIntegrator({
+      git: async (_cwd, args) => {
+        if (
+          args.join('\0') ===
+          ['merge-base', '--is-ancestor', record.branch, 'HEAD'].join('\0')
+        )
+          throw new Error('branch is not merged');
+        if (args.includes('MERGE_HEAD') || args.includes('CHERRY_PICK_HEAD'))
+          throw new Error('no in-progress operation');
+        return '';
+      },
+      gitText: async (_cwd, args) => {
+        if (args[0] === 'rev-list') return '1';
+        if (args[0] === 'diff' || args[0] === 'ls-files') return '';
+        if (
+          args[0] === 'rev-parse' &&
+          args[1] === '--show-superproject-working-tree'
+        )
+          return '/outer/repository';
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'merged';
+        return '';
+      },
+    });
+
+    await expect(integrator.mergeBranch(record)).resolves.toMatchObject({
+      merged: true,
+      commit: 'merged',
+      superprojectWorkingTree: '/outer/repository',
+    });
+  });
+
   it('bounds oversized Git output without creating a large repository', async () => {
     const integrator = createWorktreeIntegrator({
       git: async (_cwd, args) => {
