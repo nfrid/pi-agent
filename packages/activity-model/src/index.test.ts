@@ -153,7 +153,7 @@ describe('shared activity model', () => {
     ).toEqual([{ start: 0, end: 0 }]);
   });
 
-  it('keeps final tool errors live until the active group finishes', () => {
+  it('settles terminal final tools despite a live runtime tail', () => {
     const failed = {
       kind: 'tool' as const,
       name: 'bash',
@@ -170,6 +170,20 @@ describe('shared activity model', () => {
       },
       failed,
     ];
+    const successfulEntries = [
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Read the file',
+        titleKind: 'preamble' as const,
+      },
+      {
+        kind: 'tool' as const,
+        name: 'read',
+        args: {},
+        status: 'success' as const,
+      },
+    ];
     const mixedEntries = [
       ...terminalEntries,
       {
@@ -182,8 +196,13 @@ describe('shared activity model', () => {
 
     expect(
       projectActivityGroups(terminalEntries, { liveTail: true })[0]?.status,
+    ).toBe('ended-error');
+    expect(
+      projectActivityGroups(successfulEntries, { liveTail: true })[0]?.status,
+    ).toBe('settled');
+    expect(
+      projectActivityGroups(mixedEntries, { liveTail: true })[0]?.status,
     ).toBe('live');
-    expect(projectActivityGroups(mixedEntries)[0]?.status).toBe('live');
     expect(projectActivityGroups(terminalEntries)[0]?.status).toBe(
       'ended-error',
     );

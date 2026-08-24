@@ -89,7 +89,10 @@ export function projectActivityGroups(
       (options.liveTail === true &&
         tools.length > 0 &&
         index === groups.length - 1 &&
-        group.end === entries.length - 1);
+        group.end === entries.length - 1 &&
+        !tools.every(
+          (tool) => tool.status === 'success' || tool.status === 'error',
+        ));
     const status: ActivityGroupStatus = streaming
       ? 'preparing'
       : live
