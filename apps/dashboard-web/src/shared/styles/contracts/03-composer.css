@@ -176,7 +176,7 @@
   color: var(--muted);
   font-size: 11px;
 }
-.composer-mode button {
+.composer-mode > button {
   border: 1px solid var(--line);
   white-space: nowrap;
   background: transparent;
@@ -184,7 +184,7 @@
   padding: 4px 8px;
   cursor: pointer;
 }
-.composer-mode button.selected {
+.composer-mode > button.selected {
   border-color: var(--pink);
   color: var(--pink);
   background: var(--pink-7);

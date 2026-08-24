@@ -317,7 +317,7 @@
 .composer-mode > * + * {
   margin-left: 5px;
 }
-.composer-mode button {
+.composer-mode > button {
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
@@ -325,8 +325,8 @@
   padding: 2px 5px;
   cursor: pointer;
 }
-.composer-mode button:hover,
-.composer-mode button.selected {
+.composer-mode > button:hover,
+.composer-mode > button.selected {
   border-color: var(--line);
   color: var(--fg);
 }
