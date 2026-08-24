@@ -4,6 +4,7 @@ import {
   BASH_DESCRIPTION_MAX_LENGTH,
   bashDescriptionParameters,
   createBashDescriptionToolDefinition,
+  validateBashDescriptionArguments,
 } from './index';
 
 describe('bash description tool', () => {
@@ -62,7 +63,17 @@ describe('bash description tool', () => {
     expect(result.content).toEqual([{ type: 'text', text: 'compatibility' }]);
   });
 
-  it('retains the upstream command and timeout schema fields', () => {
+  it('retains a provider-compatible upstream object schema', () => {
+    expect(bashDescriptionParameters).toMatchObject({
+      type: 'object',
+      properties: {
+        command: expect.any(Object),
+        timeout: expect.any(Object),
+        description: expect.any(Object),
+      },
+      required: ['command'],
+    });
+    expect(bashDescriptionParameters).not.toHaveProperty('allOf');
     expect(
       Value.Check(bashDescriptionParameters, {
         command: 'printf ok',
@@ -70,5 +81,28 @@ describe('bash description tool', () => {
         description: 'Print a short result',
       }),
     ).toBe(true);
+  });
+
+  it('rejects coercible and blank descriptions before command execution', () => {
+    const definition = createBashDescriptionToolDefinition();
+    expect(() =>
+      definition.prepareArguments?.({ command: 'false', description: 42 }),
+    ).toThrow(/description must be a string.*omit it/u);
+    expect(() =>
+      validateBashDescriptionArguments({
+        command: 'false',
+        description: '   ',
+      }),
+    ).toThrow(/description must not be blank.*omit it/u);
+    expect(() =>
+      definition.prepareArguments?.({
+        command: 'false',
+        description: 'x'.repeat(BASH_DESCRIPTION_MAX_LENGTH + 1),
+      }),
+    ).toThrow(/description must be 140 characters or fewer/u);
+
+    const converted = { command: 'false', description: 42 };
+    Value.Convert(bashDescriptionParameters, converted);
+    expect(converted.description).toBe('42');
   });
 });
