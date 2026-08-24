@@ -253,23 +253,43 @@
 }
 .delegate-inspector-metadata {
   display: flex;
-  max-width: 330px;
+  max-width: 390px;
   margin: 0;
   border: 0;
   padding: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 0;
   color: var(--muted);
   font-size: 9px;
+  line-height: 1.35;
 }
 .delegate-inspector-metadata > span {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 3px 6px;
   white-space: nowrap;
 }
+.delegate-inspector-metadata > span + span::before {
+  content: "·";
+  margin: 0 5px;
+  color: var(--dim);
+}
+.delegate-meta-status {
+  font-weight: 700;
+}
+.delegate-meta-access {
+  font-weight: 650;
+}
+.delegate-meta-workspace,
+.delegate-meta-context {
+  color: var(--cyan);
+}
+.delegate-meta-route {
+  color: var(--purple);
+}
+.delegate-meta-recovery {
+  color: var(--orange);
+}
 .delegate-transcript-inspector-body {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
@@ -428,11 +448,16 @@ ol.delegate-inspector-runs > li small {
   flex-direction: column;
 }
 .delegate-transcript-follow-control {
-  position: sticky;
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
   z-index: 2;
-  bottom: 8px;
   min-height: 0;
+  pointer-events: none;
   text-align: center;
+}
+.delegate-transcript-follow-control > * {
+  pointer-events: auto;
 }
 .delegate-transcript-follow-control:empty {
   display: none;

@@ -28,19 +28,35 @@ export function DelegateInspectorMetadata({
       className="delegate-inspector-metadata"
       aria-label="Delegate details"
     >
-      <span className={surfaceStateClass(state)}>{state}</span>
-      {duration && <span>{duration}</span>}
+      <span className={`delegate-meta-status ${surfaceStateClass(state)}`}>
+        {state}
+      </span>
+      {duration && <span className="delegate-meta-duration">{duration}</span>}
       {row.allowWrites !== undefined && (
-        <span>{row.allowWrites ? 'read/write' : 'read-only'}</span>
+        <span
+          className={`delegate-meta-access ${row.allowWrites ? 'delegate-row-access-rw' : 'delegate-row-access-ro'}`}
+        >
+          {row.allowWrites ? 'read/write' : 'read-only'}
+        </span>
       )}
-      {row.isolation && <span>{row.isolation} workspace</span>}
-      {row.context && <span>{row.context}</span>}
+      {row.isolation && (
+        <span className="delegate-meta-workspace">
+          {row.isolation} workspace
+        </span>
+      )}
+      {row.context && (
+        <span className="delegate-meta-context">{row.context}</span>
+      )}
       {(row.route ?? row.workflow?.route) && (
-        <span>{row.route ?? row.workflow?.route}</span>
+        <span className="delegate-meta-route">
+          {row.route ?? row.workflow?.route}
+        </span>
       )}
-      {row.runCount && row.runCount > 1 && <span>{row.runCount} attempts</span>}
+      {row.runCount && row.runCount > 1 && (
+        <span className="delegate-meta-attempts">{row.runCount} attempts</span>
+      )}
       {lifecycle && (
-        <span className="surface-failed">
+        <span className="delegate-meta-recovery surface-failed">
           {!lifecycle.continuationUsable
             ? 'continuation unavailable'
             : lifecycle.writableBranchRetained

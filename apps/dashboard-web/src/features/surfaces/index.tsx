@@ -46,6 +46,8 @@ export function renderTasksSurface(
 export {
   DelegateSurface,
   delegateActivityLabel,
+  delegateReferenceLabel,
   delegateRowActivityLabel,
+  humanizeDelegateLogicalId,
   selectedDelegateInspectionRow,
 } from './delegate-surface';

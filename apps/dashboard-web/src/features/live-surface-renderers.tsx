@@ -2,7 +2,9 @@
 export {
   DelegateSurface,
   delegateActivityLabel,
+  delegateReferenceLabel,
   delegateRowActivityLabel,
+  humanizeDelegateLogicalId,
   renderDelegateSurface,
   renderTasksSurface,
   selectedDelegateInspectionRow,

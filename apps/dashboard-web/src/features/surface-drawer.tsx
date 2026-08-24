@@ -29,12 +29,32 @@ export function SurfaceStats({
       {stats
         .filter((stat) => showZero || stat.value > 0)
         .map((stat) => (
-          <span className={stat.tone} key={stat.label}>
-            <strong>{stat.value}</strong> {stat.label}
+          <span
+            className={stat.tone}
+            key={stat.label}
+            role="img"
+            aria-label={`${stat.value} ${stat.label}`}
+          >
+            <span className="surface-stat-glyph" aria-hidden="true">
+              {surfaceStatGlyph(stat.label)}
+            </span>
+            <strong aria-hidden="true">{stat.value}</strong>{' '}
+            <span className="surface-stat-label" aria-hidden="true">
+              {stat.label}
+            </span>
           </span>
         ))}
     </div>
   );
+}
+
+function surfaceStatGlyph(label: string): string {
+  if (label === 'running' || label === 'active') return '●';
+  if (label === 'queued') return '○';
+  if (label === 'failed') return '!';
+  if (label === 'stopped') return '■';
+  if (label === 'done' || label === 'finished') return '✓';
+  return '•';
 }
 
 export function SurfaceDrawer({

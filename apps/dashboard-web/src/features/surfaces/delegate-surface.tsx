@@ -83,6 +83,27 @@ function delegateConsurfaceText(row: DelegateStatus): string | undefined {
   return row.context;
 }
 
+export function humanizeDelegateLogicalId(reference: string): string {
+  const logicalId = reference.replace(/@\d+$/, '');
+  const words = logicalId.split(/[-_.]+/).filter(Boolean);
+  return words.length
+    ? words
+        .map((word) => `${word[0]?.toUpperCase() ?? ''}${word.slice(1)}`)
+        .join(' ')
+    : 'Delegate';
+}
+
+export function delegateReferenceLabel(
+  reference: string,
+  rows: readonly DelegateInspectionStatus[],
+): string {
+  const logicalId = reference.replace(/@\d+$/, '');
+  const row =
+    rows.find((candidate) => candidate.workflow?.identity === reference) ??
+    rows.find((candidate) => candidate.workflow?.logicalId === logicalId);
+  return surfaceText(row?.name, humanizeDelegateLogicalId(logicalId));
+}
+
 function delegateWaitingRelationship(
   row: DelegateInspectionStatus,
 ): string | undefined {
@@ -384,9 +405,12 @@ export function DelegateSurface({
                   <strong>Resume condition</strong>
                   <span>
                     {ready}/{wake.references.length} ready · waiting for{' '}
-                    {waitingFor.join(', ')}
+                    {waitingFor
+                      .map((reference) =>
+                        delegateReferenceLabel(reference, rows),
+                      )
+                      .join(', ')}
                   </span>
-                  <small>{wake.references.join(', ')}</small>
                 </aside>
               );
             })}
