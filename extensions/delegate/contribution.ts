@@ -130,6 +130,8 @@ const DelegateWorkflowInputSchema = Type.Object(
 );
 const DelegateWorkflowStatusSchema = Type.Object(
   {
+    /** Missing only for legacy live workflow records. */
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
     logicalId: Type.String({ minLength: 1, maxLength: 64 }),
     attempt: Type.Integer({ minimum: 1 }),
     identity: Type.String({ minLength: 1, maxLength: 80 }),

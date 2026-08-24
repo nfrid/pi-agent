@@ -23,6 +23,7 @@ import {
 export const WORKFLOW_ENTRY_TYPE = 'delegate-workflow:v1';
 export const MAX_WORKFLOW_HISTORY_ATTEMPTS = 256;
 export const MAX_WORKFLOW_HISTORY_REASON = 256;
+export const MAX_WORKFLOW_HISTORY_NAME = 2_000;
 export const MAX_WORKFLOW_HISTORY_ROUTE = 512;
 export const MAX_WORKFLOW_HISTORY_INPUTS = 4;
 export const MAX_WORKFLOW_HISTORY_INPUT_LABEL = 120;
@@ -180,6 +181,11 @@ function validAttempt(
   for (const key of ['queuedAt', 'startedAt', 'settledAt'] as const)
     if (value[key] !== undefined && !validTimestamp(value[key])) return false;
   if (
+    value.name !== undefined &&
+    !validBoundedText(value.name, MAX_WORKFLOW_HISTORY_NAME)
+  )
+    return false;
+  if (
     value.route !== undefined &&
     !validBoundedText(value.route, MAX_WORKFLOW_HISTORY_ROUTE)
   )
@@ -258,6 +264,7 @@ function boundedState(
       ...(attempt.ownerBranchId
         ? { ownerBranchId: attempt.ownerBranchId }
         : {}),
+      ...(attempt.name === undefined ? {} : { name: attempt.name }),
       logicalId: attempt.logicalId,
       attempt: attempt.attempt,
       identity: attempt.identity,

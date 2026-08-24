@@ -645,6 +645,11 @@ function projectWorkflow(
   const source = hasWorkflowMetadata ? run.workflow : run.workflowAttempt;
   if (!isRecord(source)) return undefined;
   const ownerBranchId = validWorkflowText(source.ownerBranchId, 256);
+  const workflowName =
+    source.name === undefined
+      ? undefined
+      : validWorkflowText(source.name, 2_000);
+  if (source.name !== undefined && workflowName === undefined) return undefined;
   if (
     (source.ownerBranchId !== undefined && ownerBranchId === undefined) ||
     (hasWorkflowMetadata && source.dependencies === undefined)
@@ -708,6 +713,7 @@ function projectWorkflow(
     return undefined;
   return {
     ...(ownerBranchId ? { ownerBranchId } : {}),
+    ...(workflowName ? { name: workflowName } : {}),
     logicalId,
     attempt: ordinal,
     identity,
@@ -895,12 +901,16 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
     value.reason === undefined
       ? undefined
       : validWorkflowText(value.reason, 256);
+  const name =
+    value.name === undefined ? undefined : validWorkflowText(value.name, 2_000);
   if (value.route !== undefined && route === undefined) return undefined;
   if (value.reason !== undefined && reason === undefined) return undefined;
+  if (value.name !== undefined && name === undefined) return undefined;
   if (value.allowWrites !== undefined && typeof value.allowWrites !== 'boolean')
     return undefined;
   const result: RecordValue = {
     ...(ownerBranchId ? { ownerBranchId } : {}),
+    ...(name ? { name } : {}),
     logicalId,
     attempt,
     identity,
@@ -977,7 +987,8 @@ function workflowStoreAttemptRun(metadata: RecordValue): RecordValue {
   return {
     runId,
     lineageId,
-    name: logicalId,
+    // Legacy journal records have no persisted display name.
+    name: stringValue(metadata.name, 2_000) ?? logicalId,
     state: metadata.state,
     createdAt: metadata.createdAt,
     ...(metadata.queuedAt === undefined ? {} : { queuedAt: metadata.queuedAt }),

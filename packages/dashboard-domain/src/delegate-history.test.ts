@@ -1111,6 +1111,47 @@ describe('delegate history adapter', () => {
     expect(projected.data?.state?.attempts).toHaveLength(1);
   });
 
+  it('uses persisted workflow names and falls back for legacy journal records', () => {
+    const attempt = (logicalId: string, name?: string) => ({
+      ownerBranchId: 'owner-a',
+      ...(name === undefined ? {} : { name }),
+      logicalId,
+      attempt: 1,
+      identity: `${logicalId}@1`,
+      state: 'success',
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      settledAt: 2,
+    });
+    const response = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'custom',
+        id: 'workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              attempt('named', 'Human-friendly review'),
+              attempt('legacy'),
+            ],
+          },
+        },
+      },
+    ]);
+    expect(
+      response.groups.find((group) => group.workflow?.logicalId === 'named'),
+    ).toMatchObject({ name: 'Human-friendly review' });
+    expect(
+      response.groups.find((group) => group.workflow?.logicalId === 'legacy'),
+    ).toMatchObject({ name: 'legacy' });
+  });
+
   it('exposes persisted child session identity from workflow journal placeholders', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },
