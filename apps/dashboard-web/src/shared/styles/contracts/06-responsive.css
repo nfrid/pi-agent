@@ -114,13 +114,6 @@
     max-width: none;
     justify-content: flex-start;
   }
-  .delegate-transcript-source {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .delegate-open-session {
-    align-self: flex-start;
-  }
   .delegate-row-chevron {
     grid-column: 3;
     grid-row: 1;

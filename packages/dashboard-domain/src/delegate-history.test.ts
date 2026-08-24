@@ -1376,4 +1376,82 @@ describe('delegate history adapter', () => {
       ),
     ).not.toContain('payload');
   });
+
+  it('projects bounded setup, run configuration, input evidence, and exact prompt only for selected detail', () => {
+    const run = oldRun({
+      runId: 'rich-run',
+      lineageId: 'rich-lineage',
+      cwd: '/repo/child',
+      scope: ['extensions/delegate'],
+      isolation: 'worktree',
+      contextNote: 'Parent note',
+      refreshSource: 'head',
+      renderedPrompt: 'exact final prompt',
+      worktree: {
+        branch: 'pi/review',
+        worktreePath: '/tmp/review',
+        repositoryRoot: '/repo',
+        baseHead: 'abc1234',
+        baseRef: 'HEAD',
+        workBase: 'abc1234',
+      },
+      workflow: {
+        logicalId: 'rich',
+        attempt: 1,
+        identity: 'rich@1',
+        state: 'success',
+        dependencies: ['upstream@1', 'gate@1'],
+        inputs: [
+          { node: 'upstream', identity: 'upstream@1', include: ['report'] },
+        ],
+      },
+      inputEvidence: [
+        {
+          identity: 'upstream@1',
+          kind: 'report',
+          label: 'Upstream report',
+          content: 'bounded included report',
+        },
+      ],
+    });
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      [
+        { type: 'session', id: 'parent-1' },
+        {
+          type: 'message',
+          id: 'rich-entry',
+          message: {
+            role: 'toolResult',
+            toolName: 'delegate',
+            details: { runs: [run] },
+          },
+        },
+      ],
+      'rich-run',
+      'rich-lineage',
+    );
+    expect(detail.run).toMatchObject({
+      isolation: 'worktree',
+      details: {
+        task: 'inspect the change',
+        setup: {
+          cwd: '/repo/child',
+          isolation: 'worktree',
+          worktree: { baseHead: 'abc1234' },
+        },
+        runConfig: {
+          scope: ['extensions/delegate'],
+          after: ['gate@1'],
+          parentContextNote: 'Parent note',
+          refreshSource: 'head',
+          inputs: [
+            { label: 'Upstream report', content: 'bounded included report' },
+          ],
+        },
+        renderedPrompt: 'exact final prompt',
+      },
+    });
+    expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);
+  });
 });

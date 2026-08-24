@@ -18,6 +18,8 @@ import type {
 
 /** Extra inspection facts which are only present on the persisted adapter. */
 export type DelegateInspectionStatus = DelegateStatus & {
+  /** Selected-run bounded detail projection, absent on summary/live rows. */
+  details?: DelegateHistoryDetails;
   historical?: boolean;
   historyIncomplete?: boolean;
   warnings?: readonly string[];
@@ -189,6 +191,7 @@ export function delegateHistoryInvocationToStatus(
     ...(run.route === undefined ? {} : { route: run.route }),
     ...(run.context === undefined ? {} : { context: run.context }),
     allowWrites: run.allowWrites,
+    ...(run.isolation === undefined ? {} : { isolation: run.isolation }),
     ...(run.workflow
       ? {
           workflow: {
@@ -213,6 +216,7 @@ export function delegateHistoryInvocationToStatus(
       },
     ],
     transcript: historyTranscript(run, details),
+    ...(details ? { details } : {}),
     ...(details?.truncated ? { transcriptTruncated: true } : {}),
     ...(lifecycle
       ? {

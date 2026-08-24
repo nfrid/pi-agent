@@ -6,6 +6,7 @@ import {
   createDelegateSession,
   type DelegateSession,
   updateDelegateSessionRouting,
+  updateDelegateSessionScope,
   updateDelegateSessionWorktree,
 } from './session';
 import type { DelegateHandoffFrom } from './tool';
@@ -53,6 +54,8 @@ export interface DelegateTaskPlan {
   handoffFrom?: DelegateHandoffFrom[];
   /** Resolved artifact text, kept out of run details. */
   handoffText?: string;
+  /** Bounded symbolic input evidence retained for selected-run inspection. */
+  inputEvidence?: import('./types').DelegateInputEvidence[];
   writeRequested: boolean;
   /** Effective workspace isolation, independent from write capability. */
   isolation: DelegateIsolation;
@@ -98,9 +101,10 @@ export function preflightDelegateContinuation(
     isolation: plan.isolation,
     warnings: [...plan.warnings],
   };
-  // A continuation cannot restate scope, so replay what the original run was
-  // told to focus on.
-  if (plan.resumed?.scope?.length) state.scope = plan.resumed.scope;
+  // Continuations inherit the latest persisted scope when omitted. An
+  // explicit (including empty) scope is a run-specific replacement.
+  if (plan.resumed && plan.scope === undefined)
+    state.scope = plan.resumed.scope;
   if (plan.resumed) {
     // Worktree-linked sessions created before capability persistence were
     // writable, so preserve that behavior for their continuations.
@@ -317,6 +321,15 @@ export async function prepareDelegateTask(
     // their immutable creatorSessionId from prepareWorktree.
     if (plan.resumed && state.worktree)
       touchWorktreeParentSession(state.worktree.record, parentSessionId);
+    if (plan.resumed) {
+      const updatedSession = updateDelegateSessionScope(
+        session.token,
+        state.scope,
+      );
+      if (!updatedSession)
+        throw new Error('The delegate session disappeared while saving scope.');
+      session = updatedSession;
+    }
 
     return {
       ...state,
@@ -439,7 +452,9 @@ export async function runPreparedDelegateTask(
       .filter((item): item is string => Boolean(item?.trim()))
       .join('\n\n'),
     handoffText: prepared.plan.handoffText,
+    inputEvidence: prepared.plan.inputEvidence,
     scope: prepared.scope,
+    refreshSource: prepared.plan.refresh,
     routing: prepared.plan.routing,
     writeRequested: prepared.plan.writeRequested,
     allowWrites: prepared.allowWrites,

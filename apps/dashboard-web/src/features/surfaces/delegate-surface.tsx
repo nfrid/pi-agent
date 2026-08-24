@@ -255,8 +255,10 @@ export function DelegateSurface({
       className="work-header-stats"
       showZero
       stats={[
-        { label: 'active', value: activeCount, tone: 'surface-running' },
-        { label: 'finished', value: finishedCount },
+        { label: 'running', value: stats.running, tone: 'surface-running' },
+        { label: 'queued', value: stats.queued, tone: 'surface-queued' },
+        { label: 'failed', value: stats.failed, tone: 'surface-failed' },
+        { label: 'done', value: stats.done, tone: 'surface-done' },
       ]}
     />
   );
@@ -278,12 +280,43 @@ export function DelegateSurface({
       label: string;
       groups: readonly DelegateCompositeGroup[];
     }[]);
+  const inspectorContent =
+    inspectorRow && inspectorOpen ? (
+      <DelegateTranscriptInspector
+        row={inspectorRow}
+        now={now}
+        runOptions={inspectorRuns}
+        detail={detail}
+        onRunSelected={onRunSelected}
+        store={store}
+        isOpen={inspectorOpen}
+        paused={pausedAt !== undefined}
+        inline
+        onBack={() => setInspectorOpen(false)}
+        onClose={() => setInspectorOpen(false)}
+      />
+    ) : undefined;
   return (
     <>
       <WorkSurface
         title={title}
         label="Delegates"
         summary={summary}
+        summaryDetail={
+          active ? (
+            <small className="surface-summary-detail">
+              {short(
+                delegateRowActivityLabel(
+                  active,
+                  wakes,
+                  surfaceStateLabel(workflowState(active)),
+                  active.pauseState,
+                ),
+                100,
+              )}
+            </small>
+          ) : undefined
+        }
         count={`${activeCount} active · ${finishedCount} finished`}
         visibleCount={
           rows.length +
@@ -294,6 +327,17 @@ export function DelegateSurface({
         drawerClassName="surface-drawer work-surface-drawer delegate-surface-drawer"
         headerStats={statsView}
         paused={pausedAt !== undefined}
+        drawerTitle={
+          inspectorRow && inspectorOpen
+            ? `Delegate · ${surfaceText(inspectorRow.name, 'Subagent')}`
+            : undefined
+        }
+        drawerContent={inspectorContent}
+        onDrawerClose={() => {
+          setInspectorOpen(false);
+          setSelectedLineageId(undefined);
+          setLastInspectorRow(undefined);
+        }}
       >
         <div className="delegate-scroll surface-scroll-region">
           {historyLoading && (
@@ -405,11 +449,6 @@ export function DelegateSurface({
                             <span className="delegate-row-main">
                               <span className="delegate-row-name">
                                 <strong>{name}</strong>
-                                {row.workflow?.identity && (
-                                  <small className="delegate-row-identity">
-                                    {row.workflow.identity}
-                                  </small>
-                                )}
                               </span>
                               <small
                                 className={`delegate-row-action ${surfaceStateClass(state)}`}
@@ -466,19 +505,6 @@ export function DelegateSurface({
           </div>
         </div>
       </WorkSurface>
-      {inspectorRow && (
-        <DelegateTranscriptInspector
-          row={inspectorRow}
-          now={now}
-          runOptions={inspectorRuns}
-          detail={detail}
-          onRunSelected={onRunSelected}
-          store={store}
-          isOpen={inspectorOpen}
-          paused={pausedAt !== undefined}
-          onClose={() => setInspectorOpen(false)}
-        />
-      )}
     </>
   );
 }

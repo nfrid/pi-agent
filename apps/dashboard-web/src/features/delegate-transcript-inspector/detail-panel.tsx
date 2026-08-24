@@ -30,6 +30,14 @@ export function DelegateInspectorMetadata({
     >
       <span className={surfaceStateClass(state)}>{state}</span>
       {duration && <span>{duration}</span>}
+      {row.allowWrites !== undefined && (
+        <span>{row.allowWrites ? 'read/write' : 'read-only'}</span>
+      )}
+      {row.isolation && <span>{row.isolation} workspace</span>}
+      {row.context && <span>{row.context}</span>}
+      {(row.route ?? row.workflow?.route) && (
+        <span>{row.route ?? row.workflow?.route}</span>
+      )}
       {row.runCount && row.runCount > 1 && <span>{row.runCount} attempts</span>}
       {lifecycle && (
         <>
@@ -67,75 +75,176 @@ function artifactHandle(row: DelegateStatus): string | undefined {
 export function DelegateInspectorDetails({
   row,
   now,
+  details,
 }: {
   row: DelegateInspectionStatus;
   now: number;
+  details?: DelegateHistoryRunDetailResponse['run']['details'];
 }) {
   const lifecycle = row.lifecycle;
   const runs = row.runs ?? [];
-  const warnings = row.warnings ?? [];
+  const warnings = details?.runConfig?.warnings ?? row.warnings ?? [];
   const runKeyOccurrences = new Map<string, number>();
   const handle = artifactHandle(row);
-  const inputIdentities = new Set(
+  const setup = details?.setup;
+  const runConfig = details?.runConfig;
+  const fallbackInputIdentities = new Set(
     (row.workflow?.inputs ?? []).map((input) => input.identity),
   );
-  const after = (row.workflow?.dependencies ?? []).filter(
-    (dependency) => !inputIdentities.has(dependency),
+  const fallbackAfter = (row.workflow?.dependencies ?? []).filter(
+    (dependency) => !fallbackInputIdentities.has(dependency),
   );
+  type DisplayInput = {
+    identity: string;
+    label: string;
+    kind: 'report' | 'handoff' | 'branch' | 'metadata';
+    include?: readonly string[];
+    content?: string;
+    branch?: { branch?: string };
+  };
+  const fallbackInputs: DisplayInput[] = (row.workflow?.inputs ?? []).map(
+    (input) => ({
+      identity: input.identity,
+      label: input.label ?? input.node,
+      kind: input.include?.[0] ?? 'report',
+      include: input.include?.length ? input.include : ['report'],
+    }),
+  );
+  const inputs: DisplayInput[] = runConfig?.inputs?.length
+    ? runConfig.inputs.map((input) => ({ ...input }))
+    : fallbackInputs;
+  const failed = ['error', 'aborted', 'timed-out'].includes(row.state);
   return (
-    <details className="delegate-inspector-details">
-      <summary>Run and recovery details</summary>
-      <dl>
-        {after.length > 0 ? (
-          <div>
-            <dt>After</dt>
-            <dd>{after.join(', ')}</dd>
-          </div>
-        ) : null}
-        {row.workflow?.inputs?.map((input) => (
-          <div key={`${input.identity}:${input.node}`}>
-            <dt>Inputs</dt>
-            <dd>
-              {input.identity} ·{' '}
-              {(input.include?.length ? input.include : ['report']).join(' + ')}
-              {input.label ? ` · ${input.label}` : ''}
-            </dd>
-          </div>
-        ))}
-        {row.jobId && (
-          <div>
-            <dt>Job</dt>
-            <dd>{row.jobId}</dd>
-          </div>
-        )}
-        <div>
-          <dt>Access</dt>
-          <dd>{row.allowWrites ? 'read/write' : 'read-only'}</dd>
-        </div>
-        {row.context && (
-          <div>
-            <dt>Context</dt>
-            <dd>{row.context}</dd>
-          </div>
-        )}
-        {(row.route ?? row.workflow?.route) && (
-          <div>
-            <dt>Route</dt>
-            <dd>{row.route ?? row.workflow?.route}</dd>
-          </div>
-        )}
-      </dl>
-      {warnings.length > 0 && (
-        <div className="delegate-inspector-warnings">
-          <strong>Warnings</strong>
-          <ul>
-            {warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        </div>
+    <div className="delegate-inspector-details">
+      {(details?.task ?? row.details?.task) && (
+        <section
+          className="delegate-inspector-task"
+          aria-labelledby="delegate-task-title"
+        >
+          <h2 id="delegate-task-title">Task</h2>
+          <p>{details?.task ?? row.details?.task}</p>
+        </section>
       )}
-      {runs.length > 0 && (
+      {setup && (
+        <section
+          className="delegate-inspector-section"
+          aria-labelledby="delegate-setup-title"
+        >
+          <h2 id="delegate-setup-title">Delegate setup</h2>
+          <dl>
+            {setup.cwd && (
+              <div>
+                <dt>Working directory</dt>
+                <dd>{setup.cwd}</dd>
+              </div>
+            )}
+            {setup.isolation && (
+              <div>
+                <dt>Workspace</dt>
+                <dd>{setup.isolation}</dd>
+              </div>
+            )}
+            {setup.worktree?.branch && (
+              <div>
+                <dt>Checkout</dt>
+                <dd>{setup.worktree.branch}</dd>
+              </div>
+            )}
+            {setup.worktree?.worktreePath && (
+              <div>
+                <dt>Worktree</dt>
+                <dd>{setup.worktree.worktreePath}</dd>
+              </div>
+            )}
+            {setup.worktree?.baseRef && (
+              <div>
+                <dt>Original base</dt>
+                <dd>{setup.worktree.baseRef}</dd>
+              </div>
+            )}
+            {setup.worktree?.baseHead && (
+              <div>
+                <dt>Base commit</dt>
+                <dd>{setup.worktree.baseHead}</dd>
+              </div>
+            )}
+          </dl>
+        </section>
+      )}
+      {(runConfig ||
+        fallbackAfter.length > 0 ||
+        inputs.length > 0 ||
+        warnings.length > 0) && (
+        <section
+          className="delegate-inspector-section"
+          aria-labelledby="delegate-run-config-title"
+        >
+          <h2 id="delegate-run-config-title">Run configuration</h2>
+          <dl>
+            {runConfig?.scope && (
+              <div>
+                <dt>Scope</dt>
+                <dd>{runConfig.scope.join(', ')}</dd>
+              </div>
+            )}
+            {(runConfig?.after ?? fallbackAfter).length > 0 && (
+              <div>
+                <dt>After</dt>
+                <dd>{(runConfig?.after ?? fallbackAfter).join(', ')}</dd>
+              </div>
+            )}
+            {runConfig?.parentContextNote && (
+              <div>
+                <dt>Parent context</dt>
+                <dd>{runConfig.parentContextNote}</dd>
+              </div>
+            )}
+            {runConfig?.refreshSource && (
+              <div>
+                <dt>Refresh source</dt>
+                <dd>{runConfig.refreshSource}</dd>
+              </div>
+            )}
+          </dl>
+          {inputs.length > 0 && (
+            <div className="delegate-inspector-inputs">
+              <h3>Inputs</h3>
+              {inputs.map((input) => (
+                <details key={`${input.label}:${input.kind}:${input.identity}`}>
+                  <summary>
+                    {input.label}{' '}
+                    <small>{input.include?.join(' + ') ?? input.kind}</small>
+                  </summary>
+                  {input.content ? (
+                    <pre>{input.content}</pre>
+                  ) : input.branch ? (
+                    <p>Branch: {input.branch.branch ?? 'source branch'}</p>
+                  ) : (
+                    <p>No bounded content retained.</p>
+                  )}
+                </details>
+              ))}
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="delegate-inspector-warnings" role="note">
+              <strong>Setup warnings</strong>
+              <ul>
+                {warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+      {details?.renderedPrompt && (
+        <details className="delegate-rendered-prompt">
+          <summary>Rendered prompt</summary>
+          <pre>{details.renderedPrompt}</pre>
+        </details>
+      )}
+      {runs.length > 1 && (
         <ol className="delegate-inspector-runs" aria-label="Run history">
           {runs.map((run, index) => {
             const duration = surfaceElapsed(
@@ -161,9 +270,10 @@ export function DelegateInspectorDetails({
           })}
         </ol>
       )}
-      {lifecycle && (
-        <div className="delegate-inspector-recovery">
+      {lifecycle && (failed || lifecycle.reason) && (
+        <div className="delegate-inspector-recovery" role="alert">
           <strong>Recovery</strong>
+          <span>{lifecycle.reason}</span>
           {lifecycle.diagnostic && <pre>{lifecycle.diagnostic}</pre>}
           {handle && (
             <p>
@@ -172,7 +282,7 @@ export function DelegateInspectorDetails({
           )}
         </div>
       )}
-    </details>
+    </div>
   );
 }
 

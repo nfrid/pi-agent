@@ -33,21 +33,38 @@ export function TasksSurface({
   const total = model.stats.total;
   const progress = total ? Math.round((completed / total) * 100) : 0;
   const title = 'Tasks';
-  const current = rows.find(
-    (row) => surfaceStateLabel(row.status) === 'running',
+  const blocked = rows.find(
+    (row) => surfaceStateLabel(row.status) === 'blocked',
   );
-  const summary = current
-    ? short(surfaceText(current.text, 'Task in progress'), 42)
-    : completed === total
-      ? 'All tasks complete'
-      : model.stats.active === 0
-        ? 'No active tasks'
-        : `${model.stats.active} remaining`;
+  const current =
+    blocked ??
+    rows.find((row) => surfaceStateLabel(row.status) === 'running') ??
+    rows.find((row) =>
+      ['queued', 'todo'].includes(surfaceStateLabel(row.status)),
+    );
+  const summary = blocked
+    ? `Blocked: ${short(surfaceText(blocked.text, 'Task blocked'), 34)}`
+    : current
+      ? short(surfaceText(current.text, 'Task in progress'), 42)
+      : completed === total
+        ? 'All tasks complete'
+        : model.stats.active === 0
+          ? 'No active tasks'
+          : `${model.stats.active} remaining`;
   return (
     <WorkSurface
       title={title}
       label="Tasks"
       summary={summary}
+      summaryDetail={
+        current ? (
+          <small className="surface-summary-detail">
+            {blocked
+              ? 'Blocked task'
+              : `${Math.max(0, total - completed)} remaining`}
+          </small>
+        ) : undefined
+      }
       count={`${completed}/${total}`}
       visibleCount={total}
       paused={paused}

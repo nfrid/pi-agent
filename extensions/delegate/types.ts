@@ -9,7 +9,7 @@ import {
   normalizeWorkflowAttempt,
   type WorkflowAttempt,
 } from './workflow-model';
-import type { WorktreeSummary } from './worktree/model';
+import type { WorktreeBase, WorktreeSummary } from './worktree/model';
 
 /** Harness-observed causes for a non-successful delegate settlement. */
 export type DelegateLifecycleReason =
@@ -94,6 +94,24 @@ export interface DelegateRouteState {
 export type DelegateContext = 'branch' | 'fresh' | 'continuation';
 /** Whether a delegate shares the parent checkout or receives a worktree. */
 export type DelegateIsolation = 'shared' | 'worktree';
+export type DelegateInputEvidenceKind =
+  | 'report'
+  | 'handoff'
+  | 'branch'
+  | 'metadata';
+/** Small, bounded public evidence projection for selected-run inspection. */
+export interface DelegateInputEvidence {
+  identity: string;
+  kind: DelegateInputEvidenceKind;
+  label: string;
+  content?: string;
+  branch?: {
+    branch?: string;
+    worktreePath?: string;
+    base?: string;
+    headCommit?: string;
+  };
+}
 export type DelegateRunState =
   | 'queued'
   | 'running'
@@ -145,6 +163,12 @@ export interface DelegateRunMetadata {
   warnings?: string[];
   /** The branch holding this run's work, when it ran in its own worktree. */
   worktree?: WorktreeSummary;
+  /** Bounded resolved workflow evidence retained for selected-run inspection. */
+  inputEvidence?: readonly DelegateInputEvidence[];
+  /** Requested refresh source; continuations may change this only for read-only runs. */
+  refreshSource?: WorktreeBase;
+  /** Exact final prompt sent to the child, retained within bounded public details. */
+  renderedPrompt?: string;
   /** Exact final assistant output, stored only when the parent handoff omits it. */
   artifact?: ArtifactMetadata;
   /** A bounded pre-timeout checkpoint request and its observed outcome. */

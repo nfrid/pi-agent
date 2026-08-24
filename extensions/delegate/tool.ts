@@ -393,7 +393,7 @@ export function registerDelegateTool(
           assertContinuationFields(
             continuationReference,
             params,
-            'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
+            'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
           );
           activeWorkflow.require(continuationReference);
         }
