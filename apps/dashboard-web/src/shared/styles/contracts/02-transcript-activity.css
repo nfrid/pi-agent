@@ -152,6 +152,9 @@
   line-height: 1.35;
   text-transform: uppercase;
 }
+.activity-tool-name-described {
+  font-style: italic;
+}
 .activity-tool-argument {
   display: flex;
   min-width: 0;

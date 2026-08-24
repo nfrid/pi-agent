@@ -51,7 +51,11 @@ function ActivityStepContent({
             ? '…'
             : null}
       </span>
-      <span className="activity-tool-name">{action.action}</span>
+      <span
+        className={`activity-tool-name${action.described ? ' activity-tool-name-described' : ''}`}
+      >
+        {action.action}
+      </span>
       {(action.argument || hasChanges) && (
         <span className="activity-tool-argument">
           {action.argument ? (

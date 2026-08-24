@@ -30,6 +30,7 @@ export type ActivityStepParts = {
   argument?: string;
   lineChanges?: FileLineChanges;
   role: 'edit' | 'read' | 'search' | 'command' | 'other';
+  described?: boolean;
   state: 'complete' | 'pending' | 'failed';
 };
 
@@ -249,20 +250,22 @@ export function activityStepParts(
   const state = activityToolState(tool);
   const path = toolPath(tool.args);
   let action: string;
+  let described: boolean | undefined;
   let argument: string | undefined;
   let lineChanges: FileLineChanges | undefined;
   if (name === 'bash' || name === 'shell' || name === 'exec') {
     const description = stringArg(tool.args, 'description');
     if (description) {
       action = compactActivityDescription(description);
+      described = true;
     } else {
       action = 'Running';
-      const command =
-        stringArg(tool.args, 'command') ??
-        stringArg(tool.args, 'cmd') ??
-        stringArg(tool.args, 'script');
-      if (command) argument = compactActivityArgument(command);
     }
+    const command =
+      stringArg(tool.args, 'command') ??
+      stringArg(tool.args, 'cmd') ??
+      stringArg(tool.args, 'script');
+    if (command) argument = compactActivityArgument(command);
   } else if (name === 'inspect_shell') {
     action = 'Checking';
     const command = stringArg(tool.args, 'command');
@@ -405,6 +408,7 @@ export function activityStepParts(
     ...(lineChanges ? { lineChanges } : {}),
     role,
     state,
+    described,
   };
 }
 
