@@ -295,7 +295,6 @@
   color: var(--orange);
 }
 .delegate-transcript-inspector-body {
-  position: relative;
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
@@ -454,18 +453,22 @@ ol.delegate-inspector-runs > li small {
   flex-direction: column;
 }
 .delegate-transcript-follow-control {
-  position: absolute;
-  right: 18px;
+  position: sticky;
   bottom: 14px;
   z-index: 2;
+  height: 0;
   min-height: 0;
+  align-self: stretch;
   pointer-events: none;
-  text-align: center;
+  text-align: right;
 }
 .delegate-transcript-follow-control > * {
   pointer-events: auto;
 }
 .delegate-transcript-follow-control > .jump-latest {
+  position: absolute;
+  right: 0;
+  bottom: 0;
   display: flex;
   width: 10em;
   height: auto;

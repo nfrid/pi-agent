@@ -87,19 +87,36 @@ const historyDetail = {
   },
 };
 
-async function inspectPersistedDelegate(page: Page) {
+async function inspectPersistedDelegate(
+  page: Page,
+  { canonicalTranscript = false } = {},
+) {
+  const selectedRun = canonicalTranscript
+    ? { ...historicalRun, sessionId: 'historical-session' }
+    : historicalRun;
+  const selectedHistory = {
+    ...history,
+    groups: [{ ...history.groups[0], ...selectedRun, runs: [selectedRun] }],
+  };
+  const selectedHistoryDetail = {
+    ...historyDetail,
+    run: { ...historyDetail.run, ...selectedRun },
+  };
   const initialSessionSnapshot = {
     metadata,
     entries: [
       { type: 'session', id: 'historical-session', cwd: '/tmp' },
-      {
+      ...Array.from({ length: canonicalTranscript ? 80 : 1 }, (_, index) => ({
         type: 'message',
-        id: 'historical-message',
+        id: `historical-message-${index}`,
         message: {
           role: 'user',
-          content: 'Show persisted delegate work',
+          content:
+            index === 0
+              ? 'Show persisted delegate work'
+              : `Historical transcript entry ${index}`,
         },
-      },
+      })),
     ],
     entriesComplete: true,
     serverId: 'delegate-history-e2e',
@@ -184,7 +201,7 @@ async function inspectPersistedDelegate(page: Page) {
     (route) =>
       route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify(historyDetail),
+        body: JSON.stringify(selectedHistoryDetail),
       }),
   );
   await page.route(
@@ -193,7 +210,7 @@ async function inspectPersistedDelegate(page: Page) {
       historyRequests += 1;
       return route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ ...history, leafId: historyLeafId }),
+        body: JSON.stringify({ ...selectedHistory, leafId: historyLeafId }),
       });
     },
   );
@@ -205,17 +222,67 @@ async function inspectPersistedDelegate(page: Page) {
   await expect(delegateLauncher).toBeVisible();
   await delegateLauncher.click();
   await page.getByRole('button', { name: /Offline historical worker/ }).click();
-  await expect(
-    page.getByLabel('Task').getByText('Inspect the historical fixture'),
-  ).toBeVisible();
-  await expect(page.getByText('apps/dashboard-web')).toBeVisible();
-  await expect(page.getByText('Keep the review concise.')).toBeVisible();
-  await page.getByText('Source report').click();
-  await expect(
-    page.getByText('The source delegate completed its scan.'),
-  ).toBeVisible();
-  await page.getByText('Rendered prompt').click();
-  await expect(page.getByText('You are a coding subagent.')).toBeVisible();
+  if (!canonicalTranscript) {
+    await expect(
+      page.getByLabel('Task').getByText('Inspect the historical fixture'),
+    ).toBeVisible();
+    await expect(page.getByText('apps/dashboard-web')).toBeVisible();
+    await expect(page.getByText('Keep the review concise.')).toBeVisible();
+    await page.getByText('Source report').click();
+    await expect(
+      page.getByText('The source delegate completed its scan.'),
+    ).toBeVisible();
+    await page.getByText('Rendered prompt').click();
+    await expect(page.getByText('You are a coding subagent.')).toBeVisible();
+  }
+  if (canonicalTranscript) {
+    const body = page.locator('.delegate-transcript-inspector-body');
+    await expect
+      .poll(() =>
+        body.evaluate((element) => element.scrollHeight - element.clientHeight),
+      )
+      .toBeGreaterThan(300);
+    await body.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+      element.scrollTop = Math.max(
+        0,
+        element.scrollHeight - element.clientHeight - 240,
+      );
+      element.dispatchEvent(new Event('scroll'));
+    });
+    const jump = page.getByRole('button', {
+      name: 'Jump to latest delegate transcript activity',
+    });
+    await expect(jump).toBeVisible();
+    const firstTop = await jump.evaluate(
+      (element) => element.getBoundingClientRect().top,
+    );
+    await body.evaluate((element) => {
+      element.scrollTop = Math.max(0, element.scrollTop - 100);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect
+      .poll(() =>
+        jump.evaluate((element) => element.getBoundingClientRect().top),
+      )
+      .toBeCloseTo(firstTop, 0);
+    const geometry = await jump.evaluate((element) => {
+      const body = element.closest('.delegate-transcript-inspector-body');
+      if (!body) throw new Error('delegate transcript body missing');
+      const buttonRect = element.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      return {
+        buttonBottom: buttonRect.bottom,
+        bodyTop: bodyRect.top,
+        bodyBottom: bodyRect.bottom,
+      };
+    });
+    expect(geometry.buttonBottom).toBeLessThan(geometry.bodyBottom);
+    expect(geometry.buttonBottom).toBeGreaterThan(geometry.bodyTop);
+    await jump.click();
+    await expect(jump).toHaveCount(0);
+    return;
+  }
   await expect(
     page.getByText(
       'Limited transcript — this older delegate has no child session.',
@@ -264,3 +331,7 @@ test('shows and inspects a persisted delegate in an offline session', async ({
 test('shows and inspects a persisted delegate in an offline session @desktop', async ({
   page,
 }) => inspectPersistedDelegate(page));
+
+test('keeps delegate jump-to-latest fixed to the transcript viewport @desktop', async ({
+  page,
+}) => inspectPersistedDelegate(page, { canonicalTranscript: true }));

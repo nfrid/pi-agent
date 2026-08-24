@@ -112,21 +112,6 @@ function DelegateCanonicalTranscript({
       className="delegate-canonical-session-transcript"
       aria-label="Canonical child session transcript"
     >
-      <div
-        ref={follow.controlLayerRef}
-        className="delegate-transcript-follow-control"
-      >
-        {follow.awayFromLatest && (
-          <button
-            type="button"
-            className="session-icon-button jump-latest"
-            onClick={follow.jumpToLatest}
-            aria-label="Jump to latest delegate transcript activity"
-          >
-            Jump to latest
-          </button>
-        )}
-      </div>
       {(historyLoading || historyError) &&
         (historyError ? (
           <SessionHistoryControl
@@ -157,6 +142,21 @@ function DelegateCanonicalTranscript({
         prependAnchor={prependAnchor}
         onPrependAnchorRestored={completePrependRestore}
       />
+      <div
+        ref={follow.controlLayerRef}
+        className="delegate-transcript-follow-control"
+      >
+        {follow.awayFromLatest && (
+          <button
+            type="button"
+            className="session-icon-button jump-latest"
+            onClick={follow.jumpToLatest}
+            aria-label="Jump to latest delegate transcript activity"
+          >
+            Jump to latest
+          </button>
+        )}
+      </div>
     </section>
   );
 }
