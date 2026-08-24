@@ -92,7 +92,10 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         branch: 'main',
         dirty: true,
         changedFileCount: 2,
-        localBranches: ['main', 'develop'],
+        localBranches: [
+          'main',
+          'develop/this-is-a-deliberately-long-worktree-branch-name',
+        ],
       }),
     }),
   );
@@ -302,9 +305,33 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await locationSheet
     .getByRole('textbox', { name: 'Search local branches' })
     .fill('dev');
-  await locationSheet.getByRole('button', { name: 'develop' }).click();
+  await locationSheet
+    .getByRole('button', {
+      name: 'develop/this-is-a-deliberately-long-worktree-branch-name',
+    })
+    .click();
   await expect(locationSheet).toHaveCount(0);
-  await expect(locationControl).toContainText('New worktree · develop');
+  await expect(locationControl).toContainText(
+    'New wt · develop/this-is-a-deliberately-long-worktree-branch-name',
+  );
+  const compactAgentControl = page.getByRole('button', {
+    name: 'Agent and thinking',
+  });
+  const [longLocationBox, compactAgentBox] = await Promise.all([
+    locationControl.boundingBox(),
+    compactAgentControl.boundingBox(),
+  ]);
+  expect(longLocationBox).not.toBeNull();
+  expect(compactAgentBox).not.toBeNull();
+  expect(
+    Math.abs((longLocationBox?.y ?? 0) - (compactAgentBox?.y ?? 0)),
+  ).toBeLessThanOrEqual(1);
+  expect(longLocationBox?.x ?? 0).toBeLessThan(compactAgentBox?.x ?? 0);
+  expect(
+    await locationControl
+      .locator('span')
+      .evaluate((element) => element.scrollWidth > element.clientWidth),
+  ).toBe(true);
   await locationControl.click();
   await page
     .getByRole('dialog', { name: 'Checkout location' })
@@ -315,7 +342,23 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   const agentControl = page.getByRole('button', {
     name: 'Agent and thinking',
   });
-  await expect(agentControl).toContainText('Careful · high');
+  await expect(agentControl).toContainText('Careful· high');
+  const footerStyle = await agentControl.evaluate((button) => {
+    const model = button.querySelector('.draft-agent-model');
+    const thinking = button.querySelector('.draft-agent-thinking');
+    return {
+      thinkingMargin: thinking ? getComputedStyle(thinking).marginLeft : '',
+      modelColor: model ? getComputedStyle(model).color : '',
+      thinkingColor: thinking ? getComputedStyle(thinking).color : '',
+    };
+  });
+  expect(footerStyle.thinkingMargin).toBe('3px');
+  expect(footerStyle.modelColor).not.toBe(footerStyle.thinkingColor);
+  expect(
+    await locationControl
+      .locator('svg')
+      .evaluate((icon) => getComputedStyle(icon).marginRight),
+  ).toBe('4px');
   await agentControl.click();
   const agentSheet = page.getByRole('dialog', {
     name: 'Agent and thinking',
@@ -326,7 +369,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(agentSheet).toBeVisible();
   await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
   await expect(agentSheet).toHaveCount(0);
-  await expect(agentControl).toContainText('Fast · medium');
+  await expect(agentControl).toContainText('Fast· medium');
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -1890,10 +1933,10 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const activeComposer = page.locator('form.composer');
   await expect(
     activeComposer.locator('.draft-picker-trigger-locked'),
-  ).toContainText('Current checkout · main · fixed');
+  ).toContainText('Current checkout · main');
   await expect(
     activeComposer.getByRole('button', { name: 'Agent and thinking' }),
-  ).toContainText('Careful · high');
+  ).toContainText('Careful· high');
   await expect(activeComposer.getByLabel('Model', { exact: true })).toHaveCount(
     0,
   );
@@ -1915,11 +1958,11 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(dormantComposer).toBeVisible();
   await expect(
     dormantComposer.locator('.draft-picker-trigger-locked'),
-  ).toContainText('Current checkout · main · fixed');
+  ).toContainText('Current checkout · main');
   const dormantAgent = dormantComposer.getByRole('button', {
     name: 'Agent and thinking',
   });
-  await expect(dormantAgent).toContainText('Careful · high');
+  await expect(dormantAgent).toContainText('Careful· high');
   await dormantAgent.click();
   await expect(
     page.getByRole('dialog', { name: 'Agent and thinking' }),
@@ -4919,11 +4962,12 @@ test('started session keeps location fixed and agent controls editable', async (
   await page.goto('/sessions/s1');
   await mocks.emit({ type: 'snapshot', snapshot });
   const composer = page.locator('form.composer');
+  await expect(composer.getByText('Mode:', { exact: true })).toHaveCount(0);
   await expect(composer.locator('.draft-picker-trigger-locked')).toContainText(
-    'Current checkout · main · fixed',
+    'Current checkout · main',
   );
   const agent = composer.getByRole('button', { name: 'Agent and thinking' });
-  await expect(agent).toContainText('Vision · medium');
+  await expect(agent).toContainText('Vision· medium');
   await agent.click();
   const picker = page.getByRole('dialog', { name: 'Agent and thinking' });
   await picker.getByRole('button', { name: /Text only/ }).click();
@@ -4957,7 +5001,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   const runtimeAgent = page.getByRole('button', {
     name: 'Agent and thinking',
   });
-  await expect(runtimeAgent).toContainText('Vision · medium');
+  await expect(runtimeAgent).toContainText('Vision· medium');
   await runtimeAgent.click();
   const runtimeAgentPicker = page.getByRole('dialog', {
     name: 'Agent and thinking',

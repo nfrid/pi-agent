@@ -149,10 +149,15 @@ export function ThreadLocationIndicator({
   checkout: CheckoutSummary | undefined;
 }) {
   const branch = checkout?.branch ?? checkout?.path.split('/').pop();
-  const prefix = checkout?.kind === 'main' ? 'Current checkout' : 'Worktree';
+  const prefix =
+    checkout?.kind === 'main'
+      ? 'Current checkout'
+      : checkout?.kind === 'worktree'
+        ? 'wt'
+        : 'Checkout';
   return (
     <span
-      className="draft-picker-trigger draft-picker-trigger-locked"
+      className={`draft-picker-trigger draft-picker-trigger-locked location-${checkout?.kind ?? 'unknown'}`}
       title={checkout?.path}
     >
       <svg
@@ -163,9 +168,6 @@ export function ThreadLocationIndicator({
         <path d="M1.5 3.5h5l1.25 1.5h6.75v7.5h-13z" />
       </svg>
       <span>{branch ? `${prefix} · ${branch}` : 'Thread checkout'}</span>
-      <span className="draft-picker-lock" aria-hidden="true">
-        {' · fixed'}
-      </span>
     </span>
   );
 }
@@ -231,7 +233,7 @@ export function DraftLocationPicker({
       ? `Current checkout · ${currentBranch}`
       : location.kind === 'checkout'
         ? `Existing · ${selectedCheckout ? checkoutLabel(selectedCheckout) : 'checkout'}`
-        : `New worktree · ${location.base === 'work' ? 'current work' : location.base === 'head' ? 'HEAD' : (selectedBranch ?? 'branch')}`;
+        : `New wt · ${location.base === 'work' ? 'current work' : location.base === 'head' ? 'HEAD' : (selectedBranch ?? 'branch')}`;
   const title =
     view === 'branches'
       ? 'Choose a branch'
@@ -243,7 +245,7 @@ export function DraftLocationPicker({
     <div className="draft-picker draft-location-picker">
       <Button
         type="button"
-        className="draft-picker-trigger"
+        className={`draft-picker-trigger location-${location.kind}`}
         isDisabled={disabled}
         aria-label="Checkout location"
         aria-expanded={open}
@@ -448,15 +450,18 @@ export function AgentPicker({
     <div className="draft-picker draft-agent-picker">
       <Button
         type="button"
-        className="draft-picker-trigger"
+        className="draft-picker-trigger draft-agent-trigger"
+        data-thinking={model?.thinking}
         isDisabled={disabled}
         aria-label="Agent and thinking"
         aria-expanded={open}
         aria-haspopup="dialog"
         onPress={() => (open ? close() : setOpen(true))}
       >
-        <span>{modelName(model, models)}</span>
-        {model?.thinking && <span> · {model.thinking}</span>}
+        <span className="draft-agent-model">{modelName(model, models)}</span>
+        {model?.thinking && (
+          <span className="draft-agent-thinking">· {model.thinking}</span>
+        )}
       </Button>
       {open && (
         <PickerSurface label="Agent and thinking" title="Agent" onClose={close}>
