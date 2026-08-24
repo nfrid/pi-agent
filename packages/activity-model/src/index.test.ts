@@ -31,13 +31,25 @@ describe('tool action summaries', () => {
     ).toBe('web_search: React Aria');
   });
 
-  it('does not emit an unbounded command or argument value', () => {
+  it('prefers a bounded bash description and falls back to the command', () => {
+    expect(
+      toolActionSummary({
+        name: 'bash',
+        args: {
+          command: 'echo fallback',
+          description: 'Update package metadata',
+        },
+      }),
+    ).toBe('Update package metadata');
     const summary = toolActionSummary({
       name: 'bash',
-      args: { command: 'x'.repeat(500) },
+      args: { command: 'echo fallback', description: 'x'.repeat(500) },
     });
     expect(summary.length).toBeLessThanOrEqual(140);
     expect(summary.endsWith('…')).toBe(true);
+    expect(
+      toolActionSummary({ name: 'bash', args: { command: 'echo fallback' } }),
+    ).toBe('bash echo fallback');
   });
 });
 

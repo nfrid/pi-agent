@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -61,9 +63,8 @@ interface DelegateSessionMetadata {
 }
 
 const SESSION_VERSION = 4;
-export const DELEGATE_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-export const DELEGATE_SESSION_MAX_UNLINKED = 200;
-const ACTIVE_GRACE_MS = 24 * 60 * 60 * 1000;
+export const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export const DELEGATE_SESSION_MAX_AGE_MS = SESSION_MAX_AGE_MS;
 const TOKEN_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -81,7 +82,10 @@ function validParentSessionId(value: unknown): value is string {
 }
 
 function sessionDir(): string {
-  return path.join(getAgentDir(), '.delegate-sessions');
+  return (
+    process.env.PI_DELEGATE_SESSION_DIR?.trim() ||
+    path.join(getAgentDir(), '.delegate-sessions')
+  );
 }
 
 function sessionPaths(token: string): {
@@ -377,18 +381,109 @@ export function removeDelegateSession(session: DelegateSession): void {
   rmSync(paths.metadataPath, { force: true });
 }
 
-/**
- * Prune durable unlinked transcripts. A transcript whose worktree still exists
- * is retained with it. Recently-written files are protected so another
- * Pi process cannot have an active transcript removed underneath it.
- */
+function isWithin(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function archiveFiles(
+  files: readonly string[],
+  sourceDirectory: string,
+  archiveDirectory: string,
+): boolean {
+  const sourceRoot = path.resolve(sourceDirectory);
+  const archiveRoot = path.resolve(archiveDirectory);
+  if (isWithin(sourceRoot, archiveRoot)) return false;
+  const destinations = files.map((file) =>
+    path.join(archiveRoot, path.relative(sourceRoot, path.resolve(file))),
+  );
+  if (destinations.some((file) => existsSync(file))) return false;
+  try {
+    for (const file of files) {
+      if (!lstatSync(file).isFile()) return false;
+    }
+    for (const destination of destinations)
+      mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    let moved = 0;
+    try {
+      for (; moved < files.length; moved++)
+        renameSync(files[moved], destinations[moved]);
+      return true;
+    } catch {
+      for (let index = moved - 1; index >= 0; index--) {
+        try {
+          renameSync(destinations[index], files[index]);
+        } catch {
+          // Best-effort rollback keeps the cleanup non-fatal.
+        }
+      }
+      return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
+function sessionFiles(directory: string, result: string[] = []): string[] {
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return result;
+  }
+  for (const entry of entries) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) sessionFiles(file, result);
+    else if (entry.isFile() && entry.name.endsWith('.jsonl')) result.push(file);
+  }
+  return result;
+}
+
+/** Move old ordinary session transcripts outside the live session tree. */
+export function archiveOldSessionFiles(options: {
+  directory: string;
+  archiveDirectory: string;
+  excludePaths?: readonly string[];
+  now?: number;
+  maxAgeMs?: number;
+}): { archived: number } {
+  const now = options.now ?? Date.now();
+  const maxAgeMs = options.maxAgeMs ?? SESSION_MAX_AGE_MS;
+  const excluded = new Set(
+    (options.excludePaths ?? []).map((file) => path.resolve(file)),
+  );
+  let archived = 0;
+  for (const file of sessionFiles(options.directory)) {
+    const resolved = path.resolve(file);
+    if (excluded.has(resolved)) continue;
+    try {
+      if (now - statSync(resolved).mtimeMs <= maxAgeMs) continue;
+      if (archiveFiles([resolved], options.directory, options.archiveDirectory))
+        archived++;
+    } catch {
+      // Best-effort retention cleanup must not break session startup.
+    }
+  }
+  return { archived };
+}
+
+/** Archive aged unlinked delegate transcripts and their metadata together. */
 export function pruneDelegateSessions(options: {
   now?: number;
   isWorktreeRetained: (id: string) => boolean;
+  archiveDirectory?: string;
 }): { removed: number } {
   const now = options.now ?? Date.now();
   const dir = sessionDir();
   if (!existsSync(dir)) return { removed: 0 };
+  const archiveDirectory =
+    options.archiveDirectory ??
+    path.join(path.dirname(dir), 'session-archive', '.delegate-sessions');
   let names: string[];
   try {
     names = readdirSync(dir);
@@ -409,27 +504,19 @@ export function pruneDelegateSessions(options: {
         statSync(paths.filePath).mtimeMs,
         statSync(paths.metadataPath).mtimeMs,
       );
-      if (now - touchedAt < ACTIVE_GRACE_MS) continue;
+      if (now - touchedAt <= DELEGATE_SESSION_MAX_AGE_MS) continue;
       candidates.push({ session, touchedAt });
     } catch {
       // Concurrent cleanup or malformed metadata is ignored safely.
     }
   }
-  candidates.sort((left, right) => right.touchedAt - left.touchedAt);
   let removed = 0;
-  for (let index = 0; index < candidates.length; index++) {
-    const candidate = candidates[index];
+  for (const candidate of candidates) {
+    const paths = sessionPaths(candidate.session.token);
     if (
-      now - candidate.touchedAt <= DELEGATE_SESSION_MAX_AGE_MS &&
-      index < DELEGATE_SESSION_MAX_UNLINKED
+      archiveFiles([paths.filePath, paths.metadataPath], dir, archiveDirectory)
     )
-      continue;
-    try {
-      removeDelegateSession(candidate.session);
       removed++;
-    } catch {
-      // Best-effort retention cleanup must not break session startup.
-    }
   }
   return { removed };
 }
