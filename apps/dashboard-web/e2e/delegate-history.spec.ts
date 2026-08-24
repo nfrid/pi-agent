@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { installDashboardBootstrap } from './dashboard-fixtures';
 
 const snapshot = {
@@ -53,6 +53,24 @@ const historyDetail = {
     ...historicalRun,
     details: {
       task: 'Inspect the historical fixture',
+      setup: {
+        cwd: '/tmp',
+        isolation: 'shared',
+      },
+      runConfig: {
+        scope: ['apps/dashboard-web'],
+        parentContextNote: 'Keep the review concise.',
+        inputs: [
+          {
+            identity: 'source@1',
+            kind: 'report',
+            label: 'Source report',
+            content: 'The source delegate completed its scan.',
+          },
+        ],
+      },
+      renderedPrompt:
+        'You are a coding subagent.\n\nInspect the historical fixture.',
       activities: [
         {
           type: 'tool',
@@ -69,9 +87,7 @@ const historyDetail = {
   },
 };
 
-test('shows and inspects a persisted delegate in an offline session', async ({
-  page,
-}) => {
+async function inspectPersistedDelegate(page: Page) {
   const initialSessionSnapshot = {
     metadata,
     entries: [
@@ -184,12 +200,22 @@ test('shows and inspects a persisted delegate in an offline session', async ({
 
   await page.goto('/sessions/historical-session');
   const delegateLauncher = page.getByRole('button', {
-    name: /Delegates 0 active · 1 finished All delegates complete/,
+    name: /Delegates.*0 running, 0 queued, 0 need attention, 1 done.*All delegates complete/,
   });
   await expect(delegateLauncher).toBeVisible();
   await delegateLauncher.click();
   await page.getByRole('button', { name: /Offline historical worker/ }).click();
-  await expect(page.getByText('Inspect the historical fixture')).toBeVisible();
+  await expect(
+    page.getByLabel('Task').getByText('Inspect the historical fixture'),
+  ).toBeVisible();
+  await expect(page.getByText('apps/dashboard-web')).toBeVisible();
+  await expect(page.getByText('Keep the review concise.')).toBeVisible();
+  await page.getByText('Source report').click();
+  await expect(
+    page.getByText('The source delegate completed its scan.'),
+  ).toBeVisible();
+  await page.getByText('Rendered prompt').click();
+  await expect(page.getByText('You are a coding subagent.')).toBeVisible();
   await expect(
     page.getByText(
       'Limited transcript — this older delegate has no child session.',
@@ -222,7 +248,19 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   });
   await expect.poll(() => historyRequests).toBeGreaterThan(1);
   await expect(
-    page.getByRole('dialog', { name: 'Delegate transcript' }),
+    page.getByRole('dialog', {
+      name: 'Delegate · Offline historical worker',
+    }),
   ).toBeVisible();
-  await expect(page.getByText('Inspect the historical fixture')).toBeVisible();
-});
+  await expect(
+    page.getByLabel('Task').getByText('Inspect the historical fixture'),
+  ).toBeVisible();
+}
+
+test('shows and inspects a persisted delegate in an offline session', async ({
+  page,
+}) => inspectPersistedDelegate(page));
+
+test('shows and inspects a persisted delegate in an offline session @desktop', async ({
+  page,
+}) => inspectPersistedDelegate(page));

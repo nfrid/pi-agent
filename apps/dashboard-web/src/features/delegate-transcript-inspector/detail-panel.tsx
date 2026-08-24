@@ -40,24 +40,15 @@ export function DelegateInspectorMetadata({
       )}
       {row.runCount && row.runCount > 1 && <span>{row.runCount} attempts</span>}
       {lifecycle && (
-        <>
-          <span>recovery {lifecycle.reason}</span>
-          <span>
-            continuation{' '}
-            {lifecycle.continuationUsable ? 'ready' : 'unavailable'}
-          </span>
-          <span>
-            {lifecycle.writableBranchRetained
-              ? 'writable branch retained'
+        <span className="surface-failed">
+          {!lifecycle.continuationUsable
+            ? 'continuation unavailable'
+            : lifecycle.writableBranchRetained
+              ? 'branch retained'
               : lifecycle.readOnlySnapshotRetained
-                ? 'read-only snapshot retained'
-                : 'no recovery checkout'}
-          </span>
-          {lifecycle.diagnostic && <span>diagnostic available</span>}
-          {lifecycle.diagnosticArtifact && (
-            <span>diagnostic artifact available</span>
-          )}
-        </>
+                ? 'snapshot retained'
+                : `recovery ${lifecycle.reason}`}
+        </span>
       )}
     </fieldset>
   );

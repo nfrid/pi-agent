@@ -164,6 +164,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.surface-counter-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+}
 .delegate-row-main {
   display: grid;
   min-width: 0;
@@ -266,7 +272,12 @@
 .delegate-transcript-inspector-body {
   display: flex;
   min-height: 0;
+  flex: 1 1 auto;
   flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 18px 28px;
 }
 .delegate-inspector-header-content {
   display: flex;
@@ -275,19 +286,21 @@
   gap: 6px;
 }
 .delegate-inspector-inline {
+  display: flex;
   min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
 }
 .delegate-inspector-inline-header {
-  display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  border-bottom: 1px solid var(--line-soft);
-  padding: 0 0 6px;
+  padding: 12px 14px 10px;
+}
+.delegate-inspector-inline-header .surface-drawer-heading {
+  flex: 1 1 auto;
 }
 .delegate-inspector-inline-header .delegate-inspector-header-content {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 }
 .delegate-open-session {
   color: var(--purple);
@@ -411,21 +424,18 @@ ol.delegate-inspector-runs > li small {
 .delegate-canonical-session-transcript {
   display: flex;
   min-height: 0;
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   flex-direction: column;
 }
 .delegate-transcript-follow-control {
+  position: sticky;
+  z-index: 2;
+  bottom: 8px;
   min-height: 0;
   text-align: center;
 }
 .delegate-transcript-follow-control:empty {
   display: none;
-}
-.delegate-transcript-scroll {
-  min-height: 180px;
-  flex: 1 1 auto;
-  overflow: auto;
-  overscroll-behavior: contain;
 }
 .delegate-transcript {
   display: grid;

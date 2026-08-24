@@ -5,7 +5,7 @@ import {
   selectTranscript,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import { useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useRef } from 'react';
 import { Transcript } from '../../entities/transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
 import { useOlderSessionHistory } from '../session/history';
@@ -50,11 +50,13 @@ function DelegateCanonicalTranscript({
   store,
   fallback,
   isOpen,
+  scrollElementRef,
 }: {
   sessionId: string;
   store: DashboardLiveStore;
   fallback: DelegateInspectionStatus;
   isOpen: boolean;
+  scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
   const projection = useDashboardStore(store, selectTranscript(sessionId));
   const runtime = useDashboardStore(store, selectRuntimeForSession(sessionId));
@@ -63,9 +65,8 @@ function DelegateCanonicalTranscript({
     store,
     (state) => state.sessionSyncById[sessionId],
   );
-  const transcriptScrollRef = useRef<HTMLDivElement>(null);
-  const pageRef = useRef<HTMLElement>(null);
-  const controlLayerRef = useRef<HTMLDivElement>(null);
+  const fallbackScrollRef = useRef<HTMLDivElement>(null);
+  const transcriptScrollRef = scrollElementRef ?? fallbackScrollRef;
   useEffect(() => {
     const handle = store.acquireSession(sessionId);
     return () => handle?.release();
@@ -107,11 +108,14 @@ function DelegateCanonicalTranscript({
     );
   return (
     <section
-      ref={pageRef}
+      ref={follow.sessionPageRef}
       className="delegate-canonical-session-transcript"
       aria-label="Canonical child session transcript"
     >
-      <div ref={controlLayerRef} className="delegate-transcript-follow-control">
+      <div
+        ref={follow.controlLayerRef}
+        className="delegate-transcript-follow-control"
+      >
         {follow.awayFromLatest && (
           <button
             type="button"
@@ -135,26 +139,24 @@ function DelegateCanonicalTranscript({
             Loading earlier child session history…
           </output>
         ))}
-      <div ref={transcriptScrollRef} className="delegate-transcript-scroll">
-        <Transcript
-          projection={projection}
-          runtime={runtime}
-          tailScrollRequest={follow.tailScrollRequest}
-          onBeforeScroll={follow.stopFollowing}
-          scrollElementRef={transcriptScrollRef}
-          outline={snapshot?.outline}
-          onJumpToLandmark={(landmark) =>
-            landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
-              ? loadThroughOrdinal(landmark.ordinal)
-              : true
-          }
-          leadingContinuation={
-            history?.hasOlder ? history.leadingContinuation : undefined
-          }
-          prependAnchor={prependAnchor}
-          onPrependAnchorRestored={completePrependRestore}
-        />
-      </div>
+      <Transcript
+        projection={projection}
+        runtime={runtime}
+        tailScrollRequest={follow.tailScrollRequest}
+        onBeforeScroll={follow.stopFollowing}
+        scrollElementRef={transcriptScrollRef}
+        outline={snapshot?.outline}
+        onJumpToLandmark={(landmark) =>
+          landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
+            ? loadThroughOrdinal(landmark.ordinal)
+            : true
+        }
+        leadingContinuation={
+          history?.hasOlder ? history.leadingContinuation : undefined
+        }
+        prependAnchor={prependAnchor}
+        onPrependAnchorRestored={completePrependRestore}
+      />
     </section>
   );
 }
@@ -163,10 +165,12 @@ export function DelegateInspectorTranscript({
   row,
   store,
   isOpen,
+  scrollElementRef,
 }: {
   row: DelegateInspectionStatus;
   store?: DashboardLiveStore;
   isOpen: boolean;
+  scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
   return isOpen && row.sessionId && store ? (
     <DelegateCanonicalTranscript
@@ -175,6 +179,7 @@ export function DelegateInspectorTranscript({
       store={store}
       fallback={row}
       isOpen={isOpen}
+      scrollElementRef={scrollElementRef}
     />
   ) : (
     <DelegateBoundedFallback

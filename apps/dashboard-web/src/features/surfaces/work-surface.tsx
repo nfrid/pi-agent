@@ -31,6 +31,7 @@ export function WorkSurface({
   drawerSummary,
   drawerHeaderContent,
   drawerContent,
+  hideDrawerHeader = false,
   onDrawerClose,
   children,
 }: {
@@ -48,6 +49,7 @@ export function WorkSurface({
   drawerSummary?: ReactNode;
   drawerHeaderContent?: ReactNode;
   drawerContent?: ReactNode;
+  hideDrawerHeader?: boolean;
   onDrawerClose?: () => void;
   children: ReactNode;
 }) {
@@ -95,6 +97,7 @@ export function WorkSurface({
         title={drawerTitle ?? title}
         eyebrow={drawerEyebrow ?? label}
         hideTitle={!drawerTitle}
+        hideHeader={hideDrawerHeader}
         headerSummary={drawerSummary ?? summary}
         className={drawerClassName}
         headerContent={drawerHeaderContent ?? headerStats}

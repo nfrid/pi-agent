@@ -672,7 +672,9 @@ describe('live extension surface fixtures', () => {
       />,
     );
     expect(markup).toContain('Review worker');
-    expect(markup).toContain('1 active · 0 finished');
+    expect(markup).toContain(
+      'aria-label="1 running, 0 queued, 0 need attention, 0 done"',
+    );
     expect(markup).not.toContain('Wake review-ready');
     expect(markup).not.toContain('wake:review-ready');
   });
@@ -699,7 +701,9 @@ describe('live extension surface fixtures', () => {
         }}
       />,
     );
-    expect(markup).toContain('0 active · 0 finished');
+    expect(markup).toContain(
+      'aria-label="0 running, 0 queued, 0 need attention, 0 done"',
+    );
     expect(markup).not.toContain('delegate-row-toggle');
   });
 
@@ -869,8 +873,10 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('<strong>Compact delegate</strong>');
     expect(markup).toContain('<strong>Compact task</strong>');
-    expect(markup).toContain('1 active · 0 finished');
-    expect(markup).toContain('0/1');
+    expect(markup).toContain(
+      'aria-label="1 running, 0 queued, 0 need attention, 0 done"',
+    );
+    expect(markup).toContain('aria-label="0 of 1 tasks complete"');
     expect(markup).not.toContain('luna-high');
     expect(markup).not.toContain('task-progress');
   });
@@ -1022,9 +1028,11 @@ describe('live extension surface fixtures', () => {
     );
 
     expect(markup).toContain('No active tasks');
-    expect(markup).toContain('0/1');
+    expect(markup).toContain('aria-label="0 of 1 tasks complete"');
     expect(markup).toContain('1 stopped');
-    expect(markup).toContain('0 active · 1 finished');
+    expect(markup).toContain(
+      'aria-label="0 running, 0 queued, 1 need attention, 0 done"',
+    );
   });
 
   it('adapts delegate history through the main transcript entry components', () => {
@@ -1138,11 +1146,9 @@ describe('live extension surface fixtures', () => {
 
     expect(markup).toContain('aria-label="Delegate details"');
     expect(markup).toContain('2 attempts');
-    expect(markup).toContain('recovery timeout');
-    expect(markup).toContain('continuation ready');
-    expect(markup).toContain('read-only snapshot retained');
-    expect(markup).toContain('diagnostic available');
-    expect(markup).toContain('diagnostic artifact available');
+    expect(markup).toContain('snapshot retained');
+    expect(markup).not.toContain('continuation ready');
+    expect(markup).not.toContain('diagnostic available');
     expect(markup).not.toContain('Observed failure');
   });
 
@@ -1332,6 +1338,56 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('Inputs');
     expect(markup).toContain('report + branch');
     expect(markup).not.toContain('upstream evidence');
+  });
+
+  it('renders structured task, mutable run scope, input evidence, and prompt', () => {
+    const row = {
+      id: 'review-lineage',
+      runId: 'review-run',
+      lineageId: 'review-lineage',
+      name: 'Review implementation',
+      kind: 'background' as const,
+      state: 'success' as const,
+      createdAt: 1,
+      allowWrites: false,
+      isolation: 'worktree' as const,
+    };
+    const markup = renderToStaticMarkup(
+      <DelegateInspectorDetails
+        row={row}
+        now={2_000}
+        details={{
+          task: 'Review the complete implementation.',
+          setup: {
+            cwd: '/repo',
+            isolation: 'worktree',
+            worktree: { branch: 'pi/review' },
+          },
+          runConfig: {
+            scope: ['apps/dashboard-web', 'extensions/delegate'],
+            parentContextNote: 'Keep it concise.\nCheck the drawer.',
+            inputs: [
+              {
+                identity: 'impl@1',
+                kind: 'report',
+                label: 'Implementation report',
+                content: 'Outcome: done\nChanged the inspector.',
+              },
+            ],
+          },
+          renderedPrompt: 'You are a child.\n\nReview the implementation.',
+          truncated: false,
+        }}
+      />,
+    );
+    expect(markup).toContain('Review the complete implementation.');
+    expect(markup).toContain('apps/dashboard-web');
+    expect(markup).toContain('Keep it concise.');
+    expect(markup).toContain('Implementation report');
+    expect(markup).toContain('Outcome: done');
+    expect(markup).toContain('<summary>Rendered prompt</summary>');
+    expect(markup).toContain('You are a child.');
+    expect(markup).not.toContain('impl@1');
   });
 
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {

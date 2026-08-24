@@ -477,7 +477,8 @@ describe('delegate task lifecycle', () => {
 
     try {
       // A continuation must land in the same worktree; otherwise the child
-      // would resume against a checkout that no longer holds its work.
+      // would resume against a checkout that no longer holds its work. Its
+      // advisory scope may change independently.
       const restored = preflightDelegateContinuation(
         plan({
           requestedCwd: '/wrong',
@@ -492,7 +493,7 @@ describe('delegate task lifecycle', () => {
       );
       expect(restored).toMatchObject({
         cwd: prepared.cwd,
-        scope: ['src'],
+        scope: ['wrong'],
         allowWrites: true,
       });
       expect(restored.worktree?.record.sessionToken).toBe(

@@ -1,4 +1,5 @@
 import {
+  MAX_DELEGATE_HISTORY_TASK,
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
 } from '@pi-dashboard/protocol';
@@ -533,7 +534,7 @@ describe('delegate history adapter', () => {
     );
     const details = detail.run.details;
     expect(details.truncated).toBe(true);
-    expect(details.task?.length).toBeLessThanOrEqual(20_000);
+    expect(details.task?.length).toBeLessThanOrEqual(MAX_DELEGATE_HISTORY_TASK);
     expect(parseDelegateHistoryResponse(response)).toEqual(response);
   });
 
@@ -639,7 +640,9 @@ describe('delegate history adapter', () => {
       activities: [{ text: expect.stringContaining('public activity') }],
       truncated: true,
     });
-    expect(detail.run.details.task?.length).toBeLessThanOrEqual(20_000);
+    expect(detail.run.details.task?.length).toBeLessThanOrEqual(
+      MAX_DELEGATE_HISTORY_TASK,
+    );
     expect(JSON.stringify(detail)).not.toContain(
       'raw payload must not be retained',
     );
@@ -1384,9 +1387,9 @@ describe('delegate history adapter', () => {
       cwd: '/repo/child',
       scope: ['extensions/delegate'],
       isolation: 'worktree',
-      contextNote: 'Parent note',
+      contextNote: 'Parent note\nwith another line',
       refreshSource: 'head',
-      renderedPrompt: 'exact final prompt',
+      renderedPrompt: 'exact final prompt\nwith policy',
       worktree: {
         branch: 'pi/review',
         worktreePath: '/tmp/review',
@@ -1410,7 +1413,7 @@ describe('delegate history adapter', () => {
           identity: 'upstream@1',
           kind: 'report',
           label: 'Upstream report',
-          content: 'bounded included report',
+          content: 'bounded included report\nwith evidence',
         },
       ],
     });
@@ -1443,13 +1446,16 @@ describe('delegate history adapter', () => {
         runConfig: {
           scope: ['extensions/delegate'],
           after: ['gate@1'],
-          parentContextNote: 'Parent note',
+          parentContextNote: 'Parent note\nwith another line',
           refreshSource: 'head',
           inputs: [
-            { label: 'Upstream report', content: 'bounded included report' },
+            {
+              label: 'Upstream report',
+              content: 'bounded included report\nwith evidence',
+            },
           ],
         },
-        renderedPrompt: 'exact final prompt',
+        renderedPrompt: 'exact final prompt\nwith policy',
       },
     });
     expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);

@@ -65,7 +65,17 @@ export function TasksSurface({
           </small>
         ) : undefined
       }
-      count={`${completed}/${total}`}
+      count={
+        <span
+          role="status"
+          className="surface-counter-strip"
+          aria-label={`${completed} of ${total} tasks complete`}
+        >
+          <span className="surface-done" aria-hidden="true">
+            ✓ {completed}/{total}
+          </span>
+        </span>
+      }
       visibleCount={total}
       paused={paused}
       headerStats={

@@ -24,6 +24,7 @@ import {
   MAX_COMPOSER_COMMAND_DESCRIPTION,
   MAX_COMPOSER_COMMAND_NAME,
   MAX_COMPOSER_COMMANDS,
+  MAX_DELEGATE_HISTORY_CONTEXT_NOTE,
   MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
   MAX_DELEGATE_HISTORY_DETAIL_TEXT,
   MAX_DELEGATE_HISTORY_GROUPS,
@@ -1870,7 +1871,7 @@ const DelegateHistoryRunConfigSchema = Type.Object(
       ),
     ),
     parentContextNote: Type.Optional(
-      Type.String({ maxLength: MAX_DELEGATE_HISTORY_DETAIL_TEXT }),
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_CONTEXT_NOTE }),
     ),
     refreshSource: Type.Optional(
       Type.Union([Type.Literal('wip'), Type.Literal('head')]),

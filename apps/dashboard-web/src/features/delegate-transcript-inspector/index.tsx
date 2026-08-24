@@ -41,6 +41,7 @@ export function DelegateTranscriptInspector({
   onClose: () => void;
 }) {
   const go = useDashboardNavigate();
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const lineageRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -89,7 +90,10 @@ export function DelegateTranscriptInspector({
     </div>
   );
   const inspectorContent = (
-    <div className="delegate-transcript-inspector-body">
+    <div
+      ref={transcriptScrollRef}
+      className="delegate-transcript-inspector-body"
+    >
       {runOptions && runOptions.length > 1 && (
         <fieldset
           className="delegate-inspector-run-picker"
@@ -134,13 +138,14 @@ export function DelegateTranscriptInspector({
         row={transcriptRow}
         store={store}
         isOpen={isOpen}
+        scrollElementRef={transcriptScrollRef}
       />
     </div>
   );
   if (inline)
     return (
       <div className="delegate-inspector-inline">
-        <div className="delegate-inspector-inline-header">
+        <header className="surface-drawer-header delegate-inspector-inline-header">
           <button
             type="button"
             className="session-icon-button"
@@ -150,8 +155,20 @@ export function DelegateTranscriptInspector({
           >
             ←
           </button>
+          <div className="surface-drawer-heading">
+            <p className="eyebrow">Delegate</p>
+            <h2>{surfaceText(displayedRow.name, 'Subagent')}</h2>
+          </div>
           {headerContent}
-        </div>
+          <button
+            type="button"
+            className="session-icon-button"
+            aria-label="Close delegate details"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
         {inspectorContent}
       </div>
     );

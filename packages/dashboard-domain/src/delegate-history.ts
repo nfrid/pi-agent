@@ -9,6 +9,7 @@ import type {
 import {
   isCanonicalWorkflowAttemptReference,
   isCanonicalWorkflowLogicalId,
+  MAX_DELEGATE_HISTORY_CONTEXT_NOTE,
   MAX_DELEGATE_HISTORY_DETAIL_BYTES,
   MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
   MAX_DELEGATE_HISTORY_DETAIL_TEXT,
@@ -308,20 +309,47 @@ function validHistoryIsolation(
   return value === 'shared' || value === 'worktree' ? value : undefined;
 }
 
+function hasUnsafeControlCharacters(
+  value: string,
+  allowWhitespace: boolean,
+): boolean {
+  return [...value].some((character) => {
+    const code = character.charCodeAt(0);
+    if (allowWhitespace && (code === 9 || code === 10 || code === 13))
+      return false;
+    return code < 32 || code === 127;
+  });
+}
+
 function safeDisplayString(
   value: unknown,
   max: number,
   budget: DetailBudget,
 ): string | undefined {
-  if (
-    typeof value !== 'string' ||
-    [...value].some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127;
-    })
-  )
+  if (typeof value !== 'string' || hasUnsafeControlCharacters(value, false))
     return undefined;
   return boundedString(value, max, budget);
+}
+
+function safeDisplayText(
+  value: unknown,
+  max: number,
+  budget: DetailBudget,
+): string | undefined {
+  if (typeof value !== 'string' || hasUnsafeControlCharacters(value, true))
+    return undefined;
+  return boundedString(value, max, budget);
+}
+
+function exactRenderedPrompt(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_DELEGATE_HISTORY_PROMPT ||
+    hasUnsafeControlCharacters(value, true)
+  )
+    return undefined;
+  return value;
 }
 
 function publicWorktree(
@@ -375,7 +403,7 @@ function publicInputEvidence(
       safeDisplayString(input.label, 120, budget) ??
       safeDisplayString(input.node, 80, budget);
     if (!identity || !kind || !label) continue;
-    const content = safeDisplayString(
+    const content = safeDisplayText(
       input.content ?? input.evidence,
       MAX_DELEGATE_HISTORY_INPUT_EVIDENCE,
       budget,
@@ -451,19 +479,17 @@ function publicDetails(run: RecordValue): DelegateHistoryDetails {
   if (scope?.length) runConfig.scope = scope;
   if (after?.length) runConfig.after = after;
   if (inputEvidence) runConfig.inputs = inputEvidence;
-  const contextNote = safeDisplayString(
+  const contextNote = safeDisplayText(
     run.contextNote,
-    MAX_DELEGATE_HISTORY_DETAIL_TEXT,
+    MAX_DELEGATE_HISTORY_CONTEXT_NOTE,
     budget,
   );
   if (contextNote) runConfig.parentContextNote = contextNote;
   if (run.refreshSource === 'wip' || run.refreshSource === 'head')
     runConfig.refreshSource = run.refreshSource;
-  const renderedPrompt = safeDisplayString(
-    run.renderedPrompt,
-    MAX_DELEGATE_HISTORY_PROMPT,
-    budget,
-  );
+  // The selected-run endpoint returns the exact child prompt independently
+  // from the bounded activity/detail budget.
+  const renderedPrompt = exactRenderedPrompt(run.renderedPrompt);
   if (Object.keys(runConfig).length > 0) details.runConfig = runConfig;
   if (renderedPrompt) details.renderedPrompt = renderedPrompt;
   const response = boundedString(
@@ -523,8 +549,17 @@ function publicDetails(run: RecordValue): DelegateHistoryDetails {
     if (run.warnings.length > 32) budget.truncated = true;
   }
   details.truncated = budget.truncated;
-  if (JSON.stringify(details).length * 4 > MAX_DELEGATE_HISTORY_DETAIL_BYTES)
-    return { truncated: true };
+  const { renderedPrompt: _renderedPrompt, ...boundedDetails } = details;
+  if (
+    JSON.stringify(boundedDetails).length * 4 >
+    MAX_DELEGATE_HISTORY_DETAIL_BYTES
+  )
+    return {
+      ...(typeof details.renderedPrompt === 'string'
+        ? { renderedPrompt: details.renderedPrompt }
+        : {}),
+      truncated: true,
+    } as DelegateHistoryDetails;
   return details as DelegateHistoryDetails;
 }
 
