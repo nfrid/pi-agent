@@ -103,6 +103,24 @@ export const ProtocolInfoSchema = Type.Object(
 );
 export type ProtocolInfo = Static<typeof ProtocolInfoSchema>;
 
+/** Live, bounded Git metadata used by the new-thread checkout picker. */
+export const GitContextSchema = Type.Object(
+  {
+    branch: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    dirty: Type.Boolean(),
+    changedFileCount: Type.Optional(
+      Type.Integer({ minimum: 0, maximum: 100_000 }),
+    ),
+    localBranches: Type.Readonly(
+      Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
+        maxItems: 4096,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type GitContext = Static<typeof GitContextSchema>;
+
 export const LiveDiagnosticsRequestSchema = Type.Object(
   {},
   { additionalProperties: false },

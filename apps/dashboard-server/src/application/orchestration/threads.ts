@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
 import {
   type CommandReceipt,
   deriveSessionTitle,
@@ -10,6 +11,7 @@ import {
   type SessionIndexEntry,
   type Thread,
 } from '@pi-dashboard/protocol';
+import { resolveGitCommit } from '../../git-context.js';
 import type { CreateThreadWithRunInput } from '../../repositories/types.js';
 import type { CreateThreadCommand, OrchestrationHost } from './helpers.js';
 import { idempotencyConflict } from './helpers.js';
@@ -174,20 +176,44 @@ export async function createThread(
   let result: { thread: Thread; run: Run; receipt: CommandReceipt };
   // Non-Git adopted directories are caller-owned roots; they cannot support
   // worktree preparation, even if an old client asks for it explicitly.
+  const requestedWorktree =
+    command.isolation === 'worktree' ||
+    command.base !== undefined ||
+    command.baseRef !== undefined;
+  if (project.repositoryIdentity === undefined && requestedWorktree)
+    throw new Error(
+      'This project is not a Git repository; worktrees are unavailable.',
+    );
   const chosenIsolation =
     project.repositoryIdentity === undefined
       ? 'main'
       : (command.isolation ?? project.defaultIsolation);
   if (command.checkoutId || chosenIsolation === 'main') {
+    if (command.base !== undefined || command.baseRef !== undefined)
+      throw new Error(
+        'A worktree base cannot be used with an existing checkout.',
+      );
     const checkout = command.checkoutId
       ? host.requireCheckout(command.checkoutId)
       : host.mainCheckout(project.id);
     if (!checkout) throw new Error('Project has no persisted main checkout.');
     if (checkout.projectId !== project.id)
       throw new Error('Checkout does not belong to this project.');
+    const activeRun = host.repository
+      .listRuns()
+      .some(
+        (run) =>
+          run.checkoutId === checkout.id &&
+          !TERMINAL_RUN_STATUSES.includes(run.status),
+      );
     if (checkout.status === 'retired')
       throw Object.assign(
         new Error('A retired checkout cannot receive a new thread.'),
+        { code: 'orchestration-conflict' },
+      );
+    if (activeRun || !['ready', 'dirty'].includes(checkout.status))
+      throw Object.assign(
+        new Error('The selected checkout is unavailable for a new thread.'),
         { code: 'orchestration-conflict' },
       );
     const input: CreateThreadWithRunInput = {
@@ -196,6 +222,15 @@ export async function createThread(
     };
     result = host.repository.createThreadWithRun(command.commandId, input);
   } else {
+    // Resolve a selected ref before the durable receipt is written. The
+    // resulting commit in baseSha makes restart/retry independent of branch
+    // movement and keeps ref validation authoritative on the server.
+    const baseSha =
+      command.baseRef !== undefined || command.base === 'head'
+        ? await resolveGitCommit(project.rootPath, command.baseRef)
+        : command.base === 'work'
+          ? 'wip'
+          : undefined;
     // The repository allocates this preparing checkout only after it has
     // checked the durable receipt, inside the same transaction as all rows.
     result = host.repository.createIsolatedThreadWithRun(command.commandId, {
@@ -204,6 +239,7 @@ export async function createThread(
         kind: 'worktree',
         path: path.join(project.rootPath, '.worktrees', `.pending-${runId}`),
         status: 'preparing',
+        ...(baseSha ? { baseSha } : {}),
       },
       thread,
       run,

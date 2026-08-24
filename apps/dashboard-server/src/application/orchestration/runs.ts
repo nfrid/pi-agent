@@ -291,9 +291,13 @@ export async function execute(
           return creator.prepareWorktree({
             cwd: project.rootPath,
             name: host.requireThread(run.threadId).title,
-            ...(project.defaultBaseBranch
-              ? { baseRef: project.defaultBaseBranch }
-              : { base: 'wip' as const }),
+            ...(checkout.baseSha === 'wip'
+              ? { base: 'wip' as const }
+              : checkout.baseSha
+                ? { baseRef: checkout.baseSha }
+                : project.defaultBaseBranch
+                  ? { baseRef: project.defaultBaseBranch }
+                  : { base: 'wip' as const }),
           });
         });
         if (!fresh.worktree) {

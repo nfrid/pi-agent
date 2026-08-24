@@ -83,11 +83,7 @@ vi.mock('./drafts', () => ({
   useDrafts: () => [draft],
 }));
 
-import {
-  DraftThreadView,
-  draftModelSelection,
-  draftThinkingLevels,
-} from './draft-thread';
+import { DraftThreadView, draftModelSelection } from './draft-thread';
 
 const snapshot = {
   projects: [{ id: 'project-1', title: 'Project One', rootPath: '/work/one' }],
@@ -108,7 +104,7 @@ afterEach(() => {
 });
 
 describe('draft thread controls', () => {
-  it('chooses a configured current model and exposes effort levels', () => {
+  it('chooses a configured current model', () => {
     const runtimes = [
       {
         model: { provider: 'test', model: 'fast', thinking: 'high' },
@@ -124,7 +120,6 @@ describe('draft thread controls', () => {
       model: 'fast',
       thinking: 'high',
     });
-    expect(draftThinkingLevels(runtimes)).toEqual(['off', 'low', 'high']);
   });
 
   it('shows startup in place and only transitions when the runtime appears', async () => {

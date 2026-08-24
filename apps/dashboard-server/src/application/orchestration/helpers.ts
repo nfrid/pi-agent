@@ -53,6 +53,8 @@ export interface CreateThreadCommand {
   prompt: string;
   checkoutId?: string;
   isolation?: 'worktree' | 'main';
+  base?: 'work' | 'head';
+  baseRef?: string;
   mode?: 'read' | 'write';
   model?: Run['model'];
   runtimeProvider?: Run['runtimeProvider'];
