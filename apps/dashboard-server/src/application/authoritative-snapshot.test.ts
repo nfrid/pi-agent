@@ -303,6 +303,16 @@ describe('authoritative application snapshot lifecycle', () => {
                 createdAt: 1,
                 allowWrites: false,
                 capabilities: ['web'],
+                details: {
+                  task: 'Primary task',
+                  setup: { cwd: '/repo', isolation: 'worktree' },
+                  runConfig: {
+                    scope: ['extensions/delegate'],
+                    parentContextNote: 'Parent note',
+                    refreshSource: 'head',
+                  },
+                  truncated: true,
+                },
                 transcript: [
                   {
                     id: 'd'.repeat(300),
@@ -357,6 +367,12 @@ describe('authoritative application snapshot lifecycle', () => {
       { toolCallId: 'tool-1', status: 'running', timestamp: 100 },
     ]);
     expect(snapshot.active.delegates[0]?.capabilities).toEqual(['web']);
+    expect(snapshot.active.delegates[0]?.details).toMatchObject({
+      task: 'Primary task',
+      setup: { cwd: '/repo', isolation: 'worktree' },
+      runConfig: { scope: ['extensions/delegate'] },
+      truncated: true,
+    });
     expect(snapshot.active.delegates[0]?.transcript[0]?.id).toBe(
       'd'.repeat(300),
     );

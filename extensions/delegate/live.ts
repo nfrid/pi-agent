@@ -7,6 +7,7 @@ import {
   DelegateStatusViewModelSchema,
 } from './contribution';
 import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
+import type { DelegateLiveDetails } from './types';
 
 export const DELEGATE_EXTENSION_ID = 'delegate';
 const MAX_SURFACE_STATUSES = 24;
@@ -47,6 +48,172 @@ function takeText(
   if (!result) return undefined;
   budget.remaining -= result.length;
   return result;
+}
+
+const MAX_SURFACE_TASK_CHARS = 4 * 1024;
+
+function projectDetails(
+  details: DelegateLiveDetails,
+  budget: { remaining: number },
+  includePrompt: boolean,
+): DelegateLiveDetails {
+  let truncated = details.truncated;
+  const task = details.task
+    ? takeText(details.task, MAX_SURFACE_TASK_CHARS, budget)
+    : undefined;
+  if (details.task && task?.length !== details.task.length) truncated = true;
+
+  const setup: NonNullable<DelegateLiveDetails['setup']> = {};
+  if (details.setup?.cwd) {
+    const cwd = takeText(details.setup.cwd, 4_096, budget);
+    if (cwd) setup.cwd = cwd;
+    if (cwd?.length !== details.setup.cwd.length) truncated = true;
+  }
+  if (details.setup?.isolation) setup.isolation = details.setup.isolation;
+  if (details.setup?.worktree) {
+    const worktree: NonNullable<
+      NonNullable<DelegateLiveDetails['setup']>['worktree']
+    > = {};
+    for (const [key, max] of [
+      ['branch', 512],
+      ['worktreePath', 4_096],
+      ['repositoryRoot', 4_096],
+      ['baseHead', 256],
+      ['baseRef', 512],
+      ['workBase', 256],
+    ] as const) {
+      const value = details.setup.worktree[key];
+      if (!value) continue;
+      const projected = takeText(value, max, budget);
+      if (projected) worktree[key] = projected;
+      if (projected?.length !== value.length) truncated = true;
+    }
+    if (Object.keys(worktree).length) setup.worktree = worktree;
+  }
+
+  const runConfig: NonNullable<DelegateLiveDetails['runConfig']> = {};
+  const sourceConfig = details.runConfig;
+  if (sourceConfig?.scope) {
+    const scope = sourceConfig.scope.flatMap((value) => {
+      const projected = takeText(value, 4_096, budget);
+      if (projected?.length !== value.length) truncated = true;
+      return projected ? [projected] : [];
+    });
+    if (scope.length) runConfig.scope = scope;
+    if (scope.length !== sourceConfig.scope.length) truncated = true;
+  }
+  if (sourceConfig?.after) {
+    const after = sourceConfig.after.flatMap((value) => {
+      const projected = takeText(value, 80, budget);
+      if (projected?.length !== value.length) truncated = true;
+      return projected ? [projected] : [];
+    });
+    if (after.length) runConfig.after = after;
+    if (after.length !== sourceConfig.after.length) truncated = true;
+  }
+  if (sourceConfig?.inputs) {
+    const inputs = sourceConfig.inputs.flatMap((input) => {
+      const included = takeValue(input, budget);
+      if (!included.included) {
+        truncated = true;
+        return [];
+      }
+      return [included.value as (typeof sourceConfig.inputs)[number]];
+    });
+    if (inputs.length) runConfig.inputs = inputs;
+    if (inputs.length !== sourceConfig.inputs.length) truncated = true;
+  }
+  if (sourceConfig?.parentContextNote) {
+    const note = takeText(sourceConfig.parentContextNote, 64 * 1024, budget);
+    if (note) runConfig.parentContextNote = note;
+    if (note?.length !== sourceConfig.parentContextNote.length)
+      truncated = true;
+  }
+  if (sourceConfig?.refreshSource)
+    runConfig.refreshSource = sourceConfig.refreshSource;
+  if (sourceConfig?.warnings) {
+    const warnings = sourceConfig.warnings.flatMap((warning) => {
+      const projected = takeText(warning, 512, budget);
+      if (projected?.length !== warning.length) truncated = true;
+      return projected ? [projected] : [];
+    });
+    if (warnings.length) runConfig.warnings = warnings;
+    if (warnings.length !== sourceConfig.warnings.length) truncated = true;
+  }
+
+  const renderedPrompt =
+    includePrompt && details.renderedPrompt
+      ? (() => {
+          const included = takeValue(details.renderedPrompt, budget);
+          if (!included.included) {
+            truncated = true;
+            return undefined;
+          }
+          return included.value as string;
+        })()
+      : undefined;
+  return {
+    ...(task ? { task } : {}),
+    ...(Object.keys(setup).length ? { setup } : {}),
+    ...(Object.keys(runConfig).length ? { runConfig } : {}),
+    ...(renderedPrompt ? { renderedPrompt } : {}),
+    truncated,
+  };
+}
+
+function projectPrompt(
+  details: DelegateLiveDetails,
+  projected: DelegateLiveDetails,
+  budget: { remaining: number },
+): DelegateLiveDetails {
+  if (!details.renderedPrompt) return projected;
+  const included = takeValue(details.renderedPrompt, budget);
+  return included.included
+    ? { ...projected, renderedPrompt: included.value as string }
+    : { ...projected, truncated: true };
+}
+
+function detailProjections(
+  statuses: readonly DelegateStatusSnapshot[],
+  budget: { remaining: number },
+): ReadonlyMap<string, DelegateLiveDetails> {
+  const active = statuses.filter(
+    (status) =>
+      (status.state === 'queued' || status.state === 'running') &&
+      status.details,
+  );
+  const projections = new Map<string, DelegateLiveDetails>();
+  let remainingRows = active.length;
+  for (const status of active) {
+    const share = Math.floor(budget.remaining / remainingRows);
+    const rowBudget = { remaining: share };
+    projections.set(
+      status.id,
+      projectDetails(status.details as DelegateLiveDetails, rowBudget, false),
+    );
+    budget.remaining -= share - rowBudget.remaining;
+    remainingRows -= 1;
+  }
+  remainingRows = active.filter(
+    (status) => status.details?.renderedPrompt,
+  ).length;
+  for (const status of active) {
+    if (!status.details?.renderedPrompt) continue;
+    const share = remainingRows
+      ? Math.floor(budget.remaining / remainingRows)
+      : 0;
+    const rowBudget = { remaining: share };
+    const current = projections.get(status.id);
+    if (current) {
+      projections.set(
+        status.id,
+        projectPrompt(status.details, current, rowBudget),
+      );
+    }
+    budget.remaining -= share - rowBudget.remaining;
+    remainingRows -= 1;
+  }
+  return projections;
 }
 
 function transcriptSnapshot(
@@ -107,6 +274,7 @@ function transcriptSnapshot(
 function statusSnapshot(
   status: DelegateStatusSnapshot,
   surfaceBudget: { remaining: number },
+  details: DelegateLiveDetails | undefined,
 ) {
   const active = status.state === 'queued' || status.state === 'running';
   return {
@@ -136,12 +304,7 @@ function statusSnapshot(
       : {}),
     ...(status.pauseState ? { pauseState: status.pauseState } : {}),
     ...(status.pausedAt === undefined ? {} : { pausedAt: status.pausedAt }),
-    ...(active && status.details
-      ? (() => {
-          const included = takeValue(status.details, surfaceBudget);
-          return included.included ? { details: included.value } : {};
-        })()
-      : {}),
+    ...(active && details ? { details } : {}),
     ...(status.activity
       ? {
           activity: {
@@ -293,9 +456,12 @@ const publisher = createLiveSurfacePublisher<DelegateStatusStore>({
         return right.createdAt - left.createdAt;
       })
       .slice(0, MAX_SURFACE_STATUSES);
+    const details = detailProjections(statuses, surfaceBudget);
     return {
       version: 1 as const,
-      statuses: statuses.map((status) => statusSnapshot(status, surfaceBudget)),
+      statuses: statuses.map((status) =>
+        statusSnapshot(status, surfaceBudget, details.get(status.id)),
+      ),
       wakes: store
         .getWakes()
         .slice(0, 256)

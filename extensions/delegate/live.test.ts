@@ -1,4 +1,6 @@
+import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
+import { DelegateStatusViewModelSchema } from './contribution';
 import { processJsonLine } from './events';
 import { delegateSurface } from './live';
 import { DelegateStatusStore } from './status';
@@ -59,6 +61,42 @@ describe('delegate live surface', () => {
         ],
       },
     });
+  });
+
+  it('keeps primary details when the rendered prompt exceeds the surface budget', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('Primary task', undefined, {
+      cwd: '/repo',
+      isolation: 'worktree',
+      renderedPrompt: 'long prompt '.repeat(20_000),
+      scope: ['extensions/delegate'],
+      contextNote: 'Parent note',
+      refreshSource: 'head',
+    });
+    const [id] = store.start([run], 'background');
+    run.state = 'running';
+    store.update(id, run);
+
+    const surface = delegateSurface(store);
+    expect(Value.Check(DelegateStatusViewModelSchema, surface.viewModel)).toBe(
+      true,
+    );
+    const status = (
+      surface.viewModel as {
+        statuses: Array<{ details?: Record<string, unknown> }>;
+      }
+    ).statuses[0];
+    expect(status?.details).toMatchObject({
+      task: 'Primary task',
+      setup: { cwd: '/repo', isolation: 'worktree' },
+      runConfig: {
+        scope: ['extensions/delegate'],
+        parentContextNote: 'Parent note',
+        refreshSource: 'head',
+      },
+      truncated: true,
+    });
+    expect(status?.details).not.toHaveProperty('renderedPrompt');
   });
 
   it('projects logical workflow and wake metadata without workflow payloads', () => {
