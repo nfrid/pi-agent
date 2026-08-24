@@ -1,5 +1,6 @@
 import {
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   type RefObject,
   type TouchEvent,
@@ -44,6 +45,7 @@ export function SurfaceDrawer({
   headerSummary,
   eyebrow = 'Live work',
   hideTitle = false,
+  hideHeader = false,
   className = 'surface-drawer',
   layerClassName = 'surface-drawer-layer',
   drawerId,
@@ -59,6 +61,8 @@ export function SurfaceDrawer({
   headerSummary?: ReactNode;
   eyebrow?: string;
   hideTitle?: boolean;
+  /** Caller renders a complete accessible header inside the drawer body. */
+  hideHeader?: boolean;
   className?: string;
   layerClassName?: string;
   drawerId?: string;
@@ -81,13 +85,13 @@ export function SurfaceDrawer({
       isDismissable
       aria-hidden={exiting || undefined}
       inert={exiting || undefined}
-      className={({ isExiting }) =>
+      className={({ isExiting }: { isExiting: boolean }) =>
         `${layerClassName}${isExiting || exiting ? ' is-exiting' : ''}`
       }
-      onClick={(event) => {
+      onClick={(event: MouseEvent<HTMLDivElement>) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      onOpenChange={(nextOpen) => {
+      onOpenChange={(nextOpen: boolean) => {
         if (!nextOpen) onClose();
       }}
     >
@@ -106,35 +110,38 @@ export function SurfaceDrawer({
           ref={swipeHandlers.ref}
           id={drawerId}
           className={className}
-          aria-labelledby={titleId}
+          aria-labelledby={hideHeader ? undefined : titleId}
+          aria-label={hideHeader ? title : undefined}
           aria-modal="true"
           data-swipe-dismiss="right"
           data-runtime-paused={paused ? '' : undefined}
         >
-          <header className="surface-drawer-header">
-            <div className="surface-drawer-heading">
-              <p className="eyebrow" id={hideTitle ? titleId : undefined}>
-                {eyebrow}
-              </p>
-              {!hideTitle && <h2 id={titleId}>{title}</h2>}
-              {headerSummary && (
-                <div className="surface-drawer-summary">{headerSummary}</div>
-              )}
-            </div>
-            {headerContent && (
-              <div className="surface-drawer-header-content">
-                {headerContent}
+          {!hideHeader && (
+            <header className="surface-drawer-header">
+              <div className="surface-drawer-heading">
+                <p className="eyebrow" id={hideTitle ? titleId : undefined}>
+                  {eyebrow}
+                </p>
+                {!hideTitle && <h2 id={titleId}>{title}</h2>}
+                {headerSummary && (
+                  <div className="surface-drawer-summary">{headerSummary}</div>
+                )}
               </div>
-            )}
-            <button
-              type="button"
-              className="session-icon-button"
-              aria-label={resolvedCloseLabel}
-              onClick={onClose}
-            >
-              ×
-            </button>
-          </header>
+              {headerContent && (
+                <div className="surface-drawer-header-content">
+                  {headerContent}
+                </div>
+              )}
+              <button
+                type="button"
+                className="session-icon-button"
+                aria-label={resolvedCloseLabel}
+                onClick={onClose}
+              >
+                ×
+              </button>
+            </header>
+          )}
           <div className="surface-drawer-body">{children}</div>
         </AriaDialog>
       </div>

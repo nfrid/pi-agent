@@ -56,7 +56,8 @@ const ContextSchema = StringEnum(['branch', 'fresh'] as const, {
 });
 const ScopeSchema = Type.Array(Type.String({ maxLength: 4096 }), {
   maxItems: 100,
-  description: 'Advisory paths for expected work; not a hard boundary.',
+  description:
+    'Advisory paths for expected work; not a hard boundary. Continuations inherit the latest scope when omitted and replace it when supplied.',
 });
 const BaseSchema = StringEnum(['wip', 'head'] as const, {
   description:
@@ -393,7 +394,7 @@ export function registerDelegateTool(
           assertContinuationFields(
             continuationReference,
             params,
-            'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
+            'A continuation reuses its original cwd, context, and base; scope may be replaced for this run.',
           );
           activeWorkflow.require(continuationReference);
         }

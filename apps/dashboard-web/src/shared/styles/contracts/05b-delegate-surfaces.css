@@ -156,6 +156,20 @@
 .surface-dropped .surface-state {
   color: var(--dim);
 }
+.surface-summary-detail {
+  display: block;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.surface-counter-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+}
 .delegate-row-main {
   display: grid;
   min-width: 0;
@@ -194,9 +208,6 @@
 .delegate-row-main .delegate-row-action.surface-done,
 .delegate-row-main .delegate-row-action.surface-aborted {
   color: var(--dim);
-}
-.delegate-row-identity {
-  flex: none;
 }
 .delegate-row-meta {
   display: grid;
@@ -259,46 +270,40 @@
   white-space: nowrap;
 }
 .delegate-transcript-inspector-body {
+  display: flex;
   min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 18px 28px;
 }
-.delegate-transcript-source {
+.delegate-inspector-header-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  padding: 9px 10px;
-  background: color-mix(in srgb, var(--purple-5) 55%, transparent);
+  justify-content: flex-end;
+  gap: 6px;
 }
-.delegate-transcript-source > span {
-  display: grid;
+.delegate-inspector-inline {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.delegate-inspector-inline-header {
+  align-items: center;
+  padding: 12px 14px 10px;
+}
+.delegate-inspector-inline-header .surface-drawer-heading {
+  flex: 1 1 auto;
+}
+.delegate-inspector-inline-header .delegate-inspector-header-content {
   min-width: 0;
-  gap: 2px;
-}
-.delegate-transcript-source strong {
-  color: var(--fg);
-  font-size: 11px;
-}
-.delegate-transcript-source small {
-  color: var(--dim);
-  font-size: 9px;
+  flex: 0 1 auto;
 }
 .delegate-open-session {
-  flex: none;
-  border: 1px solid var(--purple);
-  border-radius: 999px;
-  padding: 5px 9px;
-  background: transparent;
   color: var(--purple);
-  font: inherit;
-  font-size: 10px;
-  cursor: pointer;
-}
-.delegate-open-session:hover {
-  background: var(--purple-5);
-  color: var(--fg);
 }
 .delegate-inspector-details {
   margin: 0 0 12px;
@@ -307,12 +312,30 @@
   color: var(--muted);
   font-size: 10px;
 }
-.delegate-inspector-details > summary {
-  color: var(--purple);
-  cursor: pointer;
-  font-weight: 650;
+.delegate-inspector-task,
+.delegate-inspector-section {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 0 0 10px;
+  margin: 0 0 10px;
 }
-.delegate-inspector-details > dl {
+.delegate-inspector-task h2,
+.delegate-inspector-section h2,
+.delegate-inspector-inputs h3 {
+  margin: 0 0 5px;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.delegate-inspector-task p,
+.delegate-inspector-section p {
+  margin: 0;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.delegate-inspector-details > dl,
+.delegate-inspector-section > dl {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 7px 12px;
@@ -342,6 +365,41 @@ ol.delegate-inspector-runs > li {
 ol.delegate-inspector-runs > li small {
   color: var(--dim);
 }
+.delegate-inspector-inputs {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.delegate-inspector-inputs details,
+.delegate-rendered-prompt {
+  border: 1px solid var(--line-soft);
+  padding: 5px 7px;
+}
+.delegate-inspector-inputs summary,
+.delegate-rendered-prompt summary {
+  color: var(--purple);
+  cursor: pointer;
+}
+.delegate-inspector-inputs summary small {
+  color: var(--dim);
+}
+.delegate-inspector-inputs pre,
+.delegate-rendered-prompt pre {
+  max-height: 18rem;
+  margin: 6px 0 0;
+  overflow: auto;
+  color: var(--fg);
+  font:
+    10px / 1.45 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.delegate-rendered-prompt {
+  margin: 0 0 12px;
+}
 .delegate-inspector-recovery {
   border-left: 2px solid var(--orange);
   padding: 6px 8px;
@@ -362,6 +420,22 @@ ol.delegate-inspector-runs > li small {
 }
 .delegate-inspector-recovery p {
   margin: 4px 0 0;
+}
+.delegate-canonical-session-transcript {
+  display: flex;
+  min-height: 0;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+.delegate-transcript-follow-control {
+  position: sticky;
+  z-index: 2;
+  bottom: 8px;
+  min-height: 0;
+  text-align: center;
+}
+.delegate-transcript-follow-control:empty {
+  display: none;
 }
 .delegate-transcript {
   display: grid;

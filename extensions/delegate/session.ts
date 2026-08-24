@@ -338,6 +338,25 @@ export function updateDelegateSessionWorktree(
   return { ...current, worktreeId, cwd };
 }
 
+export function updateDelegateSessionScope(
+  token: string,
+  scope: string[] | undefined,
+): DelegateSession | null {
+  const current = resolveDelegateSession(token);
+  if (!current) return null;
+  const { metadataPath } = sessionPaths(token);
+  const metadata = JSON.parse(
+    readFileSync(metadataPath, 'utf8'),
+  ) as DelegateSessionMetadata;
+  const updated = { ...metadata };
+  if (scope?.length) updated.scope = [...scope];
+  else delete updated.scope;
+  atomicWriteJsonSync(metadataPath, updated);
+  if (scope?.length) return { ...current, scope: [...scope] };
+  const { scope: _scope, ...withoutScope } = current;
+  return withoutScope;
+}
+
 export function updateDelegateSessionRouting(
   token: string,
   routing: DelegateRouteState | undefined,

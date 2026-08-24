@@ -187,7 +187,7 @@ const MarkdownComposerEditor = forwardRef<
         className="composer-rich-editor-root dark-theme"
         contentEditableClassName="composer-rich-editor"
         markdown={initialMarkdown}
-        onChange={(next, initialMarkdownNormalize) => {
+        onChange={(next: string, initialMarkdownNormalize: boolean) => {
           if (!initialMarkdownNormalize) updateMarkdown(next);
         }}
         placeholder={placeholder}

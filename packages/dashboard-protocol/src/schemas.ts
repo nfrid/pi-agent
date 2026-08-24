@@ -24,9 +24,12 @@ import {
   MAX_COMPOSER_COMMAND_DESCRIPTION,
   MAX_COMPOSER_COMMAND_NAME,
   MAX_COMPOSER_COMMANDS,
+  MAX_DELEGATE_HISTORY_CONTEXT_NOTE,
   MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
   MAX_DELEGATE_HISTORY_DETAIL_TEXT,
   MAX_DELEGATE_HISTORY_GROUPS,
+  MAX_DELEGATE_HISTORY_INPUT_EVIDENCE,
+  MAX_DELEGATE_HISTORY_PROMPT,
   MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
   MAX_DELEGATE_HISTORY_TASK,
   MAX_ID,
@@ -1786,9 +1789,108 @@ const DelegateHistoryLifecycleSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const DelegateHistoryIsolationSchema = Type.Union([
+  Type.Literal('shared'),
+  Type.Literal('worktree'),
+]);
+const DelegateHistorySetupSchema = Type.Object(
+  {
+    cwd: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
+    isolation: Type.Optional(DelegateHistoryIsolationSchema),
+    worktree: Type.Optional(
+      Type.Object(
+        {
+          branch: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+          worktreePath: Type.Optional(
+            Type.String({ minLength: 1, maxLength: MAX_PATH }),
+          ),
+          repositoryRoot: Type.Optional(
+            Type.String({ minLength: 1, maxLength: MAX_PATH }),
+          ),
+          baseHead: Type.Optional(
+            Type.String({ minLength: 1, maxLength: 256 }),
+          ),
+          baseRef: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+          workBase: Type.Optional(
+            Type.String({ minLength: 1, maxLength: 256 }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+const DelegateHistoryInputEvidenceSchema = Type.Object(
+  {
+    /** Technical identity stays inside an expandable evidence row. */
+    identity: Type.String({ minLength: 1, maxLength: 80 }),
+    kind: Type.Union([
+      Type.Literal('report'),
+      Type.Literal('handoff'),
+      Type.Literal('branch'),
+      Type.Literal('metadata'),
+    ]),
+    label: Type.String({ minLength: 1, maxLength: 120 }),
+    content: Type.Optional(
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_INPUT_EVIDENCE }),
+    ),
+    branch: Type.Optional(
+      Type.Object(
+        {
+          branch: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+          worktreePath: Type.Optional(
+            Type.String({ minLength: 1, maxLength: MAX_PATH }),
+          ),
+          base: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+          headCommit: Type.Optional(
+            Type.String({ minLength: 1, maxLength: 256 }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+const DelegateHistoryRunConfigSchema = Type.Object(
+  {
+    scope: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: MAX_PATH }), {
+        maxItems: 128,
+      }),
+    ),
+    after: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+        maxItems: 32,
+      }),
+    ),
+    inputs: Type.Optional(
+      Type.Readonly(
+        Type.Array(DelegateHistoryInputEvidenceSchema, { maxItems: 8 }),
+      ),
+    ),
+    parentContextNote: Type.Optional(
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_CONTEXT_NOTE }),
+    ),
+    refreshSource: Type.Optional(
+      Type.Union([Type.Literal('wip'), Type.Literal('head')]),
+    ),
+    warnings: Type.Optional(
+      Type.Array(Type.String({ maxLength: 512 }), { maxItems: 32 }),
+    ),
+  },
+  { additionalProperties: false },
+);
 const DelegateHistoryDetailsSchema = Type.Object(
   {
     task: Type.Optional(Type.String({ maxLength: MAX_DELEGATE_HISTORY_TASK })),
+    setup: Type.Optional(DelegateHistorySetupSchema),
+    runConfig: Type.Optional(DelegateHistoryRunConfigSchema),
+    /** Exact final prompt passed to the child for this invocation. */
+    renderedPrompt: Type.Optional(
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_PROMPT }),
+    ),
     /** Bounded assistant response text from public run messages only. */
     response: Type.Optional(
       Type.String({ maxLength: MAX_DELEGATE_HISTORY_DETAIL_TEXT }),
@@ -1840,6 +1942,7 @@ const DelegateHistoryInvocationSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    isolation: Type.Optional(DelegateHistoryIsolationSchema),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
     wake: Type.Optional(DelegateWakeMetadataSchema),
   },
@@ -1874,6 +1977,7 @@ export const DelegateHistoryRunDetailSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    isolation: Type.Optional(DelegateHistoryIsolationSchema),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
     wake: Type.Optional(DelegateWakeMetadataSchema),
     details: DelegateHistoryDetailsSchema,
@@ -1908,6 +2012,7 @@ const DelegateHistoryGroupSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    isolation: Type.Optional(DelegateHistoryIsolationSchema),
     workflow: Type.Optional(DelegateWorkflowMetadataSchema),
     wake: Type.Optional(DelegateWakeMetadataSchema),
     runCount: Type.Integer({

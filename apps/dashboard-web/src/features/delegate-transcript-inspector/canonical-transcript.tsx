@@ -5,10 +5,11 @@ import {
   selectTranscript,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import { useEffect } from 'react';
+import { type RefObject, useEffect, useRef } from 'react';
 import { Transcript } from '../../entities/transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
 import { useOlderSessionHistory } from '../session/history';
+import { useSessionScroll } from '../session/scroll';
 import { SessionHistoryControl } from '../session/views';
 import { DelegateTranscript } from './adaptation';
 
@@ -48,10 +49,14 @@ function DelegateCanonicalTranscript({
   sessionId,
   store,
   fallback,
+  isOpen,
+  scrollElementRef,
 }: {
   sessionId: string;
   store: DashboardLiveStore;
   fallback: DelegateInspectionStatus;
+  isOpen: boolean;
+  scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
   const projection = useDashboardStore(store, selectTranscript(sessionId));
   const runtime = useDashboardStore(store, selectRuntimeForSession(sessionId));
@@ -60,11 +65,21 @@ function DelegateCanonicalTranscript({
     store,
     (state) => state.sessionSyncById[sessionId],
   );
+  const fallbackScrollRef = useRef<HTMLDivElement>(null);
+  const transcriptScrollRef = scrollElementRef ?? fallbackScrollRef;
   useEffect(() => {
     const handle = store.acquireSession(sessionId);
     return () => handle?.release();
   }, [sessionId, store]);
   const mounted = Boolean(projection && snapshot?.metadata.id === sessionId);
+  const follow = useSessionScroll({
+    id: sessionId,
+    data: snapshot,
+    projection,
+    sessionMounted: mounted,
+    enabled: isOpen,
+    scrollElementRef: transcriptScrollRef,
+  });
   const {
     history,
     historyError,
@@ -93,9 +108,25 @@ function DelegateCanonicalTranscript({
     );
   return (
     <section
+      ref={follow.sessionPageRef}
       className="delegate-canonical-session-transcript"
       aria-label="Canonical child session transcript"
     >
+      <div
+        ref={follow.controlLayerRef}
+        className="delegate-transcript-follow-control"
+      >
+        {follow.awayFromLatest && (
+          <button
+            type="button"
+            className="session-icon-button jump-latest"
+            onClick={follow.jumpToLatest}
+            aria-label="Jump to latest delegate transcript activity"
+          >
+            Jump to latest
+          </button>
+        )}
+      </div>
       {(historyLoading || historyError) &&
         (historyError ? (
           <SessionHistoryControl
@@ -111,6 +142,9 @@ function DelegateCanonicalTranscript({
       <Transcript
         projection={projection}
         runtime={runtime}
+        tailScrollRequest={follow.tailScrollRequest}
+        onBeforeScroll={follow.stopFollowing}
+        scrollElementRef={transcriptScrollRef}
         outline={snapshot?.outline}
         onJumpToLandmark={(landmark) =>
           landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
@@ -131,10 +165,12 @@ export function DelegateInspectorTranscript({
   row,
   store,
   isOpen,
+  scrollElementRef,
 }: {
   row: DelegateInspectionStatus;
   store?: DashboardLiveStore;
   isOpen: boolean;
+  scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
   return isOpen && row.sessionId && store ? (
     <DelegateCanonicalTranscript
@@ -142,6 +178,8 @@ export function DelegateInspectorTranscript({
       sessionId={row.sessionId}
       store={store}
       fallback={row}
+      isOpen={isOpen}
+      scrollElementRef={scrollElementRef}
     />
   ) : (
     <DelegateBoundedFallback

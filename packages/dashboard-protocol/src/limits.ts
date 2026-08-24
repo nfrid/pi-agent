@@ -18,7 +18,13 @@ export const MAX_DELEGATE_HISTORY_SUMMARY_BYTES = 512 * 1024;
 export const MAX_DELEGATE_HISTORY_GROUPS = 256;
 export const MAX_DELEGATE_HISTORY_RUNS_PER_GROUP = 128;
 export const MAX_DELEGATE_HISTORY_TOTAL_RUNS = 2_048;
-export const MAX_DELEGATE_HISTORY_TASK = 20_000;
+export const MAX_DELEGATE_HISTORY_TASK = 32 * 1024;
+export const MAX_DELEGATE_HISTORY_CONTEXT_NOTE = 64 * 1024;
 export const MAX_DELEGATE_HISTORY_DETAIL_TEXT = 8_000;
 export const MAX_DELEGATE_HISTORY_DETAIL_ENTRIES = 128;
-export const MAX_DELEGATE_HISTORY_DETAIL_BYTES = 512 * 1024;
+/** One selected invocation may contain the complete scope and parent context. */
+export const MAX_DELEGATE_HISTORY_DETAIL_BYTES = 3 * 1024 * 1024;
+/** Exact prompt retained for one selected delegate invocation. */
+export const MAX_DELEGATE_HISTORY_PROMPT = 640 * 1024;
+/** Aggregate bounded upstream evidence retained for one selected invocation. */
+export const MAX_DELEGATE_HISTORY_INPUT_EVIDENCE = 48 * 1024;
