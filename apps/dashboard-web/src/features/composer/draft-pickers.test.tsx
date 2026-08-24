@@ -27,12 +27,14 @@ vi.mock('react-aria-components', () => ({
     children,
     isDisabled,
     onPress,
+    ...props
   }: {
     children?: ReactNode;
     isDisabled?: boolean;
     onPress?: () => void;
+    [key: string]: unknown;
   }) => (
-    <button type="button" disabled={isDisabled} onClick={onPress}>
+    <button {...props} type="button" disabled={isDisabled} onClick={onPress}>
       {children}
     </button>
   ),
@@ -126,6 +128,7 @@ describe('draft location picker', () => {
     });
     act(() => buttonWithLabel(renderer, 'Current checkout')?.props.onPress());
     expect(buttonWithLabel(renderer, 'Done')).toBeDefined();
+    act(() => buttonWithLabel(renderer, 'Existing checkout')?.props.onPress());
     expect(buttonWithLabel(renderer, 'pi/busy')?.props.isDisabled).toBe(true);
     expect(buttonWithLabel(renderer, 'pi/retired')?.props.isDisabled).toBe(
       true,
@@ -133,6 +136,33 @@ describe('draft location picker', () => {
     act(() => {
       globalThis.dispatchEvent({ key: 'Escape' } as unknown as Event);
     });
+    expect(buttonWithLabel(renderer, 'Done')).toBeUndefined();
+    renderer.unmount();
+  });
+
+  it('closes when the backdrop is pressed', () => {
+    installKeyboard();
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(
+        <DraftLocationPicker
+          draftId="draft-1"
+          location={{ kind: 'current' }}
+          projectId="project-1"
+          projectRoot="/repo"
+          checkouts={checkouts}
+          disabled={false}
+        />,
+      );
+    });
+    act(() => buttonWithLabel(renderer, 'Current checkout')?.props.onPress());
+    act(() =>
+      renderer.root
+        .findByProps({
+          'aria-label': 'Close Checkout location',
+        })
+        .props.onClick(),
+    );
     expect(buttonWithLabel(renderer, 'Done')).toBeUndefined();
     renderer.unmount();
   });
@@ -214,6 +244,14 @@ describe('draft agent picker', () => {
       model: 'fast',
       thinking: 'high',
     });
+    expect(buttonWithLabel(renderer, 'Done')).toBeDefined();
+    act(() =>
+      renderer.root
+        .findByProps({
+          'aria-label': 'Close Agent and thinking',
+        })
+        .props.onClick(),
+    );
     expect(buttonWithLabel(renderer, 'Done')).toBeUndefined();
     renderer.unmount();
   });

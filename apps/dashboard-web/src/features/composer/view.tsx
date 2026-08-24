@@ -6,6 +6,7 @@ import {
   startRuntimeMutationOptions,
 } from '@pi-dashboard/client';
 import type {
+  CheckoutSummary,
   RuntimeSnapshot,
   SessionIndexEntry,
 } from '@pi-dashboard/protocol';
@@ -15,15 +16,11 @@ import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
 import { ProgressBar } from '../../shared/ui/progress-bar';
-import {
-  configuredModelOptions,
-  modelOptionValue,
-  parseModelOptionValue,
-} from '../model-option';
+import { configuredModelOptions, modelOptionValue } from '../model-option';
 import { hasSettledBackground } from '../presentation-status';
 import { useImageAttachments } from './attachments';
-import { ComposerModelControl, ComposerThinkingControl } from './controls';
 import { useComposerDraft } from './draft';
+import { AgentPicker, ThreadLocationIndicator } from './draft-pickers';
 import {
   newQueueId,
   QueuePanel,
@@ -43,10 +40,7 @@ import {
   runtimeSupportsImages,
   waitForStartedRuntime,
 } from './runtime';
-import {
-  RuntimeModelControl,
-  RuntimeThinkingControl,
-} from './runtime-controls';
+import { RuntimeAgentControl } from './runtime-controls';
 import { ComposerShell } from './shell';
 
 function ContextIndicator({
@@ -85,6 +79,7 @@ export function Composer({
   sessionId,
   projectId,
   checkoutId,
+  checkout,
   onMessageSubmitted,
   onPromptSubmitted,
 }: {
@@ -95,6 +90,7 @@ export function Composer({
   sessionId: string;
   projectId?: string;
   checkoutId?: string;
+  checkout?: CheckoutSummary;
   onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 }) {
@@ -437,9 +433,13 @@ export function Composer({
                 </AriaButton>
               </>
             )}
-            {(!runtime ||
-              runtime.liveState === 'idle' ||
-              settledBackground) && <span>Prompt</span>}
+            {checkout ? (
+              <ThreadLocationIndicator checkout={checkout} />
+            ) : (
+              (!runtime ||
+                runtime.liveState === 'idle' ||
+                settledBackground) && <span>Prompt</span>
+            )}
             {runtime?.liveState === 'waiting' && <span>Answer above</span>}
             <ContextIndicator
               usage={
@@ -451,32 +451,24 @@ export function Composer({
         }
         controls={
           runtime ? (
-            <>
-              <RuntimeModelControl runtime={runtime} runtimes={runtimes} />
-              <RuntimeThinkingControl runtime={runtime} />
-            </>
+            <RuntimeAgentControl runtime={runtime} runtimes={runtimes} />
           ) : (
-            <>
-              <ComposerModelControl
-                models={resumeModels}
-                value={
-                  resumeModel
-                    ? modelOptionValue(resumeModel.provider, resumeModel.model)
-                    : ''
-                }
-                disabled={submissionDisabled || busy}
-                onChange={(value) => {
-                  const selected = parseModelOptionValue(value);
-                  if (selected) setResumeModel(selected);
-                }}
-              />
-              <ComposerThinkingControl
-                levels={thinkingLevels}
-                value={resumeThinking ?? thinkingLevels[0] ?? ''}
-                disabled={submissionDisabled || busy || !resumeModel}
-                onChange={setResumeThinking}
-              />
-            </>
+            <AgentPicker
+              model={
+                resumeModel
+                  ? {
+                      provider: resumeModel.provider,
+                      model: resumeModel.model,
+                      ...(resumeThinking ? { thinking: resumeThinking } : {}),
+                    }
+                  : undefined
+              }
+              models={resumeModels}
+              levels={thinkingLevels}
+              disabled={submissionDisabled || busy}
+              onModelChange={setResumeModel}
+              onThinkingChange={setResumeThinking}
+            />
           )
         }
         footer={

@@ -11,14 +11,18 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { type DraftLocation, setDraftLocation, setDraftModel } from '../drafts';
-import { configuredModelOptions, modelOptionValue } from '../model-option';
+import {
+  configuredModelOptions,
+  modelOptionValue,
+  type RuntimeModelOption,
+} from '../model-option';
 
 function modelName(
   model: ModelSelection | undefined,
-  runtimes: readonly RuntimeSnapshot[],
+  models: readonly RuntimeModelOption[],
 ): string {
   if (!model) return 'Agent';
-  const option = configuredModelOptions(runtimes).find(
+  const option = models.find(
     (item) => item.provider === model.provider && item.model === model.model,
   );
   return option?.name ?? model.model;
@@ -33,27 +37,136 @@ function checkoutReason(checkout: CheckoutSummary): string | undefined {
   return undefined;
 }
 
-function LocationRow({
+function checkoutLabel(checkout: CheckoutSummary): string {
+  return checkout.branch ?? checkout.path.split('/').pop() ?? checkout.id;
+}
+
+function useEscapeDismiss(open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open || typeof globalThis.addEventListener !== 'function') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    globalThis.addEventListener('keydown', onKeyDown);
+    return () => globalThis.removeEventListener?.('keydown', onKeyDown);
+  }, [open, close]);
+}
+
+function PickerSurface({
+  label,
+  title,
+  onClose,
+  onBack,
+  children,
+}: {
+  label: string;
+  title: string;
+  onClose: () => void;
+  onBack?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className="draft-picker-backdrop"
+        aria-label={`Close ${label}`}
+        onClick={onClose}
+      />
+      <div
+        className="draft-picker-popover"
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+      >
+        <div className="draft-picker-heading">
+          <div>
+            {onBack && (
+              <Button
+                type="button"
+                className="draft-picker-back"
+                aria-label="Back"
+                onPress={onBack}
+              >
+                ←
+              </Button>
+            )}
+            <span>{title}</span>
+          </div>
+          <Button
+            type="button"
+            className="draft-picker-close"
+            onPress={onClose}
+          >
+            Done
+          </Button>
+        </div>
+        <div className="draft-picker-content">{children}</div>
+      </div>
+    </>
+  );
+}
+
+function PickerRow({
   label,
   detail,
+  selected,
+  drillIn,
   disabled,
   onPress,
 }: {
   label: string;
   detail?: string;
+  selected?: boolean;
+  drillIn?: boolean;
   disabled?: boolean;
   onPress: () => void;
 }) {
   return (
     <Button
       type="button"
-      className="draft-picker-option"
+      className={`draft-picker-option${selected ? ' selected' : ''}`}
       isDisabled={disabled}
+      aria-pressed={selected || undefined}
       onPress={onPress}
     >
-      <span>{label}</span>
-      {detail && <small>{detail}</small>}
+      <span className="draft-picker-option-copy">
+        <span>{label}</span>
+        {detail && <small>{detail}</small>}
+      </span>
+      {(selected || drillIn) && (
+        <span className="draft-picker-option-mark" aria-hidden="true">
+          {selected ? '✓' : '›'}
+        </span>
+      )}
     </Button>
+  );
+}
+
+export function ThreadLocationIndicator({
+  checkout,
+}: {
+  checkout: CheckoutSummary | undefined;
+}) {
+  const branch = checkout?.branch ?? checkout?.path.split('/').pop();
+  const prefix = checkout?.kind === 'main' ? 'Current checkout' : 'Worktree';
+  return (
+    <span
+      className="draft-picker-trigger draft-picker-trigger-locked"
+      title={checkout?.path}
+    >
+      <svg
+        className="draft-picker-location-icon"
+        viewBox="0 0 16 16"
+        aria-hidden="true"
+      >
+        <path d="M1.5 3.5h5l1.25 1.5h6.75v7.5h-13z" />
+      </svg>
+      <span>{branch ? `${prefix} · ${branch}` : 'Thread checkout'}</span>
+      <span className="draft-picker-lock" aria-hidden="true">
+        {' · fixed'}
+      </span>
+    </span>
   );
 }
 
@@ -73,8 +186,8 @@ export function DraftLocationPicker({
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [branchSearch, setBranchSearch] = useState('');
-  const [showBranches, setShowBranches] = useState(false);
+  const [view, setView] = useState<'root' | 'branches' | 'checkouts'>('root');
+  const [search, setSearch] = useState('');
   const context = useQuery({
     ...gitContextQueryOptions(dashboardHttpClient, projectId),
     enabled: open,
@@ -83,44 +196,48 @@ export function DraftLocationPicker({
     checkouts.find(
       (checkout) => checkout.kind === 'main' && checkout.path === projectRoot,
     ) ?? checkouts.find((checkout) => checkout.kind === 'main');
+  const existing = checkouts.filter((checkout) => checkout.id !== main?.id);
   const selectedBranch =
     location.kind === 'worktree' && location.base === 'branch'
       ? location.baseRef
       : undefined;
   const close = () => {
     setOpen(false);
-    setShowBranches(false);
-    setBranchSearch('');
+    setView('root');
+    setSearch('');
   };
   const choose = (next: DraftLocation) => {
     setDraftLocation(draftId, next);
     close();
   };
-  useEffect(() => {
-    if (!open || typeof globalThis.addEventListener !== 'function') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-        setShowBranches(false);
-        setBranchSearch('');
-      }
-    };
-    globalThis.addEventListener('keydown', onKeyDown);
-    return () => globalThis.removeEventListener?.('keydown', onKeyDown);
-  }, [open]);
+  useEscapeDismiss(open, close);
+  const query = search.trim().toLowerCase();
   const branches = (context.data?.localBranches ?? []).filter((branch) =>
-    branch.toLowerCase().includes(branchSearch.trim().toLowerCase()),
+    branch.toLowerCase().includes(query),
+  );
+  const visibleCheckouts = existing.filter((checkout) =>
+    `${checkoutLabel(checkout)} ${checkout.path}`.toLowerCase().includes(query),
   );
   const currentBranch = context.data?.branch ?? main?.branch ?? 'main';
   const currentDirty = context.data?.dirty ?? main?.status === 'dirty';
   const currentChangedFileCount =
     context.data?.changedFileCount ?? main?.changedFileCount;
+  const selectedCheckout =
+    location.kind === 'checkout'
+      ? checkouts.find((item) => item.id === location.checkoutId)
+      : undefined;
   const summary =
     location.kind === 'current'
       ? `Current checkout · ${currentBranch}`
       : location.kind === 'checkout'
-        ? `Existing · ${checkouts.find((item) => item.id === location.checkoutId)?.branch ?? 'checkout'}`
-        : `New worktree · ${location.base === 'work' ? 'current work' : location.base === 'head' ? 'HEAD' : `from ${selectedBranch ?? 'branch'}`}`;
+        ? `Existing · ${selectedCheckout ? checkoutLabel(selectedCheckout) : 'checkout'}`
+        : `New worktree · ${location.base === 'work' ? 'current work' : location.base === 'head' ? 'HEAD' : (selectedBranch ?? 'branch')}`;
+  const title =
+    view === 'branches'
+      ? 'Choose a branch'
+      : view === 'checkouts'
+        ? 'Existing checkouts'
+        : 'Location';
 
   return (
     <div className="draft-picker draft-location-picker">
@@ -131,7 +248,7 @@ export function DraftLocationPicker({
         aria-label="Checkout location"
         aria-expanded={open}
         aria-haspopup="dialog"
-        onPress={() => setOpen((value) => !value)}
+        onPress={() => (open ? close() : setOpen(true))}
       >
         <svg
           className="draft-picker-location-icon"
@@ -143,75 +260,116 @@ export function DraftLocationPicker({
         <span>{summary}</span>
       </Button>
       {open && (
-        <div
-          className="draft-picker-popover"
-          role="dialog"
-          aria-label="Checkout location"
+        <PickerSurface
+          label="Checkout location"
+          title={title}
+          onClose={close}
+          onBack={
+            view === 'root'
+              ? undefined
+              : () => {
+                  setView('root');
+                  setSearch('');
+                }
+          }
         >
-          <div className="draft-picker-heading">
-            <span>Location</span>
-            <Button
-              type="button"
-              className="draft-picker-close"
-              onPress={close}
-            >
-              Done
-            </Button>
-          </div>
-          <LocationRow
-            label="Current checkout"
-            detail={
-              currentDirty
-                ? currentChangedFileCount === undefined
-                  ? 'Changed checkout'
-                  : `${currentChangedFileCount} changed files`
-                : 'No isolated worktree'
-            }
-            disabled={Boolean(main && checkoutReason(main))}
-            onPress={() => main && choose({ kind: 'current' })}
-          />
-          {!context.error && (
+          {view === 'root' ? (
             <>
-              <div className="draft-picker-section">New worktree</div>
-              <LocationRow
-                label="Current work"
-                detail="Carry uncommitted work"
-                onPress={() => choose({ kind: 'worktree', base: 'work' })}
+              <div className="draft-picker-section">Workspace</div>
+              <PickerRow
+                label="Current checkout"
+                detail={
+                  currentDirty
+                    ? currentChangedFileCount === undefined
+                      ? 'Changed checkout'
+                      : `${currentChangedFileCount} changed files`
+                    : 'Use the project checkout directly'
+                }
+                selected={location.kind === 'current'}
+                disabled={Boolean(main && checkoutReason(main))}
+                onPress={() => main && choose({ kind: 'current' })}
               />
-              <LocationRow
-                label="Current HEAD"
-                detail="Start from the current commit"
-                onPress={() => choose({ kind: 'worktree', base: 'head' })}
-              />
-              <LocationRow
-                label="Choose a branch"
-                detail={selectedBranch ? `from ${selectedBranch}` : undefined}
-                onPress={() => {
-                  setShowBranches(true);
-                  setBranchSearch('');
-                }}
-              />
-            </>
-          )}
-          {!context.error && (location.kind === 'worktree' || showBranches) && (
-            <div className="draft-picker-subsection">
-              <div className="draft-picker-section">Start from</div>
-              {showBranches && (
+              {!context.error && (
                 <>
-                  <input
-                    className="draft-picker-search"
-                    aria-label="Search local branches"
-                    placeholder="Search branches…"
-                    value={branchSearch}
-                    onChange={(event) =>
-                      setBranchSearch(event.target.value.slice(0, 512))
+                  <div className="draft-picker-section">New worktree</div>
+                  <PickerRow
+                    label="Current work"
+                    detail="Carry uncommitted changes"
+                    selected={
+                      location.kind === 'worktree' && location.base === 'work'
                     }
+                    onPress={() => choose({ kind: 'worktree', base: 'work' })}
                   />
-                  <div className="draft-picker-results" role="listbox">
-                    {branches.map((branch) => (
-                      <LocationRow
+                  <PickerRow
+                    label="Current HEAD"
+                    detail="Start from the current commit"
+                    selected={
+                      location.kind === 'worktree' && location.base === 'head'
+                    }
+                    onPress={() => choose({ kind: 'worktree', base: 'head' })}
+                  />
+                  <PickerRow
+                    label="Choose a branch"
+                    detail={selectedBranch}
+                    selected={Boolean(selectedBranch)}
+                    drillIn={!selectedBranch}
+                    onPress={() => {
+                      setView('branches');
+                      setSearch('');
+                    }}
+                  />
+                </>
+              )}
+              {existing.length > 0 && (
+                <>
+                  <div className="draft-picker-section">Reuse</div>
+                  <PickerRow
+                    label="Existing checkout"
+                    detail={
+                      selectedCheckout
+                        ? checkoutLabel(selectedCheckout)
+                        : `${existing.length} available`
+                    }
+                    selected={Boolean(selectedCheckout)}
+                    drillIn={!selectedCheckout}
+                    onPress={() => {
+                      setView('checkouts');
+                      setSearch('');
+                    }}
+                  />
+                </>
+              )}
+              {context.error && (
+                <small className="draft-picker-error">
+                  New worktree options are unavailable. You can still use an
+                  existing checkout.
+                </small>
+              )}
+            </>
+          ) : (
+            <>
+              <input
+                className="draft-picker-search"
+                aria-label={
+                  view === 'branches'
+                    ? 'Search local branches'
+                    : 'Search existing checkouts'
+                }
+                placeholder={
+                  view === 'branches' ? 'Search branches…' : 'Search checkouts…'
+                }
+                value={search}
+                onChange={(event) =>
+                  setSearch(event.target.value.slice(0, 512))
+                }
+              />
+              <div className="draft-picker-results" role="listbox">
+                {view === 'branches'
+                  ? branches.map((branch) => (
+                      <PickerRow
                         key={branch}
                         label={branch}
+                        selected={selectedBranch === branch}
                         onPress={() =>
                           choose({
                             kind: 'worktree',
@@ -220,49 +378,130 @@ export function DraftLocationPicker({
                           })
                         }
                       />
-                    ))}
-                    {!branches.length && (
-                      <small>No matching local branches.</small>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
+                    ))
+                  : visibleCheckouts.map((checkout) => {
+                      const reason = checkoutReason(checkout);
+                      return (
+                        <PickerRow
+                          key={checkout.id}
+                          label={checkoutLabel(checkout)}
+                          detail={
+                            reason ??
+                            (checkout.status === 'dirty'
+                              ? checkout.changedFileCount === undefined
+                                ? 'Changed checkout'
+                                : `${checkout.changedFileCount} changed files`
+                              : 'Ready')
+                          }
+                          selected={selectedCheckout?.id === checkout.id}
+                          disabled={Boolean(reason)}
+                          onPress={() =>
+                            choose({
+                              kind: 'checkout',
+                              checkoutId: checkout.id,
+                            })
+                          }
+                        />
+                      );
+                    })}
+                {(view === 'branches' ? branches : visibleCheckouts).length ===
+                  0 && (
+                  <small className="draft-picker-empty">
+                    No matching results.
+                  </small>
+                )}
+              </div>
+            </>
           )}
-          <div className="draft-picker-section">Existing checkouts</div>
-          {checkouts
-            .filter((checkout) => checkout.id !== main?.id)
-            .map((checkout) => {
-              const reason = checkoutReason(checkout);
-              return (
-                <LocationRow
-                  key={checkout.id}
-                  label={
-                    checkout.branch ??
-                    checkout.path.split('/').pop() ??
-                    checkout.id
-                  }
-                  detail={
-                    reason ??
-                    (checkout.status === 'dirty'
-                      ? checkout.changedFileCount === undefined
-                        ? 'Changed checkout'
-                        : `${checkout.changedFileCount} changed files`
-                      : 'Ready')
-                  }
-                  disabled={Boolean(reason)}
-                  onPress={() =>
-                    choose({ kind: 'checkout', checkoutId: checkout.id })
-                  }
-                />
-              );
-            })}
-          {context.error && (
-            <small className="draft-picker-error">
-              Git options are unavailable. Use Current checkout.
+        </PickerSurface>
+      )}
+    </div>
+  );
+}
+
+export function AgentPicker({
+  model,
+  models,
+  levels,
+  disabled,
+  pending,
+  error,
+  onModelChange,
+  onThinkingChange,
+}: {
+  model: ModelSelection | undefined;
+  models: readonly RuntimeModelOption[];
+  levels: readonly string[];
+  disabled: boolean;
+  pending?: boolean;
+  error?: string;
+  onModelChange: (model: { provider: string; model: string }) => void;
+  onThinkingChange: (level: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+  useEscapeDismiss(open, close);
+  const selectedValue = model
+    ? modelOptionValue(model.provider, model.model)
+    : '';
+  return (
+    <div className="draft-picker draft-agent-picker">
+      <Button
+        type="button"
+        className="draft-picker-trigger"
+        isDisabled={disabled}
+        aria-label="Agent and thinking"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onPress={() => (open ? close() : setOpen(true))}
+      >
+        <span>{modelName(model, models)}</span>
+        {model?.thinking && <span> · {model.thinking}</span>}
+      </Button>
+      {open && (
+        <PickerSurface label="Agent and thinking" title="Agent" onClose={close}>
+          <div className="draft-picker-section">Model</div>
+          {models.map((item) => {
+            const value = modelOptionValue(item.provider, item.model);
+            return (
+              <PickerRow
+                key={value}
+                label={item.name ?? item.model}
+                detail={item.name ? item.model : item.provider}
+                selected={value === selectedValue}
+                disabled={pending}
+                onPress={() =>
+                  onModelChange({ provider: item.provider, model: item.model })
+                }
+              />
+            );
+          })}
+          {levels.length > 0 && (
+            <>
+              <div className="draft-picker-section">Thinking</div>
+              <fieldset className="draft-picker-chips">
+                <legend className="sr-only">Thinking level</legend>
+                {levels.map((level) => (
+                  <Button
+                    key={level}
+                    type="button"
+                    className={`draft-picker-chip${model?.thinking === level ? ' selected' : ''}`}
+                    isDisabled={!model || pending}
+                    aria-pressed={model?.thinking === level}
+                    onPress={() => onThinkingChange(level)}
+                  >
+                    {level}
+                  </Button>
+                ))}
+              </fieldset>
+            </>
+          )}
+          {error && (
+            <small className="draft-picker-error" role="alert">
+              {error}
             </small>
           )}
-        </div>
+        </PickerSurface>
       )}
     </div>
   );
@@ -279,7 +518,6 @@ export function DraftAgentPicker({
   runtimes: readonly RuntimeSnapshot[];
   disabled: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const models = configuredModelOptions(runtimes);
   const levels = [
     ...new Set([
@@ -287,87 +525,21 @@ export function DraftAgentPicker({
       ...(model?.thinking ? [model.thinking] : []),
     ]),
   ];
-  const selectedValue = model
-    ? modelOptionValue(model.provider, model.model)
-    : '';
-  const close = () => setOpen(false);
-  const updateModel = (next: ModelSelection) => {
-    setDraftModel(draftId, {
-      ...next,
-      ...(model?.thinking ? { thinking: model.thinking } : {}),
-    });
-  };
-  useEffect(() => {
-    if (!open || typeof globalThis.addEventListener !== 'function') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    globalThis.addEventListener('keydown', onKeyDown);
-    return () => globalThis.removeEventListener?.('keydown', onKeyDown);
-  }, [open]);
   return (
-    <div className="draft-picker draft-agent-picker">
-      <Button
-        type="button"
-        className="draft-picker-trigger"
-        isDisabled={disabled}
-        aria-label="Agent and thinking"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        onPress={() => setOpen((value) => !value)}
-      >
-        <span>{modelName(model, runtimes)}</span>
-        {model?.thinking && <span> · {model.thinking}</span>}
-      </Button>
-      {open && (
-        <div
-          className="draft-picker-popover"
-          role="dialog"
-          aria-label="Agent and thinking"
-        >
-          <div className="draft-picker-heading">
-            <span>Agent</span>
-            <Button
-              type="button"
-              className="draft-picker-close"
-              onPress={close}
-            >
-              Done
-            </Button>
-          </div>
-          {models.map((item) => {
-            const value = modelOptionValue(item.provider, item.model);
-            return (
-              <LocationRow
-                key={value}
-                label={item.name ?? value}
-                detail={value === selectedValue ? 'Selected' : undefined}
-                onPress={() =>
-                  updateModel({ provider: item.provider, model: item.model })
-                }
-              />
-            );
-          })}
-          {levels.length > 0 && (
-            <>
-              <div className="draft-picker-section">Thinking</div>
-              {levels.map((level) => (
-                <LocationRow
-                  key={level}
-                  label={level}
-                  detail={model?.thinking === level ? 'Selected' : undefined}
-                  disabled={!model}
-                  onPress={() => {
-                    if (!model) return;
-                    setDraftModel(draftId, { ...model, thinking: level });
-                    close();
-                  }}
-                />
-              ))}
-            </>
-          )}
-        </div>
-      )}
-    </div>
+    <AgentPicker
+      model={model}
+      models={models}
+      levels={levels}
+      disabled={disabled}
+      onModelChange={(next) =>
+        setDraftModel(draftId, {
+          ...next,
+          ...(model?.thinking ? { thinking: model.thinking } : {}),
+        })
+      }
+      onThinkingChange={(thinking) => {
+        if (model) setDraftModel(draftId, { ...model, thinking });
+      }}
+    />
   );
 }

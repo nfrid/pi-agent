@@ -6,14 +6,10 @@ import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { errorMessage } from '../../shared/lib/error-message';
-import {
-  configuredModelOptions,
-  modelOptionValue,
-  parseModelOptionValue,
-} from '../model-option';
-import { ComposerModelControl, ComposerThinkingControl } from './controls';
+import { configuredModelOptions } from '../model-option';
+import { AgentPicker } from './draft-pickers';
 
-export function RuntimeModelControl({
+export function RuntimeAgentControl({
   runtime,
   runtimes,
 }: {
@@ -21,85 +17,52 @@ export function RuntimeModelControl({
   runtimes: readonly RuntimeSnapshot[];
 }) {
   const command = useMutation(commandMutationOptions(dashboardHttpClient));
-  const [modelValue, setModelValue] = useState(
-    runtime.model
-      ? modelOptionValue(runtime.model.provider, runtime.model.model)
-      : '',
-  );
+  const [model, setModel] = useState(runtime.model);
   const [error, setError] = useState<string>();
-  useEffect(
-    () =>
-      setModelValue(
-        runtime.model
-          ? modelOptionValue(runtime.model.provider, runtime.model.model)
-          : '',
-      ),
-    [runtime.model],
-  );
+  useEffect(() => setModel(runtime.model), [runtime.model]);
   const models = configuredModelOptions(runtimes, runtime);
-  const unavailable =
-    runtime.online === false || runtime.liveState === 'stopping';
-  const setModel = async (value: string) => {
-    const selected = parseModelOptionValue(value);
-    if (!selected) return;
-    setError(undefined);
-    try {
-      await command.mutateAsync({
-        runtimeId: runtime.runtimeId,
-        command: { type: 'setModel', ...selected },
-      });
-      setModelValue(value);
-    } catch (cause) {
-      setError(errorMessage(cause));
-    }
-  };
-  return (
-    <ComposerModelControl
-      models={models}
-      value={modelValue}
-      disabled={unavailable || command.isPending}
-      onChange={(value) => void setModel(value)}
-      error={error}
-    />
-  );
-}
-
-export function RuntimeThinkingControl({
-  runtime,
-}: {
-  runtime: RuntimeSnapshot;
-}) {
-  const command = useMutation(commandMutationOptions(dashboardHttpClient));
-  const [thinking, setThinking] = useState(runtime.model?.thinking ?? 'off');
-  const [error, setError] = useState<string>();
-  useEffect(
-    () => setThinking(runtime.model?.thinking ?? 'off'),
-    [runtime.model?.thinking],
-  );
   const levels =
-    runtime.thinkingLevels ??
-    (runtime.model?.thinking ? [runtime.model.thinking] : []);
+    runtime.thinkingLevels ?? (model?.thinking ? [model.thinking] : []);
   const unavailable =
     runtime.online === false || runtime.liveState === 'stopping';
-  const setLevel = async (level: string) => {
+  const setRuntimeModel = async (next: { provider: string; model: string }) => {
     setError(undefined);
     try {
       await command.mutateAsync({
         runtimeId: runtime.runtimeId,
-        command: { type: 'setThinking', level },
+        command: { type: 'setModel', ...next },
       });
-      setThinking(level);
+      setModel({
+        ...next,
+        ...(model?.thinking ? { thinking: model.thinking } : {}),
+      });
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  };
+  const setRuntimeThinking = async (thinking: string) => {
+    if (!model) return;
+    setError(undefined);
+    try {
+      await command.mutateAsync({
+        runtimeId: runtime.runtimeId,
+        command: { type: 'setThinking', level: thinking },
+      });
+      setModel({ ...model, thinking });
     } catch (cause) {
       setError(errorMessage(cause));
     }
   };
   return (
-    <ComposerThinkingControl
+    <AgentPicker
+      model={model}
+      models={models}
       levels={levels}
-      value={thinking}
-      disabled={unavailable || command.isPending}
-      onChange={(level) => void setLevel(level)}
+      disabled={unavailable}
+      pending={command.isPending}
       error={error}
+      onModelChange={(next) => void setRuntimeModel(next)}
+      onThinkingChange={(thinking) => void setRuntimeThinking(thinking)}
     />
   );
 }
