@@ -1,6 +1,7 @@
 import {
   type projectActivityGroups,
   stringArg,
+  TOOL_ACTION_LABEL_MAX,
   toolActionSummary,
   toolBaseName,
   toolPath,
@@ -104,6 +105,13 @@ export function displayActivityPath(value: string, cwd = ''): string {
 
 function compactActivityArgument(value: string): string {
   return value.replace(/\s+/gu, ' ').trim();
+}
+
+function compactActivityDescription(value: string): string {
+  const compact = compactActivityArgument(value);
+  return compact.length > TOOL_ACTION_LABEL_MAX
+    ? `${compact.slice(0, TOOL_ACTION_LABEL_MAX - 1)}…`
+    : compact;
 }
 
 function activityArgs(args: unknown): Record<string, unknown> | undefined {
@@ -244,12 +252,17 @@ export function activityStepParts(
   let argument: string | undefined;
   let lineChanges: FileLineChanges | undefined;
   if (name === 'bash' || name === 'shell' || name === 'exec') {
-    action = 'Running';
-    const command =
-      stringArg(tool.args, 'command') ??
-      stringArg(tool.args, 'cmd') ??
-      stringArg(tool.args, 'script');
-    if (command) argument = compactActivityArgument(command);
+    const description = stringArg(tool.args, 'description');
+    if (description) {
+      action = compactActivityDescription(description);
+    } else {
+      action = 'Running';
+      const command =
+        stringArg(tool.args, 'command') ??
+        stringArg(tool.args, 'cmd') ??
+        stringArg(tool.args, 'script');
+      if (command) argument = compactActivityArgument(command);
+    }
   } else if (name === 'inspect_shell') {
     action = 'Checking';
     const command = stringArg(tool.args, 'command');

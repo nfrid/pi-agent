@@ -192,6 +192,26 @@ describe('activity row views and virtual transcript construction', () => {
       role: 'command',
       state: 'complete',
     });
+    expect(
+      activityStepParts({
+        name: 'bash',
+        args: {
+          command: 'git add . && git commit -m change',
+          description: 'Stage and commit changes in the current repository',
+        },
+      }),
+    ).toEqual({
+      label: 'Stage and commit changes in the current repository',
+      action: 'Stage and commit changes in the current repository',
+      role: 'command',
+      state: 'complete',
+    });
+    expect(
+      activityStepParts({
+        name: 'bash',
+        args: { command: 'echo fallback', description: 'x'.repeat(500) },
+      }).label.length,
+    ).toBeLessThanOrEqual(140);
     const compoundCommand =
       'rg -n "todo|otherstuff"\napps && rg -n "kind: other" packages; printf done';
     expect(

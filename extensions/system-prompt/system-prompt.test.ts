@@ -187,6 +187,12 @@ describe('canonical prompt composition', () => {
       expect(prompt).toContain('\n\n# Interaction\n');
       expect(prompt).toContain('\n\n# Tool use\n');
       expect(prompt).toContain('\n\n- Keep command output bounded');
+      expect(prompt).toContain(
+        'For non-trivial `bash` calls—compound or control-flow commands, mutating commands, or otherwise non-obvious commands—provide the optional `description` field.',
+      );
+      expect(prompt).toContain(
+        'do not add individual tool-call narration when the surrounding guidance says not to.',
+      );
       expect(prompt).toContain('\n</agent_instructions>');
       expect(prompt.match(/# Working style/g)).toHaveLength(1);
       expect(prompt.match(/# Interaction/g)).toHaveLength(1);

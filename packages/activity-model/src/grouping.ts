@@ -80,7 +80,7 @@ export function toolPath(args: unknown): string | undefined {
   return stringArg(args, 'path') ?? stringArg(args, 'file_path');
 }
 
-const TOOL_ACTION_LABEL_MAX = 140;
+export const TOOL_ACTION_LABEL_MAX = 140;
 
 function actionArgs(args: unknown): Record<string, unknown> | undefined {
   return args && typeof args === 'object' && !Array.isArray(args)
@@ -114,6 +114,8 @@ export function toolActionSummary(tool: ToolDescriptor): string {
   const args = actionArgs(tool.args);
   const path = toolPath(tool.args);
   if (base === 'bash' || base === 'shell' || base === 'exec') {
+    const description = stringArg(tool.args, 'description');
+    if (description) return compactAction(description);
     const command = actionValue(tool.args, 'command', 'cmd', 'script');
     return command ? `${base} ${command}` : base;
   }
