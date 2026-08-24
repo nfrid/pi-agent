@@ -8,7 +8,6 @@ import {
   DraftPendingThreadRoute,
   DraftRoute,
   HomeRoute,
-  InboxRoute,
   LegacyNewRoute,
   ProjectNewThreadRoute,
   ProjectPendingThreadRoute,
@@ -16,7 +15,6 @@ import {
   ProjectsRoute,
   RuntimeRoute,
   SessionRoute,
-  SessionsRoute,
 } from './components';
 
 const rootRoute = createRootRoute({ component: RouteShell });
@@ -24,11 +22,6 @@ const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: HomeRoute,
-});
-const sessionsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/sessions',
-  component: SessionsRoute,
 });
 const sessionRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -65,11 +58,6 @@ const draftPendingThreadRoute = createRoute({
   path: '/drafts/$draftId/pending/$threadId',
   component: DraftPendingThreadRoute,
 });
-const inboxRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/inbox',
-  component: InboxRoute,
-});
 const runtimeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/runtimes/$runtimeId',
@@ -83,7 +71,6 @@ const legacyNewRoute = createRoute({
 
 export const dashboardRouteTree = rootRoute.addChildren([
   homeRoute,
-  sessionsRoute,
   sessionRoute,
   projectsRoute,
   projectRoute,
@@ -91,7 +78,6 @@ export const dashboardRouteTree = rootRoute.addChildren([
   projectPendingThreadRoute,
   draftRoute,
   draftPendingThreadRoute,
-  inboxRoute,
   runtimeRoute,
   legacyNewRoute,
 ]);

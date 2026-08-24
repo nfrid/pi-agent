@@ -33,60 +33,69 @@ async function openSession(page: Page, path = '/sessions/session-usage') {
       body: JSON.stringify({ invocations: [] }),
     }),
   );
-  await installDashboardBootstrap(page, {
-    serverId: 'dashboard-usage',
-    revision: 1,
-    cursor: 1,
-    runtimes: [
-      {
-        runtimeId: 'runtime-usage',
-        ownership: 'external',
-        pid: 1,
-        cwd: '/tmp/usage',
-        liveState: 'working',
-        online: true,
-        session: {
-          id: 'session-usage',
-          title: 'Usage session',
-          entries: [],
+  await installDashboardBootstrap(
+    page,
+    {
+      serverId: 'dashboard-usage',
+      revision: 1,
+      cursor: 1,
+      runtimes: [
+        {
+          runtimeId: 'runtime-usage',
+          ownership: 'external',
+          pid: 1,
+          cwd: '/tmp/usage',
+          liveState: 'working',
+          online: true,
+          session: {
+            id: 'session-usage',
+            title: 'Usage session',
+            entries: [],
+          },
         },
-      },
-    ],
-    workspaces: [],
-    sessions: [
-      {
-        id: 'session-usage',
-        file: '',
-        cwd: '/tmp/usage',
-        title: 'Usage session',
-        updatedAt: Date.now(),
-      },
-    ],
-    unread: [],
-    usage,
-  });
+      ],
+      workspaces: [],
+      sessions: [
+        {
+          id: 'session-usage',
+          file: '',
+          cwd: '/tmp/usage',
+          title: 'Usage session',
+          updatedAt: Date.now(),
+        },
+      ],
+      unread: [],
+      usage,
+    },
+    { usage },
+  );
   await page.goto(path);
 }
 
-test('keeps usage in the global toolbar on non-session routes', async ({
+test('keeps usage and settings together in the home sidebar footer', async ({
   page,
 }) => {
   await openSession(page, '/');
-  const trigger = page.getByRole('button', {
-    name: 'Usage: 5h 73%, wk 41%',
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const sidebar = page.getByRole('complementary', {
+    name: 'Agents and threads',
   });
-  await expect(page.locator('.global-tools .global-usage')).toHaveCount(1);
-  await expect(trigger).toBeVisible();
-  await expect(trigger).toContainText('5h');
-  await expect(trigger).toContainText('wk');
+  const footer = sidebar.locator('.agent-nav-footer');
+  await expect(page.locator('.global-tools .usage-capsule')).toHaveCount(0);
+  await expect(
+    footer.getByRole('button', { name: 'Usage: 5h 73%, wk 41%' }),
+  ).toBeVisible();
+  await expect(
+    footer.getByRole('button', { name: 'Open settings' }),
+  ).toBeVisible();
+  await expect(footer.getByText('Inbox', { exact: true })).toHaveCount(0);
+  await expect(footer.getByText('History', { exact: true })).toHaveCount(0);
 });
 
-test('shows usage in the mobile agent drawer, not the session toolbar', async ({
-  page,
-}) => {
+test('shows compact usage in the mobile agent drawer', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 720 });
   await openSession(page);
-  await expect(page.locator('.global-tools .global-usage')).toHaveCount(0);
+  await expect(page.locator('.global-tools .usage-capsule')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open agent list' }).click();
   const trigger = page.getByRole('button', {
     name: 'Usage: 5h 73%, wk 41%',
@@ -94,46 +103,62 @@ test('shows usage in the mobile agent drawer, not the session toolbar', async ({
   await expect(trigger).toBeVisible();
   await expect(trigger).toContainText('5h');
   await expect(trigger).toContainText('wk');
+  await expect(trigger.getByText('in 3h', { exact: true })).toBeHidden();
   await trigger.click();
   await expect(
     page.getByRole('dialog', { name: 'Usage limits' }),
   ).toBeVisible();
 });
 
-test('shows usage in the desktop sidebar, not the session toolbar @desktop', async ({
+test('shares the desktop sidebar footer with Settings @desktop', async ({
   page,
 }) => {
   await openSession(page);
-  await expect(page.locator('.global-tools .global-usage')).toHaveCount(0);
+  await expect(page.locator('.global-tools .usage-capsule')).toHaveCount(0);
   const trigger = page.getByRole('button', {
     name: 'Usage: 5h 73%, wk 41%',
   });
   await expect(trigger).toBeVisible();
   await expect(trigger).toContainText('5h');
   await expect(trigger).toContainText('wk');
+  await expect(trigger).toContainText('in 3h');
+  await expect(trigger).toContainText('in 3d');
   const sidebar = page.locator('aside.agent-thread-nav-session');
   const footer = sidebar.locator('.agent-nav-footer');
+  const settings = footer.getByRole('button', { name: 'Open settings' });
   const triggerBox = await trigger.boundingBox();
   const sidebarBox = await sidebar.boundingBox();
   const footerBox = await footer.boundingBox();
-  if (!triggerBox || !sidebarBox || !footerBox)
-    throw new Error('Sidebar usage controls are not laid out.');
-  const expectedSidebarLeft = sidebarBox.x + 8;
-  const expectedSidebarRight = sidebarBox.x + sidebarBox.width - 8;
-  const expectedFooterLeft = footerBox.x + 8;
-  const expectedFooterRight = footerBox.x + footerBox.width - 8;
-  for (const [actual, expected] of [
-    [triggerBox.x, expectedSidebarLeft],
-    [triggerBox.x + triggerBox.width, expectedSidebarRight],
-    [triggerBox.x, expectedFooterLeft],
-    [triggerBox.x + triggerBox.width, expectedFooterRight],
-  ]) {
-    expect(Math.abs(actual - expected)).toBeLessThanOrEqual(2);
-  }
+  const settingsBox = await settings.boundingBox();
+  if (!triggerBox || !sidebarBox || !footerBox || !settingsBox)
+    throw new Error('Sidebar footer controls are not laid out.');
+  const expectedLeft = footerBox.x + 8;
+  const expectedRight = footerBox.x + footerBox.width - 8;
+  expect(Math.abs(triggerBox.x - (sidebarBox.x + 8))).toBeLessThanOrEqual(2);
+  expect(Math.abs(triggerBox.x - expectedLeft)).toBeLessThanOrEqual(2);
+  expect(
+    Math.abs(settingsBox.x + settingsBox.width - expectedRight),
+  ).toBeLessThanOrEqual(2);
+  expect(
+    settingsBox.x - (triggerBox.x + triggerBox.width),
+  ).toBeGreaterThanOrEqual(5);
   await trigger.click();
   const details = page.getByRole('dialog', { name: 'Usage limits' });
   await expect(details).toBeVisible();
   const detailsBox = await details.boundingBox();
   if (!detailsBox) throw new Error('Sidebar usage details are not laid out.');
   expect(detailsBox.y + detailsBox.height).toBeLessThanOrEqual(triggerBox.y);
+  await trigger.click();
+  await settings.click();
+  const settingsDrawer = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settingsDrawer).toBeVisible();
+  await expect(
+    settingsDrawer.getByRole('heading', { name: 'Alert delivery' }),
+  ).toBeVisible();
+  await expect(
+    settingsDrawer.getByRole('heading', { name: 'Projects' }),
+  ).toBeVisible();
+  await expect(
+    settingsDrawer.getByRole('button', { name: /push/iu }),
+  ).toBeVisible();
 });

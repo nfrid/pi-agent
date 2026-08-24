@@ -3,9 +3,7 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
-import { useDashboardUtility } from '../dashboard-utility-context';
 import {
-  DASHBOARD_MOTION_MS,
   useOverlayFocusRestore,
   useOverlayPresence,
 } from '../overlay-presence';
@@ -19,7 +17,6 @@ export function CommandPalette({
   disabled?: boolean;
 }) {
   const go = useDashboardNavigate();
-  const utility = useDashboardUtility();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -30,7 +27,6 @@ export function CommandPalette({
   const dialogRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { rememberFocus } = useOverlayFocusRestore(open);
-  const utilityTimerRef = useRef<number | undefined>(undefined);
   const items = paletteItems(snapshot);
   const runtimeActionCount = items.filter(
     (item) => item.kind === 'action',
@@ -67,13 +63,6 @@ export function CommandPalette({
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
-  useEffect(
-    () => () => {
-      if (utilityTimerRef.current !== undefined)
-        window.clearTimeout(utilityTimerRef.current);
-    },
-    [],
-  );
   useEffect(() => {
     if (!open) return;
     setError(undefined);
@@ -101,23 +90,8 @@ export function CommandPalette({
     if (!item || (item.kind === 'action' && item.needsInput)) return;
     setError(undefined);
     if (item.kind === 'navigate') {
-      const utilityPanel =
-        item.path === '/sessions'
-          ? 'sessions'
-          : item.path === '/inbox'
-            ? 'inbox'
-            : undefined;
       close();
-      if (utility && utilityPanel) {
-        if (utilityTimerRef.current !== undefined)
-          window.clearTimeout(utilityTimerRef.current);
-        const pathname = window.location.pathname;
-        utilityTimerRef.current = window.setTimeout(() => {
-          utilityTimerRef.current = undefined;
-          if (window.location.pathname === pathname)
-            utility.openPanel(utilityPanel);
-        }, DASHBOARD_MOTION_MS);
-      } else go(item.path);
+      go(item.path);
       return;
     }
     try {

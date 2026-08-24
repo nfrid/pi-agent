@@ -563,10 +563,9 @@ export function AgentThreadNav({
       select(activeResultId);
     }
   };
-  const openUtility = (panel: 'sessions' | 'inbox', fallbackPath: string) => {
+  const openSettings = () => {
     onOpenChange?.(false);
-    if (utility) utility.openPanel(panel);
-    else go(fallbackPath);
+    utility?.openPanel('settings');
   };
   const openNewThread = () => {
     if (projects.length === 0) {
@@ -860,45 +859,15 @@ export function AgentThreadNav({
             : 's'}
         </button>
       )}
-      {mode === 'session' && (
-        <div className={styles.usageRow}>
-          <UsageCapsule usage={snapshot.usage} variant="sidebar" />
-        </div>
-      )}
-      <footer
-        className={`${styles.footer} ${mode === 'session' ? styles.sessionFooter : ''}`}
-      >
+      <footer className={`agent-nav-footer ${styles.footer}`}>
+        <UsageCapsule usage={snapshot.usage} />
         <button
           type="button"
-          className={styles.utility}
-          onClick={() => {
-            onOpenChange?.(false);
-            go('/projects');
-          }}
+          className={styles.settingsButton}
+          aria-label="Open settings"
+          onClick={openSettings}
         >
-          <span aria-hidden="true">⌂</span>
-          <span>Projects</span>
-        </button>
-        <button
-          type="button"
-          className={styles.utility}
-          onClick={() => openUtility('sessions', '/sessions')}
-        >
-          <span aria-hidden="true">▤</span>
-          <span>History</span>
-        </button>
-        <button
-          type="button"
-          className={styles.utility}
-          onClick={() => openUtility('inbox', '/inbox')}
-        >
-          <span aria-hidden="true">✉</span>
-          <span>Inbox</span>
-          {snapshot.unread.length > 0 && (
-            <b>
-              {snapshot.unread.length > 99 ? '99+' : snapshot.unread.length}
-            </b>
-          )}
+          <span aria-hidden="true">⚙</span>
         </button>
       </footer>
     </aside>

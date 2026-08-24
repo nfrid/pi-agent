@@ -263,8 +263,8 @@ describe('command palette', () => {
       'Dashboard',
       'New thread',
     ]);
-    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(29);
-    expect(items[5]?.title).toBe('Session: Untitled session');
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(27);
+    expect(items[3]?.title).toBe('Session: Untitled session');
     expect(items.at(-1)?.id).toBe('session:session-23');
     expect(items.some((item) => item.title === 'Session: session-436')).toBe(
       false,

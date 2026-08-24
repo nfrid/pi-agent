@@ -8,7 +8,6 @@ import {
 import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
 import styles from './dashboard-overview.module.css';
 import { runtimePauseStatus } from './extension-surfaces';
-import { SessionRow } from './session-row';
 
 /** Home is intentionally a thread browser, not a dashboard of duplicate cards. */
 export function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -86,25 +85,6 @@ export function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
         )}
       </section>
     </div>
-  );
-}
-
-export function SessionsView({ snapshot }: { snapshot: BrowserSnapshot }) {
-  return (
-    <section>
-      <div className="section-heading page-heading">
-        <div>
-          <h1>Sessions</h1>
-          <p className="muted">History across every project.</p>
-        </div>
-      </div>
-      <div className="session-list">
-        {snapshot.sessions.map((session) => (
-          <SessionRow key={session.id} session={session} />
-        ))}
-      </div>
-      {!snapshot.sessions.length && <p className="empty">No sessions yet.</p>}
-    </section>
   );
 }
 

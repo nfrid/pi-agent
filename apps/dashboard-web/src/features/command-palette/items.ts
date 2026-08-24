@@ -87,20 +87,6 @@ export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
       description: 'Browse registered projects',
       path: '/projects',
     },
-    {
-      kind: 'navigate',
-      id: 'sessions',
-      title: 'Sessions',
-      description: 'Browse session history',
-      path: '/sessions',
-    },
-    {
-      kind: 'navigate',
-      id: 'inbox',
-      title: 'Inbox',
-      description: 'Open notifications and usage',
-      path: '/inbox',
-    },
   ];
   const actions = snapshotActions(snapshot).map(
     ({ runtime, action }): PaletteItem => ({

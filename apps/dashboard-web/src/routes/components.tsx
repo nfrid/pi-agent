@@ -6,11 +6,9 @@ import { DraftThreadView } from '../features/draft-thread';
 import { SessionView } from '../features/session';
 import {
   Dashboard,
-  InboxView,
   ProjectNewThreadView,
   ProjectsView,
   ProjectView,
-  SessionsView,
 } from './dashboard';
 import { newProjectThreadPath, useDashboardNavigate } from './navigation';
 import { RuntimeView } from './runtime';
@@ -101,23 +99,6 @@ export function ProjectPendingThreadRoute() {
       pendingThreadId={threadId}
       snapshot={dashboard.snapshot}
       store={dashboard.store}
-    />
-  ) : null;
-}
-
-export function SessionsRoute() {
-  const dashboard = useDashboardContext();
-  return dashboard.snapshot ? (
-    <SessionsView snapshot={dashboard.snapshot} />
-  ) : null;
-}
-
-export function InboxRoute() {
-  const dashboard = useDashboardContext();
-  return dashboard.snapshot ? (
-    <InboxView
-      snapshot={dashboard.snapshot}
-      usageError={dashboard.usageError}
     />
   ) : null;
 }
