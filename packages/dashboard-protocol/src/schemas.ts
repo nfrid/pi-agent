@@ -785,6 +785,8 @@ export const DelegateWorkflowMetadataSchema = Type.Object(
   {
     /** Immutable branch owner used to disambiguate identical logical attempts. */
     ownerBranchId: Type.Optional(IdentifierSchema),
+    /** Missing only for legacy workflow records. */
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
     logicalId: WorkflowLogicalIdSchema,
     attempt: Type.Integer({
       minimum: 1,
