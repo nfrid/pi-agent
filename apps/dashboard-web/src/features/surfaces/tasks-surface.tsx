@@ -9,7 +9,7 @@ import {
   surfaceText,
 } from '../delegate/surface-state';
 import { SurfaceStats } from '../surface-drawer';
-import { short, stateGlyph } from './state-glyphs';
+import { stateGlyph } from './state-glyphs';
 import { WorkSurface } from './work-surface';
 
 function taskRows(model: TaskStateViewModel): readonly TaskSurfaceTask[] {
@@ -43,36 +43,30 @@ export function TasksSurface({
       ['queued', 'todo'].includes(surfaceStateLabel(row.status)),
     );
   const summary = blocked
-    ? `Blocked: ${short(surfaceText(blocked.text, 'Task blocked'), 34)}`
+    ? `Blocked: ${surfaceText(blocked.text, 'Task blocked')}`
     : current
-      ? short(surfaceText(current.text, 'Task in progress'), 42)
+      ? surfaceText(current.text, 'Task in progress')
       : completed === total
         ? 'All tasks complete'
         : model.stats.active === 0
           ? 'No active tasks'
-          : `${model.stats.active} remaining`;
+          : 'Tasks pending';
   return (
     <WorkSurface
       title={title}
       label="Tasks"
       summary={summary}
-      summaryDetail={
-        current ? (
-          <small className="surface-summary-detail">
-            {blocked
-              ? 'Blocked task'
-              : `${Math.max(0, total - completed)} remaining`}
-          </small>
-        ) : undefined
-      }
       count={
         <span
           role="status"
           className="surface-counter-strip"
           aria-label={`${completed} of ${total} tasks complete`}
         >
-          <span className="surface-done" aria-hidden="true">
-            ✓ {completed}/{total}
+          <span
+            className={completed === total ? 'surface-done' : 'surface-queued'}
+            aria-hidden="true"
+          >
+            {completed === total ? '✓' : '○'} {completed}/{total}
           </span>
         </span>
       }
@@ -125,7 +119,7 @@ export function TasksSurface({
               <span className="sr-only">{state}</span>
               <span className="task-row-main">
                 <strong>{id}</strong>
-                <span>{short(row.text || 'Untitled task', 180)}</span>
+                <span>{row.text || 'Untitled task'}</span>
               </span>
               <span className="task-row-meta">
                 {priority && (

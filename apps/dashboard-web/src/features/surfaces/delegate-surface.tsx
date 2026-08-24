@@ -254,7 +254,7 @@ export function DelegateSurface({
       : historyIncomplete
         ? 'History incomplete · some work omitted'
         : active
-          ? short(delegateDisplayName(active), 42)
+          ? delegateDisplayName(active)
           : stats.failed
             ? `${stats.failed} need attention`
             : stats.aborted
@@ -438,7 +438,7 @@ export function DelegateSurface({
                       ),
                       140,
                     );
-                    const name = short(delegateDisplayName(row), 70);
+                    const name = delegateDisplayName(row);
                     const route = row.route ?? row.workflow?.route ?? '';
                     const context = delegateConsurfaceText(row) ?? '';
                     const access =

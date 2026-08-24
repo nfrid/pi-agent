@@ -874,7 +874,7 @@ describe('live extension surface fixtures', () => {
             id: 'd1',
             runId: 'run-d1',
             lineageId: 'lineage-d1',
-            name: 'Compact delegate',
+            name: 'Compact delegate title that should remain complete when space allows',
             kind: 'background',
             state: 'running',
             createdAt: 1,
@@ -892,7 +892,7 @@ describe('live extension surface fixtures', () => {
         tasks: [
           {
             id: 'T1',
-            text: 'Compact task',
+            text: 'Compact task title that should remain complete when space allows',
             status: 'doing',
             dependsOn: [],
             createdAt: 1,
@@ -910,12 +910,18 @@ describe('live extension surface fixtures', () => {
       </>,
     );
     expect(markup).toContain('aria-expanded="false"');
-    expect(markup).toContain('<strong>Compact delegate</strong>');
-    expect(markup).toContain('<strong>Compact task</strong>');
+    expect(markup).toContain(
+      '<strong>Compact delegate title that should remain complete when space allows</strong>',
+    );
+    expect(markup).toContain(
+      '<strong>Compact task title that should remain complete when space allows</strong>',
+    );
     expect(markup).toContain(
       'aria-label="1 running, 0 queued, 0 need attention, 0 done"',
     );
     expect(markup).toContain('aria-label="0 of 1 tasks complete"');
+    expect(markup).toContain('○ 0/1');
+    expect(markup).not.toContain('✓ 0/1');
     expect(markup).not.toContain('luna-high');
     expect(markup).not.toContain('task-progress');
   });
@@ -966,7 +972,8 @@ describe('live extension surface fixtures', () => {
     expect(markup.indexOf('aria-label="Tasks"')).toBeLessThan(
       markup.indexOf('aria-label="Delegates"'),
     );
-    expect(markup).toContain('12 remaining');
+    expect(markup).toContain('<strong>Task 1</strong>');
+    expect(markup).not.toContain('remaining');
     expect(markup).not.toContain('0 of 12 complete');
     expect(markup).not.toContain('more tasks');
   });
@@ -991,7 +998,8 @@ describe('live extension surface fixtures', () => {
     const markup = renderToStaticMarkup(tasks);
 
     expect(markup).toContain('22/150');
-    expect(markup).toContain('128 remaining');
+    expect(markup).toContain('<strong>Visible task 1</strong>');
+    expect(markup).not.toContain('remaining');
     expect(markup).not.toContain('0/128');
   });
 
