@@ -99,8 +99,22 @@ export function delegateReferenceLabel(
   return row ? delegateDisplayName(row) : humanizeDelegateLogicalId(logicalId);
 }
 
+function delegateReferencesLabel(
+  references: readonly string[],
+  rows?: readonly DelegateInspectionStatus[],
+): string {
+  return references
+    .map((reference) =>
+      rows
+        ? delegateReferenceLabel(reference, rows)
+        : humanizeDelegateLogicalId(reference),
+    )
+    .join(', ');
+}
+
 function delegateWaitingRelationship(
   row: DelegateInspectionStatus,
+  rows?: readonly DelegateInspectionStatus[],
 ): string | undefined {
   const workflow = row.workflow;
   if (!workflow) return undefined;
@@ -111,7 +125,9 @@ function delegateWaitingRelationship(
   const after = dependencies.filter(
     (dependency) => !inputIdentities.has(dependency),
   );
-  return after.length ? `after ${after.join(', ')}` : undefined;
+  return after.length
+    ? `after ${delegateReferencesLabel(after, rows)}`
+    : undefined;
 }
 
 export function delegateActivityLabel(
@@ -119,21 +135,27 @@ export function delegateActivityLabel(
   runState: string,
   pauseState?: string,
   includeRelationships = true,
+  referenceRows?: readonly DelegateInspectionStatus[],
 ): string {
   if (pauseState === 'paused') return 'Paused at a safe boundary';
   if (pauseState === 'pausing') return 'Pausing at a safe boundary';
   if (includeRelationships) {
-    const waitingRelationship = delegateWaitingRelationship(row);
+    const waitingRelationship = delegateWaitingRelationship(row, referenceRows);
     if (waitingRelationship) return waitingRelationship;
   }
   // Historical rows carry wake metadata on the invocation rather than in the
   // live wake list; keep this as a wait/action fallback, not a node state.
-  if (includeRelationships && row.wake)
+  if (includeRelationships && row.wake) {
+    const references = delegateReferencesLabel(
+      row.wake.references,
+      referenceRows,
+    );
     return row.wake.state === 'entered'
-      ? `delivered for ${row.wake.references.join(', ')}`
+      ? `delivered for ${references}`
       : row.wake.state === 'pending' || row.wake.state === 'ready'
-        ? `waiting for ${row.wake.references.join(', ')}`
-        : `wake ${row.wake.state} · ${row.wake.references.join(', ')}`;
+        ? `waiting for ${references}`
+        : `wake ${row.wake.state} · ${references}`;
+  }
   if (row.workflow?.state === 'blocked' && row.workflow.reason)
     return `blocked: ${row.workflow.reason}`;
   if (row.activity?.latestText || row.activity?.label)
@@ -149,9 +171,16 @@ export function delegateRowActivityLabel(
   wakes: readonly DelegateWakePresentation[] | undefined,
   runState: string,
   pauseState?: string,
+  referenceRows?: readonly DelegateInspectionStatus[],
 ): string {
-  const waitingRelationship = delegateWaitingRelationship(row);
-  const action = delegateActivityLabel(row, runState, pauseState, false);
+  const waitingRelationship = delegateWaitingRelationship(row, referenceRows);
+  const action = delegateActivityLabel(
+    row,
+    runState,
+    pauseState,
+    false,
+    referenceRows,
+  );
   return [waitingRelationship ?? action, delegateWakeEffect(row, wakes)]
     .filter((value): value is string => Boolean(value))
     .join(' · ');
@@ -448,6 +477,7 @@ export function DelegateSurface({
                         wakes,
                         runState,
                         pauseState,
+                        rows,
                       ),
                       140,
                     );

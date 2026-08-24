@@ -1817,12 +1817,14 @@ function invocation(
   );
   const workflowLogicalId = stringValue(workflowSource?.logicalId, 64);
   const workflowIdentity = stringValue(workflowSource?.identity, 80);
+  const workflowName = validWorkflowText(workflowSource?.name, 2_000);
   const workflowAttempt = workflowSource?.attempt ?? workflowSource?.ordinal;
   const workflowInputs = projectWorkflowInputs(workflowSource?.inputs);
   const workflow =
     workflowSource &&
     workflowLogicalId &&
     workflowIdentity &&
+    (workflowSource.name === undefined || workflowName) &&
     typeof workflowAttempt === 'number' &&
     Number.isSafeInteger(workflowAttempt) &&
     workflowAttempt >= 1
@@ -1830,6 +1832,7 @@ function invocation(
           ...(workflowOwnerBranchId
             ? { ownerBranchId: workflowOwnerBranchId }
             : {}),
+          ...(workflowName ? { name: workflowName } : {}),
           logicalId: workflowLogicalId,
           attempt: workflowAttempt,
           identity: workflowIdentity,

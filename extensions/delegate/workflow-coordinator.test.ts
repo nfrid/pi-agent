@@ -1420,6 +1420,7 @@ describe('DelegateWorkflowCoordinator', () => {
     let thirdToken: string | undefined;
     const third = coordinator.schedule({
       logicalId: 'impl',
+      name: 'Third implementation',
       continuation: true,
       prepare: async (context) => {
         thirdToken = context.continuationToken;
@@ -1435,6 +1436,11 @@ describe('DelegateWorkflowCoordinator', () => {
     );
     expect(third.identity).toBe('impl@3');
     expect(thirdToken).toBe('opaque-child-token');
+    expect(
+      coordinator
+        .metadataSnapshot()
+        .attempts.find((attempt) => attempt.identity === third.identity)?.name,
+    ).toBe('Third implementation');
 
     const fresh = coordinator.schedule({
       logicalId: 'fresh',

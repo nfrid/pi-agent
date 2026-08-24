@@ -1658,7 +1658,10 @@ export class DelegateWorkflowCoordinator {
         return;
       }
       this.validatePreparedLaunch(normalized.launch);
-      record.name = boundedWorkflowName(normalized.launch.name);
+      record.name = boundedWorkflowName(
+        normalized.launch.name,
+        record.name ?? 'Subagent',
+      );
       if (normalized.launch.route !== undefined)
         record.route = normalized.launch.route;
       this.startJob(record, normalized.launch);

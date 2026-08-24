@@ -4,6 +4,7 @@ export interface DelegateDisplayIdentity {
   name?: string;
   workflow?: {
     logicalId?: string;
+    identity?: string;
     name?: string;
   };
 }
@@ -22,12 +23,15 @@ export function humanizeDelegateLogicalId(reference: string): string {
 export function delegateDisplayName(row: DelegateDisplayIdentity): string {
   const logicalId = row.workflow?.logicalId;
   const persistedName = row.workflow?.name;
-  const runName =
-    logicalId && row.name === logicalId && !persistedName
-      ? undefined
-      : row.name;
+  const canonicalAttempt = row.workflow?.identity;
+  const canonicalFallbackName =
+    !persistedName &&
+    (row.name === logicalId ||
+      row.name === canonicalAttempt ||
+      /^[a-z][a-z0-9-]*@\d+$/u.test(row.name ?? ''));
+  const fallbackIdentity = logicalId ?? row.name;
   return surfaceText(
-    persistedName ?? runName,
-    logicalId ? humanizeDelegateLogicalId(logicalId) : 'Subagent',
+    persistedName ?? (canonicalFallbackName ? undefined : row.name),
+    fallbackIdentity ? humanizeDelegateLogicalId(fallbackIdentity) : 'Subagent',
   );
 }

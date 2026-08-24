@@ -286,7 +286,10 @@
   color: var(--cyan);
 }
 .delegate-meta-route {
+  max-width: min(160px, 35vw);
+  overflow: hidden;
   color: var(--purple);
+  text-overflow: ellipsis;
 }
 .delegate-meta-recovery {
   color: var(--orange);

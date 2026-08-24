@@ -839,6 +839,7 @@ describe('delegate history adapter', () => {
             attempts: [
               {
                 ownerBranchId: 'owner-a',
+                name: 'Persisted review title',
                 logicalId: 'review',
                 attempt: 1,
                 identity: 'review@1',
@@ -862,6 +863,7 @@ describe('delegate history adapter', () => {
       name: 'Actual production worker',
       workflow: {
         ownerBranchId: 'owner-a',
+        name: 'Persisted review title',
         identity: 'review@1',
         dependencies: ['gate@1'],
         settledAt: 3,
@@ -1146,7 +1148,10 @@ describe('delegate history adapter', () => {
     ]);
     expect(
       response.groups.find((group) => group.workflow?.logicalId === 'named'),
-    ).toMatchObject({ name: 'Human-friendly review' });
+    ).toMatchObject({
+      name: 'Human-friendly review',
+      workflow: { name: 'Human-friendly review' },
+    });
     expect(
       response.groups.find((group) => group.workflow?.logicalId === 'legacy'),
     ).toMatchObject({ name: 'legacy' });

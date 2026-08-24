@@ -596,12 +596,8 @@ describe('live extension surface fixtures', () => {
       id: 'review-ready',
       references: ['review@1'],
     });
-    expect(delegateActivityLabel(pending, 'queued')).toBe(
-      'waiting for review@1',
-    );
-    expect(delegateActivityLabel(entered, 'done')).toBe(
-      'delivered for review@1',
-    );
+    expect(delegateActivityLabel(pending, 'queued')).toBe('waiting for Review');
+    expect(delegateActivityLabel(entered, 'done')).toBe('delivered for Review');
   });
 
   it('renders wake history inline without wake-owned rows or counts', () => {
@@ -741,6 +737,15 @@ describe('live extension surface fixtures', () => {
       delegateDisplayName({
         name: 'legacy-review',
         workflow: { logicalId: 'legacy-review' },
+      }),
+    ).toBe('Legacy Review');
+    expect(
+      delegateDisplayName({
+        name: 'legacy-review@2',
+        workflow: {
+          logicalId: 'legacy-review',
+          identity: 'legacy-review@2',
+        },
       }),
     ).toBe('Legacy Review');
     expect(humanizeDelegateLogicalId('build_ui@3')).toBe('Build Ui');
@@ -1384,7 +1389,7 @@ describe('live extension surface fixtures', () => {
       },
     ];
     expect(delegateRowActivityLabel(row, wakes, 'queued')).toBe(
-      'after impl@1 · resumes parent',
+      'after Impl · resumes parent',
     );
     const markup = renderToStaticMarkup(
       <DelegateSurface

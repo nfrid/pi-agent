@@ -321,19 +321,24 @@ export function SessionControlLayer({
           Jump to latest
         </button>
       )}
-      <div className="extension-surfaces session-extension-surfaces">
+      <section
+        className="extension-surfaces session-extension-surfaces"
+        aria-label="Current tasks and delegates"
+      >
         <ExtensionSurfaceStack
           runtime={runtime}
           placement="composer"
           excludeDelegate
+          slotsOnly
         />
         <DelegateHistorySurface
           id={sessionId}
           runtime={runtime}
           sessionChange={sessionChange}
           store={store}
+          slotsOnly
         />
-      </div>
+      </section>
       <Composer
         key={sessionId}
         runtime={runtime}
