@@ -3941,14 +3941,17 @@ function phase6EditEntries(historyCount: number) {
 
 async function installPhase6Mocks(
   page: Page,
-  options: { entries?: unknown[] } = {},
+  options: {
+    entries?: unknown[];
+    snapshot?: import('@pi-dashboard/protocol').BrowserSnapshot;
+  } = {},
 ) {
   const commands: Array<Record<string, unknown>> = [];
   const starts: Array<Record<string, unknown>> = [];
   const stops: Array<Record<string, unknown>> = [];
   const restarts: Array<Record<string, unknown>> = [];
   const initialFixture = {
-    snapshot: phase6Snapshot(),
+    snapshot: options.snapshot ?? phase6Snapshot(),
     entries: options.entries ?? phase6Entries(),
   };
   await page.addInitScript((initial) => {
@@ -4044,6 +4047,9 @@ async function installPhase6Mocks(
                 ? { context: status.context }
                 : {}),
               allowWrites: status.allowWrites === true,
+              ...(status.details && typeof status.details === 'object'
+                ? { details: status.details }
+                : {}),
               ...(status.pauseState === 'paused' ||
               status.pauseState === 'pausing'
                 ? { pauseState: status.pauseState }
@@ -4423,6 +4429,74 @@ async function installPhase6Mocks(
       ),
   };
 }
+
+test('shows structured delegate content while the delegate is running @desktop', async ({
+  page,
+}) => {
+  await installPhase6Mocks(page, {
+    snapshot: phase6Snapshot({
+      extensionSurfaces: [
+        {
+          id: 'delegate-status',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'live-review',
+                runId: 'live-review-run',
+                sessionId: 'child-session',
+                lineageId: 'live-review-lineage',
+                name: 'Live review',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                startedAt: 2,
+                allowWrites: false,
+                isolation: 'shared',
+                details: {
+                  task: 'Review the running implementation.',
+                  setup: { cwd: '/tmp/project', isolation: 'shared' },
+                  runConfig: {
+                    scope: ['extensions/delegate'],
+                    after: ['gate@1'],
+                    parentContextNote: 'Keep the live review focused.',
+                  },
+                  renderedPrompt: 'Full rendered child prompt',
+                  truncated: false,
+                },
+                transcript: [],
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+  await page.setViewportSize({ width: 960, height: 760 });
+  await page.goto('/sessions/s1');
+
+  const launcher = page.getByRole('button', {
+    name: /Delegates.*1 running/u,
+  });
+  await expect(launcher).toBeVisible();
+  await launcher.click();
+  await page.getByRole('button', { name: /Live review/u }).click();
+
+  const inspector = page.locator('.delegate-transcript-inspector-body');
+  await expect(
+    inspector.getByText('Review the running implementation.'),
+  ).toBeVisible();
+  await expect(inspector.getByText('Delegate setup')).toBeVisible();
+  await expect(inspector.getByText('extensions/delegate')).toBeVisible();
+  await expect(
+    inspector.getByText('Keep the live review focused.'),
+  ).toBeVisible();
+  const renderedPrompt = inspector.getByText('Full rendered child prompt');
+  await expect(renderedPrompt).toBeHidden();
+  await inspector.getByText('Rendered prompt').click();
+  await expect(renderedPrompt).toBeVisible();
+});
 
 test('runtime restart stays on the current thread with pending status', async ({
   page,
