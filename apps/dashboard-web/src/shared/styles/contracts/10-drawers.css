@@ -298,18 +298,25 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
   min-height: 25px;
   margin-top: 2px;
   padding: 2px 2px 0;
+  white-space: nowrap;
+}
+.composer-secondary > * + * {
+  margin-left: 8px;
 }
 .composer-mode {
   display: flex;
-  align-items: center;
   min-width: 0;
-  gap: 5px;
+  flex: 1 1 0;
+  align-items: center;
+  overflow: hidden;
   color: var(--dim);
   font-size: 10px;
+}
+.composer-mode > * + * {
+  margin-left: 5px;
 }
 .composer-mode button {
   border: 1px solid transparent;
@@ -325,7 +332,10 @@
   color: var(--fg);
 }
 .composer-control-row {
-  margin-left: auto;
+  min-width: 0;
+  max-width: 50%;
+  flex: 0 1 auto;
+  margin-left: 8px;
 }
 .model-control,
 .thinking-control {
@@ -345,6 +355,7 @@
   order: 2;
   margin: 3px 0 0;
   font-size: 10px;
+  white-space: normal;
 }
 .composer-previews {
   position: static;
@@ -360,6 +371,11 @@
 .draft-picker {
   position: relative;
   min-width: 0;
+}
+.composer-mode .draft-picker,
+.composer-control-row .draft-picker {
+  min-width: 0;
+  max-width: 100%;
 }
 .draft-picker-trigger {
   display: inline-flex;
@@ -377,12 +393,17 @@
   font-size: 10px;
   white-space: nowrap;
 }
+.composer-mode .draft-picker-trigger,
+.composer-control-row .draft-picker-trigger {
+  max-width: 100%;
+}
 .draft-picker-trigger:hover,
 .draft-picker-trigger[aria-expanded="true"] {
   border-color: var(--line);
   color: var(--fg);
 }
 .draft-picker-trigger > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -402,18 +423,51 @@
 .draft-picker-trigger-locked::after {
   content: none;
 }
-.draft-picker-lock {
-  flex: none;
-  color: var(--muted);
-}
 .draft-picker-location-icon {
   flex: none;
   width: 13px;
+  margin-right: 4px;
   height: 13px;
   fill: none;
   stroke: currentColor;
   stroke-linejoin: round;
   stroke-width: 1.25;
+}
+.draft-picker-trigger.location-current .draft-picker-location-icon,
+.draft-picker-trigger.location-main .draft-picker-location-icon {
+  color: var(--green);
+}
+.draft-picker-trigger.location-worktree .draft-picker-location-icon {
+  color: var(--purple);
+}
+.draft-picker-trigger.location-checkout .draft-picker-location-icon,
+.draft-picker-trigger.location-external .draft-picker-location-icon {
+  color: var(--cyan);
+}
+.draft-agent-model {
+  color: var(--cyan);
+}
+.draft-agent-thinking {
+  flex: none;
+  margin-left: 3px;
+  color: var(--purple);
+}
+.draft-agent-trigger[data-thinking="off"] .draft-agent-thinking {
+  color: var(--muted);
+}
+.draft-agent-trigger[data-thinking="minimal"] .draft-agent-thinking,
+.draft-agent-trigger[data-thinking="low"] .draft-agent-thinking {
+  color: var(--green);
+}
+.draft-agent-trigger[data-thinking="medium"] .draft-agent-thinking {
+  color: var(--cyan);
+}
+.draft-agent-trigger[data-thinking="high"] .draft-agent-thinking {
+  color: var(--orange);
+}
+.draft-agent-trigger[data-thinking="xhigh"] .draft-agent-thinking,
+.draft-agent-trigger[data-thinking="max"] .draft-agent-thinking {
+  color: var(--pink);
 }
 .draft-picker-backdrop {
   position: fixed;

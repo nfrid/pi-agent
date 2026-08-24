@@ -416,22 +416,19 @@ export function Composer({
         mode={
           <>
             {runtime?.liveState === 'working' && !settledBackground && (
-              <>
-                <span>Mode:</span>
-                <AriaButton
-                  type="button"
-                  aria-label="Steer current work instead of following up later"
-                  aria-pressed={mode === 'steer'}
-                  className={mode === 'steer' ? 'selected' : ''}
-                  onPress={() =>
-                    setMode((current) =>
-                      current === 'steer' ? 'followUp' : 'steer',
-                    )
-                  }
-                >
-                  {mode === 'steer' ? 'Steer' : 'Later'}
-                </AriaButton>
-              </>
+              <AriaButton
+                type="button"
+                aria-label="Steer current work instead of following up later"
+                aria-pressed={mode === 'steer'}
+                className={mode === 'steer' ? 'selected' : ''}
+                onPress={() =>
+                  setMode((current) =>
+                    current === 'steer' ? 'followUp' : 'steer',
+                  )
+                }
+              >
+                {mode === 'steer' ? 'Steer' : 'Later'}
+              </AriaButton>
             )}
             {checkout ? (
               <ThreadLocationIndicator checkout={checkout} />
