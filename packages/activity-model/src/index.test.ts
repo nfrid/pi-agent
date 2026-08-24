@@ -181,6 +181,12 @@ describe('shared activity model', () => {
         kind: 'tool' as const,
         name: 'read',
         args: {},
+        status: 'complete' as const,
+      },
+      {
+        kind: 'tool' as const,
+        name: 'grep',
+        args: {},
         status: 'success' as const,
       },
     ];

@@ -91,7 +91,10 @@ export function projectActivityGroups(
         index === groups.length - 1 &&
         group.end === entries.length - 1 &&
         !tools.every(
-          (tool) => tool.status === 'success' || tool.status === 'error',
+          (tool) =>
+            tool.status === 'complete' ||
+            tool.status === 'success' ||
+            tool.status === 'error',
         ));
     const status: ActivityGroupStatus = streaming
       ? 'preparing'
