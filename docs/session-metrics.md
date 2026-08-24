@@ -3,8 +3,8 @@
 `scripts/session-metrics` reads Pi session JSONL and emits privacy-safe aggregate measurements. It follows only the active ancestry, so abandoned branches do not inflate totals.
 
 ```bash
-npm run session:metrics -- summarize ~/.pi/agent/sessions --min-delegate-calls 1
-npm run session:metrics -- compare --baseline /path/to/baseline --comparison /path/to/comparison
+bun run session:metrics -- summarize ~/.pi/agent/sessions --min-delegate-calls 1
+bun run session:metrics -- compare --baseline /path/to/baseline --comparison /path/to/comparison
 ```
 
 JSON is written to stdout. `--limit` applies after filtering; `--min-todo-calls` and `--min-delegate-calls` can be combined.
@@ -71,8 +71,8 @@ conditional future failures from becoming approval or advancement.
 Per-episode records are intentionally opt-in:
 
 ```bash
-npm run session:metrics -- summarize ~/.pi/agent/sessions --episodes
-npm run session:metrics -- compare --baseline ./before --comparison ./after --episodes
+bun run session:metrics -- summarize ~/.pi/agent/sessions --episodes
+bun run session:metrics -- compare --baseline ./before --comparison ./after --episodes
 ```
 
 Without `--episodes`, output is aggregate-only. With it, each session includes

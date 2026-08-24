@@ -51,16 +51,16 @@ env.PI_DASHBOARD_AUTH_TOKEN ??= 'change-me';
 env.PI_DASHBOARD_ORIGINS ??= `http://127.0.0.1:${env.PI_DASHBOARD_WEB_PORT}`;
 env.VITE_DASHBOARD_URL ??= `http://127.0.0.1:${env.PI_DASHBOARD_PORT}`;
 
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const bun = process.platform === 'win32' ? 'bun.exe' : 'bun';
 const children = new Set();
 let stopping = false;
 
 function run(name, args, independent = false) {
-  const child = spawn(pnpm, args, {
+  const child = spawn(bun, ['run', ...args], {
     cwd: root,
     env,
     stdio: 'inherit',
-    // Give each pnpm wrapper and its grandchildren one process group so a
+    // Give each Bun wrapper and its grandchildren one process group so a
     // forced launchd restart cannot orphan the actual daemon or preview server.
     detached: process.platform !== 'win32',
   });
@@ -132,7 +132,7 @@ async function main() {
     const port = Number(env.PI_DASHBOARD_PORT);
     if (await endpointInUse({ host, port })) {
       process.stderr.write(
-        `Dashboard API ${host}:${port} is already in use. Refusing to start a second daemon because it would steal dashboard/bridge.sock and make live sessions look dormant.\nUse \`pnpm dashboard:web\` for UI HMR against the running production API.\n`,
+        `Dashboard API ${host}:${port} is already in use. Refusing to start a second daemon because it would steal dashboard/bridge.sock and make live sessions look dormant.\nUse \`bun run dashboard:web\` for UI HMR against the running production API.\n`,
       );
       process.exit(2);
     }

@@ -34,13 +34,13 @@ built-in `node:sqlite` API. Session transcripts remain Pi JSONL files.
 From the repository root:
 
 ```sh
-pnpm install
+bun install
 cp .env.dashboard.example .env.dashboard
 # Replace PI_DASHBOARD_AUTH_TOKEN and adjust origins if needed.
-pnpm dashboard:dev
+bun run dashboard:dev
 ```
 
-`pnpm dashboard:daemon` and `pnpm dashboard:web` run either side separately.
+`bun run dashboard:daemon` and `bun run dashboard:web` run either side separately.
 Root environment variables override `.env.dashboard`; the private environment
 file is gitignored. When the daemon and web app use different origins, set
 `VITE_DASHBOARD_URL` for the web build and allow that exact origin through
@@ -240,24 +240,24 @@ conditions of installed host-API shims.
 Start with the dashboard scopes relevant to the change:
 
 ```sh
-pnpm run typecheck:packages
-pnpm run typecheck:apps
-pnpm --filter <changed-dashboard-workspace> test
+bun run typecheck:packages
+bun run typecheck:apps
+bun run --filter <changed-dashboard-workspace> test
 ```
 
 Before deployment or after a cross-cutting dashboard change, run the combined
 validation and build:
 
 ```sh
-pnpm run check
-pnpm run workspace:build
+bun run check
+bun run workspace:build
 ```
 
 The checked-in mobile Playwright coverage mocks the snapshot API and exercises
 the dashboard and launch routes:
 
 ```sh
-pnpm --filter @pi-dashboard/web test:e2e
+bun run --filter @pi-dashboard/web test:e2e
 ```
 
 Real Pi/Sesh discovery and browser-device push delivery remain opt-in

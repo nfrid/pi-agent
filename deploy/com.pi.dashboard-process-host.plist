@@ -13,7 +13,7 @@
   <dict>
     <key>PI_DASHBOARD_STATE_DIR</key><string>/Users/REPLACE_ME/.pi/agent/dashboard</string>
     <key>PI_PROCESS_HOST_SOCKET</key><string>/Users/REPLACE_ME/.pi/agent/dashboard/background-jobs.sock</string>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>/Users/REPLACE_ME/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

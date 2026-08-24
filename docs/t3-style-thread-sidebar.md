@@ -115,9 +115,9 @@ A text submission starts the existing runtime with `workspaceId`, `sessionId`, a
 Run the narrow checks first:
 
 ```sh
-pnpm --filter @pi-dashboard/web test
-pnpm --filter @pi-dashboard/web typecheck
-pnpm exec biome check apps/dashboard-web/src/features/agent-thread-nav.tsx \
+bun run --filter @pi-dashboard/web test
+bun run --filter @pi-dashboard/web typecheck
+bun x biome check apps/dashboard-web/src/features/agent-thread-nav.tsx \
   apps/dashboard-web/src/features/agent-thread-nav/model.ts \
   apps/dashboard-web/src/features/agent-thread-nav.module.css \
   apps/dashboard-web/src/features/new-chat.tsx \

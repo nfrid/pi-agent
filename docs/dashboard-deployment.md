@@ -5,9 +5,9 @@ The production dashboard is served from generated `dist/` directories by the mac
 ## Browser-test guidance
 
 - Read `apps/dashboard-web/playwright.config.ts` before adding hover or responsive assertions. The default Playwright configuration may only define a mobile project; desktop-only behavior needs an explicit desktop context or project.
-- Run filtered Playwright tests with `pnpm --filter @pi-dashboard/web exec playwright test --grep "<test name>"`. Do not insert `--` before `--grep`: it can be forwarded as a positional argument and cause the full suite to run.
+- Run filtered Playwright tests with `bun run --filter @pi-dashboard/web test:e2e -- --grep "<test name>"`.
 - Hidden tooltip, preview, and accessibility-only DOM can still make Playwright text locators ambiguous. Avoid duplicating decorative text in DOM nodes when `data-*` attributes or CSS-generated content suffice. Otherwise, scope text assertions to the semantic transcript or control that owns the text.
-- The default test ports are shared process resources. If either is occupied, identify its owner rather than stopping an unfamiliar process, choose an unused pair, and run with `PI_DASHBOARD_E2E_PORT=<port> PI_DASHBOARD_E2E_API_PORT=<port> pnpm --filter @pi-dashboard/web test:e2e`.
+- The default test ports are shared process resources. If either is occupied, identify its owner rather than stopping an unfamiliar process, choose an unused pair, and run with `PI_DASHBOARD_E2E_PORT=<port> PI_DASHBOARD_E2E_API_PORT=<port> bun run --filter @pi-dashboard/web test:e2e`.
 
 ## Dirty-tree deployment
 
@@ -18,7 +18,7 @@ If unrelated changes are present, do not deploy a build from the mixed checkout.
 After validating a dashboard-affecting change:
 
 1. Build every dashboard workspace dependency and restart the production dashboard service from the repository root so both the server and web preview load the new bundles:
-   `pnpm run dashboard:deploy`
+   `bun run dashboard:deploy`
    The deploy script runs `workspace:build` before restarting `com.pi.dashboard`; if the build fails, the running service is not restarted. Install and start `deploy/com.pi.dashboard-runtime-host.plist` and `deploy/com.pi.dashboard-process-host.plist` separately once; do not include either in ordinary dashboard deploy restarts.
 2. Source `.env.dashboard` without printing its token, then wait for both the bridge socket and HTTP health endpoint:
    `set -a; [ ! -f .env.dashboard ] || . ./.env.dashboard; set +a; ready=; for i in $(seq 1 50); do [ -S dashboard/bridge.sock ] && curl -fsS --max-time 1 "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/api/health" >/dev/null && { ready=1; break; }; sleep 0.2; done; [ "$ready" = 1 ]`
@@ -26,7 +26,7 @@ After validating a dashboard-affecting change:
    `origin="http://127.0.0.1:${PI_DASHBOARD_WEB_PORT:-4174}"; curl -fsS -o /dev/null "$origin/" && curl -fsS -H "origin: $origin" -H "content-type: application/json" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" -H "x-dashboard-protocol-version: 3" --data 'null' "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/trpc/protocolInfo" >/dev/null && curl -fsS -H "origin: $origin" -H "content-type: application/json" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" -H "x-dashboard-protocol-version: 3" --data '{"protocolVersion":3}' "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/trpc/shellSnapshot" >/dev/null && test "$(curl -s -o /dev/null -w '%{http_code}' -H "origin: $origin" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D")" = 404 && test "$(curl -s -o /dev/null -w '%{http_code}' -H "origin: $origin" -H "x-dashboard-token: $PI_DASHBOARD_AUTH_TOKEN" "http://127.0.0.1:${PI_DASHBOARD_PORT:-4173}/api/sessions/example")" = 404`
 4. If startup fails, inspect `dashboard/serve.log` and `dashboard/serve.error.log` before making further changes.
 
-Phase 1 does not migrate delegate execution; that remains pending. Do not delete or clean `apps/**/dist` or `packages/**/dist` while the production service is running: the preview server returns `404` without its bundle. Do not run tests or temporary dashboard servers against the production `dashboard/bridge.sock`; always provide an isolated `stateDir` or `socketPath`. A successful build alone is not a deployment, and a web `200` alone does not prove the bridge daemon is healthy.
+The LaunchAgent templates include `~/.bun/bin` in `PATH`; preserve that entry when installing them so managed agents and background jobs can run workspace commands. Phase 1 does not migrate delegate execution; that remains pending. Do not delete or clean `apps/**/dist` or `packages/**/dist` while the production service is running: the preview server returns `404` without its bundle. Do not run tests or temporary dashboard servers against the production `dashboard/bridge.sock`; always provide an isolated `stateDir` or `socketPath`. A successful build alone is not a deployment, and a web `200` alone does not prove the bridge daemon is healthy.
 
 ## Project catalogue cutover gate
 

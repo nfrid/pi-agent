@@ -12,7 +12,7 @@ export default defineConfig({
     serviceWorkers: 'block',
   },
   webServer: {
-    command: `PI_DASHBOARD_PORT=${apiPort} pnpm exec vite --host 127.0.0.1 --port ${port}`,
+    command: `PI_DASHBOARD_PORT=${apiPort} bun run dev -- --host 127.0.0.1 --port ${port}`,
     port,
     reuseExistingServer: false,
   },

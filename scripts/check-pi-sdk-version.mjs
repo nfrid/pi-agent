@@ -41,7 +41,7 @@ export function checkPiSdkVersions({
   for (const { packageName, declaredVersion } of mismatches) {
     logError(`- ${packageName}: ${declaredVersion ?? 'missing'}`);
   }
-  logError('Fix: pnpm run pi:sdk-sync');
+  logError('Fix: bun run pi:sdk-sync');
   return false;
 }
 

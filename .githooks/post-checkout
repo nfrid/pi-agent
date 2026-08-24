@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# Git passes 1 for branch/worktree checkouts and 0 for path-only checkouts.
+[ "${3:-0}" = 1 ] || exit 0
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+[ -f bun.lock ] || exit 0
+
+stale=
+if [ ! -d node_modules ] || [ bun.lock -nt node_modules ] || [ package.json -nt node_modules ] || [ bunfig.toml -nt node_modules ]; then
+  stale=1
+elif find apps packages extensions -mindepth 2 -maxdepth 2 -name package.json -newer node_modules -print -quit | grep -q .; then
+  stale=1
+fi
+
+if [ "$stale" = 1 ]; then
+  printf '%s\n' 'Installing worktree dependencies with Bun...'
+  bun install --frozen-lockfile
+fi

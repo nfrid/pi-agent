@@ -35,20 +35,20 @@ or packages.
 
 ```sh
 # TypeScript scopes
-pnpm run typecheck:extensions
-pnpm run typecheck:packages
-pnpm run typecheck:apps
+bun run typecheck:extensions
+bun run typecheck:packages
+bun run typecheck:apps
 
 # One root or extension test file
-pnpm exec vitest run extensions/example/example.test.ts
+bun x vitest run extensions/example/example.test.ts
 
 # One workspace and focused Biome paths
-pnpm --filter <workspace-name> test
-pnpm exec biome check path/to/changed-file.ts
+bun run --filter <workspace-name> test
+bun x biome check path/to/changed-file.ts
 ```
 
-Combine scopes only when the change crosses them. `pnpm run typecheck` runs all
-three TypeScript categories. Use `pnpm run check` for changes to shared validation
+Combine scopes only when the change crosses them. `bun run typecheck` runs all
+three TypeScript categories. Use `bun run check` for changes to shared validation
 configuration, cross-cutting interfaces, release or deployment work, or when a
 full repository result is explicitly required. A narrow change does not need a
 full check when its scoped typecheck, tests, and Biome check cover the affected

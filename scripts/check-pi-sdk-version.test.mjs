@@ -48,7 +48,7 @@ describe('Pi SDK version validation', () => {
       '- @earendil-works/pi-coding-agent: 0.83.0',
       '- @earendil-works/pi-tui: missing',
       '- typebox: 1.1.38',
-      'Fix: pnpm run pi:sdk-sync',
+      'Fix: bun run pi:sdk-sync',
     ]);
   });
 

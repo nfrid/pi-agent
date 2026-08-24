@@ -15,6 +15,7 @@
     <key>PI_DASHBOARD_PORT</key><string>4175</string>
     <key>PI_DASHBOARD_STATE_DIR</key><string>/Users/REPLACE_ME/.pi/agent/dashboard</string>
     <key>PI_DASHBOARD_ORIGINS</key><string>https://REPLACE_ME.ts.net</string>
+    <key>PATH</key><string>/Users/REPLACE_ME/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
