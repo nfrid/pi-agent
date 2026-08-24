@@ -302,7 +302,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px 18px 28px;
+  padding: 0 18px;
 }
 .delegate-inspector-header-content {
   display: flex;
@@ -321,11 +321,11 @@
   padding: 12px 14px 10px;
 }
 .delegate-inspector-inline-header .surface-drawer-heading {
-  flex: 1 1 auto;
+  flex: 1;
 }
 .delegate-inspector-inline-header .delegate-inspector-header-content {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1;
 }
 .delegate-open-session {
   color: var(--purple);

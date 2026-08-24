@@ -25,7 +25,6 @@ export function DelegateTranscriptInspector({
   isOpen,
   paused = false,
   inline = false,
-  onBack,
   onClose,
 }: {
   row: import('../delegate/history-compose').DelegateInspectionStatus;
@@ -37,7 +36,6 @@ export function DelegateTranscriptInspector({
   isOpen: boolean;
   paused?: boolean;
   inline?: boolean;
-  onBack?: () => void;
   onClose: () => void;
 }) {
   const go = useDashboardNavigate();
@@ -146,18 +144,11 @@ export function DelegateTranscriptInspector({
     return (
       <div className="delegate-inspector-inline">
         <header className="surface-drawer-header delegate-inspector-inline-header">
-          <button
-            type="button"
-            className="session-icon-button"
-            aria-label="Back to delegates"
-            title="Back to delegates"
-            onClick={onBack}
-          >
-            ←
-          </button>
           <div className="surface-drawer-heading">
             <p className="eyebrow">Delegate</p>
-            <h2>{delegateDisplayName(displayedRow)}</h2>
+            <div className="surface-drawer-summary">
+              {delegateDisplayName(displayedRow)}
+            </div>
           </div>
           {headerContent}
           <button

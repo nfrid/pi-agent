@@ -359,7 +359,6 @@ export function DelegateSurface({
         isOpen={inspectorOpen}
         paused={pausedAt !== undefined}
         inline
-        onBack={() => setInspectorOpen(false)}
         onClose={() => setInspectorOpen(false)}
       />
     ) : undefined;
