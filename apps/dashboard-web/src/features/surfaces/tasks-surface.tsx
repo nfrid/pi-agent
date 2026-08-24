@@ -36,26 +36,49 @@ export function TasksSurface({
   const blocked = rows.find(
     (row) => surfaceStateLabel(row.status) === 'blocked',
   );
+  const running = rows.filter((row) =>
+    ['running', 'blocked'].includes(surfaceStateLabel(row.status)),
+  );
   const current =
     blocked ??
-    rows.find((row) => surfaceStateLabel(row.status) === 'running') ??
-    rows.find((row) =>
-      ['queued', 'todo'].includes(surfaceStateLabel(row.status)),
-    );
-  const summary = blocked
-    ? `Blocked: ${surfaceText(blocked.text, 'Task blocked')}`
-    : current
-      ? surfaceText(current.text, 'Task in progress')
-      : completed === total
-        ? 'All tasks complete'
-        : model.stats.active === 0
-          ? 'No active tasks'
-          : 'Tasks pending';
+    running[0] ??
+    rows.find((row) => surfaceStateLabel(row.status) === 'queued');
+  const launcherTasks = running.length > 0 ? running : current ? [current] : [];
+  const fallbackSummary =
+    completed === total
+      ? 'All tasks complete'
+      : model.stats.active === 0
+        ? 'No active tasks'
+        : 'Tasks pending';
+  const summary = launcherTasks.length ? (
+    <span className="surface-launcher-items">
+      {launcherTasks.map((row) => {
+        const state = surfaceStateLabel(row.status);
+        return (
+          <span
+            className={`surface-launcher-item ${surfaceStateClass(state)}`}
+            key={row.id}
+          >
+            <span className="surface-launcher-item-state" aria-hidden="true">
+              {stateGlyph(state)}
+            </span>
+            <span className="surface-launcher-item-copy">
+              <b>{row.id}</b>
+              <span>{surfaceText(row.text, 'Untitled task')}</span>
+            </span>
+          </span>
+        );
+      })}
+    </span>
+  ) : (
+    fallbackSummary
+  );
   return (
     <WorkSurface
       title={title}
       label="Tasks"
       summary={summary}
+      drawerSummary={`${completed} of ${total} complete`}
       count={
         <span
           role="status"

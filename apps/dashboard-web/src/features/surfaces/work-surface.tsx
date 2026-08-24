@@ -37,7 +37,7 @@ export function WorkSurface({
 }: {
   title: string;
   label: string;
-  summary: string;
+  summary: ReactNode;
   summaryDetail?: ReactNode;
   count: ReactNode;
   visibleCount: number;
@@ -85,7 +85,7 @@ export function WorkSurface({
               <span className="eyebrow">{label}</span>
               <span className="surface-count">{count}</span>
             </span>
-            <strong>{summary}</strong>
+            {typeof summary === 'string' ? <strong>{summary}</strong> : summary}
             {summaryDetail}
           </span>
           <span className="surface-chevron" aria-hidden="true">

@@ -316,6 +316,55 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.surface-launcher-items {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.surface-launcher-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.surface-launcher-item-state {
+  color: var(--dim);
+  text-align: center;
+}
+.surface-launcher-item.surface-running .surface-launcher-item-state,
+.surface-launcher-item.surface-done .surface-launcher-item-state {
+  color: var(--green);
+}
+.surface-launcher-item.surface-pausing .surface-launcher-item-state,
+.surface-launcher-item.surface-paused .surface-launcher-item-state,
+.surface-launcher-item.surface-aborted .surface-launcher-item-state {
+  color: var(--orange);
+}
+.surface-launcher-item.surface-failed .surface-launcher-item-state {
+  color: var(--red);
+}
+.surface-launcher-item-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+}
+.surface-launcher-item-copy b {
+  flex: none;
+  color: var(--purple);
+  font-size: 10px;
+}
+.surface-launcher-item-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .surface-launcher .surface-chevron {
   color: var(--purple);
 }

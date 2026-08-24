@@ -911,10 +911,11 @@ describe('live extension surface fixtures', () => {
     );
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain(
-      '<strong>Compact delegate title that should remain complete when space allows</strong>',
+      'Compact delegate title that should remain complete when space allows',
     );
+    expect(markup).toContain('<b>T1</b>');
     expect(markup).toContain(
-      '<strong>Compact task title that should remain complete when space allows</strong>',
+      'Compact task title that should remain complete when space allows',
     );
     expect(markup).toContain(
       'aria-label="1 running, 0 queued, 0 need attention, 0 done"',
@@ -924,6 +925,97 @@ describe('live extension surface fixtures', () => {
     expect(markup).not.toContain('✓ 0/1');
     expect(markup).not.toContain('luna-high');
     expect(markup).not.toContain('task-progress');
+  });
+
+  it('lists every concurrently active task and delegate in launchers', () => {
+    const delegate = renderLiveExtensionSurface({
+      id: 'delegate-active',
+      rendererId: 'delegate.status',
+      viewModel: {
+        version: 1,
+        statuses: [
+          {
+            id: 'd1',
+            runId: 'run-d1',
+            lineageId: 'lineage-d1',
+            name: 'First active delegate',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+          },
+          {
+            id: 'd2',
+            runId: 'run-d2',
+            lineageId: 'lineage-d2',
+            name: 'Second active delegate',
+            kind: 'background',
+            state: 'queued',
+            createdAt: 1,
+            allowWrites: false,
+          },
+          {
+            id: 'd3',
+            runId: 'run-d3',
+            lineageId: 'lineage-d3',
+            name: 'Finished delegate',
+            kind: 'background',
+            state: 'success',
+            createdAt: 1,
+            allowWrites: false,
+          },
+        ],
+      },
+    });
+    const tasks = renderLiveExtensionSurface({
+      id: 'tasks-active',
+      rendererId: 'tasks.current',
+      viewModel: {
+        version: 1,
+        tasks: [
+          {
+            id: 'T1',
+            text: 'First active task',
+            status: 'doing',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: 'T2',
+            text: 'Second active task',
+            status: 'doing',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: 'T3',
+            text: 'Queued task',
+            status: 'todo',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        stats: { total: 3, active: 3, done: 0, blocked: 0, ready: 1 },
+      },
+    });
+    const markup = renderToStaticMarkup(
+      <>
+        {tasks}
+        {delegate}
+      </>,
+    );
+
+    expect(markup).toContain('<b>T1</b>');
+    expect(markup).toContain('First active task');
+    expect(markup).toContain('<b>T2</b>');
+    expect(markup).toContain('Second active task');
+    expect(markup).not.toContain('Queued task');
+    expect(markup).toContain('First active delegate');
+    expect(markup).toContain('Second active delegate');
+    expect(markup).not.toContain('Finished delegate');
   });
 
   it('orders tasks left of delegates and retains every row for scrolling', () => {
@@ -972,7 +1064,8 @@ describe('live extension surface fixtures', () => {
     expect(markup.indexOf('aria-label="Tasks"')).toBeLessThan(
       markup.indexOf('aria-label="Delegates"'),
     );
-    expect(markup).toContain('<strong>Task 1</strong>');
+    expect(markup).toContain('<b>T1</b>');
+    expect(markup).toContain('Task 1');
     expect(markup).not.toContain('remaining');
     expect(markup).not.toContain('0 of 12 complete');
     expect(markup).not.toContain('more tasks');
@@ -998,7 +1091,8 @@ describe('live extension surface fixtures', () => {
     const markup = renderToStaticMarkup(tasks);
 
     expect(markup).toContain('22/150');
-    expect(markup).toContain('<strong>Visible task 1</strong>');
+    expect(markup).toContain('<b>T1</b>');
+    expect(markup).toContain('Visible task 1');
     expect(markup).not.toContain('remaining');
     expect(markup).not.toContain('0/128');
   });

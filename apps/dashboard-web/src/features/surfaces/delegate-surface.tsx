@@ -242,24 +242,51 @@ export function DelegateSurface({
   const inspectorRuns: readonly DelegateInspectorRunOption[] | undefined =
     selectedGroup?.runs;
   const title = 'Delegates';
-  const active = rows.find(
+  const activeRows = rows.filter(
     (row) =>
       row.pauseState !== undefined ||
       ['running', 'queued'].includes(surfaceStateLabel(workflowState(row))),
   );
-  const summary = historyLoading
+  const fallbackSummary = stats.failed
+    ? `${stats.failed} need attention`
+    : stats.aborted
+      ? `${stats.aborted} stopped`
+      : 'All delegates complete';
+  const summaryText = historyLoading
     ? 'Loading delegate history…'
     : historyError
       ? 'Delegate history unavailable'
       : historyIncomplete
         ? 'History incomplete · some work omitted'
-        : active
-          ? delegateDisplayName(active)
-          : stats.failed
-            ? `${stats.failed} need attention`
-            : stats.aborted
-              ? `${stats.aborted} stopped`
-              : 'All delegates complete';
+        : activeRows.length
+          ? `${activeRows.length} active`
+          : fallbackSummary;
+  const summary =
+    !historyLoading &&
+    !historyError &&
+    !historyIncomplete &&
+    activeRows.length ? (
+      <span className="surface-launcher-items">
+        {activeRows.map((row) => {
+          const state = row.pauseState ?? surfaceStateLabel(workflowState(row));
+          return (
+            <span
+              className={`surface-launcher-item ${surfaceStateClass(state)}`}
+              key={`${row.lineageId}:${row.runId}`}
+            >
+              <span className="surface-launcher-item-state" aria-hidden="true">
+                {stateGlyph(state)}
+              </span>
+              <span className="surface-launcher-item-copy">
+                <span>{delegateDisplayName(row)}</span>
+              </span>
+            </span>
+          );
+        })}
+      </span>
+    ) : (
+      summaryText
+    );
   const statsView = (
     <SurfaceStats
       className="work-header-stats"
@@ -312,21 +339,7 @@ export function DelegateSurface({
       title={title}
       label="Delegates"
       summary={summary}
-      summaryDetail={
-        active ? (
-          <small className="surface-summary-detail">
-            {short(
-              delegateRowActivityLabel(
-                active,
-                wakes,
-                surfaceStateLabel(workflowState(active)),
-                active.pauseState,
-              ),
-              100,
-            )}
-          </small>
-        ) : undefined
-      }
+      drawerSummary={summaryText}
       count={
         <span
           role="status"
