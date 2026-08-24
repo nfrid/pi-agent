@@ -741,9 +741,11 @@ test('desktop project thread form stays readable @desktop', async ({
   await expect(agentControl).toHaveText(/Agent/u);
   const triggerBox = await locationControl.boundingBox();
   await locationControl.click();
-  const pickerBox = await page
-    .getByRole('dialog', { name: 'Checkout location' })
-    .boundingBox();
+  const desktopLocationPicker = page.getByRole('dialog', {
+    name: 'Checkout location',
+  });
+  await expect(desktopLocationPicker).toBeVisible();
+  const pickerBox = await desktopLocationPicker.boundingBox();
   expect(triggerBox).not.toBeNull();
   expect(pickerBox).not.toBeNull();
   expect(pickerBox?.width ?? 0).toBeLessThanOrEqual(340);
