@@ -111,9 +111,13 @@ export function DraftLocationPicker({
   const branches = (context.data?.localBranches ?? []).filter((branch) =>
     branch.toLowerCase().includes(branchSearch.trim().toLowerCase()),
   );
+  const currentBranch = context.data?.branch ?? main?.branch ?? 'main';
+  const currentDirty = context.data?.dirty ?? main?.status === 'dirty';
+  const currentChangedFileCount =
+    context.data?.changedFileCount ?? main?.changedFileCount;
   const summary =
     location.kind === 'current'
-      ? `Current checkout · ${main?.branch ?? context.data?.branch ?? 'main'}`
+      ? `Current checkout · ${currentBranch}`
       : location.kind === 'checkout'
         ? `Existing · ${checkouts.find((item) => item.id === location.checkoutId)?.branch ?? 'checkout'}`
         : `New worktree · ${location.base === 'work' ? 'current work' : location.base === 'head' ? 'HEAD' : `from ${selectedBranch ?? 'branch'}`}`;
@@ -129,7 +133,13 @@ export function DraftLocationPicker({
         aria-haspopup="dialog"
         onPress={() => setOpen((value) => !value)}
       >
-        <span aria-hidden="true">▣</span>
+        <svg
+          className="draft-picker-location-icon"
+          viewBox="0 0 16 16"
+          aria-hidden="true"
+        >
+          <path d="M1.5 3.5h5l1.25 1.5h6.75v7.5h-13z" />
+        </svg>
         <span>{summary}</span>
       </Button>
       {open && (
@@ -151,35 +161,39 @@ export function DraftLocationPicker({
           <LocationRow
             label="Current checkout"
             detail={
-              main?.status === 'dirty'
-                ? main.changedFileCount === undefined
+              currentDirty
+                ? currentChangedFileCount === undefined
                   ? 'Changed checkout'
-                  : `${main.changedFileCount} changed files`
+                  : `${currentChangedFileCount} changed files`
                 : 'No isolated worktree'
             }
             disabled={Boolean(main && checkoutReason(main))}
             onPress={() => main && choose({ kind: 'current' })}
           />
-          <div className="draft-picker-section">New worktree</div>
-          <LocationRow
-            label="Current work"
-            detail="Carry uncommitted work"
-            onPress={() => choose({ kind: 'worktree', base: 'work' })}
-          />
-          <LocationRow
-            label="Current HEAD"
-            detail="Start from the current commit"
-            onPress={() => choose({ kind: 'worktree', base: 'head' })}
-          />
-          <LocationRow
-            label="Choose a branch"
-            detail={selectedBranch ? `from ${selectedBranch}` : undefined}
-            onPress={() => {
-              setShowBranches(true);
-              setBranchSearch('');
-            }}
-          />
-          {(location.kind === 'worktree' || showBranches) && (
+          {!context.error && (
+            <>
+              <div className="draft-picker-section">New worktree</div>
+              <LocationRow
+                label="Current work"
+                detail="Carry uncommitted work"
+                onPress={() => choose({ kind: 'worktree', base: 'work' })}
+              />
+              <LocationRow
+                label="Current HEAD"
+                detail="Start from the current commit"
+                onPress={() => choose({ kind: 'worktree', base: 'head' })}
+              />
+              <LocationRow
+                label="Choose a branch"
+                detail={selectedBranch ? `from ${selectedBranch}` : undefined}
+                onPress={() => {
+                  setShowBranches(true);
+                  setBranchSearch('');
+                }}
+              />
+            </>
+          )}
+          {!context.error && (location.kind === 'worktree' || showBranches) && (
             <div className="draft-picker-subsection">
               <div className="draft-picker-section">Start from</div>
               {showBranches && (
@@ -245,7 +259,7 @@ export function DraftLocationPicker({
             })}
           {context.error && (
             <small className="draft-picker-error">
-              Git context unavailable: choose Current checkout or HEAD.
+              Git options are unavailable. Use Current checkout.
             </small>
           )}
         </div>

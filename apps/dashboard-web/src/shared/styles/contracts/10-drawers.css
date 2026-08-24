@@ -390,6 +390,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.draft-picker-trigger::after {
+  content: "⌄";
+  flex: none;
+  margin-left: 2px;
+  color: var(--muted);
+}
+.draft-picker-location-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
 .draft-picker-popover {
   position: absolute;
   right: 0;
@@ -405,6 +420,10 @@
   background: var(--bg-alt);
   box-shadow: 0 12px 36px #0008;
   padding: 7px;
+}
+.draft-location-picker .draft-picker-popover {
+  right: auto;
+  left: 0;
 }
 .draft-picker-heading,
 .draft-picker-section {
@@ -490,7 +509,8 @@
   padding: 6px;
 }
 @media (max-width: 600px) {
-  .draft-picker-popover {
+  .draft-picker-popover,
+  .draft-location-picker .draft-picker-popover {
     position: fixed;
     right: 0;
     bottom: 0;

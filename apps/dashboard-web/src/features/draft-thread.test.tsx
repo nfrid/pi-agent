@@ -24,6 +24,12 @@ const {
     createdAt: 1,
     updatedAt: 1,
     isolation: 'worktree' as const,
+    location: undefined as
+      | { kind: 'current' }
+      | { kind: 'worktree'; base: 'work' | 'head' }
+      | { kind: 'worktree'; base: 'branch'; baseRef: string }
+      | { kind: 'checkout'; checkoutId: string }
+      | undefined,
     promotedThreadId: undefined as string | undefined,
     model: undefined as
       | { provider: string; model: string; thinking?: string }
@@ -99,6 +105,7 @@ afterEach(() => {
   setDraftModel.mockReset();
   clearDraft.mockReset();
   vi.unstubAllGlobals();
+  draft.location = undefined;
   draft.promotedThreadId = undefined;
   draft.model = undefined;
 });
@@ -218,6 +225,88 @@ describe('draft thread promotion', () => {
     expect(markDraftPromoted).toHaveBeenCalledWith('draft-1', 'thread-1');
     expect(deleteDraft).not.toHaveBeenCalled();
     expect(go).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
+  it('uses the project current checkout by default', async () => {
+    draft.location = { kind: 'current' };
+    mutateAsync.mockResolvedValue({ thread: { id: 'thread-1' } });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView
+          draftId="draft-1"
+          snapshot={
+            {
+              projects: [
+                {
+                  id: 'project-1',
+                  title: 'Project One',
+                  rootPath: '/work/one',
+                },
+              ],
+              runtimes: [],
+              checkouts: [
+                {
+                  id: 'checkout-main',
+                  projectId: 'project-1',
+                  kind: 'main',
+                  path: '/work/one',
+                  status: 'ready',
+                  updatedAt: 1,
+                },
+              ],
+            } as never
+          }
+        />,
+      );
+    });
+
+    await act(async () => {
+      await renderer.root.findByType('form').props.onSubmit({
+        preventDefault: vi.fn(),
+      });
+    });
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ checkoutId: 'checkout-main' }),
+      }),
+    );
+    expect(mutateAsync.mock.calls[0]?.[0].command).not.toHaveProperty(
+      'isolation',
+    );
+    renderer.unmount();
+  });
+
+  it('passes a selected branch as a new worktree base', async () => {
+    draft.location = {
+      kind: 'worktree',
+      base: 'branch',
+      baseRef: 'develop',
+    };
+    mutateAsync.mockResolvedValue({ thread: { id: 'thread-1' } });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={snapshot} />,
+      );
+    });
+
+    await act(async () => {
+      await renderer.root.findByType('form').props.onSubmit({
+        preventDefault: vi.fn(),
+      });
+    });
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({
+          isolation: 'worktree',
+          baseRef: 'develop',
+        }),
+      }),
+    );
     renderer.unmount();
   });
 

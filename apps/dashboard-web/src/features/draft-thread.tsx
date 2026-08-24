@@ -343,26 +343,25 @@ export function DraftThreadView({
             submissionDisabled={submitting}
             sendDisabled={submitting || !text.trim()}
             sendAriaLabel="Send message"
-            mode={<span>Prompt</span>}
+            mode={
+              <DraftLocationPicker
+                draftId={draftId}
+                location={selectedLocation}
+                projectId={project.id}
+                projectRoot={project.rootPath}
+                checkouts={(snapshot.checkouts ?? []).filter(
+                  (checkout) => checkout.projectId === project.id,
+                )}
+                disabled={submitting}
+              />
+            }
             controls={
-              <>
-                <DraftLocationPicker
-                  draftId={draftId}
-                  location={selectedLocation}
-                  projectId={project.id}
-                  projectRoot={project.rootPath}
-                  checkouts={(snapshot.checkouts ?? []).filter(
-                    (checkout) => checkout.projectId === project.id,
-                  )}
-                  disabled={submitting}
-                />
-                <DraftAgentPicker
-                  draftId={draftId}
-                  model={selectedModel}
-                  runtimes={snapshot.runtimes}
-                  disabled={submitting}
-                />
-              </>
+              <DraftAgentPicker
+                draftId={draftId}
+                model={selectedModel}
+                runtimes={snapshot.runtimes}
+                disabled={submitting}
+              />
             }
             footer={
               error ? (

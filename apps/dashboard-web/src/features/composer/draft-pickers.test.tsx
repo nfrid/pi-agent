@@ -160,7 +160,7 @@ describe('draft location picker', () => {
     });
     expect(buttonWithLabel(renderer, 'Done')).toBeUndefined();
 
-    act(() => buttonWithLabel(renderer, '▣')?.props.onPress());
+    act(() => buttonWithLabel(renderer, 'Current checkout')?.props.onPress());
     act(() => buttonWithLabel(renderer, 'Choose a branch')?.props.onPress());
     expect(setDraftLocation).toHaveBeenCalledTimes(1);
     expect(buttonWithLabel(renderer, 'develop')).toBeDefined();
