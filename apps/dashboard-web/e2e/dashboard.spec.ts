@@ -745,6 +745,16 @@ test('desktop project thread form stays readable @desktop', async ({
     name: 'Checkout location',
   });
   await expect(desktopLocationPicker).toBeVisible();
+  const locationBackdropStyle = await page
+    .getByRole('button', { name: 'Close Checkout location' })
+    .evaluate((backdrop) => ({
+      borderStyle: getComputedStyle(backdrop).borderStyle,
+      cursor: getComputedStyle(backdrop).cursor,
+    }));
+  expect(locationBackdropStyle).toEqual({
+    borderStyle: 'none',
+    cursor: 'default',
+  });
   const pickerBox = await desktopLocationPicker.boundingBox();
   expect(triggerBox).not.toBeNull();
   expect(pickerBox).not.toBeNull();
@@ -754,6 +764,19 @@ test('desktop project thread form stays readable @desktop', async ({
   await expect(
     page.getByRole('dialog', { name: 'Checkout location' }),
   ).toHaveCount(0);
+  await agentControl.click();
+  await expect(
+    page.getByRole('dialog', { name: 'Agent and thinking' }),
+  ).toBeVisible();
+  expect(
+    await page
+      .getByRole('button', { name: 'Close Agent and thinking' })
+      .evaluate((backdrop) => ({
+        borderStyle: getComputedStyle(backdrop).borderStyle,
+        cursor: getComputedStyle(backdrop).cursor,
+      })),
+  ).toEqual(locationBackdropStyle);
+  await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
 });
 
 test('durable lifecycle controls require an exact persisted run mapping @desktop', async ({
