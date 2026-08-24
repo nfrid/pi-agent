@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import * as path from 'node:path';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -58,7 +59,7 @@ import {
   reconcileRestoredHostedAttempts,
 } from './restore';
 import { serializeDelegateRunForPublic } from './serialize';
-import { pruneDelegateSessions } from './session';
+import { archiveOldSessionFiles, pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
 
 import { registerDelegateTool } from './tool';
@@ -508,6 +509,27 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   const activeStatuses = () => statuses?.list() ?? [];
 
+  const archiveOldParentSessions = (ctx: ExtensionContext): void => {
+    const sessionManager =
+      ctx.sessionManager as ExtensionContext['sessionManager'] & {
+        getSessionDir?: () => string;
+        getSessionFile?: () => string | undefined;
+      };
+    const directory = sessionManager.getSessionDir?.();
+    const sessionFile = sessionManager.getSessionFile?.();
+    if (!directory) return;
+    archiveOldSessionFiles({
+      directory,
+      archiveDirectory: path.join(
+        path.dirname(path.dirname(directory)),
+        'session-archive',
+        'sessions',
+        path.basename(directory),
+      ),
+      ...(sessionFile ? { excludePaths: [sessionFile] } : {}),
+    });
+  };
+
   // Refreshed on a timer because the rendered rows include elapsed time.
   const widget = createRailPanel({
     key: 'delegate-jobs',
@@ -597,6 +619,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     wakeBranchKey = `${sessionScopeId}:${initialBranchId}`;
     widgetDetailed = true;
     widget.attach(ui);
+    archiveOldParentSessions(ctx);
     pruneDelegateSessions({
       isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
     });

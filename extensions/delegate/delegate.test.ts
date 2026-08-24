@@ -31,12 +31,14 @@ import { formatDelegateRoutingConfig } from './routing';
 import { mergeDelegateRouteRequest } from './routing-warnings';
 import { buildChildArgs, mapWithConcurrency, resolvePiSpawn } from './runner';
 import {
+  archiveOldSessionFiles,
   buildSessionSnapshotJsonl,
   createDelegateSession,
   DELEGATE_SESSION_MAX_AGE_MS,
   pruneDelegateSessions,
   removeDelegateSession,
   resolveDelegateSession,
+  SESSION_MAX_AGE_MS,
   updateDelegateSessionRouting,
 } from './session';
 import { delegatePromptGuidelines, registerDelegateTool } from './tool';
@@ -723,13 +725,54 @@ describe('delegate', () => {
     }
   });
 
-  test('prunes aged unlinked transcripts but retains worktree-linked evidence', () => {
+  test('archives aged ordinary sessions while retaining recent and current files', () => {
+    const source = mkdtempSync(path.join(tmpdir(), 'pi-session-source-'));
+    const archive = mkdtempSync(path.join(tmpdir(), 'pi-session-archive-'));
+    const old = path.join(source, 'old.jsonl');
+    const current = path.join(source, 'current.jsonl');
+    const boundary = path.join(source, 'boundary.jsonl');
+    const recent = path.join(source, 'recent.jsonl');
+    writeFileSync(old, 'old\n');
+    writeFileSync(current, 'current\n');
+    writeFileSync(boundary, 'boundary\n');
+    writeFileSync(recent, 'recent\n');
+    const now = Date.now();
+    const oldDate = new Date(now - SESSION_MAX_AGE_MS - 1);
+    const boundaryDate = new Date(now - SESSION_MAX_AGE_MS);
+    const recentDate = new Date(now);
+    utimesSync(old, oldDate, oldDate);
+    utimesSync(current, oldDate, oldDate);
+    utimesSync(boundary, boundaryDate, boundaryDate);
+    utimesSync(recent, recentDate, recentDate);
+    try {
+      expect(
+        archiveOldSessionFiles({
+          directory: source,
+          archiveDirectory: archive,
+          excludePaths: [current],
+          now,
+        }),
+      ).toEqual({ archived: 1 });
+      expect(existsSync(old)).toBe(false);
+      expect(existsSync(path.join(archive, 'old.jsonl'))).toBe(true);
+      expect(existsSync(current)).toBe(true);
+      expect(existsSync(boundary)).toBe(true);
+      expect(existsSync(recent)).toBe(true);
+    } finally {
+      rmSync(source, { recursive: true, force: true });
+      rmSync(archive, { recursive: true, force: true });
+    }
+  });
+
+  test('archives aged unlinked transcripts but retains worktree-linked evidence', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'pi-delegate-source-'));
+    const archive = mkdtempSync(path.join(tmpdir(), 'pi-delegate-archive-'));
+    vi.stubEnv('PI_DELEGATE_SESSION_DIR', dir);
     const unlinked = createDelegateSession({ cwd: '/tmp/project' });
     const linked = createDelegateSession({
       cwd: '/tmp/project',
       worktreeId: 'wt-retained',
     });
-    const dir = path.join(getAgentDir(), '.delegate-sessions');
     const old = new Date(Date.now() - DELEGATE_SESSION_MAX_AGE_MS - 1);
     for (const session of [unlinked, linked]) {
       utimesSync(session.filePath, old, old);
@@ -737,16 +780,22 @@ describe('delegate', () => {
     }
     try {
       const result = pruneDelegateSessions({
+        archiveDirectory: archive,
         isWorktreeRetained: (id: string) => id === 'wt-retained',
       });
-      expect(result.removed).toBeGreaterThanOrEqual(1);
+      expect(result.removed).toBe(1);
       expect(resolveDelegateSession(unlinked.token)).toBeNull();
       expect(resolveDelegateSession(linked.token)).toEqual(linked);
+      expect(existsSync(path.join(archive, `${unlinked.token}.jsonl`))).toBe(
+        true,
+      );
+      expect(existsSync(path.join(archive, `${unlinked.token}.json`))).toBe(
+        true,
+      );
     } finally {
-      for (const session of [unlinked, linked]) {
-        rmSync(session.filePath, { force: true });
-        rmSync(path.join(dir, `${session.token}.json`), { force: true });
-      }
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(archive, { recursive: true, force: true });
     }
   });
 
