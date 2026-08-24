@@ -38,6 +38,7 @@ import {
 import {
   DelegateSurface,
   delegateActivityLabel,
+  delegateDisplayName,
   delegateReferenceLabel,
   delegateRowActivityLabel,
   humanizeDelegateLogicalId,
@@ -734,7 +735,14 @@ describe('live extension surface fixtures', () => {
     expect(delegateReferenceLabel('review@1', rows)).toBe(
       'Review implementation',
     );
+    expect(delegateReferenceLabel('review@2', rows)).toBe('Review');
     expect(delegateReferenceLabel('missing-step@2', rows)).toBe('Missing Step');
+    expect(
+      delegateDisplayName({
+        name: 'legacy-review',
+        workflow: { logicalId: 'legacy-review' },
+      }),
+    ).toBe('Legacy Review');
     expect(humanizeDelegateLogicalId('build_ui@3')).toBe('Build Ui');
   });
 

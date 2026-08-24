@@ -310,7 +310,6 @@
     > :is(
       .delegate-meta-workspace,
       .delegate-meta-context,
-      .delegate-meta-route,
       .delegate-meta-attempts
     ) {
     position: absolute;
@@ -320,6 +319,12 @@
     clip: rect(0 0 0 0);
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+  .delegate-meta-access-full {
+    display: none;
+  }
+  .delegate-meta-access-compact {
+    display: inline;
   }
   .surface-drawer {
     top: 0;

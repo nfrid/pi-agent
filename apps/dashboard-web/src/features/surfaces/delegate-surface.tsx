@@ -6,6 +6,10 @@ import type {
   DelegateStatusViewModel,
 } from '../../../../../extensions/delegate/contribution';
 import {
+  delegateDisplayName,
+  humanizeDelegateLogicalId,
+} from '../delegate/display-name';
+import {
   composeDelegateHistory,
   type DelegateCompositeGroup,
   type DelegateCompositeRun,
@@ -16,7 +20,6 @@ import {
   surfaceElapsed,
   surfaceStateClass,
   surfaceStateLabel,
-  surfaceText,
 } from '../delegate/surface-state';
 import {
   type DelegateInspectorDetailState,
@@ -83,25 +86,17 @@ function delegateConsurfaceText(row: DelegateStatus): string | undefined {
   return row.context;
 }
 
-export function humanizeDelegateLogicalId(reference: string): string {
-  const logicalId = reference.replace(/@\d+$/, '');
-  const words = logicalId.split(/[-_.]+/).filter(Boolean);
-  return words.length
-    ? words
-        .map((word) => `${word[0]?.toUpperCase() ?? ''}${word.slice(1)}`)
-        .join(' ')
-    : 'Delegate';
-}
+export { delegateDisplayName, humanizeDelegateLogicalId };
 
 export function delegateReferenceLabel(
   reference: string,
   rows: readonly DelegateInspectionStatus[],
 ): string {
   const logicalId = reference.replace(/@\d+$/, '');
-  const row =
-    rows.find((candidate) => candidate.workflow?.identity === reference) ??
-    rows.find((candidate) => candidate.workflow?.logicalId === logicalId);
-  return surfaceText(row?.name, humanizeDelegateLogicalId(logicalId));
+  const row = rows.find(
+    (candidate) => candidate.workflow?.identity === reference,
+  );
+  return row ? delegateDisplayName(row) : humanizeDelegateLogicalId(logicalId);
 }
 
 function delegateWaitingRelationship(
@@ -259,7 +254,7 @@ export function DelegateSurface({
       : historyIncomplete
         ? 'History incomplete · some work omitted'
         : active
-          ? short(surfaceText(active.name, 'Subagent'), 42)
+          ? short(delegateDisplayName(active), 42)
           : stats.failed
             ? `${stats.failed} need attention`
             : stats.aborted
@@ -363,7 +358,7 @@ export function DelegateSurface({
       paused={pausedAt !== undefined}
       drawerTitle={
         inspectorRow && inspectorOpen
-          ? `Delegate · ${surfaceText(inspectorRow.name, 'Subagent')}`
+          ? `Delegate · ${delegateDisplayName(inspectorRow)}`
           : undefined
       }
       drawerContent={inspectorContent}
@@ -443,7 +438,7 @@ export function DelegateSurface({
                       ),
                       140,
                     );
-                    const name = short(row.name, 70);
+                    const name = short(delegateDisplayName(row), 70);
                     const route = row.route ?? row.workflow?.route ?? '';
                     const context = delegateConsurfaceText(row) ?? '';
                     const access =

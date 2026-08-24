@@ -236,7 +236,7 @@ interface WorkflowRecord {
   route?: string;
   routing?: DelegateRouteState;
   allowWrites?: boolean;
-  name: string;
+  name?: string;
   jobId?: string;
   processJobId?: string;
   reason?: string;
@@ -1205,7 +1205,9 @@ export class DelegateWorkflowCoordinator {
         settledAt,
         route: metadata.route,
         allowWrites: metadata.allowWrites,
-        name: boundedWorkflowName(metadata.name),
+        ...(metadata.name === undefined
+          ? {}
+          : { name: boundedWorkflowName(metadata.name) }),
         jobId: undefined,
         processJobId: validLink ? metadata.processJobId : undefined,
         reason: orphaned ? WORKFLOW_RELOAD_ORPHAN_REASON : metadata.reason,

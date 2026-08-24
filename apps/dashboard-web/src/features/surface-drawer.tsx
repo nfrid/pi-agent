@@ -20,30 +20,24 @@ export function SurfaceStats({
   className?: string;
   showZero?: boolean;
 }) {
+  const visibleStats = stats.filter((stat) => showZero || stat.value > 0);
   return (
     <div
       className={`surface-stats${className ? ` ${className}` : ''}`}
       role="status"
-      aria-label="Status summary"
+      aria-label={visibleStats
+        .map((stat) => `${stat.value} ${stat.label}`)
+        .join(', ')}
     >
-      {stats
-        .filter((stat) => showZero || stat.value > 0)
-        .map((stat) => (
-          <span
-            className={stat.tone}
-            key={stat.label}
-            role="img"
-            aria-label={`${stat.value} ${stat.label}`}
-          >
-            <span className="surface-stat-glyph" aria-hidden="true">
-              {surfaceStatGlyph(stat.label)}
-            </span>
-            <strong aria-hidden="true">{stat.value}</strong>{' '}
-            <span className="surface-stat-label" aria-hidden="true">
-              {stat.label}
-            </span>
+      {visibleStats.map((stat) => (
+        <span className={stat.tone} key={stat.label} aria-hidden="true">
+          <span className="surface-stat-glyph">
+            {surfaceStatGlyph(stat.label)}
           </span>
-        ))}
+          <strong>{stat.value}</strong>{' '}
+          <span className="surface-stat-label">{stat.label}</span>
+        </span>
+      ))}
     </div>
   );
 }

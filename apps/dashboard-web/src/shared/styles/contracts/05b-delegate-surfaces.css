@@ -278,6 +278,9 @@
 .delegate-meta-access {
   font-weight: 650;
 }
+.delegate-meta-access-compact {
+  display: none;
+}
 .delegate-meta-workspace,
 .delegate-meta-context {
   color: var(--cyan);

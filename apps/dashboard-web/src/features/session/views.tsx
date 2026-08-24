@@ -204,47 +204,45 @@ export function SessionHeader({
   const title = sessionDisplayTitle(data, entries);
   const { parent } = sessionRelationships(id, data, sessions);
   return (
-    <>
-      <SessionHeaderFrame
-        projectLabel={projectName}
-        projectId={projectId}
-        title={
-          <div className="session-title-with-parent">
-            {data.sessionKind === 'delegate' ? (
-              <h1>{title}</h1>
-            ) : (
-              <InlineSessionRename
-                id={id}
-                title={title}
-                store={store}
-                onRenamed={(name) => store.updateSessionMetadata(id, { name })}
-              />
-            )}
-            {parent && (
-              <span className="session-parent-link">
-                ← Parent: <SessionLink session={parent} />
-              </span>
-            )}
-          </div>
-        }
-        status={status}
-        statusLabel={statusLabel}
-        actions={
-          <button
-            type="button"
-            ref={outlineTriggerRef}
-            className="session-icon-button outline-trigger"
-            aria-label="Open transcript outline"
-            aria-haspopup="dialog"
-            onClick={onOpenOutline}
-          >
-            <span className="session-icon-glyph" aria-hidden="true">
-              ≡
+    <SessionHeaderFrame
+      projectLabel={projectName}
+      projectId={projectId}
+      title={
+        <div className="session-title-with-parent">
+          {data.sessionKind === 'delegate' ? (
+            <h1>{title}</h1>
+          ) : (
+            <InlineSessionRename
+              id={id}
+              title={title}
+              store={store}
+              onRenamed={(name) => store.updateSessionMetadata(id, { name })}
+            />
+          )}
+          {parent && (
+            <span className="session-parent-link">
+              ← Parent: <SessionLink session={parent} />
             </span>
-          </button>
-        }
-      />
-    </>
+          )}
+        </div>
+      }
+      status={status}
+      statusLabel={statusLabel}
+      actions={
+        <button
+          type="button"
+          ref={outlineTriggerRef}
+          className="session-icon-button outline-trigger"
+          aria-label="Open transcript outline"
+          aria-haspopup="dialog"
+          onClick={onOpenOutline}
+        >
+          <span className="session-icon-glyph" aria-hidden="true">
+            ≡
+          </span>
+        </button>
+      }
+    />
   );
 }
 
@@ -324,16 +322,16 @@ export function SessionControlLayer({
         </button>
       )}
       <div className="extension-surfaces session-extension-surfaces">
+        <ExtensionSurfaceStack
+          runtime={runtime}
+          placement="composer"
+          excludeDelegate
+        />
         <DelegateHistorySurface
           id={sessionId}
           runtime={runtime}
           sessionChange={sessionChange}
           store={store}
-        />
-        <ExtensionSurfaceStack
-          runtime={runtime}
-          placement="composer"
-          excludeDelegate
         />
       </div>
       <Composer

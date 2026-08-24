@@ -36,7 +36,15 @@ export function DelegateInspectorMetadata({
         <span
           className={`delegate-meta-access ${row.allowWrites ? 'delegate-row-access-rw' : 'delegate-row-access-ro'}`}
         >
-          {row.allowWrites ? 'read/write' : 'read-only'}
+          <span className="sr-only">
+            {row.allowWrites ? 'read/write' : 'read-only'}
+          </span>
+          <span className="delegate-meta-access-full" aria-hidden="true">
+            {row.allowWrites ? 'read/write' : 'read-only'}
+          </span>
+          <span className="delegate-meta-access-compact" aria-hidden="true">
+            {row.allowWrites ? 'RW' : 'RO'}
+          </span>
         </span>
       )}
       {row.isolation && (
