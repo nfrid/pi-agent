@@ -20,15 +20,10 @@ const DESCRIPTION_SCHEMA = Type.Optional(
 
 const upstreamDefinition = createBashToolDefinition('');
 
-export const bashDescriptionParameters = Type.Object({
-  command: Type.String({ description: 'Bash command to execute' }),
-  timeout: Type.Optional(
-    Type.Number({
-      description: 'Timeout in seconds (optional, no default timeout)',
-    }),
-  ),
-  description: DESCRIPTION_SCHEMA,
-});
+export const bashDescriptionParameters = Type.Intersect([
+  upstreamDefinition.parameters,
+  Type.Object({ description: DESCRIPTION_SCHEMA }),
+]);
 
 export type BashDescriptionToolDefinition = ToolDefinition<
   typeof bashDescriptionParameters
