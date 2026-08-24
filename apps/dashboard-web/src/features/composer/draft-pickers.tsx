@@ -157,7 +157,7 @@ export function ThreadLocationIndicator({
         : 'Checkout';
   return (
     <span
-      className={`draft-picker-trigger draft-picker-trigger-locked location-${checkout?.kind ?? 'unknown'}`}
+      className={`draft-picker-trigger draft-picker-trigger-locked location-picker location-${checkout?.kind ?? 'unknown'}`}
       title={checkout?.path}
     >
       <svg
@@ -233,7 +233,13 @@ export function DraftLocationPicker({
       ? `Current checkout · ${currentBranch}`
       : location.kind === 'checkout'
         ? `Existing · ${selectedCheckout ? checkoutLabel(selectedCheckout) : 'checkout'}`
-        : `New wt · ${location.base === 'work' ? 'current work' : location.base === 'head' ? 'HEAD' : (selectedBranch ?? 'branch')}`;
+        : `New wt · ${
+            location.base === 'work'
+              ? 'current work'
+              : location.base === 'head'
+                ? 'HEAD'
+                : (selectedBranch ?? 'branch')
+          }`;
   const title =
     view === 'branches'
       ? 'Choose a branch'

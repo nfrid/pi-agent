@@ -430,6 +430,12 @@ export function Composer({
                 {mode === 'steer' ? 'Steer' : 'Later'}
               </AriaButton>
             )}
+            <ContextIndicator
+              usage={
+                runtime?.contextUsage ??
+                dormantContextUsage(session, resumeModel, runtimes)
+              }
+            />
             {checkout ? (
               <ThreadLocationIndicator checkout={checkout} />
             ) : (
@@ -438,12 +444,6 @@ export function Composer({
                 settledBackground) && <span>Prompt</span>
             )}
             {runtime?.liveState === 'waiting' && <span>Answer above</span>}
-            <ContextIndicator
-              usage={
-                runtime?.contextUsage ??
-                dormantContextUsage(session, resumeModel, runtimes)
-              }
-            />
           </>
         }
         controls={

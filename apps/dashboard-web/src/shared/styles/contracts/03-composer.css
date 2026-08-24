@@ -190,7 +190,6 @@
   background: var(--pink-7);
 }
 .context-indicator {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
