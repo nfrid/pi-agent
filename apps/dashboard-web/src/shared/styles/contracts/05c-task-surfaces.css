@@ -24,27 +24,17 @@
   gap: 7px;
   padding: 7px 11px;
 }
-.task-row-main {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
 .task-row-main strong {
   color: var(--cyan);
-  font-size: 10px;
+  padding-right: 0.5em;
 }
-.task-row.surface-done {
-  opacity: 0.58;
-}
-.task-row-main span {
+.task-row-main {
   min-width: 0;
-  overflow: hidden;
   color: var(--fg);
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-wrap: pretty;
 }
-.task-row.surface-done .task-row-main span {
+.task-row.surface-done .task-row-main {
   color: var(--dim);
 }
 .task-row-meta {

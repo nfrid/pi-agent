@@ -8,7 +8,6 @@ import {
   surfaceStateLabel,
   surfaceText,
 } from '../delegate/surface-state';
-import { SurfaceStats } from '../surface-drawer';
 import { stateGlyph } from './state-glyphs';
 import { WorkSurface } from './work-surface';
 
@@ -78,7 +77,6 @@ export function TasksSurface({
       title={title}
       label="Tasks"
       summary={summary}
-      drawerSummary={`${completed} of ${total} complete`}
       count={
         <span
           role="status"
@@ -95,20 +93,6 @@ export function TasksSurface({
       }
       visibleCount={total}
       paused={paused}
-      headerStats={
-        <SurfaceStats
-          className="work-header-stats"
-          showZero
-          stats={[
-            {
-              label: 'active',
-              value: model.stats.active,
-              tone: 'surface-running',
-            },
-            { label: 'finished', value: completed },
-          ]}
-        />
-      }
     >
       <div
         className="task-progress"
@@ -142,7 +126,7 @@ export function TasksSurface({
               <span className="sr-only">{state}</span>
               <span className="task-row-main">
                 <strong>{id}</strong>
-                <span>{row.text || 'Untitled task'}</span>
+                {row.text || 'Untitled task'}
               </span>
               <span className="task-row-meta">
                 {priority && (
