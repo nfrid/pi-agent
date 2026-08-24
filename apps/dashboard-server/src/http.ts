@@ -194,6 +194,9 @@ function activeDelegateTranscriptBaseline(
         ...(typeof value.pausedAt === 'number'
           ? { pausedAt: value.pausedAt }
           : {}),
+        ...(value.details && typeof value.details === 'object'
+          ? { details: value.details as DelegateLiveRun['details'] }
+          : {}),
         transcript: transcript.slice(0, 128),
         ...(value.transcriptTruncated === true
           ? { transcriptTruncated: true }

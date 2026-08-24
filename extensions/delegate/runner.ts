@@ -293,7 +293,12 @@ export async function runDelegate(
       : buildChildArgs(options, options.sessionPath);
     if (!options.observeExisting) {
       const renderedPrompt = args.at(-1);
-      if (renderedPrompt) run.renderedPrompt = renderedPrompt;
+      if (renderedPrompt) {
+        run.renderedPrompt = renderedPrompt;
+        // The exact prompt becomes known only after argv construction; publish
+        // it immediately so the live inspector does not wait for a timer tick.
+        emitUpdate();
+      }
     }
     const dashboardEnv = options.hosted
       ? Object.fromEntries(

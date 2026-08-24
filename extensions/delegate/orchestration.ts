@@ -190,6 +190,8 @@ export function pendingRuns(
       context: item.plan.context,
       contextNote: item.plan.contextNote,
       scope: item.scope,
+      inputEvidence: item.plan.inputEvidence,
+      refreshSource: item.plan.refresh,
       writeRequested: item.plan.writeRequested,
       allowWrites: item.allowWrites,
       capabilities: [...(item.capabilities ?? item.session.capabilities ?? [])],

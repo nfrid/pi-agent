@@ -1639,6 +1639,51 @@ describe('live extension surface fixtures', () => {
     expect(markup).not.toContain('impl@1');
   });
 
+  it('renders live structured details as primary inspector content with a collapsed prompt', () => {
+    const row = {
+      id: 'live-review',
+      runId: 'live-review-run',
+      lineageId: 'live-review-lineage',
+      name: 'Live review',
+      kind: 'background' as const,
+      state: 'running' as const,
+      createdAt: 1,
+      allowWrites: false,
+      details: {
+        task: 'Review the live change.',
+        setup: { cwd: '/repo', isolation: 'shared' as const },
+        runConfig: {
+          scope: ['extensions/delegate'],
+          after: ['gate@1'],
+          parentContextNote: 'Parent context is bounded.',
+          refreshSource: 'wip' as const,
+          inputs: [
+            {
+              identity: 'report@1',
+              kind: 'report' as const,
+              label: 'Prior report',
+              content: 'bounded evidence',
+            },
+          ],
+          warnings: ['A setup warning'],
+        },
+        renderedPrompt: 'exact live prompt',
+        truncated: false,
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <DelegateInspectorDetails row={row} now={2_000} />,
+    );
+    expect(markup).toContain('Review the live change.');
+    expect(markup).toContain('Delegate setup');
+    expect(markup).toContain('extensions/delegate');
+    expect(markup).toContain('Parent context is bounded.');
+    expect(markup).toContain('Prior report');
+    expect(markup).toContain('A setup warning');
+    expect(markup).toContain('<details class="delegate-rendered-prompt">');
+    expect(markup).toContain('<summary>Rendered prompt</summary>');
+  });
+
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {
     const unknown = renderLiveExtensionSurface({
       id: 'delegate-1',

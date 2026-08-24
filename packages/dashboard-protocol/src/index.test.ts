@@ -344,6 +344,27 @@ describe('dashboard protocol', () => {
             state: 'running',
             createdAt: 1,
             allowWrites: false,
+            details: {
+              task: 'Review the live implementation.',
+              setup: { cwd: '/repo', isolation: 'worktree' },
+              runConfig: {
+                scope: ['extensions/delegate'],
+                after: ['gate@1'],
+                parentContextNote: 'Parent note',
+                refreshSource: 'head',
+                inputs: [
+                  {
+                    identity: 'impl@1',
+                    kind: 'report',
+                    label: 'Implementation report',
+                    content: 'bounded evidence',
+                  },
+                ],
+                warnings: ['fallback used'],
+              },
+              renderedPrompt: 'exact prompt',
+              truncated: false,
+            },
             transcript: [entry],
             workflow: {
               logicalId: 'review',
@@ -359,7 +380,38 @@ describe('dashboard protocol', () => {
           },
         ],
       }),
-    ).toMatchObject({ runs: [{ transcript: [entry] }] });
+    ).toMatchObject({
+      runs: [
+        {
+          transcript: [entry],
+          details: { task: 'Review the live implementation.' },
+        },
+      ],
+    });
+    expect(() =>
+      parseActiveDelegateTranscriptBaseline({
+        version: 1,
+        serverId: 'server-1',
+        cursor: 4,
+        sessionId: 'session-1',
+        runs: [
+          {
+            runId: 'run-1',
+            lineageId: 'lineage-1',
+            name: 'Worker',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            details: {
+              truncated: false,
+              renderedPrompt: 'x'.repeat(640 * 1024 + 1),
+            },
+            transcript: [],
+          },
+        ],
+      }),
+    ).toThrow();
     expect(
       parseBridgeEvent({
         type: 'delegate.transcript.updated',

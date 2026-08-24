@@ -8,6 +8,7 @@ import type {
   DelegatedRun,
   DelegateIsolation,
   DelegateLifecycleProjection,
+  DelegateLiveDetails,
   DelegateRunState,
 } from './types';
 import { getRunState } from './types';
@@ -111,6 +112,8 @@ export interface DelegateStatusSnapshot {
   /** Ordered, bounded activity and response history across the lineage. */
   transcript?: DelegateTranscriptEntry[];
   transcriptTruncated?: boolean;
+  /** Bounded structured inspector detail for queued/running delegates. */
+  details?: DelegateLiveDetails;
   /** Harness-authored terminal projection retained in status snapshots. */
   lifecycle?: DelegateLifecycleProjection;
   /** Compact workflow identity/lifecycle metadata; never a result payload. */
@@ -127,6 +130,128 @@ interface DelegateStatusRecord extends DelegateStatusSnapshot {
 }
 
 const MAX_TRANSCRIPT_ENTRIES = 128;
+const MAX_DETAIL_TASK = 32 * 1024;
+const MAX_DETAIL_PROMPT = 640 * 1024;
+const MAX_DETAIL_CONTEXT = 64 * 1024;
+const MAX_DETAIL_INPUT = 48 * 1024;
+const MAX_DETAIL_SCOPE = 128;
+const MAX_DETAIL_AFTER = 32;
+const MAX_DETAIL_INPUTS = 8;
+const MAX_DETAIL_WARNINGS = 32;
+
+function bounded(value: string | undefined, max: number): string | undefined {
+  if (!value) return undefined;
+  return value.slice(0, max);
+}
+
+function liveDetails(
+  run: DelegatedRun,
+  workflow?: DelegateWorkflowStatus,
+): DelegateLiveDetails {
+  let truncated = false;
+  const task = bounded(run.task, MAX_DETAIL_TASK);
+  truncated ||= task !== undefined && task.length !== run.task.length;
+  const setup: NonNullable<DelegateLiveDetails['setup']> = {};
+  const cwd = bounded(run.cwd, 4096);
+  if (cwd) setup.cwd = cwd;
+  if (cwd && cwd.length !== run.cwd?.length) truncated = true;
+  if (run.isolation) setup.isolation = run.isolation;
+  if (run.worktree) {
+    setup.worktree = {
+      branch: bounded(run.worktree.branch, 512),
+      worktreePath: bounded(run.worktree.worktreePath, 4096),
+      repositoryRoot: bounded(run.worktree.repositoryRoot, 4096),
+      baseHead: bounded(run.worktree.baseHead, 256),
+      baseRef: bounded(run.worktree.baseRef, 512),
+      workBase: bounded(run.worktree.workBase, 256),
+    };
+  }
+  const runConfig: NonNullable<DelegateLiveDetails['runConfig']> = {};
+  if (run.scope?.length) {
+    runConfig.scope = run.scope.slice(0, MAX_DETAIL_SCOPE).flatMap((item) => {
+      const value = bounded(item, 4096);
+      return value ? [value] : [];
+    });
+    truncated ||= run.scope.length > MAX_DETAIL_SCOPE;
+  }
+  const inputEvidence = run.inputEvidence
+    ?.slice(0, MAX_DETAIL_INPUTS)
+    .flatMap((input) => {
+      const identity = bounded(input.identity, 80);
+      const label = bounded(input.label, 120);
+      if (!identity || !label) {
+        truncated = true;
+        return [];
+      }
+      const content =
+        input.content === undefined
+          ? undefined
+          : bounded(input.content, MAX_DETAIL_INPUT);
+      truncated ||=
+        content !== undefined && content.length !== input.content?.length;
+      const branch = input.branch
+        ? {
+            ...(bounded(input.branch.branch, 512)
+              ? { branch: bounded(input.branch.branch, 512) }
+              : {}),
+            ...(bounded(input.branch.worktreePath, 4096)
+              ? { worktreePath: bounded(input.branch.worktreePath, 4096) }
+              : {}),
+            ...(bounded(input.branch.base, 256)
+              ? { base: bounded(input.branch.base, 256) }
+              : {}),
+            ...(bounded(input.branch.headCommit, 256)
+              ? { headCommit: bounded(input.branch.headCommit, 256) }
+              : {}),
+          }
+        : undefined;
+      return [
+        {
+          identity,
+          kind: input.kind,
+          label,
+          ...(content === undefined ? {} : { content }),
+          ...(branch && Object.keys(branch).length ? { branch } : {}),
+        },
+      ];
+    });
+  if (inputEvidence?.length) runConfig.inputs = inputEvidence;
+  truncated ||= (run.inputEvidence?.length ?? 0) > MAX_DETAIL_INPUTS;
+  const inputIdentities = new Set(
+    inputEvidence?.map((input) => input.identity),
+  );
+  const after = workflow?.dependencies
+    .filter((identity) => !inputIdentities.has(identity))
+    .slice(0, MAX_DETAIL_AFTER)
+    .map((identity) => bounded(identity, 80) ?? identity.slice(0, 80));
+  if (after?.length) runConfig.after = after;
+  truncated ||= (workflow?.dependencies.length ?? 0) > MAX_DETAIL_AFTER;
+  const contextNote = bounded(run.contextNote, MAX_DETAIL_CONTEXT);
+  if (contextNote) runConfig.parentContextNote = contextNote;
+  truncated ||=
+    contextNote !== undefined && contextNote.length !== run.contextNote?.length;
+  if (run.refreshSource) runConfig.refreshSource = run.refreshSource;
+  if (run.warnings?.length) {
+    runConfig.warnings = run.warnings
+      .slice(0, MAX_DETAIL_WARNINGS)
+      .flatMap((warning) => {
+        const value = bounded(warning, 512);
+        return value ? [value] : [];
+      });
+    truncated ||= run.warnings.length > MAX_DETAIL_WARNINGS;
+  }
+  const renderedPrompt = bounded(run.renderedPrompt, MAX_DETAIL_PROMPT);
+  truncated ||=
+    renderedPrompt !== undefined &&
+    renderedPrompt.length !== run.renderedPrompt?.length;
+  return {
+    ...(task ? { task } : {}),
+    ...(Object.keys(setup).length ? { setup } : {}),
+    ...(Object.keys(runConfig).length ? { runConfig } : {}),
+    ...(renderedPrompt ? { renderedPrompt } : {}),
+    truncated,
+  };
+}
 
 function assistantText(run: DelegatedRun): DelegateTranscriptEntry[] {
   return run.messages.flatMap((message, index) => {
@@ -314,6 +439,39 @@ function workflowStatusFromRun(
   };
 }
 
+function preserveDetailWarnings(
+  details: DelegateLiveDetails,
+  previous: DelegateLiveDetails | undefined,
+): DelegateLiveDetails {
+  const warnings = details.runConfig?.warnings ?? previous?.runConfig?.warnings;
+  if (!warnings?.length || details.runConfig?.warnings?.length) return details;
+  return {
+    ...details,
+    runConfig: { ...details.runConfig, warnings: [...warnings] },
+  };
+}
+
+function mergeWorkflowDetails(
+  details: DelegateLiveDetails | undefined,
+  workflow: DelegateWorkflowStatus,
+): DelegateLiveDetails | undefined {
+  if (!details) return details;
+  const inputIdentities = new Set(
+    (details.runConfig?.inputs ?? []).map((input) => input.identity),
+  );
+  const after = workflow.dependencies
+    .filter((identity) => !inputIdentities.has(identity))
+    .slice(0, MAX_DETAIL_AFTER);
+  if (after.length === 0 && !details.runConfig?.after) return details;
+  return {
+    ...details,
+    runConfig: {
+      ...details.runConfig,
+      ...(after.length ? { after } : {}),
+    },
+  };
+}
+
 function hasContent(activity: DelegatedActivity): boolean {
   return activity.type === 'thinking'
     ? Boolean(activity.latestText?.trim())
@@ -348,6 +506,9 @@ export class DelegateStatusStore {
     const ids = runs.map((inputRun) => {
       const run = serializeDelegateRunForPublic(inputRun);
       const id = `ds-${++this.counter}`;
+      const workflow = run.workflowAttempt
+        ? workflowStatusFromRun(run.workflowAttempt, getRunState(run), run)
+        : undefined;
       this.records.set(id, {
         id,
         runId: run.runId,
@@ -366,16 +527,9 @@ export class DelegateStatusStore {
         isolation: run.isolation,
         activity: displayActivity(run, undefined),
         transcript: transcript(run, inputRun.activities),
+        details: liveDetails(run, workflow),
         lifecycle: cloneDelegateLifecycle(run.lifecycle),
-        ...(run.workflowAttempt
-          ? {
-              workflow: workflowStatusFromRun(
-                run.workflowAttempt,
-                getRunState(run),
-                run,
-              ),
-            }
-          : {}),
+        ...(workflow ? { workflow } : {}),
         resultEntered: false,
         clearOnNextUserMessage: false,
       });
@@ -410,6 +564,10 @@ export class DelegateStatusStore {
         run,
         record.workflow,
       );
+    record.details = preserveDetailWarnings(
+      liveDetails(run, record.workflow),
+      record.details,
+    );
     this.onChange();
   }
 
@@ -443,6 +601,10 @@ export class DelegateStatusStore {
           run,
           record.workflow,
         );
+      record.details = preserveDetailWarnings(
+        liveDetails(run, record.workflow),
+        record.details,
+      );
       changed = true;
     }
     if (changed) this.onChange();
@@ -453,6 +615,7 @@ export class DelegateStatusStore {
     const record = this.records.get(id);
     if (!record) return;
     record.workflow = workflowStatusFromAttempt(attempt, record.workflow);
+    record.details = mergeWorkflowDetails(record.details, record.workflow);
     this.onChange();
   }
 
@@ -468,6 +631,7 @@ export class DelegateStatusStore {
       const attempt = byIdentity.get(identity);
       if (!attempt) continue;
       record.workflow = workflowStatusFromAttempt(attempt, record.workflow);
+      record.details = mergeWorkflowDetails(record.details, record.workflow);
       changed = true;
     }
     if (changed) this.onChange();

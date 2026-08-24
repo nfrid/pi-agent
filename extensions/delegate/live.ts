@@ -136,6 +136,12 @@ function statusSnapshot(
       : {}),
     ...(status.pauseState ? { pauseState: status.pauseState } : {}),
     ...(status.pausedAt === undefined ? {} : { pausedAt: status.pausedAt }),
+    ...(active && status.details
+      ? (() => {
+          const included = takeValue(status.details, surfaceBudget);
+          return included.included ? { details: included.value } : {};
+        })()
+      : {}),
     ...(status.activity
       ? {
           activity: {

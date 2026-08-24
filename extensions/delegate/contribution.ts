@@ -61,6 +61,109 @@ const DelegateLifecycleSchema = Type.Object(
 );
 export type DelegatePauseState = 'pausing' | 'paused';
 
+const DelegateLiveInputEvidenceSchema = Type.Object(
+  {
+    identity: Type.String({ minLength: 1, maxLength: 80 }),
+    kind: Type.Union([
+      Type.Literal('report'),
+      Type.Literal('handoff'),
+      Type.Literal('branch'),
+      Type.Literal('metadata'),
+    ]),
+    label: Type.String({ minLength: 1, maxLength: 120 }),
+    content: Type.Optional(Type.String({ maxLength: 48 * 1024 })),
+    branch: Type.Optional(
+      Type.Object(
+        {
+          branch: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+          worktreePath: Type.Optional(
+            Type.String({ minLength: 1, maxLength: 4096 }),
+          ),
+          base: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+          headCommit: Type.Optional(
+            Type.String({ minLength: 1, maxLength: 256 }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+const DelegateLiveDetailsSchema = Type.Object(
+  {
+    task: Type.Optional(Type.String({ maxLength: 32 * 1024 })),
+    setup: Type.Optional(
+      Type.Object(
+        {
+          cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+          isolation: Type.Optional(
+            Type.Union([Type.Literal('shared'), Type.Literal('worktree')]),
+          ),
+          worktree: Type.Optional(
+            Type.Object(
+              {
+                branch: Type.Optional(
+                  Type.String({ minLength: 1, maxLength: 512 }),
+                ),
+                worktreePath: Type.Optional(
+                  Type.String({ minLength: 1, maxLength: 4096 }),
+                ),
+                repositoryRoot: Type.Optional(
+                  Type.String({ minLength: 1, maxLength: 4096 }),
+                ),
+                baseHead: Type.Optional(
+                  Type.String({ minLength: 1, maxLength: 256 }),
+                ),
+                baseRef: Type.Optional(
+                  Type.String({ minLength: 1, maxLength: 512 }),
+                ),
+                workBase: Type.Optional(
+                  Type.String({ minLength: 1, maxLength: 256 }),
+                ),
+              },
+              { additionalProperties: false },
+            ),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    runConfig: Type.Optional(
+      Type.Object(
+        {
+          scope: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), {
+              maxItems: 128,
+            }),
+          ),
+          after: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+              maxItems: 32,
+            }),
+          ),
+          inputs: Type.Optional(
+            Type.Array(DelegateLiveInputEvidenceSchema, { maxItems: 8 }),
+          ),
+          parentContextNote: Type.Optional(
+            Type.String({ maxLength: 64 * 1024 }),
+          ),
+          refreshSource: Type.Optional(
+            Type.Union([Type.Literal('wip'), Type.Literal('head')]),
+          ),
+          warnings: Type.Optional(
+            Type.Array(Type.String({ maxLength: 512 }), { maxItems: 32 }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    renderedPrompt: Type.Optional(Type.String({ maxLength: 640 * 1024 })),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
 const DelegateActivitySchema = Type.Object(
   {
     id: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -255,6 +358,7 @@ export const DelegateStatusSchema = Type.Object(
     isolation: Type.Optional(
       Type.Union([Type.Literal('shared'), Type.Literal('worktree')]),
     ),
+    details: Type.Optional(DelegateLiveDetailsSchema),
     pauseState: Type.Optional(
       Type.Union([Type.Literal('pausing'), Type.Literal('paused')]),
     ),

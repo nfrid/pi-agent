@@ -102,12 +102,13 @@ export function DelegateInspectorDetails({
   details?: DelegateHistoryRunDetailResponse['run']['details'];
 }) {
   const lifecycle = row.lifecycle;
+  const structuredDetails = details ?? row.details;
   const runs = row.runs ?? [];
-  const warnings = details?.runConfig?.warnings ?? row.warnings ?? [];
+  const warnings = structuredDetails?.runConfig?.warnings ?? row.warnings ?? [];
   const runKeyOccurrences = new Map<string, number>();
   const handle = artifactHandle(row);
-  const setup = details?.setup;
-  const runConfig = details?.runConfig;
+  const setup = structuredDetails?.setup;
+  const runConfig = structuredDetails?.runConfig;
   const fallbackInputIdentities = new Set(
     (row.workflow?.inputs ?? []).map((input) => input.identity),
   );
@@ -136,13 +137,13 @@ export function DelegateInspectorDetails({
   const failed = ['error', 'aborted', 'timed-out'].includes(row.state);
   return (
     <div className="delegate-inspector-details">
-      {(details?.task ?? row.details?.task) && (
+      {structuredDetails?.task && (
         <section
           className="delegate-inspector-task"
           aria-labelledby="delegate-task-title"
         >
           <h2 id="delegate-task-title">Task</h2>
-          <p>{details?.task ?? row.details?.task}</p>
+          <p>{structuredDetails.task}</p>
         </section>
       )}
       {setup && (
@@ -258,10 +259,10 @@ export function DelegateInspectorDetails({
           )}
         </section>
       )}
-      {details?.renderedPrompt && (
+      {structuredDetails?.renderedPrompt && (
         <details className="delegate-rendered-prompt">
           <summary>Rendered prompt</summary>
-          <pre>{details.renderedPrompt}</pre>
+          <pre>{structuredDetails.renderedPrompt}</pre>
         </details>
       )}
       {runs.length > 1 && (

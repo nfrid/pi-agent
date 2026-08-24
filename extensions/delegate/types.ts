@@ -142,6 +142,33 @@ export interface DelegateCheckpoint {
   state: DelegateCheckpointState;
 }
 
+/** Bounded live projection matching the persisted delegate inspector detail shape. */
+export interface DelegateLiveDetails {
+  task?: string;
+  setup?: {
+    cwd?: string;
+    isolation?: DelegateIsolation;
+    worktree?: {
+      branch?: string;
+      worktreePath?: string;
+      repositoryRoot?: string;
+      baseHead?: string;
+      baseRef?: string;
+      workBase?: string;
+    };
+  };
+  runConfig?: {
+    scope?: string[];
+    after?: string[];
+    inputs?: DelegateInputEvidence[];
+    parentContextNote?: string;
+    refreshSource?: WorktreeBase;
+    warnings?: string[];
+  };
+  renderedPrompt?: string;
+  truncated: boolean;
+}
+
 export interface DelegateRunMetadata {
   /** Stable identity for this invocation; generated for every new run. */
   runId?: string;

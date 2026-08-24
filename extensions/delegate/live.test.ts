@@ -8,7 +8,13 @@ import { createRun } from './types';
 describe('delegate live surface', () => {
   it('projects the current bounded status lineage for the renderer', () => {
     const store = new DelegateStatusStore();
-    const run = createRun('inspect');
+    const run = createRun('inspect', undefined, {
+      cwd: '/repo',
+      isolation: 'shared',
+      scope: ['extensions/delegate'],
+      contextNote: 'Parent context',
+      refreshSource: 'wip',
+    });
     const [id] = store.start([run], 'background');
     run.state = 'running';
     run.activities.push({
@@ -34,6 +40,16 @@ describe('delegate live surface', () => {
             state: 'running',
             pauseState: 'paused',
             pausedAt: 12_345,
+            details: {
+              task: 'inspect',
+              setup: { cwd: '/repo', isolation: 'shared' },
+              runConfig: {
+                scope: ['extensions/delegate'],
+                parentContextNote: 'Parent context',
+                refreshSource: 'wip',
+              },
+              truncated: false,
+            },
             activity: { label: 'read source' },
             transcript: [
               { type: 'task', label: 'Task', text: 'inspect' },

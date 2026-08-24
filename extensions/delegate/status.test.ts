@@ -87,6 +87,62 @@ describe('delegate status store', () => {
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 
+  test('projects structured inspector details before and during execution', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('Inspect the live delegate setup', undefined, {
+      cwd: '/repo/worktree',
+      context: 'fresh',
+      contextNote: 'Parent selected the focused checkout.',
+      isolation: 'worktree',
+      scope: ['extensions/delegate'],
+      refreshSource: 'head',
+      inputEvidence: [
+        {
+          identity: 'report@1',
+          kind: 'report',
+          label: 'Prior report',
+          content: 'bounded evidence',
+        },
+      ],
+      warnings: ['setup used a fallback'],
+      worktree: {
+        id: 'worktree-live-details',
+        branch: 'pi/live-details',
+        worktreePath: '/repo/worktree',
+        repositoryRoot: '/repo',
+        baseHead: 'abc123',
+        workBase: 'abc123',
+        status: 'active',
+        hasWork: false,
+      },
+    });
+    const [id] = store.start([run], 'background');
+    expect(store.list()[0]?.details).toMatchObject({
+      task: 'Inspect the live delegate setup',
+      setup: {
+        cwd: '/repo/worktree',
+        isolation: 'worktree',
+        worktree: { branch: 'pi/live-details' },
+      },
+      runConfig: {
+        scope: ['extensions/delegate'],
+        inputs: [{ identity: 'report@1', content: 'bounded evidence' }],
+        parentContextNote: 'Parent selected the focused checkout.',
+        refreshSource: 'head',
+        warnings: ['setup used a fallback'],
+      },
+      truncated: false,
+    });
+
+    run.state = 'running';
+    run.renderedPrompt = 'exact rendered prompt';
+    store.update(id, run);
+    expect(store.list()[0]).toMatchObject({
+      state: 'running',
+      details: { renderedPrompt: 'exact rendered prompt' },
+    });
+  });
+
   test('tracks per-delegate pausing and reached pause timestamps', () => {
     const store = new DelegateStatusStore();
     const run = createRun('pause me');
