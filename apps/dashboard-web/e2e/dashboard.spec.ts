@@ -2883,7 +2883,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
                       type: 'toolCall',
                       id: 'call-2',
                       name: 'bash',
-                      arguments: { command: 'false' },
+                      arguments: {
+                        command: 'false',
+                        description: 'Run the expected failing command',
+                      },
                     },
                   ],
                 },
@@ -3120,9 +3123,15 @@ test('dense mobile session keeps conversation and activity readable', async ({
     /1 tool.*(?:failed|error)/,
   );
   await failedActivity.click();
-  const failedExpandedDot = failedActivity
-    .locator('xpath=../..')
-    .locator('.tool-detail.step-failed .activity-step-dot');
+  const failedActivityGroup = failedActivity.locator('xpath=../..');
+  await expect(
+    failedActivityGroup.getByText('Run the expected failing command', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  const failedExpandedDot = failedActivityGroup.locator(
+    '.tool-detail.step-failed .activity-step-dot',
+  );
   await expect(failedExpandedDot).toHaveText('!');
   await failedActivity.click();
   const activity = page.getByRole('button', {
