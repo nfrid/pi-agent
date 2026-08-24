@@ -9,6 +9,7 @@ import {
   hiddenAgentThreadRowCount,
   isArchivedThread,
   isUnavailableThread,
+  resolvedDraftPromotionIds,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
   statusGlyph,
@@ -96,6 +97,80 @@ describe('agent thread view model', () => {
     expect(rows[0]).toEqual(
       expect.objectContaining({ status: 'waiting', statusLabel: 'starting' }),
     );
+  });
+
+  it('replaces a promoted draft with its runtime-backed session row', () => {
+    const draft = {
+      id: 'draft-1',
+      projectId: 'project-1',
+      createdAt: 1,
+      updatedAt: 20,
+      isolation: 'worktree' as const,
+      promotedThreadId: 'thread-1',
+    };
+    const snapshot = {
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          liveState: 'working',
+          cwd: '/work/one',
+          session: { id: 'session-1', title: 'Started thread', entries: [] },
+        },
+      ],
+      sessions: [],
+      runs: [
+        {
+          threadId: 'thread-1',
+          runtimeId: 'runtime-1',
+          status: 'running',
+        },
+      ],
+      projects: [
+        { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+      ],
+    } as never;
+
+    expect(agentThreadRows(snapshot, undefined, [], [draft])).toEqual([
+      expect.objectContaining({
+        id: 'session-1',
+        title: 'Started thread',
+        startedAt: 20,
+        updatedAt: 20,
+      }),
+    ]);
+  });
+
+  it('cleans up promotion metadata only after indexed chronology arrives', () => {
+    const draft = {
+      id: 'draft-1',
+      projectId: 'project-1',
+      createdAt: 1,
+      updatedAt: 20,
+      isolation: 'worktree' as const,
+      promotedThreadId: 'thread-1',
+    };
+    const snapshot = (startedAt?: number) =>
+      ({
+        runs: [
+          {
+            threadId: 'thread-1',
+            runtimeId: 'runtime-1',
+            status: 'running',
+          },
+        ],
+        runtimes: [{ runtimeId: 'runtime-1', session: { id: 'session-1' } }],
+        sessions: [
+          {
+            id: 'session-1',
+            ...(startedAt === undefined ? {} : { startedAt }),
+          },
+        ],
+      }) as never;
+
+    expect(resolvedDraftPromotionIds(snapshot(), [], [draft])).toEqual([]);
+    expect(resolvedDraftPromotionIds(snapshot(19), [], [draft])).toEqual([
+      'draft-1',
+    ]);
   });
 
   it('keys persisted-link refreshes to the exact session identity set', () => {

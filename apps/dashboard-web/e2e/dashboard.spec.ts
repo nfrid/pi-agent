@@ -494,6 +494,87 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
 });
 
+test('promoted draft is replaced by its started thread in the sidebar @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'pi-dashboard-drafts:v1',
+      JSON.stringify([
+        {
+          id: 'draft-promoted',
+          projectId: 'project-1',
+          createdAt: 10,
+          updatedAt: 20,
+          isolation: 'worktree',
+          title: 'Promoted draft',
+          promotedThreadId: 'thread-1',
+        },
+      ]),
+    );
+  });
+  await page.route('**/api/threads*', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/session-threads', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-promoted-draft',
+    revision: 1,
+    cursor: 1,
+    projects: [
+      {
+        id: 'project-1',
+        title: 'Project One',
+        rootPath: '/work/one',
+        status: 'active',
+      },
+    ],
+    runs: [
+      {
+        id: 'run-1',
+        threadId: 'thread-1',
+        checkoutId: 'checkout-1',
+        attempt: 1,
+        mode: 'new',
+        runtimeProvider: 'extension-bridge',
+        runtimeId: 'runtime-1',
+        initialPrompt: 'Start it',
+        status: 'running',
+        createdAt: 20,
+      },
+    ],
+    runtimes: [
+      {
+        runtimeId: 'runtime-1',
+        projectId: 'project-1',
+        cwd: '/work/one',
+        liveState: 'working',
+        online: true,
+        session: {
+          id: 'session-1',
+          title: 'Started thread',
+          entries: [],
+        },
+      },
+    ],
+    sessions: [],
+    unread: [],
+  } as never);
+
+  await page.goto('/sessions/session-1');
+  const nav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  await expect(nav.locator('.agent-thread-row')).toHaveCount(1);
+  await expect(
+    nav.getByRole('button', { name: /Started thread working/ }),
+  ).toBeVisible();
+  await expect(nav.getByText('Promoted draft')).toHaveCount(0);
+});
+
 test('sidebar New thread handles one and zero project fallbacks @desktop', async ({
   page,
 }) => {

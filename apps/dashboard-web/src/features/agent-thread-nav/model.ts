@@ -182,6 +182,49 @@ export function durableThreadForSession(
   };
 }
 
+function promotedDraftForSession(
+  snapshot: Pick<BrowserSnapshot, 'runs'>,
+  directLinks: readonly SessionThreadLink[],
+  drafts: readonly DraftMetadata[],
+  sessionId: string,
+  runtimeId?: string,
+): DraftMetadata | undefined {
+  const threadIds = new Set(
+    directLinks
+      .filter((link) => link.sessionId === sessionId)
+      .map((link) => link.threadId),
+  );
+  for (const run of snapshot.runs ?? []) {
+    if (
+      run.piSessionId === sessionId ||
+      (runtimeId !== undefined && run.runtimeId === runtimeId)
+    )
+      threadIds.add(run.threadId);
+  }
+  if (threadIds.size !== 1) return undefined;
+  const threadId = [...threadIds][0];
+  return drafts.find((draft) => draft.promotedThreadId === threadId);
+}
+
+export function resolvedDraftPromotionIds(
+  snapshot: Pick<BrowserSnapshot, 'runs' | 'runtimes' | 'sessions'>,
+  directLinks: readonly SessionThreadLink[],
+  drafts: readonly DraftMetadata[],
+): string[] {
+  return snapshot.sessions.flatMap((session) => {
+    if (session.startedAt === undefined) return [];
+    const draft = promotedDraftForSession(
+      snapshot,
+      directLinks,
+      drafts,
+      session.id,
+      snapshot.runtimes.find((runtime) => runtime.session.id === session.id)
+        ?.runtimeId,
+    );
+    return draft ? [draft.id] : [];
+  });
+}
+
 export function agentThreadRows(
   snapshot: BrowserSnapshot,
   durableThreads?: readonly Pick<
@@ -216,11 +259,20 @@ export function agentThreadRows(
     snapshot.sessions.map((session) => [session.id, session]),
   );
   const rows = new Map<string, AgentThreadRow>();
+  const representedPromotedDraftIds = new Set<string>();
   for (const runtime of snapshot.runtimes) {
     const session = sessionsById.get(runtime.session.id);
     if (session?.sessionKind === 'delegate') continue;
     const projectId = runtime.projectId ?? session?.projectId;
     const presentation = dashboardStatus(runtime);
+    const promotedDraft = promotedDraftForSession(
+      snapshot,
+      directLinks,
+      drafts,
+      runtime.session.id,
+      runtime.runtimeId,
+    );
+    if (promotedDraft) representedPromotedDraftIds.add(promotedDraft.id);
     rows.set(runtime.session.id, {
       id: runtime.session.id,
       title: sessionDisplayTitle(runtime.session, runtime.session.entries),
@@ -234,13 +286,20 @@ export function agentThreadRows(
       statusLabel: presentation.label,
       runtime,
       session,
-      startedAt: session?.startedAt,
-      updatedAt: session?.updatedAt,
+      startedAt: session?.startedAt ?? promotedDraft?.updatedAt,
+      updatedAt: session?.updatedAt ?? promotedDraft?.updatedAt,
     });
   }
   for (const session of snapshot.sessions) {
     if (session.sessionKind === 'delegate' || rows.has(session.id)) continue;
     const projectId = session.projectId;
+    const promotedDraft = promotedDraftForSession(
+      snapshot,
+      directLinks,
+      drafts,
+      session.id,
+    );
+    if (promotedDraft) representedPromotedDraftIds.add(promotedDraft.id);
     rows.set(session.id, {
       id: session.id,
       title: sessionDisplayTitle(session),
@@ -252,11 +311,12 @@ export function agentThreadRows(
       durableThread: durableForSession?.get(session.id),
       status: 'dormant',
       session,
-      startedAt: session.startedAt ?? 0,
-      updatedAt: session.updatedAt,
+      startedAt: session.startedAt ?? promotedDraft?.updatedAt ?? 0,
+      updatedAt: session.updatedAt ?? promotedDraft?.updatedAt,
     });
   }
   for (const draft of drafts) {
+    if (representedPromotedDraftIds.has(draft.id)) continue;
     const project = projectsById.get(draft.projectId);
     const prompt = readComposerDraft(draft.id).replace(/\s+/gu, ' ').trim();
     const starting = Boolean(

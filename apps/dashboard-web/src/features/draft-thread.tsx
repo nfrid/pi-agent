@@ -23,7 +23,6 @@ import {
 import { ComposerShell } from './composer/shell';
 import {
   beginDraftRetry,
-  deleteDraft,
   draftPromotionCommandId,
   markDraftPromoted,
   readDrafts,
@@ -146,9 +145,8 @@ export function DraftThreadView({
     const sessionId = pendingRuntime?.session.id;
     if (!sessionId) return;
     clearDraft();
-    deleteDraft(draftId);
     go(`/sessions/${encodeURIComponent(sessionId)}`, { replace: true });
-  }, [clearDraft, draftId, go, pendingRuntime?.session.id]);
+  }, [clearDraft, go, pendingRuntime?.session.id]);
 
   useEffect(() => {
     if (pendingRun?.status !== 'failed' && pendingRun?.status !== 'interrupted')

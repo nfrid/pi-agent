@@ -192,7 +192,8 @@ describe('draft thread controls', () => {
         />,
       );
     });
-    expect(deleteDraft).toHaveBeenCalledWith('draft-1');
+    expect(clearDraft).toHaveBeenCalledOnce();
+    expect(deleteDraft).not.toHaveBeenCalled();
     expect(go).toHaveBeenCalledWith('/sessions/session-1', { replace: true });
     renderer.unmount();
   });

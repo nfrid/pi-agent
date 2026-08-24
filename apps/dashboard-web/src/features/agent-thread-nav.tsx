@@ -26,6 +26,7 @@ import {
   hiddenAgentThreadRowCount,
   isArchivedThread,
   MAX_VISIBLE_ACTIVE_THREADS,
+  resolvedDraftPromotionIds,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
   statusGlyph,
@@ -459,6 +460,13 @@ export function AgentThreadNav({
   const directLinks = sessionThreadLinksQuery.isSuccess
     ? sessionThreadLinksQuery.data
     : [];
+  const resolvedPromotions = useMemo(
+    () => resolvedDraftPromotionIds(snapshot, directLinks, drafts),
+    [directLinks, drafts, snapshot],
+  );
+  useEffect(() => {
+    for (const draftId of resolvedPromotions) deleteDraft(draftId);
+  }, [resolvedPromotions]);
   const sessionIdentityKey = useMemo(
     () => sessionThreadIdentityKey(snapshot),
     [snapshot],
