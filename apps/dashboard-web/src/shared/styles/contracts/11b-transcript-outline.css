@@ -287,6 +287,13 @@
   .work-surface-drawer .work-header-stats {
     width: max-content;
   }
+  .work-surface-drawer .work-header-stats .surface-stat-label {
+    display: none;
+  }
+  .work-surface-drawer .work-header-stats .surface-stat-glyph {
+    display: inline;
+    margin-right: 3px;
+  }
   .delegate-transcript-drawer .surface-drawer-header {
     flex-wrap: wrap;
     gap: 8px;
@@ -298,6 +305,21 @@
     max-width: calc(100% - 40px);
     justify-content: flex-start;
     order: 3;
+  }
+  .delegate-inspector-metadata
+    > :is(
+      .delegate-meta-workspace,
+      .delegate-meta-context,
+      .delegate-meta-route,
+      .delegate-meta-attempts
+    ) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .surface-drawer {
     top: 0;

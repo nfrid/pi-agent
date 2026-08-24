@@ -74,6 +74,11 @@
 .extension-surface-slot {
   min-width: 0;
 }
+/* Session launchers are one coordinated grid even though each extension keeps
+   its own semantic section when rendered elsewhere. */
+.session-extension-surfaces > .extension-surfaces {
+  display: contents;
+}
 .extension-surface-slot:empty,
 .extension-surfaces:not(:has(.extension-surface)) {
   display: none;

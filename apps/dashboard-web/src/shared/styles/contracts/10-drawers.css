@@ -117,6 +117,9 @@
   color: currentColor;
   font-variant-numeric: tabular-nums;
 }
+.surface-stat-glyph {
+  display: none;
+}
 .surface-drawer-header-content .surface-stats {
   padding: 0;
 }

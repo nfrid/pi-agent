@@ -323,17 +323,19 @@ export function SessionControlLayer({
           Jump to latest
         </button>
       )}
-      <DelegateHistorySurface
-        id={sessionId}
-        runtime={runtime}
-        sessionChange={sessionChange}
-        store={store}
-      />
-      <ExtensionSurfaceStack
-        runtime={runtime}
-        placement="composer"
-        excludeDelegate
-      />
+      <div className="extension-surfaces session-extension-surfaces">
+        <DelegateHistorySurface
+          id={sessionId}
+          runtime={runtime}
+          sessionChange={sessionChange}
+          store={store}
+        />
+        <ExtensionSurfaceStack
+          runtime={runtime}
+          placement="composer"
+          excludeDelegate
+        />
+      </div>
       <Composer
         key={sessionId}
         runtime={runtime}

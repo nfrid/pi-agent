@@ -38,7 +38,9 @@ import {
 import {
   DelegateSurface,
   delegateActivityLabel,
+  delegateReferenceLabel,
   delegateRowActivityLabel,
+  humanizeDelegateLogicalId,
   selectedDelegateInspectionRow,
 } from './live-surface-renderers';
 
@@ -705,6 +707,35 @@ describe('live extension surface fixtures', () => {
       'aria-label="0 running, 0 queued, 0 need attention, 0 done"',
     );
     expect(markup).not.toContain('delegate-row-toggle');
+  });
+
+  it('resolves resume references to delegate titles and humanizes missing titles', () => {
+    const rows = [
+      {
+        id: 'review',
+        runId: 'review-run',
+        lineageId: 'review-lineage',
+        name: 'Review implementation',
+        kind: 'background' as const,
+        state: 'success' as const,
+        createdAt: 1,
+        allowWrites: false,
+        workflow: {
+          logicalId: 'review',
+          attempt: 1,
+          identity: 'review@1',
+          state: 'success' as const,
+          dependencies: [],
+          createdAt: 1,
+          scheduledAt: 1,
+        },
+      },
+    ];
+    expect(delegateReferenceLabel('review@1', rows)).toBe(
+      'Review implementation',
+    );
+    expect(delegateReferenceLabel('missing-step@2', rows)).toBe('Missing Step');
+    expect(humanizeDelegateLogicalId('build_ui@3')).toBe('Build Ui');
   });
 
   it('uses a truthful fallback for settled historical rows without activity', () => {
