@@ -132,6 +132,7 @@ export function useOlderSessionHistory({
   scrollElementRef,
   sessionMounted,
   autoloadAll = false,
+  autoloadAtTop = false,
 }: {
   id: string;
   data: SessionApiResponse | undefined;
@@ -140,6 +141,8 @@ export function useOlderSessionHistory({
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   /** Drain remaining older pages without a user pagination control. */
   autoloadAll?: boolean;
+  /** Load older pages while the initialized scrollport remains at its top. */
+  autoloadAtTop?: boolean;
 }) {
   const coverage = useDashboardStore(store, selectSessionHistoryCoverage(id));
   const [history, setHistory] = useState<SessionApiResponse['history']>();
@@ -314,6 +317,11 @@ export function useOlderSessionHistory({
         if (pointerGestureRef.current || historyRequestRef.current)
           cancelPendingRestore();
       }
+      if (autoloadAtTop && top <= 1) {
+        topIntentRef.current = false;
+        void loadEarlierHistoryRef.current();
+        return;
+      }
       const automaticNearTop =
         previous !== undefined && top < previous - 1 && top <= 128;
       if (
@@ -341,7 +349,13 @@ export function useOlderSessionHistory({
       window.removeEventListener('pointercancel', onPointerEnd);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [clearAnchor, prependAnchor, scrollElementRef, sessionMounted]);
+  }, [
+    autoloadAtTop,
+    clearAnchor,
+    prependAnchor,
+    scrollElementRef,
+    sessionMounted,
+  ]);
 
   const historyIsCurrent = historySessionRef.current === id;
   const currentHistory = historyIsCurrent ? history : undefined;
@@ -565,6 +579,25 @@ export function useOlderSessionHistory({
     [loadEarlierHistory],
   );
   loadEarlierHistoryRef.current = loadEarlierHistory;
+
+  useEffect(() => {
+    const element = scrollElementRef?.current;
+    if (!sessionMounted || !autoloadAtTop || !element) return;
+    const loadIfAtTop = () => {
+      if (element.scrollTop <= 1) void loadEarlierHistory();
+    };
+    loadIfAtTop();
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(loadIfAtTop);
+    observer?.observe(element);
+    window.addEventListener('resize', loadIfAtTop);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', loadIfAtTop);
+    };
+  }, [autoloadAtTop, loadEarlierHistory, scrollElementRef, sessionMounted]);
 
   // A partial head is never rendered as a hanging activity. Resolve its owner
   // automatically; the visible control remains available for retry/error UI.
