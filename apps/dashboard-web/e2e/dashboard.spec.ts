@@ -2912,6 +2912,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
                 type: 'message',
                 message: {
                   role: 'assistant',
+                  timestamp: '2026-08-09T12:35:00.000Z',
                   content: [
                     {
                       type: 'text',
@@ -3011,6 +3012,52 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(paragraphBoxes[1]?.top).toBeGreaterThan(
     paragraphBoxes[0]?.bottom ?? 0,
   );
+  const assistantFlow = await page
+    .locator('.message-assistant')
+    .filter({ hasText: 'Deployment resumes automatically.' })
+    .evaluate((message) => {
+      const accessory = message.querySelector<HTMLElement>(
+        '.message-bubble-accessories',
+      );
+      const markdown = message.querySelector<HTMLElement>('.markdown');
+      if (!accessory || !markdown)
+        throw new Error('Assistant message geometry missing');
+      const accessoryRect = accessory.getBoundingClientRect();
+      const lineRects = Array.from(markdown.querySelectorAll('p')).flatMap(
+        (paragraph) => {
+          const range = document.createRange();
+          range.selectNodeContents(paragraph);
+          return Array.from(range.getClientRects()).map((rect) => ({
+            top: rect.top,
+            bottom: rect.bottom,
+            left: rect.left,
+            right: rect.right,
+          }));
+        },
+      );
+      return {
+        accessoryLeft: accessoryRect.left,
+        accessoryBottom: accessoryRect.bottom,
+        overflowX: getComputedStyle(markdown).overflowX,
+        alongside: lineRects.filter(
+          (line) =>
+            line.top < accessoryRect.bottom && line.bottom > accessoryRect.top,
+        ),
+        below: lineRects.filter((line) => line.top >= accessoryRect.bottom - 1),
+      };
+    });
+  expect(assistantFlow.overflowX).toBe('visible');
+  expect(assistantFlow.alongside.length).toBeGreaterThan(0);
+  expect(
+    assistantFlow.alongside.every(
+      (line) => line.right <= assistantFlow.accessoryLeft + 1,
+    ),
+  ).toBe(true);
+  expect(
+    assistantFlow.below.some(
+      (line) => line.right > assistantFlow.accessoryLeft + 1,
+    ),
+  ).toBe(true);
   await expect(
     page.getByText('Context compacted', { exact: true }),
   ).toBeVisible();

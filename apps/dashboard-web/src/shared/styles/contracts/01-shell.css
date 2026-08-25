@@ -478,6 +478,9 @@ h2 {
 .message-bubble-accessories > .transcript-time {
   margin-left: 0;
 }
+.message-assistant > .markdown {
+  overflow-x: visible;
+}
 .message-images {
   display: flex;
   flex-wrap: wrap;
