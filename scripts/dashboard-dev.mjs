@@ -53,6 +53,7 @@ env.VITE_DASHBOARD_URL ??= `http://127.0.0.1:${env.PI_DASHBOARD_PORT}`;
 
 const bun = process.platform === 'win32' ? 'bun.exe' : 'bun';
 const children = new Set();
+const productionServe = mode === 'serve';
 let stopping = false;
 
 function run(name, args, independent = false) {
@@ -60,9 +61,10 @@ function run(name, args, independent = false) {
     cwd: root,
     env,
     stdio: 'inherit',
-    // Give each Bun wrapper and its grandchildren one process group so a
-    // forced launchd restart cannot orphan the actual daemon or preview server.
-    detached: process.platform !== 'win32',
+    // Keep production API/web descendants in launchd's process group so a
+    // forced restart cannot orphan them. Local development modes get a
+    // private group for signalChildTree().
+    detached: process.platform !== 'win32' && !productionServe,
   });
   children.add(child);
   child.once('exit', (code, signal) => {
@@ -159,8 +161,8 @@ async function main() {
         path.join(env.HOME ?? process.cwd(), '.pi', 'agent', 'dashboard'),
       'background-jobs.sock',
     );
-    const startsRuntime = mode !== 'process-host';
-    const startsProcess = mode !== 'runtime-host' && mode !== 'serve';
+    const startsRuntime = mode !== 'process-host' && !productionServe;
+    const startsProcess = mode !== 'runtime-host' && !productionServe;
     if (startsRuntime) {
       if (
         mode !== 'runtime-host' &&
