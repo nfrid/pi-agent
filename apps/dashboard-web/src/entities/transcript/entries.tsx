@@ -1,5 +1,5 @@
 import { dashboardHttpClient } from '@pi-dashboard/client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
@@ -24,72 +24,270 @@ async function copyText(text: string) {
   input.remove();
 }
 
-function TranscriptImageThumbnail({
+interface TranscriptImage {
+  index: number;
+  available: boolean;
+}
+
+interface ThumbnailState {
+  source?: string;
+  status: 'loading' | 'ready' | 'error';
+}
+
+function TranscriptImageGallery({
   sessionId,
   entryId,
-  index,
+  images: attachmentImages,
 }: {
   sessionId: string;
   entryId: string;
-  index: number;
+  images: readonly TranscriptImage[];
 }) {
-  const [source, setSource] = useState<string>();
+  const images = useMemo(
+    () => attachmentImages.filter((image) => image.available),
+    [attachmentImages],
+  );
+  const [thumbnails, setThumbnails] = useState<Record<number, ThumbnailState>>(
+    {},
+  );
+  const [activePosition, setActivePosition] = useState<number>();
+  const [fullSource, setFullSource] = useState<string>();
+  const [fullStatus, setFullStatus] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const pointerStart = useRef<{ id: number; x: number; y: number } | undefined>(
+    undefined,
+  );
+  const activeImage =
+    activePosition === undefined ? undefined : images[activePosition];
+
   useEffect(() => {
     const controller = new AbortController();
-    let objectUrl: string | undefined;
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    let attempts = 0;
-    const load = async () => {
-      attempts += 1;
-      try {
-        const blob = await dashboardHttpClient.sessionImage(
-          sessionId,
-          entryId,
-          index,
-          controller.signal,
-        );
-        objectUrl = URL.createObjectURL(blob);
-        setSource(objectUrl);
-      } catch {
-        if (!controller.signal.aborted && attempts < 10)
-          retry = setTimeout(() => void load(), 300);
-      }
-    };
-    void load();
+    const objectUrls: string[] = [];
+    const retries: ReturnType<typeof setTimeout>[] = [];
+    setThumbnails({});
+    for (const image of images) {
+      let attempts = 0;
+      const load = async () => {
+        attempts += 1;
+        try {
+          const blob = await dashboardHttpClient.sessionImage(
+            sessionId,
+            entryId,
+            image.index,
+            { signal: controller.signal, variant: 'thumbnail' },
+          );
+          if (controller.signal.aborted) return;
+          const source = URL.createObjectURL(blob);
+          objectUrls.push(source);
+          setThumbnails((current) => ({
+            ...current,
+            [image.index]: { source, status: 'ready' },
+          }));
+        } catch {
+          if (controller.signal.aborted) return;
+          if (attempts < 10) {
+            retries.push(setTimeout(() => void load(), 300));
+          } else {
+            setThumbnails((current) => ({
+              ...current,
+              [image.index]: { status: 'error' },
+            }));
+          }
+        }
+      };
+      void load();
+    }
     return () => {
       controller.abort();
-      if (retry) clearTimeout(retry);
+      for (const retry of retries) clearTimeout(retry);
+      for (const source of objectUrls) URL.revokeObjectURL(source);
+    };
+  }, [entryId, images, sessionId]);
+
+  useEffect(() => {
+    if (activePosition === undefined) {
+      if (dialogRef.current?.open) dialogRef.current.close();
+      return;
+    }
+    if (!dialogRef.current?.open) dialogRef.current?.showModal();
+  }, [activePosition]);
+
+  useEffect(() => {
+    if (!activeImage) {
+      setFullSource(undefined);
+      setFullStatus('idle');
+      return;
+    }
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    setFullSource(undefined);
+    setFullStatus('loading');
+    void dashboardHttpClient
+      .sessionImage(sessionId, entryId, activeImage.index, {
+        signal: controller.signal,
+      })
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setFullSource(objectUrl);
+        setFullStatus('ready');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFullStatus('error');
+      });
+    return () => {
+      controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [entryId, index, sessionId]);
-  if (!source) return null;
-  const label = `Open attached image ${index + 1}`;
+  }, [activeImage, entryId, sessionId]);
+
+  const closeViewer = () => {
+    setActivePosition(undefined);
+    dialogRef.current?.close();
+  };
+  const move = (delta: number) => {
+    setActivePosition((current) =>
+      current === undefined
+        ? current
+        : (current + delta + images.length) % images.length,
+    );
+  };
+  const finishSwipe = (pointerId: number, x: number, y: number) => {
+    const start = pointerStart.current;
+    pointerStart.current = undefined;
+    if (!start || start.id !== pointerId) return;
+    const deltaX = x - start.x;
+    const deltaY = y - start.y;
+    if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 50) return;
+    if (images.length === 1 || Math.abs(deltaY) > Math.abs(deltaX)) {
+      closeViewer();
+      return;
+    }
+    move(deltaX < 0 ? 1 : -1);
+  };
+
   return (
-    <>
-      <button
-        type="button"
-        className="message-image-thumbnail"
-        aria-label={label}
-        onClick={() => dialogRef.current?.showModal()}
-      >
-        <img src={source} alt={`Attachment ${index + 1}`} />
-      </button>
+    <fieldset className="message-images">
+      <legend className="sr-only">Image attachments</legend>
+      {images.map((image, position) => {
+        const thumbnail = thumbnails[image.index] ?? { status: 'loading' };
+        const label = `Open attached image ${position + 1}`;
+        return (
+          <button
+            type="button"
+            className="message-image-thumbnail"
+            aria-label={
+              thumbnail.status === 'loading'
+                ? `Loading attachment ${position + 1}`
+                : thumbnail.status === 'error'
+                  ? `Attachment ${position + 1} unavailable`
+                  : label
+            }
+            aria-busy={thumbnail.status === 'loading'}
+            disabled={thumbnail.status !== 'ready'}
+            key={image.index}
+            onClick={() => setActivePosition(position)}
+          >
+            {thumbnail.source ? (
+              <img src={thumbnail.source} alt={`Attachment ${position + 1}`} />
+            ) : (
+              <span
+                className={`message-image-thumbnail-state state-${thumbnail.status}`}
+                aria-hidden="true"
+              >
+                {thumbnail.status === 'error' ? '!' : ''}
+              </span>
+            )}
+          </button>
+        );
+      })}
       <dialog
         ref={dialogRef}
         className="message-image-dialog"
-        aria-label={`Attached image ${index + 1}`}
+        aria-label={
+          activePosition === undefined
+            ? 'Attached image viewer'
+            : `Attached image ${activePosition + 1} of ${images.length}`
+        }
+        onClose={() => setActivePosition(undefined)}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeViewer();
+        }}
+        onPointerDown={(event) => {
+          if (
+            event.pointerType !== 'touch' ||
+            (event.target as Element).closest('button')
+          )
+            return;
+          pointerStart.current = {
+            id: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+          };
+        }}
+        onPointerUp={(event) =>
+          finishSwipe(event.pointerId, event.clientX, event.clientY)
+        }
+        onPointerCancel={() => {
+          pointerStart.current = undefined;
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowLeft' && images.length > 1) move(-1);
+          if (event.key === 'ArrowRight' && images.length > 1) move(1);
+        }}
       >
         <button
           type="button"
+          className="message-image-close"
           aria-label="Close image viewer"
-          onClick={() => dialogRef.current?.close()}
+          onClick={closeViewer}
         >
           ×
         </button>
-        <img src={source} alt={`Attachment ${index + 1}, expanded`} />
+        {images.length > 1 ? (
+          <>
+            <button
+              type="button"
+              className="message-image-nav previous"
+              aria-label="Previous attached image"
+              onClick={() => move(-1)}
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              className="message-image-nav next"
+              aria-label="Next attached image"
+              onClick={() => move(1)}
+            >
+              ›
+            </button>
+            <span className="message-image-position" aria-live="polite">
+              {(activePosition ?? 0) + 1} / {images.length}
+            </span>
+          </>
+        ) : null}
+        {activeImage ? (
+          <img
+            src={
+              fullSource ?? thumbnails[activeImage.index]?.source ?? undefined
+            }
+            alt={`Attachment ${(activePosition ?? 0) + 1}, expanded`}
+          />
+        ) : null}
+        {fullStatus === 'loading' ? (
+          <span className="message-image-loading" role="status">
+            Loading full image…
+          </span>
+        ) : fullStatus === 'error' ? (
+          <span className="message-image-loading" role="status">
+            Full image unavailable
+          </span>
+        ) : null}
       </dialog>
-    </>
+    </fieldset>
   );
 }
 
@@ -372,19 +570,11 @@ function TranscriptEntry({
             {item.imageCount ? (
               item.sessionId &&
               item.images?.some((image) => image.available) ? (
-                <fieldset className="message-images">
-                  <legend className="sr-only">Image attachments</legend>
-                  {item.images.map((image) =>
-                    image.available ? (
-                      <TranscriptImageThumbnail
-                        key={image.index}
-                        sessionId={item.sessionId as string}
-                        entryId={item.key}
-                        index={image.index}
-                      />
-                    ) : null,
-                  )}
-                </fieldset>
+                <TranscriptImageGallery
+                  sessionId={item.sessionId}
+                  entryId={item.key}
+                  images={item.images}
+                />
               ) : (
                 <span className="message-attachment">
                   {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}

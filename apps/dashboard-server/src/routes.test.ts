@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 
@@ -113,6 +114,57 @@ describe('Fastify dashboard route plugin', () => {
       groups: [],
     });
     expect(routeContext.readDelegateHistory).toHaveBeenCalledWith('offline-1');
+  });
+
+  it('serves a bounded authenticated WebP thumbnail separately from the original', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const original = await sharp({
+      create: {
+        width: 1000,
+        height: 800,
+        channels: 3,
+        background: '#c44',
+      },
+    })
+      .png()
+      .toBuffer();
+    const routeContext = context();
+    routeContext.sessionImage = vi.fn(async () => ({
+      data: original,
+      mediaType: 'image/png',
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+
+    const thumbnail = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-1/images/entry-1/0?variant=thumbnail',
+      headers,
+    });
+    expect(thumbnail.statusCode).toBe(200);
+    expect(thumbnail.headers['content-type']).toContain('image/webp');
+    expect(thumbnail.headers['cache-control']).toBe('no-store');
+    await expect(sharp(thumbnail.rawPayload).metadata()).resolves.toMatchObject(
+      {
+        format: 'webp',
+        width: 300,
+        height: 240,
+      },
+    );
+
+    const full = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-1/images/entry-1/0',
+      headers,
+    });
+    expect(full.headers['content-type']).toContain('image/png');
+    expect(full.headers['cache-control']).toBe('no-store');
+    expect(full.rawPayload).toEqual(original);
   });
 
   it('serves one selected delegate run detail with branch query pins', async () => {

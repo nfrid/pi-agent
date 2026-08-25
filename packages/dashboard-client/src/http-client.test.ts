@@ -70,6 +70,27 @@ function tokenStore() {
   };
 }
 
+describe('DashboardHttpClient session images', () => {
+  it('requests the dedicated thumbnail variant', async () => {
+    const fetch = vi.fn(
+      async () => new Response(new Blob(['thumbnail']), { status: 200 }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await client.sessionImage('session/1', 'entry 1', 2, {
+      variant: 'thumbnail',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/sessions/session%2F1/images/entry%201/2?variant=thumbnail',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+  });
+});
+
 describe('DashboardHttpClient command requests', () => {
   it('patches project titles and validates the renamed project', async () => {
     const project = {

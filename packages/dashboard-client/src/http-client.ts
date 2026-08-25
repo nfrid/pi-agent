@@ -564,7 +564,10 @@ export class DashboardHttpClient {
     sessionId: string,
     entryId: string,
     imageIndex: number,
-    signal?: AbortSignal,
+    options: {
+      signal?: AbortSignal;
+      variant?: 'full' | 'thumbnail';
+    } = {},
   ): Promise<Blob> {
     const { baseUrl } = await this.ensureEndpoint();
     const headers = new Headers();
@@ -573,8 +576,8 @@ export class DashboardHttpClient {
     let response: Response;
     try {
       response = await this.fetchImpl(
-        `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(entryId)}/${imageIndex}`,
-        { headers, ...(signal ? { signal } : {}) },
+        `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(entryId)}/${imageIndex}${options.variant === 'thumbnail' ? '?variant=thumbnail' : ''}`,
+        { headers, ...(options.signal ? { signal: options.signal } : {}) },
       );
     } catch (cause) {
       throw networkError(cause);
