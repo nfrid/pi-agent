@@ -3088,6 +3088,26 @@ test('dense mobile session keeps conversation and activity readable', async ({
     name: /^Steering · Focus on mobile readability\./u,
   });
   await expect(steeringOutlineItem).toHaveClass(/outline-steering/u);
+  const outlineItemLayout = await steeringOutlineItem.evaluate((item) => {
+    const label = item.querySelector('span');
+    const time = item.querySelector('.transcript-outline-time');
+    const body = item.closest('.surface-drawer-body');
+    if (!label || !time || !body)
+      throw new Error('Transcript outline item layout missing');
+    const labelStyle = getComputedStyle(label);
+    return {
+      bodyFlexGrow: getComputedStyle(body).flexGrow,
+      labelOverflow: labelStyle.overflow,
+      labelWhiteSpace: labelStyle.whiteSpace,
+      timeFloat: getComputedStyle(time).cssFloat,
+    };
+  });
+  expect(outlineItemLayout).toEqual({
+    bodyFlexGrow: '0',
+    labelOverflow: 'visible',
+    labelWhiteSpace: 'normal',
+    timeFloat: 'inline-end',
+  });
   await reopenedOutline
     .getByRole('button', { name: 'Earlier message 1', exact: true })
     .click();
