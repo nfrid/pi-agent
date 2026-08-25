@@ -368,6 +368,41 @@ export function activityGroupSummary(
   };
 }
 
+export type ActivityGroupMetadataModel = {
+  kindLabel: string;
+  toolLabel: string;
+  lineChanges: ActivityGroupFacts['lineChanges'];
+  duration?: string;
+  failure?: string;
+};
+
+export function activityGroupMetadataModel(
+  group: Pick<TranscriptGroup, 'kind' | 'tools' | 'toolCount'>,
+  summary: Pick<ActivityGroupSummary, 'failureCount'>,
+): ActivityGroupMetadataModel {
+  const facts = activityGroupFacts(group.tools);
+  return {
+    kindLabel:
+      group.kind === 'mutate'
+        ? 'Edited'
+        : group.kind === 'inspect'
+          ? 'Inspected'
+          : group.kind === 'validate'
+            ? 'Validated'
+            : group.kind === 'execute'
+              ? 'Ran'
+              : 'Mixed work',
+    toolLabel: `${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}`,
+    lineChanges: facts.lineChanges,
+    ...(facts.commandDurationMs > 0
+      ? { duration: formatCommandDuration(facts.commandDurationMs) }
+      : {}),
+    ...(summary.failureCount > 0
+      ? { failure: `${summary.failureCount} failed` }
+      : {}),
+  };
+}
+
 export function activityGroupMetadata(
   summary: Pick<ActivityGroupSummary, 'toolCount' | 'failureCount'>,
 ): string;
@@ -399,32 +434,22 @@ export function activityGroupMetadata(
     TranscriptGroup,
     'kind' | 'status' | 'tools' | 'toolCount'
   >;
-  const facts = activityGroupFacts(group.tools);
+  const metadata = activityGroupMetadataModel(group, providedSummary);
   const changes = [
-    facts.lineChanges.added ? `+${facts.lineChanges.added}` : undefined,
-    facts.lineChanges.changed ? `~${facts.lineChanges.changed}` : undefined,
-    facts.lineChanges.removed ? `-${facts.lineChanges.removed}` : undefined,
+    metadata.lineChanges.added ? `+${metadata.lineChanges.added}` : undefined,
+    metadata.lineChanges.changed
+      ? `~${metadata.lineChanges.changed}`
+      : undefined,
+    metadata.lineChanges.removed
+      ? `-${metadata.lineChanges.removed}`
+      : undefined,
   ].filter(Boolean);
-  const kindLabel =
-    group.kind === 'mutate'
-      ? 'Edited'
-      : group.kind === 'inspect'
-        ? 'Inspected'
-        : group.kind === 'validate'
-          ? 'Validated'
-          : group.kind === 'execute'
-            ? 'Ran'
-            : 'Mixed work';
   const parts = [
-    kindLabel,
-    `${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}`,
+    metadata.kindLabel,
+    metadata.toolLabel,
     changes.length ? changes.join(' ') : undefined,
-    facts.commandDurationMs > 0
-      ? formatCommandDuration(facts.commandDurationMs)
-      : undefined,
-    providedSummary.failureCount > 0
-      ? `${providedSummary.failureCount} failed`
-      : undefined,
+    metadata.duration,
+    metadata.failure,
   ];
   return parts.filter(Boolean).join(' · ');
 }

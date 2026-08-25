@@ -55,6 +55,10 @@ describe('TranscriptActivityGroup', () => {
     expect(collapsed).toContain('aria-labelledby="activity-label-0"');
     expect(collapsed).toContain('aria-describedby="activity-status-0"');
     expect(collapsed).toContain('class="activity-summary"');
+    expect(collapsed).toContain(
+      'class="activity-metadata activity-metadata-inspect"',
+    );
+    expect(collapsed).toContain('class="activity-metadata-kind">Inspected');
     expect(collapsed).not.toContain('class="activity-detail"');
     expect(collapsed).toContain('class="activity-group-preamble"');
     expect(collapsed).toContain('aria-label="Copy assistant message"');

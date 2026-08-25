@@ -3450,11 +3450,19 @@ test('dense mobile session keeps conversation and activity readable', async ({
   });
   expect(mobileActivityHeader?.topDifference).toBeLessThan(5);
   await expect(activity.locator('small')).toHaveCount(0);
-  await expect(
-    activity
-      .locator('xpath=../..')
-      .getByText('Inspected · 1 tool', { exact: true }),
-  ).toHaveCount(1);
+  const activityMetadata = activity
+    .locator('xpath=../..')
+    .locator('.activity-metadata');
+  await expect(activityMetadata).toHaveText('Inspected · 1 tool');
+  const metadataColors = await activityMetadata.evaluate((metadata) => {
+    const kind = metadata.querySelector('.activity-metadata-kind');
+    if (!kind) throw new Error('activity metadata kind missing');
+    return {
+      base: getComputedStyle(metadata).color,
+      kind: getComputedStyle(kind).color,
+    };
+  });
+  expect(metadataColors.kind).not.toBe(metadataColors.base);
   const completedStepDot = activity
     .locator('xpath=../..')
     .locator('.activity-step.step-complete .activity-step-dot');

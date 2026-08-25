@@ -3,6 +3,7 @@ import type { TranscriptModelItem } from '../../transcript';
 import {
   type ActivityStepParts,
   activityGroupMetadata,
+  activityGroupMetadataModel,
   activityGroupSummary,
   activityStepParts,
   commandStepMeta,
@@ -99,6 +100,12 @@ function CollapsedActivitySummary({
   cwd?: string;
 }) {
   const summary = activityGroupSummary(group);
+  const metadata = activityGroupMetadataModel(group, summary);
+  const hasLineChanges = Boolean(
+    metadata.lineChanges.added ||
+      metadata.lineChanges.changed ||
+      metadata.lineChanges.removed,
+  );
   const allTimestamps = activityStepTimestamps(items);
   const recentActions = group.tools
     .slice(-summary.recentTools.length)
@@ -140,8 +147,59 @@ function CollapsedActivitySummary({
           })}
         </ol>
       )}
-      <small className="activity-metadata">
-        {activityGroupMetadata(group, summary)}
+      <small
+        className={`activity-metadata activity-metadata-${group.kind}`}
+        title={activityGroupMetadata(group, summary)}
+      >
+        <span className="activity-metadata-kind">{metadata.kindLabel}</span>
+        <span className="activity-metadata-separator" aria-hidden="true">
+          {' · '}
+        </span>
+        <span>{metadata.toolLabel}</span>
+        {hasLineChanges ? (
+          <>
+            <span className="activity-metadata-separator" aria-hidden="true">
+              {' · '}
+            </span>
+            <span className="activity-metadata-changes">
+              {metadata.lineChanges.added ? (
+                <span className="line-change-added">
+                  +{metadata.lineChanges.added}
+                </span>
+              ) : null}
+              {metadata.lineChanges.changed ? (
+                <span className="line-change-changed">
+                  ~{metadata.lineChanges.changed}
+                </span>
+              ) : null}
+              {metadata.lineChanges.removed ? (
+                <span className="line-change-removed">
+                  -{metadata.lineChanges.removed}
+                </span>
+              ) : null}
+            </span>
+          </>
+        ) : null}
+        {metadata.duration ? (
+          <>
+            <span className="activity-metadata-separator" aria-hidden="true">
+              {' · '}
+            </span>
+            <span className="activity-metadata-duration">
+              {metadata.duration}
+            </span>
+          </>
+        ) : null}
+        {metadata.failure ? (
+          <>
+            <span className="activity-metadata-separator" aria-hidden="true">
+              {' · '}
+            </span>
+            <span className="activity-metadata-failure">
+              {metadata.failure}
+            </span>
+          </>
+        ) : null}
       </small>
     </div>
   );

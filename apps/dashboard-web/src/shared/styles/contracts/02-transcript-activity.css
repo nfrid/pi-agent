@@ -203,6 +203,38 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.activity-metadata-kind {
+  font-weight: 650;
+}
+.activity-metadata-inspect .activity-metadata-kind {
+  color: var(--cyan);
+}
+.activity-metadata-mutate .activity-metadata-kind {
+  color: var(--orange);
+}
+.activity-metadata-validate .activity-metadata-kind {
+  color: var(--green);
+}
+.activity-metadata-execute .activity-metadata-kind {
+  color: var(--purple);
+}
+.activity-metadata-mixed .activity-metadata-kind {
+  color: var(--fg);
+}
+.activity-metadata-separator,
+.activity-metadata-duration {
+  color: var(--dim);
+}
+.activity-metadata-changes {
+  display: inline-flex;
+  gap: 4px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.activity-metadata-failure {
+  color: var(--red);
+  font-weight: 700;
+}
 .activity-detail {
   border-top: 1px solid var(--line-soft);
   padding: 0 13px;
