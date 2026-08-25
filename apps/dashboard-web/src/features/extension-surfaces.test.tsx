@@ -44,6 +44,7 @@ import {
   humanizeDelegateLogicalId,
   selectedDelegateInspectionRow,
 } from './live-surface-renderers';
+import { selectedDelegateCompositeRun } from './surfaces/delegate-surface';
 
 const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
@@ -365,6 +366,21 @@ describe('live extension surface fixtures', () => {
       live: true,
       row: { runId: 'live-run' },
     });
+    const group = model.groups[0];
+    if (!group) throw new Error('Expected the composed delegate group');
+    const selected = selectedDelegateCompositeRun(group);
+    expect(selected).toMatchObject({
+      id: 'persisted-run',
+      persisted: true,
+      live: true,
+      row: { runId: 'live-run' },
+    });
+    expect(
+      shouldFetchDelegateDetail({
+        ...selected,
+        row: { ...selected.row, state: 'success' },
+      }),
+    ).toBe(true);
 
     const settlementKey = 'session:workflow:review@1';
     const transition = reconcileDelegateLiveRuns(

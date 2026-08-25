@@ -195,6 +195,21 @@ export function selectedDelegateInspectionRow(
   return rows.find((row) => row.lineageId === selectedLineageId);
 }
 
+/** Resolve the durable option even when its live overlay carries a different run ID. */
+export function selectedDelegateCompositeRun(
+  group: DelegateCompositeGroup,
+): DelegateCompositeRun {
+  return (
+    group.runs.find(
+      (run) => run.id === group.row.runId || run.row.runId === group.row.runId,
+    ) ?? {
+      id: group.row.runId,
+      label: '',
+      row: group.row,
+    }
+  );
+}
+
 export function DelegateSurface({
   surface,
   pausedAt,
@@ -504,13 +519,7 @@ export function DelegateSurface({
                           aria-haspopup="dialog"
                           onPress={() => {
                             onRunSelected?.(
-                              group.runs.find(
-                                (run) => run.id === row.runId,
-                              ) ?? {
-                                id: row.runId,
-                                label: '',
-                                row,
-                              },
+                              selectedDelegateCompositeRun(group),
                             );
                             setSelectedLineageId(row.lineageId);
                             setLastInspectorRow(row);
