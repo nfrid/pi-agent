@@ -3451,7 +3451,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(mobileActivityHeader?.topDifference).toBeLessThan(5);
   await expect(activity.locator('small')).toHaveCount(0);
   await expect(
-    activity.locator('xpath=../..').getByText('1 tool call', { exact: true }),
+    activity
+      .locator('xpath=../..')
+      .getByText('Inspected · 1 tool', { exact: true }),
   ).toHaveCount(1);
   const completedStepDot = activity
     .locator('xpath=../..')
