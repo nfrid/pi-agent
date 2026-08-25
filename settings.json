@@ -7,6 +7,16 @@
   "hideThinkingBlock": false,
   "quietStartup": true,
   "theme": "dracula",
+  "sessionTitle": {
+    "enabled": true,
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "thinking": "low",
+    "timeoutMs": 20000,
+    "maxInputChars": 8000,
+    "maxOutputTokens": 64,
+    "maxLength": 50
+  },
   "delegate": {
     "provider": "openai-codex",
     "routingGuidance": "Luna routes are for bounded background work, Terra routes trade higher cost for lower latency when the parent is blocked, and Sol routes are for maintainer judgement rather than harder implementation. Escalate thinking only within a matching task shape.",
