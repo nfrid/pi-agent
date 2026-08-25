@@ -532,6 +532,14 @@ describe('Fastify dashboard route plugin', () => {
       createdAt: 1,
       updatedAt: 2,
     }));
+    routeContext.regenerateThreadTitle = vi.fn(async () => ({
+      id: 'thread-1',
+      projectId: 'project-1',
+      title: 'Regenerated thread',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 2,
+    }));
     routeContext.pinThread = vi.fn(async () => ({
       id: 'thread-1',
       projectId: 'project-1',
@@ -584,6 +592,24 @@ describe('Fastify dashboard route plugin', () => {
       payload: { commandId: 'restore-extra', extra: true },
     });
     expect(invalidRestore.statusCode).toBe(400);
+    const regenerateTitle = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/regenerate-title',
+      headers,
+      payload: { commandId: 'regenerate-title-1' },
+    });
+    expect(regenerateTitle.statusCode).toBe(200);
+    expect(routeContext.regenerateThreadTitle).toHaveBeenCalledWith(
+      'thread-1',
+      'regenerate-title-1',
+    );
+    const invalidRegenerateTitle = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/regenerate-title',
+      headers,
+      payload: { commandId: 'regenerate-title-extra', extra: true },
+    });
+    expect(invalidRegenerateTitle.statusCode).toBe(400);
     const pin = await app.inject({
       method: 'POST',
       url: '/api/threads/thread-1/pin',

@@ -14,6 +14,7 @@ import {
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
   pinThreadMutationOptions,
+  regenerateThreadTitleMutationOptions,
   renameSessionMutationOptions,
   restartRuntimeMutationOptions,
   restoreThreadMutationOptions,
@@ -305,6 +306,7 @@ describe('dashboard query and mutation factories', () => {
   it('reuses lifecycle command IDs and honors explicit IDs for thread controls', async () => {
     const archiveThread = vi.fn(async (...value: unknown[]) => value);
     const restoreThread = vi.fn(async (...value: unknown[]) => value);
+    const regenerateThreadTitle = vi.fn(async (...value: unknown[]) => value);
     const pinThread = vi.fn(async (...value: unknown[]) => value);
     const unpinThread = vi.fn(async (...value: unknown[]) => value);
     const settleThread = vi.fn(async (...value: unknown[]) => value);
@@ -312,6 +314,12 @@ describe('dashboard query and mutation factories', () => {
     const mutations = [
       [archiveThreadMutationOptions({ archiveThread } as never), archiveThread],
       [restoreThreadMutationOptions({ restoreThread } as never), restoreThread],
+      [
+        regenerateThreadTitleMutationOptions({
+          regenerateThreadTitle,
+        } as never),
+        regenerateThreadTitle,
+      ],
       [pinThreadMutationOptions({ pinThread } as never), pinThread],
       [unpinThreadMutationOptions({ unpinThread } as never), unpinThread],
       [settleThreadMutationOptions({ settleThread } as never), settleThread],

@@ -20,7 +20,10 @@ import type { PushSender } from './push.js';
 import { RuntimeManager } from './runtime-manager.js';
 import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { SessionIndex } from './session-index.js';
-import { createDashboardSessionTitleGenerator } from './session-title-generator.js';
+import {
+  createDashboardSessionTitleGenerator,
+  readLiteSessionTitleHistory,
+} from './session-title-generator.js';
 import { CodexUsageProvider } from './usage.js';
 
 const FEED_INACTIVITY_MS = 5 * 60_000;
@@ -174,18 +177,31 @@ function dependencies(
     config.socketPath,
     metadata.orchestration,
   );
+  const sessionTitleGenerator = createDashboardSessionTitleGenerator();
+  let application!: DashboardApplication;
   const orchestrationService = new OrchestrationService({
     repository: metadata.orchestration,
     manager,
     registry,
     getSession: (id) => sessions.get(id),
     readSession: (id) => sessions.readEntries(id),
+    readSessionTitleHistory: (id) => readLiteSessionTitleHistory(sessions, id),
     generateThreadTitle:
-      options.generateSessionTitle ?? createDashboardSessionTitleGenerator(),
+      options.generateSessionTitle ?? sessionTitleGenerator.generate,
+    generateThreadTitleFromHistory:
+      options.regenerateSessionTitle ?? sessionTitleGenerator.regenerate,
+    renameLinkedSession: async (sessionId, name, commandId) => {
+      const result = await application.runtime.renameWithReceipt({
+        commandId,
+        sessionId,
+        name,
+      });
+      return result.result.name;
+    },
     defaultRuntimeProvider: 'extension-bridge',
     onChange: () => applicationChanges.publish(undefined),
   });
-  const application = new DashboardApplication({
+  application = new DashboardApplication({
     registry,
     manager,
     sessions,

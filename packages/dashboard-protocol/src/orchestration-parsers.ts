@@ -13,6 +13,8 @@ import {
   ProjectAdoptCommandSchema,
   type ProjectCreateCommand,
   ProjectCreateCommandSchema,
+  type RegenerateThreadTitleCommand,
+  RegenerateThreadTitleCommandSchema,
   type RestoreThreadCommand,
   RestoreThreadCommandSchema,
   type RetryCommand,
@@ -165,6 +167,18 @@ export const tryParseRestoreThreadCommand = (
   value: unknown,
 ): RestoreThreadCommand | undefined =>
   tryParseSchema(RestoreThreadCommandSchema, value);
+export const parseRegenerateThreadTitleCommand = (
+  value: unknown,
+): RegenerateThreadTitleCommand =>
+  parseSchema(
+    RegenerateThreadTitleCommandSchema,
+    value,
+    'thread title regeneration command',
+  );
+export const tryParseRegenerateThreadTitleCommand = (
+  value: unknown,
+): RegenerateThreadTitleCommand | undefined =>
+  tryParseSchema(RegenerateThreadTitleCommandSchema, value);
 export const parsePinThreadCommand = (value: unknown): PinThreadCommand =>
   parseSchema(PinThreadCommandSchema, value, 'thread pin command');
 export const tryParsePinThreadCommand = (

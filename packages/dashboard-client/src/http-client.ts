@@ -21,6 +21,7 @@ import {
   parseRestartRuntimeMutationOutput,
   parseStartRuntimeMutationOutput,
   parseStopRuntimeMutationOutput,
+  type RegenerateThreadTitleCommand,
   type RenameSessionMutationOutput,
   type RestartRuntimeMutationOutput,
   type RestoreThreadCommand,
@@ -835,6 +836,21 @@ export class DashboardHttpClient {
     const thread = tryParseThread(value);
     if (!thread)
       throw malformedOutput('Invalid restored thread response.', value);
+    return thread;
+  }
+
+  async regenerateThreadTitle(
+    threadId: string,
+    command: RegenerateThreadTitleCommand | string,
+  ): Promise<Thread> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
+    const value = await this.request<unknown>(
+      `/api/threads/${encodeURIComponent(threadId)}/regenerate-title`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    const thread = tryParseThread(value);
+    if (!thread)
+      throw malformedOutput('Invalid regenerated thread response.', value);
     return thread;
   }
 

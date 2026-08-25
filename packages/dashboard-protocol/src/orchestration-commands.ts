@@ -138,6 +138,14 @@ export const RestoreThreadCommandSchema = Type.Object(
 );
 export type RestoreThreadCommand = Static<typeof RestoreThreadCommandSchema>;
 
+export const RegenerateThreadTitleCommandSchema = Type.Object(
+  { commandId: CommandIdSchema },
+  { additionalProperties: false },
+);
+export type RegenerateThreadTitleCommand = Static<
+  typeof RegenerateThreadTitleCommandSchema
+>;
+
 export const PinThreadCommandSchema = Type.Object(
   { commandId: CommandIdSchema },
   { additionalProperties: false },

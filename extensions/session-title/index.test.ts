@@ -3,15 +3,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SESSION_TITLE_CONFIG } from './config';
 import {
   type generateSessionTitle,
+  type regenerateSessionTitle,
   registerAutomaticSessionTitles,
 } from './index';
 
 const TEST_CONFIG = { ...DEFAULT_SESSION_TITLE_CONFIG };
 
 type Handler = (event: unknown, context: unknown) => unknown;
+type CommandHandler = (args: string, context: never) => Promise<void>;
 
 function createHarness(entries: readonly unknown[] = []) {
   const handlers = new Map<string, Handler>();
+  const commands = new Map<string, CommandHandler>();
+  const notify = vi.fn();
+  const setStatus = vi.fn();
   const setSessionName = vi.fn((value: string) => {
     name = value;
   });
@@ -20,21 +25,33 @@ function createHarness(entries: readonly unknown[] = []) {
     on(event: string, handler: Handler) {
       handlers.set(event, handler);
     },
+    registerCommand(command: string, definition: { handler: CommandHandler }) {
+      commands.set(command, definition.handler);
+    },
     getSessionName: () => name,
     setSessionName,
   } as unknown as ExtensionAPI;
   const context = {
-    sessionManager: { getEntries: () => entries },
+    hasUI: true,
+    modelRegistry: {},
+    sessionManager: {
+      getBranch: () => entries,
+      getEntries: () => entries,
+    },
+    ui: { notify, setStatus },
   };
 
   return {
+    commands,
     context,
     handlers,
+    notify,
     pi,
     setName(value: string | undefined) {
       name = value;
     },
     setSessionName,
+    setStatus,
   };
 }
 
@@ -125,6 +142,39 @@ describe('automatic session titles', () => {
 
     expect(namedGenerate).not.toHaveBeenCalled();
     expect(resumedGenerate).not.toHaveBeenCalled();
+  });
+
+  it('regenerates an existing title explicitly from session history', async () => {
+    const harness = createHarness([
+      {
+        type: 'message',
+        message: { role: 'user', content: 'Update the title.' },
+      },
+    ]);
+    harness.setName('Manual title');
+    const regenerate = vi.fn<typeof regenerateSessionTitle>(
+      async () => 'History-aware title',
+    );
+    registerAutomaticSessionTitles(
+      harness.pi,
+      async () => undefined,
+      () => TEST_CONFIG,
+      regenerate,
+    );
+    harness.handlers.get('session_start')?.({ reason: 'new' }, harness.context);
+
+    await harness.commands.get('retitle')?.('', harness.context as never);
+
+    expect(regenerate).toHaveBeenCalledOnce();
+    expect(harness.setSessionName).toHaveBeenCalledWith('History-aware title');
+    expect(harness.notify).toHaveBeenCalledWith(
+      'Session title: History-aware title',
+      'info',
+    );
+    expect(harness.setStatus).toHaveBeenLastCalledWith(
+      'session-title',
+      undefined,
+    );
   });
 
   it('aborts in-flight generation when the session shuts down', async () => {

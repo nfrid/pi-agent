@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
 import {
@@ -251,6 +251,97 @@ export async function createThread(
   host.changed();
   host.kick();
   return result;
+}
+
+function titleReceiptId(
+  kind: 'prepare' | 'session',
+  commandId: string,
+): string {
+  const digest = createHash('sha256').update(commandId).digest('hex');
+  return `thread-title-${kind}:${digest}`;
+}
+
+export async function regenerateThreadTitle(
+  host: OrchestrationHost,
+  threadId: string,
+  commandId: string,
+): Promise<Thread> {
+  const prior = host.receipt(commandId, 'thread.regenerate-title');
+  if (prior) {
+    const result = prior.result as Thread;
+    if (result.id !== threadId) throw idempotencyConflict(commandId, result.id);
+    return result;
+  }
+  if (!host.generateThreadTitleFromHistory)
+    throw new Error('Session title regeneration is unavailable.');
+
+  host.requireThread(threadId);
+  const link = host.repository.getSessionThreadLinkByThreadId(threadId);
+  const preparationId = titleReceiptId('prepare', commandId);
+  const prepared = host.receipt(
+    preparationId,
+    'thread.regenerate-title.prepare',
+  );
+  let title: string;
+  if (prepared) {
+    const result = prepared.result as { threadId: string; title: string };
+    if (result.threadId !== threadId)
+      throw idempotencyConflict(commandId, result.threadId);
+    title = result.title;
+  } else {
+    let entries: readonly unknown[] = [];
+    if (link && host.readSessionTitleHistory) {
+      entries = await host
+        .readSessionTitleHistory(link.sessionId)
+        .catch(() => []);
+    } else if (link && host.readSession) {
+      const loaded = await host
+        .readSession(link.sessionId)
+        .catch(() => undefined);
+      if (loaded?.entries.length) entries = loaded.entries;
+    }
+    if (entries.length === 0) {
+      const run = host.repository.listRuns(threadId).at(-1);
+      if (run)
+        entries = [
+          {
+            type: 'message',
+            message: { role: 'user', content: run.initialPrompt },
+          },
+        ];
+    }
+    if (entries.length === 0)
+      throw new Error('This thread has no conversation history to title.');
+    const generated = await host.generateThreadTitleFromHistory(entries);
+    if (!generated)
+      throw new Error('No title could be generated from this thread.');
+    const result = host.saveReceipt(
+      preparationId,
+      'thread.regenerate-title.prepare',
+      { threadId, title: generated },
+    ) as { threadId: string; title: string };
+    if (result.threadId !== threadId)
+      throw idempotencyConflict(commandId, result.threadId);
+    title = result.title;
+  }
+
+  if (link) {
+    if (!host.renameLinkedSession)
+      throw new Error('Linked session title synchronization is unavailable.');
+    title = await host.renameLinkedSession(
+      link.sessionId,
+      title,
+      titleReceiptId('session', commandId),
+    );
+  }
+  const thread = host.repository.updateThread(threadId, { title });
+  const persisted = host.saveReceipt(
+    commandId,
+    'thread.regenerate-title',
+    thread,
+  ) as Thread;
+  host.changed();
+  return persisted;
 }
 
 function archiveResponseThread(thread: Thread): Thread {

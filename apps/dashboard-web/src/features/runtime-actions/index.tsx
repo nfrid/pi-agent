@@ -3,6 +3,7 @@ import {
   dashboardHttpClient,
   dashboardQueryKeys,
   pinThreadMutationOptions,
+  regenerateThreadTitleMutationOptions,
   restartRuntimeMutationOptions,
   restoreThreadMutationOptions,
   settleThreadMutationOptions,
@@ -143,6 +144,9 @@ export function DurableThreadActions({
   );
   const pin = useMutation(pinThreadMutationOptions(dashboardHttpClient));
   const unpin = useMutation(unpinThreadMutationOptions(dashboardHttpClient));
+  const regenerateTitle = useMutation(
+    regenerateThreadTitleMutationOptions(dashboardHttpClient),
+  );
   const settle = useMutation(settleThreadMutationOptions(dashboardHttpClient));
   const unsettle = useMutation(
     unsettleThreadMutationOptions(dashboardHttpClient),
@@ -155,11 +159,19 @@ export function DurableThreadActions({
     restore.isPending ||
     pin.isPending ||
     unpin.isPending ||
+    regenerateTitle.isPending ||
     settle.isPending ||
     unsettle.isPending;
 
   const run = async (
-    action: 'archive' | 'restore' | 'pin' | 'unpin' | 'settle' | 'unsettle',
+    action:
+      | 'archive'
+      | 'restore'
+      | 'pin'
+      | 'unpin'
+      | 'regenerate-title'
+      | 'settle'
+      | 'unsettle',
   ): Promise<void> => {
     setError(undefined);
     try {
@@ -171,6 +183,8 @@ export function DurableThreadActions({
         await pin.mutateAsync({ threadId: thread.threadId });
       else if (action === 'unpin')
         await unpin.mutateAsync({ threadId: thread.threadId });
+      else if (action === 'regenerate-title')
+        await regenerateTitle.mutateAsync({ threadId: thread.threadId });
       else if (action === 'settle')
         await settle.mutateAsync({ threadId: thread.threadId });
       else await unsettle.mutateAsync({ threadId: thread.threadId });
@@ -207,6 +221,17 @@ export function DurableThreadActions({
           {settled ? 'Unsettle' : 'Settle'}
         </button>
       )}
+      <button
+        type="button"
+        role="menuitem"
+        disabled={busy}
+        onClick={(event) => {
+          event.stopPropagation();
+          void run('regenerate-title');
+        }}
+      >
+        {regenerateTitle.isPending ? 'Regenerating title…' : 'Regenerate title'}
+      </button>
       <button
         type="button"
         role="menuitem"

@@ -128,6 +128,7 @@ describe('DashboardHttpClient command requests', () => {
     });
     await client.archiveThread('thread-1', 'archive-1');
     await client.restoreThread('thread-1', 'restore-1');
+    await client.regenerateThreadTitle('thread-1', 'regenerate-1');
     await client.pinThread('thread-1', 'pin-1');
     await client.unpinThread('thread-1', 'unpin-1');
     await client.settleThread('thread-1', 'settle-1');
@@ -136,6 +137,7 @@ describe('DashboardHttpClient command requests', () => {
     expect(calls.map(([input]) => input)).toEqual([
       '/api/threads/thread-1/archive',
       '/api/threads/thread-1/restore',
+      '/api/threads/thread-1/regenerate-title',
       '/api/threads/thread-1/pin',
       '/api/threads/thread-1/unpin',
       '/api/threads/thread-1/settle',
@@ -144,6 +146,7 @@ describe('DashboardHttpClient command requests', () => {
     expect(calls.map(([, init]) => JSON.parse(String(init.body)))).toEqual([
       { commandId: 'archive-1' },
       { commandId: 'restore-1' },
+      { commandId: 'regenerate-1' },
       { commandId: 'pin-1' },
       { commandId: 'unpin-1' },
       { commandId: 'settle-1' },

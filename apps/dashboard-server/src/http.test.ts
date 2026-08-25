@@ -24,19 +24,26 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
-  it('publishes exact durable links for indexed sessions before HTTP is ready', async () => {
+  it('publishes durable links and synchronizes regenerated titles to dormant sessions', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-session-links-'));
     const sessionDir = path.join(root, 'sessions');
     await mkdir(sessionDir, { recursive: true });
     await writeFile(
       path.join(sessionDir, 'ordinary.jsonl'),
-      `${JSON.stringify({ type: 'session', id: 'ordinary-session', cwd: '/tmp' })}\n`,
+      `${JSON.stringify({ type: 'session', id: 'ordinary-session', cwd: '/tmp' })}\n${JSON.stringify(
+        {
+          type: 'message',
+          id: 'ordinary-user-message',
+          message: { role: 'user', content: 'Regenerate this session title.' },
+        },
+      )}\n`,
     );
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir,
+      regenerateSessionTitle: async () => 'History-aware title',
     });
     await server.start();
     const origin = `http://127.0.0.1:${server.port}`;
@@ -47,12 +54,44 @@ describe('dashboard HTTP boundary', () => {
       },
     });
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual([
+    const links = (await response.json()) as Array<{
+      sessionId: string;
+      threadId: string;
+    }>;
+    expect(links).toEqual([
       {
         sessionId: 'ordinary-session',
         threadId: expect.stringMatching(/^thread-session-/),
       },
     ]);
+
+    const regenerate = await fetch(
+      `${origin}/api/threads/${links[0]?.threadId}/regenerate-title`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: origin,
+          'content-type': 'application/json',
+          'x-dashboard-token': 'test-token',
+        },
+        body: JSON.stringify({ commandId: 'r'.repeat(256) }),
+      },
+    );
+    const regenerated = (await regenerate.json()) as Record<string, unknown>;
+    expect(regenerate.status, JSON.stringify(regenerated)).toBe(200);
+    expect(regenerated).toMatchObject({ title: 'History-aware title' });
+    const entries = (
+      await readFile(path.join(sessionDir, 'ordinary.jsonl'), 'utf8')
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        type: 'session_info',
+        name: 'History-aware title',
+      }),
+    );
   });
 
   it('publishes auxiliary JSONL appends as ordered normalized session events', async () => {

@@ -142,6 +142,38 @@ describe('runtime lifecycle action availability', () => {
     act(() => tree.unmount());
   });
 
+  it('regenerates a durable thread title from its action menu', async () => {
+    const client = new QueryClient();
+    const regenerate = vi
+      .spyOn(dashboardHttpClient, 'regenerateThreadTitle')
+      .mockResolvedValue({ id: 'thread-1', title: 'New title' } as never);
+    const closeMenu = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <QueryClientProvider client={client}>
+          <DurableThreadActions
+            title="Durable thread"
+            closeMenu={closeMenu}
+            thread={{ threadId: 'thread-1', hasActiveRun: true }}
+          />
+        </QueryClientProvider>,
+      );
+    });
+    const button = tree.root
+      .findAllByType('button')
+      .find((item) => item.children.join(' ') === 'Regenerate title');
+
+    await act(async () => {
+      button?.props.onClick({ stopPropagation: vi.fn() });
+    });
+
+    expect(regenerate).toHaveBeenCalledWith('thread-1', expect.anything());
+    expect(closeMenu).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+    regenerate.mockRestore();
+  });
+
   it('renders durable lifecycle controls and disables archive for active runs', () => {
     const client = new QueryClient();
     let tree!: ReturnType<typeof create>;
@@ -165,6 +197,7 @@ describe('runtime lifecycle action availability', () => {
     const labels = buttons.map((button) => button.children.join(' '));
     expect(labels).toContain('Unpin');
     expect(labels).toContain('Settle');
+    expect(labels).toContain('Regenerate title');
     expect(
       buttons.find((button) => button.children.join(' ') === 'Archive')?.props
         .disabled,

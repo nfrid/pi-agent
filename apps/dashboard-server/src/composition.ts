@@ -31,6 +31,10 @@ export interface DashboardServerOptions {
   push?: PushSender;
   /** Test/embedding override for pre-worktree automatic title generation. */
   generateSessionTitle?: (prompt: string) => Promise<string | undefined>;
+  /** Test/embedding override for history-based title regeneration. */
+  regenerateSessionTitle?: (
+    entries: readonly unknown[],
+  ) => Promise<string | undefined>;
   /** Bounded replay and subscriber memory for shell/session feeds. */
   feedReplayCount?: number;
   feedReplayBytes?: number;

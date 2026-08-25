@@ -31,6 +31,7 @@ import {
   parseNormalizedMessagePayload,
   parsePinThreadCommand,
   parseProtocolInfo,
+  parseRegenerateThreadTitleCommand,
   parseRestoreThreadCommand,
   parseRuntimeCommandInput,
   parseRuntimeCommandOutput,
@@ -129,6 +130,9 @@ describe('dashboard protocol', () => {
     expect(parseRestoreThreadCommand({ commandId: 'restore-1' })).toEqual({
       commandId: 'restore-1',
     });
+    expect(
+      parseRegenerateThreadTitleCommand({ commandId: 'regenerate-title-1' }),
+    ).toEqual({ commandId: 'regenerate-title-1' });
     expect(parsePinThreadCommand({ commandId: 'pin-1' })).toEqual({
       commandId: 'pin-1',
     });

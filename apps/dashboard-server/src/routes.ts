@@ -16,6 +16,7 @@ import {
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   ProjectRenameCommandSchema,
+  RegenerateThreadTitleCommandSchema,
   RestoreThreadCommandSchema,
   RetryCommandSchema,
   SessionAdoptCommandSchema,
@@ -159,6 +160,7 @@ export interface DashboardRouteContext {
   retireCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
   archiveThread?(threadId: string, commandId: string): Promise<unknown>;
   restoreThread?(threadId: string, commandId: string): Promise<unknown>;
+  regenerateThreadTitle?(threadId: string, commandId: string): Promise<unknown>;
   pinThread?(threadId: string, commandId: string): Promise<unknown>;
   unpinThread?(threadId: string, commandId: string): Promise<unknown>;
   settleThread?(threadId: string, commandId: string): Promise<unknown>;
@@ -578,6 +580,11 @@ export const dashboardRoutes: FastifyPluginAsync<{
 
   for (const [suffix, operation, schema] of [
     ['restore', 'restoreThread', RestoreThreadCommandSchema],
+    [
+      'regenerate-title',
+      'regenerateThreadTitle',
+      RegenerateThreadTitleCommandSchema,
+    ],
     ['pin', 'pinThread', PinThreadCommandSchema],
     ['unpin', 'unpinThread', UnpinThreadCommandSchema],
     ['settle', 'settleThread', SettleThreadCommandSchema],

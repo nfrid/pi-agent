@@ -436,6 +436,15 @@ async function isolatedServiceFixture(
     beforeWorktreePreparation?: () => Promise<void>;
     beforeWorktreeFinish?: () => Promise<void>;
     generateThreadTitle?: (prompt: string) => Promise<string | undefined>;
+    generateThreadTitleFromHistory?: (
+      entries: readonly unknown[],
+    ) => Promise<string | undefined>;
+    readSessionTitleHistory?: (id: string) => Promise<readonly unknown[]>;
+    renameLinkedSession?: (
+      sessionId: string,
+      name: string,
+      commandId: string,
+    ) => Promise<string>;
   } = {},
 ) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'pi-orchestration-git-'));
@@ -482,6 +491,9 @@ async function isolatedServiceFixture(
     beforeWorktreePreparation: options.beforeWorktreePreparation,
     beforeWorktreeFinish: options.beforeWorktreeFinish,
     generateThreadTitle: options.generateThreadTitle,
+    generateThreadTitleFromHistory: options.generateThreadTitleFromHistory,
+    readSessionTitleHistory: options.readSessionTitleHistory,
+    renameLinkedSession: options.renameLinkedSession,
   });
   const adopted = (await service.adoptProject({
     commandId: `adopt-${Date.now()}-${Math.random()}`,
@@ -562,6 +574,160 @@ describe('OrchestrationService', () => {
         prompt: 'Add cheap automatic titles.',
       })) as { thread: { title: string } };
       expect(created.thread.title).toBe('Prompt-derived fallback');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('regenerates and idempotently persists a durable title from history', async () => {
+    const generate = vi.fn(async (entries: readonly unknown[]) => {
+      expect(JSON.stringify(entries)).toContain('History title prompt');
+      return 'History-aware dashboard title';
+    });
+    const fixture = await isolatedServiceFixture({
+      generateThreadTitleFromHistory: generate,
+    });
+    try {
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'history-title-thread',
+        title: 'Initial title',
+        prompt: 'History title prompt',
+      })) as { thread: { id: string } };
+
+      const [first, concurrent] = await Promise.all([
+        fixture.service.regenerateThreadTitle(
+          created.thread.id,
+          'regenerate-history-title',
+        ),
+        fixture.service.regenerateThreadTitle(
+          created.thread.id,
+          'regenerate-history-title',
+        ),
+      ]);
+      const replay = await fixture.service.regenerateThreadTitle(
+        created.thread.id,
+        'regenerate-history-title',
+      );
+
+      expect(first.title).toBe('History-aware dashboard title');
+      expect(concurrent).toEqual(first);
+      expect(replay).toEqual(first);
+      await expect(
+        fixture.service.regenerateThreadTitle(
+          'another-thread',
+          'regenerate-history-title',
+        ),
+      ).rejects.toThrow('Idempotency key');
+      expect(generate).toHaveBeenCalledOnce();
+      expect(
+        fixture.metadata.orchestration.getThread(created.thread.id)?.title,
+      ).toBe('History-aware dashboard title');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('serializes different regeneration commands on one thread', async () => {
+    let active = 0;
+    let maxActive = 0;
+    let generated = 0;
+    const fixture = await isolatedServiceFixture({
+      generateThreadTitleFromHistory: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        const sequence = ++generated;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return `Generated title ${sequence}`;
+      },
+    });
+    try {
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'queued-title-thread',
+        title: 'Initial title',
+        prompt: 'Queue title regeneration.',
+      })) as { thread: { id: string } };
+
+      const results = await Promise.all(
+        ['one', 'two', 'three'].map((suffix) =>
+          fixture.service.regenerateThreadTitle(
+            created.thread.id,
+            `queued-title-${suffix}`,
+          ),
+        ),
+      );
+
+      expect(maxActive).toBe(1);
+      expect(results.map((thread) => thread.title)).toEqual([
+        'Generated title 1',
+        'Generated title 2',
+        'Generated title 3',
+      ]);
+      expect(
+        fixture.metadata.orchestration.getThread(created.thread.id)?.title,
+      ).toBe('Generated title 3');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('retries linked session synchronization with one prepared title', async () => {
+    const generate = vi.fn(async () => 'Prepared stable title');
+    const renameLinkedSession = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('bridge acknowledgement lost'))
+      .mockResolvedValueOnce('Prepared stable title');
+    const fixture = await isolatedServiceFixture({
+      generateThreadTitleFromHistory: generate,
+      readSessionTitleHistory: async () => [
+        {
+          type: 'message',
+          message: { role: 'user', content: 'Original linked request' },
+        },
+      ],
+      renameLinkedSession,
+    });
+    try {
+      fixture.metadata.orchestration.ensureSessionThreadLinks([
+        {
+          id: 'linked-title-session',
+          file: path.join(fixture.root, 'linked-title-session.jsonl'),
+          cwd: fixture.root,
+          updatedAt: 10,
+        },
+      ]);
+      const link = fixture.metadata.orchestration.getSessionThreadLink(
+        'linked-title-session',
+      );
+      if (!link) throw new Error('Missing linked title session.');
+      const originalTitle = fixture.metadata.orchestration.getThread(
+        link.threadId,
+      )?.title;
+
+      await expect(
+        fixture.service.regenerateThreadTitle(
+          link.threadId,
+          'retry-linked-title',
+        ),
+      ).rejects.toThrow('bridge acknowledgement lost');
+      expect(
+        fixture.metadata.orchestration.getThread(link.threadId)?.title,
+      ).toBe(originalTitle);
+
+      await expect(
+        fixture.service.regenerateThreadTitle(
+          link.threadId,
+          'retry-linked-title',
+        ),
+      ).resolves.toMatchObject({ title: 'Prepared stable title' });
+      expect(generate).toHaveBeenCalledOnce();
+      expect(renameLinkedSession).toHaveBeenCalledTimes(2);
+      expect(renameLinkedSession.mock.calls[1]).toEqual(
+        renameLinkedSession.mock.calls[0],
+      );
+      expect(
+        String(renameLinkedSession.mock.calls[0]?.[2]).length,
+      ).toBeLessThanOrEqual(128);
     } finally {
       await fixture.close();
     }

@@ -55,6 +55,7 @@ import {
   archiveThread as archiveThreadLifecycle,
   createThread as createThreadLifecycle,
   pinThread as pinThreadLifecycle,
+  regenerateThreadTitle as regenerateThreadTitleLifecycle,
   restoreThread as restoreThreadLifecycle,
   settleThread as settleThreadLifecycle,
   unpinThread as unpinThreadLifecycle,
@@ -76,7 +77,10 @@ export class OrchestrationService implements OrchestrationHost {
   readonly beforeWorktreePreparation?: () => Promise<void>;
   readonly beforeWorktreeFinish?: () => Promise<void>;
   readonly generateThreadTitle?: OrchestrationServiceOptions['generateThreadTitle'];
+  readonly generateThreadTitleFromHistory?: OrchestrationServiceOptions['generateThreadTitleFromHistory'];
+  readonly renameLinkedSession?: OrchestrationServiceOptions['renameLinkedSession'];
   readonly defaultRuntimeProvider: Run['runtimeProvider'];
+  readonly readSessionTitleHistory?: OrchestrationServiceOptions['readSessionTitleHistory'];
   readonly readSession?: OrchestrationServiceOptions['readSession'];
   readonly getSession?: OrchestrationServiceOptions['getSession'];
   readonly inFlight = new Set<string>();
@@ -101,6 +105,8 @@ export class OrchestrationService implements OrchestrationHost {
     string,
     { commandId: string; task: Promise<Thread> }
   >();
+  private readonly regenerateTitleTasks = new Map<string, Promise<Thread>>();
+  private readonly regenerateTitleQueues = new Map<string, Promise<void>>();
   private readonly threadActivityRevisions = new Map<string, number>();
   private readonly tools = new Map<
     string,
@@ -127,8 +133,12 @@ export class OrchestrationService implements OrchestrationHost {
     this.beforeWorktreePreparation = options.beforeWorktreePreparation;
     this.beforeWorktreeFinish = options.beforeWorktreeFinish;
     this.generateThreadTitle = options.generateThreadTitle;
+    this.generateThreadTitleFromHistory =
+      options.generateThreadTitleFromHistory;
+    this.renameLinkedSession = options.renameLinkedSession;
     this.defaultRuntimeProvider =
       options.defaultRuntimeProvider ?? 'extension-bridge';
+    this.readSessionTitleHistory = options.readSessionTitleHistory;
     this.readSession = options.readSession;
     this.getSession = options.getSession;
   }
@@ -224,6 +234,34 @@ export class OrchestrationService implements OrchestrationHost {
 
   async restoreThread(threadId: string, commandId: string): Promise<Thread> {
     return restoreThreadLifecycle(this, threadId, commandId);
+  }
+
+  async regenerateThreadTitle(
+    threadId: string,
+    commandId: string,
+  ): Promise<Thread> {
+    const key = `${threadId}\0${commandId}`;
+    const existing = this.regenerateTitleTasks.get(key);
+    if (existing) return existing;
+
+    const prior = this.regenerateTitleQueues.get(threadId) ?? Promise.resolve();
+    const task = prior
+      .catch(() => undefined)
+      .then(() => regenerateThreadTitleLifecycle(this, threadId, commandId));
+    const tail = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.regenerateTitleTasks.set(key, task);
+    this.regenerateTitleQueues.set(threadId, tail);
+    try {
+      return await task;
+    } finally {
+      if (this.regenerateTitleTasks.get(key) === task)
+        this.regenerateTitleTasks.delete(key);
+      if (this.regenerateTitleQueues.get(threadId) === tail)
+        this.regenerateTitleQueues.delete(threadId);
+    }
   }
 
   async pinThread(threadId: string, commandId: string): Promise<Thread> {

@@ -566,6 +566,18 @@ export function restoreThreadMutationOptions(client: DashboardHttpClient) {
   });
 }
 
+export function regenerateThreadTitleMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions({
+    mutationFn: (variables: { threadId: string; commandId?: string }) =>
+      client.regenerateThreadTitle(variables.threadId, {
+        commandId: lifecycleCommandId('thread-regenerate-title', variables),
+      }),
+    retry: false,
+  });
+}
+
 export function pinThreadMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
     mutationFn: (variables: { threadId: string; commandId?: string }) =>

@@ -558,6 +558,11 @@ export class DashboardServerImpl implements DashboardServer {
         if (!service) throw new Error('Orchestration is unavailable.');
         return service.restoreThread(threadId, commandId);
       },
+      regenerateThreadTitle: (threadId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.regenerateThreadTitle(threadId, commandId);
+      },
       pinThread: (threadId, commandId) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');

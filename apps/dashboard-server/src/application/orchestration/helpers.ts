@@ -29,8 +29,20 @@ export interface OrchestrationServiceOptions {
   beforeWorktreeFinish?: () => Promise<void>;
   /** Generate the authoritative title before thread/worktree creation. */
   generateThreadTitle?: (prompt: string) => Promise<string | undefined>;
+  /** Regenerate a durable title from a bounded, host-provided transcript. */
+  generateThreadTitleFromHistory?: (
+    entries: readonly unknown[],
+  ) => Promise<string | undefined>;
+  /** Synchronize the linked Pi session name before persisting its thread title. */
+  renameLinkedSession?: (
+    sessionId: string,
+    name: string,
+    commandId: string,
+  ) => Promise<string>;
   /** Default provider label for durable managed orchestration runs. */
   defaultRuntimeProvider?: Run['runtimeProvider'];
+  /** Lite selected-branch history for title regeneration. */
+  readSessionTitleHistory?: (id: string) => Promise<readonly unknown[]>;
   /** Legacy transcript access used by session adoption. */
   readSession?: (id: string) => Promise<{
     metadata: SessionIndexEntry;
@@ -107,7 +119,12 @@ export interface OrchestrationHost {
   readonly generateThreadTitle?: (
     prompt: string,
   ) => Promise<string | undefined>;
+  readonly generateThreadTitleFromHistory?: (
+    entries: readonly unknown[],
+  ) => Promise<string | undefined>;
+  readonly renameLinkedSession?: OrchestrationServiceOptions['renameLinkedSession'];
   readonly defaultRuntimeProvider: Run['runtimeProvider'];
+  readonly readSessionTitleHistory?: OrchestrationServiceOptions['readSessionTitleHistory'];
   readonly readSession?: OrchestrationServiceOptions['readSession'];
   readonly getSession?: OrchestrationServiceOptions['getSession'];
   readonly reconnectGraceMs: number;
