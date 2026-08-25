@@ -27,6 +27,8 @@ export interface OrchestrationServiceOptions {
   beforeWorktreePreparation?: () => Promise<void>;
   /** Test seam for deterministically racing goodbye with worktree settlement. */
   beforeWorktreeFinish?: () => Promise<void>;
+  /** Generate the authoritative title before thread/worktree creation. */
+  generateThreadTitle?: (prompt: string) => Promise<string | undefined>;
   /** Default provider label for durable managed orchestration runs. */
   defaultRuntimeProvider?: Run['runtimeProvider'];
   /** Legacy transcript access used by session adoption. */
@@ -102,6 +104,9 @@ export interface OrchestrationHost {
   readonly registry: RuntimeRegistry;
   readonly beforeWorktreePreparation?: () => Promise<void>;
   readonly beforeWorktreeFinish?: () => Promise<void>;
+  readonly generateThreadTitle?: (
+    prompt: string,
+  ) => Promise<string | undefined>;
   readonly defaultRuntimeProvider: Run['runtimeProvider'];
   readonly readSession?: OrchestrationServiceOptions['readSession'];
   readonly getSession?: OrchestrationServiceOptions['getSession'];

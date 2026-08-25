@@ -69,12 +69,23 @@ describe('delegate_wake tool', () => {
       nonObstructive: true,
     });
     expect(JSON.stringify(listed)).not.toContain('secret evidence');
-    await tool.execute(
+    const cancelled = (await tool.execute(
       'call',
       { action: 'cancel', id: 'source-ready' },
       undefined,
       undefined,
       {} as ExtensionContext,
+    )) as { content: Array<{ text: string }> };
+    expect(cancelled.content[0]?.text).toContain('Wake cancelled');
+    const unchanged = (await tool.execute(
+      'call',
+      { action: 'cancel', id: 'source-ready' },
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    )) as { content: Array<{ text: string }> };
+    expect(unchanged.content[0]?.text).toContain(
+      'Wake unchanged because it is already cancelled',
     );
     const activeOnly = (await tool.execute(
       'call',

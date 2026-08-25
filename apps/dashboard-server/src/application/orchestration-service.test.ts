@@ -435,6 +435,7 @@ async function isolatedServiceFixture(
     defaultBaseBranch?: string;
     beforeWorktreePreparation?: () => Promise<void>;
     beforeWorktreeFinish?: () => Promise<void>;
+    generateThreadTitle?: (prompt: string) => Promise<string | undefined>;
   } = {},
 ) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'pi-orchestration-git-'));
@@ -480,6 +481,7 @@ async function isolatedServiceFixture(
     pollMs: 5,
     beforeWorktreePreparation: options.beforeWorktreePreparation,
     beforeWorktreeFinish: options.beforeWorktreeFinish,
+    generateThreadTitle: options.generateThreadTitle,
   });
   const adopted = (await service.adoptProject({
     commandId: `adopt-${Date.now()}-${Math.random()}`,
@@ -511,6 +513,60 @@ async function isolatedServiceFixture(
 }
 
 describe('OrchestrationService', () => {
+  it('persists the generated title before worktree preparation and seeds the runtime name', async () => {
+    const events: string[] = [];
+    const fixture = await isolatedServiceFixture({
+      generateThreadTitle: async (prompt) => {
+        events.push(`title:${prompt}`);
+        return 'Generated dashboard title';
+      },
+      beforeWorktreePreparation: async () => {
+        events.push('worktree');
+      },
+    });
+    try {
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'generated-title-thread',
+        title: 'Prompt-derived fallback',
+        prompt: 'Add cheap automatic titles.',
+      })) as { thread: { id: string; title: string } };
+
+      expect(created.thread.title).toBe('Generated dashboard title');
+      await waitFor(() => fixture.launches.length === 1);
+      expect(events).toEqual(['title:Add cheap automatic titles.', 'worktree']);
+      expect(fixture.launches[0]).toMatchObject({
+        name: 'Generated dashboard title',
+      });
+      expect(
+        await gitOutput(fixture.root, 'branch', '--list', 'pi/*'),
+      ).toContain('pi/generated-dashboard-title');
+      expect(
+        fixture.metadata.orchestration.getThread(created.thread.id)?.title,
+      ).toBe('Generated dashboard title');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('uses the submitted title when dashboard title generation fails', async () => {
+    const fixture = await isolatedServiceFixture({
+      generateThreadTitle: async () => {
+        throw new Error('provider unavailable');
+      },
+    });
+    try {
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'fallback-title-thread',
+        title: 'Prompt-derived fallback',
+        prompt: 'Add cheap automatic titles.',
+      })) as { thread: { title: string } };
+      expect(created.thread.title).toBe('Prompt-derived fallback');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('replays isolated create without allocating an orphan checkout', async () => {
     const fixture = await isolatedServiceFixture();
     try {

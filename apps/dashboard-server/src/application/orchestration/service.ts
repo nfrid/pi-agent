@@ -75,6 +75,7 @@ export class OrchestrationService implements OrchestrationHost {
   readonly reconnectGraceMs: number;
   readonly beforeWorktreePreparation?: () => Promise<void>;
   readonly beforeWorktreeFinish?: () => Promise<void>;
+  readonly generateThreadTitle?: OrchestrationServiceOptions['generateThreadTitle'];
   readonly defaultRuntimeProvider: Run['runtimeProvider'];
   readonly readSession?: OrchestrationServiceOptions['readSession'];
   readonly getSession?: OrchestrationServiceOptions['getSession'];
@@ -125,6 +126,7 @@ export class OrchestrationService implements OrchestrationHost {
       : 5_000;
     this.beforeWorktreePreparation = options.beforeWorktreePreparation;
     this.beforeWorktreeFinish = options.beforeWorktreeFinish;
+    this.generateThreadTitle = options.generateThreadTitle;
     this.defaultRuntimeProvider =
       options.defaultRuntimeProvider ?? 'extension-bridge';
     this.readSession = options.readSession;

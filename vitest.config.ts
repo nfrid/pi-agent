@@ -7,6 +7,9 @@ export default defineConfig({
       '@pi-agent/background-jobs': path.resolve(
         'packages/background-jobs/src/index.ts',
       ),
+      '@pi-agent/session-title': path.resolve(
+        'packages/session-title/src/index.ts',
+      ),
       '@pi-dashboard/client': path.resolve(
         'packages/dashboard-client/src/index.ts',
       ),

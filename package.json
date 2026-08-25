@@ -51,6 +51,7 @@
     "@earendil-works/pi-tui": "0.84.1",
     "@mozilla/readability": "^0.6.0",
     "@pi-agent/background-jobs": "workspace:*",
+    "@pi-agent/session-title": "workspace:*",
     "@pi-dashboard/activity-model": "workspace:*",
     "@pi-dashboard/codex-usage": "workspace:*",
     "@pi-dashboard/extension-contributions": "workspace:*",

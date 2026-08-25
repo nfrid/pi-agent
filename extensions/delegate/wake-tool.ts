@@ -210,15 +210,25 @@ export function registerDelegateWakeTool(
           });
         }
         case 'cancel': {
+          const id = requireId(params.id);
+          const previous = coordinator.require(id);
+          const alreadyTerminal = ['entered', 'cancelled', 'blocked'].includes(
+            previous.state,
+          );
           const wake = coordinator.cancel(
-            requireId(params.id),
+            id,
             params.reason ?? 'Wake subscription cancelled.',
           );
-          options.onCancelled?.(wake);
-          return textResult(`Wake cancelled: ${snapshotText(wake)}`, {
-            action: 'cancel',
-            wake: metadata(wake),
-          });
+          if (!alreadyTerminal) options.onCancelled?.(wake);
+          return textResult(
+            alreadyTerminal
+              ? `Wake unchanged because it is already ${previous.state}: ${snapshotText(wake)}`
+              : `Wake cancelled: ${snapshotText(wake)}`,
+            {
+              action: 'cancel',
+              wake: metadata(wake),
+            },
+          );
         }
         case 'recover': {
           const wake = coordinator.recover(requireId(params.id));

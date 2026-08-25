@@ -3,10 +3,11 @@ import {
   DEFAULT_SESSION_TITLE_CONFIG,
   parseSessionTitleConfig,
   parseSessionTitleSettings,
-} from './config';
+} from './config.js';
 
 describe('session title configuration', () => {
-  it('uses cheap defaults when the settings block is absent', () => {
+  it('uses cheap low-reasoning defaults when the settings block is absent', () => {
+    expect(DEFAULT_SESSION_TITLE_CONFIG.thinking).toBe('low');
     expect(parseSessionTitleSettings({ unrelated: true })).toEqual(
       DEFAULT_SESSION_TITLE_CONFIG,
     );

@@ -159,11 +159,14 @@ export async function createThread(
   }
   const project = host.requireProject(projectId);
   if (project.status !== 'active') throw new Error('Project is archived.');
+  const generatedTitle = host.generateThreadTitle
+    ? await host.generateThreadTitle(command.prompt).catch(() => undefined)
+    : undefined;
   const runId = `run-${randomUUID()}`;
   const thread = {
     id: `thread-${randomUUID()}`,
     projectId,
-    title: command.title,
+    title: generatedTitle ?? command.title,
   };
   const run = {
     id: runId,

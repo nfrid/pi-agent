@@ -20,6 +20,7 @@ import type { PushSender } from './push.js';
 import { RuntimeManager } from './runtime-manager.js';
 import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { SessionIndex } from './session-index.js';
+import { createDashboardSessionTitleGenerator } from './session-title-generator.js';
 import { CodexUsageProvider } from './usage.js';
 
 const FEED_INACTIVITY_MS = 5 * 60_000;
@@ -179,6 +180,8 @@ function dependencies(
     registry,
     getSession: (id) => sessions.get(id),
     readSession: (id) => sessions.readEntries(id),
+    generateThreadTitle:
+      options.generateSessionTitle ?? createDashboardSessionTitleGenerator(),
     defaultRuntimeProvider: 'extension-bridge',
     onChange: () => applicationChanges.publish(undefined),
   });
