@@ -432,7 +432,9 @@ export const QueueDraftSchema = Type.Object(
     /** Stable browser-owned identity, distinct from a command frame id. */
     clientId: IdentifierSchema,
     mode: QueueDraftModeSchema,
-    text: Type.String({ minLength: 1, maxLength: MAX_QUEUE_DRAFT_TEXT }),
+    text: Type.String({ maxLength: MAX_QUEUE_DRAFT_TEXT }),
+    /** Browser-safe metadata; queued image bytes remain runtime-private. */
+    imageCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
   },
   { additionalProperties: false },
 );
@@ -1197,6 +1199,9 @@ export const QueueDraftAddCommandSchema = Type.Object(
     clientId: IdentifierSchema,
     mode: QueueDraftModeSchema,
     text: Type.String({ maxLength: MAX_QUEUE_DRAFT_TEXT }),
+    images: Type.Optional(
+      Type.Array(BridgeImageAttachmentSchema, { maxItems: 4 }),
+    ),
   },
   { additionalProperties: false },
 );

@@ -331,9 +331,16 @@ export function flushQueueDrafts(
   let failedAt = drafts.length;
   for (const [index, draft] of drafts.entries()) {
     try {
-      pi.sendUserMessage(expandDashboardInput(draft.text, commands), {
-        deliverAs: draft.mode,
-      });
+      const expanded = expandDashboardInput(draft.text, commands);
+      pi.sendUserMessage(
+        (draft.images.length > 0
+          ? [
+              ...(expanded ? [{ type: 'text' as const, text: expanded }] : []),
+              ...draft.images,
+            ]
+          : expanded) as Parameters<ExtensionAPI['sendUserMessage']>[0],
+        { deliverAs: draft.mode },
+      );
     } catch {
       failedAt = index;
       break;

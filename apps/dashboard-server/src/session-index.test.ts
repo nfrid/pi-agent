@@ -54,6 +54,13 @@ describe('session index', () => {
       },
     });
     expect(JSON.stringify(session.entries)).not.toContain('base64-bytes');
+    await expect(index.readImage('session-id', 'entry', 0)).resolves.toEqual({
+      data: Buffer.from('base64-bytes', 'base64'),
+      mediaType: 'image/png',
+    });
+    await expect(index.readImage('session-id', 'entry', 1)).rejects.toThrow(
+      'Unknown session image',
+    );
   });
 
   it('projects linked delegate auxiliary sessions without exposing their paths', async () => {

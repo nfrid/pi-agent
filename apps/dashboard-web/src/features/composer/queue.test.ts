@@ -49,12 +49,22 @@ describe('composer queue model', () => {
           { clientId: 'q1', mode: 'steer', text: 'inspect this' },
           { clientId: 'q1', mode: 'steer', text: 'duplicate' },
           { clientId: '', mode: 'steer', text: 'ignore' },
-          { clientId: 'q2', mode: 'followUp', text: 'then test it' },
+          {
+            clientId: 'q2',
+            mode: 'followUp',
+            text: 'then test it',
+            imageCount: 2,
+          },
         ],
       } as unknown as RuntimeSnapshot),
     ).toEqual([
       { id: 'q1', mode: 'steer', text: 'inspect this' },
-      { id: 'q2', mode: 'followUp', text: 'then test it' },
+      {
+        id: 'q2',
+        mode: 'followUp',
+        text: 'then test it',
+        imageCount: 2,
+      },
     ]);
   });
 
@@ -252,6 +262,6 @@ describe('composer queue model', () => {
     expect(shouldQueueComposerMessage('compacting', 'followUp', false)).toBe(
       true,
     );
-    expect(shouldQueueComposerMessage('working', 'steer', true)).toBe(false);
+    expect(shouldQueueComposerMessage('working', 'steer', true)).toBe(true);
   });
 });

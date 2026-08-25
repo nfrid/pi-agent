@@ -182,11 +182,10 @@ export function composerCommandType(
 export function composerSubmissionPolicy(
   runtime: RuntimeSnapshot,
   mode: ComposerMode,
-  hasAttachments: boolean,
+  _hasAttachments: boolean,
 ): { commandType: ComposerMode; queues: boolean } {
   const commandType = composerCommandType(runtime, mode);
-  if (hasAttachments || hasSettledBackground(runtime))
-    return { commandType, queues: false };
+  if (hasSettledBackground(runtime)) return { commandType, queues: false };
   return {
     commandType,
     queues:

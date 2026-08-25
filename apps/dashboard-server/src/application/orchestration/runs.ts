@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
-import type { Run } from '@pi-dashboard/protocol';
+import type { BridgeImageAttachment, Run } from '@pi-dashboard/protocol';
 import {
   createWorktreeFinisher,
   type WorktreeRecord,
@@ -17,10 +17,16 @@ import { handleRegistryChange } from './runtime-binding.js';
 export async function retryRun(
   host: OrchestrationHost,
   threadId: string,
-  command: { commandId: string; prompt?: string; model?: Run['model'] },
+  command: {
+    commandId: string;
+    prompt?: string;
+    model?: Run['model'];
+    images?: readonly BridgeImageAttachment[];
+    releaseImages?: () => Promise<void>;
+  },
 ): Promise<unknown> {
   host.requireThread(threadId);
-  const { receipt: _receipt, ...result } = host.repository.retryRunIdempotent(
+  const { receipt, ...result } = host.repository.retryRunIdempotent(
     command.commandId,
     {
       threadId,
@@ -28,6 +34,13 @@ export async function retryRun(
       model: command.model,
     },
   );
+  if (receipt) await command.releaseImages?.();
+  else if (command.images?.length && command.releaseImages)
+    host.holdInitialImages(
+      result.run.id,
+      command.images,
+      command.releaseImages,
+    );
   host.changed();
   host.kick();
   return result;
@@ -97,6 +110,7 @@ export async function performCancel(
       throw error;
     }
   }
+  await host.releaseInitialImages(runId);
 
   let result = host.repository.getRun(runId) as Run;
   const checkout = host.repository.getCheckout(result.checkoutId);

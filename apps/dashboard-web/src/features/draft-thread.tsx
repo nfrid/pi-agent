@@ -20,6 +20,7 @@ import {
   DraftAgentPicker,
   DraftLocationPicker,
 } from './composer/draft-pickers';
+import { modelSupportsImages } from './composer/runtime';
 import { ComposerShell } from './composer/shell';
 import {
   beginDraftRetry,
@@ -109,15 +110,15 @@ export function DraftThreadView({
   );
   const { initialDraft, text, updateText, clearDraft } =
     useComposerDraft(draftId);
-  const attachments = useImageAttachments({
-    enabled: false,
-    busy: submitting,
-    onError: setError,
-  });
   const selectedModel = draftModelSelection(
     snapshot.runtimes,
     fallbackDraft?.model,
   );
+  const attachments = useImageAttachments({
+    enabled: modelSupportsImages(selectedModel, snapshot.runtimes),
+    busy: submitting,
+    onError: setError,
+  });
   const selectedLocation = fallbackDraft
     ? locationForDraft(fallbackDraft)
     : { kind: 'current' as const };
@@ -189,7 +190,7 @@ export function DraftThreadView({
     event.preventDefault();
     const prompt = text.trim();
     if (
-      !prompt ||
+      (!prompt && attachments.attachments.length === 0) ||
       submitting ||
       createMutation.isPending ||
       retryMutation.isPending
@@ -217,54 +218,72 @@ export function DraftThreadView({
         const retry = beginDraftRetry(draftId);
         if (!retry)
           throw new Error('The promoted draft is no longer available.');
-        await retryMutation.mutateAsync({
-          threadId: retry.threadId,
-          command: {
-            commandId: retry.commandId,
-            prompt,
-            ...(submissionModel ? { model: submissionModel } : {}),
-          },
-        });
+        const retryCommand = {
+          commandId: retry.commandId,
+          prompt,
+          ...(submissionModel ? { model: submissionModel } : {}),
+        };
+        if (attachments.attachments.length > 0)
+          await dashboardHttpClient.retryThreadWithImages(
+            retry.threadId,
+            retryCommand,
+            attachments.attachments.map((attachment) => attachment.file),
+          );
+        else
+          await retryMutation.mutateAsync({
+            threadId: retry.threadId,
+            command: retryCommand,
+          });
+        if (attachments.attachments.length > 0) attachments.clearAttachments();
         return;
       }
-      const result = await createMutation.mutateAsync({
-        projectId: liveDraft.projectId,
-        command: {
-          commandId: draftPromotionCommandId(draftId),
-          title: threadTitle(prompt),
-          prompt,
-          ...(location.kind === 'current'
-            ? {
-                ...(snapshot.checkouts?.find(
-                  (checkout) =>
-                    checkout.projectId === liveDraft.projectId &&
-                    checkout.kind === 'main',
-                )?.id
-                  ? {
-                      checkoutId: snapshot.checkouts.find(
-                        (checkout) =>
-                          checkout.projectId === liveDraft.projectId &&
-                          checkout.kind === 'main',
-                      )?.id,
-                    }
-                  : { isolation: 'main' as const }),
-              }
-            : location.kind === 'checkout'
-              ? { checkoutId: location.checkoutId }
-              : {
-                  isolation: 'worktree' as const,
-                  ...(location.base === 'head'
-                    ? { base: 'head' as const }
-                    : location.base === 'work' && liveDraft.location
-                      ? { base: 'work' as const }
-                      : {}),
-                  ...(location.base === 'branch'
-                    ? { baseRef: location.baseRef.trim() }
+      const createCommand = {
+        commandId: draftPromotionCommandId(draftId),
+        title: threadTitle(prompt || 'Image attachment'),
+        prompt,
+        ...(location.kind === 'current'
+          ? {
+              ...(snapshot.checkouts?.find(
+                (checkout) =>
+                  checkout.projectId === liveDraft.projectId &&
+                  checkout.kind === 'main',
+              )?.id
+                ? {
+                    checkoutId: snapshot.checkouts.find(
+                      (checkout) =>
+                        checkout.projectId === liveDraft.projectId &&
+                        checkout.kind === 'main',
+                    )?.id,
+                  }
+                : { isolation: 'main' as const }),
+            }
+          : location.kind === 'checkout'
+            ? { checkoutId: location.checkoutId }
+            : {
+                isolation: 'worktree' as const,
+                ...(location.base === 'head'
+                  ? { base: 'head' as const }
+                  : location.base === 'work' && liveDraft.location
+                    ? { base: 'work' as const }
                     : {}),
-                }),
-          ...(submissionModel ? { model: submissionModel } : {}),
-        },
-      });
+                ...(location.base === 'branch'
+                  ? { baseRef: location.baseRef.trim() }
+                  : {}),
+              }),
+        ...(submissionModel ? { model: submissionModel } : {}),
+      };
+      const result =
+        attachments.attachments.length > 0
+          ? await dashboardHttpClient.createThreadWithImages(
+              liveDraft.projectId,
+              createCommand,
+              attachments.attachments.map((attachment) => attachment.file),
+            )
+          : await createMutation.mutateAsync({
+              projectId: liveDraft.projectId,
+              command: createCommand,
+            });
+      if (attachments.attachments.length > 0) attachments.clearAttachments();
       markDraftPromoted(draftId, result.thread.id);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -326,7 +345,10 @@ export function DraftThreadView({
             onDragOver={attachments.onDragOver}
             onDragLeave={attachments.onDragLeave}
             onDrop={attachments.onDrop}
-            attachmentsEnabled={false}
+            attachmentsEnabled={modelSupportsImages(
+              selectedModel,
+              snapshot.runtimes,
+            )}
             attachmentsBusy={submitting}
             fileInputRef={attachments.fileInputRef}
             attachments={attachments.attachments}
@@ -339,7 +361,9 @@ export function DraftThreadView({
             placeholder="Message Pi…"
             readOnly={submitting}
             submissionDisabled={submitting}
-            sendDisabled={submitting || !text.trim()}
+            sendDisabled={
+              submitting || (!text.trim() && !attachments.attachments.length)
+            }
             sendAriaLabel="Send message"
             mode={
               <DraftLocationPicker

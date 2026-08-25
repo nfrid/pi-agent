@@ -71,7 +71,7 @@ export const ThreadCreateCommandSchema = Type.Object(
   {
     commandId: CommandIdSchema,
     title: Type.String({ minLength: 1, maxLength: 512 }),
-    prompt: Type.String({ minLength: 1, maxLength: MAX_TEXT }),
+    prompt: Type.String({ maxLength: MAX_TEXT }),
     checkoutId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_ID })),
     isolation: Type.Optional(
       Type.Union([Type.Literal('worktree'), Type.Literal('main')]),
@@ -100,7 +100,7 @@ export type ThreadCreateCommand = Static<typeof ThreadCreateCommandSchema>;
 export const RetryCommandSchema = Type.Object(
   {
     commandId: CommandIdSchema,
-    prompt: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_TEXT })),
+    prompt: Type.Optional(Type.String({ maxLength: MAX_TEXT })),
     model: Type.Optional(ModelSelectionSchema),
   },
   { additionalProperties: false },

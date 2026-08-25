@@ -32,6 +32,7 @@ import {
   type SessionMetadataDelta,
   shellRuntime,
 } from './application/dashboard-application.js';
+import type { DashboardImage } from './application/upload-service.js';
 import type {
   DashboardDependencies,
   DashboardServerOptions,
@@ -191,6 +192,27 @@ export class DashboardServerImpl implements DashboardServer {
     this.http = this.app.server;
   }
 
+  private async withUploadedImages<T>(
+    imageBuffers: readonly Buffer[],
+    operation: (
+      images: readonly DashboardImage[],
+      release: () => Promise<void>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const images =
+      imageBuffers.length > 0
+        ? await this.application.uploads.save(imageBuffers)
+        : [];
+    const release = () =>
+      this.application.uploads.cleanup(images.map((image) => image.path));
+    try {
+      return await operation(images, release);
+    } catch (error) {
+      await release();
+      throw error;
+    }
+  }
+
   private routeContext(): DashboardRouteContext {
     return {
       token: this.token,
@@ -216,6 +238,8 @@ export class DashboardServerImpl implements DashboardServer {
           before,
           this.sessionFeeds.get(id).sequence,
         ),
+      sessionImage: (sessionId, entryId, imageIndex) =>
+        this.sessions.readImage(sessionId, entryId, imageIndex),
       shellFeed: this.shellFeed,
       sessionFeeds: this.sessionFeeds,
       shellSnapshotAt: (sequence) => {
@@ -351,12 +375,14 @@ export class DashboardServerImpl implements DashboardServer {
           command as Parameters<typeof service.renameProject>[1],
         );
       },
-      createThread: (projectId, command) => {
+      createThread: async (projectId, command, imageBuffers) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
-        return service.createThread(
-          projectId,
-          command as Parameters<typeof service.createThread>[1],
+        return this.withUploadedImages(imageBuffers, (images, release) =>
+          service.createThread(projectId, {
+            ...(command as Parameters<typeof service.createThread>[1]),
+            ...(images.length > 0 ? { images, releaseImages: release } : {}),
+          }),
         );
       },
       gitContext: async (projectId) => {
@@ -374,12 +400,14 @@ export class DashboardServerImpl implements DashboardServer {
           command as Parameters<typeof service.adoptSession>[2],
         );
       },
-      retryRun: (threadId, command) => {
+      retryRun: async (threadId, command, imageBuffers) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
-        return service.retryRun(
-          threadId,
-          command as Parameters<typeof service.retryRun>[1],
+        return this.withUploadedImages(imageBuffers, (images, release) =>
+          service.retryRun(threadId, {
+            ...(command as Parameters<typeof service.retryRun>[1]),
+            ...(images.length > 0 ? { images, releaseImages: release } : {}),
+          }),
         );
       },
       cancelRun: (runId, commandId) => {

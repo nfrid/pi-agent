@@ -9,6 +9,10 @@ const {
   beginDraftRetry,
   setDraftModel,
   clearDraft,
+  clearAttachments,
+  createThreadWithImages,
+  retryThreadWithImages,
+  imageAttachments,
   draft,
 } = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
@@ -18,6 +22,10 @@ const {
   beginDraftRetry: vi.fn(),
   setDraftModel: vi.fn(),
   clearDraft: vi.fn(),
+  clearAttachments: vi.fn(),
+  createThreadWithImages: vi.fn(),
+  retryThreadWithImages: vi.fn(),
+  imageAttachments: [] as Array<{ file: File; previewUrl: string }>,
   draft: {
     id: 'draft-1',
     projectId: 'project-1',
@@ -43,7 +51,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@pi-dashboard/client', () => ({
   createThreadMutationOptions: vi.fn(() => ({})),
   retryThreadMutationOptions: vi.fn(() => ({})),
-  dashboardHttpClient: {},
+  dashboardHttpClient: { createThreadWithImages, retryThreadWithImages },
 }));
 vi.mock('../routes/navigation', () => ({
   useDashboardNavigate: () => go,
@@ -51,7 +59,7 @@ vi.mock('../routes/navigation', () => ({
 vi.mock('./agent-thread-nav', () => ({ AgentThreadNav: () => null }));
 vi.mock('./composer/attachments', () => ({
   useImageAttachments: () => ({
-    attachments: [],
+    attachments: imageAttachments,
     dragging: false,
     fileInputRef: { current: null },
     selectImages: vi.fn(),
@@ -61,6 +69,7 @@ vi.mock('./composer/attachments', () => ({
     onDragLeave: vi.fn(),
     onDrop: vi.fn(),
     onPasteCapture: vi.fn(),
+    clearAttachments,
   }),
 }));
 vi.mock('./composer/draft', () => ({
@@ -104,6 +113,10 @@ afterEach(() => {
   beginDraftRetry.mockReset();
   setDraftModel.mockReset();
   clearDraft.mockReset();
+  clearAttachments.mockReset();
+  createThreadWithImages.mockReset();
+  retryThreadWithImages.mockReset();
+  imageAttachments.splice(0);
   vi.unstubAllGlobals();
   draft.location = undefined;
   draft.promotedThreadId = undefined;
@@ -344,6 +357,52 @@ describe('draft thread promotion', () => {
         }),
       }),
     );
+    renderer.unmount();
+  });
+
+  it('creates a draft thread with selected images through multipart upload', async () => {
+    const file = { name: 'draft.png' } as File;
+    imageAttachments.push({ file, previewUrl: 'blob:draft' });
+    createThreadWithImages.mockResolvedValue({
+      thread: { id: 'thread-image' },
+    });
+    const imageSnapshot = {
+      projects: [
+        { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+      ],
+      runtimes: [
+        {
+          model: { provider: 'test', model: 'vision', supportsImages: true },
+          modelCatalog: [
+            { provider: 'test', model: 'vision', supportsImages: true },
+          ],
+        },
+      ],
+    } as never;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={imageSnapshot} />,
+      );
+    });
+
+    await act(async () => {
+      await renderer.root.findByType('form').props.onSubmit({
+        preventDefault: vi.fn(),
+      });
+    });
+
+    expect(createThreadWithImages).toHaveBeenCalledWith(
+      'project-1',
+      expect.objectContaining({
+        commandId: 'draft-promote-draft-1',
+        prompt: 'Do the thing',
+      }),
+      [file],
+    );
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(clearAttachments).toHaveBeenCalledOnce();
+    expect(markDraftPromoted).toHaveBeenCalledWith('draft-1', 'thread-image');
     renderer.unmount();
   });
 

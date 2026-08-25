@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { dashboardHttpClient } from '@pi-dashboard/client';
+import { useEffect, useRef, useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
@@ -21,6 +22,75 @@ async function copyText(text: string) {
   input.select();
   document.execCommand('copy');
   input.remove();
+}
+
+function TranscriptImageThumbnail({
+  sessionId,
+  entryId,
+  index,
+}: {
+  sessionId: string;
+  entryId: string;
+  index: number;
+}) {
+  const [source, setSource] = useState<string>();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const load = async () => {
+      attempts += 1;
+      try {
+        const blob = await dashboardHttpClient.sessionImage(
+          sessionId,
+          entryId,
+          index,
+          controller.signal,
+        );
+        objectUrl = URL.createObjectURL(blob);
+        setSource(objectUrl);
+      } catch {
+        if (!controller.signal.aborted && attempts < 10)
+          retry = setTimeout(() => void load(), 300);
+      }
+    };
+    void load();
+    return () => {
+      controller.abort();
+      if (retry) clearTimeout(retry);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [entryId, index, sessionId]);
+  if (!source) return null;
+  const label = `Open attached image ${index + 1}`;
+  return (
+    <>
+      <button
+        type="button"
+        className="message-image-thumbnail"
+        aria-label={label}
+        onClick={() => dialogRef.current?.showModal()}
+      >
+        <img src={source} alt={`Attachment ${index + 1}`} />
+      </button>
+      <dialog
+        ref={dialogRef}
+        className="message-image-dialog"
+        aria-label={`Attached image ${index + 1}`}
+      >
+        <button
+          type="button"
+          aria-label="Close image viewer"
+          onClick={() => dialogRef.current?.close()}
+        >
+          ×
+        </button>
+        <img src={source} alt={`Attachment ${index + 1}, expanded`} />
+      </dialog>
+    </>
+  );
 }
 
 export function AssistantMessageCopyButton({ text }: { text: string }) {
@@ -300,10 +370,27 @@ function TranscriptEntry({
               />
             )}
             {item.imageCount ? (
-              <span className="message-attachment">
-                {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}
-                attached
-              </span>
+              item.sessionId &&
+              item.images?.some((image) => image.available) ? (
+                <fieldset className="message-images">
+                  <legend className="sr-only">Image attachments</legend>
+                  {item.images.map((image) =>
+                    image.available ? (
+                      <TranscriptImageThumbnail
+                        key={image.index}
+                        sessionId={item.sessionId as string}
+                        entryId={item.key}
+                        index={image.index}
+                      />
+                    ) : null,
+                  )}
+                </fieldset>
+              ) : (
+                <span className="message-attachment">
+                  {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}
+                  attached
+                </span>
+              )
             ) : null}
             {item.text && !suppressAssistantText ? (
               <Markdown>{item.text}</Markdown>

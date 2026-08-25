@@ -1,4 +1,5 @@
 import type {
+  BridgeImageAttachment,
   Checkout,
   CommandReceipt,
   Project,
@@ -72,6 +73,8 @@ export interface CreateThreadCommand {
   mode?: 'read' | 'write';
   model?: Run['model'];
   runtimeProvider?: Run['runtimeProvider'];
+  images?: readonly BridgeImageAttachment[];
+  releaseImages?: () => Promise<void>;
 }
 
 export function errorText(error: unknown): string {
@@ -157,6 +160,13 @@ export interface OrchestrationHost {
   latestRun(threadId: string): Run;
   containsPath(root: string, target: string): boolean;
   promptReceiptId(runId: string): string;
+  holdInitialImages(
+    runId: string,
+    images: readonly BridgeImageAttachment[],
+    release: () => Promise<void>,
+  ): void;
+  initialImages(runId: string): readonly BridgeImageAttachment[] | undefined;
+  releaseInitialImages(runId: string): Promise<void>;
   worktreeRecord(checkout: { id: string }): WorktreeRecord | undefined;
   storeFor(checkout: { id: string }): WorktreeStore;
   creatorFor(checkout: {

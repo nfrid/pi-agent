@@ -952,6 +952,37 @@ describe('dashboard-owned queue drafts', () => {
     expect(store.list()).toEqual([]);
   });
 
+  it('owns queued image bytes while exposing metadata-only snapshots', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'queue-image-'));
+    const file = path.join(root, 'image.png');
+    await writeFile(file, Buffer.from([1, 2, 3]));
+    const store = new QueueDraftStore();
+    store.setSession('session-image');
+    store.add({
+      id: 'command-image',
+      type: 'queue.add',
+      clientId: 'draft-image',
+      mode: 'steer',
+      text: '',
+      images: [{ type: 'image', path: file, mediaType: 'image/png' }],
+    });
+    await rm(file);
+
+    expect(store.list()).toEqual([
+      {
+        clientId: 'draft-image',
+        mode: 'steer',
+        text: '',
+        imageCount: 1,
+      },
+    ]);
+    const [owned] = store.take('steer');
+    expect(owned?.images).toEqual([
+      { type: 'image', data: 'AQID', mimeType: 'image/png' },
+    ]);
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('flushes each mode once, restores failed sends, and ignores stale sessions', () => {
     const sendUserMessage = vi.fn((text: string) => {
       if (text === 'fails') throw new Error('Pi queue rejected message');

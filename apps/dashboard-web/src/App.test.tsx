@@ -204,7 +204,11 @@ describe('image attachments', () => {
           },
         },
       ])[0],
-    ).toMatchObject({ role: 'user', imageCount: 1 });
+    ).toMatchObject({
+      role: 'user',
+      imageCount: 1,
+      images: [{ index: 0, mimeType: 'image/png', available: true }],
+    });
   });
 
   it('requires an explicit image capability from the connected runtime', () => {

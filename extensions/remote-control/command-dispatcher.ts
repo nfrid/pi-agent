@@ -85,8 +85,11 @@ export async function dispatchDashboardCommand(
         'queue-drafts-unavailable',
         'Queue drafts are unavailable for this runtime.',
       );
-    if (command.type === 'queue.add' || command.type === 'queueDraft.add')
+    if (command.type === 'queue.add' || command.type === 'queueDraft.add') {
+      if (command.images?.length && !ctx.model?.input.includes('image'))
+        throw new Error('The selected model does not support image input.');
       return { accepted: true, draft: queueDrafts.add(command) };
+    }
     if (command.type === 'queue.update' || command.type === 'queueDraft.update')
       return { accepted: true, draft: queueDrafts.update(command) };
     queueDrafts.remove(command.clientId);

@@ -131,16 +131,23 @@ export async function bindAndDeliverPrompt(
   });
   const promptReceiptId = host.promptReceiptId(run.id);
   if (!host.repository.getCommandReceipt(promptReceiptId)) {
+    const images = host.initialImages(run.id);
+    if (run.error === 'Initial images pending delivery.' && !images)
+      throw new Error(
+        'Initial image attachments were lost before delivery; retry the draft.',
+      );
     await host.registry.sendCommand(runtimeId, {
       id: promptReceiptId,
       type: 'prompt',
       text: run.initialPrompt,
+      ...(images?.length ? { images } : {}),
     });
     host.saveReceipt(promptReceiptId, 'run.prompt', { runId: run.id });
-    // A prior ACK failure is no longer actionable once this retry was
-    // acknowledged by the runtime.
-    host.repository.clearRunError(run.id);
   }
+  await host.releaseInitialImages(run.id);
+  // A prior ACK failure is no longer actionable once this retry was
+  // acknowledged by the runtime.
+  host.repository.clearRunError(run.id);
   const current = host.repository.getRun(runId);
   if (!current || TERMINAL_RUN_STATUSES.includes(current.status)) return;
   if (current.status === 'preparing')

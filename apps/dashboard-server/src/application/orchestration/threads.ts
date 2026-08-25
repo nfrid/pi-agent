@@ -154,6 +154,7 @@ export async function createThread(
 ): Promise<unknown> {
   const prior = host.receipt(command.commandId, 'thread.create');
   if (prior) {
+    await command.releaseImages?.();
     const result = prior.result as { thread: Thread; run: Run };
     return { ...result, receipt: prior };
   }
@@ -248,6 +249,12 @@ export async function createThread(
       run,
     });
   }
+  if (command.images?.length && command.releaseImages)
+    host.holdInitialImages(
+      result.run.id,
+      command.images,
+      command.releaseImages,
+    );
   host.changed();
   host.kick();
   return result;
