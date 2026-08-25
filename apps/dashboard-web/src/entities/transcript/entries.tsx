@@ -24,43 +24,56 @@ async function copyText(text: string) {
   input.remove();
 }
 
-interface TranscriptImage {
-  index: number;
-  available: boolean;
-}
-
 interface ThumbnailState {
   source?: string;
   status: 'loading' | 'ready' | 'error';
 }
 
+function imageIndexKey(
+  images: NonNullable<TranscriptModelItem['images']>,
+): string {
+  return images
+    .filter((image) => image.available)
+    .map((image) => image.index)
+    .join(',');
+}
+
 function TranscriptImageGallery({
   sessionId,
   entryId,
-  images: attachmentImages,
+  imageIndices,
+  messageTimestamp,
 }: {
   sessionId: string;
   entryId: string;
-  images: readonly TranscriptImage[];
+  imageIndices: string;
+  messageTimestamp?: number | string;
 }) {
   const images = useMemo(
-    () => attachmentImages.filter((image) => image.available),
-    [attachmentImages],
+    () =>
+      imageIndices
+        .split(',')
+        .map((index) => ({ index: Number.parseInt(index, 10) })),
+    [imageIndices],
   );
   const [thumbnails, setThumbnails] = useState<Record<number, ThumbnailState>>(
     {},
   );
   const [activePosition, setActivePosition] = useState<number>();
-  const [fullSource, setFullSource] = useState<string>();
-  const [fullStatus, setFullStatus] = useState<
-    'idle' | 'loading' | 'ready' | 'error'
-  >('idle');
+  const [fullImages, setFullImages] = useState<Record<number, ThumbnailState>>(
+    {},
+  );
+  const fullCache = useRef({
+    controllers: new Set<AbortController>(),
+    objectUrls: new Set<string>(),
+  });
   const dialogRef = useRef<HTMLDialogElement>(null);
   const pointerStart = useRef<{ id: number; x: number; y: number } | undefined>(
     undefined,
   );
   const activeImage =
     activePosition === undefined ? undefined : images[activePosition];
+  const activeFull = activeImage ? fullImages[activeImage.index] : undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -76,7 +89,11 @@ function TranscriptImageGallery({
             sessionId,
             entryId,
             image.index,
-            { signal: controller.signal, variant: 'thumbnail' },
+            {
+              signal: controller.signal,
+              variant: 'thumbnail',
+              messageTimestamp,
+            },
           );
           if (controller.signal.aborted) return;
           const source = URL.createObjectURL(blob);
@@ -87,8 +104,10 @@ function TranscriptImageGallery({
           }));
         } catch {
           if (controller.signal.aborted) return;
-          if (attempts < 10) {
-            retries.push(setTimeout(() => void load(), 300));
+          if (attempts < 70) {
+            retries.push(
+              setTimeout(() => void load(), attempts < 10 ? 300 : 1_000),
+            );
           } else {
             setThumbnails((current) => ({
               ...current,
@@ -104,7 +123,7 @@ function TranscriptImageGallery({
       for (const retry of retries) clearTimeout(retry);
       for (const source of objectUrls) URL.revokeObjectURL(source);
     };
-  }, [entryId, images, sessionId]);
+  }, [entryId, images, messageTimestamp, sessionId]);
 
   useEffect(() => {
     if (activePosition === undefined) {
@@ -115,33 +134,47 @@ function TranscriptImageGallery({
   }, [activePosition]);
 
   useEffect(() => {
-    if (!activeImage) {
-      setFullSource(undefined);
-      setFullStatus('idle');
-      return;
-    }
+    const cache = fullCache.current;
+    return () => {
+      for (const controller of cache.controllers) controller.abort();
+      for (const source of cache.objectUrls) URL.revokeObjectURL(source);
+      cache.controllers.clear();
+      cache.objectUrls.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeImage || fullImages[activeImage.index]) return;
     const controller = new AbortController();
-    let objectUrl: string | undefined;
-    setFullSource(undefined);
-    setFullStatus('loading');
+    const cache = fullCache.current;
+    cache.controllers.add(controller);
+    setFullImages((current) => ({
+      ...current,
+      [activeImage.index]: { status: 'loading' },
+    }));
     void dashboardHttpClient
       .sessionImage(sessionId, entryId, activeImage.index, {
         signal: controller.signal,
+        messageTimestamp,
       })
       .then((blob) => {
         if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setFullSource(objectUrl);
-        setFullStatus('ready');
+        const source = URL.createObjectURL(blob);
+        cache.objectUrls.add(source);
+        setFullImages((current) => ({
+          ...current,
+          [activeImage.index]: { source, status: 'ready' },
+        }));
       })
       .catch(() => {
-        if (!controller.signal.aborted) setFullStatus('error');
-      });
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [activeImage, entryId, sessionId]);
+        if (!controller.signal.aborted)
+          setFullImages((current) => ({
+            ...current,
+            [activeImage.index]: { status: 'error' },
+          }));
+      })
+      .finally(() => cache.controllers.delete(controller));
+  }, [activeImage, entryId, fullImages, messageTimestamp, sessionId]);
 
   const closeViewer = () => {
     setActivePosition(undefined);
@@ -272,16 +305,18 @@ function TranscriptImageGallery({
         {activeImage ? (
           <img
             src={
-              fullSource ?? thumbnails[activeImage.index]?.source ?? undefined
+              activeFull?.source ??
+              thumbnails[activeImage.index]?.source ??
+              undefined
             }
             alt={`Attachment ${(activePosition ?? 0) + 1}, expanded`}
           />
         ) : null}
-        {fullStatus === 'loading' ? (
+        {activeFull?.status === 'loading' ? (
           <span className="message-image-loading" role="status">
             Loading full image…
           </span>
-        ) : fullStatus === 'error' ? (
+        ) : activeFull?.status === 'error' ? (
           <span className="message-image-loading" role="status">
             Full image unavailable
           </span>
@@ -571,9 +606,11 @@ function TranscriptEntry({
               item.sessionId &&
               item.images?.some((image) => image.available) ? (
                 <TranscriptImageGallery
+                  key={`${item.sessionId}:${item.key}:${imageIndexKey(item.images)}`}
                   sessionId={item.sessionId}
                   entryId={item.key}
-                  images={item.images}
+                  imageIndices={imageIndexKey(item.images)}
+                  messageTimestamp={timestamp}
                 />
               ) : (
                 <span className="message-attachment">

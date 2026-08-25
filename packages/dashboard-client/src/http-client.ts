@@ -567,16 +567,22 @@ export class DashboardHttpClient {
     options: {
       signal?: AbortSignal;
       variant?: 'full' | 'thumbnail';
+      messageTimestamp?: number | string;
     } = {},
   ): Promise<Blob> {
     const { baseUrl } = await this.ensureEndpoint();
     const headers = new Headers();
     const token = this.tokenStore.get();
     if (token) headers.set('x-dashboard-token', token);
+    const query = new URLSearchParams();
+    if (options.variant === 'thumbnail') query.set('variant', 'thumbnail');
+    if (options.messageTimestamp !== undefined)
+      query.set('timestamp', JSON.stringify(options.messageTimestamp));
+    const search = query.size > 0 ? `?${query.toString()}` : '';
     let response: Response;
     try {
       response = await this.fetchImpl(
-        `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(entryId)}/${imageIndex}${options.variant === 'thumbnail' ? '?variant=thumbnail' : ''}`,
+        `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(entryId)}/${imageIndex}${search}`,
         { headers, ...(options.signal ? { signal: options.signal } : {}) },
       );
     } catch (cause) {

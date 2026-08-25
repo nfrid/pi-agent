@@ -121,6 +121,7 @@ export interface DashboardRouteContext {
     sessionId: string,
     entryId: string,
     imageIndex: number,
+    messageTimestamp?: number | string,
   ): Promise<{ data: Buffer; mediaType: string }>;
   readDelegateHistoryRun(
     id: string,
@@ -420,16 +421,37 @@ export const dashboardRoutes: FastifyPluginAsync<{
   );
   app.get<{
     Params: { sessionId: string; entryId: string; imageIndex: string };
-    Querystring: { variant?: string };
+    Querystring: { variant?: string; timestamp?: string };
   }>(
     '/api/sessions/:sessionId/images/:entryId/:imageIndex',
     async (request, reply) => {
       try {
         const imageIndex = Number(request.params.imageIndex);
+        if ((request.query.timestamp?.length ?? 0) > 256)
+          throw new Error('Invalid image timestamp.');
+        const parsedTimestamp =
+          request.query.timestamp === undefined
+            ? undefined
+            : (JSON.parse(request.query.timestamp) as unknown);
+        const messageTimestamp =
+          typeof parsedTimestamp === 'number' &&
+          Number.isFinite(parsedTimestamp)
+            ? parsedTimestamp
+            : typeof parsedTimestamp === 'string' &&
+                parsedTimestamp.length > 0 &&
+                parsedTimestamp.length <= 128
+              ? parsedTimestamp
+              : undefined;
+        if (
+          request.query.timestamp !== undefined &&
+          messageTimestamp === undefined
+        )
+          throw new Error('Invalid image timestamp.');
         const image = await requireOperation(context.sessionImage)(
           request.params.sessionId,
           request.params.entryId,
           imageIndex,
+          messageTimestamp,
         );
         const thumbnail = request.query.variant === 'thumbnail';
         if (request.query.variant !== undefined && !thumbnail)

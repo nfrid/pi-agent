@@ -238,8 +238,13 @@ export class DashboardServerImpl implements DashboardServer {
           before,
           this.sessionFeeds.get(id).sequence,
         ),
-      sessionImage: (sessionId, entryId, imageIndex) =>
-        this.sessions.readImage(sessionId, entryId, imageIndex),
+      sessionImage: (sessionId, entryId, imageIndex, messageTimestamp) =>
+        this.sessions.readImage(
+          sessionId,
+          entryId,
+          imageIndex,
+          messageTimestamp,
+        ),
       shellFeed: this.shellFeed,
       sessionFeeds: this.sessionFeeds,
       shellSnapshotAt: (sequence) => {

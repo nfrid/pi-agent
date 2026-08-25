@@ -29,7 +29,7 @@ describe('session index', () => {
     const startedAt = '2026-08-12T10:20:30.000Z';
     await writeFile(
       file,
-      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', timestamp: startedAt, cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry', message: { role: 'user', content: [{ type: 'image', mimeType: 'image/png', data: 'base64-bytes' }] } })}\n`,
+      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', timestamp: startedAt, cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry', message: { role: 'user', timestamp: 12345, content: [{ type: 'image', mimeType: 'image/png', data: 'base64-bytes' }] } })}\n`,
     );
     const index = new SessionIndex(root);
     await index.rebuild();
@@ -58,9 +58,22 @@ describe('session index', () => {
       data: Buffer.from('base64-bytes', 'base64'),
       mediaType: 'image/png',
     });
+    await expect(
+      index.readImage('session-id', 'live-runtime-id', 0, 12345),
+    ).resolves.toEqual({
+      data: Buffer.from('base64-bytes', 'base64'),
+      mediaType: 'image/png',
+    });
     await expect(index.readImage('session-id', 'entry', 1)).rejects.toThrow(
       'Unknown session image',
     );
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'entry-2', message: { role: 'user', timestamp: 12345, content: [{ type: 'image', mimeType: 'image/png', data: 'second-image' }] } })}\n`,
+    );
+    await expect(
+      index.readImage('session-id', 'live-runtime-id', 0, 12345),
+    ).rejects.toThrow('Unknown session image');
   });
 
   it('projects linked delegate auxiliary sessions without exposing their paths', async () => {
