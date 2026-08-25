@@ -78,6 +78,158 @@ async function sharedDrawerMotion(drawer: Locator) {
   });
 }
 
+test('mobile transcript image gallery loads, navigates, and swipes away', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  const session = {
+    id: 'session-images',
+    file: '',
+    cwd: '/tmp',
+    title: 'Image gallery',
+    updatedAt: 1,
+  };
+  await installDashboardBootstrap(
+    page,
+    {
+      serverId: 'server-images',
+      revision: 1,
+      cursor: 1,
+      runtimes: [
+        {
+          runtimeId: 'runtime-images',
+          ownership: 'external',
+          pid: 1,
+          cwd: session.cwd,
+          liveState: 'idle',
+          online: true,
+          session: { id: session.id, title: session.title, entries: [] },
+        },
+      ],
+      workspaces: [],
+      sessions: [session],
+      unread: [],
+    },
+    {
+      sessionSnapshot: {
+        entries: [
+          {
+            type: 'message',
+            id: 'entry-images',
+            message: {
+              role: 'user',
+              content: [
+                { type: 'image', mimeType: 'image/png', omitted: true },
+                { type: 'image', mimeType: 'image/png', omitted: true },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  );
+  let releaseThumbnails!: () => void;
+  const thumbnailsReady = new Promise<void>((resolve) => {
+    releaseThumbnails = resolve;
+  });
+  const image = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+  await page.route(
+    '**/api/sessions/session-images/images/**',
+    async (route) => {
+      if (new URL(route.request().url()).searchParams.has('variant'))
+        await thumbnailsReady;
+      await route.fulfill({ contentType: 'image/png', body: image });
+    },
+  );
+
+  await page.goto('/sessions/session-images');
+  await expect(
+    page.getByRole('button', { name: 'Loading attachment 1' }),
+  ).toBeVisible();
+  releaseThumbnails();
+  const first = page.getByRole('button', {
+    name: 'Open attached image 1',
+  });
+  await expect(first).toBeEnabled();
+  await first.click();
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Attached image 1 of 2',
+  });
+  await expect(dialog).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Previous attached image' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Next attached image' }),
+  ).toBeVisible();
+  const closeStyle = await page
+    .getByRole('button', { name: 'Close image viewer' })
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        width: style.width,
+        height: style.height,
+        borderRadius: style.borderRadius,
+      };
+    });
+  expect(closeStyle).toEqual({
+    width: '44px',
+    height: '44px',
+    borderRadius: '50%',
+  });
+
+  await dialog.evaluate((element) => {
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerId: 1,
+        pointerType: 'touch',
+        clientX: 220,
+        clientY: 200,
+      }),
+    );
+    element.dispatchEvent(
+      new PointerEvent('pointerup', {
+        bubbles: true,
+        pointerId: 1,
+        pointerType: 'touch',
+        clientX: 100,
+        clientY: 205,
+      }),
+    );
+  });
+  const secondDialog = page.getByRole('dialog', {
+    name: 'Attached image 2 of 2',
+  });
+  await expect(secondDialog).toBeVisible();
+
+  await secondDialog.evaluate((element) => {
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerId: 2,
+        pointerType: 'touch',
+        clientX: 160,
+        clientY: 150,
+      }),
+    );
+    element.dispatchEvent(
+      new PointerEvent('pointerup', {
+        bubbles: true,
+        pointerId: 2,
+        pointerType: 'touch',
+        clientX: 165,
+        clientY: 250,
+      }),
+    );
+  });
+  await expect(secondDialog).toBeHidden();
+});
+
 test('mobile dashboard renders and supports project-scoped new chat', async ({
   page,
 }) => {

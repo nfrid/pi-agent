@@ -15,9 +15,9 @@ import {
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   ProjectRenameCommandSchema,
-  RegenerateThreadTitleCommandSchema,
   parseRetryCommand,
   parseThreadCreateCommand,
+  RegenerateThreadTitleCommandSchema,
   RestoreThreadCommandSchema,
   SessionAdoptCommandSchema,
   SessionThreadLinksSchema,
@@ -31,6 +31,7 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
+import sharp from 'sharp';
 import { Type } from 'typebox';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { allowedOrigin, authorizeRequest } from './security.js';
@@ -419,6 +420,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
   );
   app.get<{
     Params: { sessionId: string; entryId: string; imageIndex: string };
+    Querystring: { variant?: string };
   }>(
     '/api/sessions/:sessionId/images/:entryId/:imageIndex',
     async (request, reply) => {
@@ -429,11 +431,28 @@ export const dashboardRoutes: FastifyPluginAsync<{
           request.params.entryId,
           imageIndex,
         );
+        const thumbnail = request.query.variant === 'thumbnail';
+        if (request.query.variant !== undefined && !thumbnail)
+          throw new Error('Unknown image variant.');
+        const data = thumbnail
+          ? await sharp(image.data, {
+              failOn: 'error',
+              limitInputPixels: 40_000_000,
+            })
+              .rotate()
+              .resize({
+                width: 320,
+                height: 240,
+                fit: 'inside',
+                withoutEnlargement: true,
+              })
+              .webp({ quality: 72, effort: 4 })
+              .toBuffer()
+          : image.data;
         return reply
-          .header('cache-control', 'private, no-store')
           .header('x-content-type-options', 'nosniff')
-          .type(image.mediaType)
-          .send(image.data);
+          .type(thumbnail ? 'image/webp' : image.mediaType)
+          .send(data);
       } catch {
         return reply.code(404).send({ error: 'Session image not found.' });
       }
