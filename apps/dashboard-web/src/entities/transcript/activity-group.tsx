@@ -6,7 +6,7 @@ import { Markdown } from '../../Markdown';
 import type { TranscriptModelItem } from '../../transcript';
 import { activityGroupPresentation, type TranscriptGroup } from './activity';
 import { CollapsedActivitySummary } from './activity-summary';
-import { TranscriptEntry } from './entries';
+import { AssistantMessageCopyButton, TranscriptEntry } from './entries';
 import {
   activityGroupItemTimestamps,
   transcriptItemTimestamp,
@@ -92,6 +92,9 @@ export function TranscriptActivityGroup({
         onClick={handleHeaderClick}
       >
         <span className="activity-group-accessories">
+          {preamble ? (
+            <AssistantMessageCopyButton key={preamble} text={preamble} />
+          ) : null}
           <DashboardTime
             className="transcript-time activity-time"
             timestamp={transcriptItemTimestamp(lead)}

@@ -53,7 +53,11 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
-.activity-detail .message-bubble > .transcript-time {
+.activity-group .thinking-time {
+  right: 0;
+}
+.activity-detail .message-bubble > .transcript-time,
+.activity-detail .message-bubble-accessories {
   margin-right: -14px;
 }
 .transcript-thinking-blob .markdown {

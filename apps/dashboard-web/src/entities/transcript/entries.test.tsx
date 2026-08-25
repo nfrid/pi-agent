@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { act, create } from 'react-test-renderer';
+import { describe, expect, it, vi } from 'vitest';
 import type { TranscriptModelItem } from '../../transcript';
 import { TranscriptEntry } from './entries';
+
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
 describe('transcript entries', () => {
   it('renders unresolved live assistant text in full instead of a preparing event', () => {
@@ -21,6 +24,34 @@ describe('transcript entries', () => {
     expect(markup).toContain('This needs a guarded cleanup.');
     expect(markup).not.toContain('preparing-toolcall');
     expect(markup).not.toContain('preparing tool call');
+  });
+
+  it('copies the raw assistant Markdown and confirms the action', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const text = '**Copied heading**\n\n- first\n- second';
+    const item: TranscriptModelItem = {
+      key: 'assistant-copy',
+      raw: {},
+      entry: { kind: 'assistant', speaks: true },
+      role: 'assistant',
+      text,
+    };
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<TranscriptEntry item={item} />);
+    });
+    const button = tree.root.findByProps({
+      'aria-label': 'Copy assistant message',
+    });
+    await act(async () => button.props.onClick());
+
+    expect(writeText).toHaveBeenCalledWith(text);
+    expect(
+      tree.root.findByProps({ 'aria-label': 'Copied assistant message' }),
+    ).toBeDefined();
+    act(() => tree.unmount());
   });
 
   it('renders compact colored line metrics for edit tools', () => {

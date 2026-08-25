@@ -8,6 +8,53 @@ import { ActivityStepContent } from './activity-summary';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
 
+async function copyText(text: string) {
+  if (navigator.clipboard) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.append(input);
+  input.select();
+  document.execCommand('copy');
+  input.remove();
+}
+
+export function AssistantMessageCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const label = copied ? 'Copied assistant message' : 'Copy assistant message';
+  return (
+    <button
+      type="button"
+      className="assistant-message-copy"
+      aria-label={label}
+      title={label}
+      onClick={async () => {
+        try {
+          await copyText(text);
+          setCopied(true);
+        } catch {
+          // Clipboard permission can be denied without affecting the transcript.
+        }
+      }}
+    >
+      <svg aria-hidden="true" viewBox="0 0 16 16">
+        {copied ? (
+          <path d="m3 8 3 3 7-7" />
+        ) : (
+          <>
+            <rect x="5" y="5" width="8" height="8" rx="1" />
+            <path d="M3 11H2V3a1 1 0 0 1 1-1h8v1" />
+          </>
+        )}
+      </svg>
+    </button>
+  );
+}
+
 function ThinkingBlobs({
   thinking,
   timestamp,
@@ -125,12 +172,7 @@ function TranscriptEventEntry({
       className={className}
       onToggle={(toggleEvent) => setExpanded(toggleEvent.currentTarget.open)}
     >
-      <summary>
-        {heading}
-        <span className="session-event-disclosure" aria-hidden="true">
-          ›
-        </span>
-      </summary>
+      <summary>{heading}</summary>
       {details}
     </details>
   ) : (
@@ -180,9 +222,6 @@ export function SkillInvocationView({
           </span>
           <strong>Skill · {invocation.name}</strong>
           <small>invoked</small>
-          <span className="session-event-disclosure" aria-hidden="true">
-            ›
-          </span>
         </summary>
         <div className="skill-invocation-details">
           {invocation.location ? (
@@ -246,7 +285,20 @@ function TranscriptEntry({
           <article
             className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
           >
-            <DashboardTime className="transcript-time" timestamp={timestamp} />
+            {item.role === 'assistant' && item.text ? (
+              <span className="message-bubble-accessories">
+                <AssistantMessageCopyButton key={item.text} text={item.text} />
+                <DashboardTime
+                  className="transcript-time"
+                  timestamp={timestamp}
+                />
+              </span>
+            ) : (
+              <DashboardTime
+                className="transcript-time"
+                timestamp={timestamp}
+              />
+            )}
             {item.imageCount ? (
               <span className="message-attachment">
                 {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}

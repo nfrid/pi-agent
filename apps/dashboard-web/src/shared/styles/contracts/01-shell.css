@@ -435,9 +435,48 @@ h2 {
   text-transform: none;
   white-space: nowrap;
 }
-.message-bubble > .transcript-time {
+.message-bubble > .transcript-time,
+.message-bubble-accessories {
   float: inline-end;
   margin-left: 12px;
+}
+.message-bubble-accessories {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.assistant-message-copy {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  padding: 3px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.assistant-message-copy:hover {
+  border-color: var(--line-soft);
+  background: var(--bg-alt);
+  color: var(--purple);
+}
+.assistant-message-copy:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 1px;
+}
+.assistant-message-copy svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+.message-bubble-accessories > .transcript-time {
+  margin-left: 0;
 }
 .message-attachment {
   display: inline-block;

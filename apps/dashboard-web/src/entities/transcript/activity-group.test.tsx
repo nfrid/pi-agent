@@ -57,6 +57,7 @@ describe('TranscriptActivityGroup', () => {
     expect(collapsed).toContain('class="activity-summary"');
     expect(collapsed).not.toContain('class="activity-detail"');
     expect(collapsed).toContain('class="activity-group-preamble"');
+    expect(collapsed).toContain('aria-label="Copy assistant message"');
     expect(collapsed).toContain('<strong>Inspecting the workspace</strong>');
     expect(collapsed).toContain('href="https://example.com/guide"');
     expect(collapsed).not.toContain('<small aria-hidden="true">');
@@ -71,6 +72,9 @@ describe('TranscriptActivityGroup', () => {
     expect(
       expanded.match(/<strong>Inspecting the workspace<\/strong>/g),
     ).toHaveLength(1);
+    expect(expanded.match(/aria-label="Copy assistant message"/g)).toHaveLength(
+      1,
+    );
   });
 
   it('keeps block-first Markdown semantic and outside the toggle', () => {

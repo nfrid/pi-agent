@@ -2638,6 +2638,13 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await page.setViewportSize({ width: 320, height: 720 });
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) =>
+          sessionStorage.setItem('copied-assistant-message', text),
+      },
+    });
     let cursor = 1;
     let initialSessionRequest = true;
     const originalFetch = window.fetch.bind(window);
@@ -3536,6 +3543,22 @@ test('dense mobile session keeps conversation and activity readable', async ({
     page.locator('.message-bubble').getByText('Message while reading history'),
   ).toHaveCount(1);
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
+  const finalAssistant = page
+    .locator('.message-assistant')
+    .filter({ hasText: 'Deployment resumes automatically.' });
+  await finalAssistant
+    .getByRole('button', { name: 'Copy assistant message' })
+    .click();
+  await expect(
+    finalAssistant.getByRole('button', { name: 'Copied assistant message' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      sessionStorage.getItem('copied-assistant-message'),
+    ),
+  ).toBe(
+    'Result: **ready** with `inline code`.\n\nDeployment resumes automatically.',
+  );
   expect(
     await page
       .locator('body')

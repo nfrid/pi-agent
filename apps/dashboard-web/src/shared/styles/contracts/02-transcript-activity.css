@@ -61,6 +61,7 @@
 .activity-group-accessories {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   float: inline-end;
   margin-inline-start: 12px;
   color: var(--muted);
