@@ -211,6 +211,30 @@
 .tool-specialized {
   min-width: 0;
 }
+.tool-command-presentation {
+  margin: 9px 0;
+  overflow: hidden;
+  border-left: 2px solid var(--cyan);
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+}
+.tool-command-presentation:has(.tool-terminal-result-error) {
+  border-left-color: var(--red);
+}
+.tool-command-presentation > .payload-section {
+  margin: 0;
+  border-left: 0;
+  background: transparent;
+}
+.tool-command-presentation > .tool-terminal-result {
+  border-top: 1px solid var(--line-soft);
+}
+.tool-command-description {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
 .tool-terminal-meta {
   display: flex;
   flex-wrap: wrap;

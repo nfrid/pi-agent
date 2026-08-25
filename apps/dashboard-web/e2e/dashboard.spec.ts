@@ -3202,9 +3202,27 @@ test('dense mobile session keeps conversation and activity readable', async ({
   const describedAction = failedActivityGroup.locator(
     '.activity-tool-name-described',
   );
-  await expect(describedAction).toHaveText(
-    'Run the expected failing command while preserving the complete mobile activity layout',
-  );
+  const commandDescription =
+    'Run the expected failing command while preserving the complete mobile activity layout';
+  await expect(describedAction).toHaveText(commandDescription);
+  await expect(
+    failedActivityGroup.locator('.tool-command-description'),
+  ).toHaveText(commandDescription);
+  const commandSections = await failedActivityGroup.evaluate((group) => {
+    const input = group.querySelector('.tool-command-input');
+    const result = group.querySelector('.tool-terminal-result');
+    if (!input || !result)
+      throw new Error('command inspector sections missing');
+    const inputRect = input.getBoundingClientRect();
+    const resultRect = result.getBoundingClientRect();
+    return {
+      gap: resultRect.top - inputRect.bottom,
+      inputLeft: inputRect.left,
+      resultLeft: resultRect.left,
+    };
+  });
+  expect(commandSections.gap).toBeCloseTo(0, 1);
+  expect(commandSections.inputLeft).toBeCloseTo(commandSections.resultLeft, 1);
   const describedActionLayout = await describedAction.evaluate((element) => {
     const row = element.closest('.activity-step');
     if (!row) throw new Error('described activity row missing');

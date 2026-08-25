@@ -346,7 +346,10 @@ describe('transcript payload inspection', () => {
       <ToolInspector
         tool={{
           name: 'exec',
-          arguments: { command: 'pnpm test' },
+          arguments: {
+            command: 'pnpm test',
+            description: 'Run the focused dashboard tests',
+          },
           result: {
             content: [{ type: 'text', text: 'failed output' }],
             exitCode: 2,
@@ -358,6 +361,8 @@ describe('transcript payload inspection', () => {
     );
     expect(command).toContain('aria-label="Command"');
     expect(command).toContain('aria-label="Terminal result"');
+    expect(command).toContain('class="tool-command-description"');
+    expect(command).toContain('Run the focused dashboard tests');
     expect(command).toContain('failed output');
     expect(command).not.toContain('Status: error');
     expect(command).toContain('exit 2');

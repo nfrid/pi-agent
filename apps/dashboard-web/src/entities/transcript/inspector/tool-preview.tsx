@@ -469,6 +469,10 @@ export function SpecializedToolInspector({
   }
   const command = toolCommand(tool);
   if (kind === 'command' && command) {
+    const description =
+      typeof args?.description === 'string' && args.description.trim()
+        ? args.description.trim()
+        : undefined;
     const resultNormalized = normalizedResultText(tool.result);
     const resultBounded =
       resultNormalized === undefined
@@ -487,6 +491,9 @@ export function SpecializedToolInspector({
           className="payload-section tool-command-input"
           aria-label="Command"
         >
+          {description ? (
+            <p className="tool-command-description">{description}</p>
+          ) : null}
           <pre className="tool-code-preview tool-command-preview">
             <HighlightedLine language="bash" value={command} />
           </pre>
