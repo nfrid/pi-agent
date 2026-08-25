@@ -106,13 +106,41 @@ function customOutcomeFacts(kind: CustomToolKind, result: unknown): string[] {
       !Array.isArray(details.process)
         ? (details.process as Record<string, unknown>)
         : undefined;
-    const status =
-      typeof process?.status === 'string' ? process.status : undefined;
-    const exitCode = finiteResultNumber(process, 'exitCode');
-    return [
-      status,
-      exitCode === undefined ? undefined : `exit ${exitCode}`,
-    ].filter((fact): fact is string => Boolean(fact));
+    const processes = Array.isArray(details.processes)
+      ? details.processes.filter(
+          (value): value is Record<string, unknown> =>
+            Boolean(value) &&
+            typeof value === 'object' &&
+            !Array.isArray(value),
+        )
+      : [];
+    if (process) {
+      const status =
+        typeof process.status === 'string' ? process.status : undefined;
+      const exitCode =
+        typeof process.exitCode === 'number' &&
+        Number.isFinite(process.exitCode)
+          ? process.exitCode
+          : undefined;
+      return [
+        status,
+        exitCode === undefined ? undefined : `exit ${exitCode}`,
+      ].filter((fact): fact is string => Boolean(fact));
+    }
+    if (processes.length > 0) {
+      const statusCounts = new Map<string, number>();
+      for (const item of processes) {
+        if (typeof item.status === 'string')
+          statusCounts.set(
+            item.status,
+            (statusCounts.get(item.status) ?? 0) + 1,
+          );
+      }
+      return [
+        `${processes.length} process${processes.length === 1 ? '' : 'es'}`,
+        ...[...statusCounts].map(([status, count]) => `${count} ${status}`),
+      ];
+    }
   }
   return [];
 }

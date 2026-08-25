@@ -182,7 +182,7 @@ export function activityStepParts(
       stringArg(tool.args, 'command') ??
       stringArg(tool.args, 'cmd') ??
       stringArg(tool.args, 'script');
-    if (command && !description) argument = compactActivityArgument(command);
+    if (command) argument = compactActivityArgument(command);
   } else if (name === 'inspect_shell') {
     action = 'Checking';
     const command = stringArg(tool.args, 'command');
@@ -327,7 +327,9 @@ export function activityStepParts(
         .join(' ')
     : undefined;
   return {
-    label: [action, displayedArgument, changeLabel].filter(Boolean).join(' '),
+    label: compactActivityDescription(
+      [action, displayedArgument, changeLabel].filter(Boolean).join(' '),
+    ),
     action,
     ...(displayedArgument ? { argument: displayedArgument } : {}),
     ...(lineChanges ? { lineChanges } : {}),
@@ -403,13 +405,22 @@ export function activityGroupMetadata(
     facts.lineChanges.changed ? `~${facts.lineChanges.changed}` : undefined,
     facts.lineChanges.removed ? `-${facts.lineChanges.removed}` : undefined,
   ].filter(Boolean);
+  const kindLabel =
+    group.kind === 'mutate'
+      ? 'Edited'
+      : group.kind === 'inspect'
+        ? 'Inspected'
+        : group.kind === 'validate'
+          ? 'Validated'
+          : group.kind === 'execute'
+            ? 'Ran'
+            : 'Mixed work';
   const parts = [
-    group.kind,
-    group.status,
+    kindLabel,
     `${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}`,
-    changes.length ? `${changes.join(' ')} lines` : undefined,
+    changes.length ? changes.join(' ') : undefined,
     facts.commandDurationMs > 0
-      ? `${formatCommandDuration(facts.commandDurationMs)} command time`
+      ? formatCommandDuration(facts.commandDurationMs)
       : undefined,
     providedSummary.failureCount > 0
       ? `${providedSummary.failureCount} failed`

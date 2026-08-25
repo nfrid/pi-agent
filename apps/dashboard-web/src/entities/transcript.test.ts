@@ -201,8 +201,10 @@ describe('activity row views and virtual transcript construction', () => {
         },
       }),
     ).toEqual({
-      label: 'Stage and commit changes in the current repository',
+      label:
+        'Stage and commit changes in the current repository git add . && git commit -m change',
       action: 'Stage and commit changes in the current repository',
+      argument: 'git add . && git commit -m change',
       described: true,
       role: 'command',
       state: 'complete',
@@ -432,9 +434,7 @@ describe('activity row views and virtual transcript construction', () => {
         },
         { failureCount: 1 },
       ),
-    ).toBe(
-      'mutate · settled · 3 tools · +3 ~1 lines · 3s command time · 1 failed',
-    );
+    ).toBe('Edited · 3 tools · +3 ~1 · 3s · 1 failed');
   });
 
   it('omits failure metadata when there are no failed calls', () => {
