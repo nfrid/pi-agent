@@ -3088,6 +3088,26 @@ test('dense mobile session keeps conversation and activity readable', async ({
     name: /^Steering · Focus on mobile readability\./u,
   });
   await expect(steeringOutlineItem).toHaveClass(/outline-steering/u);
+  const outlineItemLayout = await steeringOutlineItem.evaluate((item) => {
+    const label = item.querySelector('span');
+    const time = item.querySelector('.transcript-outline-time');
+    const body = item.closest('.surface-drawer-body');
+    if (!label || !time || !body)
+      throw new Error('Transcript outline item layout missing');
+    const labelStyle = getComputedStyle(label);
+    return {
+      bodyFlexGrow: getComputedStyle(body).flexGrow,
+      labelOverflow: labelStyle.overflow,
+      labelWhiteSpace: labelStyle.whiteSpace,
+      timeFloat: getComputedStyle(time).cssFloat,
+    };
+  });
+  expect(outlineItemLayout).toEqual({
+    bodyFlexGrow: '0',
+    labelOverflow: 'visible',
+    labelWhiteSpace: 'normal',
+    timeFloat: 'inline-end',
+  });
   await reopenedOutline
     .getByRole('button', { name: 'Earlier message 1', exact: true })
     .click();
@@ -4043,6 +4063,9 @@ async function installPhase6Mocks(
               )?.viewModel?.statuses ?? [];
             const activeDelegates = delegateStatuses.map((status, index) => ({
               runId: String(status.id ?? `delegate-${index + 1}`),
+              ...(typeof status.sessionId === 'string'
+                ? { sessionId: status.sessionId }
+                : {}),
               lineageId: String(status.id ?? `delegate-${index + 1}`),
               name: String(status.name ?? `Delegate ${index + 1}`),
               kind: status.kind === 'foreground' ? 'foreground' : 'background',
@@ -4456,7 +4479,7 @@ async function installPhase6Mocks(
 test('shows structured delegate content while the delegate is running @desktop', async ({
   page,
 }) => {
-  await installPhase6Mocks(page, {
+  const mocks = await installPhase6Mocks(page, {
     snapshot: phase6Snapshot({
       extensionSurfaces: [
         {
@@ -4519,6 +4542,26 @@ test('shows structured delegate content while the delegate is running @desktop',
   await expect(renderedPrompt).toBeHidden();
   await inspector.getByText('Rendered prompt').click();
   await expect(renderedPrompt).toBeVisible();
+  await expect(
+    inspector.locator('.delegate-canonical-session-transcript'),
+  ).toBeVisible();
+
+  await mocks.emit({
+    event: {
+      type: 'message.finished',
+      sessionId: 'child-session',
+      message: {
+        messageId: 'child-live-update',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Live update from child bridge' }],
+        phase: 'finished',
+      },
+    },
+  });
+  await expect(
+    inspector.getByText('Live update from child bridge'),
+  ).toBeVisible();
+  await mocks.close();
 });
 
 test('runtime restart stays on the current thread with pending status', async ({

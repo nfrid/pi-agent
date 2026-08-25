@@ -1268,10 +1268,6 @@ export class DashboardLiveStore {
       value.runtimeEpoch !== coverage.runtimeEpoch
     )
       this.resetSessionHistoryToNewest(sessionId);
-    if (value.event.type === 'session.transcript.reset') {
-      this.resetSessionHistoryToNewest(sessionId);
-      return false;
-    }
     const accepted = this.applyEventEnvelope(
       {
         cursor: sequence,

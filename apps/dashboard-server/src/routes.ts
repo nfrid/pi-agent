@@ -1,5 +1,4 @@
 import {
-  type ActiveDelegateTranscriptBaseline,
   ArchiveThreadCommandSchema,
   type AuthoritativeSessionSnapshot,
   type BridgeCommand,
@@ -116,9 +115,6 @@ export interface DashboardRouteContext {
     sequence: number,
   ): Promise<AuthoritativeSessionSnapshot>;
   usage(): Promise<{ usage: unknown; error?: string }>;
-  readActiveDelegateTranscripts(
-    id: string,
-  ): Promise<ActiveDelegateTranscriptBaseline>;
   readDelegateHistory(id: string): Promise<DelegateHistoryResponse>;
   readDelegateHistoryRun(
     id: string,
@@ -606,16 +602,6 @@ export const dashboardRoutes: FastifyPluginAsync<{
     );
   }
 
-  app.get<{ Params: { id: string } }>(
-    '/api/sessions/:id/delegate-transcripts/active',
-    async (request, reply) => {
-      try {
-        return await context.readActiveDelegateTranscripts(request.params.id);
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
   app.get<{ Params: { id: string } }>(
     '/api/sessions/:id/delegate-history',
     async (request, reply) => {

@@ -301,44 +301,6 @@ describe('DashboardHttpClient command requests', () => {
     ).toBeUndefined();
   });
 
-  it('fetches and validates the active delegate transcript baseline', async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            version: 1,
-            serverId: 'server-1',
-            cursor: 4,
-            sessionId: 'session-1',
-            runtimeId: 'runtime-1',
-            runtimeEpoch: 'epoch-1',
-            runtimeSeq: 3,
-            runs: [],
-          }),
-          { status: 200 },
-        ),
-    );
-    const client = new DashboardHttpClient({
-      fetch,
-      tokenStore: {
-        get: () => undefined,
-        set: () => undefined,
-        clear: () => undefined,
-      },
-    });
-    await expect(
-      client.activeDelegateTranscripts('session-1'),
-    ).resolves.toMatchObject({
-      sessionId: 'session-1',
-      runtimeEpoch: 'epoch-1',
-      runs: [],
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/sessions/session-1/delegate-transcripts/active',
-      expect.objectContaining({ headers: expect.anything() }),
-    );
-  });
-
   it('fetches and validates persisted delegate history', async () => {
     const fetch = vi.fn(
       async () =>

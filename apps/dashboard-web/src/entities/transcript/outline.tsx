@@ -127,13 +127,14 @@ export function TranscriptOutline({
               onJump(landmark);
               onOpenChange?.(false);
             }}
+            aria-label={landmark.label}
           >
-            <i aria-hidden="true" />
-            <span>{landmark.label}</span>
             <DashboardTime
               className="transcript-outline-time"
               timestamp={landmark.timestamp}
             />
+            <i aria-hidden="true" />
+            <span>{landmark.label}</span>
           </button>
         ))
       ) : (

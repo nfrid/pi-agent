@@ -1598,6 +1598,25 @@ describe('remote-control bridge', () => {
                 },
               ],
             },
+            {
+              id: 'ds-hosted',
+              runId: 'run-hosted',
+              sessionId: 'child-session-1',
+              lineageId: 'lineage-hosted',
+              name: 'Hosted worker',
+              kind: 'background',
+              state: 'running',
+              createdAt: 1,
+              allowWrites: false,
+              transcript: [
+                {
+                  id: 'hosted-tool',
+                  type: 'tool',
+                  label: 'read child source',
+                  status: 'completed',
+                },
+              ],
+            },
           ],
         },
       },
@@ -1634,6 +1653,7 @@ describe('remote-control bridge', () => {
         (frame) => (frame.event as { entry: { id: string } }).entry.id,
       ),
     ).toEqual(['task', 'tool-1']);
+    expect(JSON.stringify(replay)).not.toContain('hosted-tool');
     expect(
       received.findIndex(
         (frame) =>

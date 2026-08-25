@@ -304,6 +304,14 @@
   overscroll-behavior: contain;
   padding: 0 18px;
 }
+@media (pointer: fine) and (min-width: 821px) {
+  .surface-drawer.delegate-transcript-drawer {
+    width: min(1017px, 100vw);
+  }
+  .delegate-transcript-drawer .delegate-transcript-inspector-body {
+    padding-right: 238px;
+  }
+}
 .delegate-inspector-header-content {
   display: flex;
   align-items: center;

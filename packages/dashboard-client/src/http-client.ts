@@ -1,5 +1,4 @@
 import {
-  type ActiveDelegateTranscriptBaseline,
   type AuthoritativeSessionSnapshot,
   type BridgeCommand,
   type BrowserSnapshot,
@@ -36,7 +35,6 @@ import {
   type StopRuntimeMutationOutput,
   type Thread,
   type ThreadCreateCommand,
-  tryParseActiveDelegateTranscriptBaseline,
   tryParseAuthoritativeSessionSnapshot,
   tryParseBrowserSnapshot,
   tryParseDelegateHistoryResponse,
@@ -560,23 +558,6 @@ export class DashboardHttpClient {
     signal?: AbortSignal,
   ): Promise<AuthoritativeSessionSnapshot> {
     return this.session(id, signal, before);
-  }
-
-  async activeDelegateTranscripts(
-    id: string,
-    signal?: AbortSignal,
-  ): Promise<ActiveDelegateTranscriptBaseline> {
-    const value = await this.request<unknown>(
-      `/api/sessions/${encodeURIComponent(id)}/delegate-transcripts/active`,
-      { signal },
-    );
-    const response = tryParseActiveDelegateTranscriptBaseline(value);
-    if (!response)
-      throw malformedOutput(
-        'Invalid active delegate transcript response.',
-        value,
-      );
-    return response;
   }
 
   async delegateHistory(

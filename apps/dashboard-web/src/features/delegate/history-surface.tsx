@@ -1,11 +1,9 @@
 import {
-  activeDelegateTranscriptQueryOptions,
   type DashboardLiveStore,
   dashboardHttpClient,
   dashboardQueryKeys,
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
-  useDashboardStore,
 } from '@pi-dashboard/client';
 import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
@@ -22,10 +20,8 @@ import {
   delegateHistoryRevisionChanged,
 } from './history-refresh';
 import {
-  activeDelegateTranscriptBaselineFor,
   delegateSurface,
   isActiveDelegateState,
-  overlayActiveDelegateTranscripts,
   reconcileDelegateLiveRuns,
   runtimePauseStatus,
   shouldClearDelegateDetailSelection,
@@ -50,85 +46,8 @@ export function DelegateHistorySurface({
     delegateHistoryQueryOptions(dashboardHttpClient, id),
   );
   const queryClient = useQueryClient();
-  const sessionSyncGeneration = useDashboardStore(
-    store,
-    (state) => state.sessionSyncById[id]?.generation ?? 0,
-  );
-  const serverId = useDashboardStore(store, (state) => state.serverId);
   const live = delegateSurface(runtime);
   const liveRows = live?.model.statuses ?? [];
-  const activeRows = liveRows.filter((row) =>
-    isActiveDelegateState(row.state, row.pauseState),
-  );
-  const activeTranscriptQuery = useQuery({
-    ...activeDelegateTranscriptQueryOptions(dashboardHttpClient, id),
-    enabled: activeRows.length > 0,
-  });
-  const baseline = activeDelegateTranscriptBaselineFor(
-    activeTranscriptQuery.data,
-    {
-      sessionId: id,
-      serverId,
-      runtimeId: runtime?.runtimeId,
-      fetching: activeTranscriptQuery.isFetching,
-    },
-  );
-  const baselineRows = overlayActiveDelegateTranscripts(liveRows, baseline);
-  const baselineMissingRef = useRef('');
-  useEffect(() => {
-    if (!baseline) return;
-    const baselineRuns = new Set(
-      baseline.runs.map((run) => `${run.lineageId}:${run.runId}`),
-    );
-    const missing = activeRows
-      .filter((row) => !baselineRuns.has(`${row.lineageId}:${row.runId}`))
-      .map((row) => `${row.lineageId}:${row.runId}`)
-      .sort()
-      .join('|');
-    if (!missing) {
-      baselineMissingRef.current = '';
-      return;
-    }
-    const missingKey = `${id}:${missing}`;
-    if (missingKey === baselineMissingRef.current) return;
-    baselineMissingRef.current = missingKey;
-    void queryClient.invalidateQueries({
-      queryKey: dashboardQueryKeys.activeDelegateTranscripts(id),
-    });
-  }, [activeRows, baseline, id, queryClient]);
-  const previousRecovery = useRef({
-    serverId,
-    sessionSyncGeneration,
-    sessionChange,
-  });
-  useEffect(() => {
-    const previous = previousRecovery.current;
-    previousRecovery.current = {
-      serverId,
-      sessionSyncGeneration,
-      sessionChange,
-    };
-    if (
-      previous.serverId === serverId &&
-      previous.sessionSyncGeneration === sessionSyncGeneration &&
-      previous.sessionChange === sessionChange
-    )
-      return;
-    void queryClient.invalidateQueries({
-      queryKey: dashboardQueryKeys.activeDelegateTranscripts(id),
-    });
-  }, [id, queryClient, serverId, sessionChange, sessionSyncGeneration]);
-  useEffect(() => {
-    if (activeRows.length === 0) return;
-    const refresh = () => {
-      if (document.visibilityState !== 'visible') return;
-      void queryClient.invalidateQueries({
-        queryKey: dashboardQueryKeys.activeDelegateTranscripts(id),
-      });
-    };
-    document.addEventListener('visibilitychange', refresh);
-    return () => document.removeEventListener('visibilitychange', refresh);
-  }, [activeRows.length, id, queryClient]);
   const [detailSelection, setDetailSelection] = useState<{
     sessionId: string;
     lineageId: string;
@@ -295,16 +214,7 @@ export function DelegateHistorySurface({
       rendererId: DELEGATE_RENDERER_ID,
       viewModel: { version: 1, statuses: [] },
     } satisfies ExtensionSurface);
-  const renderedSurface =
-    baseline === undefined || surface.rendererId !== DELEGATE_RENDERER_ID
-      ? surface
-      : {
-          ...surface,
-          viewModel: {
-            ...(surface.viewModel as Record<string, unknown>),
-            statuses: baselineRows,
-          },
-        };
+  const renderedSurface = surface;
   const slot = (
     <div className="extension-surface-slot">
       <DelegateSurface

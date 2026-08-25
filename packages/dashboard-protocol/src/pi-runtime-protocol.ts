@@ -3,7 +3,6 @@
 export { MAX_ID } from './limits.js';
 export {
   isBridgeEvent,
-  parseActiveDelegateTranscriptBaseline,
   parseBridgeCommand,
   parseBridgeEvent,
   parseBridgeFrame,
@@ -15,7 +14,6 @@ export {
   parseRuntimeSnapshotPatch,
   parseSessionSnapshotPatch,
   serializeFrame,
-  tryParseActiveDelegateTranscriptBaseline,
   tryParseBridgeCommand,
   tryParseBridgeEvent,
   tryParseBridgeFrame,
@@ -31,7 +29,6 @@ export { redactBridgeEvent, redactImageData } from './redaction.js';
 export type {
   ActionCommandEnvelope,
   ActionInvocation,
-  ActiveDelegateTranscriptBaseline,
   BridgeCommand,
   BridgeCommandBase,
   BridgeEvent,
@@ -78,7 +75,6 @@ export type {
 export {
   ActionCommandEnvelopeSchema,
   ActionInvocationSchema,
-  ActiveDelegateTranscriptBaselineSchema,
   BridgeCommandSchema,
   BridgeEventSchema,
   BridgeFrameSchema,

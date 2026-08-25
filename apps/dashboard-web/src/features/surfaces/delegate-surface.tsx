@@ -394,7 +394,7 @@ export function DelegateSurface({
         (historyIncomplete ? 1 : 0) +
         (historyLoading || historyError ? 1 : 0)
       }
-      drawerClassName="surface-drawer work-surface-drawer delegate-surface-drawer"
+      drawerClassName={`surface-drawer work-surface-drawer delegate-surface-drawer${inspectorContent ? ' delegate-transcript-drawer' : ''}`}
       headerStats={statsView}
       paused={pausedAt !== undefined}
       drawerTitle={
@@ -405,7 +405,10 @@ export function DelegateSurface({
       drawerContent={inspectorContent}
       hideDrawerHeader={inspectorContent !== undefined}
       onDrawerClose={() => {
-        setInspectorOpen(false);
+        if (inspectorOpen) {
+          setInspectorOpen(false);
+          return false;
+        }
         setSelectedLineageId(undefined);
         setLastInspectorRow(undefined);
       }}

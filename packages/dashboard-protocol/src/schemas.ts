@@ -1009,23 +1009,6 @@ const DelegateLiveRunSchema = Type.Object(
 );
 export type DelegateLiveRun = Static<typeof DelegateLiveRunSchema>;
 
-export const ActiveDelegateTranscriptBaselineSchema = Type.Object(
-  {
-    version: Type.Literal(1),
-    serverId: IdentifierSchema,
-    cursor: Type.Integer({ minimum: 0 }),
-    sessionId: IdentifierSchema,
-    runtimeId: Type.Optional(IdentifierSchema),
-    runtimeEpoch: Type.Optional(IdentifierSchema),
-    runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
-    runs: Type.Readonly(Type.Array(DelegateLiveRunSchema, { maxItems: 64 })),
-  },
-  { additionalProperties: false },
-);
-export type ActiveDelegateTranscriptBaseline = Static<
-  typeof ActiveDelegateTranscriptBaselineSchema
->;
-
 export const DelegateTranscriptUpdatedEventSchema = Type.Object(
   {
     type: Type.Literal('delegate.transcript.updated'),
@@ -1081,26 +1064,6 @@ const SessionCompactedEventSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export const SessionTranscriptResetReasonSchema = Type.Union([
-  Type.Literal('source-rewrite'),
-  Type.Literal('source-truncated'),
-  Type.Literal('source-overflow'),
-  Type.Literal('entry-too-large'),
-]);
-export type SessionTranscriptResetReason = Static<
-  typeof SessionTranscriptResetReasonSchema
->;
-const SessionTranscriptResetEventSchema = Type.Object(
-  {
-    type: Type.Literal('session.transcript.reset'),
-    sessionId: IdentifierSchema,
-    reason: SessionTranscriptResetReasonSchema,
-  },
-  { additionalProperties: false },
-);
-export type SessionTranscriptResetEvent = Static<
-  typeof SessionTranscriptResetEventSchema
->;
 const MessageEventSchema = Type.Object(
   {
     type: Type.Union([
@@ -1175,7 +1138,6 @@ export const BridgeEventSchema = Type.Union([
   RuntimeStateEventSchema,
   SessionEventSchema,
   SessionCompactedEventSchema,
-  SessionTranscriptResetEventSchema,
   MessageEventSchema,
   ToolEventSchema,
   DelegateTranscriptUpdatedEventSchema,
@@ -1198,7 +1160,6 @@ export type BridgeEvent =
       session: SessionSnapshot;
     })
   | Static<typeof SessionCompactedEventSchema>
-  | Static<typeof SessionTranscriptResetEventSchema>
   | Static<typeof MessageEventSchema>
   | Static<typeof ToolEventSchema>
   | Static<typeof DelegateTranscriptUpdatedEventSchema>
