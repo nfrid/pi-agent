@@ -559,6 +559,33 @@ export class DashboardHttpClient {
     return this.session(id, signal, before);
   }
 
+  async sessionImage(
+    sessionId: string,
+    entryId: string,
+    imageIndex: number,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const { baseUrl } = await this.ensureEndpoint();
+    const headers = new Headers();
+    const token = this.tokenStore.get();
+    if (token) headers.set('x-dashboard-token', token);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(entryId)}/${imageIndex}`,
+        { headers, ...(signal ? { signal } : {}) },
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    if (!response.ok)
+      throw new DashboardHttpError(
+        response.status,
+        'Session image is unavailable.',
+      );
+    return response.blob();
+  }
+
   async delegateHistory(
     id: string,
     signal?: AbortSignal,
@@ -683,6 +710,20 @@ export class DashboardHttpClient {
     );
   }
 
+  async createThreadWithImages(
+    projectId: string,
+    command: ThreadCreateCommand,
+    images: readonly File[],
+  ): Promise<{ thread: Thread; run: Run; receipt: CommandReceipt }> {
+    const body = new FormData();
+    body.append('command', JSON.stringify(command));
+    for (const image of images) body.append('images', image, image.name);
+    return this.multipart(
+      `/api/projects/${encodeURIComponent(projectId)}/threads`,
+      body,
+    );
+  }
+
   async listSessionThreadLinks(
     signal?: AbortSignal,
   ): Promise<SessionThreadLink[]> {
@@ -747,6 +788,20 @@ export class DashboardHttpClient {
       method: 'POST',
       body: JSON.stringify(command),
     });
+  }
+
+  async retryThreadWithImages(
+    threadId: string,
+    command: RetryCommand,
+    images: readonly File[],
+  ): Promise<{ thread: Thread; run: Run; receipt?: CommandReceipt }> {
+    const body = new FormData();
+    body.append('command', JSON.stringify(command));
+    for (const image of images) body.append('images', image, image.name);
+    return this.multipart(
+      `/api/threads/${encodeURIComponent(threadId)}/retry`,
+      body,
+    );
   }
 
   async cancelRun(

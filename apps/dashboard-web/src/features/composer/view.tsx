@@ -271,6 +271,7 @@ export function Composer({
           id: queueId,
           mode: mode === 'prompt' ? ('followUp' as const) : mode,
           text: trimmedText,
+          ...(attachments.length > 0 ? { imageCount: attachments.length } : {}),
         };
         // Install the row before waiting for the HTTP acknowledgement. The
         // runtime event and command response are independent streams and may
@@ -278,15 +279,23 @@ export function Composer({
         // the authoritative server queue when the event arrives.
         addOptimistic(queuedItem);
         try {
-          await commandMutation.mutateAsync({
-            runtimeId: runtime.runtimeId,
-            command: queueCommand(
-              'queue.add',
-              queueId,
-              queuedItem.mode,
-              trimmedText,
-            ),
-          });
+          const queuedCommand = queueCommand(
+            'queue.add',
+            queueId,
+            queuedItem.mode,
+            trimmedText,
+          );
+          if (attachments.length > 0)
+            await dashboardHttpClient.sendCommandWithImages(
+              runtime.runtimeId,
+              queuedCommand,
+              attachments.map((attachment) => attachment.file),
+            );
+          else
+            await commandMutation.mutateAsync({
+              runtimeId: runtime.runtimeId,
+              command: queuedCommand,
+            });
         } catch (cause) {
           if (mountedRef.current) rejectOptimistic(queueId);
           throw cause;

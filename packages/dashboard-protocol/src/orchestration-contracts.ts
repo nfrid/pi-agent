@@ -271,7 +271,7 @@ export const RunSchema = Type.Object(
     runtimeId: Type.Optional(IdentifierSchema),
     piSessionId: Type.Optional(IdentifierSchema),
     /** Complete user intent; never replace this with a rendered transcript. */
-    initialPrompt: Type.String({ minLength: 1, maxLength: MAX_TEXT }),
+    initialPrompt: Type.String({ maxLength: MAX_TEXT }),
     model: Type.Optional(ModelSelectionSchema),
     status: RunStatusSchema,
     createdAt: TimestampSchema,

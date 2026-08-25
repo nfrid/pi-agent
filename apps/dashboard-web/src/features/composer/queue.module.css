@@ -65,6 +65,12 @@
   white-space: nowrap;
 }
 
+.text small {
+  display: block;
+  color: var(--cyan);
+  font-size: 9px;
+}
+
 .item input {
   min-width: 0;
   width: 100%;

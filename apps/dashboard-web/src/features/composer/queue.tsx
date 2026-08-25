@@ -20,6 +20,7 @@ export type QueuedMessage = {
   id: string;
   mode: 'steer' | 'followUp';
   text: string;
+  imageCount?: number;
 };
 
 export function queuedMessagesForRuntime(
@@ -39,7 +40,14 @@ export function queuedMessagesForRuntime(
     )
       return [];
     seen.add(item.clientId);
-    return [{ id: item.clientId, mode: item.mode, text: item.text }];
+    return [
+      {
+        id: item.clientId,
+        mode: item.mode,
+        text: item.text,
+        ...(item.imageCount ? { imageCount: item.imageCount } : {}),
+      },
+    ];
   });
 }
 
@@ -116,10 +124,10 @@ export function shouldShowQueuePanel(
 export function shouldQueueComposerMessage(
   liveState: RuntimeSnapshot['liveState'],
   mode: 'prompt' | 'steer' | 'followUp',
-  hasAttachments: boolean,
+  _hasAttachments: boolean,
   settledBackground = false,
 ): boolean {
-  if (settledBackground || hasAttachments) return false;
+  if (settledBackground) return false;
   if (liveState === 'compacting') return true;
   return liveState === 'working' && mode !== 'followUp';
 }
@@ -211,7 +219,7 @@ export function QueuePanel({
   };
   const save = async (item: QueuedMessage) => {
     const text = editingText.trim();
-    if (!text || mutation.isPending) return;
+    if ((!text && !item.imageCount) || mutation.isPending) return;
     setError(undefined);
     try {
       await mutation.mutateAsync({
@@ -277,13 +285,24 @@ export function QueuePanel({
                   disabled={mutation.isPending}
                 />
               ) : (
-                <span className={styles.text}>{item.text}</span>
+                <span className={styles.text}>
+                  {item.text}
+                  {item.imageCount ? (
+                    <small>
+                      {item.imageCount} image
+                      {item.imageCount === 1 ? '' : 's'} attached
+                    </small>
+                  ) : null}
+                </span>
               )}
               <div className={styles.actions}>
                 {editing ? (
                   <AriaButton
                     type="button"
-                    isDisabled={mutation.isPending || !editingText.trim()}
+                    isDisabled={
+                      mutation.isPending ||
+                      (!editingText.trim() && !item.imageCount)
+                    }
                     onPress={() => void save(item)}
                   >
                     Save

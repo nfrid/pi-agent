@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
 import type {
+  BridgeImageAttachment,
   Checkout,
   CommandReceipt,
   Project,
@@ -86,6 +87,13 @@ export class OrchestrationService implements OrchestrationHost {
   readonly registryTasks = new Set<Promise<void>>();
   /** Registry callbacks for one durable run are reduced in bridge arrival order. */
   readonly registryRunQueues = new Map<string, Promise<void>>();
+  private readonly pendingInitialImages = new Map<
+    string,
+    {
+      images: readonly BridgeImageAttachment[];
+      release: () => Promise<void>;
+    }
+  >();
   /** Concurrent cancellation requests for one command share all side effects. */
   readonly cancelTasks = new Map<
     string,
@@ -196,14 +204,26 @@ export class OrchestrationService implements OrchestrationHost {
 
   async retry(
     threadId: string,
-    command: { commandId: string; prompt?: string; model?: Run['model'] },
+    command: {
+      commandId: string;
+      prompt?: string;
+      model?: Run['model'];
+      images?: readonly BridgeImageAttachment[];
+      releaseImages?: () => Promise<void>;
+    },
   ): Promise<unknown> {
     return this.retryRun(threadId, command);
   }
 
   async retryRun(
     threadId: string,
-    command: { commandId: string; prompt?: string; model?: Run['model'] },
+    command: {
+      commandId: string;
+      prompt?: string;
+      model?: Run['model'];
+      images?: readonly BridgeImageAttachment[];
+      releaseImages?: () => Promise<void>;
+    },
   ): Promise<unknown> {
     return retryRunLifecycle(this, threadId, command);
   }
@@ -355,6 +375,27 @@ export class OrchestrationService implements OrchestrationHost {
     return `run-prompt:${runId}`;
   }
 
+  holdInitialImages(
+    runId: string,
+    images: readonly BridgeImageAttachment[],
+    release: () => Promise<void>,
+  ): void {
+    if (images.length === 0) return;
+    this.pendingInitialImages.set(runId, { images: [...images], release });
+    this.repository.setRunError(runId, 'Initial images pending delivery.');
+  }
+
+  initialImages(runId: string): readonly BridgeImageAttachment[] | undefined {
+    return this.pendingInitialImages.get(runId)?.images;
+  }
+
+  async releaseInitialImages(runId: string): Promise<void> {
+    const pending = this.pendingInitialImages.get(runId);
+    if (!pending) return;
+    await pending.release();
+    this.pendingInitialImages.delete(runId);
+  }
+
   receipt(id: string, type: string): CommandReceipt | undefined {
     const value = this.repository.getCommandReceipt(id);
     if (value && value.commandType !== type)
@@ -481,6 +522,7 @@ export class OrchestrationService implements OrchestrationHost {
       /* another reconciler won */
     }
     this.repository.setRunError(id, boundedErrorText(error));
+    void this.releaseInitialImages(id).catch(() => undefined);
   }
 
   transitionIfPossible(id: string, status: Run['status']): void {

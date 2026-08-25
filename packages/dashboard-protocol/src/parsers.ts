@@ -352,21 +352,34 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
       clientId: string;
       text?: string;
       mode?: QueueDraftMode;
+      images?: unknown;
     };
+    const adding =
+      command.type === 'queue.add' || command.type === 'queueDraft.add';
     if (
       !onlyKeys(
         command as Record<string, unknown>,
-        new Set(['id', 'type', 'clientId', 'mode', 'text']),
+        new Set([
+          'id',
+          'type',
+          'clientId',
+          'mode',
+          'text',
+          ...(adding ? ['images'] : []),
+        ]),
       ) ||
       !safeIdentifier(queueCommand.clientId, MAX_ID)
     )
       throw new Error('Invalid queue draft client id.');
-    if (queueCommand.text !== undefined) {
-      const text = queueCommand.text.trim();
-      if (!text) throw new Error('Queue draft text is required.');
-      return { ...command, text } as BridgeCommand;
-    }
-    return command;
+    const text = queueCommand.text?.trim() ?? '';
+    const images = adding ? validateImages(queueCommand.images) : [];
+    if (adding && !text && images.length === 0)
+      throw new Error('Queue draft text or an image is required.');
+    return {
+      ...command,
+      ...(queueCommand.text === undefined ? {} : { text }),
+      ...(images.length > 0 ? { images } : {}),
+    } as BridgeCommand;
   }
   if (
     command.type === 'prompt' ||

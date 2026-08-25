@@ -2,6 +2,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import type { TranscriptModelItem } from '../../transcript';
+
+const sessionImage = vi.hoisted(() => vi.fn());
+vi.mock('@pi-dashboard/client', () => ({
+  dashboardHttpClient: { sessionImage },
+}));
+
 import { TranscriptEntry } from './entries';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -52,6 +58,43 @@ describe('transcript entries', () => {
       tree.root.findByProps({ 'aria-label': 'Copied assistant message' }),
     ).toBeDefined();
     act(() => tree.unmount());
+  });
+
+  it('loads authenticated image thumbnails for transcript attachments', async () => {
+    sessionImage.mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
+    const createObjectURL = vi.fn(() => 'blob:transcript-image');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+    const item: TranscriptModelItem = {
+      key: 'user-image-entry',
+      sessionId: 'session-1',
+      raw: {},
+      entry: { kind: 'other' },
+      role: 'user',
+      imageCount: 1,
+      images: [{ index: 0, mimeType: 'image/png', available: true }],
+    };
+    let tree!: ReturnType<typeof create>;
+
+    await act(async () => {
+      tree = create(<TranscriptEntry item={item} />);
+      await Promise.resolve();
+    });
+
+    expect(sessionImage).toHaveBeenCalledWith(
+      'session-1',
+      'user-image-entry',
+      0,
+      expect.any(AbortSignal),
+    );
+    expect(
+      tree.root.findByProps({ 'aria-label': 'Open attached image 1' }),
+    ).toBeDefined();
+    expect(
+      tree.root.findAllByProps({ src: 'blob:transcript-image' }),
+    ).toHaveLength(2);
+    act(() => tree.unmount());
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:transcript-image');
   });
 
   it('renders compact colored line metrics for edit tools', () => {

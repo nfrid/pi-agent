@@ -76,6 +76,11 @@ export interface SessionHistoryPage {
   leadingContinuation?: boolean;
 }
 
+export interface SessionImage {
+  data: Buffer;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+}
+
 export interface SessionEntriesResult {
   metadata: SessionIndexEntry;
   entries: unknown[];
@@ -950,6 +955,72 @@ export class SessionIndex {
     if (before !== undefined && isLegacyHistoryCursor(before))
       return this.readEntriesLegacy(id, before, leafId, options);
     return this.readIndexedEntries(id, before, leafId, options);
+  }
+
+  /** Read one image from a proven session entry without exposing file paths. */
+  async readImage(
+    id: string,
+    entryId: string,
+    imageIndex: number,
+  ): Promise<SessionImage> {
+    if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex > 3)
+      throw new Error('Invalid session image.');
+    const indexed = await this.currentIndexedFile(id);
+    const descriptor = indexed.historyIndex.byId.get(entryId);
+    if (!descriptor) throw new Error('Unknown session image.');
+    const handle = await fs.open(indexed.file, 'r');
+    try {
+      const size = descriptor.end - descriptor.start;
+      if (size <= 0 || size > INDEX_MAX_LINE_BYTES)
+        throw new Error('Invalid session image.');
+      const buffer = Buffer.allocUnsafe(size);
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        size,
+        descriptor.start,
+      );
+      if (bytesRead !== size) throw new Error('Session file changed.');
+      const entry = JSON.parse(buffer.toString('utf8').trim()) as unknown;
+      if (!isRecord(entry)) throw new Error('Invalid session image.');
+      const message = isRecord(entry.message) ? entry.message : entry;
+      if (!Array.isArray(message.content))
+        throw new Error('Unknown session image.');
+      const images = message.content.filter(
+        (part): part is Record<string, unknown> =>
+          isRecord(part) && part.type === 'image',
+      );
+      const image = images[imageIndex];
+      if (!image) throw new Error('Unknown session image.');
+      const source = isRecord(image.source) ? image.source : undefined;
+      const data =
+        typeof image.data === 'string'
+          ? image.data
+          : source?.type === 'base64' && typeof source.data === 'string'
+            ? source.data
+            : undefined;
+      const mediaType =
+        typeof image.mimeType === 'string'
+          ? image.mimeType
+          : typeof source?.media_type === 'string'
+            ? source.media_type
+            : typeof source?.mediaType === 'string'
+              ? source.mediaType
+              : undefined;
+      if (
+        !data ||
+        (mediaType !== 'image/png' &&
+          mediaType !== 'image/jpeg' &&
+          mediaType !== 'image/webp')
+      )
+        throw new Error('Unknown session image.');
+      const decoded = Buffer.from(data, 'base64');
+      if (decoded.length === 0 || decoded.length > 5 * 1024 * 1024)
+        throw new Error('Invalid session image.');
+      return { data: decoded, mediaType };
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
   }
 
   async readSelectedBranchEntries(

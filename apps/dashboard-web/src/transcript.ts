@@ -58,8 +58,15 @@ export type TranscriptEvent =
       details?: unknown;
     };
 
+export interface TranscriptImage {
+  index: number;
+  mimeType?: string;
+  available: boolean;
+}
+
 export interface TranscriptModelItem {
   key: string;
+  sessionId?: string;
   entry: ActivityTranscriptEntry;
   raw: unknown;
   text?: string;
@@ -67,6 +74,7 @@ export interface TranscriptModelItem {
   role?: 'user' | 'assistant';
   deliveryMode?: TranscriptDeliveryMode;
   imageCount?: number;
+  images?: readonly TranscriptImage[];
   event?: TranscriptEvent;
   /** Canonical domain tool semantics used by the inspector presentation. */
   tool?: TranscriptRenderToolItem;
@@ -171,15 +179,27 @@ function messageThinking(content: unknown): string[] {
     .filter((thinking) => thinking.length > 0);
 }
 
-function messageImageCount(content: unknown): number {
-  return Array.isArray(content)
-    ? content.filter(
-        (part) =>
-          part &&
-          typeof part === 'object' &&
-          (part as Record<string, unknown>).type === 'image',
-      ).length
-    : 0;
+function messageImages(content: unknown): TranscriptImage[] {
+  if (!Array.isArray(content)) return [];
+  let index = 0;
+  return content.flatMap((part) => {
+    if (
+      !part ||
+      typeof part !== 'object' ||
+      (part as Record<string, unknown>).type !== 'image'
+    )
+      return [];
+    const image = part as Record<string, unknown>;
+    const result = {
+      index,
+      ...(typeof image.mimeType === 'string'
+        ? { mimeType: image.mimeType }
+        : {}),
+      available: image.omitted === true || typeof image.data === 'string',
+    };
+    index += 1;
+    return [result];
+  });
 }
 
 function todoSnapshot(
@@ -375,6 +395,7 @@ export function toTranscriptEntries(
   options: { leadingContinuation?: boolean } = {},
 ): TranscriptModelItem[] {
   const result: TranscriptModelItem[] = [];
+  const sessionId = isTranscriptProjection(input) ? input.sessionId : undefined;
   let previousTodo: readonly TranscriptTodoTask[] | undefined;
   let hasConversation = false;
   for (const item of renderItems(input)) {
@@ -512,7 +533,8 @@ export function toTranscriptEntries(
     }
     const text = messageText(item.content);
     const thinking = messageThinking(item.content);
-    const imageCount = messageImageCount(item.content);
+    const images = messageImages(item.content);
+    const imageCount = images.length;
     const raw = messageRaw(item);
     const role =
       item.role === 'user'
@@ -530,7 +552,8 @@ export function toTranscriptEntries(
         ...(item.deliveryMode === undefined
           ? {}
           : { deliveryMode: item.deliveryMode }),
-        ...(imageCount > 0 ? { imageCount } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        ...(imageCount > 0 ? { imageCount, images } : {}),
       });
       continue;
     }
@@ -580,7 +603,8 @@ export function toTranscriptEntries(
       text: visibleText,
       ...(thinking.length > 0 ? { thinking } : {}),
       role,
-      ...(imageCount > 0 ? { imageCount } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(imageCount > 0 ? { imageCount, images } : {}),
       ...(item.preparing ? { preparing: true } : {}),
     });
   }

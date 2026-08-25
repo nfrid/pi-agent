@@ -478,6 +478,62 @@ h2 {
 .message-bubble-accessories > .transcript-time {
   margin-left: 0;
 }
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 4px 0 8px;
+  border: 0;
+  padding: 0;
+}
+.message-image-thumbnail {
+  width: 92px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  padding: 0;
+  cursor: zoom-in;
+}
+.message-image-thumbnail img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.message-image-dialog {
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  box-sizing: border-box;
+  margin: 0;
+  border: 0;
+  background: #000e;
+  padding: 36px;
+}
+.message-image-dialog::backdrop {
+  background: #000d;
+}
+.message-image-dialog > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.message-image-dialog > button {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 1;
+  border: 1px solid #fff8;
+  border-radius: 50%;
+  background: #000a;
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+}
 .message-attachment {
   display: inline-block;
   margin: 2px 0 7px;

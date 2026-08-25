@@ -1,5 +1,7 @@
+import { readFileSync, statSync } from 'node:fs';
 import {
   type BridgeCommand,
+  type BridgeImageAttachment,
   MAX_QUEUE_DRAFT_TEXT,
   MAX_QUEUE_DRAFT_TOTAL_TEXT,
   MAX_QUEUE_DRAFTS,
@@ -17,12 +19,12 @@ export function queueDraftError(
   return Object.assign(new Error(message), { code });
 }
 
-function validQueueDraftText(text: string): string {
+function validQueueDraftText(text: string, hasImages = false): string {
   const normalized = text.trim();
-  if (!normalized || normalized.length > MAX_QUEUE_DRAFT_TEXT)
+  if ((!normalized && !hasImages) || normalized.length > MAX_QUEUE_DRAFT_TEXT)
     throw queueDraftError(
       'invalid-queue-draft',
-      'Queue draft text is invalid.',
+      'Queue draft text or image is invalid.',
     );
   return normalized;
 }
@@ -43,13 +45,51 @@ function validQueueDraftClientId(clientId: string): string {
   return clientId;
 }
 
+export type QueueDraftImage = {
+  type: 'image';
+  data: string;
+  mimeType: BridgeImageAttachment['mediaType'];
+};
+
+export type StoredQueueDraft = QueueDraft & {
+  readonly images: readonly QueueDraftImage[];
+};
+
+function ownImages(
+  images: readonly BridgeImageAttachment[] | undefined,
+): QueueDraftImage[] {
+  return (images ?? []).map((image) => {
+    const stat = statSync(image.path);
+    if (!stat.isFile() || stat.size === 0 || stat.size > 5 * 1024 * 1024)
+      throw queueDraftError(
+        'invalid-queue-draft-image',
+        'Queued image attachment is invalid.',
+      );
+    return {
+      type: 'image',
+      data: readFileSync(image.path).toString('base64'),
+      mimeType: image.mediaType,
+    };
+  });
+}
+
+function publicDraft(draft: StoredQueueDraft): QueueDraft {
+  const { images, ...metadata } = draft;
+  return {
+    ...metadata,
+    ...(images.length > 0 ? { imageCount: images.length } : {}),
+  };
+}
+
 /**
  * Dashboard-owned queue state. Pi's own queue is intentionally not reflected
  * here: drafts remain editable until a lifecycle boundary hands them to Pi.
+ * Image bytes are copied into this runtime-private store before HTTP upload
+ * cleanup and never appear in bridge snapshots.
  */
 export class QueueDraftStore {
   private sessionId: string | undefined;
-  private readonly drafts = new Map<string, QueueDraft>();
+  private readonly drafts = new Map<string, StoredQueueDraft>();
 
   setSession(sessionId: string | undefined): void {
     if (this.sessionId === sessionId) return;
@@ -62,10 +102,14 @@ export class QueueDraftStore {
   }
 
   list(): readonly QueueDraft[] {
-    return [...this.drafts.values()].map((draft) => ({ ...draft }));
+    return [...this.drafts.values()].map(publicDraft);
   }
 
-  add(draft: QueueDraft): QueueDraft {
+  add(
+    draft:
+      | QueueDraftAddCommand
+      | (QueueDraft & { images?: readonly BridgeImageAttachment[] }),
+  ): QueueDraft {
     this.requireSession();
     const clientId = validQueueDraftClientId(draft.clientId);
     if (this.drafts.has(clientId))
@@ -78,24 +122,27 @@ export class QueueDraftStore {
         'queue-draft-capacity',
         'Queue draft queue is full.',
       );
+    const images = ownImages(draft.images);
     const next = {
       clientId,
       mode: draft.mode,
-      text: validQueueDraftText(draft.text),
-    } satisfies QueueDraft;
+      text: validQueueDraftText(draft.text, images.length > 0),
+      images,
+    } satisfies StoredQueueDraft;
     if (this.totalTextLength() + next.text.length > MAX_QUEUE_DRAFT_TOTAL_TEXT)
       throw queueDraftError(
         'queue-draft-capacity',
         'Queue draft text capacity is full.',
       );
     this.drafts.set(clientId, next);
-    return { ...next };
+    return publicDraft(next);
   }
 
-  update(draft: QueueDraft): QueueDraft {
+  update(draft: QueueDraftUpdateCommand | QueueDraft): QueueDraft {
     this.requireSession();
     const clientId = validQueueDraftClientId(draft.clientId);
-    if (!this.drafts.has(clientId))
+    const current = this.drafts.get(clientId);
+    if (!current)
       throw queueDraftError(
         'unknown-queue-draft-client-id',
         'Queue draft client id is unknown.',
@@ -103,11 +150,11 @@ export class QueueDraftStore {
     const next = {
       clientId,
       mode: draft.mode,
-      text: validQueueDraftText(draft.text),
-    } satisfies QueueDraft;
-    const current = this.drafts.get(clientId);
+      text: validQueueDraftText(draft.text, current.images.length > 0),
+      images: current.images,
+    } satisfies StoredQueueDraft;
     if (
-      this.totalTextLength() - (current?.text.length ?? 0) + next.text.length >
+      this.totalTextLength() - current.text.length + next.text.length >
       MAX_QUEUE_DRAFT_TOTAL_TEXT
     )
       throw queueDraftError(
@@ -115,7 +162,7 @@ export class QueueDraftStore {
         'Queue draft text capacity is full.',
       );
     this.drafts.set(clientId, next);
-    return { ...next };
+    return publicDraft(next);
   }
 
   remove(clientId: string): QueueDraft {
@@ -128,30 +175,33 @@ export class QueueDraftStore {
         'Queue draft client id is unknown.',
       );
     this.drafts.delete(clientId);
-    return { ...draft };
+    return publicDraft(draft);
   }
 
   /** Atomically claim drafts for one Pi delivery boundary. */
-  take(mode: QueueDraftMode): QueueDraft[] {
+  take(mode: QueueDraftMode): StoredQueueDraft[] {
     this.requireSession();
-    const claimed: QueueDraft[] = [];
+    const claimed: StoredQueueDraft[] = [];
     for (const [clientId, draft] of this.drafts) {
       if (draft.mode !== mode) continue;
-      claimed.push({ ...draft });
+      claimed.push({ ...draft, images: [...draft.images] });
       this.drafts.delete(clientId);
     }
     return claimed;
   }
 
   /** Restore a failed delivery without replacing newer edits. */
-  restore(drafts: readonly QueueDraft[]): void {
+  restore(drafts: readonly StoredQueueDraft[]): void {
     if (!this.sessionId) return;
     for (const draft of drafts)
       if (
         !this.drafts.has(draft.clientId) &&
         this.totalTextLength() + draft.text.length <= MAX_QUEUE_DRAFT_TOTAL_TEXT
       )
-        this.drafts.set(draft.clientId, { ...draft });
+        this.drafts.set(draft.clientId, {
+          ...draft,
+          images: [...draft.images],
+        });
   }
 
   clear(): void {

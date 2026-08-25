@@ -15,12 +15,12 @@ import {
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   ProjectRenameCommandSchema,
+  parseRetryCommand,
+  parseThreadCreateCommand,
   RestoreThreadCommandSchema,
-  RetryCommandSchema,
   SessionAdoptCommandSchema,
   SessionThreadLinksSchema,
   SettleThreadCommandSchema,
-  ThreadCreateCommandSchema,
   UnpinThreadCommandSchema,
   UnsettleThreadCommandSchema,
 } from '@pi-dashboard/protocol';
@@ -115,6 +115,11 @@ export interface DashboardRouteContext {
   ): Promise<AuthoritativeSessionSnapshot>;
   usage(): Promise<{ usage: unknown; error?: string }>;
   readDelegateHistory(id: string): Promise<DelegateHistoryResponse>;
+  sessionImage?(
+    sessionId: string,
+    entryId: string,
+    imageIndex: number,
+  ): Promise<{ data: Buffer; mediaType: string }>;
   readDelegateHistoryRun(
     id: string,
     runId: string,
@@ -141,14 +146,22 @@ export interface DashboardRouteContext {
   vapidPublicKey(): string | null;
   adoptProject?(command: unknown): Promise<unknown>;
   renameProject?(projectId: string, command: unknown): Promise<unknown>;
-  createThread?(projectId: string, command: unknown): Promise<unknown>;
+  createThread?(
+    projectId: string,
+    command: unknown,
+    images: readonly Buffer[],
+  ): Promise<unknown>;
   gitContext?(projectId: string): Promise<unknown>;
   adoptSession?(
     projectId: string,
     sessionId: string,
     command: unknown,
   ): Promise<unknown>;
-  retryRun?(threadId: string, command: unknown): Promise<unknown>;
+  retryRun?(
+    threadId: string,
+    command: unknown,
+    images: readonly Buffer[],
+  ): Promise<unknown>;
   cancelRun?(runId: string, commandId: string): Promise<unknown>;
   reviewCheckout?(checkoutId: string): Promise<unknown>;
   mergeCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
@@ -402,17 +415,44 @@ export const dashboardRoutes: FastifyPluginAsync<{
       }
     },
   );
-  app.post<{ Params: { projectId: string } }>(
-    '/api/projects/:projectId/threads',
-    { schema: { body: ThreadCreateCommandSchema } },
+  app.get<{
+    Params: { sessionId: string; entryId: string; imageIndex: string };
+  }>(
+    '/api/sessions/:sessionId/images/:entryId/:imageIndex',
     async (request, reply) => {
       try {
+        const imageIndex = Number(request.params.imageIndex);
+        const image = await requireOperation(context.sessionImage)(
+          request.params.sessionId,
+          request.params.entryId,
+          imageIndex,
+        );
+        return reply
+          .header('cache-control', 'private, no-store')
+          .header('x-content-type-options', 'nosniff')
+          .type(image.mediaType)
+          .send(image.data);
+      } catch {
+        return reply.code(404).send({ error: 'Session image not found.' });
+      }
+    },
+  );
+  app.post<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/threads',
+    { schema: { body: anyBody } },
+    async (request, reply) => {
+      try {
+        const payload = await commandPayload(request);
+        const command = parseThreadCreateCommand(payload.body);
+        if (!command.prompt.trim() && payload.images.length === 0)
+          throw new Error('Thread prompt or an image is required.');
         return reply
           .code(202)
           .send(
             await requireOperation(context.createThread)(
               request.params.projectId,
-              request.body,
+              command,
+              payload.images,
             ),
           );
       } catch (error) {
@@ -443,15 +483,24 @@ export const dashboardRoutes: FastifyPluginAsync<{
   );
   app.post<{ Params: { threadId: string } }>(
     '/api/threads/:threadId/retry',
-    { schema: { body: RetryCommandSchema } },
+    { schema: { body: anyBody } },
     async (request, reply) => {
       try {
+        const payload = await commandPayload(request);
+        const command = parseRetryCommand(payload.body);
+        if (
+          command.prompt !== undefined &&
+          !command.prompt.trim() &&
+          payload.images.length === 0
+        )
+          throw new Error('Retry prompt or an image is required.');
         return reply
           .code(202)
           .send(
             await requireOperation(context.retryRun)(
               request.params.threadId,
-              request.body,
+              command,
+              payload.images,
             ),
           );
       } catch (error) {

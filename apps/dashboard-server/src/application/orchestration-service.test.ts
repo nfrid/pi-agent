@@ -1914,6 +1914,18 @@ describe('OrchestrationService', () => {
       ).toContain('carried');
       const runtimeId = metadata.orchestration.getRun(first.run.id)
         ?.runtimeId as string;
+      const releaseImages = vi.fn(async () => undefined);
+      service.holdInitialImages(
+        first.run.id,
+        [
+          {
+            type: 'image',
+            path: '/server-owned/pending-image',
+            mediaType: 'image/png',
+          },
+        ],
+        releaseImages,
+      );
       service.onRegistryChange({
         kind: 'registered',
         snapshot: {
@@ -1938,8 +1950,16 @@ describe('OrchestrationService', () => {
           id: `run-prompt:${first.run.id}`,
           type: 'prompt',
           text: 'complete prompt one',
+          images: [
+            {
+              type: 'image',
+              path: '/server-owned/pending-image',
+              mediaType: 'image/png',
+            },
+          ],
         }),
       );
+      expect(releaseImages).toHaveBeenCalledOnce();
       expect(
         metadata.orchestration.getCommandReceipt(`run-prompt:${first.run.id}`),
       ).toBeDefined();
