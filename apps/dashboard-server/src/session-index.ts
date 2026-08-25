@@ -962,11 +962,20 @@ export class SessionIndex {
     id: string,
     entryId: string,
     imageIndex: number,
+    messageTimestamp?: number | string,
   ): Promise<SessionImage> {
     if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex > 3)
       throw new Error('Invalid session image.');
     const indexed = await this.currentIndexedFile(id);
-    const descriptor = indexed.historyIndex.byId.get(entryId);
+    let descriptor = indexed.historyIndex.byId.get(entryId);
+    if (!descriptor && messageTimestamp !== undefined) {
+      const matches = indexed.historyIndex.descriptors.filter(
+        (candidate) =>
+          candidate.type === 'message' &&
+          candidate.timestamp === messageTimestamp,
+      );
+      if (matches.length === 1) descriptor = matches[0];
+    }
     if (!descriptor) throw new Error('Unknown session image.');
     const handle = await fs.open(indexed.file, 'r');
     try {

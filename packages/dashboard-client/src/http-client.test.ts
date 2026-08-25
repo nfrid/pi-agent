@@ -82,10 +82,11 @@ describe('DashboardHttpClient session images', () => {
 
     await client.sessionImage('session/1', 'entry 1', 2, {
       variant: 'thumbnail',
+      messageTimestamp: '2026-08-25T12:00:00.000Z',
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/sessions/session%2F1/images/entry%201/2?variant=thumbnail',
+      '/api/sessions/session%2F1/images/entry%201/2?variant=thumbnail&timestamp=%222026-08-25T12%3A00%3A00.000Z%22',
       expect.objectContaining({ headers: expect.any(Headers) }),
     );
   });

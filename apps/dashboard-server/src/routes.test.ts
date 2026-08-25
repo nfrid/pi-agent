@@ -143,10 +143,16 @@ describe('Fastify dashboard route plugin', () => {
 
     const thumbnail = await app.inject({
       method: 'GET',
-      url: '/api/sessions/session-1/images/entry-1/0?variant=thumbnail',
+      url: '/api/sessions/session-1/images/live-entry/0?variant=thumbnail&timestamp=12345',
       headers,
     });
     expect(thumbnail.statusCode).toBe(200);
+    expect(routeContext.sessionImage).toHaveBeenCalledWith(
+      'session-1',
+      'live-entry',
+      0,
+      12345,
+    );
     expect(thumbnail.headers['content-type']).toContain('image/webp');
     expect(thumbnail.headers['cache-control']).toBe('no-store');
     await expect(sharp(thumbnail.rawPayload).metadata()).resolves.toMatchObject(

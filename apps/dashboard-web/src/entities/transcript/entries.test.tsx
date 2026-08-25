@@ -61,6 +61,7 @@ describe('transcript entries', () => {
   });
 
   it('shows a loading thumbnail before fetching the full image on demand', async () => {
+    sessionImage.mockClear();
     let resolveThumbnail!: (blob: Blob) => void;
     sessionImage
       .mockReturnValueOnce(
@@ -87,7 +88,7 @@ describe('transcript entries', () => {
     const item: TranscriptModelItem = {
       key: 'user-image-entry',
       sessionId: 'session-1',
-      raw: {},
+      raw: { type: 'message', message: { timestamp: 12345 } },
       entry: { kind: 'other' },
       role: 'user',
       imageCount: 1,
@@ -115,8 +116,23 @@ describe('transcript entries', () => {
       'session-1',
       'user-image-entry',
       0,
-      expect.objectContaining({ variant: 'thumbnail' }),
+      expect.objectContaining({
+        variant: 'thumbnail',
+        messageTimestamp: 12345,
+      }),
     );
+    await act(async () => {
+      tree.update(
+        <TranscriptEntry
+          item={{
+            ...item,
+            images: [{ index: 0, mimeType: 'image/png', available: true }],
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+    expect(sessionImage).toHaveBeenCalledTimes(1);
     const thumbnail = tree.root.findByProps({
       'aria-label': 'Open attached image 1',
     });
@@ -131,19 +147,29 @@ describe('transcript entries', () => {
       'session-1',
       'user-image-entry',
       0,
-      expect.not.objectContaining({ variant: 'thumbnail' }),
+      expect.objectContaining({ messageTimestamp: 12345 }),
     );
     expect(tree.root.findByProps({ src: 'blob:full' })).toBeDefined();
-    expect(
-      tree.root.findByProps({ 'aria-label': 'Close image viewer' }).props
-        .className,
-    ).toBe('message-image-close');
+    const close = tree.root.findByProps({
+      'aria-label': 'Close image viewer',
+    });
+    expect(close.props.className).toBe('message-image-close');
+    await act(async () => {
+      close.props.onClick();
+      tree.root
+        .findByProps({ 'aria-label': 'Open attached image 1' })
+        .props.onClick();
+      await Promise.resolve();
+    });
+    expect(sessionImage).toHaveBeenCalledTimes(2);
+    expect(tree.root.findByProps({ src: 'blob:full' })).toBeDefined();
     act(() => tree.unmount());
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:thumbnail');
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:full');
   });
 
   it('navigates horizontal swipes and dismisses vertical swipes', async () => {
+    sessionImage.mockClear();
     sessionImage.mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
     let url = 0;
     vi.stubGlobal('URL', {
@@ -189,7 +215,7 @@ describe('transcript entries', () => {
     let dialog = tree.root.findByType('dialog');
     expect(dialog.props['aria-label']).toBe('Attached image 1 of 2');
 
-    act(() => {
+    await act(async () => {
       dialog.props.onPointerDown({
         pointerType: 'touch',
         target: { closest: () => null },
@@ -202,9 +228,27 @@ describe('transcript entries', () => {
         clientX: 80,
         clientY: 105,
       });
+      await Promise.resolve();
     });
     dialog = tree.root.findByType('dialog');
     expect(dialog.props['aria-label']).toBe('Attached image 2 of 2');
+    await act(async () => {
+      tree.root
+        .findByProps({ 'aria-label': 'Previous attached image' })
+        .props.onClick();
+      await Promise.resolve();
+    });
+    expect(sessionImage).toHaveBeenCalledTimes(4);
+    dialog = tree.root.findByType('dialog');
+    expect(dialog.props['aria-label']).toBe('Attached image 1 of 2');
+    await act(async () => {
+      tree.root
+        .findByProps({ 'aria-label': 'Next attached image' })
+        .props.onClick();
+      await Promise.resolve();
+    });
+    expect(sessionImage).toHaveBeenCalledTimes(4);
+    dialog = tree.root.findByType('dialog');
 
     act(() => {
       dialog.props.onPointerDown({

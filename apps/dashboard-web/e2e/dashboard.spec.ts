@@ -118,6 +118,7 @@ test('mobile transcript image gallery loads, navigates, and swipes away', async 
             id: 'entry-images',
             message: {
               role: 'user',
+              timestamp: 12345,
               content: [
                 { type: 'image', mimeType: 'image/png', omitted: true },
                 { type: 'image', mimeType: 'image/png', omitted: true },
@@ -136,11 +137,19 @@ test('mobile transcript image gallery loads, navigates, and swipes away', async 
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64',
   );
+  let thumbnailRequests = 0;
+  let fullRequests = 0;
   await page.route(
     '**/api/sessions/session-images/images/**',
     async (route) => {
-      if (new URL(route.request().url()).searchParams.has('variant'))
+      const search = new URL(route.request().url()).searchParams;
+      expect(search.get('timestamp')).toBe('12345');
+      if (search.has('variant')) {
+        thumbnailRequests += 1;
         await thumbnailsReady;
+      } else {
+        fullRequests += 1;
+      }
       await route.fulfill({ contentType: 'image/png', body: image });
     },
   );
@@ -154,12 +163,21 @@ test('mobile transcript image gallery loads, navigates, and swipes away', async 
     name: 'Open attached image 1',
   });
   await expect(first).toBeEnabled();
+  await page.waitForTimeout(300);
+  expect(thumbnailRequests).toBe(2);
   await first.click();
 
   const dialog = page.getByRole('dialog', {
     name: 'Attached image 1 of 2',
   });
   await expect(dialog).toBeVisible();
+  await expect.poll(() => fullRequests).toBe(1);
+  await page.getByRole('button', { name: 'Close image viewer' }).click();
+  await expect(dialog).toBeHidden();
+  await first.click();
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(100);
+  expect(fullRequests).toBe(1);
   await expect(
     page.getByRole('button', { name: 'Previous attached image' }),
   ).toBeVisible();
@@ -206,6 +224,12 @@ test('mobile transcript image gallery loads, navigates, and swipes away', async 
     name: 'Attached image 2 of 2',
   });
   await expect(secondDialog).toBeVisible();
+  await expect.poll(() => fullRequests).toBe(2);
+  await page.getByRole('button', { name: 'Previous attached image' }).click();
+  await expect(dialog).toBeVisible();
+  await page.getByRole('button', { name: 'Next attached image' }).click();
+  await expect(secondDialog).toBeVisible();
+  expect(fullRequests).toBe(2);
 
   await secondDialog.evaluate((element) => {
     element.dispatchEvent(
