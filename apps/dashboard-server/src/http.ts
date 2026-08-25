@@ -5,20 +5,15 @@ import {
   delegateHistoryFromBranch,
   delegateHistoryRunDetailFromBranch,
   isDelegateHistoryEntry,
-  isPersistedSteeringMarker,
-  persistedEntriesToTranscriptEvents,
   projectDelegateHistoryEntry,
 } from '@pi-dashboard/domain';
 import {
-  type ActiveDelegateTranscriptBaseline,
   type BridgeCommand,
   type BridgeEvent,
   type BrowserSnapshot,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
-  type DelegateLiveRun,
-  MAX_FRAME_BYTES,
   MAX_ID,
   MAX_SESSION_INDEX_DELTA_ITEMS,
   MAX_SHELL_INDEX_ITEMS,
@@ -28,8 +23,6 @@ import {
   type ShellFeedData,
   type ShellFeedDomain,
   type ShellRuntimeSnapshot,
-  tryParseActiveDelegateTranscriptBaseline,
-  tryParseDelegateTranscriptEntry,
   validateBridgeCommand,
   validateSessionRenameRequest,
 } from '@pi-dashboard/protocol';
@@ -45,21 +38,25 @@ import type {
 } from './composition.js';
 import { readGitContext } from './git-context.js';
 import { BridgeListener } from './http/bridge-listener.js';
-import {
-  MAX_SESSION_FEEDS,
-  type SessionFeedRegistry,
-  type ShellFeed,
-} from './live-feeds.js';
+import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
-import {
-  AuxiliaryAppendError,
-  type AuxiliarySourceCursor,
-} from './session-index.js';
 
 /** Keep session deltas comfortably below the authoritative frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
+
+function validDelegateIdentifier(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_ID &&
+    !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
+}
 
 function shellRuntimeComparison(
   runtime: ShellRuntimeSnapshot,
@@ -88,129 +85,6 @@ function transcriptOnlyShellEvent(event: BridgeEvent): boolean {
   }
 }
 
-function validDelegateIdentifier(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= MAX_ID &&
-    !Array.from(value).some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127;
-    })
-  );
-}
-
-function activeDelegateTranscriptBaseline(
-  serverId: string,
-  cursor: number,
-  sessionId: string,
-  runtime: RuntimeSnapshot | undefined,
-  provenance?: { runtimeEpoch: string; runtimeSeq: number },
-): ActiveDelegateTranscriptBaseline {
-  const base = {
-    version: 1 as const,
-    serverId,
-    cursor,
-    sessionId,
-    ...(runtime ? { runtimeId: runtime.runtimeId } : {}),
-    ...(provenance ? { runtimeEpoch: provenance.runtimeEpoch } : {}),
-    ...(provenance && provenance.runtimeSeq >= 0
-      ? { runtimeSeq: provenance.runtimeSeq }
-      : {}),
-    runs: [] as DelegateLiveRun[],
-  };
-  if (!runtime || runtime.online === false) return base;
-  const surfaces = runtime.extensionSurfaces ?? [];
-  const delegateSurface = surfaces.find(
-    (surface) => surface.rendererId === 'delegate.status',
-  );
-  const model = delegateSurface?.viewModel;
-  const statuses =
-    model && typeof model === 'object' && !Array.isArray(model)
-      ? (model as { statuses?: unknown }).statuses
-      : undefined;
-  const runs: DelegateLiveRun[] = [];
-  if (Array.isArray(statuses)) {
-    for (const status of statuses.slice(0, 64)) {
-      if (!status || typeof status !== 'object' || Array.isArray(status))
-        continue;
-      const value = status as Record<string, unknown>;
-      const state = value.state;
-      const pauseState = value.pauseState;
-      if (
-        !(
-          state === 'queued' ||
-          state === 'running' ||
-          pauseState === 'pausing' ||
-          pauseState === 'paused'
-        )
-      )
-        continue;
-      if (
-        typeof value.runId !== 'string' ||
-        typeof value.lineageId !== 'string' ||
-        typeof value.name !== 'string' ||
-        typeof value.kind !== 'string' ||
-        typeof value.createdAt !== 'number' ||
-        !Number.isFinite(value.createdAt) ||
-        typeof value.allowWrites !== 'boolean'
-      )
-        continue;
-      const transcript = Array.isArray(value.transcript)
-        ? value.transcript.flatMap((entry) => {
-            const parsed = tryParseDelegateTranscriptEntry(entry);
-            return parsed ? [parsed] : [];
-          })
-        : [];
-      runs.push({
-        runId: value.runId,
-        ...(validDelegateIdentifier(value.sessionId)
-          ? { sessionId: value.sessionId }
-          : {}),
-        lineageId: value.lineageId,
-        name: value.name,
-        kind: value.kind as DelegateLiveRun['kind'],
-        state: state as DelegateLiveRun['state'],
-        createdAt: value.createdAt,
-        ...(typeof value.startedAt === 'number'
-          ? { startedAt: value.startedAt }
-          : {}),
-        ...(typeof value.finishedAt === 'number'
-          ? { finishedAt: value.finishedAt }
-          : {}),
-        ...(typeof value.jobId === 'string' ? { jobId: value.jobId } : {}),
-        ...(typeof value.route === 'string' ? { route: value.route } : {}),
-        ...(typeof value.context === 'string'
-          ? { context: value.context as DelegateLiveRun['context'] }
-          : {}),
-        allowWrites: value.allowWrites,
-        ...(Array.isArray(value.capabilities) &&
-        value.capabilities.includes('web')
-          ? { capabilities: ['web' as const] }
-          : {}),
-        ...(pauseState === 'pausing' || pauseState === 'paused'
-          ? { pauseState }
-          : {}),
-        ...(typeof value.pausedAt === 'number'
-          ? { pausedAt: value.pausedAt }
-          : {}),
-        ...(value.details && typeof value.details === 'object'
-          ? { details: value.details as DelegateLiveRun['details'] }
-          : {}),
-        transcript: transcript.slice(0, 128),
-        ...(value.transcriptTruncated === true
-          ? { transcriptTruncated: true }
-          : {}),
-      });
-    }
-  }
-  const result = {
-    ...base,
-    runs,
-  };
-  return tryParseActiveDelegateTranscriptBaseline(result) ?? base;
-}
-
 function sessionEventCoalesceKey(event: BridgeEvent): string | undefined {
   if (event.type === 'delegate.transcript.updated')
     return `delegate:${event.runId}`;
@@ -228,23 +102,6 @@ function sessionEventCoalesceKey(event: BridgeEvent): string | undefined {
   }
   return undefined;
 }
-
-interface AuxiliaryFeedState {
-  cursor?: AuxiliarySourceCursor;
-  /** A marker at a bounded-range edge is carried into the next range only. */
-  pendingSteeringMarkers: readonly unknown[];
-  dirty: boolean;
-  workerRunning: boolean;
-  gateBusy: boolean;
-  gateWaiters: Array<{
-    resolve: () => void;
-    reject: (error: Error) => void;
-  }>;
-  lastUsedAt: number;
-}
-
-const MAX_AUXILIARY_FEED_STATES = MAX_SESSION_FEEDS;
-const MAX_AUXILIARY_GATE_WAITERS = 128;
 
 export interface DashboardServer {
   readonly token: string;
@@ -301,7 +158,6 @@ export class DashboardServerImpl implements DashboardServer {
     string,
     { stable: string; full: string }
   >();
-  private readonly auxiliaryFeeds = new Map<string, AuxiliaryFeedState>();
 
   constructor(dependencies: DashboardDependencies) {
     const config = dependencies.configuration;
@@ -373,8 +229,6 @@ export class DashboardServerImpl implements DashboardServer {
       sessionSnapshotAt: (id, sequence) =>
         this.buildSessionSnapshot(id, undefined, sequence),
       usage: () => this.application.usage.get(),
-      readActiveDelegateTranscripts: (id) =>
-        this.activeDelegateTranscriptResult(id),
       readDelegateHistory: (id) => this.delegateHistoryResult(id),
       readDelegateHistoryRun: (id, runId, query) =>
         this.delegateHistoryRunResult(id, runId, query),
@@ -652,17 +506,6 @@ export class DashboardServerImpl implements DashboardServer {
         () => {
           const now = Date.now();
           this.sessionFeeds.sweep(now, this.configuration.feedInactivityMs);
-          for (const [sessionId, state] of this.auxiliaryFeeds) {
-            const feed = this.sessionFeeds.peek(sessionId);
-            if (
-              !state.gateBusy &&
-              !state.workerRunning &&
-              (feed?.active ?? false) === false &&
-              (feed?.metrics().subscribers ?? 0) === 0 &&
-              now - state.lastUsedAt >= this.configuration.feedInactivityMs
-            )
-              this.auxiliaryFeeds.delete(sessionId);
-          }
         },
         Math.max(
           30_000,
@@ -750,15 +593,6 @@ export class DashboardServerImpl implements DashboardServer {
     });
   }
 
-  private closeAuxiliaryStates(): void {
-    for (const state of this.auxiliaryFeeds.values()) {
-      for (const waiter of state.gateWaiters)
-        waiter.reject(new Error('Auxiliary feed stopped.'));
-      state.gateWaiters = [];
-    }
-    this.auxiliaryFeeds.clear();
-  }
-
   private async stopInternal(): Promise<void> {
     if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
     this.feedSweepTimer = undefined;
@@ -768,7 +602,6 @@ export class DashboardServerImpl implements DashboardServer {
         close?: () => Promise<void>;
       }
     ).close?.();
-    this.closeAuxiliaryStates();
     this.sessions.close();
     this.shellFeed.close();
     this.sessionFeeds.close();
@@ -791,7 +624,6 @@ export class DashboardServerImpl implements DashboardServer {
         close?: () => Promise<void>;
       }
     ).close?.();
-    this.closeAuxiliaryStates();
     this.sessions.close();
     this.registry.close();
     this.bridge.destroyClients();
@@ -803,25 +635,6 @@ export class DashboardServerImpl implements DashboardServer {
 
   snapshot(cursor = this.shellFeed.sequence): BrowserSnapshot {
     return this.application.snapshot(this.serverId, this.revision, cursor);
-  }
-
-  private async activeDelegateTranscriptResult(
-    id: string,
-  ): Promise<ActiveDelegateTranscriptBaseline> {
-    if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
-      throw new Error('Invalid session id.');
-    const runtime = this.registry
-      .snapshots()
-      .find((item) => item.session.id === id && item.online !== false);
-    return activeDelegateTranscriptBaseline(
-      this.serverId,
-      this.shellFeed.sequence,
-      id,
-      runtime,
-      runtime
-        ? this.registry.transportProvenance(runtime.runtimeId)
-        : undefined,
-    );
   }
 
   private async delegateHistoryResult(
@@ -933,245 +746,17 @@ export class DashboardServerImpl implements DashboardServer {
     });
   }
 
-  private auxiliaryState(sessionId: string): AuxiliaryFeedState {
-    const existing = this.auxiliaryFeeds.get(sessionId);
-    if (existing) {
-      existing.lastUsedAt = Date.now();
-      return existing;
-    }
-    if (this.auxiliaryFeeds.size >= MAX_AUXILIARY_FEED_STATES) {
-      let candidate: [string, AuxiliaryFeedState] | undefined;
-      for (const entry of this.auxiliaryFeeds) {
-        const [id, state] = entry;
-        const feed = this.sessionFeeds.peek(id);
-        if (
-          state.gateBusy ||
-          state.workerRunning ||
-          (feed?.active ?? false) ||
-          (feed?.metrics().subscribers ?? 0) !== 0 ||
-          (candidate && state.lastUsedAt >= candidate[1].lastUsedAt)
-        )
-          continue;
-        candidate = entry;
-      }
-      if (candidate) this.auxiliaryFeeds.delete(candidate[0]);
-    }
-    if (this.auxiliaryFeeds.size >= MAX_AUXILIARY_FEED_STATES)
-      throw new Error(
-        'Auxiliary session feed capacity is reserved for active feeds.',
-      );
-    const state: AuxiliaryFeedState = {
-      pendingSteeringMarkers: [],
-      dirty: false,
-      workerRunning: false,
-      gateBusy: false,
-      gateWaiters: [],
-      lastUsedAt: Date.now(),
-    };
-    this.auxiliaryFeeds.set(sessionId, state);
-    return state;
-  }
-
-  private releaseAuxiliaryGate(state: AuxiliaryFeedState): void {
-    const waiter = state.gateWaiters.shift();
-    if (!waiter) {
-      state.gateBusy = false;
-      return;
-    }
-    // Keep the mutex occupied while handing it to the next bounded waiter;
-    // this is an explicit mutex, not an ever-growing promise chain.
-    state.gateBusy = true;
-    waiter.resolve();
-  }
-
-  private async withAuxiliaryGate<T>(
-    sessionId: string,
-    callback: (state: AuxiliaryFeedState) => Promise<T>,
-  ): Promise<T> {
-    const state = this.auxiliaryState(sessionId);
-    if (state.gateBusy) {
-      if (state.gateWaiters.length >= MAX_AUXILIARY_GATE_WAITERS)
-        throw new Error('Auxiliary session snapshot gate is busy.');
-      await new Promise<void>((resolve, reject) =>
-        state.gateWaiters.push({ resolve, reject }),
-      );
-    } else state.gateBusy = true;
-    state.lastUsedAt = Date.now();
-    try {
-      return await callback(state);
-    } finally {
-      state.lastUsedAt = Date.now();
-      this.releaseAuxiliaryGate(state);
-    }
-  }
-
-  private async buildSessionSnapshot(
+  private buildSessionSnapshot(
     sessionId: string,
     before: string | undefined,
     sequence: number,
   ): Promise<import('@pi-dashboard/protocol').AuthoritativeSessionSnapshot> {
-    if (!this.sessions.isAuxiliary(sessionId) || before !== undefined)
-      return this.application.sessionSnapshot(
-        this.serverId,
-        sessionId,
-        before,
-        sequence,
-      );
-    const snapshot = await this.withAuxiliaryGate(sessionId, async (state) => {
-      const internal = await this.application.sessionSnapshot(
-        this.serverId,
-        sessionId,
-        undefined,
-        sequence,
-        true,
-      );
-      state.cursor = internal.sourceCursor;
-      state.pendingSteeringMarkers = [];
-      // A watcher that fired while the source cut was being read must remain
-      // dirty. The worker will range-read from this exact installed cut.
-      state.lastUsedAt = Date.now();
-      const { sourceCursor: _sourceCursor, ...publicSnapshot } = internal;
-      return publicSnapshot;
-    });
-    const state = this.auxiliaryFeeds.get(sessionId);
-    if (state?.dirty) this.scheduleAuxiliaryWorker(sessionId);
-    return snapshot;
-  }
-
-  private resetReason(
-    error: unknown,
-  ): import('@pi-dashboard/protocol').SessionTranscriptResetReason {
-    if (error instanceof AuxiliaryAppendError) {
-      if (error.reason === 'entry-too-large') return 'entry-too-large';
-      if (error.reason === 'source-truncated') return 'source-truncated';
-      return 'source-rewrite';
-    }
-    if (
-      error instanceof Error &&
-      error.message.includes('cannot be represented')
-    )
-      return 'entry-too-large';
-    return 'source-rewrite';
-  }
-
-  private publishAuxiliaryReset(
-    sessionId: string,
-    reason: import('@pi-dashboard/protocol').SessionTranscriptResetReason,
-  ): void {
-    const feed = this.sessionFeeds.peek(sessionId);
-    if (!feed) return;
-    try {
-      feed.publishEvent({
-        type: 'session.transcript.reset',
-        sessionId,
-        reason,
-      });
-    } catch {
-      // A reset itself is intentionally tiny; a closed/evicted feed is already
-      // a retryable authoritative-snapshot recovery path.
-    }
-  }
-
-  private invalidateIdleAuxiliaryFeed(
-    sessionId: string,
-    feed = this.sessionFeeds.peek(sessionId),
-  ): void {
-    // This synchronous check-and-invalidate is the fail-closed boundary: a
-    // subscriber cannot appear between the zero-subscriber check and feed
-    // removal on the event loop. Active subscribers are never disturbed.
-    if (!feed) {
-      this.auxiliaryFeeds.delete(sessionId);
-      return;
-    }
-    if (feed.metrics().subscribers !== 0) return;
-    if (this.sessionFeeds.peek(sessionId) === feed)
-      this.sessionFeeds.invalidate(sessionId);
-    if (this.auxiliaryFeeds.get(sessionId) === undefined) return;
-    this.auxiliaryFeeds.delete(sessionId);
-  }
-
-  private scheduleAuxiliaryWorker(sessionId: string): void {
-    const state = this.auxiliaryFeeds.get(sessionId);
-    const feed = this.sessionFeeds.peek(sessionId);
-    if (
-      !state ||
-      !feed ||
-      feed.metrics().subscribers === 0 ||
-      state.workerRunning
-    )
-      return;
-    state.workerRunning = true;
-    void this.runAuxiliaryWorker(sessionId, state).finally(() => {
-      state.workerRunning = false;
-      if (
-        this.auxiliaryFeeds.get(sessionId) === state &&
-        state.dirty &&
-        this.lifecycle === 'started' &&
-        this.sessionFeeds.peek(sessionId)?.metrics().subscribers !== 0
-      )
-        this.scheduleAuxiliaryWorker(sessionId);
-    });
-  }
-
-  private async runAuxiliaryWorker(
-    sessionId: string,
-    state: AuxiliaryFeedState,
-  ): Promise<void> {
-    while (
-      state.dirty &&
-      this.lifecycle === 'started' &&
-      this.sessions.isAuxiliary(sessionId)
-    ) {
-      const feed = this.sessionFeeds.peek(sessionId);
-      if (!feed || feed.metrics().subscribers === 0) {
-        this.invalidateIdleAuxiliaryFeed(sessionId, feed);
-        return;
-      }
-      if (state.cursor === undefined) return;
-      state.dirty = false;
-      await this.withAuxiliaryGate(sessionId, async (current) => {
-        const cursor = current.cursor;
-        if (cursor === undefined) return;
-        try {
-          const range = await this.sessions.readAppendRange(sessionId, cursor);
-          const events = persistedEntriesToTranscriptEvents(
-            range.records,
-            sessionId,
-            {
-              fallbackEntryOffset: cursor.ordinal,
-              steeringMarkers: current.pendingSteeringMarkers,
-            },
-          );
-          for (const event of events) {
-            const eventBytes = Buffer.byteLength(JSON.stringify(event), 'utf8');
-            if (eventBytes >= MAX_FRAME_BYTES)
-              throw new AuxiliaryAppendError(
-                'entry-too-large',
-                'Normalized auxiliary event exceeds the protocol budget.',
-              );
-            // Source records are not keyed/coalesced. Every persisted event
-            // consumes one feed sequence in source order.
-            feed.publishEvent(event);
-          }
-          // Commit only after every record in this range has been published.
-          current.cursor = range.nextCursor;
-          if (range.records.length > 0) {
-            let suffixStart = range.records.length;
-            while (
-              suffixStart > 0 &&
-              isPersistedSteeringMarker(range.records[suffixStart - 1])
-            )
-              suffixStart -= 1;
-            current.pendingSteeringMarkers = range.records.slice(suffixStart);
-          }
-          if (range.hasMore && range.records.length > 0) current.dirty = true;
-        } catch (error) {
-          current.cursor = undefined;
-          current.dirty = false;
-          this.publishAuxiliaryReset(sessionId, this.resetReason(error));
-        }
-      });
-    }
+    return this.application.sessionSnapshot(
+      this.serverId,
+      sessionId,
+      before,
+      sequence,
+    );
   }
 
   public handleRegistryChange(change: RegistryChange): void {
@@ -1307,32 +892,9 @@ export class DashboardServerImpl implements DashboardServer {
     this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
     if (!sessionId || (!auxiliary && !this.sessions.isAuxiliary(sessionId)))
       return;
-    const current = this.sessions.get(sessionId);
-    if (!current) {
-      this.auxiliaryFeeds.delete(sessionId);
-      this.sessionFeeds.invalidate(sessionId);
-      return;
-    }
-    // A normal session wins an ID collision; never publish it on a child feed.
-    if (!this.sessions.isAuxiliary(sessionId)) return;
-    const feed = this.sessionFeeds.peek(sessionId);
-    // Watchers before the first subscriber must not turn old child history into
-    // a replay. The first authoritative snapshot seeds at the current end.
-    if (!feed || feed.metrics().subscribers === 0) {
-      this.invalidateIdleAuxiliaryFeed(sessionId, feed);
-      return;
-    }
-    let state: AuxiliaryFeedState;
-    try {
-      state = this.auxiliaryState(sessionId);
-    } catch {
-      // Feed capacity is bounded; an eventual authoritative subscription is
-      // the only safe recovery when all inactive state is pinned.
-      return;
-    }
-    state.dirty = true;
-    state.lastUsedAt = Date.now();
-    this.scheduleAuxiliaryWorker(sessionId);
+    // Auxiliary files remain discoverable and indexed, but their JSONL writes
+    // never become live feed events. Active child runtimes own that transport.
+    if (!this.sessions.get(sessionId)) this.sessionFeeds.invalidate(sessionId);
   }
 
   private publishSessionIndexDelta(

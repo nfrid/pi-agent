@@ -12,8 +12,6 @@ import {
   SESSION_NAME_MAX_LENGTH,
 } from './limits.js';
 import {
-  type ActiveDelegateTranscriptBaseline,
-  ActiveDelegateTranscriptBaselineSchema,
   type AuthoritativeSessionSnapshot,
   AuthoritativeSessionSnapshotSchema,
   type BridgeCommand,
@@ -300,18 +298,6 @@ function validateImages(value: unknown): BridgeImageAttachment[] {
     if (!safeIdentifier(image.path, MAX_PATH))
       throw new Error('Invalid image attachment.');
   return images;
-}
-
-export function parseActiveDelegateTranscriptBaseline(
-  value: unknown,
-): ActiveDelegateTranscriptBaseline {
-  return parseSchema(ActiveDelegateTranscriptBaselineSchema, value);
-}
-
-export function tryParseActiveDelegateTranscriptBaseline(
-  value: unknown,
-): ActiveDelegateTranscriptBaseline | undefined {
-  return tryParseSchema(ActiveDelegateTranscriptBaselineSchema, value);
 }
 
 export function parseDelegateTranscriptEntry(

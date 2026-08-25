@@ -7,10 +7,8 @@ export {
 } from './delegate/history-refresh';
 export { DelegateHistorySurface } from './delegate/history-surface';
 export {
-  activeDelegateTranscriptBaselineFor,
   dashboardSurfacePlacement,
   delegateHistoryRunIds,
-  overlayActiveDelegateTranscripts,
   reconcileDelegateLiveRuns,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,

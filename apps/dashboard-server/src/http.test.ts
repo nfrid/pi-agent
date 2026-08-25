@@ -55,8 +55,8 @@ describe('dashboard HTTP boundary', () => {
     ]);
   });
 
-  it('publishes auxiliary JSONL appends as ordered normalized session events', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-aux-live-'));
+  it('does not republish auxiliary JSONL appends on a session feed', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-aux-no-live-'));
     const sessionDir = path.join(root, 'sessions');
     const delegateDir = path.join(root, '.delegate-sessions');
     await mkdir(sessionDir, { recursive: true });
@@ -78,8 +78,8 @@ describe('dashboard HTTP boundary', () => {
       sessions: { close(): void };
       sessionFeeds: {
         get(id: string): {
+          sequence: number;
           subscribe(options: {
-            lastEventId?: string;
             buildSnapshot: (sequence: number) => Promise<unknown>;
           }): AsyncGenerator<unknown>;
         };
@@ -90,235 +90,31 @@ describe('dashboard HTTP boundary', () => {
         sequence: number,
       ): Promise<unknown>;
     };
-    // This boundary test drives publication explicitly. The SessionIndex suite
-    // covers real watcher ordering; disable it here to avoid racing two sources.
     internals.sessions.close();
     const feed = internals.sessionFeeds.get('live-child');
     const stream = feed.subscribe({
       buildSnapshot: (sequence) =>
         internals.buildSessionSnapshot('live-child', undefined, sequence),
     });
-    expect((await stream.next()).value).toMatchObject({ kind: 'snapshot' });
-    expect((await stream.next()).value).toMatchObject({ kind: 'caught-up' });
-    await writeFile(
-      file,
-      `${JSON.stringify({ type: 'session', id: 'live-child', cwd: '/tmp' })}\n${JSON.stringify(
-        {
-          type: 'message',
-          id: 'live-message',
-          message: { role: 'assistant', content: 'from append' },
-        },
-      )}\n`,
-    );
-    server.publishSessionIndexChange('live-child', true);
-    const event = await Promise.race([
-      stream.next(),
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(() => reject(new Error('append event timed out')), 2_000),
-      ),
-    ]);
-    expect(event.value).toMatchObject({
-      kind: 'event',
-      event: {
-        type: 'session-event',
-        event: {
-          type: 'message.finished',
-          message: { messageId: 'live-message', role: 'assistant' },
-        },
-      },
-    });
-    const priorEventId = (event.value as { id: string }).id;
-    await stream.return(undefined);
-
-    // The idle feed is invalidated before this append, so reconnecting with
-    // the old Last-Event-ID must take the authoritative snapshot path.
+    await stream.next();
+    await stream.next();
+    const sequence = feed.sequence;
     await writeFile(
       file,
       `${[
         { type: 'session', id: 'live-child', cwd: '/tmp' },
         {
           type: 'message',
-          id: 'live-message',
-          message: { role: 'assistant', content: 'from append' },
-        },
-        {
-          type: 'message',
-          id: 'disconnected-message',
-          message: { role: 'assistant', content: 'while disconnected' },
+          id: 'file-only-message',
+          message: { role: 'assistant', content: 'file only' },
         },
       ]
         .map((entry) => JSON.stringify(entry))
         .join('\n')}\n`,
     );
     server.publishSessionIndexChange('live-child', true);
-    const resumedFeed = internals.sessionFeeds.get('live-child');
-    const resumed = resumedFeed.subscribe({
-      lastEventId: priorEventId,
-      buildSnapshot: (sequence) =>
-        internals.buildSessionSnapshot('live-child', undefined, sequence),
-    });
-    const resumedSnapshot = await resumed.next();
-    expect(resumedSnapshot.value).toMatchObject({ kind: 'snapshot' });
-    expect(
-      (resumedSnapshot.value as { snapshot: { entries: unknown[] } }).snapshot
-        .entries,
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'disconnected-message' }),
-      ]),
-    );
-    expect((await resumed.next()).value).toMatchObject({ kind: 'caught-up' });
-
-    await writeFile(
-      file,
-      `${[
-        { type: 'session', id: 'live-child', cwd: '/tmp' },
-        {
-          type: 'message',
-          id: 'live-message',
-          message: { role: 'assistant', content: 'from append' },
-        },
-        {
-          type: 'message',
-          id: 'disconnected-message',
-          message: { role: 'assistant', content: 'while disconnected' },
-        },
-        {
-          type: 'message',
-          id: 'later-message',
-          message: { role: 'assistant', content: 'after rebase' },
-        },
-      ]
-        .map((entry) => JSON.stringify(entry))
-        .join('\n')}\n`,
-    );
-    server.publishSessionIndexChange('live-child', true);
-    await expect(
-      Promise.race([
-        resumed.next(),
-        new Promise<never>((_resolve, reject) =>
-          setTimeout(
-            () => reject(new Error('post-rebase event timed out')),
-            2_000,
-          ),
-        ),
-      ]),
-    ).resolves.toMatchObject({
-      value: {
-        kind: 'event',
-        event: {
-          event: {
-            type: 'message.finished',
-            message: { messageId: 'later-message' },
-          },
-        },
-      },
-    });
-    await resumed.return(undefined);
-  });
-
-  it('carries a contiguous trailing marker suffix across bounded ranges', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-aux-markers-'));
-    const sessionDir = path.join(root, 'sessions');
-    const delegateDir = path.join(root, '.delegate-sessions');
-    await mkdir(sessionDir, { recursive: true });
-    await mkdir(delegateDir, { recursive: true });
-    const file = path.join(delegateDir, 'child.jsonl');
-    const header = { type: 'session', id: 'marker-child', cwd: '/tmp' };
-    await writeFile(file, `${JSON.stringify(header)}\n`);
-    server = await createDashboardServer({
-      port: 0,
-      authToken: 'test-token',
-      stateDir: path.join(root, 'state'),
-      sessionDir,
-      delegateSessionDir: delegateDir,
-    });
-    await server.start();
-    const internals = server as unknown as {
-      sessions: { close(): void };
-      sessionFeeds: {
-        get(id: string): {
-          subscribe(options: {
-            buildSnapshot: (sequence: number) => Promise<unknown>;
-          }): AsyncGenerator<unknown>;
-        };
-      };
-      buildSessionSnapshot(
-        id: string,
-        before: string | undefined,
-        sequence: number,
-      ): Promise<unknown>;
-    };
-    internals.sessions.close();
-    const stream = internals.sessionFeeds.get('marker-child').subscribe({
-      buildSnapshot: (sequence) =>
-        internals.buildSessionSnapshot('marker-child', undefined, sequence),
-    });
-    await stream.next();
-    await stream.next();
-    const markerOne = {
-      type: 'custom',
-      customType: 'steering-message',
-      data: { timestamp: 1001, text: 'first steer' },
-    };
-    const markerTwo = {
-      type: 'custom',
-      customType: 'steering-message',
-      data: { timestamp: 1002, text: 'second steer' },
-    };
-    const records = [
-      ...Array.from({ length: 254 }, (_, index) => ({
-        type: 'custom',
-        customType: 'steering-message',
-        data: { timestamp: 2000 + index, text: `prefix steer ${index}` },
-      })),
-      markerOne,
-      markerTwo,
-      {
-        type: 'message',
-        id: 'steered-one',
-        message: { role: 'user', content: 'first steer', timestamp: 1001 },
-      },
-      {
-        type: 'message',
-        id: 'steered-two',
-        message: { role: 'user', content: 'second steer', timestamp: 1002 },
-      },
-    ];
-    await writeFile(
-      file,
-      `${[header, ...records].map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
-    server.publishSessionIndexChange('marker-child', true);
-    const seen = new Map<string, unknown>();
-    await Promise.race([
-      (async () => {
-        while (!seen.has('steered-one') || !seen.has('steered-two')) {
-          const item = await stream.next();
-          if (item.done) throw new Error('marker feed closed');
-          const event = item.value as {
-            kind?: string;
-            event?: {
-              event?: { type?: string; message?: { messageId?: string } };
-            };
-          };
-          const message = event.event?.event?.message;
-          if (event.kind === 'event' && message?.messageId)
-            seen.set(message.messageId, event.event?.event);
-        }
-      })(),
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(() => reject(new Error('marker suffix timed out')), 3_000),
-      ),
-    ]);
-    expect(seen.get('steered-one')).toMatchObject({
-      type: 'message.finished',
-      message: { data: { deliveryMode: 'steer' } },
-    });
-    expect(seen.get('steered-two')).toMatchObject({
-      type: 'message.finished',
-      message: { data: { deliveryMode: 'steer' } },
-    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(feed.sequence).toBe(sequence);
     await stream.return(undefined);
   });
 
@@ -423,7 +219,7 @@ describe('dashboard HTTP boundary', () => {
       string,
       unknown
     >;
-    expect((details.task as string).length).toBeLessThanOrEqual(20_000);
+    expect((details.task as string).length).toBeLessThanOrEqual(32 * 1024);
     expect(
       (
         (details.activities as Array<Record<string, unknown>>)[0]

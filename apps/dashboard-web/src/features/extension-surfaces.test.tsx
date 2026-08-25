@@ -22,13 +22,11 @@ import {
   selectedDelegateRunId,
 } from './delegate-transcript-inspector';
 import {
-  activeDelegateTranscriptBaselineFor,
   createDelegateHistoryRefreshCoordinator,
   DelegateTranscript,
   dashboardSurfacePlacement,
   delegateHistoryRevisionChanged,
   ExtensionSurfaceStack,
-  overlayActiveDelegateTranscripts,
   reconcileDelegateLiveRuns,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
@@ -153,111 +151,6 @@ describe('live extension surface fixtures', () => {
         { id: 'session-2', revision: 2 },
       ),
     ).toBe(false);
-  });
-
-  it('rejects active transcript baselines from another session, server, or fetch', () => {
-    const baseline = {
-      version: 1 as const,
-      serverId: 'server-1',
-      cursor: 4,
-      sessionId: 'session-1',
-      runtimeId: 'runtime-1',
-      runs: [],
-    };
-    expect(
-      activeDelegateTranscriptBaselineFor(baseline, {
-        sessionId: 'session-1',
-        serverId: 'server-2',
-        runtimeId: 'runtime-1',
-        fetching: false,
-      }),
-    ).toBeUndefined();
-    expect(
-      activeDelegateTranscriptBaselineFor(baseline, {
-        sessionId: 'session-1',
-        serverId: 'server-1',
-        runtimeId: 'runtime-2',
-        fetching: false,
-      }),
-    ).toBeUndefined();
-    expect(
-      activeDelegateTranscriptBaselineFor(baseline, {
-        sessionId: 'session-1',
-        serverId: 'server-1',
-        runtimeId: 'runtime-1',
-        fetching: true,
-      }),
-    ).toBeUndefined();
-  });
-
-  it('backfills active delegate transcripts while live entries take precedence', () => {
-    const live = {
-      id: 'status-1',
-      runId: 'run-1',
-      lineageId: 'lineage-1',
-      name: 'Worker',
-      kind: 'background' as const,
-      state: 'running' as const,
-      createdAt: 1,
-      allowWrites: false,
-      transcript: [
-        {
-          id: 'tool-1',
-          type: 'tool' as const,
-          label: 'read source',
-          status: 'completed' as const,
-          text: 'new result',
-        },
-      ],
-    };
-    const baseline = {
-        version: 1 as const,
-        serverId: 'server-1',
-        cursor: 4,
-        sessionId: 'session-1',
-        runs: [
-          {
-            runId: 'run-1',
-            lineageId: 'lineage-1',
-            name: 'Worker',
-            kind: 'background' as const,
-            state: 'running' as const,
-            createdAt: 1,
-            allowWrites: false,
-            transcript: [
-              {
-                id: 'task',
-                type: 'task' as const,
-                label: 'Task',
-                text: 'inspect source',
-              },
-              {
-                id: 'tool-1',
-                type: 'tool' as const,
-                label: 'read source',
-                status: 'running' as const,
-                text: 'old result',
-              },
-            ],
-            transcriptTruncated: true,
-          },
-        ],
-      },
-      result = overlayActiveDelegateTranscripts([live], baseline);
-    expect(result[0]?.transcript).toEqual([
-      expect.objectContaining({ id: 'task', text: 'inspect source' }),
-      expect.objectContaining({ id: 'tool-1', text: 'new result' }),
-    ]);
-    expect(result[0]?.transcriptTruncated).toBe(true);
-
-    const complete = overlayActiveDelegateTranscripts([live], {
-      ...baseline,
-      runs: baseline.runs.map((run) => ({
-        ...run,
-        transcriptTruncated: false,
-      })),
-    });
-    expect(complete[0]?.transcriptTruncated).toBe(false);
   });
 
   it('prefers the current lineage row over the inspected fallback', () => {

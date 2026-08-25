@@ -52,11 +52,14 @@ function delegateTranscriptEntries(
         runId?: unknown;
         state?: unknown;
         pauseState?: unknown;
+        /** Hosted delegates have their own runtime/session feed authority. */
+        sessionId?: unknown;
         transcript?: unknown;
       };
       if (
         typeof candidate.lineageId !== 'string' ||
         typeof candidate.runId !== 'string' ||
+        candidate.sessionId !== undefined ||
         !(
           candidate.state === 'queued' ||
           candidate.state === 'running' ||

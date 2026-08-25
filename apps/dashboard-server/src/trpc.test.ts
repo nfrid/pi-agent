@@ -71,13 +71,6 @@ function context(): DashboardRouteContext {
       },
       completeThroughCursor: before === undefined,
     }),
-    readActiveDelegateTranscripts: async () => ({
-      version: 1,
-      serverId: 'generation-1',
-      cursor: 8,
-      sessionId: 's',
-      runs: [],
-    }),
     readDelegateHistory: async () => ({
       version: 2,
       sessionId: 's',

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ActiveDelegateTranscriptBaselineSchema,
   ComposerCommandCatalogueSchema,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   DelegateWorkflowMetadataSchema,
@@ -16,7 +15,6 @@ import {
   MAX_RUNTIME_EXTENSION_SURFACES,
   MAX_SHELL_SNAPSHOT_BYTES,
   ProtocolInfoSchema,
-  parseActiveDelegateTranscriptBaseline,
   parseAuthoritativeSessionSnapshot,
   parseBridgeCommand,
   parseBridgeEvent,
@@ -180,27 +178,6 @@ describe('dashboard protocol', () => {
       ).toThrow();
   });
 
-  it('validates a narrow per-session transcript reset event', () => {
-    expect(
-      parseBridgeEvent({
-        type: 'session.transcript.reset',
-        sessionId: 'session-1',
-        reason: 'source-rewrite',
-      }),
-    ).toEqual({
-      type: 'session.transcript.reset',
-      sessionId: 'session-1',
-      reason: 'source-rewrite',
-    });
-    expect(() =>
-      parseBridgeEvent({
-        type: 'session.transcript.reset',
-        sessionId: 'session-1',
-        reason: 'gap',
-      }),
-    ).toThrow();
-  });
-
   it('validates typed runtime command input and receipts', () => {
     expect(
       parseRuntimeCommandInput({
@@ -314,7 +291,7 @@ describe('dashboard protocol', () => {
     ).toThrow();
   });
 
-  it('validates active delegate baselines and transcript upsert events', () => {
+  it('validates delegate transcript upsert events', () => {
     const entry = {
       id: '2:tool-1',
       type: 'tool' as const,
@@ -326,93 +303,6 @@ describe('dashboard protocol', () => {
       run: 2,
     };
     expect(
-      parseActiveDelegateTranscriptBaseline({
-        version: 1,
-        serverId: 'server-1',
-        cursor: 4,
-        sessionId: 'session-1',
-        runtimeId: 'runtime-1',
-        runtimeEpoch: 'epoch-1',
-        runtimeSeq: 7,
-        runs: [
-          {
-            runId: 'run-1',
-            sessionId: 'child-session-1',
-            lineageId: 'lineage-1',
-            name: 'Worker',
-            kind: 'background',
-            state: 'running',
-            createdAt: 1,
-            allowWrites: false,
-            details: {
-              task: 'Review the live implementation.',
-              setup: { cwd: '/repo', isolation: 'worktree' },
-              runConfig: {
-                scope: ['extensions/delegate'],
-                after: ['gate@1'],
-                parentContextNote: 'Parent note',
-                refreshSource: 'head',
-                inputs: [
-                  {
-                    identity: 'impl@1',
-                    kind: 'report',
-                    label: 'Implementation report',
-                    content: 'bounded evidence',
-                  },
-                ],
-                warnings: ['fallback used'],
-              },
-              renderedPrompt: 'exact prompt',
-              truncated: false,
-            },
-            transcript: [entry],
-            workflow: {
-              logicalId: 'review',
-              attempt: 1,
-              identity: 'review@1',
-              state: 'scheduled',
-              dependencies: ['impl@1'],
-              waitingFor: ['impl@1'],
-              reason: 'waiting for impl@1',
-              createdAt: 1,
-              scheduledAt: 1,
-            },
-          },
-        ],
-      }),
-    ).toMatchObject({
-      runs: [
-        {
-          transcript: [entry],
-          details: { task: 'Review the live implementation.' },
-        },
-      ],
-    });
-    expect(() =>
-      parseActiveDelegateTranscriptBaseline({
-        version: 1,
-        serverId: 'server-1',
-        cursor: 4,
-        sessionId: 'session-1',
-        runs: [
-          {
-            runId: 'run-1',
-            lineageId: 'lineage-1',
-            name: 'Worker',
-            kind: 'background',
-            state: 'running',
-            createdAt: 1,
-            allowWrites: false,
-            details: {
-              truncated: false,
-              renderedPrompt: 'x'.repeat(640 * 1024 + 1),
-            },
-            transcript: [],
-          },
-        ],
-      }),
-    ).toThrow();
-    expect(
       parseBridgeEvent({
         type: 'delegate.transcript.updated',
         sessionId: 'session-1',
@@ -421,7 +311,6 @@ describe('dashboard protocol', () => {
         entry,
       }),
     ).toMatchObject({ type: 'delegate.transcript.updated', entry });
-    expect(ActiveDelegateTranscriptBaselineSchema).toBeDefined();
     expect(DelegateWorkflowMetadataSchema).toBeDefined();
   });
 

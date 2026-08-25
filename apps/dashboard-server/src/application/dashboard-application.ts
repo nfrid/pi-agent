@@ -37,7 +37,7 @@ import type { PushSender } from '../push.js';
 import type { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
 import type { RuntimeManager } from '../runtime-manager.js';
 import type { RegistryChange, RuntimeRegistry } from '../runtime-registry.js';
-import type { AuxiliarySourceCursor, SessionIndex } from '../session-index.js';
+import type { SessionIndex } from '../session-index.js';
 import type { UsageProvider } from '../usage.js';
 import { NotificationService } from './notification-service.js';
 import type { OrchestrationService } from './orchestration-service.js';
@@ -56,10 +56,7 @@ export interface ApplicationChange {
   snapshot?: RuntimeSnapshot;
 }
 
-export type InternalSessionSnapshot = AuthoritativeSessionSnapshot & {
-  /** Server-internal source cut; never sent through the browser protocol. */
-  sourceCursor?: AuxiliarySourceCursor;
-};
+export type InternalSessionSnapshot = AuthoritativeSessionSnapshot;
 
 export interface DashboardApplicationOptions {
   registry: RuntimeRegistry;
@@ -1317,7 +1314,6 @@ export class DashboardApplication {
     sessionId: string,
     before?: string,
     feedSequence?: number,
-    includeSourceCursor = false,
   ): Promise<InternalSessionSnapshot> {
     if (!SESSION_ID_PATTERN.test(sessionId))
       throw new Error('Invalid session id.');
@@ -1386,13 +1382,6 @@ export class DashboardApplication {
       const cursor = feedSequence ?? 0;
       const capture = before === undefined ? this.captureActive(sessionId) : {};
       const indexed = this.sessionIndex.get(sessionId);
-      const sourceCursor =
-        includeSourceCursor &&
-        before === undefined &&
-        indexed !== undefined &&
-        this.sessionIndex.isAuxiliary(sessionId)
-          ? await this.sessionIndex.readAppendCursor(sessionId)
-          : undefined;
       let result: SessionRead;
       try {
         if (!indexed && capture.runtime)
@@ -1407,7 +1396,6 @@ export class DashboardApplication {
             {
               resolveLatestLeaf:
                 before === undefined && runtimeIsWorking(capture.runtime),
-              ...(sourceCursor === undefined ? {} : { sourceCursor }),
             },
           );
       } catch (error) {
@@ -1499,9 +1487,6 @@ export class DashboardApplication {
         ...(runtimeSeq === undefined || runtimeSeq < 0 ? {} : { runtimeSeq }),
         active,
         completeThroughCursor,
-        ...(includeSourceCursor && result.sourceCursor !== undefined
-          ? { sourceCursor: result.sourceCursor }
-          : {}),
       };
     }
     throw new Error('Runtime changed while reading session snapshot; retry.');
