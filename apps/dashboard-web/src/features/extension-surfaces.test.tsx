@@ -1499,7 +1499,7 @@ describe('live extension surface fixtures', () => {
         row={row}
         now={2_000}
         details={{
-          task: 'Review the complete implementation.',
+          task: 'Review the **complete** implementation.\n\n- Check behavior\n- Check layout',
           setup: {
             cwd: '/repo',
             isolation: 'worktree',
@@ -1522,7 +1522,11 @@ describe('live extension surface fixtures', () => {
         }}
       />,
     );
-    expect(markup).toContain('Review the complete implementation.');
+    expect(markup).toContain(
+      'Review the <strong>complete</strong> implementation.',
+    );
+    expect(markup).toContain('<li>Check behavior</li>');
+    expect(markup).toContain('class="markdown');
     expect(markup).toContain('apps/dashboard-web');
     expect(markup).toContain('Keep it concise.');
     expect(markup).toContain('Implementation report');

@@ -1,5 +1,6 @@
 import type { DelegateHistoryRunDetailResponse } from '@pi-dashboard/protocol';
 import type { DelegateStatus } from '../../../../../extensions/delegate/contribution';
+import { Markdown } from '../../Markdown';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
 import {
   surfaceElapsed,
@@ -138,12 +139,9 @@ export function DelegateInspectorDetails({
   return (
     <div className="delegate-inspector-details">
       {structuredDetails?.task && (
-        <section
-          className="delegate-inspector-task"
-          aria-labelledby="delegate-task-title"
-        >
-          <h2 id="delegate-task-title">Task</h2>
-          <p>{structuredDetails.task}</p>
+        <section className="delegate-inspector-task" aria-label="Task">
+          <h2>Task</h2>
+          <Markdown>{structuredDetails.task}</Markdown>
         </section>
       )}
       {setup && (
@@ -217,7 +215,9 @@ export function DelegateInspectorDetails({
             {runConfig?.parentContextNote && (
               <div>
                 <dt>Parent context</dt>
-                <dd>{runConfig.parentContextNote}</dd>
+                <dd className="delegate-inspector-context-note">
+                  {runConfig.parentContextNote}
+                </dd>
               </div>
             )}
             {runConfig?.refreshSource && (

@@ -132,6 +132,10 @@ export function DelegateTranscriptInspector({
             : displayedRow.details
         }
       />
+      <div className="delegate-transcript-heading">
+        <h2>Transcript</h2>
+        {transcriptSessionId && <span>Child session</span>}
+      </div>
       <DelegateInspectorTranscript
         row={transcriptRow}
         store={store}
