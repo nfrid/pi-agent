@@ -20,6 +20,10 @@ export type ActivityKind =
 export interface ToolDescriptor {
   name: string;
   args: unknown;
+  status?: string;
+  isError?: boolean;
+  result?: unknown;
+  data?: unknown;
 }
 
 const INSPECTION_TOOLS = new Set([
@@ -81,6 +85,129 @@ export function toolPath(args: unknown): string | undefined {
 }
 
 export const TOOL_ACTION_LABEL_MAX = 140;
+
+export type ActivityLineChanges = {
+  added: number;
+  changed: number;
+  removed: number;
+};
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function textLines(text: string): string[] {
+  if (!text) return [];
+  const lines = text.split(/\r\n|\r|\n/u);
+  if (/\r\n|\r|\n$/u.test(text)) lines.pop();
+  return lines;
+}
+
+function replacementLineChanges(
+  oldText: string,
+  newText: string,
+): ActivityLineChanges {
+  const before = textLines(oldText);
+  const after = textLines(newText);
+  let start = 0;
+  let beforeEnd = before.length - 1;
+  let afterEnd = after.length - 1;
+  while (
+    start <= beforeEnd &&
+    start <= afterEnd &&
+    before[start] === after[start]
+  )
+    start += 1;
+  while (
+    beforeEnd >= start &&
+    afterEnd >= start &&
+    before[beforeEnd] === after[afterEnd]
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+  const removedLines = Math.max(0, beforeEnd - start + 1);
+  const addedLines = Math.max(0, afterEnd - start + 1);
+  const changed = Math.min(removedLines, addedLines);
+  return {
+    added: addedLines - changed,
+    changed,
+    removed: removedLines - changed,
+  };
+}
+
+/** Derive line changes only from complete, well-known edit/write arguments. */
+export function activityToolLineChanges(
+  tool: Pick<ToolDescriptor, 'name' | 'args'>,
+): ActivityLineChanges | undefined {
+  const name = toolBaseName(tool.name);
+  const args = recordValue(tool.args);
+  if (name === 'write' && typeof args?.content === 'string')
+    return { added: textLines(args.content).length, changed: 0, removed: 0 };
+  if (name !== 'edit' || !Array.isArray(args?.edits) || args.edits.length === 0)
+    return undefined;
+  const total: ActivityLineChanges = { added: 0, changed: 0, removed: 0 };
+  let counted = false;
+  for (const value of args.edits) {
+    const edit = recordValue(value);
+    if (typeof edit?.oldText !== 'string' || typeof edit.newText !== 'string')
+      continue;
+    const changes = replacementLineChanges(edit.oldText, edit.newText);
+    total.added += changes.added;
+    total.changed += changes.changed;
+    total.removed += changes.removed;
+    counted = true;
+  }
+  return counted ? total : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/** Return a command duration only when a tool result/data explicitly records it. */
+export function activityToolDurationMs(
+  tool: ToolDescriptor,
+): number | undefined {
+  const name = toolBaseName(tool.name);
+  if (
+    name !== 'bash' &&
+    name !== 'shell' &&
+    name !== 'exec' &&
+    name !== 'inspect_shell'
+  )
+    return undefined;
+  return (
+    finiteNumber(recordValue(tool.data)?.durationMs) ??
+    finiteNumber(recordValue(tool.result)?.durationMs)
+  );
+}
+
+export interface ActivityGroupFacts {
+  lineChanges: ActivityLineChanges;
+  commandDurationMs: number;
+}
+
+export function activityGroupFacts(
+  tools: readonly ToolDescriptor[],
+): ActivityGroupFacts {
+  const lineChanges: ActivityLineChanges = { added: 0, changed: 0, removed: 0 };
+  let commandDurationMs = 0;
+  for (const tool of tools) {
+    const changes = activityToolLineChanges(tool);
+    if (changes) {
+      lineChanges.added += changes.added;
+      lineChanges.changed += changes.changed;
+      lineChanges.removed += changes.removed;
+    }
+    commandDurationMs += activityToolDurationMs(tool) ?? 0;
+  }
+  return { lineChanges, commandDurationMs };
+}
 
 function actionArgs(args: unknown): Record<string, unknown> | undefined {
   return args && typeof args === 'object' && !Array.isArray(args)

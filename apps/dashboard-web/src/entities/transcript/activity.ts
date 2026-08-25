@@ -1,4 +1,6 @@
 import {
+  type ActivityGroupFacts,
+  activityGroupFacts,
   type projectActivityGroups,
   stringArg,
   TOOL_ACTION_LABEL_MAX,
@@ -28,7 +30,7 @@ export type ActivityStepParts = {
   label: string;
   action: string;
   argument?: string;
-  lineChanges?: FileLineChanges;
+  lineChanges?: ActivityGroupFacts['lineChanges'];
   role: 'edit' | 'read' | 'search' | 'command' | 'other';
   described?: boolean;
   state: 'complete' | 'pending' | 'failed';
@@ -137,93 +139,6 @@ function countLabel(count: number, singular: string): string {
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
-type FileLineChanges = {
-  added: number;
-  changed: number;
-  removed: number;
-};
-
-function textLines(text: string): string[] {
-  if (!text) return [];
-  const lines = text.split(/\r\n|\r|\n/u);
-  if (/\r\n|\r|\n$/u.test(text)) lines.pop();
-  return lines;
-}
-
-function replacementLineChanges(
-  oldText: string,
-  newText: string,
-): FileLineChanges {
-  const before = textLines(oldText);
-  const after = textLines(newText);
-  let start = 0;
-  let beforeEnd = before.length - 1;
-  let afterEnd = after.length - 1;
-  while (
-    start <= beforeEnd &&
-    start <= afterEnd &&
-    before[start] === after[start]
-  )
-    start += 1;
-  while (
-    beforeEnd >= start &&
-    afterEnd >= start &&
-    before[beforeEnd] === after[afterEnd]
-  ) {
-    beforeEnd -= 1;
-    afterEnd -= 1;
-  }
-  const removedLines = Math.max(0, beforeEnd - start + 1);
-  const addedLines = Math.max(0, afterEnd - start + 1);
-  const changed = Math.min(removedLines, addedLines);
-  return {
-    added: addedLines - changed,
-    changed,
-    removed: removedLines - changed,
-  };
-}
-
-function fileLineChanges(
-  name: string,
-  args: unknown,
-): FileLineChanges | undefined {
-  const record = activityArgs(args);
-  if (name === 'write' && typeof record?.content === 'string')
-    return { added: textLines(record.content).length, changed: 0, removed: 0 };
-  if (name !== 'edit') return undefined;
-  const edits = arrayArg(args, 'edits');
-  if (!edits.length) return undefined;
-  const total: FileLineChanges = { added: 0, changed: 0, removed: 0 };
-  let counted = false;
-  for (const edit of edits) {
-    const replacement = activityArgs(edit);
-    if (
-      typeof replacement?.oldText !== 'string' ||
-      typeof replacement.newText !== 'string'
-    )
-      continue;
-    const changes = replacementLineChanges(
-      replacement.oldText,
-      replacement.newText,
-    );
-    total.added += changes.added;
-    total.changed += changes.changed;
-    total.removed += changes.removed;
-    counted = true;
-  }
-  return counted ? total : undefined;
-}
-
-function fileLineChangeLabel(changes: FileLineChanges): string {
-  return [
-    changes.added ? `+${changes.added}` : undefined,
-    changes.changed ? `~${changes.changed}` : undefined,
-    changes.removed ? `-${changes.removed}` : undefined,
-  ]
-    .filter(Boolean)
-    .join(' ');
-}
-
 function readPathArgument(path: string, args: unknown, cwd: string): string {
   const displayed = displayActivityPath(path, cwd);
   const offset = numberArg(args, 'offset');
@@ -235,7 +150,9 @@ function readPathArgument(path: string, args: unknown, cwd: string): string {
 
 function activityToolState(tool: ActivityStepTool): ActivityStepParts['state'] {
   if (isFailedActivityTool(tool)) return 'failed';
-  const status = 'status' in tool ? tool.status : undefined;
+  const status = ('status' in tool ? tool.status : undefined) as
+    | string
+    | undefined;
   return status === 'pending' || status === 'running' || status === 'preparing'
     ? 'pending'
     : 'complete';
@@ -252,7 +169,7 @@ export function activityStepParts(
   let action: string;
   let described: boolean | undefined;
   let argument: string | undefined;
-  let lineChanges: FileLineChanges | undefined;
+  let lineChanges: ActivityGroupFacts['lineChanges'] | undefined;
   if (name === 'bash' || name === 'shell' || name === 'exec') {
     const description = stringArg(tool.args, 'description');
     if (description) {
@@ -376,7 +293,9 @@ export function activityStepParts(
     else argument = mode;
   } else if (path) {
     const edits = arrayArg(tool.args, 'edits');
-    lineChanges = fileLineChanges(name, tool.args);
+    const changes = activityGroupFacts([tool]).lineChanges;
+    lineChanges =
+      changes.added || changes.changed || changes.removed ? changes : undefined;
     action =
       name === 'read'
         ? 'Reading'
@@ -399,10 +318,18 @@ export function activityStepParts(
     ? compactActivityArgument(argument)
     : undefined;
   const changeLabel = lineChanges
-    ? fileLineChangeLabel(lineChanges)
+    ? [
+        lineChanges.added ? `+${lineChanges.added}` : undefined,
+        lineChanges.changed ? `~${lineChanges.changed}` : undefined,
+        lineChanges.removed ? `-${lineChanges.removed}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(' ')
     : undefined;
   return {
-    label: [action, displayedArgument, changeLabel].filter(Boolean).join(' '),
+    label: compactActivityDescription(
+      [action, displayedArgument, changeLabel].filter(Boolean).join(' '),
+    ),
     action,
     ...(displayedArgument ? { argument: displayedArgument } : {}),
     ...(lineChanges ? { lineChanges } : {}),
@@ -443,15 +370,63 @@ export function activityGroupSummary(
 
 export function activityGroupMetadata(
   summary: Pick<ActivityGroupSummary, 'toolCount' | 'failureCount'>,
+): string;
+export function activityGroupMetadata(
+  group: Pick<TranscriptGroup, 'kind' | 'status' | 'tools' | 'toolCount'>,
+  summary: Pick<ActivityGroupSummary, 'failureCount'>,
+): string;
+export function activityGroupMetadata(
+  groupOrSummary:
+    | Pick<TranscriptGroup, 'kind' | 'status' | 'tools' | 'toolCount'>
+    | Pick<ActivityGroupSummary, 'toolCount' | 'failureCount'>,
+  providedSummary?: Pick<ActivityGroupSummary, 'failureCount'>,
 ): string {
+  if (providedSummary === undefined) {
+    const summary = groupOrSummary as Pick<
+      ActivityGroupSummary,
+      'toolCount' | 'failureCount'
+    >;
+    const parts = [
+      `${summary.toolCount} tool call${summary.toolCount === 1 ? '' : 's'}`,
+    ];
+    if (summary.failureCount > 0)
+      parts.push(
+        `${summary.failureCount} failed attempt${summary.failureCount === 1 ? '' : 's'}`,
+      );
+    return parts.join(' · ');
+  }
+  const group = groupOrSummary as Pick<
+    TranscriptGroup,
+    'kind' | 'status' | 'tools' | 'toolCount'
+  >;
+  const facts = activityGroupFacts(group.tools);
+  const changes = [
+    facts.lineChanges.added ? `+${facts.lineChanges.added}` : undefined,
+    facts.lineChanges.changed ? `~${facts.lineChanges.changed}` : undefined,
+    facts.lineChanges.removed ? `-${facts.lineChanges.removed}` : undefined,
+  ].filter(Boolean);
+  const kindLabel =
+    group.kind === 'mutate'
+      ? 'Edited'
+      : group.kind === 'inspect'
+        ? 'Inspected'
+        : group.kind === 'validate'
+          ? 'Validated'
+          : group.kind === 'execute'
+            ? 'Ran'
+            : 'Mixed work';
   const parts = [
-    `${summary.toolCount} tool call${summary.toolCount === 1 ? '' : 's'}`,
+    kindLabel,
+    `${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}`,
+    changes.length ? changes.join(' ') : undefined,
+    facts.commandDurationMs > 0
+      ? formatCommandDuration(facts.commandDurationMs)
+      : undefined,
+    providedSummary.failureCount > 0
+      ? `${providedSummary.failureCount} failed`
+      : undefined,
   ];
-  if (summary.failureCount > 0)
-    parts.push(
-      `${summary.failureCount} failed attempt${summary.failureCount === 1 ? '' : 's'}`,
-    );
-  return parts.join(' · ');
+  return parts.filter(Boolean).join(' · ');
 }
 
 export function activityGroupPresentation(

@@ -381,6 +381,7 @@ function toolRaw(item: TranscriptRenderToolItem) {
       ...(item.isError === undefined ? {} : { isError: item.isError }),
       ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
       status: item.status,
+      ...(item.data === undefined ? {} : { data: item.data }),
     },
   };
 }
@@ -525,6 +526,9 @@ export function toTranscriptEntries(
           args: item.arguments,
           status: item.status,
           ...(item.status === 'error' ? { isError: true } : {}),
+          ...(item.isError === undefined ? {} : { isError: item.isError }),
+          ...(item.result === undefined ? {} : { result: item.result }),
+          ...(item.data === undefined ? {} : { data: item.data }),
         },
         raw: toolRaw(item),
         tool: item,

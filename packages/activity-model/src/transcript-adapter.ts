@@ -117,13 +117,18 @@ function toolEntry(
   name: string | undefined,
   args: unknown,
   status: RawToolStatus,
+  result?: unknown,
+  data?: unknown,
+  isError = false,
 ): TranscriptEntry {
   return {
     kind: 'tool',
     name: name ?? 'tool',
     args,
     ...(status === undefined ? {} : { status }),
-    ...(status === 'error' ? { isError: true } : {}),
+    ...(isError || status === 'error' ? { isError: true } : {}),
+    ...(result === undefined ? {} : { result }),
+    ...(data === undefined ? {} : { data }),
   };
 }
 
@@ -150,6 +155,9 @@ export function activityEntryFromRaw(raw: unknown): TranscriptEntry {
         message?.isError === true || value.isError === true
           ? 'error'
           : 'complete',
+        message?.result ?? value.result ?? message?.content ?? value.content,
+        message?.data ?? value.data,
+        message?.isError === true || value.isError === true,
       );
     }
     // User messages, and provider messages unknown to the model, terminate an
@@ -165,6 +173,9 @@ export function activityEntryFromRaw(raw: unknown): TranscriptEntry {
       tool.isError === true || tool.status === 'error'
         ? 'error'
         : (tool.status as RawToolStatus),
+      tool.result,
+      tool.data,
+      tool.isError === true,
     );
   }
 

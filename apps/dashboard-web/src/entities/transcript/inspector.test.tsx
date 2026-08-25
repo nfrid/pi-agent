@@ -369,8 +369,9 @@ describe('transcript payload inspection', () => {
     expect(command).not.toContain('<h4>Command</h4>');
     expect(command).not.toContain('<h4>Terminal result</h4>');
     expect(command).toContain('tool-terminal-result-error');
-    expect(command).toContain('Raw Arguments');
-    expect(command).toContain('Raw Result');
+    expect(command).toContain('Raw tool data');
+    expect(command).not.toContain('Raw Arguments');
+    expect(command).not.toContain('Raw Result');
   });
 
   it('keeps full specialized arguments while bounding only command results', () => {
@@ -448,7 +449,8 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain(
       'Source truncated this arguments before it reached the dashboard.',
     );
-    expect(markup).toContain('Raw Arguments');
+    expect(markup).toContain('Raw tool data');
+    expect(markup).not.toContain('Raw Arguments');
   });
 
   it('separates arguments and result before the expandable raw fallback', () => {
@@ -583,7 +585,126 @@ describe('transcript payload inspection', () => {
     expect(search).toContain('tool-web_search-presentation');
     expect(search).toContain('2 queries');
     expect(search).toContain('<h2>Hits</h2>');
-    expect(search).toContain('Raw Arguments');
+    expect(search).toContain('Raw tool data');
+    expect(search).not.toContain('Raw Arguments');
+
+    const searchOutcome = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'web_search',
+          arguments: { query: 'activity model' },
+          result: {
+            content: [{ type: 'text', text: 'bounded search result' }],
+            details: { queryCount: 1, failed: 0 },
+          },
+        }}
+      />,
+    );
+    expect(searchOutcome).toContain('1 query');
+    expect(searchOutcome).toContain('Raw tool data');
+
+    const fetch = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'fetch_content',
+          arguments: { url: 'https://example.com' },
+          result: {
+            content: [{ type: 'text', text: 'page text' }],
+            details: {
+              responseId: 'web_1',
+              title: 'Example',
+              totalChars: 1234,
+            },
+          },
+        }}
+      />,
+    );
+    expect(fetch).toContain('1,234 chars');
+
+    const fetchBatch = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'fetch_content',
+          arguments: { urls: ['https://one.example', 'https://two.example'] },
+          result: {
+            content: [{ type: 'text', text: 'summary' }],
+            details: { responseId: 'web_2', urlCount: 2, successful: 1 },
+          },
+        }}
+      />,
+    );
+    expect(fetchBatch).toContain('2 pages');
+    expect(fetchBatch).toContain('1 succeeded');
+
+    const content = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'get_search_content',
+          arguments: { responseId: 'web_1', view: 'summary' },
+          result: {
+            content: [{ type: 'text', text: 'selected content' }],
+            details: {
+              responseId: 'web_1',
+              totalChars: 80,
+              selectedChars: 32,
+              offset: 0,
+              remainingChars: 48,
+              nextOffset: 32,
+            },
+          },
+        }}
+      />,
+    );
+    expect(content).toContain('32 chars');
+
+    const artifact = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'artifact_retrieve',
+          arguments: {
+            handle: 'art_abcdefghijklmnopqrstuv',
+            mode: 'lines',
+            offset: 4,
+            limit: 3,
+          },
+          result: {
+            content: [{ type: 'text', text: 'line 5\nline 6\nline 7' }],
+            details: {
+              mode: 'lines',
+              totalBytes: 200,
+              startLine: 5,
+              returnedLines: 3,
+              remainingLines: 0,
+            },
+          },
+        }}
+      />,
+    );
+    expect(artifact).toContain('3 lines');
+
+    const backgroundOutcome = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'background',
+          arguments: { action: 'peek', id: 'bg-1' },
+          result: {
+            content: [{ type: 'text', text: 'running output' }],
+            details: {
+              action: 'peek',
+              process: {
+                id: 'bg-1',
+                title: 'dev server',
+                status: 'done',
+                exitCode: 0,
+                stdoutBytes: 40,
+                stderrBytes: 0,
+              },
+            },
+          },
+        }}
+      />,
+    );
+    expect(backgroundOutcome).toContain('done · exit 0');
 
     const delegate = renderToStaticMarkup(
       <ToolInspector

@@ -33,6 +33,131 @@ function Summary({ title, detail }: { title: string; detail?: string }) {
   );
 }
 
+function resultDetails(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const details = (value as Record<string, unknown>).details;
+  return details && typeof details === 'object' && !Array.isArray(details)
+    ? (details as Record<string, unknown>)
+    : undefined;
+}
+
+function finiteResultNumber(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
+  const candidate = value?.[key];
+  return typeof candidate === 'number' &&
+    Number.isFinite(candidate) &&
+    candidate >= 0
+    ? candidate
+    : undefined;
+}
+
+/** Outcome fields have to be named facts from the extension result contract. */
+function customOutcomeFacts(kind: CustomToolKind, result: unknown): string[] {
+  const details = resultDetails(result);
+  if (!details) return [];
+  if (kind === 'web_search') {
+    const queries = finiteResultNumber(details, 'queryCount');
+    const failed = finiteResultNumber(details, 'failed');
+    return [
+      queries === undefined
+        ? undefined
+        : `${queries} quer${queries === 1 ? 'y' : 'ies'}`,
+      failed === undefined || failed === 0 ? undefined : `${failed} failed`,
+    ].filter((fact): fact is string => Boolean(fact));
+  }
+  if (kind === 'fetch_content') {
+    const pages = finiteResultNumber(details, 'urlCount');
+    const successful = finiteResultNumber(details, 'successful');
+    const chars = finiteResultNumber(details, 'totalChars');
+    return [
+      pages === undefined
+        ? undefined
+        : `${pages} page${pages === 1 ? '' : 's'}`,
+      successful !== undefined && pages !== undefined && successful < pages
+        ? `${successful} succeeded`
+        : undefined,
+      chars === undefined ? undefined : `${chars.toLocaleString()} chars`,
+    ].filter((fact): fact is string => Boolean(fact));
+  }
+  if (kind === 'get_search_content') {
+    const chars = finiteResultNumber(details, 'selectedChars');
+    return chars === undefined ? [] : [`${chars.toLocaleString()} chars`];
+  }
+  if (kind === 'artifact_retrieve') {
+    const mode = details.mode;
+    const lines = finiteResultNumber(details, 'returnedLines');
+    const matches = finiteResultNumber(details, 'totalMatches');
+    const bytes = finiteResultNumber(details, 'totalBytes');
+    if (mode === 'lines' && lines !== undefined)
+      return [`${lines.toLocaleString()} lines`];
+    if (mode === 'search' && matches !== undefined)
+      return [`${matches.toLocaleString()} matches`];
+    if (mode === 'metadata' && bytes !== undefined)
+      return [`${bytes.toLocaleString()} bytes`];
+    return [];
+  }
+  if (kind === 'background') {
+    const process =
+      details.process &&
+      typeof details.process === 'object' &&
+      !Array.isArray(details.process)
+        ? (details.process as Record<string, unknown>)
+        : undefined;
+    const processes = Array.isArray(details.processes)
+      ? details.processes.filter(
+          (value): value is Record<string, unknown> =>
+            Boolean(value) &&
+            typeof value === 'object' &&
+            !Array.isArray(value),
+        )
+      : [];
+    if (process) {
+      const status =
+        typeof process.status === 'string' ? process.status : undefined;
+      const exitCode =
+        typeof process.exitCode === 'number' &&
+        Number.isFinite(process.exitCode)
+          ? process.exitCode
+          : undefined;
+      return [
+        status,
+        exitCode === undefined ? undefined : `exit ${exitCode}`,
+      ].filter((fact): fact is string => Boolean(fact));
+    }
+    if (processes.length > 0) {
+      const statusCounts = new Map<string, number>();
+      for (const item of processes) {
+        if (typeof item.status === 'string')
+          statusCounts.set(
+            item.status,
+            (statusCounts.get(item.status) ?? 0) + 1,
+          );
+      }
+      return [
+        `${processes.length} process${processes.length === 1 ? '' : 'es'}`,
+        ...[...statusCounts].map(([status, count]) => `${count} ${status}`),
+      ];
+    }
+  }
+  return [];
+}
+
+function OutcomeFacts({
+  kind,
+  result,
+}: {
+  kind: CustomToolKind;
+  result: unknown;
+}) {
+  const facts = customOutcomeFacts(kind, result);
+  return facts.length ? (
+    <small className="tool-custom-outcome">{facts.join(' · ')}</small>
+  ) : null;
+}
+
 function ResultBody({
   kind,
   text,
@@ -393,6 +518,7 @@ export function CustomToolInspector({
       aria-label={`${kind} presentation`}
     >
       {SUMMARIES[kind](args)}
+      <OutcomeFacts kind={kind} result={tool.result} />
       {visibleResult ? (
         <ResultBody
           kind={kind}
