@@ -835,6 +835,8 @@ function projectRun(
 }
 
 const WORKFLOW_STORE_ENTRY_TYPE = 'delegate-workflow:v1';
+const DELEGATE_CALL_ENTRY_TYPE = 'delegate-history-call:v1';
+const MAX_PROJECTED_DELEGATE_CALLS = 16;
 const MAX_WORKFLOW_HISTORY_ATTEMPTS = 256;
 const MAX_WORKFLOW_DELTA_ATTEMPTS = 32;
 const WORKFLOW_STATES = new Set([
@@ -1219,6 +1221,108 @@ function projectWorkflowStoreEntry(
   };
 }
 
+function delegateCallArguments(entry: RecordValue): RecordValue[] {
+  const message = isRecord(entry.message) ? entry.message : undefined;
+  if (message?.role !== 'assistant' || !Array.isArray(message.content))
+    return [];
+  return message.content.flatMap((part) =>
+    isRecord(part) &&
+    part.type === 'toolCall' &&
+    part.name === 'delegate' &&
+    isRecord(part.arguments)
+      ? [part.arguments]
+      : [],
+  );
+}
+
+type DelegateCallReference = {
+  logicalId: string;
+  targetIdentity?: string;
+  predecessorIdentity?: string;
+  continuation: boolean;
+};
+
+function delegateCallReference(
+  args: RecordValue,
+): DelegateCallReference | undefined {
+  const hasId = Object.hasOwn(args, 'id');
+  const hasContinuation = Object.hasOwn(args, 'continue');
+  if (hasId === hasContinuation) return undefined;
+  if (hasId && typeof args.id !== 'string') return undefined;
+  if (hasContinuation && typeof args.continue !== 'string') return undefined;
+  const id = hasId ? (args.id as string) : undefined;
+  const continuation = hasContinuation ? (args.continue as string) : undefined;
+  if (id !== undefined)
+    return isCanonicalWorkflowLogicalId(id)
+      ? { logicalId: id, targetIdentity: `${id}@1`, continuation: false }
+      : undefined;
+  if (!continuation) return undefined;
+  if (isCanonicalWorkflowAttemptReference(continuation)) {
+    const separator = continuation.lastIndexOf('@');
+    const logicalId = continuation.slice(0, separator);
+    const ordinal = Number(continuation.slice(separator + 1));
+    if (ordinal >= MAX_WORKFLOW_ATTEMPT_ORDINAL) return undefined;
+    return {
+      logicalId,
+      targetIdentity: `${logicalId}@${ordinal + 1}`,
+      predecessorIdentity: continuation,
+      continuation: true,
+    };
+  }
+  return isCanonicalWorkflowLogicalId(continuation)
+    ? { logicalId: continuation, continuation: true }
+    : undefined;
+}
+
+function projectDelegateCallEntry(entry: RecordValue): RecordValue | undefined {
+  const sourceCalls = delegateCallArguments(entry);
+  const calls: RecordValue[] = [];
+  let truncated = sourceCalls.length > MAX_PROJECTED_DELEGATE_CALLS;
+  for (const args of sourceCalls.slice(0, MAX_PROJECTED_DELEGATE_CALLS)) {
+    const reference = delegateCallReference(args);
+    if (!reference) continue;
+    const source: RecordValue = {
+      task: args.task,
+      cwd: args.cwd,
+      isolation: args.isolation,
+      scope: args.scope,
+      contextNote: args.contextNote,
+      refreshSource: args.refresh,
+      workflow: { dependencies: args.after },
+    };
+    const details = publicDetails(source);
+    const context =
+      args.context === 'branch' || args.context === 'fresh'
+        ? args.context
+        : reference.continuation
+          ? 'continuation'
+          : undefined;
+    const isolation = validHistoryIsolation(args.isolation);
+    const call: RecordValue = {
+      ...reference,
+      ...(typeof details.task === 'string' ? { task: details.task } : {}),
+      ...(context ? { context } : {}),
+      ...(isolation ? { isolation } : {}),
+      details,
+    };
+    if (
+      serializedBytes({ version: 1, calls: [...calls, call] }) >
+      MAX_DELEGATE_HISTORY_DETAIL_BYTES
+    ) {
+      truncated = true;
+      break;
+    }
+    calls.push(call);
+  }
+  if (calls.length === 0) return undefined;
+  return {
+    ...projectedEntryMetadata(entry),
+    type: 'custom',
+    customType: DELEGATE_CALL_ENTRY_TYPE,
+    data: { version: 1, calls, ...(truncated ? { truncated: true } : {}) },
+  };
+}
+
 function projectJobMetadata(job: RecordValue): RecordValue {
   const result: RecordValue = {};
   for (const [key, max] of [
@@ -1250,6 +1354,9 @@ export function projectDelegateHistoryEntry(
   const result = projectedEntryMetadata(value);
   const workflowEntry = projectWorkflowStoreEntry(value);
   if (workflowEntry) return { entry: workflowEntry };
+  const callEntry = projectDelegateCallEntry(value);
+  if (callEntry)
+    return { entry: callEntry, retainedBytes: serializedBytes(callEntry) };
   const wakeEntry = projectWakeStoreEntry(value);
   if (wakeEntry) return { entry: wakeEntry };
   const entryIdentity = stringValue(value.id, 256);
@@ -1434,18 +1541,78 @@ function backgroundDetails(
 export function isDelegateHistoryEntry(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
+    delegateCallArguments(value).some(
+      (args) => delegateCallReference(args) !== undefined,
+    ) ||
     workflowDetails(value, 0).length > 0 ||
     foregroundDetails(value, 0).length > 0 ||
     backgroundDetails(value, 0).length > 0
   );
 }
 
+function projectedDelegateCalls(entry: RecordValue): RecordValue[] {
+  if (entry.customType !== DELEGATE_CALL_ENTRY_TYPE) return [];
+  const data = isRecord(entry.data) ? entry.data : undefined;
+  return data?.version === 1 && Array.isArray(data.calls)
+    ? data.calls.filter(isRecord)
+    : [];
+}
+
 function workflowJournal(
   branch: readonly unknown[],
 ): DelegateOccurrence[] | undefined {
+  const ownersByIdentity = new Map<string, Set<string>>();
+  for (const value of branch) {
+    if (!isRecord(value)) continue;
+    const operation = workflowStoreOperation(value);
+    if (operation === undefined) return undefined;
+    if (operation === null) continue;
+    for (const metadata of operation.attempts) {
+      const identity = String(metadata.identity);
+      const owners = ownersByIdentity.get(identity) ?? new Set<string>();
+      owners.add(validWorkflowText(metadata.ownerBranchId, 256) ?? '');
+      ownersByIdentity.set(identity, owners);
+    }
+  }
   const latest = new Map<string, DelegateOccurrence>();
+  const pendingCalls = new Map<string, RecordValue[]>();
+  const callsByAttempt = new Map<string, RecordValue>();
+  const maxAttemptByLogicalId = new Map<string, number>();
   for (const [entryIndex, value] of branch.entries()) {
     if (!isRecord(value)) continue;
+    for (const call of projectedDelegateCalls(value)) {
+      const logicalId = isCanonicalWorkflowLogicalId(call.logicalId)
+        ? call.logicalId
+        : undefined;
+      if (!logicalId) continue;
+      let targetIdentity = isCanonicalWorkflowAttemptReference(
+        call.targetIdentity,
+      )
+        ? call.targetIdentity
+        : undefined;
+      let predecessorIdentity = isCanonicalWorkflowAttemptReference(
+        call.predecessorIdentity,
+      )
+        ? call.predecessorIdentity
+        : undefined;
+      if (!targetIdentity && call.continuation === true) {
+        const previousAttempt = maxAttemptByLogicalId.get(logicalId);
+        if (
+          previousAttempt !== undefined &&
+          previousAttempt < MAX_WORKFLOW_ATTEMPT_ORDINAL
+        ) {
+          predecessorIdentity = `${logicalId}@${previousAttempt}`;
+          targetIdentity = `${logicalId}@${previousAttempt + 1}`;
+        }
+      }
+      if (!targetIdentity) continue;
+      const pending = pendingCalls.get(targetIdentity) ?? [];
+      pending.push({
+        ...call,
+        ...(predecessorIdentity ? { predecessorIdentity } : {}),
+      });
+      pendingCalls.set(targetIdentity, pending);
+    }
     const operation = workflowStoreOperation(value);
     // A malformed workflow record invalidates the complete metadata journal;
     // never render a valid prefix or an incomplete delta as current state.
@@ -1456,9 +1623,50 @@ function workflowJournal(
       const owner = validWorkflowText(metadata.ownerBranchId, 256) ?? '';
       const identity = String(metadata.identity);
       const key = `workflow:${owner}\u0000${identity}`;
+      if (
+        !callsByAttempt.has(key) &&
+        (ownersByIdentity.get(identity)?.size ?? 0) === 1
+      ) {
+        const pending = pendingCalls.get(identity);
+        if (pending?.length === 1) {
+          const candidate = pending[0];
+          const predecessorIdentity = isCanonicalWorkflowAttemptReference(
+            candidate?.predecessorIdentity,
+          )
+            ? candidate.predecessorIdentity
+            : undefined;
+          if (
+            !predecessorIdentity ||
+            (ownersByIdentity.get(predecessorIdentity)?.size ?? 0) === 1
+          )
+            callsByAttempt.set(key, candidate as RecordValue);
+        }
+        if (pending?.length) pendingCalls.delete(identity);
+      }
+      const ordinal = Number(metadata.attempt);
+      const logicalId = String(metadata.logicalId);
+      maxAttemptByLogicalId.set(
+        logicalId,
+        Math.max(maxAttemptByLogicalId.get(logicalId) ?? 0, ordinal),
+      );
+      const call = callsByAttempt.get(key);
+      const run = workflowStoreAttemptRun(metadata) as ProjectedRun;
+      if (call) {
+        if (typeof call.task === 'string') run.task = call.task;
+        if (
+          call.context === 'branch' ||
+          call.context === 'fresh' ||
+          call.context === 'continuation'
+        )
+          run.context = call.context;
+        const isolation = validHistoryIsolation(call.isolation);
+        if (isolation) run.isolation = isolation;
+        if (isRecord(call.details))
+          run[PROJECTED_DETAILS] = call.details as DelegateHistoryDetails;
+      }
       latest.delete(key);
       latest.set(key, {
-        run: workflowStoreAttemptRun(metadata),
+        run,
         kind: 'background',
         entryIndex,
         runIndex: identity,

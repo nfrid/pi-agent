@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   delegateHistoryFromBranch,
   delegateHistoryRunDetailFromBranch,
+  isDelegateHistoryEntry,
   projectDelegateHistoryEntry,
 } from './delegate-history.js';
 
@@ -1211,6 +1212,339 @@ describe('delegate history adapter', () => {
     expect(detail.run.sessionId).toBe('child-session-journal');
     expect(parseDelegateHistoryResponse(response)).toEqual(response);
     expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);
+  });
+
+  it('joins persisted delegate call metadata to workflow-only settled runs', () => {
+    const call = {
+      type: 'message',
+      id: 'delegate-call',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            name: 'delegate',
+            arguments: {
+              id: 'review-ui',
+              name: 'Review UI',
+              task: 'Review the **settled** delegate UI.',
+              cwd: '/repo',
+              isolation: 'shared',
+              scope: ['apps/dashboard-web'],
+              context: 'fresh',
+              contextNote: 'Keep the review focused.',
+              after: ['gate@1'],
+              refresh: 'head',
+              unrelatedSecret: 'must not cross the history projection',
+            },
+          },
+        ],
+      },
+    };
+    const workflow = {
+      type: 'custom',
+      id: 'workflow-entry',
+      customType: 'delegate-workflow:v1',
+      data: {
+        version: 1,
+        kind: 'snapshot',
+        state: {
+          version: 1,
+          attempts: [
+            {
+              ownerBranchId: 'owner-a',
+              name: 'Review UI',
+              logicalId: 'review-ui',
+              attempt: 1,
+              identity: 'review-ui@1',
+              state: 'success',
+              dependencies: ['gate@1'],
+              waitingFor: [],
+              createdAt: 1,
+              scheduledAt: 1,
+              settledAt: 2,
+            },
+          ],
+        },
+      },
+    };
+    expect(isDelegateHistoryEntry(call)).toBe(true);
+    const branch = [call, workflow].map(
+      (entry) =>
+        projectDelegateHistoryEntry(entry, { sessionId: 'parent-1' }).entry,
+    );
+    expect(JSON.stringify(branch)).not.toContain('unrelatedSecret');
+    expect(JSON.stringify(branch)).not.toContain('must not cross');
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups[0]).toMatchObject({
+      name: 'Review UI',
+      context: 'fresh',
+      isolation: 'shared',
+      runs: [{ task: 'Review the **settled** delegate UI.' }],
+    });
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      response.groups[0]?.runId ?? '',
+      response.groups[0]?.lineageId,
+    );
+    expect(detail.run.details).toMatchObject({
+      task: 'Review the **settled** delegate UI.',
+      setup: { cwd: '/repo', isolation: 'shared' },
+      runConfig: {
+        scope: ['apps/dashboard-web'],
+        after: ['gate@1'],
+        parentContextNote: 'Keep the review focused.',
+        refreshSource: 'head',
+      },
+      truncated: false,
+    });
+    expect(parseDelegateHistoryResponse(response)).toEqual(response);
+    expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);
+  });
+
+  it('targets exact continuations at the new workflow attempt', () => {
+    const call = projectDelegateHistoryEntry(
+      {
+        type: 'message',
+        id: 'continuation-call',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              name: 'delegate',
+              arguments: {
+                continue: 'review@1',
+                task: 'Fix the review findings.',
+                cwd: '/repo',
+              },
+            },
+          ],
+        },
+      },
+      { sessionId: 'parent-1' },
+    ).entry;
+    const attempt = (ordinal: number) => ({
+      ownerBranchId: 'owner-a',
+      name: 'Review',
+      logicalId: 'review',
+      attempt: ordinal,
+      identity: `review@${ordinal}`,
+      state: 'success',
+      dependencies: [],
+      waitingFor: [],
+      createdAt: ordinal,
+      scheduledAt: ordinal,
+      settledAt: ordinal + 1,
+    });
+    const workflow = projectDelegateHistoryEntry(
+      {
+        type: 'custom',
+        id: 'workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: { version: 1, attempts: [attempt(1), attempt(2)] },
+        },
+      },
+      { sessionId: 'parent-1' },
+    ).entry;
+    const response = delegateHistoryFromBranch('parent-1', [call, workflow]);
+    expect(response.groups[0]?.runs[0]?.task).toBeUndefined();
+    expect(response.groups[0]?.runs[1]?.task).toBe('Fix the review findings.');
+    const continued = response.groups[0]?.runs[1];
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      [call, workflow],
+      continued?.runId ?? '',
+      continued?.lineageId,
+    );
+    expect(detail.run.details).toMatchObject({
+      task: 'Fix the review findings.',
+      setup: { cwd: '/repo' },
+    });
+  });
+
+  it('leaves delegate call metadata unresolved across sibling workflow owners', () => {
+    const call = (id: string, argumentsValue: Record<string, unknown>) =>
+      projectDelegateHistoryEntry(
+        {
+          type: 'message',
+          id,
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                name: 'delegate',
+                arguments: argumentsValue,
+              },
+            ],
+          },
+        },
+        { sessionId: 'parent-1' },
+      ).entry;
+    const freshCall = call('ambiguous-call', {
+      id: 'review',
+      task: 'Do not misassign this task.',
+    });
+    const continuationCall = call('ambiguous-continuation', {
+      continue: 'review@1',
+      task: 'Do not propagate ambiguity.',
+    });
+    const attempt = (ownerBranchId: string, ordinal: number) => ({
+      ownerBranchId,
+      name: 'Review',
+      logicalId: 'review',
+      attempt: ordinal,
+      identity: `review@${ordinal}`,
+      state: 'success',
+      dependencies: [],
+      waitingFor: [],
+      createdAt: ordinal,
+      scheduledAt: ordinal,
+      settledAt: ordinal + 1,
+    });
+    const workflow = projectDelegateHistoryEntry(
+      {
+        type: 'custom',
+        id: 'workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              attempt('owner-a', 1),
+              attempt('owner-b', 1),
+              attempt('owner-b', 2),
+            ],
+          },
+        },
+      },
+      { sessionId: 'parent-1' },
+    ).entry;
+    const response = delegateHistoryFromBranch('parent-1', [
+      freshCall,
+      continuationCall,
+      workflow,
+    ]);
+    expect(response.groups).toHaveLength(2);
+    const runs = response.groups.flatMap((group) => group.runs);
+    expect(runs).not.toContainEqual(
+      expect.objectContaining({ task: 'Do not misassign this task.' }),
+    );
+    expect(runs).not.toContainEqual(
+      expect.objectContaining({ task: 'Do not propagate ambiguity.' }),
+    );
+  });
+
+  it('leaves duplicate delegate calls for one target unresolved', () => {
+    const call = (id: string, task: string) =>
+      projectDelegateHistoryEntry(
+        {
+          type: 'message',
+          id,
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                name: 'delegate',
+                arguments: { id: 'review', task },
+              },
+            ],
+          },
+        },
+        { sessionId: 'parent-1' },
+      ).entry;
+    const workflow = projectDelegateHistoryEntry(
+      {
+        type: 'custom',
+        id: 'workflow-entry',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                ownerBranchId: 'owner-a',
+                name: 'Review',
+                logicalId: 'review',
+                attempt: 1,
+                identity: 'review@1',
+                state: 'success',
+                dependencies: [],
+                waitingFor: [],
+                createdAt: 1,
+                scheduledAt: 1,
+                settledAt: 2,
+              },
+            ],
+          },
+        },
+      },
+      { sessionId: 'parent-1' },
+    ).entry;
+    const response = delegateHistoryFromBranch('parent-1', [
+      call('first-call', 'first task'),
+      call('second-call', 'second task'),
+      workflow,
+    ]);
+    expect(response.groups[0]?.runs[0]?.task).toBeUndefined();
+  });
+
+  it('rejects malformed delegate references and bounds projected call batches', () => {
+    const malformedArguments = [
+      { continue: 'review@0', task: 'invalid' },
+      { continue: 'review@01', task: 'invalid' },
+      { continue: 'review@1000000000', task: 'invalid' },
+      { id: 123, continue: 'review', task: 'invalid' },
+      { id: 'review', continue: 123, task: 'invalid' },
+    ];
+    for (const [index, argumentsValue] of malformedArguments.entries()) {
+      const entry = {
+        type: 'message',
+        id: `invalid-${index}`,
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              name: 'delegate',
+              arguments: argumentsValue,
+            },
+          ],
+        },
+      };
+      expect(isDelegateHistoryEntry(entry)).toBe(false);
+      expect(
+        projectDelegateHistoryEntry(entry, { sessionId: 'parent-1' }).entry,
+      ).not.toHaveProperty('data');
+    }
+    const projected = projectDelegateHistoryEntry(
+      {
+        type: 'message',
+        id: 'many-calls',
+        message: {
+          role: 'assistant',
+          content: Array.from({ length: 40 }, (_, index) => ({
+            type: 'toolCall',
+            name: 'delegate',
+            arguments: { id: `review-${index}`, task: `task ${index}` },
+          })),
+        },
+      },
+      { sessionId: 'parent-1' },
+    ).entry as { data?: { calls?: unknown[]; truncated?: boolean } };
+    expect(projected.data?.calls).toHaveLength(16);
+    expect(projected.data?.truncated).toBe(true);
+    expect(JSON.stringify(projected).length).toBeLessThan(32_000);
   });
 
   it('fails closed on malformed durable workflow deltas', () => {
