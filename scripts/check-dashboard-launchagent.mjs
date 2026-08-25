@@ -2,7 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const repositoryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
+const expectedNode = '/opt/homebrew/bin/node';
 const plistPath = path.join(
   os.homedir(),
   'Library',
@@ -39,12 +45,15 @@ try {
 
 const args = plist.ProgramArguments;
 const ownsDashboard =
+  plist.WorkingDirectory === repositoryRoot &&
   Array.isArray(args) &&
-  args.at(-2) === 'scripts/dashboard-dev.mjs' &&
-  args.at(-1) === 'serve';
+  args.length === 3 &&
+  args[0] === expectedNode &&
+  args[1] === 'scripts/dashboard-dev.mjs' &&
+  args[2] === 'serve';
 if (!ownsDashboard || plist.AbandonProcessGroup !== false) {
   process.stderr.write(
-    `${plistPath} is stale or unsafe: install the versioned dashboard template so it runs scripts/dashboard-dev.mjs serve with AbandonProcessGroup=false.\n`,
+    `${plistPath} is stale or unsafe: install the versioned dashboard template for ${repositoryRoot} so it uses ${expectedNode} scripts/dashboard-dev.mjs serve with AbandonProcessGroup=false.\n`,
   );
   process.exit(1);
 }
