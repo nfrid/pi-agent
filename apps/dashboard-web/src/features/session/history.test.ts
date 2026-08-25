@@ -335,6 +335,114 @@ describe('useOlderSessionHistory', () => {
     }
   });
 
+  it('keeps loading older pages while the transcript remains at the top', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const store = new DashboardLiveStore();
+    const metadata = {
+      id: 'session-1',
+      file: '/tmp/session.jsonl',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    const active: AuthoritativeSessionSnapshot['active'] = {
+      messages: [],
+      tools: [],
+      delegates: [],
+      truncated: false,
+    };
+    const initial = {
+      serverId: 'daemon-1',
+      cursor: 1,
+      metadata,
+      entries: [
+        { type: 'message', id: 'newest', message: { role: 'assistant' } },
+      ],
+      history: {
+        version: 1 as const,
+        start: 20,
+        end: 30,
+        hasOlder: true,
+        nextBefore: 'before-20',
+      },
+      entriesComplete: true,
+      active,
+      completeThroughCursor: true,
+    } as AuthoritativeSessionSnapshot;
+    store.hydrateSession(initial);
+    const pages = [
+      {
+        ...initial,
+        entries: [
+          { type: 'message', id: 'middle', message: { role: 'assistant' } },
+        ],
+        history: {
+          version: 1 as const,
+          start: 10,
+          end: 20,
+          hasOlder: true,
+          nextBefore: 'before-10',
+        },
+      },
+      {
+        ...initial,
+        entries: [
+          { type: 'message', id: 'oldest', message: { role: 'assistant' } },
+        ],
+        history: {
+          version: 1 as const,
+          start: 0,
+          end: 10,
+          hasOlder: false,
+        },
+      },
+    ];
+    const sessionBefore = vi
+      .spyOn(dashboardHttpClient, 'sessionBefore')
+      .mockImplementation(async () => {
+        const page = pages.shift();
+        if (!page) throw new Error('unexpected request');
+        return page;
+      });
+    const scrollElement = {
+      scrollTop: 0,
+      scrollHeight: 100,
+      clientHeight: 200,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      querySelectorAll: () => [],
+      getBoundingClientRect: () => ({ top: 0 }),
+    } as unknown as HTMLDivElement;
+    function Probe() {
+      useOlderSessionHistory({
+        id: 'session-1',
+        data: initial,
+        store,
+        sessionMounted: true,
+        scrollElementRef: { current: scrollElement },
+        autoloadAtTop: true,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe));
+      });
+      await vi.waitFor(() => expect(sessionBefore).toHaveBeenCalledTimes(2));
+      expect(
+        store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+      ).toEqual(['oldest', 'middle', 'newest']);
+    } finally {
+      sessionBefore.mockRestore();
+      await act(async () => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('coalesces an outline target into an in-flight page request', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const store = new DashboardLiveStore();

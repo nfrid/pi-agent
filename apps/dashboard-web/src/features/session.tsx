@@ -90,30 +90,6 @@ export function SessionView({
   });
   const sessionMounted = Boolean(data && projection);
   const {
-    history,
-    historyError,
-    historyLoading,
-    loadEarlierHistory,
-    loadThroughOrdinal,
-    cancelScrollRestore,
-    completePrependRestore,
-    prependAnchor,
-  } = useOlderSessionHistory({
-    id,
-    data,
-    store,
-    sessionMounted,
-    scrollElementRef: embedded ? undefined : transcriptScrollRef,
-  });
-
-  useEffect(() => {
-    if (outlineOpen) outlineWasOpenRef.current = true;
-    else if (outlineWasOpenRef.current) {
-      outlineWasOpenRef.current = false;
-      outlineTriggerRef.current?.focus({ preventScroll: true });
-    }
-  }, [outlineOpen]);
-  const {
     awayFromLatest,
     controlLayerRef,
     jumpToLatest,
@@ -129,6 +105,31 @@ export function SessionView({
     enabled: !embedded,
     scrollElementRef: transcriptScrollRef,
   });
+  const {
+    history,
+    historyError,
+    historyLoading,
+    loadEarlierHistory,
+    loadThroughOrdinal,
+    cancelScrollRestore,
+    completePrependRestore,
+    prependAnchor,
+  } = useOlderSessionHistory({
+    id,
+    data,
+    store,
+    sessionMounted,
+    scrollElementRef: embedded ? undefined : transcriptScrollRef,
+    autoloadAtTop: !embedded && tailReadySessionId === id,
+  });
+
+  useEffect(() => {
+    if (outlineOpen) outlineWasOpenRef.current = true;
+    else if (outlineWasOpenRef.current) {
+      outlineWasOpenRef.current = false;
+      outlineTriggerRef.current?.focus({ preventScroll: true });
+    }
+  }, [outlineOpen]);
   const handleJumpToLatest = useCallback(() => {
     cancelScrollRestore();
     jumpToLatest();
