@@ -306,10 +306,10 @@
 }
 @media (pointer: fine) and (min-width: 821px) {
   .surface-drawer.delegate-transcript-drawer {
-    width: min(1017px, 100vw);
+    width: min(917px, 100vw);
   }
   .delegate-transcript-drawer .delegate-transcript-inspector-body {
-    padding-right: 238px;
+    padding-right: 42px;
   }
 }
 .delegate-inspector-header-content {
@@ -372,7 +372,7 @@
 }
 .delegate-inspector-task .markdown {
   color: var(--fg);
-  font-size: 11px;
+  font-size: 14px;
 }
 .delegate-inspector-section p {
   margin: 0;
