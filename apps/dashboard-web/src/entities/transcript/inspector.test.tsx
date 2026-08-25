@@ -369,8 +369,9 @@ describe('transcript payload inspection', () => {
     expect(command).not.toContain('<h4>Command</h4>');
     expect(command).not.toContain('<h4>Terminal result</h4>');
     expect(command).toContain('tool-terminal-result-error');
-    expect(command).toContain('Raw Arguments');
-    expect(command).toContain('Raw Result');
+    expect(command).toContain('Raw tool data');
+    expect(command).not.toContain('Raw Arguments');
+    expect(command).not.toContain('Raw Result');
   });
 
   it('keeps full specialized arguments while bounding only command results', () => {
@@ -448,7 +449,8 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain(
       'Source truncated this arguments before it reached the dashboard.',
     );
-    expect(markup).toContain('Raw Arguments');
+    expect(markup).toContain('Raw tool data');
+    expect(markup).not.toContain('Raw Arguments');
   });
 
   it('separates arguments and result before the expandable raw fallback', () => {
@@ -583,7 +585,23 @@ describe('transcript payload inspection', () => {
     expect(search).toContain('tool-web_search-presentation');
     expect(search).toContain('2 queries');
     expect(search).toContain('<h2>Hits</h2>');
-    expect(search).toContain('Raw Arguments');
+    expect(search).toContain('Raw tool data');
+    expect(search).not.toContain('Raw Arguments');
+
+    const searchOutcome = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'web_search',
+          arguments: { query: 'activity model' },
+          result: {
+            content: [{ type: 'text', text: 'bounded search result' }],
+            details: { queryCount: 1, failed: 0 },
+          },
+        }}
+      />,
+    );
+    expect(searchOutcome).toContain('1 query');
+    expect(searchOutcome).toContain('Raw tool data');
 
     const delegate = renderToStaticMarkup(
       <ToolInspector

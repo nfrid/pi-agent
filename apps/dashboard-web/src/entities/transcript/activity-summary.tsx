@@ -141,7 +141,7 @@ function CollapsedActivitySummary({
         </ol>
       )}
       <small className="activity-metadata">
-        {activityGroupMetadata(summary)}
+        {activityGroupMetadata(group, summary)}
       </small>
     </div>
   );

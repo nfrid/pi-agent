@@ -203,6 +203,7 @@ describe('activity row views and virtual transcript construction', () => {
     ).toEqual({
       label: 'Stage and commit changes in the current repository',
       action: 'Stage and commit changes in the current repository',
+      described: true,
       role: 'command',
       state: 'complete',
     });
@@ -409,6 +410,31 @@ describe('activity row views and virtual transcript construction', () => {
       toolCount: 5,
       failureCount: 2,
     });
+  });
+
+  it('includes compact canonical work aggregates in the collapsed metadata line', () => {
+    expect(
+      activityGroupMetadata(
+        {
+          kind: 'mutate',
+          status: 'settled',
+          toolCount: 3,
+          tools: [
+            { name: 'write', args: { content: 'one\ntwo\n' } },
+            {
+              name: 'edit',
+              args: {
+                edits: [{ oldText: 'old', newText: 'new\nextra' }],
+              },
+            },
+            { name: 'bash', args: {}, result: { durationMs: 2_500 } },
+          ],
+        },
+        { failureCount: 1 },
+      ),
+    ).toBe(
+      'mutate · settled · 3 tools · +3 ~1 lines · 3s command time · 1 failed',
+    );
   });
 
   it('omits failure metadata when there are no failed calls', () => {

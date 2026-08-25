@@ -37,18 +37,6 @@ function ToolInspector({
       {specializedKind ? (
         <SpecializedToolInspector kind={specializedKind} tool={record} />
       ) : null}
-      {specializedKind && argumentsValue !== undefined ? (
-        <details className="tool-inspector-raw">
-          <summary>Raw Arguments</summary>
-          <BoundedPayloadPreview value={argumentsValue} label="arguments" />
-        </details>
-      ) : null}
-      {specializedKind && record.result !== undefined ? (
-        <details className="tool-inspector-raw">
-          <summary>Raw Result</summary>
-          <BoundedPayloadPreview value={record.result} label="result" />
-        </details>
-      ) : null}
       {!specializedKind && argumentsValue !== undefined && (
         <PayloadSection
           title="Arguments"
@@ -64,8 +52,13 @@ function ToolInspector({
         />
       )}
       <details className="tool-inspector-raw">
-        <summary>Raw tool record</summary>
-        <BoundedPayloadPreview value={record} label="raw tool record" />
+        <summary>
+          {specializedKind ? 'Raw tool data' : 'Raw tool record'}
+        </summary>
+        <BoundedPayloadPreview
+          value={record}
+          label={specializedKind ? 'raw tool data' : 'raw tool record'}
+        />
       </details>
     </div>
   );

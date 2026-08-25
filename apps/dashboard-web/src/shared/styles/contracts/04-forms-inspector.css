@@ -167,8 +167,8 @@
   white-space: pre-wrap;
 }
 .payload-section {
-  margin: 9px 0;
-  padding: 8px 10px;
+  margin: 6px 0;
+  padding: 7px 9px;
   border-left: 2px solid var(--cyan);
   background: color-mix(in srgb, var(--bg) 46%, transparent);
 }
@@ -318,7 +318,7 @@
 }
 .tool-replacement {
   min-width: 0;
-  margin: 10px 0;
+  margin: 7px 0;
 }
 .tool-terminal-output {
   max-height: 300px;
@@ -340,7 +340,7 @@
 .tool-read-summary,
 .tool-grep-summary,
 .tool-custom-summary {
-  margin: 0 0 8px;
+  margin: 0 0 5px;
   color: var(--muted);
   font-size: 11px;
 }
@@ -350,7 +350,7 @@
 .tool-custom-list {
   display: grid;
   gap: 3px;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   padding: 0;
   list-style: none;
   color: var(--fg);
@@ -370,9 +370,10 @@
 }
 .tool-custom-meta,
 .tool-custom-task,
-.tool-custom-notes {
+.tool-custom-notes,
+.tool-custom-outcome {
   display: block;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: var(--muted);
   font-size: 11px;
   overflow-wrap: anywhere;

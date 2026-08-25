@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityEntryFromRaw,
+  activityGroupFacts,
   groupTranscript,
   headersOf,
   leadingContinuationSpan,
@@ -54,6 +55,22 @@ describe('tool action summaries', () => {
 });
 
 describe('shared activity model', () => {
+  it('projects bounded work facts from complete tool arguments and outcomes', () => {
+    expect(
+      activityGroupFacts([
+        { name: 'write', args: { content: 'one\ntwo\n' } },
+        {
+          name: 'edit',
+          args: { edits: [{ oldText: 'old', newText: 'new\nextra' }] },
+        },
+        { name: 'bash', args: {}, result: { durationMs: 2_500 } },
+      ]),
+    ).toEqual({
+      lineChanges: { added: 3, changed: 1, removed: 0 },
+      commandDurationMs: 2_500,
+    });
+  });
+
   it('groups the same pure transcript deterministically', () => {
     const entries = [
       {
