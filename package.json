@@ -33,7 +33,7 @@
     "dashboard:process-host": "node scripts/dashboard-dev.mjs process-host",
     "dashboard:web": "node scripts/dashboard-dev.mjs web",
     "dashboard:web:build": "bun run --filter './apps/dashboard-web' build",
-    "dashboard:deploy": "bun run workspace:build && launchctl kickstart -k \"gui/$(id -u)/com.pi.dashboard\"",
+    "dashboard:deploy": "node scripts/check-dashboard-launchagent.mjs && bun run workspace:build && launchctl kickstart -k \"gui/$(id -u)/com.pi.dashboard\"",
     "dashboard:dist-smoke": "bun run --filter @pi-dashboard/protocol build && bun run --filter @pi-dashboard/server build && node scripts/dashboard-dist-smoke.mjs",
     "workspace:typecheck": "bun run typecheck:packages && bun run typecheck:apps",
     "workspace:build": "bun run --filter './packages/**' --filter './apps/**' build",

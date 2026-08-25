@@ -7,12 +7,14 @@
   <key>ProgramArguments</key>
   <array>
     <string>/opt/homebrew/bin/node</string>
-    <string>apps/dashboard-server/dist/index.js</string>
+    <string>scripts/dashboard-dev.mjs</string>
+    <string>serve</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PI_DASHBOARD_HOST</key><string>127.0.0.1</string>
     <key>PI_DASHBOARD_PORT</key><string>4175</string>
+    <key>PI_DASHBOARD_WEB_PORT</key><string>4174</string>
     <key>PI_DASHBOARD_STATE_DIR</key><string>/Users/REPLACE_ME/.pi/agent/dashboard</string>
     <key>PI_DASHBOARD_ORIGINS</key><string>https://REPLACE_ME.ts.net</string>
     <key>PATH</key><string>/Users/REPLACE_ME/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
@@ -20,7 +22,9 @@
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
-  <key>StandardOutPath</key><string>/Users/REPLACE_ME/.pi/agent/dashboard/server.log</string>
-  <key>StandardErrorPath</key><string>/Users/REPLACE_ME/.pi/agent/dashboard/server.error.log</string>
+  <!-- The runner's API and Vite preview children stay in this job's group. -->
+  <key>AbandonProcessGroup</key><false/>
+  <key>StandardOutPath</key><string>/Users/REPLACE_ME/.pi/agent/dashboard/serve.log</string>
+  <key>StandardErrorPath</key><string>/Users/REPLACE_ME/.pi/agent/dashboard/serve.error.log</string>
 </dict>
 </plist>
