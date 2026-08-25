@@ -227,6 +227,12 @@ async function inspectPersistedDelegate(
   ).toBeVisible();
   await expect(page.getByText('apps/dashboard-web')).toBeVisible();
   await expect(page.getByText('Keep the review concise.')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Offline historical worker/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: /Offline historical worker/ }).click();
   await page.getByText('Source report').click();
   await expect(
     page.getByText('The source delegate completed its scan.'),
@@ -236,7 +242,31 @@ async function inspectPersistedDelegate(
   await page.getByText('Rendered prompt').click();
   await expect(renderedPrompt).toBeVisible();
   if (canonicalTranscript) {
+    const drawer = page.getByRole('dialog', {
+      name: 'Delegate · Offline historical worker',
+    });
     const body = page.locator('.delegate-transcript-inspector-body');
+    const layout = await drawer.evaluate((element) => {
+      const body = element.querySelector<HTMLElement>(
+        '.delegate-transcript-inspector-body',
+      );
+      const transcript = element.querySelector<HTMLElement>(
+        '.delegate-canonical-session-transcript',
+      );
+      if (!body || !transcript) throw new Error('delegate transcript missing');
+      return {
+        drawerWidth: element.getBoundingClientRect().width,
+        transcriptWidth: transcript.getBoundingClientRect().width,
+        bodyPaddingRight: Number.parseFloat(
+          getComputedStyle(body).paddingRight,
+        ),
+      };
+    });
+    expect(layout).toEqual({
+      drawerWidth: 1017,
+      transcriptWidth: 760,
+      bodyPaddingRight: 238,
+    });
     await expect(body.getByText('Show persisted delegate work')).toHaveCount(0);
     await expect
       .poll(() =>

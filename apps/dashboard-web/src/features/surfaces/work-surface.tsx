@@ -50,7 +50,8 @@ export function WorkSurface({
   drawerHeaderContent?: ReactNode;
   drawerContent?: ReactNode;
   hideDrawerHeader?: boolean;
-  onDrawerClose?: () => void;
+  /** Return false to consume the close request without closing the drawer. */
+  onDrawerClose?: () => boolean | undefined;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -104,8 +105,8 @@ export function WorkSurface({
         isOpen={open}
         paused={paused}
         onClose={() => {
+          if (onDrawerClose?.() === false) return;
           setOpen(false);
-          onDrawerClose?.();
         }}
       >
         <div className="work-surface-content">{drawerContent ?? children}</div>
