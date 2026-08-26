@@ -54,14 +54,6 @@
         "useFor": "Difficult bounded background implementation, diagnosis, regression review, or security verification spanning multiple files or subsystems, with explicit acceptance criteria or named security invariants.",
         "avoid": "Foreground work blocking the parent on a deadline, unclear criteria that require maintainer judgement, or unbounded repository-wide review."
       },
-      "terra-medium": {
-        "provider": "openai-codex",
-        "model": "gpt-5.6-terra",
-        "thinking": "medium",
-        "relativeCost": 32,
-        "useFor": "Interactive bounded multi-file work where lower latency justifies higher cost, especially when a foreground delegate blocks the parent.",
-        "avoid": "Background or parallel work without urgency, mechanical tasks, quality-first work with no deadline, or broad difficult analysis."
-      },
       "luna-max": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
@@ -70,14 +62,6 @@
         "useFor": "Difficult bounded background work expected to need unusually deep exploration or verification; select it directly when that depth is predictable.",
         "avoid": "Short deadlines, interactive foreground work, tasks without a bounded finish line, or assuming more reasoning replaces Sol-style judgement."
       },
-      "terra-high": {
-        "provider": "openai-codex",
-        "model": "gpt-5.6-terra",
-        "thinking": "high",
-        "relativeCost": 63,
-        "useFor": "Interactive hard repository work with explicit criteria when lower latency justifies higher cost and the parent is blocked on the result.",
-        "avoid": "Background work without urgency, rote edits, open-ended maintainer judgement, or choosing it merely because Luna high was insufficient."
-      },
       "sol-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-sol",
@@ -85,14 +69,6 @@
         "relativeCost": 75,
         "useFor": "Judgement about the work rather than a generic strength escalation: decide whether a diff overclaims, whether complexity is earned, what completion should mean when criteria are unclear, or assess ambiguous or high-stakes security concerns. Strict maintainer-style review.",
         "avoid": "Mechanical correctness sweeps, implementation against explicit acceptance criteria, or any task adequately served by a Luna background route or Terra latency route."
-      },
-      "terra-xhigh": {
-        "provider": "openai-codex",
-        "model": "gpt-5.6-terra",
-        "thinking": "xhigh",
-        "relativeCost": 118,
-        "useFor": "Difficult interactive work with explicit criteria when the parent needs the deepest latency-oriented route and the higher cost is justified.",
-        "avoid": "Generic background quality escalation, claiming a proven React specialization, broad security or race review without a local evaluation, or work where Luna max latency is acceptable."
       },
       "sol-high": {
         "provider": "openai-codex",
