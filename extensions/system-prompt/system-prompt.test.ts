@@ -140,8 +140,9 @@ describe('canonical prompt composition', () => {
         'This main agent is running in an isolated Git worktree.',
       );
       expect(prompt).toContain(
-        'ask the user whether to merge the finished branch into `main` and clean up the worktree and merged branch',
+        'ask the user whether to merge the finished branch into its parent branch',
       );
+      expect(prompt).not.toContain('clean up the worktree');
 
       process.env.PI_DELEGATE_CHILD = '1';
       expect(buildSystemPrompt(options({ cwd: nested }), 'json')).not.toContain(

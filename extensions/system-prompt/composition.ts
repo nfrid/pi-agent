@@ -204,7 +204,7 @@ export function buildSystemPrompt(
 
   if (process.env.PI_DELEGATE_CHILD !== '1' && isIsolatedGitWorktree(cwd)) {
     addGuidelines(
-      'This main agent is running in an isolated Git worktree. When the task is fully finished and validated, ask the user whether to merge the finished branch into `main` and clean up the worktree and merged branch, or leave them available for review, unless the user already stated an integration preference.',
+      'This main agent is running in an isolated Git worktree. When the task is fully finished and validated, ask the user whether to merge the finished branch into its parent branch, unless the user already stated an integration preference.',
     );
   }
 

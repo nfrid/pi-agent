@@ -1,6 +1,6 @@
 # Dashboard deployment
 
-The production dashboard is served from generated `dist/` directories by the macOS LaunchAgent `com.pi.dashboard`, which runs `node scripts/dashboard-dev.mjs serve` and owns only the API daemon and Vite preview. Its children remain in the LaunchAgent process group so a forced restart cannot orphan either service. Managed headless children are owned by `com.pi.dashboard-runtime-host`; phase-1 durable shell jobs are owned by the separate `com.pi.dashboard-process-host` LaunchAgent. The shell-job control socket is `PI_PROCESS_HOST_SOCKET`, separate from both the runtime bridge and dashboard HTTP. Changes under `apps/dashboard-*`, `packages/dashboard-*`, `packages/background-jobs`, `packages/activity-model`, or `packages/codex-usage` are not deployed until the production bundles are rebuilt and the service is restarted. Ordinary dashboard deploy must not restart the runtime or process host.
+The production dashboard is served from generated `dist/` directories by the macOS LaunchAgent `com.pi.dashboard`, which runs `node scripts/dashboard-dev.mjs serve` and owns only the API daemon and Vite preview. Its children remain in the LaunchAgent process group so a forced restart cannot orphan either service. Managed headless children are owned by `com.pi.dashboard-runtime-host`; phase-1 durable shell jobs are owned by the separate `com.pi.dashboard-process-host` LaunchAgent. The shell-job control socket is `PI_PROCESS_HOST_SOCKET`, separate from both the runtime bridge and dashboard HTTP. Client-only changes under `apps/dashboard-web` are deployed once its production bundle is rebuilt in the production checkout. Changes to the server, shared dashboard packages, preview configuration, or other runtime dependencies require the full build and dashboard service restart described below. Ordinary dashboard deploy must not restart the runtime or process host.
 
 ## Browser-test guidance
 
@@ -13,9 +13,15 @@ The production dashboard is served from generated `dist/` directories by the mac
 
 The deployment steps below assume the dashboard build contains only the intended work. Before building, follow `docs/development-workflow.md` and inspect both `HEAD` and the working tree.
 
-If unrelated changes are present, do not deploy a build from the mixed checkout. Commit the owned change first, then either wait for the shared checkout to become suitable or build the exact intended commit in an isolated detached worktree. Copy only that build's generated dashboard `dist/` artifacts into the production checkout before restarting the service, and report the deployed commit. Validation run in a mixed checkout does not prove the isolated commit.
+If unrelated changes are present, do not deploy a build from the mixed checkout. Commit the owned change first, then either wait for the shared checkout to become suitable or build the exact intended commit in an isolated detached worktree. Copy only that build's generated dashboard `dist/` artifacts into the production checkout, follow the matching client-only or full deployment path below, and report the deployed commit. Validation run in a mixed checkout does not prove the isolated commit.
 
-After validating a dashboard-affecting change:
+After validating a client-only change under `apps/dashboard-web`, build it from the clean production checkout:
+
+`bun run dashboard:web:build`
+
+The running Vite preview reads the rebuilt `apps/dashboard-web/dist` bundle without a service restart. Confirm the web entrypoint returns `200`. Use the full deployment below if the change also touches workspace dependencies, server code, Vite or preview configuration, the LaunchAgent, or deployment scripts.
+
+After validating a dashboard change that requires a service restart:
 
 1. Ensure the customized `deploy/com.pi.dashboard.plist` is installed at `~/Library/LaunchAgents/com.pi.dashboard.plist` after every template change. Reload only `com.pi.dashboard` with `launchctl bootout`/`bootstrap`; install and start `deploy/com.pi.dashboard-runtime-host.plist` and `deploy/com.pi.dashboard-process-host.plist` separately once. The dashboard deploy command verifies that the installed agent runs `scripts/dashboard-dev.mjs serve` with `AbandonProcessGroup=false` and refuses to restart a stale direct-API template.
 2. Build every dashboard workspace dependency and restart the production dashboard service from the repository root so both the server and web preview load the new bundles:
