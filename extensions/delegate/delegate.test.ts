@@ -182,12 +182,10 @@ describe('delegate', () => {
         'tool-call',
         {
           id: 'branch-review',
-          name: 'Branch review',
           task: 'Review the implementation',
           route: 'luna-low',
-          inputs: [{ node: 'implementation', include: ['branch'] }],
+          base: 'implementation',
           cwd: '/tmp/explicit-cwd',
-          isolation: 'shared',
         },
         undefined,
         undefined,
@@ -197,7 +195,7 @@ describe('delegate', () => {
         },
       ),
     ).rejects.toThrow(
-      /Symbolic branch input preflight failed.*cwd must be omitted.*explicit isolation must be "worktree".*Effective configuration/s,
+      /Symbolic branch input preflight failed.*cwd must be omitted.*Effective configuration/s,
     );
     expect(schedule).not.toHaveBeenCalled();
     expect(ensureBranchOwner).not.toHaveBeenCalled();
@@ -249,10 +247,12 @@ describe('delegate', () => {
       'tool-call',
       {
         id: 'branch-review',
-        name: 'Branch review',
         task: 'Review the implementation',
         route: 'luna-low',
-        inputs: [{ node: 'implementation', include: ['branch'] }],
+        base: 'implementation',
+        inputs: ['audit'],
+        write: true,
+        web: true,
       },
       undefined,
       undefined,
@@ -262,6 +262,18 @@ describe('delegate', () => {
       },
     );
     expect(ordering).toEqual(['owner', 'schedule']);
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        logicalId: 'branch-review',
+        name: 'branch-review',
+        allowWrites: true,
+        capabilities: ['web'],
+        inputs: [
+          { node: 'implementation', include: ['branch', 'report'] },
+          { node: 'audit' },
+        ],
+      }),
+    );
   });
 
   test('keeps the serialized delegate schema compact', () => {
@@ -283,7 +295,54 @@ describe('delegate', () => {
     expect(serialized).not.toContain('"continuation"');
     expect(serialized).not.toContain('"handoffFrom"');
     const schema = parameters as Parameters<typeof Value.Check>[0];
+    const properties = Object.keys(
+      (parameters as { properties: Record<string, unknown> }).properties,
+    ).sort();
+    expect(properties).toEqual(
+      [
+        'id',
+        'continue',
+        'task',
+        'route',
+        'inputs',
+        'base',
+        'scope',
+        'write',
+        'cwd',
+        'web',
+      ].sort(),
+    );
+    for (const removed of [
+      'name',
+      'after',
+      'context',
+      'contextNote',
+      'isolation',
+      'from',
+      'refresh',
+      'worktreePath',
+      'capabilities',
+      'selectors',
+    ])
+      expect(properties).not.toContain(removed);
     expect(Value.Check(schema, { id: 'impl', task: 'implement' })).toBe(true);
+    expect(
+      Value.Check(schema, {
+        id: 'impl',
+        task: 'implement',
+        inputs: ['prepare'],
+        base: 'prepare',
+        write: true,
+        web: true,
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(schema, {
+        id: 'impl',
+        task: 'implement',
+        inputs: [{ node: 'prepare' }],
+      }),
+    ).toBe(false);
     expect(Value.Check(schema, { continue: 'impl', task: 'fix' })).toBe(true);
     expect(Value.Check(schema, { task: 'missing identity' })).toBe(false);
     expect(

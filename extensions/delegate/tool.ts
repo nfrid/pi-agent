@@ -1,4 +1,3 @@
-import { StringEnum } from '@earendil-works/pi-ai';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -42,7 +41,7 @@ import { parseWorkflowReference } from './workflow-model';
 import { captureWorkInProgress } from './worktree';
 
 const DELEGATE_TOOL_DESCRIPTION =
-  'Schedule one focused child agent asynchronously. Choose a route and workspace mode; children return concise prose reports. Use after and inputs to compose work and delegate_wake to receive reports, handoffs, branches, or metadata.';
+  'Schedule one focused child agent asynchronously. Use a stable id or continue reference, inputs to wait for reports, base to start from an upstream code state, and write or web when needed.';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -50,42 +49,24 @@ const RouteSchema = Type.String({
   description:
     'Delegate catalog route; fresh tasks require it, continuations inherit it when omitted.',
 });
-const ContextSchema = StringEnum(['branch', 'fresh'] as const, {
-  description:
-    'Optional context mode. fresh starts with the task and project instructions; branch also includes parent conversation history.',
-});
 const ScopeSchema = Type.Array(Type.String({ maxLength: 4096 }), {
   maxItems: 100,
   description:
     'Advisory paths for expected work; not a hard boundary. Continuations inherit the latest scope when omitted and replace it when supplied.',
 });
-const BaseSchema = StringEnum(['wip', 'head'] as const, {
-  description:
-    "Where a worktree-isolated task's branch starts. wip (default) carries your uncommitted changes into the worktree so the child sees the repository as you see it; head starts from the last commit instead.",
-});
-const AllowWritesSchema = Type.Boolean({
-  description:
-    'Let a task edit files. This does not sandbox shell commands; continuations inherit it when omitted and cannot change it explicitly.',
-});
-const CapabilitiesSchema = Type.Array(StringEnum(['web'] as const), {
-  maxItems: 1,
-  uniqueItems: true,
-  description:
-    'Optional child tool bundles. web enables web_search, fetch_content, and get_search_content. Fresh delegates only; continuations inherit the original list.',
-});
-const IsolationSchema = StringEnum(['shared', 'worktree'] as const, {
-  description:
-    'Repository workspace mode. Worktrees isolate checkout files, not shell or external side effects; fresh read-only tasks default to shared and writable tasks to worktree. Writable shared tasks are rejected. Continuations inherit this when omitted and cannot change it explicitly.',
-});
-const WorktreePathSchema = Type.String({
+const BaseSchema = Type.String({
   minLength: 1,
-  maxLength: 4096,
+  maxLength: 512,
   description:
-    'Absolute path to an existing clean Git worktree belonging to cwd. Uses that caller-owned checkout directly; no nested checkout, branch, commit, merge, or deletion is performed by the harness.',
+    'Logical node or exact attempt whose recorded code state becomes the fresh isolated workspace base.',
 });
-const RefreshSchema = StringEnum(['wip', 'head'] as const, {
+const WriteSchema = Type.Boolean({
   description:
-    'Continuation-only snapshot selector. For a read-only isolated continuation, wip recreates from the parent’s current tracked and untracked work; head recreates from current HEAD only. Omit to continue the original snapshot.',
+    'Let a task edit files. Continuations inherit the original write capability and cannot change it.',
+});
+const WebSchema = Type.Boolean({
+  description:
+    'Enable web_search, fetch_content, and get_search_content for this delegate. Continuations inherit the original capability.',
 });
 
 const LogicalIdSchema = Type.String({
@@ -94,36 +75,11 @@ const LogicalIdSchema = Type.String({
   pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$',
   description: 'Stable logical node ID; fresh calls require one.',
 });
-const AfterSchema = Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
-  maxItems: 32,
-  description: 'Exact or bare logical attempts that must settle first.',
-});
-const WorkflowInputSchema = Type.Object(
-  {
-    node: Type.String({ minLength: 1, maxLength: 512 }),
-    include: Type.Optional(
-      Type.Array(
-        StringEnum(['report', 'handoff', 'branch', 'metadata'] as const),
-        { minItems: 1, maxItems: 4 },
-      ),
-    ),
-    label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
-  },
-  { additionalProperties: false },
-);
 const ContinueSchema = Type.String({
   minLength: 1,
   maxLength: 512,
   description: 'Logical node or exact attempt to continue after settlement.',
 });
-
-const NameSchema = Type.String({
-  minLength: 1,
-  maxLength: 120,
-  description:
-    'Display name; required for fresh tasks and inherited by continuations when omitted.',
-});
-
 const TaskSchema = Type.String({
   minLength: 1,
   maxLength: 32 * 1024,
@@ -134,63 +90,60 @@ const CwdSchema = Type.String({
   description:
     'Fresh delegates inherit ctx.cwd when omitted. Relative paths resolve against ctx.cwd; ~ and ~/ paths expand using the effective home directory; absolute paths are supported. Continuations retain their persisted cwd and must omit this field.',
 });
-const ContextNoteSchema = Type.String({
-  maxLength: 64 * 1024,
-  description: 'Curated context from the parent agent',
-});
-const ContinuationSchema = Type.String({
-  maxLength: 512,
-  description: 'Opaque token from a previous delegate run',
-});
 
-const TaskItem = Type.Object({
-  name: Type.Optional(NameSchema),
-  task: TaskSchema,
-  cwd: Type.Optional(CwdSchema),
-  route: Type.Optional(RouteSchema),
-  context: Type.Optional(ContextSchema),
-  contextNote: Type.Optional(ContextNoteSchema),
-  scope: Type.Optional(ScopeSchema),
-  continuation: Type.Optional(ContinuationSchema),
-  allowWrites: Type.Optional(AllowWritesSchema),
-  capabilities: Type.Optional(CapabilitiesSchema),
-  isolation: Type.Optional(IsolationSchema),
-  from: Type.Optional(BaseSchema),
-  refresh: Type.Optional(RefreshSchema),
-  worktreePath: Type.Optional(WorktreePathSchema),
-});
-
-const DelegateCommonParamProperties = {
-  after: Type.Optional(AfterSchema),
-  inputs: Type.Optional(Type.Array(WorkflowInputSchema, { maxItems: 4 })),
-  name: Type.Optional(NameSchema),
-  task: TaskSchema,
-  cwd: Type.Optional(CwdSchema),
-  route: Type.Optional(RouteSchema),
-  context: Type.Optional(ContextSchema),
-  contextNote: Type.Optional(ContextNoteSchema),
-  scope: Type.Optional(ScopeSchema),
-  allowWrites: Type.Optional(AllowWritesSchema),
-  capabilities: Type.Optional(CapabilitiesSchema),
-  isolation: Type.Optional(IsolationSchema),
-  from: Type.Optional(BaseSchema),
-  refresh: Type.Optional(RefreshSchema),
-  worktreePath: Type.Optional(WorktreePathSchema),
+type LegacyWorkflowInput = {
+  node: string;
+  include?: Array<'report' | 'handoff' | 'branch' | 'metadata'>;
+  label?: string;
 };
-
-type DelegateCommonParams = Omit<Static<typeof TaskItem>, 'continuation'> & {
-  after?: Static<typeof AfterSchema>;
-  inputs?: Array<Static<typeof WorkflowInputSchema>>;
+type LegacyTaskInput = {
+  name?: string;
+  task: string;
+  cwd?: string;
+  route?: string;
+  context?: 'branch' | 'fresh';
+  contextNote?: string;
+  scope?: string[];
+  continuation?: string;
+  allowWrites?: boolean;
+  capabilities?: Array<'web'>;
+  isolation?: 'shared' | 'worktree';
+  from?: 'wip' | 'head';
+  refresh?: 'wip' | 'head';
+  worktreePath?: string;
 };
-type ModelDelegateParams = DelegateCommonParams &
-  ({ id: string; continue?: never } | { continue: string; id?: never });
+type DelegateCommonParams = Omit<LegacyTaskInput, 'continuation'> & {
+  after?: string[];
+  inputs?: LegacyWorkflowInput[];
+};
+type ModelDelegateParams = {
+  task: Static<typeof TaskSchema>;
+  route?: Static<typeof RouteSchema>;
+  inputs?: string[];
+  base?: Static<typeof BaseSchema>;
+  scope?: Static<typeof ScopeSchema>;
+  write?: Static<typeof WriteSchema>;
+  cwd?: Static<typeof CwdSchema>;
+  web?: Static<typeof WebSchema>;
+} & ({ id: string; continue?: never } | { continue: string; id?: never });
 
 const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
   type: 'object',
   properties: {
     id: LogicalIdSchema,
     continue: ContinueSchema,
-    ...DelegateCommonParamProperties,
+    task: TaskSchema,
+    route: Type.Optional(RouteSchema),
+    inputs: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
+        maxItems: 4,
+      }),
+    ),
+    base: Type.Optional(BaseSchema),
+    scope: Type.Optional(ScopeSchema),
+    write: Type.Optional(WriteSchema),
+    cwd: Type.Optional(CwdSchema),
+    web: Type.Optional(WebSchema),
   },
   required: ['task'],
   additionalProperties: false,
@@ -204,10 +157,87 @@ const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
 export type DelegateParams = Partial<DelegateCommonParams> & {
   id?: string;
   continue?: string;
-  tasks?: Array<Static<typeof TaskItem>>;
+  tasks?: LegacyTaskInput[];
   continuation?: string;
   background?: boolean;
 };
+
+/** Translate the small model contract into the durable execution shape. */
+function normalizeModelParams(rawParams: unknown): DelegateParams {
+  const raw = (rawParams ?? {}) as Record<string, unknown>;
+  // Legacy batch calls are not model-facing, so leave their established shape
+  // untouched for background and internal callers.
+  if (
+    Array.isArray(raw.tasks) ||
+    (raw.id === undefined && raw.continue === undefined)
+  )
+    return raw as DelegateParams;
+
+  const continuation =
+    typeof raw.continue === 'string' ? raw.continue.trim() : undefined;
+  const logicalId =
+    typeof raw.id === 'string'
+      ? raw.id.trim()
+      : continuation
+        ? parseWorkflowReference(continuation).logicalId
+        : undefined;
+  if (!logicalId) throw new Error('Fresh delegate calls require a stable id.');
+
+  const selectors: LegacyWorkflowInput[] = [];
+  const base = typeof raw.base === 'string' ? raw.base.trim() : undefined;
+  if (base) selectors.push({ node: base, include: ['branch', 'report'] });
+  if (Array.isArray(raw.inputs))
+    for (const input of raw.inputs) {
+      // Object selectors are retained only for direct internal/test callers;
+      // the registered schema admits strings exclusively.
+      if (typeof input === 'string') {
+        const node = input.trim();
+        if (node !== base) selectors.push({ node });
+      } else if (input && typeof input === 'object')
+        selectors.push(input as LegacyWorkflowInput);
+    }
+
+  return {
+    ...(typeof raw.task === 'string' ? { task: raw.task } : {}),
+    ...(typeof raw.route === 'string' ? { route: raw.route } : {}),
+    ...(selectors.length ? { inputs: selectors } : {}),
+    ...(Array.isArray(raw.after) ? { after: raw.after as string[] } : {}),
+    ...(typeof raw.scope !== 'undefined'
+      ? { scope: raw.scope as string[] }
+      : {}),
+    ...(typeof raw.cwd === 'string' ? { cwd: raw.cwd } : {}),
+    ...(typeof raw.write === 'boolean'
+      ? { allowWrites: raw.write }
+      : typeof raw.allowWrites === 'boolean'
+        ? { allowWrites: raw.allowWrites }
+        : {}),
+    ...(typeof raw.web === 'boolean'
+      ? { capabilities: raw.web ? (['web'] as const) : [] }
+      : Array.isArray(raw.capabilities)
+        ? { capabilities: raw.capabilities as 'web'[] }
+        : {}),
+    // These fields are accepted only for direct legacy/runtime callers, never
+    // by the registered model schema.
+    ...(raw.context === 'branch' || raw.context === 'fresh'
+      ? { context: raw.context }
+      : {}),
+    ...(typeof raw.contextNote === 'string'
+      ? { contextNote: raw.contextNote }
+      : {}),
+    ...(raw.isolation === 'shared' || raw.isolation === 'worktree'
+      ? { isolation: raw.isolation }
+      : {}),
+    ...(raw.from === 'wip' || raw.from === 'head' ? { from: raw.from } : {}),
+    ...(typeof raw.worktreePath === 'string'
+      ? { worktreePath: raw.worktreePath }
+      : {}),
+    ...(typeof raw.id === 'string'
+      ? { id: logicalId }
+      : { continue: continuation }),
+    // A logical ID is the only display-name source for model-facing calls.
+    name: logicalId,
+  } as DelegateParams;
+}
 
 export function delegatePromptGuidelines(
   cwd: string,
@@ -286,14 +316,14 @@ export function registerDelegateTool(
     label: 'Delegate',
     description: DELEGATE_TOOL_DESCRIPTION,
     promptSnippet:
-      'Schedule one focused async delegate with a stable id; compose with after/inputs, register delegate_wake for required results, then continue or settle without polling.',
+      'Schedule one focused async delegate with a stable id; compose with inputs or base, register delegate_wake for required results, then continue or settle without polling.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
     parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,
     renderResult: renderDelegateResult,
 
     async execute(toolCallId, rawParams, signal, onUpdate, ctx) {
-      const params = rawParams as DelegateParams;
+      const params = normalizeModelParams(rawParams);
       const config = loadDelegateConfig(ctx.cwd);
       const snapshots = new Map<string, string | null>();
       const getSnapshot = (targetCwd: string) => {

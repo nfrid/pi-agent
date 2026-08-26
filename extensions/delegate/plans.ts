@@ -148,7 +148,7 @@ function normalizeInputs(params: DelegateParams): {
     parallel: false,
     inputs: [
       {
-        name: params.name?.trim(),
+        name: params.name?.trim() || params.id?.trim(),
         task,
         cwd: params.cwd,
         route: params.route,

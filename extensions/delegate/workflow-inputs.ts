@@ -189,8 +189,18 @@ function outputFileGuidance(
     .join('\n');
 }
 
+function compactHandoff(source: WorkflowInputSource): string {
+  const result = source.result;
+  if (!result) return '';
+  return isCompactResult(result) ? result.handoff.text : result.handoff;
+}
+
 function resolveReport(source: WorkflowInputSource): string {
-  return outputFileGuidance(source, 'report');
+  const outputFile = outputFileGuidance(source, 'report');
+  const handoff = compactHandoff(source).trim();
+  // Keep the bounded actionable handoff inline while retaining the exact
+  // report's durable path for deeper inspection.
+  return handoff ? `${handoff}\n${outputFile}` : outputFile;
 }
 
 function resolveHandoff(source: WorkflowInputSource): string {
