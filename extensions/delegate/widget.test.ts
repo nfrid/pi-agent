@@ -214,7 +214,7 @@ describe('delegate widget', () => {
     const readOnly = renderDelegateWidget(
       [
         status({
-          route: 'terra-high',
+          route: 'luna-high',
           context: 'branch',
           allowWrites: false,
         }),
@@ -238,7 +238,7 @@ describe('delegate widget', () => {
       5_000,
     );
 
-    expect(readOnly[0]).toContain('terra-high/branch/ro');
+    expect(readOnly[0]).toContain('luna-high/branch/ro');
     expect(writableContinuation[0]).toContain('/cont/rw');
     expect(writableContinuation[0]).not.toContain(
       'a-route-name-that-is-deliberately-too-long',
@@ -249,7 +249,7 @@ describe('delegate widget', () => {
       [
         status({
           name: 'Phase\n5 review',
-          route: 'terra\nhigh',
+          route: 'luna\nhigh',
           context: 'fresh',
         }),
       ],
@@ -267,7 +267,7 @@ describe('delegate widget', () => {
     const branchReadOnly = renderDelegateWidget(
       [
         status({
-          route: 'terra-high',
+          route: 'luna-high',
           context: 'branch',
           allowWrites: false,
         }),
@@ -291,7 +291,7 @@ describe('delegate widget', () => {
       5_000,
     )[0];
 
-    expect(branchReadOnly).toContain('\u001b[36mterra-high\u001b[0m');
+    expect(branchReadOnly).toContain('\u001b[36mluna-high\u001b[0m');
     expect(branchReadOnly).toContain('\u001b[33mbranch\u001b[0m');
     expect(branchReadOnly).toContain('\u001b[32mro\u001b[0m');
     expect(continuedWritable).toContain('\u001b[35mcont\u001b[0m');

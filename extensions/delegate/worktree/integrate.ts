@@ -40,5 +40,10 @@ export function reviewBranch(
 }
 
 export function mergeBranch(record: WorktreeRecord): Promise<MergeOutcome> {
-  return integrator().mergeBranch(record);
+  const cumulative = record.integrationBase;
+  return integrator().mergeBranch(
+    cumulative && cumulative !== record.carryCommit
+      ? { ...record, carryCommit: cumulative }
+      : record,
+  );
 }

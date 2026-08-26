@@ -1,6 +1,6 @@
 /**
  * Shared reporting for delegate branches, used by both the agent-facing
- * `delegate_branches` tool and the `/delegate-worktrees` command so the two
+ * `delegate_changes` tool and the `/delegate-worktrees` command so the two
  * never drift into describing the same branch differently.
  */
 import { resolveDelegateSession } from './session';
@@ -65,7 +65,7 @@ export async function listBranchEntries(
 }
 
 // Branch detail is combined with the independently bounded review sections in
-// delegate_branches review. Keep every record-derived field bounded here too, so
+// delegate_changes review. Keep every record-derived field bounded here too, so
 // the complete response has a deterministic upper bound while retaining the
 // first useful path evidence and an explicit omission count.
 const MAX_DETAIL_FIELD_CHARS = 512;
@@ -119,7 +119,7 @@ export function snapshotGuidance(record: WorktreeRecord): string {
   const id = bounded(record.id, MAX_DETAIL_FIELD_CHARS);
   return [
     `Read-only snapshot: ${id} (checkout retired)`,
-    `Cleanup: delegate_branches drop ${id}`,
+    `Cleanup: /delegate-worktrees ${id} drop`,
     'Continue with its continuation token without refresh to rehydrate this exact source.',
     'Use refresh wip or head only for targeted verification; it is not independent review.',
   ].join('\n');
@@ -141,7 +141,7 @@ export function formatBranchDetail({ record, state }: BranchEntry): string {
     `Status:    ${bounded(record.status, MAX_DETAIL_FIELD_CHARS)}`,
     changedDetail(record),
     record.ownership === 'caller'
-      ? 'Integration: delegate_branches merge is disabled; merge or manage this branch in the caller checkout.'
+      ? 'Integration: delegate_changes merge is disabled; merge or manage this branch in the caller checkout.'
       : undefined,
     record.error
       ? `Note:      ${bounded(record.error, MAX_DETAIL_ERROR_CHARS)}`

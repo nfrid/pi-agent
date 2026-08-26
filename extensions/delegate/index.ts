@@ -32,7 +32,7 @@ import {
   getSessionLeafId,
 } from './branch-ownership';
 import { listBranchEntries } from './branches';
-import { registerDelegateBranchesTool } from './branches-tool';
+import { registerDelegateChangesTool } from './changes-tool';
 import {
   completionCard,
   createCompletionDelivery,
@@ -49,8 +49,8 @@ import {
   registerDelegateControl,
   subscribeDelegateControlLifecycle,
 } from './control';
+import { isExplicitGate, registerDelegateGateTool } from './gate-tool';
 import { HostedCompletionAcker } from './hosted-completion-ack';
-import { registerImplicitAllSettledWake } from './implicit-wake';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { clearDelegateSurface, publishDelegateSurface } from './live';
@@ -62,7 +62,6 @@ import {
 import { serializeDelegateRunForPublic } from './serialize';
 import { archiveOldSessionFiles, pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
-
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import { buildOutputFileHandoff } from './tool-result';
@@ -78,7 +77,6 @@ import {
   latestWakeState,
   restoreWakeState,
 } from './wake-store';
-import { registerDelegateWakeTool } from './wake-tool';
 import {
   DELEGATE_WIDGET_MAX_WIDTH,
   DELEGATE_WIDGET_MIN_WIDTH,
@@ -99,7 +97,7 @@ export const DELEGATES_COMMAND_DESCRIPTION =
 
 function setDelegateToolActive(
   pi: ExtensionAPI,
-  name: 'delegate_jobs' | 'delegate_branches',
+  name: 'delegate_jobs' | 'delegate_changes',
   active: boolean,
 ): void {
   // Older test/runtime shims do not expose active-tool selection; registration
@@ -178,6 +176,23 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getRuntimeActive: () => runtimeActive,
     getActiveCoordinator: () => activeWake?.coordinator,
     getDeliveryBroker: () => getScopedServices(scopeId).backgroundDeliveries,
+    getOutstanding: (sources) => {
+      const sourceSet = new Set(sources);
+      return (
+        activeRuntime?.workflow
+          .list()
+          .filter(
+            (attempt) =>
+              !sourceSet.has(attempt.identity) &&
+              ['scheduled', 'queued', 'running'].includes(attempt.state),
+          )
+          .map((attempt) =>
+            attempt.waitingFor.length > 0
+              ? `${attempt.identity} — waiting for ${attempt.waitingFor.join(', ')}`
+              : `${attempt.identity} — ${attempt.state}`,
+          ) ?? []
+      );
+    },
     onEntered: (sources) => {
       statuses?.markWorkflowDelivered(sources);
       void hostedCompletionAcker
@@ -188,22 +203,28 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
             error,
           ),
         );
+      reconcileEagerDelivery();
     },
   });
-  registerDelegateWakeTool(pi, () => activeWake?.coordinator, {
+  registerDelegateGateTool(pi, () => activeWake?.coordinator, {
     onRegistered: (registered, coordinator) => {
-      if (registered.id.startsWith('implicit-all-')) return;
+      const selected = new Set(registered.references);
       for (const wake of coordinator
         .list()
-        .filter((candidate) => candidate.id.startsWith('implicit-all-'))) {
+        .filter(
+          (candidate) =>
+            candidate.id.startsWith('eager-') &&
+            candidate.references.some((reference) => selected.has(reference)),
+        )) {
         const cancelled = coordinator.cancel(
           wake.id,
-          'Superseded by an explicit wake subscription.',
+          'Selected by an explicit delegate gate.',
         );
         getScopedServices(scopeId).backgroundDeliveries.cancel(
           `delegate-wake:${cancelled.deliveryKey}`,
         );
       }
+      reconcileEagerDelivery();
     },
     onCancelled: (wake) =>
       getScopedServices(scopeId).backgroundDeliveries.cancel(
@@ -232,7 +253,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const activateJobsTool = () =>
     setDelegateToolActive(pi, 'delegate_jobs', true);
   const activateBranchesTool = () =>
-    setDelegateToolActive(pi, 'delegate_branches', true);
+    setDelegateToolActive(pi, 'delegate_changes', true);
   let promptSnapshot:
     | {
         fingerprint: string;
@@ -246,6 +267,48 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   const ownerBranchIsActive = (ownerBranchId: string): boolean =>
     runtimeActive && activeRuntime?.branchId === ownerBranchId;
+
+  function reconcileEagerDelivery(): void {
+    if (!runtimeActive || !activeRuntime || !activeWake) return;
+    const coordinator = activeWake.coordinator;
+    const delivered = new Set(coordinator.enteredSourceIdentities());
+    const active = coordinator.list();
+    const explicitlyHeld = new Set(
+      active.filter(isExplicitGate).flatMap((wake) => [...wake.references]),
+    );
+    const alreadyQueued = new Set(
+      active
+        .filter((wake) => wake.id.startsWith('eager-'))
+        .flatMap((wake) => [...wake.references]),
+    );
+    for (const attempt of activeRuntime.workflow.list()) {
+      if (
+        attempt.ownerBranchId !== activeRuntime.branchId ||
+        ![
+          'success',
+          'error',
+          'timed-out',
+          'aborted',
+          'cancelled',
+          'blocked',
+        ].includes(attempt.state) ||
+        delivered.has(attempt.identity) ||
+        explicitlyHeld.has(attempt.identity) ||
+        alreadyQueued.has(attempt.identity)
+      )
+        continue;
+      const id = `eager-${createHash('sha256')
+        .update(attempt.identity)
+        .digest('hex')
+        .slice(0, 24)}`;
+      if (coordinator.get(id)) continue;
+      coordinator.register({
+        id,
+        condition: { node: attempt.identity },
+        payload: ['handoff', 'metadata'],
+      });
+    }
+  }
 
   const allocateForkOwnerId = (): string => {
     let ownerId: string;
@@ -290,6 +353,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       ownerBranchId: branchId,
       onChange: syncWorkflowSurface,
     });
+    nextWorkflow.subscribeTerminal(() => reconcileEagerDelivery());
     // Import only owners whose marker is in the active branch ancestry. A
     // sibling's public impl@1 is deliberately absent and can be scheduled
     // independently without colliding with this runtime.
@@ -699,13 +763,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       initialRuntime.workflow,
       () => activeRuntime?.workflow,
     );
-    registerDelegateBranchesTool(pi);
+    registerDelegateChangesTool(pi, () => activeRuntime?.workflow);
     // Keep the broker tools registered for stable extension ownership, but do
     // not expose either one until a job or retained branch makes it useful.
     setDelegateToolActive(pi, 'delegate_jobs', false);
-    setDelegateToolActive(pi, 'delegate_branches', false);
+    setDelegateToolActive(pi, 'delegate_changes', false);
     if (branchEntries.length > 0) activateBranchesTool();
     activateWakeBranch(ctx, wakeBranchKey, true);
+    reconcileEagerDelivery();
 
     // Reattach durable hosted links only after the owner workflow/store and
     // tools are live. The generation guard prevents a replaced session from
@@ -917,15 +982,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     // inspection must remain able to return the retained handoff.
     delivery.clearUnenteredAutomaticDeliveries();
     if (genuinelySettled) statuses?.parentSettled();
-    // Pending workflow delegates are why a normal parent settlement is not
-    // considered "genuine" above. Arm their fallback at the idle boundary
-    // regardless; legacy automatic deliveries remain outside this workflow.
-    if (activeRuntime && activeWake)
-      registerImplicitAllSettledWake({
-        workflow: activeRuntime.workflow,
-        wakes: activeWake.coordinator,
-        ownerBranchId: activeRuntime.branchId,
-      });
     syncWidget();
   });
   pi.on('session_shutdown', async (_event, ctx) => {

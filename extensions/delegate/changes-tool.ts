@@ -10,6 +10,7 @@ import {
   listBranchEntries,
   resolveWorktreeRecord,
 } from './branches';
+import type { DelegateWorkflowCoordinator } from './workflow-coordinator';
 import {
   branchState,
   mergeBranch,
@@ -56,11 +57,12 @@ const Parameters = Type.Object({
         'For review only, maximum patch-body characters. The default is 60,000; summaryOnly cannot be combined with this selector.',
     }),
   ),
-  id: Type.Optional(
+  node: Type.Optional(
     Type.String({
+      minLength: 1,
       maxLength: 512,
       description:
-        'Worktree id or continuation token from the writable run. Required for every action except list.',
+        'Logical workflow node or exact attempt. Required for every action except list.',
     }),
   ),
   force: Type.Optional(
@@ -92,14 +94,17 @@ function text(value: string) {
   return { content: [{ type: 'text' as const, text: value }] };
 }
 
-const DELEGATE_BRANCHES_DESCRIPTION =
-  "Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch.";
+const DELEGATE_CHANGES_DESCRIPTION =
+  "Review and integrate code changes produced by a delegate workflow node. review shows that node's own delta from its base by default; merge integrates its cumulative base chain and either lands cleanly or leaves the checkout untouched. list is an operational inventory and defaults to the current parent session.";
 
-export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
+export function registerDelegateChangesTool(
+  pi: ExtensionAPI,
+  getWorkflow: () => DelegateWorkflowCoordinator | undefined,
+): void {
   pi.registerTool<typeof Parameters, BranchesDetails>({
-    name: 'delegate_branches',
-    label: 'Delegate Branches',
-    description: DELEGATE_BRANCHES_DESCRIPTION,
+    name: 'delegate_changes',
+    label: 'Delegate Changes',
+    description: DELEGATE_CHANGES_DESCRIPTION,
     parameters: Parameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const reviewSelectorUsed =
@@ -137,13 +142,24 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
         };
       }
 
-      const identifier = params.id?.trim();
-      if (!identifier) throw new Error(`id is required for ${params.action}.`);
+      const node = params.node?.trim();
+      if (!node) throw new Error(`node is required for ${params.action}.`);
+      const result = getWorkflow()?.getResultEvidence(node);
+      const worktreeIds = [
+        ...new Set(
+          result?.runs
+            .map((run) => run.worktree?.id)
+            .filter((id): id is string => Boolean(id)) ?? [],
+        ),
+      ];
+      if (worktreeIds.length !== 1)
+        throw new Error(
+          `Delegate node ${node} has no unambiguous retained code changes.`,
+        );
+      const identifier = worktreeIds[0] as string;
       const record = resolveWorktreeRecord(identifier);
       if (!record)
-        throw new Error(
-          `No delegate worktree or continuation for ${identifier}.`,
-        );
+        throw new Error(`Retained code changes for ${node} are unavailable.`);
 
       switch (params.action) {
         case 'review': {
@@ -248,7 +264,7 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     },
     renderCall(args, theme) {
       const title =
-        theme.fg('toolTitle', theme.bold('delegate_branches')) +
+        theme.fg('toolTitle', theme.bold('delegate_changes')) +
         (args.action ? ` ${theme.fg('muted', args.action)}` : '');
       const selectors = [
         args.scope === 'all' ? 'all history' : '',
@@ -261,8 +277,8 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
         .join(', ');
       const selector = selectors ? ` ${theme.fg('muted', selectors)}` : '';
       return new Text(
-        args.id
-          ? `${title}${selector} ${theme.fg('accent', args.id)}`
+        args.node
+          ? `${title}${selector} ${theme.fg('accent', args.node)}`
           : `${title}${selector}`,
         0,
         0,

@@ -1,15 +1,12 @@
-- Delegate any useful, independently describable chunk when briefing, verification, and integration cost less than doing it directly. Parallelism, specialization, latency hiding, and context isolation are common reasons to delegate.
-- Give each child one bounded objective and, when useful, a small ranked finish checklist; a stronger route must not substitute for decomposition.
-- Default to fresh context.
-- For consequential work, include the objective, non-discoverable constraints, scope boundaries, expected output, and finish checks; do not copy repository facts the child can cheaply recover. Keep tiny calls free of ceremony.
-- Parallelize independent work by making separate delegate calls with stable `id` values; every delegate call is asynchronous. Prefer several bounded cheap tasks over one expensive task only when coordination is low; do not create duplicate work or tasks that need constant synchronization.
-- Use `after` and symbolic `inputs` to compose downstream work without copying evidence.
-- Continue an existing child while the request belongs to the same line of work; send it new evidence, corrections, and review feedback. Start a fresh child for independent work or when a fresh perspective is the point.
-- Register `delegate_wake` when outstanding work gates the next decision. Wakes arrive at the next safe model boundary by default; use `nonObstructive: true` only when delivery should wait until the parent would otherwise become idle. When no independent work remains, emit one concise waiting status and never poll.
-- Keep final scope, branch integration, final verification, and user-facing decisions with the parent. Children may make bounded implementation decisions and recommend scope or acceptance criteria.
-- Compact recipes (choose the shape; do not build a declarative workflow graph):
-- **Fan-out/fan-in:** schedule two or more independent scans with exact routes; schedule `synthesis` after them with symbolic report `inputs`; register one wake for `synthesis` and settle.
-- **Implementation → review:** schedule writable `impl`; schedule `review` after `impl` with `inputs: [{ "node": "impl", "include": ["report", "branch"] }]` and the exact symbolic branch reference; wake on `review` and the branch decision.
-- **Hidden exploration:** give `explore` a named question or repository area; pipe its symbolic report to a focused `plan` or `impl`; wake only on the focused conclusion. Do not dump exploration into the parent context.
-- **Continuation:** use `continue: "impl"` after review feedback, pipe the reviewer report with `inputs`, and let the runtime preserve the original route, worktree, and write access. Omit `scope` to inherit the latest scope; provide `scope` to replace the advisory scope for this run and future continuations.
-- **Do not delegate:** keep short edits, obvious check loops, and tasks requiring repeated parent judgement in the parent.
+- Delegate useful, independently describable work when briefing, verification, and integration cost less than doing it directly.
+- Give every fresh delegate a meaningful kebab-case `id`; avoid placeholders such as `task-1`, `worker-a`, or `subagent-b`.
+- Fresh work defaults to fresh context. A fresh call normally needs only `id`, `task`, and an exact configured `route`.
+- Use `inputs` to wait for prior delegates and give the child their compact handoffs plus durable full-report paths.
+- Use `base` when a fresh child needs another delegate's exact resulting code state. `base` also supplies that delegate as an input.
+- Use `continue` for the same child session and retained workspace. Continuations inherit route, cwd, write access, workspace, web access, and latest scope; provide `scope` only to replace it.
+- Parallel work is multiple independent `delegate` calls. Results arrive eagerly at the next safe model boundary and ready completions are coalesced into the same parent turn.
+- Use `delegate_gate` only when intermediate results are not useful: `all` batches a fan-in and `any` opens on the first settled result. A later gate replaces the earlier gate.
+- Keep final scope, change integration, final verification, and user-facing decisions with the parent.
+- Use `delegate_changes` with a workflow `node` to review or merge retained code changes.
+- Do not poll for results. `delegate_jobs` is only for bounded status, feedback, and cancellation.
+- Canonical flow: explore with `id: "reconnect-race-explore"`; implement with `id: "reconnect-race-fix"`, `inputs: ["reconnect-race-explore"]`, `scope`, and `write: true`; review with `id: "reconnect-race-review"` and `base: "reconnect-race-fix"`.

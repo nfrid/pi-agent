@@ -320,7 +320,7 @@ export function worktreeLines(run: DelegatedRun): string[] {
   if (worktree.snapshot)
     return [
       `Read-only snapshot: ${worktree.id} (checkout retired)`,
-      `Cleanup: delegate_branches drop ${worktree.id}`,
+      `Cleanup: /delegate-worktrees ${worktree.id} drop`,
       'Continue without refresh for this exact source, or refresh wip/head for targeted verification.',
       'A refreshed continuation is not independent review; use a fresh delegate for that.',
     ];
@@ -342,11 +342,13 @@ export function worktreeLines(run: DelegatedRun): string[] {
   else lines.push('Changed: nothing was committed on this branch');
   if (worktree.error && !continuationRecoveryNote(run))
     lines.push(`Note: ${worktree.error}`);
+  const changeNode = run.workflowAttempt?.logicalId;
   lines.push(
-    `Review:    delegate_branches review ${worktree.id}`,
     worktree.ownership === 'caller'
       ? 'Integrate: manage the caller-owned branch in that checkout'
-      : `Integrate: delegate_branches merge ${worktree.id}`,
+      : changeNode
+        ? `Changes: delegate_changes review/merge node ${changeNode}`
+        : `Changes: inspect with /delegate-worktrees ${worktree.id}`,
   );
   return lines;
 }

@@ -120,6 +120,9 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
     (record.headCommit === undefined ||
       (typeof record.headCommit === 'string' &&
         /^[a-f0-9]{7,64}$/.test(record.headCommit))) &&
+    (record.integrationBase === undefined ||
+      (typeof record.integrationBase === 'string' &&
+        /^[a-f0-9]{7,64}$/.test(record.integrationBase))) &&
     typeof record.workingDirectory === 'string' &&
     !path.isAbsolute(record.workingDirectory) &&
     (record.status === 'active' ||

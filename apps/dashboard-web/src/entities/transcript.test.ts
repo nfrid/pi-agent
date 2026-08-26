@@ -305,15 +305,15 @@ describe('activity row views and virtual transcript construction', () => {
   it('summarizes delegation, fetches, and file ranges usefully', () => {
     expect(
       activityStepParts({
-        name: 'delegate_branches',
+        name: 'delegate_changes',
         args: {
           action: 'drop',
-          id: '136d280a-7c10-4427-9d2d-1f7e62acd03b',
+          node: 'reconnect-race-fix',
         },
       }),
     ).toMatchObject({
-      action: 'Dropping delegate branch',
-      argument: '136d280a-7c10-4427-9d2d-1f7e62acd03b',
+      action: 'Dropping delegate changes',
+      argument: 'reconnect-race-fix',
       role: 'command',
     });
     expect(

@@ -182,7 +182,7 @@ describe('output', () => {
       'Read-only snapshot: 11111111-1111-1111-1111-111111111111 (checkout retired)',
     );
     expect(handoff).toContain(
-      'Cleanup: delegate_branches drop 11111111-1111-1111-1111-111111111111',
+      'Cleanup: /delegate-worktrees 11111111-1111-1111-1111-111111111111 drop',
     );
     expect(handoff).toContain('refresh wip or head');
     expect(handoff).toContain('fresh delegate');

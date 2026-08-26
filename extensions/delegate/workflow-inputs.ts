@@ -310,7 +310,8 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
       `Branch source for ${source.attempt.identity} has no recorded head.`,
     );
   const record = loadWorktree(summary.id);
-  const workBase = record?.carryCommit ?? record?.baseHead;
+  const workBase =
+    record?.integrationBase ?? record?.carryCommit ?? record?.baseHead;
   const normalizedWorkingDirectory = record
     ? path.normalize(record.workingDirectory)
     : '';

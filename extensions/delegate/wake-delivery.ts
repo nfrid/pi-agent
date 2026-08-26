@@ -31,8 +31,11 @@ function json(value: unknown): string {
 }
 
 /** Render the payload as source-grouped, model-readable evidence. */
-export function formatWakeDispatch(dispatch: WakeDispatch): string {
-  const sections = [`# Delegate wake ${dispatch.wake.id} ready`];
+export function formatWakeDispatch(
+  dispatch: WakeDispatch,
+  outstanding: readonly string[] = [],
+): string {
+  const sections = ['# Delegate result'];
   const sources = Object.entries(dispatch.payload.sources);
   for (const [identity, source] of sources) {
     sections.push(`\n## Source ${identity}`);
@@ -46,6 +49,10 @@ export function formatWakeDispatch(dispatch: WakeDispatch): string {
         `### Metadata\n\`\`\`json\n${json(source.metadata)}\n\`\`\``,
       );
   }
+  if (outstanding.length > 0)
+    sections.push(
+      `Still running:\n${outstanding.map((item) => `- ${item}`).join('\n')}`,
+    );
   return sections.join('\n\n');
 }
 
@@ -122,6 +129,7 @@ export function createWakeDelivery(options: {
   getRuntimeActive: () => boolean;
   getDeliveryBroker?: () => BackgroundDeliveryBroker | undefined;
   onEntered?: (sources: readonly string[], wake: WakeSnapshot) => void;
+  getOutstanding?: (sources: readonly string[]) => readonly string[];
 }): WakeDeliveryController {
   const dispatch: WakeDispatchHandler = (value) => {
     const active = options.getActiveCoordinator();
@@ -134,7 +142,10 @@ export function createWakeDelivery(options: {
       throw new Error('Wake delivery branch is no longer active.');
     const message = {
       customType: DELEGATE_WAKE_MESSAGE_TYPE,
-      content: formatWakeDispatch(value),
+      content: formatWakeDispatch(
+        value,
+        options.getOutstanding?.(Object.keys(value.payload.sources)) ?? [],
+      ),
       display: true,
       details: deliveryDetails(value),
     };

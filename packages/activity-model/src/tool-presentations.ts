@@ -15,8 +15,8 @@ export const CUSTOM_TOOL_KIND_BY_NAME = {
   delegate: 'delegate',
   delegates: 'delegate',
   delegate_jobs: 'delegate_jobs',
-  delegate_branches: 'delegate_branches',
-  delegate_wake: 'delegate_wake',
+  delegate_changes: 'delegate_changes',
+  delegate_gate: 'delegate_gate',
   background: 'background',
   todo: 'todo',
   tasks: 'todo',
@@ -232,7 +232,7 @@ export function todoResultIsRedundant(
   return compact === restated;
 }
 
-export type DelegateBranchesPresentation = ActionIdPresentation & {
+export type DelegateChangesPresentation = ActionIdPresentation & {
   scope?: string;
   incremental: boolean;
   summaryOnly: boolean;
@@ -240,9 +240,9 @@ export type DelegateBranchesPresentation = ActionIdPresentation & {
   patchBudget?: number;
 };
 
-export function delegateBranchesPresentation(
+export function delegateChangesPresentation(
   args: unknown,
-): DelegateBranchesPresentation {
+): DelegateChangesPresentation {
   const record = recordArgs(args);
   const patchBudget = record?.patchBudget;
   return {

@@ -15,7 +15,7 @@ import type {
 const Parameters = Type.Object({
   action: StringEnum(['list', 'status', 'feedback', 'cancel'] as const, {
     description:
-      'list shows tracked jobs; status shows bounded metadata; feedback sends corrective guidance to a queued or running job; cancel stops one or more jobs. Results are delivered only through delegate_wake; use status rather than polling.',
+      'list shows tracked jobs; status shows bounded metadata; feedback sends corrective guidance to a queued or running job; cancel stops one or more jobs. Results arrive through eager delivery or delegate_gate; use status rather than polling.',
   }),
   id: Type.Optional(
     Type.String({
@@ -36,7 +36,7 @@ const Parameters = Type.Object({
 });
 
 const DELEGATE_JOBS_DESCRIPTION =
-  'Inspect bounded metadata, steer, and cancel asynchronous delegate workflow attempts. Selected results are delivered only by an explicitly registered delegate_wake. Use feedback with one bounded message to steer a running child; this tool never polls or consumes result bodies.';
+  'Inspect bounded metadata, steer, and cancel asynchronous delegate workflow attempts. Results arrive eagerly unless held by delegate_gate. Use feedback with one bounded message to steer a running child; this tool never polls or consumes result bodies.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();

@@ -50,8 +50,8 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
         const guidance = record.snapshot
           ? `Drop:     /delegate-worktrees ${id} drop`
           : record.ownership === 'caller'
-            ? `Review:    delegate_branches review ${id}\nManage:    merge or otherwise manage this caller-owned branch in its checkout\nRelease:   /delegate-worktrees ${id} drop`
-            : `Review:    delegate_branches review ${id}\nIntegrate: delegate_branches merge ${id}\nDiscard:   /delegate-worktrees ${id} drop`;
+            ? `Manage:    review or merge this caller-owned branch in its checkout\nRelease:   /delegate-worktrees ${id} drop`
+            : `Changes:   use delegate_changes with the workflow node that produced this record\nDiscard:   /delegate-worktrees ${id} drop`;
         ctx.ui.notify(`${detail}\n\n${guidance}`, 'info');
         return;
       }

@@ -2,7 +2,7 @@ import {
   actionIdPresentation,
   backgroundPresentation,
   type CustomToolKind,
-  delegateBranchesPresentation,
+  delegateChangesPresentation,
   delegatePresentation,
   fetchContentPresentation,
   getSearchContentPresentation,
@@ -281,7 +281,7 @@ function DelegateSummary({ args }: { args: unknown }) {
 }
 
 function BranchesSummary({ args }: { args: unknown }) {
-  const model = delegateBranchesPresentation(args);
+  const model = delegateChangesPresentation(args);
   const target =
     model.id ??
     (model.ids.length === 1
@@ -463,8 +463,8 @@ const SUMMARIES: Record<CustomToolKind, (args: unknown) => ReactNode> = {
   get_search_content: (args) => <GetSearchContentSummary args={args} />,
   delegate: (args) => <DelegateSummary args={args} />,
   delegate_jobs: (args) => <ActionSummary args={args} title="Delegate jobs" />,
-  delegate_branches: (args) => <BranchesSummary args={args} />,
-  delegate_wake: (args) => <ActionSummary args={args} title="Delegate wake" />,
+  delegate_changes: (args) => <BranchesSummary args={args} />,
+  delegate_gate: (args) => <ActionSummary args={args} title="Delegate gate" />,
   background: (args) => <BackgroundSummary args={args} />,
   todo: (args) => <TodoSummary args={args} />,
 };

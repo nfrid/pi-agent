@@ -645,7 +645,7 @@ describe('delegate measurements', () => {
                 turns: 2,
                 cost: 0.5,
               }),
-              run('terra-high', 8, {
+              run('luna-high', 8, {
                 input: 900,
                 output: 90,
                 turns: 8,
@@ -677,7 +677,7 @@ describe('delegate measurements', () => {
         cost: 0.75,
         relativeCost: 1,
       },
-      'terra-high': {
+      'luna-high': {
         tasks: 1,
         turns: 8,
         usageInput: 900,
@@ -696,7 +696,7 @@ describe('delegate measurements', () => {
       handoff: 'Delegated results: 1 run\n\nStatus: success',
       runs: [
         {
-          routing: { route: 'terra-max', relativeCost: 13 },
+          routing: { route: 'luna-max', relativeCost: 13 },
           usage: { turns: 9 },
         },
       ],
@@ -708,7 +708,7 @@ describe('delegate measurements', () => {
           // The acknowledgement's run has not spent anything yet.
           details: {
             runs: [
-              { routing: { route: 'terra-max', relativeCost: 13 }, usage: {} },
+              { routing: { route: 'luna-max', relativeCost: 13 }, usage: {} },
             ],
           },
         },
@@ -728,7 +728,7 @@ describe('delegate measurements', () => {
     // Delivered and then peeked at: two handoffs the parent paid context for,
     // but only one child run to bill.
     expect(result.delegateBackgroundDeliveries).toBe(2);
-    expect(result.routes['terra-max'].tasks).toBe(1);
+    expect(result.routes['luna-max'].tasks).toBe(1);
     expect(result.childTurns).toBe(9);
   });
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   backgroundPresentation,
   customToolKind,
-  delegateBranchesPresentation,
+  delegateChangesPresentation,
   delegatePresentation,
   fetchContentPresentation,
   getSearchContentPresentation,
@@ -20,8 +20,8 @@ describe('custom tool presentation kinds', () => {
     expect(customToolKind('delegate')).toBe('delegate');
     expect(customToolKind('delegates')).toBe('delegate');
     expect(customToolKind('delegate_jobs')).toBe('delegate_jobs');
-    expect(customToolKind('delegate_branches')).toBe('delegate_branches');
-    expect(customToolKind('delegate_wake')).toBe('delegate_wake');
+    expect(customToolKind('delegate_changes')).toBe('delegate_changes');
+    expect(customToolKind('delegate_gate')).toBe('delegate_gate');
     expect(customToolKind('background')).toBe('background');
     expect(customToolKind('todo')).toBe('todo');
     expect(customToolKind('tasks')).toBe('todo');
@@ -171,7 +171,7 @@ describe('custom tool presentation kinds', () => {
       ),
     ).toBe(false);
     expect(
-      delegateBranchesPresentation({
+      delegateChangesPresentation({
         action: 'review',
         id: 'wt-1',
         incremental: true,
