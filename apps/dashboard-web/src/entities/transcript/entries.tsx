@@ -1,28 +1,13 @@
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
-import { Markdown } from '../../Markdown';
+import { copyText, Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
 import type { TranscriptModelItem } from '../../transcript';
 import { activityStepParts, commandStepMeta } from './activity';
 import { ActivityStepContent } from './activity-summary';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
-
-async function copyText(text: string) {
-  if (navigator.clipboard) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const input = document.createElement('textarea');
-  input.value = text;
-  input.style.position = 'fixed';
-  input.style.opacity = '0';
-  document.body.append(input);
-  input.select();
-  document.execCommand('copy');
-  input.remove();
-}
 
 interface ThumbnailState {
   source?: string;

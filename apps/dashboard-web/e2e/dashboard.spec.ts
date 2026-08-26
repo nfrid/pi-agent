@@ -5162,6 +5162,15 @@ test('activity header renders Markdown and proves float and sticky geometry @des
 test('activity header preserves block-first Markdown semantics @desktop', async ({
   page,
 }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) =>
+          sessionStorage.setItem('copied-code-block', text),
+      },
+    });
+  });
   await installPhase6Mocks(page, {
     entries: markdownActivityEntries({ blockFirst: true }),
   });
@@ -5188,6 +5197,14 @@ test('activity header preserves block-first Markdown semantics @desktop', async 
   expect(blockStyles.markdownDisplay).toBe('block');
   expect(blockStyles.headingDisplay).not.toBe('inline');
   expect(blockStyles.codeOverflow).toBe('auto');
+
+  await preamble.getByRole('button', { name: 'Copy code block' }).click();
+  await expect(
+    preamble.getByRole('button', { name: 'Copied code block' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('copied-code-block')),
+  ).toBe('const blockFirst = true;');
 });
 
 test('virtual transcript focus and group layout stay inside simple contracts', async ({

@@ -85,8 +85,9 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain('<li>');
     expect(markup).toContain('<code>code</code>');
     expect(markup).toContain(
-      '<pre><code class="language-ts">const ready = true;\n</code></pre>',
+      '<code class="language-ts">const ready = true;\n</code>',
     );
+    expect(markup).toContain('aria-label="Copy code block"');
     expect(markup).toContain('<p class="structured-result-primitive">2</p>');
     expect(markup).toContain('<p class="structured-result-primitive">true</p>');
   });

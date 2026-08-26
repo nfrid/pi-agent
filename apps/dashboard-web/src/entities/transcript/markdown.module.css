@@ -73,6 +73,17 @@
   padding: 0.8em;
 }
 
+.markdown .codeBlock {
+  position: relative;
+  padding-right: 2.8em;
+}
+
+.codeBlockCopy {
+  position: absolute;
+  top: 0.45em;
+  right: 0.45em;
+}
+
 .markdown pre code {
   border: 0;
   padding: 0;
