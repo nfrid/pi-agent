@@ -14,6 +14,7 @@ import {
   workBase,
 } from './worktree';
 import * as worktreeGit from './worktree/git';
+import { loadWorktree, writeWorktreeRecord } from './worktree/records';
 
 async function delegated(options: {
   name?: string;
@@ -92,6 +93,42 @@ describe('separating carried parent work from the task own work', () => {
     const record = await delegated({});
     const review = await reviewBranch(record);
     expect(review.log).toBe('');
+  });
+});
+
+describe('cumulative base-chain integration', () => {
+  test('marks integrated ancestors when a descendant lands the cumulative chain', async () => {
+    const ancestor = await delegated({
+      name: 'Ancestor change',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'ancestor.txt'), 'a\n'),
+    });
+    if (!ancestor.headCommit) throw new Error('missing ancestor head');
+    const preparation = await prepareWorktree({
+      cwd: repository,
+      name: 'Descendant change',
+      baseRef: ancestor.headCommit,
+    });
+    const descendant = preparation.worktree?.record;
+    if (!descendant) throw new Error('descendant preparation failed');
+    descendant.integrationBase =
+      ancestor.integrationBase ?? ancestor.carryCommit ?? ancestor.baseHead;
+    writeWorktreeRecord(descendant);
+    writeFileSync(
+      path.join(descendant.worktreePath, 'src', 'descendant.txt'),
+      'b\n',
+    );
+    const finished = await finishWorktree(descendant.id, {
+      taskName: 'Descendant change',
+      outcome: 'success',
+    });
+
+    expect((await mergeBranch(finished)).merged).toBe(true);
+    const integratedAncestor = loadWorktree(ancestor.id);
+    expect(integratedAncestor?.integratedBy).toBe(finished.id);
+    expect(await branchState(integratedAncestor as WorktreeRecord)).toBe(
+      'merged',
+    );
   });
 });
 

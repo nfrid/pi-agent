@@ -24,6 +24,9 @@ export interface WorktreeRecord extends GenericWorktreeRecord {
   sessionToken?: string;
   /** Earliest integration base inherited through a delegate `base` chain. */
   integrationBase?: string;
+  /** Leaf worktree whose cumulative merge integrated this record's changes. */
+  integratedBy?: string;
+  integratedAt?: string;
   /** Parent Pi session that first created this retained record. */
   creatorSessionId?: string;
   /** Bounded recent parent-session touches; creatorSessionId is never evicted. */

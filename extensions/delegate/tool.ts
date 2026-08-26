@@ -255,7 +255,6 @@ function workflowReceipt(attempt: DelegateWorkflowAttemptSnapshot): {
   content: [{ type: 'text'; text: string }];
   details: Record<string, unknown>;
 } {
-  const job = attempt.jobId ? `; adapter=${attempt.jobId}` : '';
   const waiting = attempt.dependencies.length
     ? ` after ${attempt.dependencies.join(', ')}`
     : '';
@@ -263,7 +262,7 @@ function workflowReceipt(attempt: DelegateWorkflowAttemptSnapshot): {
     content: [
       {
         type: 'text',
-        text: `Scheduled ${attempt.identity}${waiting}; state=${attempt.state}${job}. Results arrive eagerly unless held by delegate_gate.`,
+        text: `Scheduled ${attempt.identity}${waiting}; state=${attempt.state}. Results arrive eagerly unless held by delegate_gate.`,
       },
     ],
     details: {

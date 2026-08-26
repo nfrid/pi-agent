@@ -816,9 +816,22 @@ describe('transcript payload inspection', () => {
       />,
     );
     expect(branches).toContain('tool-delegate_changes-presentation');
+    expect(branches).toContain('Delegate changes');
+    expect(branches).toContain('wt-1');
     expect(branches).toContain('incremental');
     expect(branches).toContain('src/a.ts');
     expect(branches).toContain('2 paths');
+
+    const gate = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'delegate_gate',
+          arguments: { any: ['audit-a', 'audit-b'], delivery: 'idle' },
+        }}
+      />,
+    );
+    expect(gate).toContain('Delegate gate');
+    expect(gate).toContain('any · 2 nodes · idle');
   });
 
   it('formats command exit code and duration for collapsed step meta', () => {

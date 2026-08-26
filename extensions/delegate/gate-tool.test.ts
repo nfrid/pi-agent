@@ -63,6 +63,28 @@ describe('delegate_gate tool', () => {
     });
   });
 
+  test('an invalid replacement preserves the active gate', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    workflow.schedule({
+      logicalId: 'first',
+      mode: 'single',
+      tasks: ['first'],
+      execute: async () => new Promise(() => {}),
+    });
+    const coordinator = new WakeCoordinator({ workflow });
+    const cancelled: string[] = [];
+    const tool = registeredTool(coordinator, cancelled);
+    await tool.execute('call', { all: ['first'] }, undefined, undefined, {});
+    const original = coordinator.list()[0];
+
+    await expect(
+      tool.execute('call', { all: ['missing'] }, undefined, undefined, {}),
+    ).rejects.toThrow('Unknown logical ID "missing"');
+    expect(cancelled).toEqual([]);
+    expect(coordinator.list()).toHaveLength(1);
+    expect(coordinator.list()[0]?.id).toBe(original?.id);
+  });
+
   test('a later gate replaces the active gate and idle maps to non-obstructive delivery', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     for (const id of ['first', 'second'])

@@ -82,19 +82,23 @@ export function registerDelegateGateTool(
       if (!coordinator)
         throw new Error('Delegate gate runtime is unavailable.');
       const requested = condition(params);
-      for (const current of coordinator.list().filter(isExplicitGate)) {
-        const cancelled = coordinator.cancel(
-          current.id,
-          'Replaced by a later delegate gate.',
-        );
-        options.onCancelled?.(cancelled);
-      }
+      const previous = coordinator.list().filter(isExplicitGate);
+      // Register first so an invalid replacement cannot destroy the active
+      // gate. The synchronous coordinator registration fully validates and
+      // binds references before returning.
       const wake = coordinator.register({
         id: `${EXPLICIT_GATE_PREFIX}${randomUUID()}`,
         condition: requested,
         payload: ['handoff', 'metadata'],
         nonObstructive: params.delivery === 'idle',
       });
+      for (const current of previous) {
+        const cancelled = coordinator.cancel(
+          current.id,
+          'Replaced by a later delegate gate.',
+        );
+        options.onCancelled?.(cancelled);
+      }
       options.onRegistered?.(wake, coordinator);
       return {
         content: [

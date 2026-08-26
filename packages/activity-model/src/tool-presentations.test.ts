@@ -3,6 +3,7 @@ import {
   backgroundPresentation,
   customToolKind,
   delegateChangesPresentation,
+  delegateGatePresentation,
   delegatePresentation,
   fetchContentPresentation,
   getSearchContentPresentation,
@@ -55,12 +56,12 @@ describe('custom tool presentation kinds', () => {
     ).toMatchObject({ responseId: 'ws_1', heading: 'Results', queryIndex: 0 });
     expect(
       delegatePresentation({
-        name: 'Review',
+        id: 'review-queue',
         task: 'Inspect the queue',
         route: 'quick',
       }),
     ).toEqual({
-      name: 'Review',
+      name: 'review-queue',
       task: 'Inspect the queue',
       route: 'quick',
       continuation: undefined,
@@ -173,17 +174,27 @@ describe('custom tool presentation kinds', () => {
     expect(
       delegateChangesPresentation({
         action: 'review',
-        id: 'wt-1',
+        node: 'implementation',
         incremental: true,
         paths: ['src/a.ts'],
         patchBudget: 4000,
       }),
     ).toMatchObject({
       action: 'review',
-      id: 'wt-1',
+      id: 'implementation',
       incremental: true,
       paths: ['src/a.ts'],
       patchBudget: 4000,
+    });
+    expect(
+      delegateGatePresentation({
+        all: ['audit-a', 'audit-b'],
+        delivery: 'idle',
+      }),
+    ).toEqual({
+      mode: 'all',
+      references: ['audit-a', 'audit-b'],
+      delivery: 'idle',
     });
   });
 });

@@ -122,10 +122,11 @@ export type DelegatePresentation = {
 export function delegatePresentation(args: unknown): DelegatePresentation {
   const tasks = recordArgs(args)?.tasks;
   return {
-    name: stringArg(args, 'name'),
+    name: stringArg(args, 'id') ?? stringArg(args, 'name'),
     task: stringArg(args, 'task'),
     route: stringArg(args, 'route'),
-    continuation: stringArg(args, 'continuation'),
+    continuation:
+      stringArg(args, 'continue') ?? stringArg(args, 'continuation'),
     taskCount: Array.isArray(tasks) ? tasks.length : 0,
   };
 }
@@ -247,6 +248,7 @@ export function delegateChangesPresentation(
   const patchBudget = record?.patchBudget;
   return {
     ...actionIdPresentation(args),
+    id: stringArg(args, 'node') ?? stringArg(args, 'id'),
     scope: stringArg(args, 'scope'),
     incremental: record?.incremental === true,
     summaryOnly: record?.summaryOnly === true,
@@ -255,5 +257,23 @@ export function delegateChangesPresentation(
       typeof patchBudget === 'number' && Number.isFinite(patchBudget)
         ? patchBudget
         : undefined,
+  };
+}
+
+export type DelegateGatePresentation = {
+  mode?: 'all' | 'any';
+  references: readonly string[];
+  delivery?: string;
+};
+
+export function delegateGatePresentation(
+  args: unknown,
+): DelegateGatePresentation {
+  const all = stringList(args, 'all');
+  const any = stringList(args, 'any');
+  return {
+    mode: all.length ? 'all' : any.length ? 'any' : undefined,
+    references: all.length ? all : any,
+    delivery: stringArg(args, 'delivery'),
   };
 }
