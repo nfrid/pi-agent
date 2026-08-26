@@ -146,9 +146,9 @@ describe('workflow symbolic inputs', () => {
       'metadata',
       'report',
     ]);
-    expect(resolved.inputs[0]?.value).toContain(
-      'Output file: /tmp/pi/files/child.md (12 bytes)',
-    );
+    expect(resolved.inputs[0]?.value).toContain('Outcome: done');
+    expect(resolved.inputs[0]?.value).toContain('Conclusion: exact handoff');
+    expect(resolved.inputs[0]?.value).not.toContain('/tmp/pi/files/child.md');
     expect(resolved.inputs[1]?.value).not.toHaveProperty('runs.0.runId');
     expect(resolved.handoffText).toContain('Conclusion: exact handoff');
     expect(resolved.handoffText).not.toContain('opaque-token');
@@ -255,7 +255,10 @@ describe('workflow symbolic inputs', () => {
   test('blocks missing reports while retaining failed metadata and handoff', () => {
     const failed = runWithReport('', 'error');
     delete failed.outputFile;
-    const failedResult = { runs: [failed], handoff: 'failure handoff' };
+    const failedResult = {
+      runs: [failed],
+      handoff: 'Status: error\nFailure: failure handoff',
+    };
     expect(() =>
       resolveWorkflowInputs([bound('impl', ['report'])], () =>
         source(failedResult, 'impl@1', 'error'),
@@ -271,5 +274,7 @@ describe('workflow symbolic inputs', () => {
       'handoff',
     ]);
     expect(metadata.inputs[0]?.value).toMatchObject({ state: 'error' });
+    expect(metadata.inputs[1]?.value).toContain('Status: error');
+    expect(metadata.inputs[1]?.value).toContain('Failure: failure handoff');
   });
 });

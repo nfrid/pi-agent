@@ -758,6 +758,16 @@ describe('live extension surface fixtures', () => {
         },
       }),
     ).toBe('Legacy Review');
+    expect(
+      delegateDisplayName({
+        name: 'reconnect-race-review',
+        workflow: {
+          logicalId: 'reconnect-race-review',
+          identity: 'reconnect-race-review@1',
+          name: 'reconnect-race-review',
+        },
+      }),
+    ).toBe('Reconnect Race Review');
     expect(humanizeDelegateLogicalId('build_ui@3')).toBe('Build Ui');
   });
 

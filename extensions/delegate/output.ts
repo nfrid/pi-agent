@@ -127,7 +127,13 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     `Outcome: ${extractReportField(originalBody, 'Outcome', 32) ?? '(not reported)'}`,
     `Conclusion: ${extractReportField(originalBody, 'Conclusion', 600) ?? '(not reported)'}`,
   ];
-  if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
+  const workflowNode = run.workflowAttempt?.logicalId;
+  if (run.continuation)
+    lines.push(
+      workflowNode
+        ? `Continue: ${workflowNode}`
+        : 'Continuation available in the retained child context.',
+    );
   if (run.checkpoint) {
     const acknowledged = run.checkpoint.acknowledgedAt
       ? ` at ${new Date(run.checkpoint.acknowledgedAt).toISOString()}`
@@ -149,20 +155,28 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
   if (run.worktree) {
     if (run.worktree.snapshot) {
       lines.push(
-        `Read-only snapshot: ${run.worktree.id} (checkout retired)`,
-        `Cleanup: /delegate-worktrees ${run.worktree.id} drop`,
-        `Continue: omit refresh to rehydrate this exact snapshot; use refresh wip or head for targeted verification. A refreshed continuation is not independent review; use a fresh delegate for that.`,
+        'Read-only snapshot retained (checkout retired).',
+        ...(workflowNode
+          ? [`Cleanup: delegate_changes drop node ${workflowNode}`]
+          : []),
+        'For a fresh perspective or current code state, start a fresh delegate instead.',
       );
     } else {
-      const changeNode = run.workflowAttempt?.logicalId;
+      const changeSummary =
+        run.worktree.status === 'active'
+          ? 'changes pending finalization'
+          : run.worktree.hasWork
+            ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)`
+            : 'no changes';
       lines.push(
-        `Branch: ${run.worktree.branch} (${run.worktree.status === 'active' ? 'changes pending finalization' : run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.workBase.slice(0, 8)})`,
-        `Worktree: ${run.worktree.worktreePath}`,
+        `Workspace result: ${changeSummary}.`,
         ...(run.worktree.ownership === 'caller'
-          ? ['Integration: manage this caller-owned branch in its checkout.']
-          : changeNode
-            ? [`Changes: delegate_changes review/merge node ${changeNode}`]
-            : [`Changes: inspect with /delegate-worktrees ${run.worktree.id}`]),
+          ? ['Changes: manage this caller-owned checkout directly.']
+          : workflowNode
+            ? [
+                `Changes: delegate_changes review/merge/drop node ${workflowNode}`,
+              ]
+            : []),
       );
     }
     if (run.worktree.changedPaths?.length)

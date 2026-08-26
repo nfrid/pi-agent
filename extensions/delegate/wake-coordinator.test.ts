@@ -357,8 +357,8 @@ describe('WakeCoordinator', () => {
     });
     wake.register({ id: 'both', condition: { all: [a.identity, b.identity] } });
     expect(Object.keys(payload.sources)).toEqual(['a@1', 'b@1']);
-    expect(payload.sources['a@1']?.handoff).toContain('/tmp/pi/files/a.md');
-    expect(payload.sources['b@1']?.handoff).toContain('/tmp/pi/files/b.md');
+    expect(payload.sources['a@1']?.handoff).toContain('Outcome: a complete');
+    expect(payload.sources['b@1']?.handoff).toContain('Outcome: b complete');
     expect(Object.isFrozen(payload.sources['a@1']?.metadata)).toBe(true);
     expect(JSON.stringify(payload)).not.toContain('runId');
     expect(payload.handoff).toBeUndefined();
@@ -378,7 +378,7 @@ describe('WakeCoordinator', () => {
       ],
     });
     expect(explicitPayload.sources['a@1']?.handoff).toContain(
-      '/tmp/pi/files/a.md',
+      'Outcome: a complete',
     );
     expect(explicitPayload.sources['b@1']?.metadata?.identity).toBe('b@1');
     await workflow.dispose();

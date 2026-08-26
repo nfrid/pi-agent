@@ -240,7 +240,7 @@ function resolveReport(source: WorkflowInputSource): string {
 }
 
 function resolveHandoff(source: WorkflowInputSource): string {
-  return outputFileGuidance(source, 'handoff');
+  return compactHandoff(source).trim() || `Status: ${source.state}`;
 }
 
 function compactMetadataRun(

@@ -713,7 +713,7 @@ describe('finishing a worktree', () => {
     expect(recovered.worktree?.error).toMatch(/ended with error/);
     expect(recovered.worktree?.runOutcome).toBe('error');
     expect(continuationRecoveryNote(recovered)).toBe(
-      'Earlier attempt ended with error; this continuation completed on the same branch.',
+      'Earlier attempt ended with error; this continuation completed in the retained workspace.',
     );
     expect(recovered.warnings).toBeUndefined();
   });
@@ -739,7 +739,7 @@ describe('finishing a worktree', () => {
     expect(recovered.worktree?.runOutcome).toBeUndefined();
     expect(recovered.worktree?.error).toMatch(/ended with error/);
     expect(continuationRecoveryNote(recovered)).toBe(
-      'Earlier attempt ended with error; this continuation completed on the same branch.',
+      'Earlier attempt ended with error; this continuation completed in the retained workspace.',
     );
   });
 

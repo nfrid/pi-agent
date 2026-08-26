@@ -212,7 +212,7 @@ describe('delegate', () => {
         ) => Promise<unknown>)
       | undefined;
     const ordering: string[] = [];
-    const schedule = vi.fn(() => {
+    const schedule = vi.fn((_options: unknown) => {
       ordering.push('schedule');
       return {
         logicalId: 'branch-review',
@@ -265,7 +265,6 @@ describe('delegate', () => {
     expect(schedule).toHaveBeenCalledWith(
       expect.objectContaining({
         logicalId: 'branch-review',
-        name: 'branch-review',
         allowWrites: true,
         capabilities: ['web'],
         inputs: [
@@ -274,6 +273,7 @@ describe('delegate', () => {
         ],
       }),
     );
+    expect(schedule.mock.calls[0]?.[0]).not.toHaveProperty('name');
   });
 
   test('keeps the serialized delegate schema compact', () => {

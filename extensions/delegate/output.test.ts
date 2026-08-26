@@ -59,7 +59,10 @@ describe('output', () => {
     expect(handoff).toContain(
       'Blocked: should a 429 retry despite the stated never-retry rule?',
     );
-    expect(handoff).toContain('Continuation: continue-blocked-child');
+    expect(handoff).toContain(
+      'Continuation available in the retained child context.',
+    );
+    expect(handoff).not.toContain('continue-blocked-child');
     expect(handoff).toContain('Mandatory metadata exceeds');
     expect(handoff).not.toContain('Output\nOutcome: blocked');
   });
@@ -80,7 +83,7 @@ describe('output', () => {
     for (let index = 1; index <= 20; index++) {
       expect(handoff).toContain(`## Task ${index}\n`);
       expect(handoff).toContain(`Conclusion: conclusion ${index}`);
-      expect(handoff).toContain(`Continuation: continue-${index}`);
+      expect(handoff).not.toContain(`continue-${index}`);
     }
     expect(handoff).not.toContain('### Task 1 output');
   });
@@ -179,16 +182,49 @@ describe('output', () => {
     ]);
 
     expect(handoff).toContain(
-      'Read-only snapshot: 11111111-1111-1111-1111-111111111111 (checkout retired)',
+      'Read-only snapshot retained (checkout retired).',
     );
-    expect(handoff).toContain(
-      'Cleanup: /delegate-worktrees 11111111-1111-1111-1111-111111111111 drop',
-    );
-    expect(handoff).toContain('refresh wip or head');
     expect(handoff).toContain('fresh delegate');
-    expect(handoff).not.toContain('abc123de (checkout retired)');
-    expect(handoff).not.toContain('Integrate with:');
-    expect(handoff).not.toContain('Branch: pi/audit-a1b2');
+    expect(handoff).not.toContain('11111111-1111-1111-1111-111111111111');
+    expect(handoff).not.toContain('/delegate-worktrees');
+    expect(handoff).not.toContain('refresh');
+    expect(handoff).not.toContain('/tmp/worktree');
+    expect(handoff).not.toContain('pi/audit-a1b2');
+  });
+
+  test('uses only semantic workflow terms for continuation and changes', () => {
+    const handoff = buildParentHandoff([
+      reportedRun('Outcome: done\nConclusion: implementation complete', {
+        continuation: 'opaque-continuation-token',
+        workflowAttempt: {
+          logicalId: 'reconnect-race-fix',
+          ordinal: 2,
+          identity: 'reconnect-race-fix@2',
+        },
+        worktree: {
+          id: '11111111-1111-1111-1111-111111111111',
+          branch: 'pi/reconnect-race-fix',
+          worktreePath: '/repo/.worktrees/reconnect-race-fix',
+          repositoryRoot: '/repo',
+          baseHead: 'abc123def456',
+          workBase: 'abc123def456',
+          status: 'finished',
+          hasWork: true,
+          changedPaths: ['src/reconnect.ts'],
+        },
+      }),
+    ]);
+
+    expect(handoff).toContain('Continue: reconnect-race-fix');
+    expect(handoff).toContain(
+      'Changes: delegate_changes review/merge/drop node reconnect-race-fix',
+    );
+    expect(handoff).not.toContain('opaque-continuation-token');
+    expect(handoff).not.toContain('11111111-1111-1111-1111-111111111111');
+    expect(handoff).not.toContain('pi/reconnect-race-fix');
+    expect(handoff).not.toContain('/repo/.worktrees');
+    expect(handoff).not.toContain('/delegate-worktrees');
+    expect(handoff).not.toContain('refresh');
   });
 
   test('reports a recovered continuation without warning about its prior run', () => {
@@ -213,7 +249,7 @@ describe('output', () => {
     ]);
 
     expect(handoff).toContain(
-      'Note: Earlier attempt timed out; this continuation completed on the same branch.',
+      'Note: Earlier attempt timed out; this continuation completed in the retained workspace.',
     );
     expect(handoff).not.toContain('Warnings: The delegate run timed out');
   });
@@ -238,7 +274,7 @@ describe('output', () => {
     );
 
     expect(buildParentHandoff([run])).not.toContain(
-      'Earlier attempt timed out; this continuation completed on the same branch.',
+      'Earlier attempt timed out; this continuation completed in the retained workspace.',
     );
   });
 
@@ -263,7 +299,7 @@ describe('output', () => {
     );
 
     expect(buildParentHandoff([run])).toContain(
-      'Note: Earlier attempt timed out; this continuation completed on the same branch.',
+      'Note: Earlier attempt timed out; this continuation completed in the retained workspace.',
     );
   });
 
@@ -375,7 +411,10 @@ describe('output', () => {
 
     expect(Buffer.byteLength(handoff, 'utf8')).toBeGreaterThan(1);
     expect(handoff).toContain('Mandatory metadata exceeds');
-    expect(handoff).toContain(`Continuation: ${continuation}`);
+    expect(handoff).toContain(
+      'Continuation available in the retained child context.',
+    );
+    expect(handoff).not.toContain(continuation);
     expect(handoff).toContain('Conclusion: a decision is required');
   });
 

@@ -1,7 +1,8 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  TurnEndEvent,
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  estimateTokens,
+  type TurnEndEvent,
 } from '@earendil-works/pi-coding-agent';
 import {
   getScopedServices,
@@ -28,7 +29,14 @@ export function shouldCompactMidRun(
     usage.contextWindow - MIN_HEADROOM_TOKENS,
     usage.contextWindow * MAX_CONTEXT_FRACTION,
   );
-  return usage.tokens > threshold;
+  // Context usage comes from the latest assistant response, before this tool
+  // batch entered the transcript. Include the finalized results so one large
+  // batch cannot cross the threshold immediately before the next request.
+  const completedToolResultTokens = event.toolResults.reduce(
+    (total, result) => total + estimateTokens(result),
+    0,
+  );
+  return usage.tokens + completedToolResultTokens > threshold;
 }
 
 export default function midRunCompaction(pi: ExtensionAPI): void {
@@ -36,6 +44,7 @@ export default function midRunCompaction(pi: ExtensionAPI): void {
     generation: number;
     accounting: PendingProcessAccounting;
     source: object;
+    settle: () => void;
   };
   let active = true;
   let generation = 0;
@@ -47,6 +56,7 @@ export default function midRunCompaction(pi: ExtensionAPI): void {
 
   const clearPending = (work = inFlight) => {
     work?.accounting.set(work.source, 0);
+    work?.settle();
     if (inFlight === work) inFlight = undefined;
   };
 
@@ -116,7 +126,7 @@ export default function midRunCompaction(pi: ExtensionAPI): void {
     compactionInFlight = false;
   });
 
-  pi.on('turn_end', (event, ctx) => {
+  pi.on('turn_end', async (event, ctx) => {
     sessionOwner ??= ctx.sessionManager ?? ctx;
     sessionScopeId ??= getSessionScopeId(ctx);
     if (
@@ -131,10 +141,20 @@ export default function midRunCompaction(pi: ExtensionAPI): void {
     const accounting = getScopedServices(
       getSessionScopeId(ctx),
     ).pendingProcesses;
+    let resolveWait: () => void = () => {};
+    const wait = new Promise<void>((resolve) => {
+      resolveWait = resolve;
+    });
+    let settled = false;
     const work: InFlightCompaction = {
       generation,
       accounting,
       source: {},
+      settle: () => {
+        if (settled) return;
+        settled = true;
+        resolveWait();
+      },
     };
     inFlight = work;
     accounting.set(work.source, 1);
@@ -151,5 +171,9 @@ export default function midRunCompaction(pi: ExtensionAPI): void {
         error instanceof Error ? error : new Error(String(error)),
       );
     }
+    // Extension handlers are awaited by Pi. Hold this boundary until the
+    // compaction callback completes so the automatic tool-loop request cannot
+    // race ahead with the oversized pre-compaction context.
+    await wait;
   });
 }

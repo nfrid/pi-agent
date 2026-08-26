@@ -473,7 +473,7 @@ describe('render', () => {
         .render(300)
         .join('\n');
       expect(output).toContain(
-        'Earlier attempt timed out; this continuation completed on the same branch.',
+        'Earlier attempt timed out; this continuation completed in the retained workspace.',
       );
       expect(output).not.toContain('The delegate run timed out');
     }

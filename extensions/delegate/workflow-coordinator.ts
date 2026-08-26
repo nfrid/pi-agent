@@ -194,6 +194,8 @@ export interface DelegateWorkflowMetadataSnapshot {
   /** Durable process-host job identity for hosted attempts. */
   readonly processJobId?: string;
   readonly reason?: string;
+  /** Bounded terminal evidence required by semantic APIs after restart. */
+  readonly result?: DelegateWorkflowResultRecord;
 }
 
 export interface DelegateWorkflowMetadataHistory {
@@ -528,6 +530,29 @@ function compactResult(
   });
 }
 
+function durableResult(
+  result: DelegateWorkflowResultRecord,
+): DelegateWorkflowResultRecord {
+  return Object.freeze({
+    version: 1,
+    // Exact reports live in ordinary output files. Keeping them out of the
+    // append-only workflow journal bounds restart evidence independently of
+    // child prose while preserving handoff, continuation, and code state.
+    reports: Object.freeze([]),
+    handoff: Object.freeze({ ...result.handoff }),
+    runs: Object.freeze(
+      result.runs.map(({ report: _report, ...run }) => Object.freeze(run)),
+    ),
+    ...(result.continuationToken
+      ? { continuationToken: result.continuationToken }
+      : {}),
+    continuationAmbiguous: result.continuationAmbiguous,
+    ...(result.continuationUnavailable
+      ? { continuationUnavailable: true as const }
+      : {}),
+  });
+}
+
 function emptyResult(reason: string): DelegateWorkflowResultRecord {
   return Object.freeze({
     version: 1,
@@ -758,7 +783,10 @@ export class DelegateWorkflowCoordinator {
     const record: WorkflowRecord = {
       attempt: copyAttempt(plan.attempt),
       ownerBranchId: this.ownerBranchId,
-      name: boundedWorkflowName(options.name),
+      name:
+        options.name === undefined
+          ? undefined
+          : boundedWorkflowName(options.name),
       dependencies: Object.freeze([...dependencies]),
       state: 'scheduled',
       createdAt: timestamp,
@@ -906,6 +934,9 @@ export class DelegateWorkflowCoordinator {
                 ? { inputs: inputMetadata(record.selectors) }
                 : {}),
               ...(record.reason === undefined ? {} : { reason: record.reason }),
+              ...(record.result === undefined
+                ? {}
+                : { result: durableResult(record.result) }),
             });
           }),
       ),
@@ -1253,8 +1284,12 @@ export class DelegateWorkflowCoordinator {
             }),
           ),
         ),
+        ...(metadata.result === undefined
+          ? {}
+          : { result: durableResult(metadata.result) }),
       };
       this.rememberChildSession(record, metadata.sessionId);
+      if (record.result) this.results.set(attempt.identity, record.result);
       if (orphaned) {
         record.result = compactResult(
           setupFailureResult(record, WORKFLOW_RELOAD_ORPHAN_REASON),
@@ -1673,10 +1708,11 @@ export class DelegateWorkflowCoordinator {
         return;
       }
       this.validatePreparedLaunch(normalized.launch);
-      record.name = boundedWorkflowName(
-        normalized.launch.name,
-        record.name ?? 'Subagent',
-      );
+      // A missing workflow name is intentional for semantic-ID calls. The
+      // adapter still has a derived run/session label, but it must not create a
+      // second persisted workflow identity during lazy preparation.
+      if (record.name !== undefined)
+        record.name = boundedWorkflowName(normalized.launch.name, record.name);
       if (normalized.launch.route !== undefined)
         record.route = normalized.launch.route;
       this.startJob(record, normalized.launch);

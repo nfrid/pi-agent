@@ -24,14 +24,19 @@ export function delegateDisplayName(row: DelegateDisplayIdentity): string {
   const logicalId = row.workflow?.logicalId;
   const persistedName = row.workflow?.name;
   const canonicalAttempt = row.workflow?.identity;
-  const canonicalFallbackName =
-    !persistedName &&
-    (row.name === logicalId ||
-      row.name === canonicalAttempt ||
-      /^[a-z][a-z0-9-]*@\d+$/u.test(row.name ?? ''));
+  const isCanonicalIdentity = (value: string | undefined) =>
+    value === logicalId ||
+    value === canonicalAttempt ||
+    /^[a-z][a-z0-9-]*@\d+$/u.test(value ?? '');
+  const explicitName =
+    persistedName && !isCanonicalIdentity(persistedName)
+      ? persistedName
+      : row.name && !isCanonicalIdentity(row.name)
+        ? row.name
+        : undefined;
   const fallbackIdentity = logicalId ?? row.name;
   return surfaceText(
-    persistedName ?? (canonicalFallbackName ? undefined : row.name),
+    explicitName,
     fallbackIdentity ? humanizeDelegateLogicalId(fallbackIdentity) : 'Subagent',
   );
 }

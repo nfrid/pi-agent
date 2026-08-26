@@ -17,36 +17,52 @@ function context(tokens: number | null, contextWindow = 200_000) {
   } as ExtensionContext;
 }
 
-function turnEnd(toolResultCount: number): TurnEndEvent {
+function turnEnd(toolResults: number | string[]): TurnEndEvent {
+  const contents =
+    typeof toolResults === 'number'
+      ? Array.from({ length: toolResults }, () => '')
+      : toolResults;
   return {
     type: 'turn_end',
     turnIndex: 0,
     message: {} as TurnEndEvent['message'],
-    toolResults: Array.from(
-      { length: toolResultCount },
-      () => ({}) as TurnEndEvent['toolResults'][number],
-    ),
+    toolResults: contents.map((text, index) => ({
+      role: 'toolResult',
+      toolCallId: `call-${index}`,
+      toolName: 'read',
+      content: [{ type: 'text', text }],
+      isError: false,
+      timestamp: 1,
+    })),
   };
 }
 
 describe('mid-run compaction', () => {
   test('uses conservative dynamic headroom only during tool loops', () => {
-    expect(shouldCompactMidRun(turnEnd(1), context(167_231))).toBe(false);
-    expect(shouldCompactMidRun(turnEnd(1), context(167_233))).toBe(true);
+    expect(shouldCompactMidRun(turnEnd(1), context(160_000))).toBe(false);
+    expect(shouldCompactMidRun(turnEnd(1), context(180_000))).toBe(true);
     expect(shouldCompactMidRun(turnEnd(0), context(190_000))).toBe(false);
     expect(shouldCompactMidRun(turnEnd(1), context(null))).toBe(false);
 
-    expect(shouldCompactMidRun(turnEnd(1), context(95_231, 128_000))).toBe(
+    expect(shouldCompactMidRun(turnEnd(1), context(90_000, 128_000))).toBe(
       false,
     );
-    expect(shouldCompactMidRun(turnEnd(1), context(95_233, 128_000))).toBe(
+    expect(shouldCompactMidRun(turnEnd(1), context(100_000, 128_000))).toBe(
       true,
     );
   });
 
-  test('compacts once and resumes through a hidden custom message', () => {
+  test('accounts for the completed tool batch before the next request', () => {
+    const nearLimit = context(231_655, 272 * 1024);
+    expect(shouldCompactMidRun(turnEnd(1), nearLimit)).toBe(false);
+    expect(
+      shouldCompactMidRun(turnEnd(['x'.repeat(31 * 1024)]), nearLimit),
+    ).toBe(true);
+  });
+
+  test('awaits one compaction before resuming through a hidden custom message', async () => {
     let turnEndHandler:
-      | ((event: TurnEndEvent, ctx: ExtensionContext) => void)
+      | ((event: TurnEndEvent, ctx: ExtensionContext) => void | Promise<void>)
       | undefined;
     const sendMessage = vi.fn();
     const api = {
@@ -68,12 +84,20 @@ describe('mid-run compaction', () => {
       ui: { setStatus: vi.fn(), notify: vi.fn() },
     } as unknown as ExtensionContext;
 
-    turnEndHandler?.(turnEnd(1), ctx);
+    const waiting = turnEndHandler?.(turnEnd(1), ctx);
     turnEndHandler?.(turnEnd(1), ctx);
     expect(compact).toHaveBeenCalledTimes(1);
     expect(hasPendingProcesses()).toBe(true);
+    let handlerSettled = false;
+    void waiting?.then(() => {
+      handlerSettled = true;
+    });
+    await Promise.resolve();
+    expect(handlerSettled).toBe(false);
 
     onComplete?.();
+    await waiting;
+    expect(handlerSettled).toBe(true);
     expect(hasPendingProcesses()).toBe(false);
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({

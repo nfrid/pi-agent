@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import { DelegateJobManager } from './jobs';
 import { createRun } from './types';
+import { WakeCoordinator, type WakeDispatch } from './wake-coordinator';
 import { DelegateWorkflowCoordinator } from './workflow-coordinator';
 import {
   attachWorkflowStore,
@@ -71,7 +72,7 @@ describe('workflow store', () => {
     await coordinator.dispose();
   });
 
-  test('keeps terminal success and blocked attempts as bounded metadata', async () => {
+  test('keeps terminal success and blocked attempts as bounded restart evidence', async () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const entries: unknown[] = [];
     attachWorkflowStore(coordinator, piFor(entries));
@@ -116,7 +117,137 @@ describe('workflow store', () => {
         }),
       ]),
     );
-    expect(JSON.stringify(entries)).not.toContain('secret');
+    expect(JSON.stringify(entries)).toContain('secret result');
+    await coordinator.dispose();
+  });
+
+  test('restores compact terminal evidence for inputs, continuation, and code state', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    const entries: unknown[] = [];
+    attachWorkflowStore(coordinator, piFor(entries));
+    const run = createRun('implementation', undefined, {
+      sessionId: 'child-session',
+      continuation: 'opaque-continuation-token',
+      outputFile: { path: '/tmp/pi/files/report.md', size: 42 },
+      worktree: {
+        id: '11111111-1111-1111-1111-111111111111',
+        repositoryRoot: '/repo',
+        worktreePath: '/repo/.worktrees/implementation',
+        branch: 'pi/implementation',
+        baseHead: 'a'.repeat(40),
+        workBase: 'a'.repeat(40),
+        headCommit: 'b'.repeat(40),
+        status: 'finished',
+        hasWork: true,
+      },
+    });
+    run.state = 'success';
+    run.exitCode = 0;
+    run.messages = [
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: 'Outcome: done\nConclusion: durable result\nPrivate detail: not journaled',
+          },
+        ],
+        timestamp: 1,
+      } as never,
+    ];
+    coordinator.schedule({
+      logicalId: 'implementation',
+      mode: 'single',
+      tasks: ['implementation'],
+      execute: async () => ({
+        runs: [run],
+        handoff: 'Status: success\nOutcome: done\nConclusion: durable result',
+      }),
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require('implementation').state).toBe('success'),
+    );
+
+    const state = latestWorkflowState(branch(entries));
+    if (!state) throw new Error('missing persisted workflow state');
+    expect(state.attempts[0]?.result).toMatchObject({
+      reports: [],
+      handoff: { text: expect.stringContaining('durable result') },
+      continuationToken: 'opaque-continuation-token',
+      runs: [
+        expect.objectContaining({
+          outputFile: { path: '/tmp/pi/files/report.md', size: 42 },
+          worktree: expect.objectContaining({
+            id: '11111111-1111-1111-1111-111111111111',
+            headCommit: 'b'.repeat(40),
+          }),
+        }),
+      ],
+    });
+    expect(JSON.stringify(state)).not.toContain(
+      'Private detail: not journaled',
+    );
+
+    const restored = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'owner-branch',
+    });
+    restored.restoreMetadata(state);
+    expect(restored.getResultEvidence('implementation')).toMatchObject({
+      continuationToken: 'opaque-continuation-token',
+      runs: [
+        expect.objectContaining({
+          outputFile: { path: '/tmp/pi/files/report.md', size: 42 },
+          worktree: expect.objectContaining({ branch: 'pi/implementation' }),
+        }),
+      ],
+    });
+    const report = restored.resolveBoundWorkflowInputs([
+      {
+        identity: 'implementation@1',
+        selector: { node: 'implementation', include: ['report'] },
+      },
+    ]);
+    expect(report.handoffText).toContain('Conclusion: durable result');
+    expect(report.handoffText).toContain('/tmp/pi/files/report.md');
+
+    let gateDispatch: WakeDispatch | undefined;
+    const wake = new WakeCoordinator({
+      workflow: restored,
+      dispatch: (value) => {
+        gateDispatch = value;
+      },
+    });
+    wake.register({
+      id: 'restored-all',
+      condition: { all: ['implementation'] },
+      payload: ['handoff', 'metadata'],
+    });
+    await vi.waitFor(() => expect(gateDispatch).toBeDefined());
+    expect(gateDispatch?.payload.sources['implementation@1']).toMatchObject({
+      handoff: expect.stringContaining('Conclusion: durable result'),
+      metadata: expect.objectContaining({ state: 'success' }),
+    });
+
+    let continuedWith: string | undefined;
+    restored.schedule({
+      logicalId: 'implementation',
+      continuation: true,
+      prepare: async ({ continuationToken }) => {
+        continuedWith = continuationToken;
+        return {
+          mode: 'single',
+          tasks: ['continue'],
+          execute: async () => ({ runs: [], handoff: '' }),
+        };
+      },
+    });
+    await vi.waitFor(() =>
+      expect(restored.require('implementation@2').state).toBe('success'),
+    );
+    expect(continuedWith).toBe('opaque-continuation-token');
+    await restored.dispose();
     await coordinator.dispose();
   });
 
@@ -385,7 +516,7 @@ describe('workflow store', () => {
       identity: 'review@1',
       sessionId: 'child-session-1',
     });
-    expect(JSON.stringify(entries)).not.toContain('secret report');
+    expect(JSON.stringify(entries)).toContain('secret report');
     await coordinator.dispose();
   });
 
@@ -485,6 +616,17 @@ describe('workflow store', () => {
     const malformed = [
       attempt({ logicalId: 'Foo', identity: 'Foo@1' }),
       attempt({ name: 'x'.repeat(2_001) }),
+      attempt({
+        state: 'success',
+        waitingFor: [],
+        result: {
+          version: 1,
+          reports: [],
+          handoff: { text: 'bad bytes', bytes: 1 },
+          runs: [],
+          continuationAmbiguous: false,
+        },
+      }),
       attempt({ logicalId: 'foo\u0000bar', identity: 'foo\u0000bar@1' }),
       attempt({ identity: 'foo@2' }),
       attempt({ attempt: 0, identity: 'foo@0' }),

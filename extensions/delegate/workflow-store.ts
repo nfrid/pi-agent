@@ -5,6 +5,11 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { isBranchOwnerId } from './branch-ownership';
 import type {
+  DelegateWorkflowResultRecord,
+  DelegateWorkflowRunProjection,
+  DelegateWorkflowTextEvidence,
+} from './types';
+import type {
   DelegateWorkflowCoordinator,
   DelegateWorkflowMetadataHistory,
   DelegateWorkflowMetadataSnapshot,
@@ -94,6 +99,219 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function validTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function onlyKeys(value: Record<string, unknown>, allowed: readonly string[]) {
+  const keys = new Set(allowed);
+  return Object.keys(value).every((key) => keys.has(key));
+}
+
+function validEvidence(value: unknown): value is DelegateWorkflowTextEvidence {
+  if (!isRecord(value) || !onlyKeys(value, ['text', 'bytes', 'oversized']))
+    return false;
+  if (
+    typeof value.text !== 'string' ||
+    typeof value.bytes !== 'number' ||
+    !Number.isSafeInteger(value.bytes) ||
+    value.bytes < 0 ||
+    (value.oversized !== undefined && value.oversized !== true)
+  )
+    return false;
+  const actual = Buffer.byteLength(value.text, 'utf8');
+  return value.oversized === true
+    ? value.text === '[oversized workflow evidence omitted]' &&
+        value.bytes > 16 * 1024
+    : value.bytes === actual && actual <= 16 * 1024;
+}
+
+function validCacheFile(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    onlyKeys(value, ['path', 'size']) &&
+    typeof value.path === 'string' &&
+    Buffer.byteLength(value.path, 'utf8') <= 4096 &&
+    typeof value.size === 'number' &&
+    Number.isSafeInteger(value.size) &&
+    value.size >= 0 &&
+    value.size <= 16 * 1024 * 1024
+  );
+}
+
+const RUN_STATES = new Set([
+  'queued',
+  'running',
+  'success',
+  'error',
+  'aborted',
+  'timed-out',
+]);
+
+function validDurableRun(
+  value: unknown,
+): value is DelegateWorkflowRunProjection {
+  if (
+    !isRecord(value) ||
+    !onlyKeys(value, [
+      'runId',
+      'name',
+      'task',
+      'exitCode',
+      'state',
+      'model',
+      'routing',
+      'sessionId',
+      'lineageId',
+      'context',
+      'allowWrites',
+      'capabilities',
+      'isolation',
+      'continuation',
+      'worktree',
+      'outputFile',
+      'lifecycle',
+      'retryable',
+      'queuedAt',
+      'startedAt',
+      'finishedAt',
+      'workflowAttempt',
+    ]) ||
+    typeof value.runId !== 'string' ||
+    Buffer.byteLength(value.runId, 'utf8') > 1024 ||
+    typeof value.name !== 'string' ||
+    Buffer.byteLength(value.name, 'utf8') > 1024 ||
+    typeof value.task !== 'string' ||
+    Buffer.byteLength(value.task, 'utf8') > 1024 ||
+    typeof value.exitCode !== 'number' ||
+    !Number.isSafeInteger(value.exitCode) ||
+    typeof value.state !== 'string' ||
+    !RUN_STATES.has(value.state)
+  )
+    return false;
+  for (const key of ['model', 'sessionId', 'lineageId'] as const)
+    if (
+      value[key] !== undefined &&
+      (typeof value[key] !== 'string' ||
+        Buffer.byteLength(value[key], 'utf8') > 1024)
+    )
+      return false;
+  if (
+    value.context !== undefined &&
+    !['branch', 'fresh', 'continuation'].includes(String(value.context))
+  )
+    return false;
+  if (
+    value.isolation !== undefined &&
+    value.isolation !== 'shared' &&
+    value.isolation !== 'worktree'
+  )
+    return false;
+  if (value.allowWrites !== undefined && typeof value.allowWrites !== 'boolean')
+    return false;
+  if (value.retryable !== undefined && value.retryable !== true) return false;
+  if (
+    value.capabilities !== undefined &&
+    (!Array.isArray(value.capabilities) ||
+      value.capabilities.length > 1 ||
+      value.capabilities.some((item) => item !== 'web'))
+  )
+    return false;
+  if (
+    value.continuation !== undefined &&
+    (typeof value.continuation !== 'string' ||
+      Buffer.byteLength(value.continuation, 'utf8') > 16 * 1024)
+  )
+    return false;
+  for (const key of ['queuedAt', 'startedAt', 'finishedAt'] as const)
+    if (value[key] !== undefined && !validTimestamp(value[key])) return false;
+  if (value.outputFile !== undefined && !validCacheFile(value.outputFile))
+    return false;
+  if (value.worktree !== undefined) {
+    const worktree = value.worktree;
+    if (
+      !isRecord(worktree) ||
+      !onlyKeys(worktree, [
+        'id',
+        'repositoryRoot',
+        'worktreePath',
+        'branch',
+        'headCommit',
+      ]) ||
+      typeof worktree.id !== 'string' ||
+      Buffer.byteLength(worktree.id, 'utf8') > 128 ||
+      typeof worktree.repositoryRoot !== 'string' ||
+      Buffer.byteLength(worktree.repositoryRoot, 'utf8') > 4096 ||
+      typeof worktree.worktreePath !== 'string' ||
+      Buffer.byteLength(worktree.worktreePath, 'utf8') > 4096 ||
+      typeof worktree.branch !== 'string' ||
+      Buffer.byteLength(worktree.branch, 'utf8') > 512 ||
+      (worktree.headCommit !== undefined &&
+        (typeof worktree.headCommit !== 'string' ||
+          Buffer.byteLength(worktree.headCommit, 'utf8') > 128))
+    )
+      return false;
+  }
+  if (value.workflowAttempt !== undefined) {
+    const attempt = value.workflowAttempt;
+    if (
+      !isRecord(attempt) ||
+      !onlyKeys(attempt, ['logicalId', 'ordinal', 'identity']) ||
+      typeof attempt.logicalId !== 'string' ||
+      !isLogicalId(attempt.logicalId) ||
+      typeof attempt.ordinal !== 'number' ||
+      !Number.isSafeInteger(attempt.ordinal) ||
+      attempt.ordinal < 1 ||
+      attempt.ordinal > MAX_ATTEMPT_ORDINAL ||
+      attempt.identity !== `${attempt.logicalId}@${attempt.ordinal}`
+    )
+      return false;
+  }
+  // Routing and lifecycle are bounded compact projections. The total record
+  // cap below protects their optional diagnostic strings and future fields.
+  if (
+    value.routing !== undefined &&
+    (!isRecord(value.routing) ||
+      Buffer.byteLength(JSON.stringify(value.routing), 'utf8') > 4096)
+  )
+    return false;
+  if (
+    value.lifecycle !== undefined &&
+    (!isRecord(value.lifecycle) ||
+      Buffer.byteLength(JSON.stringify(value.lifecycle), 'utf8') > 20 * 1024)
+  )
+    return false;
+  return true;
+}
+
+function validDurableResult(
+  value: unknown,
+): value is DelegateWorkflowResultRecord {
+  if (
+    !isRecord(value) ||
+    !onlyKeys(value, [
+      'version',
+      'reports',
+      'handoff',
+      'runs',
+      'continuationToken',
+      'continuationAmbiguous',
+      'continuationUnavailable',
+    ]) ||
+    value.version !== 1 ||
+    !Array.isArray(value.reports) ||
+    value.reports.length !== 0 ||
+    !validEvidence(value.handoff) ||
+    !Array.isArray(value.runs) ||
+    value.runs.length > 32 ||
+    value.runs.some((run) => !validDurableRun(run)) ||
+    typeof value.continuationAmbiguous !== 'boolean' ||
+    (value.continuationUnavailable !== undefined &&
+      value.continuationUnavailable !== true) ||
+    (value.continuationToken !== undefined &&
+      (typeof value.continuationToken !== 'string' ||
+        Buffer.byteLength(value.continuationToken, 'utf8') > 16 * 1024))
+  )
+    return false;
+  return Buffer.byteLength(JSON.stringify(value), 'utf8') <= 64 * 1024;
 }
 
 function validBoundedText(value: unknown, maximum: number): value is string {
@@ -209,6 +427,13 @@ function validAttempt(
     return false;
   if (value.processJobId !== undefined && !isCanonicalUuid(value.processJobId))
     return false;
+  if (value.result !== undefined && !validDurableResult(value.result))
+    return false;
+  if (
+    value.result !== undefined &&
+    !isTerminalWorkflowAttemptStateForStore(value.state as WorkflowAttemptState)
+  )
+    return false;
   const hasSession = value.sessionId !== undefined;
   const hasProcessJob = value.processJobId !== undefined;
   if (hasProcessJob && !hasSession) return false;
@@ -218,6 +443,12 @@ function validAttempt(
   )
     return false;
   return true;
+}
+
+function isTerminalWorkflowAttemptStateForStore(
+  state: WorkflowAttemptState,
+): boolean {
+  return !['scheduled', 'queued', 'running'].includes(state);
 }
 
 function metadataKey(attempt: DelegateWorkflowMetadataSnapshot): string {
@@ -318,6 +549,7 @@ function boundedState(
         ? {}
         : { processJobId: attempt.processJobId }),
       ...(attempt.reason === undefined ? {} : { reason: attempt.reason }),
+      ...(attempt.result === undefined ? {} : { result: attempt.result }),
     }),
   );
   return Object.freeze({ version: 1, attempts: Object.freeze(attempts) });

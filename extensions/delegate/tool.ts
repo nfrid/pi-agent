@@ -234,8 +234,6 @@ function normalizeModelParams(rawParams: unknown): DelegateParams {
     ...(typeof raw.id === 'string'
       ? { id: logicalId }
       : { continue: continuation }),
-    // A logical ID is the only display-name source for model-facing calls.
-    name: logicalId,
   } as DelegateParams;
 }
 
@@ -495,7 +493,8 @@ export function registerDelegateTool(
             inputs: params.inputs as
               | import('./workflow-inputs').SymbolicWorkflowSelector[]
               | undefined,
-            name: params.name?.trim() || logicalId,
+            // Semantic calls derive display text from logicalId. Keep workflow
+            // name absent so it cannot become a second persisted identity.
             ownerBranchId: launchBranchId,
             route: routing.route,
             routing,

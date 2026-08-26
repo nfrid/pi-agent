@@ -439,21 +439,21 @@ export function continuationRecoveryNote(
 
   const outcome = run.worktree.runOutcome;
   if (outcome === 'timed-out')
-    return 'Earlier attempt timed out; this continuation completed on the same branch.';
+    return 'Earlier attempt timed out; this continuation completed in the retained workspace.';
   if (outcome === 'aborted')
-    return 'Earlier attempt was aborted; this continuation completed on the same branch.';
+    return 'Earlier attempt was aborted; this continuation completed in the retained workspace.';
   if (outcome === 'error')
-    return 'Earlier attempt ended with error; this continuation completed on the same branch.';
+    return 'Earlier attempt ended with error; this continuation completed in the retained workspace.';
 
   // Records written before runOutcome existed retain only this exact prose.
   const error = run.worktree.error;
   if (!error) return undefined;
   if (/^The delegate run timed out;/.test(error))
-    return 'Earlier attempt timed out; this continuation completed on the same branch.';
+    return 'Earlier attempt timed out; this continuation completed in the retained workspace.';
   if (/^The delegate run ended with aborted;/.test(error))
-    return 'Earlier attempt was aborted; this continuation completed on the same branch.';
+    return 'Earlier attempt was aborted; this continuation completed in the retained workspace.';
   if (/^The delegate run ended with error;/.test(error))
-    return 'Earlier attempt ended with error; this continuation completed on the same branch.';
+    return 'Earlier attempt ended with error; this continuation completed in the retained workspace.';
   return undefined;
 }
 

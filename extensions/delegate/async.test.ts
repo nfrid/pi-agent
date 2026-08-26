@@ -1667,6 +1667,61 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
+  test('delivers a failed workflow handoff without requiring final assistant output', async () => {
+    const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
+      await createAsyncHarness('eager-error-parent');
+    await tools
+      .get('delegate')
+      ?.execute(
+        'eager-error-call',
+        { id: 'eager-error', task: 'eager error task', route: 'quick' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    await vi.waitFor(() => expect(hasFinish('eager error task')).toBe(true));
+
+    finish('eager error task', failedRun());
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    const delivery = JSON.stringify(sendMessage.mock.calls[0]?.[0]);
+    expect(delivery).toContain('eager-error@1');
+    expect(delivery).toContain('Status: error');
+    expect(delivery).not.toContain('Required handoff output file');
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('coalesces completions ready in one burst into one eager delivery', async () => {
+    const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
+      await createAsyncHarness('eager-coalescing-parent');
+    for (const [id, task] of [
+      ['eager-first', 'eager first task'],
+      ['eager-second', 'eager second task'],
+    ] as const)
+      await tools
+        .get('delegate')
+        ?.execute(
+          `${id}-call`,
+          { id, task, route: 'quick' },
+          undefined,
+          undefined,
+          ctx,
+        );
+    await vi.waitFor(() => {
+      expect(hasFinish('eager first task')).toBe(true);
+      expect(hasFinish('eager second task')).toBe(true);
+    });
+
+    finish('eager first task');
+    finish('eager second task');
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    const delivery = JSON.stringify(sendMessage.mock.calls[0]?.[0]);
+    expect(delivery).toContain('eager-first@1');
+    expect(delivery).toContain('eager-second@1');
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(sendMessage).toHaveBeenCalledOnce();
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
   test('holds selected results until an all gate is satisfied', async () => {
     const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
       await createAsyncHarness('explicit-gate-parent');
@@ -1869,7 +1924,7 @@ describe('async delegate extension', () => {
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
 
-  test('blocks a persisted pending wake over a running attempt after recreation', async () => {
+  test('delivers a persisted wake when its restored attempt becomes blocked', async () => {
     const first = await createAsyncHarness('reload-pending');
     await first.tools
       .get('delegate')
@@ -1906,7 +1961,11 @@ describe('async delegate extension', () => {
     });
     expect(restored.activeTools).toContain('delegate_jobs');
     expect(restored.tools.has('delegate_gate')).toBe(true);
-    expect(restored.sendMessage).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(restored.sendMessage).toHaveBeenCalledOnce());
+    const delivery = JSON.stringify(restored.sendMessage.mock.calls[0]?.[0]);
+    expect(delivery).toContain('reload-running@1');
+    expect(delivery).toContain('Status: error');
+    expect(delivery).toContain('setup-failure');
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
 

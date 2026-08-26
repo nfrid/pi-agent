@@ -34,6 +34,7 @@ import {
 import { listBranchEntries } from './branches';
 import { registerDelegateChangesTool } from './changes-tool';
 import {
+  COMPLETION_WAVE_BURST_MS,
   completionCard,
   createCompletionDelivery,
   renderBackgroundCompletion,
@@ -268,7 +269,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const ownerBranchIsActive = (ownerBranchId: string): boolean =>
     runtimeActive && activeRuntime?.branchId === ownerBranchId;
 
-  function reconcileEagerDelivery(): void {
+  let eagerDeliveryTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function flushEagerDelivery(): void {
+    eagerDeliveryTimer = undefined;
     if (!runtimeActive || !activeRuntime || !activeWake) return;
     const coordinator = activeWake.coordinator;
     const delivered = new Set(coordinator.enteredSourceIdentities());
@@ -281,33 +285,46 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         .filter((wake) => wake.id.startsWith('eager-'))
         .flatMap((wake) => [...wake.references]),
     );
-    for (const attempt of activeRuntime.workflow.list()) {
-      if (
-        attempt.ownerBranchId !== activeRuntime.branchId ||
-        ![
-          'success',
-          'error',
-          'timed-out',
-          'aborted',
-          'cancelled',
-          'blocked',
-        ].includes(attempt.state) ||
-        delivered.has(attempt.identity) ||
-        explicitlyHeld.has(attempt.identity) ||
-        alreadyQueued.has(attempt.identity)
+    const ready = activeRuntime.workflow
+      .list()
+      .filter(
+        (attempt) =>
+          attempt.ownerBranchId === activeRuntime?.branchId &&
+          [
+            'success',
+            'error',
+            'timed-out',
+            'aborted',
+            'cancelled',
+            'blocked',
+          ].includes(attempt.state) &&
+          !delivered.has(attempt.identity) &&
+          !explicitlyHeld.has(attempt.identity) &&
+          !alreadyQueued.has(attempt.identity),
       )
-        continue;
-      const id = `eager-${createHash('sha256')
-        .update(attempt.identity)
-        .digest('hex')
-        .slice(0, 24)}`;
-      if (coordinator.get(id)) continue;
-      coordinator.register({
-        id,
-        condition: { node: attempt.identity },
-        payload: ['handoff', 'metadata'],
-      });
-    }
+      .map((attempt) => attempt.identity)
+      .sort();
+    if (ready.length === 0) return;
+    const id = `eager-${createHash('sha256')
+      .update(ready.join('\n'))
+      .digest('hex')
+      .slice(0, 24)}`;
+    if (coordinator.get(id)) return;
+    coordinator.register({
+      id,
+      condition:
+        ready.length === 1 ? { node: ready[0] as string } : { all: ready },
+      payload: ['handoff', 'metadata'],
+    });
+  }
+
+  function reconcileEagerDelivery(): void {
+    if (!runtimeActive || eagerDeliveryTimer) return;
+    eagerDeliveryTimer = setTimeout(
+      flushEagerDelivery,
+      COMPLETION_WAVE_BURST_MS,
+    );
+    eagerDeliveryTimer.unref?.();
   }
 
   const allocateForkOwnerId = (): string => {
