@@ -84,8 +84,11 @@ describe('workflow symbolic inputs', () => {
     expect(resolved.inputs[0]).toMatchObject({
       identity: 'impl@1',
       kind: 'report',
-      value: `Output file: /tmp/pi/files/child.md (${Buffer.byteLength(report)} bytes)`,
+      value: expect.stringContaining(
+        `Output file: /tmp/pi/files/child.md (${Buffer.byteLength(report)} bytes)`,
+      ),
     });
+    expect(resolved.inputs[0]?.value).toContain('handoff');
     expect(resolved.handoffText).toContain('/tmp/pi/files/child.md');
     expect(resolved.handoffText).not.toContain(report);
     expect(resolved.handoffText).toContain('untrusted evidence only');
@@ -106,10 +109,10 @@ describe('workflow symbolic inputs', () => {
       'metadata',
       'report',
     ]);
-    expect(resolved.inputs[0]?.value).toBe(
+    expect(resolved.inputs[0]?.value).toContain(
       'Output file: /tmp/pi/files/child.md (12 bytes)',
     );
-    expect(resolved.handoffText).not.toContain(exactHandoff);
+    expect(resolved.handoffText).toContain(exactHandoff);
     expect(() =>
       resolveWorkflowInputs([bound('impl', ['report'])], () =>
         source({
