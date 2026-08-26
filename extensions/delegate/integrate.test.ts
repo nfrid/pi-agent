@@ -126,9 +126,24 @@ describe('cumulative base-chain integration', () => {
     expect((await mergeBranch(finished)).merged).toBe(true);
     const integratedAncestor = loadWorktree(ancestor.id);
     expect(integratedAncestor?.integratedBy).toBe(finished.id);
+    expect(integratedAncestor?.integratedHead).toBe(ancestor.headCommit);
     expect(await branchState(integratedAncestor as WorktreeRecord)).toBe(
       'merged',
     );
+
+    writeFileSync(
+      path.join(ancestor.worktreePath, 'src', 'ancestor-follow-up.txt'),
+      'follow-up\n',
+    );
+    const continuedAncestor = await finishWorktree(ancestor.id, {
+      taskName: 'Ancestor follow-up',
+      outcome: 'success',
+    });
+    expect(continuedAncestor.integratedBy).toBe(finished.id);
+    expect(continuedAncestor.headCommit).not.toBe(
+      continuedAncestor.integratedHead,
+    );
+    expect(await branchState(continuedAncestor)).toBe('unmerged');
   });
 });
 

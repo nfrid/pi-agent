@@ -126,6 +126,9 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
     (record.integratedBy === undefined ||
       (typeof record.integratedBy === 'string' &&
         SAFE_ID.test(record.integratedBy))) &&
+    (record.integratedHead === undefined ||
+      (typeof record.integratedHead === 'string' &&
+        /^[a-f0-9]{7,64}$/.test(record.integratedHead))) &&
     (record.integratedAt === undefined ||
       (typeof record.integratedAt === 'string' &&
         !Number.isNaN(Date.parse(record.integratedAt)))) &&

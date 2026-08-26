@@ -30,7 +30,12 @@ function integrator() {
 }
 
 export function branchState(record: WorktreeRecord): Promise<BranchState> {
-  if (record.integratedBy) return Promise.resolve('merged');
+  if (
+    record.integratedBy &&
+    record.integratedHead &&
+    record.integratedHead === record.headCommit
+  )
+    return Promise.resolve('merged');
   return integrator().branchState(record);
 }
 
@@ -79,6 +84,7 @@ async function markIntegratedAncestors(record: WorktreeRecord): Promise<void> {
     )
       continue;
     candidate.integratedBy = record.id;
+    candidate.integratedHead = candidate.headCommit;
     candidate.integratedAt = integratedAt;
     writeWorktreeRecord(candidate);
   }
