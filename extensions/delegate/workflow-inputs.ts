@@ -3,13 +3,12 @@ import type { DelegateJobResult } from './jobs';
 import { ensureDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
 import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
 
-import {
-  type DelegatedRun,
-  type DelegateWorkflowBranchDescriptor,
-  type DelegateWorkflowResultRecord,
-  type DelegateWorkflowRunProjection,
-  type DelegateWorkflowTextEvidence,
-  getExactFinalAssistantText,
+import type {
+  DelegatedRun,
+  DelegateWorkflowBranchDescriptor,
+  DelegateWorkflowResultRecord,
+  DelegateWorkflowRunProjection,
+  DelegateWorkflowTextEvidence,
 } from './types';
 import type {
   AttemptIdentity,
@@ -121,7 +120,7 @@ function jsonText(value: unknown, label: string): string {
   }
 }
 
-/** Shared framing/cap calculation used by artifact and symbolic forwarding. */
+/** Shared framing/cap calculation used by symbolic forwarding. */
 export function frameWorkflowEvidence(
   label: string,
   text: string,
@@ -173,60 +172,29 @@ function legacyRuns(result: WorkflowSourceResult): readonly DelegatedRun[] {
   return isCompactResult(result) ? [] : (result.retainedRuns ?? result.runs);
 }
 
-function proseRuns(result: DelegateJobResult): DelegatedRun[] {
-  return result.retainedRuns ?? result.runs;
-}
-
-function exactEvidence(
-  evidence: DelegateWorkflowTextEvidence | undefined,
-  label: string,
-): string | undefined {
-  if (!evidence || evidence.oversized)
+function outputFileGuidance(
+  source: WorkflowInputSource,
+  kind: 'report' | 'handoff',
+): string {
+  const runs = source.result ? canonicalRuns(source.result) : [];
+  const files = runs
+    .map((run) => run.outputFile)
+    .filter((file): file is NonNullable<typeof file> => Boolean(file));
+  if (files.length === 0)
     throw new WorkflowInputBlockedError(
-      `${label} is unavailable because the retained evidence exceeded the workflow input cap.`,
+      `Required ${kind} output file is unavailable for ${source.attempt.identity}.`,
     );
-  return evidence.text;
+  return files
+    .map((file) => `Output file: ${file.path} (${file.size} bytes)`)
+    .join('\n');
 }
 
 function resolveReport(source: WorkflowInputSource): string {
-  const result = source.result;
-  if (!result)
-    throw new WorkflowInputBlockedError(
-      'Required report is unavailable: source has no retained result.',
-    );
-  if (isCompactResult(result)) {
-    const reports = result.reports
-      .map((evidence) => exactEvidence(evidence, 'Required report'))
-      .filter((text): text is string => Boolean(text?.trim()));
-    if (reports.length === 0)
-      throw new WorkflowInputBlockedError(
-        `Required report is unavailable for ${source.attempt.identity}.`,
-      );
-    return reports.join('\n\n');
-  }
-  const report = proseRuns(result)
-    .map((run) => getExactFinalAssistantText(run.messages))
-    .filter((text) => text.trim())
-    .join('\n\n');
-  if (!report)
-    throw new WorkflowInputBlockedError(
-      `Required report is unavailable for ${source.attempt.identity}.`,
-    );
-  return report;
+  return outputFileGuidance(source, 'report');
 }
 
 function resolveHandoff(source: WorkflowInputSource): string {
-  const result = source.result;
-  const handoff =
-    result && isCompactResult(result) ? result.handoff : undefined;
-  if (handoff) {
-    const exact = exactEvidence(handoff, 'Required handoff');
-    if (exact?.trim()) return exact;
-  } else if (result && !isCompactResult(result) && result.handoff?.trim())
-    return result.handoff;
-  throw new WorkflowInputBlockedError(
-    `Required handoff is unavailable for ${source.attempt.identity}.`,
-  );
+  return outputFileGuidance(source, 'handoff');
 }
 
 function compactMetadataRun(
@@ -262,7 +230,7 @@ function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
             if (['error', 'aborted', 'timed-out'].includes(run.state))
               ensureDelegateLifecycle(run);
             const lifecycle = getDelegateLifecycle(run, {
-              includeArtifact: false,
+              includeFile: false,
             });
             return {
               runId: run.runId,

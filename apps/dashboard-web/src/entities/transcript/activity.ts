@@ -282,15 +282,6 @@ export function activityStepParts(
         numberArg(tool.args, 'urlIndex') ?? numberArg(tool.args, 'queryIndex');
       if (page !== undefined) argument = `result ${page + 1}`;
     }
-  } else if (name === 'artifact_retrieve') {
-    role = 'read';
-    action = 'Reading artifact';
-    const mode = stringArg(tool.args, 'mode');
-    const offset = numberArg(tool.args, 'offset');
-    const limit = numberArg(tool.args, 'limit');
-    if (mode === 'lines' && offset !== undefined)
-      argument = `lines ${offset + 1}${limit === undefined ? '' : `–${offset + limit}`}`;
-    else argument = mode;
   } else if (path) {
     const edits = arrayArg(tool.args, 'edits');
     const changes = activityGroupFacts([tool]).lineChanges;

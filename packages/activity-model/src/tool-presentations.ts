@@ -12,7 +12,6 @@ export const CUSTOM_TOOL_KIND_BY_NAME = {
   search_web: 'web_search',
   fetch_content: 'fetch_content',
   get_search_content: 'get_search_content',
-  artifact_retrieve: 'artifact_retrieve',
   delegate: 'delegate',
   delegates: 'delegate',
   delegate_jobs: 'delegate_jobs',
@@ -109,35 +108,6 @@ export function getSearchContentPresentation(
         : undefined,
     heading: stringArg(args, 'heading'),
     literal: stringArg(args, 'literal'),
-  };
-}
-
-export type ArtifactRetrievePresentation = {
-  handle?: string;
-  mode?: string;
-  query?: string;
-  pointer?: string;
-  offset?: number;
-  limit?: number;
-};
-
-export function artifactRetrievePresentation(
-  args: unknown,
-): ArtifactRetrievePresentation {
-  const record = recordArgs(args);
-  const offset = record?.offset;
-  const limit = record?.limit;
-  return {
-    handle: stringArg(args, 'handle'),
-    mode: stringArg(args, 'mode'),
-    query: stringArg(args, 'query'),
-    pointer: stringArg(args, 'pointer'),
-    offset:
-      typeof offset === 'number' && Number.isFinite(offset)
-        ? offset
-        : undefined,
-    limit:
-      typeof limit === 'number' && Number.isFinite(limit) ? limit : undefined,
   };
 }
 

@@ -1,126 +1,59 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from '@earendil-works/pi-coding-agent';
-import {
-  type ArtifactMetadata,
-  artifactProducer,
-  MAX_ARTIFACT_BYTES,
-} from '../shared/artifacts';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { CACHE_FILE_MAX_BYTES, writeCacheFile } from '../shared/cache-files';
 import { pageContent } from './content-retrieval';
-import {
-  type StoredSearchData,
-  WEB_REFERENCE_TYPE,
-  type WebResultStore,
-} from './storage';
+import type { StoredSearchData, WebResultStore } from './storage';
 
-/** Keep routine web results small; exact content remains in the artifact/retrieval view. */
+/** Keep routine web results small; exact content remains in the in-memory/retrieval view. */
 export const MAX_INLINE_CHARS = 12_000;
-const ARTIFACT_WARNING =
-  'Exact artifact unavailable; continuation is limited to this session.';
+const CACHE_FILE_WARNING =
+  'Cache file unavailable; continuation remains available in this process.';
 const CAPTURE_LIMIT_WARNING =
-  'Exact continuation unavailable; aggregate result exceeded the persistence limit.';
+  'Exact cache file unavailable; aggregate result exceeded the cache-file limit.';
 
 export interface StoredPayload {
-  artifact?: ArtifactMetadata;
+  cacheFile?: { path: string; size: number };
   warning?: string;
-  continuationAvailable: boolean;
 }
 
 export async function persistWebResult(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
+  _pi: unknown,
+  _ctx: ExtensionContext,
   results: WebResultStore,
   data: StoredSearchData,
   assertCurrent: () => void,
 ): Promise<StoredPayload> {
   const serialized = JSON.stringify(data);
-  const serializedBytes = Buffer.byteLength(serialized);
-  if (serializedBytes > MAX_ARTIFACT_BYTES)
-    return {
-      warning: CAPTURE_LIMIT_WARNING,
-      continuationAvailable: false,
-    };
+  if (Buffer.byteLength(serialized) > CACHE_FILE_MAX_BYTES)
+    return { warning: CAPTURE_LIMIT_WARNING };
 
   assertCurrent();
-  results.store(data.id, data);
   try {
-    const artifact = await artifactProducer.put(
-      pi,
-      ctx,
-      {
-        bytes: serialized,
-        producer: 'web',
-        contentClass: 'json',
-        mediaType: 'application/json',
-        creationSource: `web.${data.type}`,
-        itemCount: Object.keys(data).length,
-      },
-      {
-        assertCurrent,
-        onPublished: (published) => {
-          assertCurrent();
-          pi.appendEntry(WEB_REFERENCE_TYPE, {
-            version: 1,
-            responseId: data.id,
-            resultType: data.type,
-            artifact: published,
-          });
-        },
-      },
-    );
-    try {
-      assertCurrent();
-      results.store(data.id, data, artifact);
-    } catch {
-      // Publication is already durable and linearized before the lifecycle
-      // boundary; do not repopulate the new branch's in-memory index.
-      results.delete(data.id);
-    }
-    return { artifact, continuationAvailable: true };
+    const cacheFile = await writeCacheFile(serialized, '.json');
+    assertCurrent();
+    results.store(data.id, data, cacheFile);
+    return { cacheFile };
   } catch {
-    // Do not expose artifact paths, policy details, or raw errors to the model.
-    try {
-      assertCurrent();
-    } catch (error) {
-      results.delete(data.id);
-      throw error;
-    }
-    return {
-      warning: ARTIFACT_WARNING,
-      continuationAvailable: false,
-    };
+    assertCurrent();
+    // Keep the current-process continuation even when filesystem publication fails.
+    results.store(data.id, data);
+    return { warning: CACHE_FILE_WARNING };
   }
-}
-
-export function artifactDetails(artifact: ArtifactMetadata): {
-  handle: string;
-  sha256: string;
-  size: number;
-  producer: ArtifactMetadata['producer'];
-  contentClass: ArtifactMetadata['contentClass'];
-  creationSource: string;
-  itemCount?: number;
-} {
-  return {
-    handle: artifact.handle,
-    sha256: artifact.sha256,
-    size: artifact.size,
-    producer: artifact.producer,
-    contentClass: artifact.contentClass,
-    creationSource: artifact.creationSource,
-    itemCount: artifact.itemCount,
-  };
 }
 
 export function persistenceDetails(payload: StoredPayload) {
   return {
-    ...(payload.artifact
-      ? { artifact: artifactDetails(payload.artifact) }
-      : {}),
-    ...(payload.warning ? { artifactWarning: payload.warning } : {}),
-    ...(!payload.continuationAvailable ? { continuationAvailable: false } : {}),
+    ...(payload.cacheFile ? { cacheFile: payload.cacheFile } : {}),
+    ...(payload.warning ? { cacheFileWarning: payload.warning } : {}),
   };
+}
+
+export function appendCacheFileNotice(
+  text: string,
+  payload: StoredPayload,
+): string {
+  if (payload.cacheFile)
+    return `${text}\n\nFull response file: ${payload.cacheFile.path} (${payload.cacheFile.size} bytes)`;
+  return payload.warning ? `${text}\n\n${payload.warning}` : text;
 }
 
 function truncatedPreviewNotice(

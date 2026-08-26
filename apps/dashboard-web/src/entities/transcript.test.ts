@@ -302,7 +302,7 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
-  it('summarizes delegation, artifacts, fetches, and file ranges usefully', () => {
+  it('summarizes delegation, fetches, and file ranges usefully', () => {
     expect(
       activityStepParts({
         name: 'delegate_branches',
@@ -315,16 +315,6 @@ describe('activity row views and virtual transcript construction', () => {
       action: 'Dropping delegate branch',
       argument: '136d280a-7c10-4427-9d2d-1f7e62acd03b',
       role: 'command',
-    });
-    expect(
-      activityStepParts({
-        name: 'artifact_retrieve',
-        args: { mode: 'lines', offset: 0, limit: 120 },
-      }),
-    ).toMatchObject({
-      action: 'Reading artifact',
-      argument: 'lines 1–120',
-      role: 'read',
     });
     expect(
       activityStepParts({
@@ -569,11 +559,6 @@ describe('activity row views and virtual transcript construction', () => {
         display: true,
         content: '# Background delegate job dj-1 (UX audit) success',
         details: { jobs: [{ name: 'UX audit', state: 'success' }] },
-      },
-      {
-        type: 'custom',
-        customType: 'artifact:v1',
-        data: { bytes: 12 },
       },
       {
         type: 'custom_message',

@@ -460,7 +460,7 @@ describe('restored delegate adapter', () => {
       dependencies: {
         runDelegate: async () => finishedRun('restore'),
         materialize: async () => {
-          throw new Error('artifact publication failed');
+          throw new Error('output file publication failed');
         },
         onRunUpdate: (run) => updates.push(run),
       },
@@ -472,7 +472,7 @@ describe('restored delegate adapter', () => {
     expect(updates[0]).toMatchObject({
       state: 'error',
       workflowAttempt: { identity: 'restore@1' },
-      errorMessage: expect.stringContaining('artifact publication failed'),
+      errorMessage: expect.stringContaining('output file publication failed'),
       capabilities: ['web'],
     });
     expect(coordinator.getResult('restore@1')?.runs[0]).toMatchObject({
@@ -598,7 +598,7 @@ describe('restored delegate adapter', () => {
     await cleanup();
   });
 
-  test('valid worktree restoration uses finalization and artifact materialization seams', async () => {
+  test('valid worktree restoration uses finalization and output-file materialization seams', async () => {
     const child = session('valid-worktree');
     sessions.push(child);
     const manager = new DelegateJobManager();
@@ -623,7 +623,7 @@ describe('restored delegate adapter', () => {
     const finalize = vi.fn(async () => undefined);
     const materialize = vi.fn(async (runs: DelegatedRun[]) => ({
       runs,
-      handoff: 'artifact-backed handoff',
+      handoff: 'file-backed handoff',
     }));
     restoreHostedDelegateAttempt({
       parentSessionId: PARENT,

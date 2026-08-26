@@ -1,4 +1,4 @@
-import { ensureDelegateLifecycle } from './lifecycle';
+import { ensureDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
 
 import {
   continuationRecoveryNote,
@@ -142,9 +142,9 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     lines.push(
       `Blocked: ${blocked} — answer it and continue this subagent; its context is intact.`,
     );
-  if (run.artifact)
+  if (run.outputFile)
     lines.push(
-      `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,
+      `Output file: ${run.outputFile.path} (${run.outputFile.size} bytes)`,
     );
   if (run.worktree) {
     if (run.worktree.snapshot) {
@@ -166,16 +166,19 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
       );
   }
   if (isRunError(run)) {
-    const lifecycle = ensureDelegateLifecycle(run);
+    ensureDelegateLifecycle(run);
+    const lifecycle = getDelegateLifecycle(run, {
+      includeBoundedFallback: true,
+    });
     if (lifecycle) {
       lines.push(`Lifecycle reason: ${lifecycle.reason}`);
-      if (lifecycle.diagnostic) lines.push(`Failure: ${lifecycle.diagnostic}`);
-      else if (lifecycle.diagnosticArtifact)
+      if (lifecycle.diagnosticFile)
         lines.push(
-          `Failure artifact: ${lifecycle.diagnosticArtifact.handle} (${lifecycle.diagnosticArtifact.size} bytes, sha256 ${lifecycle.diagnosticArtifact.sha256})`,
+          `Failure file: ${lifecycle.diagnosticFile.path} (${lifecycle.diagnosticFile.size} bytes)`,
         );
-      else
-        lines.push('Failure: owner-session diagnostic artifact unavailable.');
+      else if (lifecycle.diagnostic)
+        lines.push(`Failure: ${lifecycle.diagnostic}`);
+      else lines.push('Failure: exact lifecycle diagnostic file unavailable.');
       if (lifecycle.continuationUsable)
         lines.push('Continuation available for recovery.');
       if (lifecycle.writableBranchRetained)
@@ -223,13 +226,9 @@ function envelopeBlock(items: PreparedRun[], parallel: boolean): string {
 
 export interface ParentHandoffResult {
   text: string;
-  /** Runs whose exact final report is omitted from the parent-visible envelope. */
-  omittedOriginalReports: ReadonlySet<DelegatedRun>;
-  /** @deprecated Use omittedOriginalReports; retained for continuation compatibility. */
-  truncatedOriginalReports: ReadonlySet<DelegatedRun>;
 }
 
-/** Builds a bounded envelope; exact final reports are never copied inline unless artifact publication failed. */
+/** Builds a bounded envelope; exact final reports are represented by output files. */
 export function buildParentHandoffResult(
   runs: DelegatedRun[],
   caps: ParentHandoffCaps = PARENT_HANDOFF_CAPS,
@@ -250,8 +249,8 @@ export function buildParentHandoffResult(
       return { ...item, body: '' };
     const prefix = `${emittedFallback ? '\n\n---\n\n' : '\n\n'}${
       parallel
-        ? `### Task ${index + 1} inline fallback (artifact unavailable)\n`
-        : 'Inline fallback (artifact unavailable)\n'
+        ? `### Task ${index + 1} inline fallback (output file unavailable)\n`
+        : 'Inline fallback (output file unavailable)\n'
     }`;
     const prefixBytes = Buffer.byteLength(prefix, 'utf8');
     if (remaining <= prefixBytes) return { ...item, body: '' };
@@ -264,26 +263,17 @@ export function buildParentHandoffResult(
   const fallbackBlocks = prepared
     .map((item, index) =>
       item.body
-        ? `${parallel ? `### Task ${index + 1} inline fallback (artifact unavailable)\n` : 'Inline fallback (artifact unavailable)\n'}${item.body}`
+        ? `${parallel ? `### Task ${index + 1} inline fallback (output file unavailable)\n` : 'Inline fallback (output file unavailable)\n'}${item.body}`
         : '',
     )
     .filter(Boolean)
     .join('\n\n---\n\n');
   const overflowWarning = options.inlineFallbackRuns?.size
     ? 'Mandatory metadata exceeds the handoff size cap; inline fallbacks may not fit and the child session remains authoritative.'
-    : 'Mandatory metadata exceeds the handoff size cap; exact reports remain artifact-only.';
+    : 'Mandatory metadata exceeds the handoff size cap; exact reports remain in the child session.';
   const envelopes = envelopeBlock(prepared, parallel);
   const text = `${overflow ? `${overflowWarning}\n\n` : ''}${envelopes}${fallbackBlocks ? `${envelopes ? '\n\n' : ''}${fallbackBlocks}` : ''}`;
-  const omittedOriginalReports = new Set(
-    prepared
-      .filter((item) => item.originalReport !== undefined)
-      .map((item) => item.run),
-  );
-  return {
-    text,
-    omittedOriginalReports,
-    truncatedOriginalReports: omittedOriginalReports,
-  };
+  return { text };
 }
 
 export function buildParentHandoff(

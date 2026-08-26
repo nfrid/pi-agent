@@ -4,7 +4,7 @@ import {
   PARENT_HANDOFF_CAPS,
   truncateBytes,
 } from './output';
-import { buildArtifactBackedHandoff } from './tool-result';
+import { buildOutputFileHandoff } from './tool-result';
 import { createRun } from './types';
 
 const assistantMessage = {
@@ -27,19 +27,6 @@ function reportedRun(
     } as never,
   ];
   return run;
-}
-
-function artifact() {
-  return {
-    handle: `art_${'d'.repeat(22)}`,
-    sha256: 'a'.repeat(64),
-    size: 1,
-    producer: 'delegate' as const,
-    contentClass: 'delegate-output' as const,
-    creationSource: 'delegate.result',
-    encoding: 'utf-8' as const,
-    createdAt: '2026-01-01T00:00:00.000Z',
-  };
 }
 
 describe('output', () => {
@@ -308,76 +295,70 @@ describe('output', () => {
     expect(handoff).not.toContain('this continuation completed');
   });
 
-  test('artifacts every exact report and keeps the parent result envelope-only', async () => {
+  test('writes every exact report and keeps the parent result envelope-only', async () => {
     const exact =
       'Outcome: done\nConclusion: the guard is correct\nEvidence: src/guard.ts:10\nRisks: none';
     const run = reportedRun(exact);
     const persisted: string[] = [];
-    const put = vi.fn(
-      async (_pi: unknown, _ctx: unknown, input: { bytes: string }) => {
-        persisted.push(input.bytes);
-        return { ...artifact(), size: Buffer.byteLength(input.bytes) };
-      },
-    );
+    const put = vi.fn(async (input: string | Uint8Array) => {
+      persisted.push(String(input));
+      return {
+        path: '/tmp/output.md',
+        size: Buffer.byteLength(input as string),
+      };
+    });
 
-    const handoff = await buildArtifactBackedHandoff(
-      {} as never,
-      {} as never,
-      [run],
-      put as never,
-    );
+    const handoff = await buildOutputFileHandoff([run], put as never);
 
     expect(put).toHaveBeenCalledTimes(1);
     expect(persisted).toEqual([exact]);
-    expect(run.artifact?.handle).toBe(artifact().handle);
-    expect(handoff).toContain(`Artifact: ${artifact().handle}`);
-    expect(handoff).not.toContain('Truncation: none');
-    expect(handoff).not.toContain(`Output\n${exact}`);
+    expect(run.outputFile).toEqual({
+      path: '/tmp/output.md',
+      size: Buffer.byteLength(exact),
+    });
+    expect(handoff).toContain(
+      `Output file: /tmp/output.md (${Buffer.byteLength(exact)} bytes)`,
+    );
     expect(handoff).not.toContain(exact);
   });
 
-  test('uses a bounded inline fallback when artifact publication fails', async () => {
+  test('uses a bounded inline fallback when output-file publication fails', async () => {
     const exact =
       'Outcome: partial\nConclusion: the report is still available inline\nEvidence: child-check\nRisks: publication failed';
     const run = reportedRun(exact);
-    const put = vi.fn().mockRejectedValue(new Error('artifact unavailable'));
+    const put = vi.fn().mockRejectedValue(new Error('output file unavailable'));
 
-    const handoff = await buildArtifactBackedHandoff(
-      {} as never,
-      {} as never,
-      [run],
-      put as never,
-    );
+    const handoff = await buildOutputFileHandoff([run], put as never);
 
-    expect(handoff).toContain('Inline fallback (artifact unavailable)');
+    expect(handoff).toContain('Inline fallback (output file unavailable)');
     expect(handoff).toContain(exact);
-    expect(handoff).not.toContain('Artifact:');
-    expect(handoff).toContain('Warnings: Exact output artifact unavailable');
-    expect(run.artifact).toBeUndefined();
+    expect(handoff).toContain('Warnings: Exact output file unavailable');
+    expect(run.outputFile).toBeUndefined();
   });
 
-  test('preserves the exact omitted report in the output artifact', async () => {
+  test('preserves the exact long report in the output file', async () => {
     const exact = `Outcome: done\nConclusion: complete\n\n${'🙂'.repeat(10_000)}`;
     const run = reportedRun(exact);
     const persisted: string[] = [];
-    const put = vi.fn(
-      async (_pi: unknown, _ctx: unknown, input: { bytes: string }) => {
-        persisted.push(input.bytes);
-        return { ...artifact(), size: Buffer.byteLength(input.bytes) };
-      },
-    );
+    const put = vi.fn(async (input: string | Uint8Array) => {
+      persisted.push(String(input));
+      return {
+        path: '/tmp/output.md',
+        size: Buffer.byteLength(input as string),
+      };
+    });
 
-    const handoff = await buildArtifactBackedHandoff(
-      {} as never,
-      {} as never,
-      [run],
-      put as never,
-    );
+    const handoff = await buildOutputFileHandoff([run], put as never);
 
     expect(put).toHaveBeenCalledTimes(1);
     expect(persisted).toEqual([exact]);
-    expect(run.artifact?.handle).toBe(artifact().handle);
-    expect(handoff).toContain(`Artifact: ${artifact().handle}`);
+    expect(run.outputFile).toEqual({
+      path: '/tmp/output.md',
+      size: Buffer.byteLength(exact),
+    });
+    expect(handoff).toContain(
+      `Output file: /tmp/output.md (${Buffer.byteLength(exact)} bytes)`,
+    );
   });
 
   test('preserves mandatory UTF-8 envelopes when they exceed a cap', () => {

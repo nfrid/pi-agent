@@ -5,12 +5,6 @@ import {
   type DelegateJobResult,
   MAX_DELEGATE_JOBS,
 } from './jobs';
-import {
-  LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
-  LIFECYCLE_PUBLIC_FALLBACK_MARKER,
-  setDelegateLifecycle,
-  setDelegateLifecycleDiagnosticArtifact,
-} from './lifecycle';
 import { createRun } from './types';
 
 function successfulResult(task = 'inspect'): DelegateJobResult {
@@ -152,54 +146,6 @@ describe('DelegateJobManager', () => {
     expect(materialize).toHaveBeenCalledOnce();
     expect(inspected.handoff).toBe('published exact report');
     expect(inspected.runs?.[0]?.messages).toHaveLength(1);
-    await manager.dispose();
-  });
-
-  test('keeps one bounded captured diagnostic in a stale-session peek', async () => {
-    const diagnostic = `actionable failure ${'x'.repeat(3_000)}`;
-    const run = createRun('stale failure');
-    run.state = 'error';
-    run.exitCode = 9;
-    run.stderr = 'raw stderr must not be used as the stale fallback';
-    setDelegateLifecycle(run, 'child-nonzero-exit', diagnostic);
-    const ownerHandle = `art_${'o'.repeat(22)}`;
-    setDelegateLifecycleDiagnosticArtifact(run, {
-      handle: ownerHandle,
-      sha256: 'a'.repeat(64),
-      size: Buffer.byteLength(diagnostic, 'utf8'),
-      producer: 'delegate',
-      contentClass: 'delegate-output',
-      creationSource: 'delegate.failure',
-      encoding: 'utf-8',
-      lineCount: 1,
-      createdAt: '2026-01-01T00:00:00.000Z',
-    });
-    const manager = new DelegateJobManager();
-    const started = manager.start({
-      ownerSessionId: 'owner-session',
-      mode: 'single',
-      tasks: [run.task],
-      execute: async () => ({ runs: [run], handoff: 'owner-only handoff' }),
-    });
-    await vi.waitFor(() => expect(manager.runningCount).toBe(0));
-
-    const stale = await manager.peek(started.id, 0, undefined, {
-      sessionManager: { getSessionId: () => 'stale-session' },
-    } as never);
-    const projection = stale.runs?.[0]?.lifecycle;
-    expect(projection?.reason).toBe('child-nonzero-exit');
-    expect(projection?.diagnostic).not.toBe(diagnostic);
-    expect(projection?.diagnostic).toContain(LIFECYCLE_PUBLIC_FALLBACK_MARKER);
-    expect(
-      Buffer.byteLength(projection?.diagnostic ?? '', 'utf8'),
-    ).toBeLessThanOrEqual(LIFECYCLE_INLINE_DIAGNOSTIC_BYTES);
-    expect(projection?.diagnosticArtifact).toBeUndefined();
-    expect(
-      JSON.stringify(stale).match(/actionable failure/g) ?? [],
-    ).toHaveLength(1);
-    expect(JSON.stringify(stale)).not.toContain('raw stderr');
-    expect(JSON.stringify(stale)).not.toContain(ownerHandle);
-    expect(stale.handoff).toBeUndefined();
     await manager.dispose();
   });
 

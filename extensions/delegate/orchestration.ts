@@ -6,11 +6,7 @@ import type { DelegateConfig } from './config';
 import { createDelegateControlChannel } from './control';
 import { createOpaqueId } from './identity';
 import { ensureDelegateLifecycle } from './lifecycle';
-import {
-  type BuiltDelegateTask,
-  buildDelegatePlans,
-  resolveDelegateHandoffs,
-} from './plans';
+import { type BuiltDelegateTask, buildDelegatePlans } from './plans';
 import { DetachedDelegateError, mapWithConcurrency } from './runner';
 
 import {
@@ -23,15 +19,12 @@ import {
 } from './task-lifecycle';
 import type { DelegateParams } from './tool';
 import {
-  buildSessionBoundArtifactBackedHandoff,
+  buildOutputFileHandoff,
   delegateToolResult,
   makeDetails,
 } from './tool-result';
 import { createRun, type DelegatedRun } from './types';
-import {
-  WORKFLOW_INPUT_CAPS,
-  workflowEvidencePromptBytes,
-} from './workflow-inputs';
+
 import {
   loadWorktree,
   type PreparedWorktree,
@@ -51,7 +44,7 @@ export type DelegateRunContext = {
   ctx: ExtensionContext;
   /** Session owning the invocation, captured before preparation can await. */
   launchSessionId?: string;
-  /** Branch owning exact metadata/artifact writes, captured before awaits. */
+  /** Branch identity retained for workflow ownership and branch composition. */
   launchBranchId?: string;
   isLaunchBranchActive?: () => boolean;
   config: DelegateConfig;
@@ -422,21 +415,9 @@ export async function prepareDelegateExecution(
     runCtx.config,
     runCtx.getSnapshot,
   );
-  let tasks: BuiltDelegateTask[];
-  try {
-    tasks = await resolveDelegateHandoffs(runCtx.ctx, built.tasks);
-  } catch (error) {
-    return {
-      mode: built.parallel ? 'parallel' : 'single',
-      tasks: setupFailurePlans(
-        built.tasks,
-        `Delegate setup failed before launch: ${errorText(error)}`,
-      ),
-    };
-  }
   return {
     mode: built.parallel ? 'parallel' : 'single',
-    tasks: await preparePlans(tasks, built.parallel, launchSessionId),
+    tasks: await preparePlans(built.tasks, built.parallel, launchSessionId),
   };
 }
 
@@ -520,20 +501,9 @@ async function executeDelegate(
   params: DelegateParams,
   hooks: RunHooks,
 ) {
-  const launchSessionId =
-    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
-  const launchBranchId = runCtx.launchBranchId;
   const execution = await prepareDelegateExecution(runCtx, params);
   const runs = await runPreparedDelegateExecution(runCtx, execution, hooks);
-  return delegateToolResult(
-    runCtx.pi,
-    runCtx.ctx,
-    execution.mode,
-    runs,
-    launchSessionId,
-    launchBranchId,
-    runCtx.isLaunchBranchActive,
-  );
+  return delegateToolResult(runCtx.pi, runCtx.ctx, execution.mode, runs);
 }
 
 export const executeSingleDelegate = executeDelegate;
@@ -577,21 +547,10 @@ export async function prepareDelegateWorkflowLaunch(
     plan: launchPlan,
     preflight: preflightDelegateContinuation(launchPlan),
   };
-  const resolved = await resolveDelegateHandoffs(runCtx.ctx, [built]);
-  const resolvedTask = resolved[0];
-  if (!resolvedTask) throw new Error('Delegate setup produced no task.');
-  const handoffParts = [
-    resolvedTask.plan.handoffText,
-    workflow.handoffText,
-  ].filter((text): text is string => Boolean(text?.trim()));
-  if (
-    handoffParts.length > 1 &&
-    workflowEvidencePromptBytes(handoffParts) >
-      WORKFLOW_INPUT_CAPS.aggregateMaxBytes
-  )
-    throw new Error(
-      'Combined delegate handoff evidence exceeds the workflow input limit.',
-    );
+  const resolvedTask = built;
+  const handoffParts = [workflow.handoffText].filter((text): text is string =>
+    Boolean(text?.trim()),
+  );
   const inputEvidence = workflow.inputs.map((input) => ({
     identity: input.identity,
     kind: input.kind,
@@ -648,22 +607,14 @@ export async function prepareDelegateWorkflowLaunch(
     control.close();
     await rollbackPreparedDelegateTasks([prepared]);
   };
-  const materialize = async (ctx: ExtensionContext, runs: DelegatedRun[]) => {
-    const handoff = await buildSessionBoundArtifactBackedHandoff(
-      runCtx.pi,
-      ctx,
-      ownerSessionId,
-      runs,
-      launchBranchId,
-      runCtx.isLaunchBranchActive,
-    );
+  const materialize = async (_ctx: ExtensionContext, runs: DelegatedRun[]) => {
+    const handoff = await buildOutputFileHandoff(runs);
     return { runs, retainedRuns: runs, handoff };
   };
   return {
     discard,
     launch: {
       name: finalPlan.name,
-      ownerSessionId,
       ownerBranchId: launchBranchId,
       mode: 'single',
       tasks: [finalPlan.task],

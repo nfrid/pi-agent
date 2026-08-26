@@ -20,6 +20,7 @@ describe('delegate_wake tool', () => {
         run.state = 'success';
         run.exitCode = 0;
         run.finishedAt = Date.now();
+        run.outputFile = { path: '/tmp/pi/files/source.md', size: 15 };
         return {
           runs: [run],
           handoff: 'secret evidence must not be returned by the tool',

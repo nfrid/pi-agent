@@ -6,10 +6,7 @@ import type {
 } from '../shared/runtime/scoped-services';
 import { copyDelegateLifecycle } from './lifecycle';
 import { buildParentHandoff } from './output';
-import {
-  serializeDelegateRunForPublic,
-  serializeDelegateRunForStaleSession,
-} from './serialize';
+import { serializeDelegateRunForPublic } from './serialize';
 import type {
   DelegateChildCapability,
   DelegateDetails,
@@ -78,11 +75,10 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   mode: DelegateDetails['mode'];
   tasks: string[];
   startedAt?: number;
-  ownerSessionId?: string;
   runs?: DelegatedRun[];
   /** A branch-safe view; the retained runs stay private for retry. */
   snapshotRuns?: DelegatedRun[];
-  /** Immutable branch owning exact handoff/artifact publication. */
+  /** Immutable branch owning workflow metadata. */
   ownerBranchId?: string;
   handoff?: string;
   error?: string;
@@ -112,11 +108,6 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
 
 export interface DelegateJobManagerOptions {
   scopeId?: SessionScopeId;
-  /** Exact owner branch guard; absent keeps legacy session-only behavior. */
-  isOwnerBranchActive?: (
-    ownerBranchId: string,
-    ctx: ExtensionContext,
-  ) => boolean;
   pendingProcesses?: PendingProcessAccounting;
   onSettled?: (snapshot: DelegateJobSnapshot) => void;
   onChange?: () => void;
@@ -124,9 +115,7 @@ export interface DelegateJobManagerOptions {
 
 export interface DelegateJobStartOptions {
   name?: string;
-  /** Session whose branch owns artifact publication and exact handoff text. */
-  ownerSessionId?: string;
-  /** Immutable branch whose path owns exact handoff/artifact publication. */
+  /** Immutable branch whose path owns workflow metadata. */
   ownerBranchId?: string;
   mode: DelegateDetails['mode'];
   tasks: string[];
@@ -175,10 +164,7 @@ export class DelegateJobManager {
     DelegateJobRecord,
     DelegateJobSnapshot
   >;
-  private readonly isOwnerBranchActive?: DelegateJobManagerOptions['isOwnerBranchActive'];
-
   constructor(options: DelegateJobManagerOptions = {}) {
-    this.isOwnerBranchActive = options.isOwnerBranchActive;
     this.registry = new AsyncJobRegistry({
       idPrefix: 'dj',
       label: 'delegate job',
@@ -237,7 +223,6 @@ export class DelegateJobManager {
       ({ item, workflowAttempt }): DelegateJobRecord => ({
         ...this.registry.newRecord('queued'),
         name: item.name?.trim() || 'Subagent',
-        ownerSessionId: item.ownerSessionId,
         ownerBranchId: item.ownerBranchId,
         mode: item.mode,
         tasks: [...item.tasks],
@@ -299,12 +284,6 @@ export class DelegateJobManager {
       record.state === 'queued' ||
       record.state === 'running'
     )
-      return this.visibleSnapshot(snapshot(record), ctx);
-
-    // Materialization is an owner write. A sibling may inspect the bounded
-    // stale projection, but it must not publish into the active sibling's
-    // session branch or acquire the owner's exact artifact handle.
-    if (ctx && !this.exactOwnerVisible(record, ctx))
       return this.visibleSnapshot(snapshot(record), ctx);
 
     if (!record.materializing) {
@@ -424,30 +403,9 @@ export class DelegateJobManager {
 
   private visibleSnapshot(
     job: DelegateJobSnapshot,
-    ctx?: ExtensionContext,
+    _ctx?: ExtensionContext,
   ): DelegateJobSnapshot {
-    const record = this.registry.require(job.id);
-    if (!ctx || this.exactOwnerVisible(record, ctx)) return job;
-    const runs = job.runs?.map((run) => {
-      const safe = serializeDelegateRunForStaleSession(run);
-      return safe;
-    });
-    const { handoff: _handoff, ...safeJob } = job;
-    return { ...safeJob, runs };
-  }
-
-  private exactOwnerVisible(
-    record: DelegateJobRecord,
-    ctx: ExtensionContext,
-  ): boolean {
-    if (
-      record.ownerSessionId &&
-      ctx.sessionManager.getSessionId() !== record.ownerSessionId
-    )
-      return false;
-    if (record.ownerBranchId && this.isOwnerBranchActive)
-      return this.isOwnerBranchActive(record.ownerBranchId, ctx);
-    return true;
+    return job;
   }
 
   private async run(record: DelegateJobRecord): Promise<void> {

@@ -90,22 +90,23 @@ not become ordinary durable thread links.
 
 ## What the parent sees
 
-Every run contributes an envelope — process status, outcome, conclusion, continuation, blocker, artifact, worktree metadata, evidence, risks, and truncation — before any report body is allocated. The original child report is then appended as the body and straightforwardly byte-truncated if necessary. Small duplication between the envelope and body is intentional: it keeps the handoff simple and preserves the original report when it fits.
+Every run contributes an envelope — process status, outcome, conclusion, continuation, blocker, output-file path, worktree metadata, evidence, risks, and truncation — before any report body is allocated. The original child report is then appended as the body and straightforwardly byte-truncated if necessary. Small duplication between the envelope and body is intentional: it keeps the handoff simple and preserves the original report when it fits.
 
 The safety bounds are 12 KiB for one result, 8 KiB per task in parallel, and 50 KiB for a parallel aggregate. They bound parent context; they do not promise savings. If mandatory envelopes alone exceed a bound, bodies are omitted rather than dropping conclusions, continuations, or other metadata.
 
-An exact-output artifact is created only when the parent handoff genuinely omits or truncates that original report. A report that fits does not get an artifact merely because its fields also appear in the envelope.
+Every exact final report is written to a Markdown cache file whether or not its inline parent handoff is truncated. The envelope gives the parent the absolute path and byte size.
 
 ## Completion contract
 
 Delegates always return a concise prose report using `Outcome`, `Conclusion`,
 `Evidence`, `Risks`, and `Blocked` sections when applicable. There is no model-authored
-result schema or result tool. The parent-visible handoff bounds the report while
-retaining lifecycle metadata, branch/worktree information, and exact report artifacts
-when needed.
+result schema or result tool. Every exact final report is also written to an opaque
+Markdown file under the local Pi cache. The parent-visible handoff includes its absolute
+path and byte size alongside lifecycle and branch/worktree information.
 
-Async composition uses prose `report` and `handoff` inputs, harness-authored
-`metadata`, and verified `branch` inputs. Register `delegate_wake` before settling
+Async composition passes `report` and `handoff` inputs as cache-file paths instead of
+copying their contents into the child prompt. Harness-authored `metadata` and verified
+`branch` inputs retain their existing behavior. Register `delegate_wake` before settling
 when downstream work depends on an attempt.
 
 ### Failed-run lifecycle contract
@@ -119,11 +120,10 @@ report only what the harness observed; they do not infer a provider-specific
 cause or retryability. Child prose cannot set or override the projection.
 
 The projection contains exactly one actionable diagnostic: complete bounded
-text in `diagnostic`, or an owner-session exact `diagnosticArtifact` when the
-text exceeds the 2 KiB inline diagnostic cap. A stale/non-owner or failed
-publication path may instead expose a separately bounded `diagnostic` fallback
-with an explicit exact-diagnostic-unavailable marker. Diagnostic capture is
-bounded at 64 KiB and
+text in `diagnostic`, or an exact `diagnosticFile` path and byte size when the
+text exceeds the 2 KiB inline diagnostic cap. If writing that file fails, the
+projection exposes a separately bounded `diagnostic` fallback with an explicit
+exact-diagnostic-file-unavailable marker. Diagnostic capture is bounded at 64 KiB and
 child stderr is only used as a bounded child-exit diagnostic; raw stderr is
 never copied wholesale into the public contract. UTF-8 byte bounds preserve
 multiline and Unicode text without cutting an inline diagnostic in the middle.

@@ -3,6 +3,7 @@ import { Type } from 'typebox';
 import { fetchAllContent } from './extract';
 import { renderFetchCall, renderWebResult } from './render';
 import {
+  appendCacheFileNotice,
   boundedPreview,
   persistenceDetails,
   persistWebResult,
@@ -57,7 +58,7 @@ export function createFetchContentTool(options: {
       if (results.length === 1) {
         const result = results[0];
         if (result.error) throw new Error(result.error);
-        const artifact = await persistWebResult(
+        const cacheFile = await persistWebResult(
           pi,
           ctx,
           resultStore,
@@ -73,19 +74,18 @@ export function createFetchContentTool(options: {
           content: [
             {
               type: 'text',
-              text: boundedPreview(
-                result.content,
-                id,
-                'urlIndex: 0',
-                artifact.continuationAvailable,
-              ).rendered,
+              text: appendCacheFileNotice(
+                boundedPreview(result.content, id, 'urlIndex: 0', true)
+                  .rendered,
+                cacheFile,
+              ),
             },
           ],
           details: {
             responseId: id,
             title: result.title,
             totalChars: result.content.length,
-            ...persistenceDetails(artifact),
+            ...persistenceDetails(cacheFile),
           },
         };
       }
@@ -102,7 +102,7 @@ export function createFetchContentTool(options: {
         )
         .join('\n');
       const renderedSummary = `${summary}\n\nResponse ID: ${id}`;
-      const artifact = await persistWebResult(
+      const cacheFile = await persistWebResult(
         pi,
         ctx,
         resultStore,
@@ -119,15 +119,20 @@ export function createFetchContentTool(options: {
         renderedSummary,
         id,
         'view: "summary"',
-        artifact.continuationAvailable,
+        true,
       );
       return {
-        content: [{ type: 'text', text: initial.rendered }],
+        content: [
+          {
+            type: 'text',
+            text: appendCacheFileNotice(initial.rendered, cacheFile),
+          },
+        ],
         details: {
           responseId: id,
           urlCount: urls.length,
           successful,
-          ...persistenceDetails(artifact),
+          ...persistenceDetails(cacheFile),
           ...initial.details,
         },
       };

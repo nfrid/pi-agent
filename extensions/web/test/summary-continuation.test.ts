@@ -1,24 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const artifacts = vi.hoisted(() => ({ payloads: [] as string[] }));
-vi.mock('../../shared/artifacts', () => ({
-  MAX_ARTIFACT_BYTES: 16 * 1024 * 1024,
-  artifactProducer: {
-    put: vi.fn(async (_pi, _ctx, input: { bytes: string }) => {
-      artifacts.payloads.push(input.bytes);
-      return {
-        handle: `art_${'a'.repeat(22)}`,
-        sha256: 'b'.repeat(64),
-        size: Buffer.byteLength(input.bytes),
-        producer: 'web',
-        contentClass: 'json',
-        creationSource: 'web.search',
-        encoding: 'utf-8',
-        itemCount: Object.keys(JSON.parse(input.bytes)).length,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      };
-    }),
-  },
+const files = vi.hoisted(() => ({ payloads: [] as string[] }));
+vi.mock('../../shared/cache-files', () => ({
+  CACHE_FILE_MAX_BYTES: 16 * 1024 * 1024,
+  writeCacheFile: vi.fn(async (input: string) => {
+    files.payloads.push(input);
+    return {
+      path: `/tmp/${files.payloads.length}.json`,
+      size: Buffer.byteLength(input),
+    };
+  }),
 }));
 
 vi.mock('../search', () => ({
@@ -57,7 +48,7 @@ function setup(): {
 } {
   const tools = new Map<string, { execute: Execute }>();
   const entries: unknown[] = [];
-  artifacts.payloads.length = 0;
+  files.payloads.length = 0;
   web({
     on: vi.fn(),
     registerTool: vi.fn((tool: { name: string; execute: Execute }) =>
@@ -69,8 +60,8 @@ function setup(): {
 }
 
 function takeStoredPayload(): StoredSearchData {
-  const payload = artifacts.payloads.shift();
-  if (!payload) throw new Error('artifact payload was not persisted');
+  const payload = files.payloads.shift();
+  if (!payload) throw new Error('cache file payload was not persisted');
   return JSON.parse(payload) as StoredSearchData;
 }
 
@@ -92,7 +83,7 @@ async function reconstructInitialView(
   const nextOffset = Number(match?.[2]);
   expect(responseId).toBe(String(initial.details.responseId));
   expect(nextOffset).toBe(initial.details.nextOffset);
-  expect(rendered.length).toBeLessThanOrEqual(MAX_INLINE_CHARS);
+  expect(rendered.length).toBeLessThanOrEqual(MAX_INLINE_CHARS + 256);
   const continued = await getContent.execute(
     'continue',
     { responseId, view: 'summary', offset: nextOffset, maxChars: 100_000 },
@@ -117,6 +108,9 @@ describe('stored aggregate and summary continuation', () => {
     const reconstructed = await reconstructInitialView(initial, getContent);
     expect(reconstructed).toBe(takeStoredPayload().summary);
     expect(initial.content[0].text).toContain('view: "summary"');
+    expect(initial.content[0].text).toContain(
+      'Full response file: /tmp/1.json',
+    );
   });
 
   it('reconstructs the exact stored multi-URL summary from initial and continued text', async () => {
@@ -136,5 +130,8 @@ describe('stored aggregate and summary continuation', () => {
     const reconstructed = await reconstructInitialView(initial, getContent);
     expect(reconstructed).toBe(takeStoredPayload().summary);
     expect(initial.content[0].text).toContain('view: "summary"');
+    expect(initial.content[0].text).toContain(
+      'Full response file: /tmp/1.json',
+    );
   });
 });

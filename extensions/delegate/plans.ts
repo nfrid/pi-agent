@@ -1,5 +1,4 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { resolveArtifact } from '../shared/artifacts';
 import { type DelegateConfig, resolveDelegateRoute } from './config';
 import { resolveDelegateCwd } from './cwd';
 import {
@@ -14,24 +13,10 @@ import {
   type DelegateTaskPlan,
   preflightDelegateContinuation,
 } from './task-lifecycle';
-import type {
-  DelegateHandoffFrom,
-  DelegateHandoffInput,
-  DelegateParams,
-} from './tool';
+import type { DelegateParams } from './tool';
 import type { DelegateChildCapability } from './types';
-import {
-  frameWorkflowEvidence,
-  WORKFLOW_INPUT_CAPS,
-  workflowEvidencePromptBytes,
-} from './workflow-inputs';
 
 type SnapshotLookup = (cwd: string) => string | null;
-
-export const DELEGATE_HANDOFF_CAPS = {
-  perItemMaxBytes: WORKFLOW_INPUT_CAPS.perItemMaxBytes,
-  aggregateMaxBytes: WORKFLOW_INPUT_CAPS.aggregateMaxBytes,
-} as const;
 
 interface TaskInput {
   name?: string;
@@ -48,7 +33,6 @@ interface TaskInput {
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
   worktreePath?: string;
-  handoffFrom?: DelegateHandoffInput;
 }
 
 interface NamedTaskInput extends TaskInput {
@@ -67,7 +51,6 @@ interface SharedDefaults {
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
   worktreePath?: string;
-  handoffFrom?: DelegateHandoffInput;
 }
 
 interface DerivedTask {
@@ -102,13 +85,6 @@ export interface BuiltDelegatePlans {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function normalizeHandoffFrom(
-  input: DelegateHandoffInput | undefined,
-): DelegateHandoffFrom[] | undefined {
-  if (!input) return undefined;
-  return Array.isArray(input) ? input : [input];
 }
 
 export function assertContinuationFields(
@@ -153,7 +129,6 @@ function normalizeInputs(params: DelegateParams): {
       from: params.from,
       refresh: params.refresh,
       worktreePath: params.worktreePath,
-      handoffFrom: params.handoffFrom,
     };
     const inputs = (params.tasks ?? [])
       .map((item) => ({
@@ -187,7 +162,6 @@ function normalizeInputs(params: DelegateParams): {
         from: params.from,
         refresh: params.refresh,
         worktreePath: params.worktreePath,
-        handoffFrom: params.handoffFrom,
       },
     ],
     shared: {},
@@ -424,9 +398,6 @@ export function buildDelegatePlans(
       base: task.input.from ?? shared.from,
       refresh: task.input.refresh ?? shared.refresh,
       worktreePath: task.worktreePath,
-      handoffFrom: normalizeHandoffFrom(
-        task.input.handoffFrom ?? shared.handoffFrom,
-      ),
       writeRequested: task.writeRequested,
       isolation: task.isolation,
       allowWritesExplicit: task.writeRequestExplicit,
@@ -455,95 +426,4 @@ export function buildDelegatePlans(
   }
 
   return { parallel, tasks: preparedTasks };
-}
-
-function handoffError(ref: DelegateHandoffFrom, reason: string): never {
-  invalidParams(`Invalid handoffFrom artifact ${ref.handle}: ${reason}`);
-}
-
-/** Resolve parent-owned artifacts before any child setup or launch occurs. */
-export async function resolveDelegateHandoffs(
-  ctx: ExtensionContext,
-  tasks: BuiltDelegateTask[],
-  resolver: typeof resolveArtifact = resolveArtifact,
-): Promise<BuiltDelegateTask[]> {
-  let aggregatePromptBytes = 0;
-  const resolved: BuiltDelegateTask[] = [];
-  for (const task of tasks) {
-    const plan = task.plan;
-    const refs = plan.handoffFrom
-      ? Array.isArray(plan.handoffFrom)
-        ? plan.handoffFrom
-        : [plan.handoffFrom]
-      : undefined;
-    if (!refs?.length) {
-      resolved.push(task);
-      continue;
-    }
-    if (refs.length > 4) {
-      const limitRef = refs[4] ?? refs.at(-1);
-      if (!limitRef)
-        invalidParams('A child handoff list is unexpectedly empty.');
-      handoffError(limitRef, 'a child may forward at most 4 artifacts');
-    }
-    const seenHandles = new Set<string>();
-    for (const ref of refs) {
-      if (!ref.handle.trim()) handoffError(ref, 'the handle is empty');
-      const duplicateKey = ref.handle;
-      if (seenHandles.has(duplicateKey))
-        handoffError(ref, 'the handle is duplicated for this child');
-      seenHandles.add(duplicateKey);
-    }
-    const framed: string[] = [];
-    for (const ref of refs) {
-      let artifact: Awaited<ReturnType<typeof resolveArtifact>>;
-      try {
-        artifact = await resolver(ctx, ref.handle);
-      } catch {
-        handoffError(ref, 'it could not be resolved in the current session');
-      }
-      if (!artifact)
-        handoffError(ref, 'it was not found in the current session');
-      if (
-        artifact.metadata.producer !== 'delegate' ||
-        artifact.metadata.contentClass !== 'delegate-output' ||
-        artifact.metadata.encoding !== 'utf-8'
-      )
-        handoffError(ref, 'it is not a textual delegate-output artifact');
-      if (artifact.bytes.length > DELEGATE_HANDOFF_CAPS.perItemMaxBytes)
-        handoffError(
-          ref,
-          `it exceeds the ${DELEGATE_HANDOFF_CAPS.perItemMaxBytes} byte raw-artifact per-item limit`,
-        );
-      const label = ref.label?.trim() || ref.handle;
-      const text = artifact.bytes.toString('utf8');
-      const frame = frameWorkflowEvidence(label, text, 'artifact');
-      const itemPromptBytes = workflowEvidencePromptBytes([frame]);
-      if (itemPromptBytes > DELEGATE_HANDOFF_CAPS.perItemMaxBytes)
-        handoffError(
-          ref,
-          `its actual framed prompt bytes exceed the ${DELEGATE_HANDOFF_CAPS.perItemMaxBytes} byte per-item limit`,
-        );
-      framed.push(frame);
-    }
-    const promptBytes = workflowEvidencePromptBytes(framed);
-    aggregatePromptBytes += promptBytes;
-    if (aggregatePromptBytes > DELEGATE_HANDOFF_CAPS.aggregateMaxBytes) {
-      const lastRef = refs.at(-1);
-      if (!lastRef)
-        invalidParams('A child handoff list is unexpectedly empty.');
-      handoffError(
-        lastRef,
-        `the actual forwarded prompt bytes exceed the ${DELEGATE_HANDOFF_CAPS.aggregateMaxBytes} byte aggregate limit`,
-      );
-    }
-    resolved.push({
-      ...task,
-      plan: {
-        ...plan,
-        handoffText: framed.join('\n\n'),
-      },
-    });
-  }
-  return resolved;
 }

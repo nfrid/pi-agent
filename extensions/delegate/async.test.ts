@@ -9,12 +9,6 @@ import type {
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { requestRuntimePause, resumeRuntimePause } from '../pause/operations';
 import { getPauseCoordinator } from '../pause/state';
-import {
-  artifactProducer,
-  putArtifact,
-  resolveArtifact,
-  restoreArtifacts,
-} from '../shared/artifacts';
 import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getLiveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
 import { getScopedServices } from '../shared/runtime/scoped-services';
@@ -32,6 +26,21 @@ import * as taskLifecycle from './task-lifecycle';
 import { createRun, type DelegatedRun } from './types';
 import * as worktreeModule from './worktree';
 
+const cacheFileMock = vi.hoisted(() => ({ next: 0 }));
+vi.mock('../shared/cache-files', () => ({
+  writeCacheFile: vi.fn(
+    async (bytes: Uint8Array | string, extension: string) => {
+      const content = Buffer.from(bytes);
+      const suffix = extension.startsWith('.') ? extension : `.${extension}`;
+      cacheFileMock.next++;
+      return {
+        path: `/tmp/pi/files/${cacheFileMock.next}${suffix}`,
+        size: content.length,
+      };
+    },
+  ),
+}));
+
 interface RegisteredTool {
   name: string;
   execute: (
@@ -48,7 +57,7 @@ interface RegisteredTool {
 
 type Handler = (...args: unknown[]) => unknown;
 
-let artifactRoot: string;
+let testRoot: string;
 
 const config: DelegateConfig = {
   timeoutMs: 60_000,
@@ -154,35 +163,17 @@ function successfulRun(): DelegatedRun {
 }
 
 beforeEach(() => {
-  artifactRoot = mkdtempSync(path.join(tmpdir(), 'pi-delegate-async-'));
-  vi.spyOn(artifactProducer, 'put').mockImplementation(
-    async (_pi, _ctx, input) => ({
-      handle: `art_${'a'.repeat(22)}`,
-      sha256: 'a'.repeat(64),
-      size: Buffer.from(input.bytes).length,
-      producer: 'delegate',
-      contentClass: 'delegate-output',
-      creationSource: 'delegate.result',
-      encoding: 'utf-8',
-      lineCount: 1,
-      createdAt: '2026-01-01T00:00:00.000Z',
-    }),
-  );
+  cacheFileMock.next = 0;
+  testRoot = mkdtempSync(path.join(tmpdir(), 'pi-delegate-async-'));
   vi.spyOn(sessionModule, 'pruneDelegateSessions').mockReturnValue({
     removed: 0,
   });
 });
 
-function useRealArtifactPublication(): void {
-  vi.mocked(artifactProducer.put).mockImplementation((pi, ctx, input) =>
-    putArtifact(pi, ctx, input, { root: artifactRoot }),
-  );
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
-  rmSync(artifactRoot, { recursive: true, force: true });
+  rmSync(testRoot, { recursive: true, force: true });
 });
 
 async function createAsyncHarness(
@@ -214,7 +205,7 @@ async function createAsyncHarness(
 
   const handlers = new Map<string, Handler>();
   const tools = new Map<string, RegisteredTool>();
-  const activeTools = new Set(['delegate', 'artifact_retrieve']);
+  const activeTools = new Set(['delegate']);
   const sendMessage = vi.fn();
   const eventListeners = new Map<string, Set<(value: unknown) => void>>();
   const entries: Array<{
@@ -301,7 +292,7 @@ describe('async delegate extension', () => {
   test('state-gates broker tools until their state is actionable', async () => {
     const { ctx, finish, handlers, sendMessage, tools, activeTools } =
       await createAsyncHarness();
-    expect(activeTools).toEqual(new Set(['delegate', 'artifact_retrieve']));
+    expect(activeTools).toEqual(new Set(['delegate']));
 
     await tools.get('delegate')?.execute(
       'call-gated-background',
@@ -481,7 +472,7 @@ describe('async delegate extension', () => {
     const { ctx, handlers, pi } = await createAsyncHarness();
     const requested = requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
-      path.join(artifactRoot, 'late-delegate.jsonl'),
+      path.join(testRoot, 'late-delegate.jsonl'),
       'parent',
     );
     const snapshot = getPauseCoordinator('parent').snapshot();
@@ -644,7 +635,7 @@ describe('async delegate extension', () => {
     const { ctx, handlers, pi } = await createAsyncHarness();
     const requested = requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
-      path.join(artifactRoot, 'missing', 'delegate.jsonl'),
+      path.join(testRoot, 'missing', 'delegate.jsonl'),
       'parent',
       'background',
     );
@@ -673,7 +664,7 @@ describe('async delegate extension', () => {
     await handlers.get('session_start')?.({}, replacement);
     const requested = requestRuntimePause(pi, replacement);
     const channel = createDelegateControlChannel(
-      path.join(artifactRoot, 'replacement-delegate.jsonl'),
+      path.join(testRoot, 'replacement-delegate.jsonl'),
       'scope-B',
       'background',
     );
@@ -694,7 +685,7 @@ describe('async delegate extension', () => {
     const { ctx, handlers, pi } = await createAsyncHarness('scope-A');
     requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
-      path.join(artifactRoot, 'old-scope-delegate.jsonl'),
+      path.join(testRoot, 'old-scope-delegate.jsonl'),
       'scope-A',
       'foreground',
     );
@@ -718,7 +709,7 @@ describe('async delegate extension', () => {
     const { ctx, handlers, pi } = await createAsyncHarness('current');
     requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
-      path.join(artifactRoot, 'stale-delegate.jsonl'),
+      path.join(testRoot, 'stale-delegate.jsonl'),
       'old',
     );
     expect(
@@ -763,7 +754,7 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, replacementContext);
   });
 
-  test('refreshes terminal live status after owner lifecycle artifact materialization', async () => {
+  test('refreshes terminal live status after lifecycle output-file materialization', async () => {
     const { ctx, finish, handlers, sendMessage, tools } =
       await createAsyncHarness();
     const launch = await tools.get('delegate')?.execute(
@@ -793,7 +784,7 @@ describe('async delegate extension', () => {
               lifecycle?: {
                 reason?: string;
                 diagnostic?: string;
-                diagnosticArtifact?: { handle?: string };
+                diagnosticFile?: { path?: string; size?: number };
               };
             }>;
           }
@@ -801,7 +792,12 @@ describe('async delegate extension', () => {
     )?.statuses?.[0];
     expect(status?.lifecycle).toMatchObject({
       reason: 'child-nonzero-exit',
-      diagnosticArtifact: { handle: `art_${'a'.repeat(22)}` },
+      diagnosticFile: {
+        path: expect.stringContaining(
+          `${path.sep}pi${path.sep}files${path.sep}`,
+        ),
+        size: expect.any(Number),
+      },
     });
     expect(status?.lifecycle?.diagnostic).toBeUndefined();
     await handlers.get('session_shutdown')?.({}, ctx);
@@ -825,7 +821,7 @@ describe('async delegate extension', () => {
     const sendMessage = vi.fn();
     const setWidget = vi.fn();
     const registerMessageRenderer = vi.fn();
-    let sessionId = 'parent';
+    const sessionId = 'parent';
     const entries: Array<{
       type: string;
       customType?: string;
@@ -864,7 +860,6 @@ describe('async delegate extension', () => {
       },
     } as unknown as ExtensionContext;
 
-    useRealArtifactPublication();
     delegate(pi);
     const completionRenderer = registerMessageRenderer.mock.calls[0]?.[1] as
       | ((
@@ -1078,123 +1073,8 @@ describe('async delegate extension', () => {
         ctx,
       );
     expect(peek?.content[0]?.text).not.toContain('Background finding.');
-    expect(entries).toHaveLength(1);
+    expect(entries).toHaveLength(0);
 
-    sessionId = 'foreign';
-    handlers.get('session_tree')?.({}, ctx);
-    const foreignPeek = await tools
-      .get('delegate_jobs')
-      ?.execute(
-        'call-foreign-peek',
-        { action: 'peek', id: 'dj-1' },
-        undefined,
-        undefined,
-        ctx,
-      );
-    expect(foreignPeek?.content[0]?.text).not.toContain('Artifact:');
-    expect(
-      (
-        foreignPeek?.details as {
-          job?: { runs?: Array<{ artifact?: unknown }> };
-        }
-      ).job?.runs?.[0]?.artifact,
-    ).toBeUndefined();
-    expect(entries).toHaveLength(1);
-
-    sessionId = 'parent';
-    const ownerPeek = await tools
-      .get('delegate_jobs')
-      ?.execute(
-        'call-owner-peek',
-        { action: 'peek', id: 'dj-1' },
-        undefined,
-        undefined,
-        ctx,
-      );
-    expect(ownerPeek?.content[0]?.text).toContain('Artifact:');
-    const ownerPeekDetails = ownerPeek?.details as {
-      job?: {
-        runs?: Array<{ artifact?: { handle?: string; size?: number } }>;
-      };
-    };
-    const handle = ownerPeekDetails.job?.runs?.[0]?.artifact?.handle;
-    expect(handle).toBeDefined();
-
-    sessionId = 'foreign';
-    handlers.get('session_tree')?.({}, ctx);
-    const foreignList = await tools
-      .get('delegate_jobs')
-      ?.execute(
-        'call-foreign-list',
-        { action: 'list' },
-        undefined,
-        undefined,
-        ctx,
-      );
-    const foreignListedJob = (
-      foreignList?.details as {
-        jobs?: Array<{
-          runs?: Array<{ artifact?: unknown }>;
-          handoff?: string;
-        }>;
-      }
-    ).jobs?.[0];
-    expect(foreignListedJob?.runs?.[0]?.artifact).toBeUndefined();
-    expect(foreignListedJob?.handoff).toBeUndefined();
-
-    const foreignCancelled = await tools
-      .get('delegate_jobs')
-      ?.execute(
-        'call-foreign-cancel',
-        { action: 'cancel', ids: ['dj-1'] },
-        undefined,
-        undefined,
-        ctx,
-      );
-    expect(foreignCancelled?.content[0]?.text).not.toContain(
-      'Delegated results: 1 run(s)',
-    );
-    const foreignCancelledJob = (
-      foreignCancelled?.details as {
-        jobs?: Array<{
-          runs?: Array<{ artifact?: unknown }>;
-          handoff?: string;
-        }>;
-      }
-    ).jobs?.[0];
-    expect(foreignCancelledJob?.runs?.[0]?.artifact).toBeUndefined();
-    expect(foreignCancelledJob?.handoff).toBeUndefined();
-
-    sessionId = 'parent';
-    const ownerList = await tools
-      .get('delegate_jobs')
-      ?.execute(
-        'call-owner-list',
-        { action: 'list' },
-        undefined,
-        undefined,
-        ctx,
-      );
-    const ownerListedJob = (
-      ownerList?.details as {
-        jobs?: Array<Record<string, unknown>>;
-      }
-    ).jobs?.[0];
-    expect(ownerListedJob).not.toHaveProperty('runs');
-    expect(ownerListedJob).not.toHaveProperty('handoff');
-    expect(ownerListedJob).not.toHaveProperty('tasks');
-    expect(JSON.stringify(ownerList?.details)).not.toContain(handle);
-
-    rmSync(artifactRoot, { recursive: true, force: true });
-    expect(
-      await resolveArtifact(ctx, handle as string, artifactRoot),
-    ).toBeUndefined();
-    expect(await restoreArtifacts(ctx, artifactRoot)).toBe(1);
-    expect(
-      (
-        await resolveArtifact(ctx, handle as string, artifactRoot)
-      )?.bytes.toString(),
-    ).toBe('Background finding.');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
@@ -2065,9 +1945,9 @@ describe('async delegate extension', () => {
         restored.ctx,
       );
     expect(status?.details).toMatchObject({
-      wake: { state: 'queued' },
+      wake: { state: 'blocked' },
     });
-    expect(restored.sendMessage).toHaveBeenCalledOnce();
+    expect(restored.sendMessage).not.toHaveBeenCalled();
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
 
@@ -2160,7 +2040,6 @@ describe('async delegate extension', () => {
       },
     } as unknown as ExtensionContext;
 
-    useRealArtifactPublication();
     delegate(pi);
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify.mock.calls[0]?.[0]).toContain('Comparison: unavailable');
@@ -2351,9 +2230,7 @@ describe('async delegate extension', () => {
     sessionId = 'branch';
     finish(successfulRun());
     const foregroundResult = await foreground;
-    expect(foregroundResult?.content[0]?.text).toContain(
-      'Inline fallback (artifact unavailable)',
-    );
+    expect(foregroundResult?.content[0]?.text).toContain('Output file: ');
     expect(entries).toHaveLength(0);
     handlers.get('agent_settled')?.({}, ctx);
     const afterSettlement =
@@ -2382,15 +2259,17 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(crossBranch?.content[0]?.text).not.toContain('Artifact:');
+    expect(crossBranch?.content[0]?.text).toContain('Output file:');
     expect(crossBranch?.details).toMatchObject({
       action: 'peek',
       job: { runs: [{ task: 'inspect independently' }] },
     });
     const crossBranchJob = (
-      crossBranch?.details as { job?: { runs?: Array<{ artifact?: unknown }> } }
+      crossBranch?.details as {
+        job?: { runs?: Array<{ outputFile?: unknown }> };
+      }
     ).job;
-    expect(crossBranchJob?.runs?.[0]?.artifact).toBeUndefined();
+    expect(crossBranchJob?.runs?.[0]?.outputFile).toBeDefined();
     expect(entries).toHaveLength(0);
 
     sessionId = 'parent';
@@ -2406,9 +2285,15 @@ describe('async delegate extension', () => {
       );
     expect(inspected?.details).toMatchObject({
       action: 'peek',
-      job: { runs: [{ artifact: { contentClass: 'delegate-output' } }] },
+      job: {
+        runs: [
+          {
+            outputFile: { path: expect.any(String), size: expect.any(Number) },
+          },
+        ],
+      },
     });
-    expect(entries).toHaveLength(entriesBeforeInspected + 1);
+    expect(entries).toHaveLength(entriesBeforeInspected);
 
     await tools
       .get('delegate_jobs')

@@ -1,5 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai';
-import type { ArtifactMetadata } from '../shared/artifacts';
+import type { CacheFile } from '../shared/cache-files';
 import {
   createOpaqueId,
   deriveCompatibilityLineageId,
@@ -28,8 +28,8 @@ export interface DelegateLifecycleProjection {
   reason: DelegateLifecycleReason;
   /** Present only when the complete bounded diagnostic fits inline. */
   diagnostic?: string;
-  /** Owner-session exact diagnostic when it does not fit inline. */
-  diagnosticArtifact?: ArtifactMetadata;
+  /** Exact diagnostic file when it does not fit inline. */
+  diagnosticFile?: CacheFile;
   continuationUsable: boolean;
   writableBranchRetained: boolean;
   readOnlySnapshotRetained: boolean;
@@ -200,8 +200,8 @@ export interface DelegateRunMetadata {
   refreshSource?: WorktreeBase;
   /** Exact final prompt sent to the child, retained within bounded public details. */
   renderedPrompt?: string;
-  /** Exact final assistant output, stored only when the parent handoff omits it. */
-  artifact?: ArtifactMetadata;
+  /** Exact final assistant output cache file. */
+  outputFile?: CacheFile;
   /** A bounded pre-timeout checkpoint request and its observed outcome. */
   checkpoint?: DelegateCheckpoint;
   /** The host transport failed transiently; a later observation may retry. */
@@ -264,7 +264,7 @@ export interface DelegateWorkflowRunProjection {
   readonly isolation?: DelegateIsolation;
   readonly continuation?: string;
   readonly worktree?: DelegateWorkflowBranchDescriptor;
-  readonly artifact?: ArtifactMetadata;
+  readonly outputFile?: CacheFile;
   readonly lifecycle?: DelegateLifecycleProjection;
   readonly retryable?: boolean;
   readonly queuedAt?: number;

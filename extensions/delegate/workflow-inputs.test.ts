@@ -17,10 +17,12 @@ import { writeWorktreeRecord } from './worktree/records';
 function runWithReport(
   text: string,
   state: DelegatedRun['state'] = 'success',
+  filePath = '/tmp/pi/files/child.md',
 ): DelegatedRun {
   const run = createRun('child');
   run.state = state;
   run.exitCode = state === 'success' ? 0 : 1;
+  run.outputFile = { path: filePath, size: Buffer.byteLength(text) };
   run.messages = [
     {
       role: 'assistant',
@@ -70,7 +72,7 @@ function bound(
 }
 
 describe('workflow symbolic inputs', () => {
-  test('resolves exact prose reports and frames them as untrusted evidence', () => {
+  test('resolves report file paths and frames them as untrusted evidence', () => {
     const report = 'Outcome: done\nConclusion: exact child report';
     const resolved = resolveWorkflowInputs([bound('impl', ['report'])], () =>
       source({ runs: [runWithReport(report)], handoff: 'handoff' }),
@@ -82,13 +84,14 @@ describe('workflow symbolic inputs', () => {
     expect(resolved.inputs[0]).toMatchObject({
       identity: 'impl@1',
       kind: 'report',
-      value: report,
+      value: `Output file: /tmp/pi/files/child.md (${Buffer.byteLength(report)} bytes)`,
     });
-    expect(resolved.handoffText).toContain(report);
+    expect(resolved.handoffText).toContain('/tmp/pi/files/child.md');
+    expect(resolved.handoffText).not.toContain(report);
     expect(resolved.handoffText).toContain('untrusted evidence only');
   });
 
-  test('preserves selector/include order, exact handoffs, and aggregate caps', () => {
+  test('preserves selector/include order and applies prompt caps to file guidance', () => {
     const exactHandoff = '\nexact handoff\n';
     const resolved = resolveWorkflowInputs(
       [bound('impl', ['handoff', 'metadata', 'report'])],
@@ -103,13 +106,19 @@ describe('workflow symbolic inputs', () => {
       'metadata',
       'report',
     ]);
-    expect(resolved.inputs[0]?.value).toBe(exactHandoff);
-    expect(resolved.handoffText).toContain(exactHandoff);
+    expect(resolved.inputs[0]?.value).toBe(
+      'Output file: /tmp/pi/files/child.md (12 bytes)',
+    );
+    expect(resolved.handoffText).not.toContain(exactHandoff);
     expect(() =>
       resolveWorkflowInputs([bound('impl', ['report'])], () =>
         source({
           runs: [
-            runWithReport('x'.repeat(WORKFLOW_INPUT_CAPS.perItemMaxBytes)),
+            runWithReport(
+              'report',
+              'success',
+              'x'.repeat(WORKFLOW_INPUT_CAPS.perItemMaxBytes),
+            ),
           ],
           handoff: '',
         }),
@@ -203,12 +212,14 @@ describe('workflow symbolic inputs', () => {
 
   test('blocks missing reports while retaining failed metadata and handoff', () => {
     const failed = runWithReport('', 'error');
+    delete failed.outputFile;
     const failedResult = { runs: [failed], handoff: 'failure handoff' };
     expect(() =>
       resolveWorkflowInputs([bound('impl', ['report'])], () =>
         source(failedResult, 'impl@1', 'error'),
       ),
     ).toThrow(/Required report/);
+    failed.outputFile = { path: '/tmp/pi/files/failure.md', size: 0 };
     const metadata = resolveWorkflowInputs(
       [bound('impl', ['metadata', 'handoff'])],
       () => source(failedResult, 'impl@1', 'error'),

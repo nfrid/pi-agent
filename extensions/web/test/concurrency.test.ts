@@ -5,23 +5,12 @@ const state = vi.hoisted(() => ({
   peak: 0,
   payload: '' as string,
 }));
-vi.mock('../../shared/artifacts', () => ({
-  MAX_ARTIFACT_BYTES: 16 * 1024 * 1024,
-  artifactProducer: {
-    put: vi.fn(async (_pi, _ctx, input: { bytes: string }) => {
-      state.payload = input.bytes;
-      return {
-        handle: `art_${'a'.repeat(22)}`,
-        sha256: 'b'.repeat(64),
-        size: Buffer.byteLength(input.bytes),
-        producer: 'web',
-        contentClass: 'json',
-        creationSource: 'web.search',
-        encoding: 'utf-8',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      };
-    }),
-  },
+vi.mock('../../shared/cache-files', () => ({
+  CACHE_FILE_MAX_BYTES: 64 * 1024 * 1024,
+  writeCacheFile: vi.fn(async (input: string) => {
+    state.payload = input;
+    return { path: '/tmp/search.json', size: Buffer.byteLength(input) };
+  }),
 }));
 vi.mock('../search', () => ({
   search: vi.fn(async (query: string) => {

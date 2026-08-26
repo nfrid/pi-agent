@@ -410,9 +410,9 @@ function boundedTerminalField(value: string, fallback: string): string {
   return fallback;
 }
 
-function copyArtifact(
-  value: DelegatedRun['artifact'],
-): DelegatedRun['artifact'] {
+function copyOutputFile(
+  value: DelegatedRun['outputFile'],
+): DelegatedRun['outputFile'] {
   return value ? Object.freeze({ ...value }) : undefined;
 }
 
@@ -447,11 +447,11 @@ function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
     !getDelegateLifecycle(run)
       ? ensureDelegateLifecycle(run)
       : getDelegateLifecycle(run, {
-          includeArtifact: true,
+          includeFile: true,
           includeBoundedFallback: true,
         });
   const compactLifecycle = lifecycle
-    ? cloneDelegateLifecycle(lifecycle, { includeArtifact: true })
+    ? cloneDelegateLifecycle(lifecycle, { includeFile: true })
     : undefined;
   const report = (() => {
     const text = getExactFinalAssistantText(run.messages);
@@ -485,8 +485,8 @@ function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
       ? { continuation }
       : {}),
     ...(copyBranch(run.worktree) ? { worktree: copyBranch(run.worktree) } : {}),
-    ...(copyArtifact(run.artifact)
-      ? { artifact: copyArtifact(run.artifact) }
+    ...(copyOutputFile(run.outputFile)
+      ? { outputFile: copyOutputFile(run.outputFile) }
       : {}),
     ...(compactLifecycle ? { lifecycle: compactLifecycle } : {}),
     ...(run.retryable ? { retryable: true } : {}),
@@ -579,7 +579,6 @@ function normalizePreparedLaunch(
 
 function publicRunFromCompact(
   run: DelegateWorkflowRunProjection,
-  includeArtifacts = false,
 ): DelegatedRun {
   const projected: DelegatedRun = {
     runId: run.runId,
@@ -609,15 +608,11 @@ function publicRunFromCompact(
     ...(run.workflowAttempt
       ? { workflowAttempt: Object.freeze({ ...run.workflowAttempt }) }
       : {}),
-    ...(includeArtifacts && run.artifact
-      ? { artifact: { ...run.artifact } }
-      : {}),
+    ...(run.outputFile ? { outputFile: { ...run.outputFile } } : {}),
     ...(run.retryable ? { retryable: true } : {}),
   };
   if (run.lifecycle) {
-    const lifecycle = cloneDelegateLifecycle(run.lifecycle, {
-      includeArtifact: includeArtifacts,
-    });
+    const lifecycle = cloneDelegateLifecycle(run.lifecycle);
     if (lifecycle) {
       projected.lifecycle = lifecycle;
       hydrateDelegateLifecycle(projected, lifecycle);
@@ -630,9 +625,7 @@ function publicResultFromCompact(
   result: DelegateWorkflowResultRecord,
 ): DelegateWorkflowResultProjection {
   return Object.freeze({
-    runs: Object.freeze(
-      result.runs.map((run) => publicRunFromCompact(run, true)),
-    ),
+    runs: Object.freeze(result.runs.map((run) => publicRunFromCompact(run))),
     handoff: result.handoff.text,
   });
 }
@@ -786,7 +779,6 @@ export class DelegateWorkflowCoordinator {
         options.prepare === undefined
           ? {
               name: options.name,
-              ownerSessionId: options.ownerSessionId,
               ownerBranchId: this.ownerBranchId,
               mode: options.mode as DelegateJobStartOptions['mode'],
               tasks: [...(options.tasks ?? [])],

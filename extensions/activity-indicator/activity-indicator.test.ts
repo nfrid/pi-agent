@@ -62,7 +62,6 @@ describe('activity indicator', () => {
     ['web_search', 'Searching the web...'],
     ['fetch_content', 'Fetching pages...'],
     ['get_search_content', 'Retrieving search results...'],
-    ['artifact_retrieve', 'Retrieving artifact...'],
     ['todo', 'Updating tasks...'],
     ['delegate', 'Delegating...'],
   ])('uses an action label for %s', (name, expected) => {

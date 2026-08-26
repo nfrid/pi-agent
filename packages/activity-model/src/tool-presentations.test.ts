@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  artifactRetrievePresentation,
   backgroundPresentation,
   customToolKind,
   delegateBranchesPresentation,
@@ -18,7 +17,6 @@ describe('custom tool presentation kinds', () => {
     expect(customToolKind('search_web')).toBe('web_search');
     expect(customToolKind('fetch_content')).toBe('fetch_content');
     expect(customToolKind('get_search_content')).toBe('get_search_content');
-    expect(customToolKind('artifact_retrieve')).toBe('artifact_retrieve');
     expect(customToolKind('delegate')).toBe('delegate');
     expect(customToolKind('delegates')).toBe('delegate');
     expect(customToolKind('delegate_jobs')).toBe('delegate_jobs');
@@ -55,14 +53,6 @@ describe('custom tool presentation kinds', () => {
         queryIndex: 0,
       }),
     ).toMatchObject({ responseId: 'ws_1', heading: 'Results', queryIndex: 0 });
-    expect(
-      artifactRetrievePresentation({
-        handle: 'art_abcdefghijklmnopqrstuv',
-        mode: 'lines',
-        offset: 10,
-        limit: 20,
-      }),
-    ).toMatchObject({ mode: 'lines', offset: 10, limit: 20 });
     expect(
       delegatePresentation({
         name: 'Review',

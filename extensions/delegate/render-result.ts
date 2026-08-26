@@ -171,9 +171,9 @@ function addExpandedRun(
       );
       const diagnostic = lifecycle.diagnostic
         ? `Diagnostic: ${lifecycle.diagnostic}`
-        : lifecycle.diagnosticArtifact
-          ? `Diagnostic artifact: ${lifecycle.diagnosticArtifact.handle}`
-          : 'Diagnostic artifact unavailable.';
+        : lifecycle.diagnosticFile
+          ? `Diagnostic file: ${lifecycle.diagnosticFile.path} (${lifecycle.diagnosticFile.size} bytes)`
+          : 'Diagnostic file unavailable.';
       container.addChild(
         new Text(fg('warning', explicitTruncate(diagnostic, 2_048)), 0, 0),
       );
@@ -401,9 +401,9 @@ export function renderDelegateResult(
           fieldLine(
             'Diagnostic',
             lifecycle.diagnostic ??
-              (lifecycle.diagnosticArtifact
-                ? `artifact ${lifecycle.diagnosticArtifact.handle}`
-                : 'artifact unavailable'),
+              (lifecycle.diagnosticFile
+                ? `file ${lifecycle.diagnosticFile.path} (${lifecycle.diagnosticFile.size} bytes)`
+                : 'file unavailable'),
             fg,
             'warning',
           ),

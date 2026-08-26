@@ -321,7 +321,7 @@ describe('delegate status store', () => {
       },
     ]);
     expect(JSON.stringify(store.getWakes())).not.toMatch(
-      /handoff|report|payload|artifact|diagnostic|transcript/i,
+      /handoff|report|payload|outputFile|diagnostic|transcript/i,
     );
   });
 

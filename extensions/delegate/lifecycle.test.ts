@@ -11,22 +11,8 @@ import { getDetails } from './render-utils';
 import { runDelegate } from './runner';
 import { serializeDelegateRunForPublic } from './serialize';
 import { DelegateStatusStore } from './status';
-import { buildArtifactBackedHandoff, makeDetails } from './tool-result';
+import { buildOutputFileHandoff, makeDetails } from './tool-result';
 import { createRun } from './types';
-
-function diagnosticArtifact(size: number) {
-  return {
-    handle: `art_${'f'.repeat(22)}`,
-    sha256: 'b'.repeat(64),
-    size,
-    producer: 'delegate' as const,
-    contentClass: 'delegate-output' as const,
-    creationSource: 'delegate.failure',
-    encoding: 'utf-8' as const,
-    lineCount: 1,
-    createdAt: '2026-01-01T00:00:00.000Z',
-  };
-}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -340,18 +326,13 @@ describe('delegate lifecycle failure projection', () => {
     expect(getDelegateLifecycle(unknown)?.reason).toBe('unknown');
   });
 
-  test('bounds a long diagnostic when lifecycle artifact publication fails', async () => {
+  test('bounds a long diagnostic when output-file publication fails', async () => {
     const run = createRun('publication failure');
     run.state = 'error';
     setDelegateLifecycle(run, 'provider-runner-error', '🙂'.repeat(20_000));
-    const handoff = await buildArtifactBackedHandoff(
-      {} as never,
-      {} as never,
-      [run],
-      async () => {
-        throw new Error('publication unavailable');
-      },
-    );
+    const handoff = await buildOutputFileHandoff([run], async () => {
+      throw new Error('publication unavailable');
+    });
     const diagnostic = getDelegateLifecycle(run)?.diagnostic ?? '';
     expect(Buffer.byteLength(diagnostic, 'utf8')).toBeLessThanOrEqual(
       LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
@@ -360,32 +341,31 @@ describe('delegate lifecycle failure projection', () => {
     expect(handoff).toContain(LIFECYCLE_PUBLIC_FALLBACK_MARKER);
   });
 
-  test('artifacts an exact long Unicode diagnostic without inline clipping', async () => {
+  test('writes an exact long Unicode diagnostic without inline clipping', async () => {
     const run = createRun('long failure');
     run.state = 'error';
     const exact = ['line one', '失敗🙂'.repeat(2_000), 'line three'].join('\n');
     setDelegateLifecycle(run, 'unknown', exact);
     let bytes = '';
-    const handoff = await buildArtifactBackedHandoff(
-      {} as never,
-      {} as never,
-      [run],
-      async (_pi, _ctx, input) => {
-        bytes = String(input.bytes);
-        return diagnosticArtifact(Buffer.byteLength(bytes, 'utf8'));
-      },
-    );
+    const handoff = await buildOutputFileHandoff([run], async (input) => {
+      bytes = String(input);
+      return {
+        path: '/tmp/diagnostic.txt',
+        size: Buffer.byteLength(bytes, 'utf8'),
+      };
+    });
 
     expect(bytes).toBe(getDelegateLifecycleDiagnostic(run));
     expect(handoff).toContain(
-      `Failure artifact: ${diagnosticArtifact(Buffer.byteLength(bytes, 'utf8')).handle}`,
+      `Failure file: /tmp/diagnostic.txt (${Buffer.byteLength(bytes, 'utf8')} bytes)`,
     );
     expect(handoff).not.toContain('失敗🙂'.repeat(100));
     expect(getDelegateLifecycle(run)).toMatchObject({
       reason: 'unknown',
-      diagnosticArtifact: expect.objectContaining({
-        creationSource: 'delegate.failure',
-      }),
+      diagnosticFile: {
+        path: '/tmp/diagnostic.txt',
+        size: Buffer.byteLength(bytes, 'utf8'),
+      },
     });
   });
 });

@@ -29,7 +29,7 @@ import { buildSessionSnapshotJsonl } from './session';
 import type { DelegateStatusStore } from './status';
 import { rollbackPreparedDelegateTasks } from './task-lifecycle';
 import {
-  buildSessionBoundArtifactBackedHandoff,
+  buildOutputFileHandoff,
   delegateToolResult,
   makeDetails,
 } from './tool-result';
@@ -87,39 +87,6 @@ const RefreshSchema = StringEnum(['wip', 'head'] as const, {
   description:
     'Continuation-only snapshot selector. For a read-only isolated continuation, wip recreates from the parent’s current tracked and untracked work; head recreates from current HEAD only. Omit to continue the original snapshot.',
 });
-
-const HandoffArtifactSchema = Type.Object({
-  handle: Type.String({
-    minLength: 1,
-    maxLength: 64,
-    pattern: '^art_[A-Za-z0-9_-]{22}$',
-    description: 'Artifact handle from a prior delegate result in this session',
-  }),
-  label: Type.Optional(
-    Type.String({
-      minLength: 1,
-      maxLength: 120,
-      description:
-        'Optional label for the upstream evidence in the child prompt',
-    }),
-  ),
-});
-
-const HandoffFromListSchema = Type.Array(HandoffArtifactSchema, {
-  minItems: 1,
-  maxItems: 4,
-  description: 'Ordered prior delegate-output artifacts to forward',
-});
-
-// Accept the original object form as a one-item shorthand while making the
-// ordered array form explicit for children that need several upstream reports.
-const HandoffFromSchema = Type.Union([
-  HandoffArtifactSchema,
-  HandoffFromListSchema,
-]);
-
-export type DelegateHandoffFrom = Static<typeof HandoffArtifactSchema>;
-export type DelegateHandoffInput = Static<typeof HandoffFromSchema>;
 
 const LogicalIdSchema = Type.String({
   minLength: 1,
@@ -191,7 +158,6 @@ const TaskItem = Type.Object({
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
   worktreePath: Type.Optional(WorktreePathSchema),
-  handoffFrom: Type.Optional(HandoffFromSchema),
 });
 
 const DelegateCommonParamProperties = {
@@ -216,7 +182,7 @@ type DelegateCommonParams = Omit<Static<typeof TaskItem>, 'continuation'> & {
   after?: Static<typeof AfterSchema>;
   inputs?: Array<Static<typeof WorkflowInputSchema>>;
 };
-type ModelDelegateParams = Omit<DelegateCommonParams, 'handoffFrom'> &
+type ModelDelegateParams = DelegateCommonParams &
   ({ id: string; continue?: never } | { continue: string; id?: never });
 
 const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
@@ -501,7 +467,6 @@ export function registerDelegateTool(
               | import('./workflow-inputs').SymbolicWorkflowSelector[]
               | undefined,
             name: params.name?.trim() || logicalId,
-            ownerSessionId: launchSessionId,
             ownerBranchId: launchBranchId,
             route: routing.route,
             routing,
@@ -625,38 +590,17 @@ export function registerDelegateTool(
         if (!backgroundRuntime)
           throw new Error('Background delegate runtime is unavailable.');
         const materializeHandoff = async (
-          materializeCtx: typeof ctx,
+          _materializeCtx: typeof ctx,
           runs: import('./types').DelegatedRun[],
           statusId?: string,
         ) => {
-          const handoff = await buildSessionBoundArtifactBackedHandoff(
-            pi,
-            materializeCtx,
-            launchSessionId,
-            runs,
-            launchBranchId,
-            () =>
-              launchBranchId !== undefined &&
-              backgroundRuntime?.getBranchId?.() === launchBranchId,
-          );
-          const ownerSession =
-            materializeCtx.sessionManager.getSessionId() === launchSessionId &&
-            (launchBranchId === undefined ||
-              backgroundRuntime?.getBranchId?.() === launchBranchId);
+          const handoff = await buildOutputFileHandoff(runs);
           const publicRuns = runs.map((run) =>
-            serializeDelegateRunForPublic(run, {
-              includeArtifacts: ownerSession,
-            }),
+            serializeDelegateRunForPublic(run),
           );
-          if (ownerSession && statusId && publicRuns[0])
+          if (statusId && publicRuns[0])
             activeStatuses?.update(statusId, publicRuns[0]);
-          return {
-            runs: ownerSession
-              ? publicRuns
-              : publicRuns.map((run) => ({ ...run, artifact: undefined })),
-            retainedRuns: runs,
-            handoff,
-          };
+          return { runs: publicRuns, retainedRuns: runs, handoff };
         };
         const controls = execution.tasks.map((item, index) => {
           const control = createDelegateControlChannel(
@@ -678,7 +622,6 @@ export function registerDelegateTool(
                 throw new Error('Missing delegate control channel.');
               return {
                 name: item.plan.name,
-                ownerSessionId: launchSessionId,
                 ownerBranchId: launchBranchId,
                 mode: 'single' as const,
                 tasks: [item.plan.task],
@@ -705,7 +648,7 @@ export function registerDelegateTool(
                         },
                       },
                     );
-                    // The child is settled before owner-session artifact
+                    // The child is settled before output-file and handoff
                     // materialization; reject feedback during that recovery
                     // window rather than reporting it as delivered.
                     if (detachSignal?.aborted) control.detach();
@@ -785,17 +728,7 @@ export function registerDelegateTool(
       }
       if (runs.some((run) => run.worktree))
         backgroundRuntime?.activateBranches?.();
-      const result = await delegateToolResult(
-        pi,
-        ctx,
-        execution.mode,
-        runs,
-        launchSessionId,
-        launchBranchId,
-        () =>
-          launchBranchId !== undefined &&
-          backgroundRuntime?.getBranchId?.() === launchBranchId,
-      );
+      const result = await delegateToolResult(pi, ctx, execution.mode, runs);
       if (statusIds) {
         // delegateToolResult publishes lifecycle diagnostics before returning;
         // refresh terminal status with that owner-safe projection rather than

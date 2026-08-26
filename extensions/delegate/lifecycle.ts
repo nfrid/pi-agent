@@ -1,4 +1,4 @@
-import type { ArtifactMetadata } from '../shared/artifacts';
+import type { CacheFile } from '../shared/cache-files';
 import { resolveDelegateSession } from './session';
 import {
   type DelegatedRun,
@@ -12,17 +12,16 @@ import { loadWorktree } from './worktree';
 export const LIFECYCLE_DIAGNOSTIC_CAPTURE_BYTES = 64 * 1024;
 /** Maximum diagnostic bytes copied into the parent envelope. */
 export const LIFECYCLE_INLINE_DIAGNOSTIC_BYTES = 2 * 1024;
-/** Marker used when an exact capture cannot cross the current public boundary. */
+/** Marker used when an exact capture cannot be written to a cache file. */
 export const LIFECYCLE_PUBLIC_FALLBACK_MARKER =
-  '\n[Exact lifecycle diagnostic unavailable on this session/publication path; bounded fallback shown.]';
+  '\n[Exact lifecycle diagnostic file unavailable; bounded fallback shown.]';
 /** Stderr is evidence for a child-exit diagnostic, never a public raw stream. */
 export const LIFECYCLE_STDERR_BYTES = 8 * 1024;
 
 interface LifecycleRecord {
   reason: DelegateLifecycleReason;
-  /** Undefined when a persisted projection retained only its artifact handle. */
   diagnostic?: string;
-  diagnosticArtifact?: ArtifactMetadata;
+  diagnosticFile?: CacheFile;
   diagnosticPublicationFailed?: boolean;
 }
 
@@ -84,7 +83,7 @@ function byteBoundedWithMarker(
   return result + marker;
 }
 
-/** Keep stale/publication-failure diagnostics actionable without exposing captures. */
+/** Keep publication-failure diagnostics actionable without exposing full captures. */
 export function boundLifecyclePublicFallback(
   value: string,
   maxBytes = LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
@@ -220,9 +219,7 @@ export function hydrateDelegateLifecycle(
   const record: LifecycleRecord = {
     reason: value.reason,
     ...(value.diagnostic !== undefined ? { diagnostic: value.diagnostic } : {}),
-    ...(value.diagnosticArtifact
-      ? { diagnosticArtifact: value.diagnosticArtifact }
-      : {}),
+    ...(value.diagnosticFile ? { diagnosticFile: value.diagnosticFile } : {}),
   };
   records.set(run, record);
   Object.defineProperty(run, TRUSTED_LIFECYCLE, {
@@ -272,14 +269,14 @@ export function markDelegateLifecycleDiagnosticPublicationFailed(
   if (record) record.diagnosticPublicationFailed = true;
 }
 
-export function setDelegateLifecycleDiagnosticArtifact(
+export function setDelegateLifecycleDiagnosticFile(
   run: DelegatedRun,
-  artifact: ArtifactMetadata | undefined,
+  file: CacheFile | undefined,
 ): void {
   const record = records.get(run);
   if (!record) return;
-  if (artifact) record.diagnosticArtifact = artifact;
-  else delete record.diagnosticArtifact;
+  if (file) record.diagnosticFile = file;
+  else delete record.diagnosticFile;
 }
 
 /** Ensure old persisted error details receive a truthful, conservative code. */
@@ -300,7 +297,7 @@ export function ensureDelegateLifecycle(
 export function getDelegateLifecycle(
   run: DelegatedRun,
   options: {
-    includeArtifact?: boolean;
+    includeFile?: boolean;
     /** Include a <=2 KiB fallback when the exact capture cannot cross this path. */
     includeBoundedFallback?: boolean;
   } = {},
@@ -319,10 +316,10 @@ export function getDelegateLifecycle(
   return {
     reason: record.reason,
     ...(inline ? { diagnostic: inline } : {}),
-    ...(options.includeArtifact === false
+    ...(options.includeFile === false
       ? {}
-      : record.diagnosticArtifact
-        ? { diagnosticArtifact: record.diagnosticArtifact }
+      : record.diagnosticFile
+        ? { diagnosticFile: record.diagnosticFile }
         : {}),
     ...facts,
   };
@@ -331,7 +328,7 @@ export function getDelegateLifecycle(
 /** Copy a public projection without retaining a mutable caller-owned object. */
 export function cloneDelegateLifecycle(
   projection: DelegateLifecycleProjection | undefined,
-  options: { includeArtifact?: boolean } = {},
+  options: { includeFile?: boolean } = {},
 ): DelegateLifecycleProjection | undefined {
   if (!projection) return undefined;
   return {
@@ -339,10 +336,10 @@ export function cloneDelegateLifecycle(
     ...(projection.diagnostic !== undefined
       ? { diagnostic: projection.diagnostic }
       : {}),
-    ...(options.includeArtifact === false
+    ...(options.includeFile === false
       ? {}
-      : projection.diagnosticArtifact
-        ? { diagnosticArtifact: { ...projection.diagnosticArtifact } }
+      : projection.diagnosticFile
+        ? { diagnosticFile: { ...projection.diagnosticFile } }
         : {}),
     continuationUsable: projection.continuationUsable,
     writableBranchRetained: projection.writableBranchRetained,
@@ -354,7 +351,7 @@ export function cloneDelegateLifecycle(
 export function copyDelegateLifecycle(
   source: DelegatedRun,
   target: DelegatedRun,
-  options: { includeArtifact?: boolean } = {},
+  options: { includeFile?: boolean } = {},
 ): void {
   const record = records.get(source);
   if (!record) return;
@@ -363,10 +360,10 @@ export function copyDelegateLifecycle(
     ...(record.diagnostic !== undefined
       ? { diagnostic: record.diagnostic }
       : {}),
-    ...(options.includeArtifact === false
+    ...(options.includeFile === false
       ? {}
-      : record.diagnosticArtifact
-        ? { diagnosticArtifact: { ...record.diagnosticArtifact } }
+      : record.diagnosticFile
+        ? { diagnosticFile: { ...record.diagnosticFile } }
         : {}),
     ...(record.diagnosticPublicationFailed
       ? { diagnosticPublicationFailed: true }

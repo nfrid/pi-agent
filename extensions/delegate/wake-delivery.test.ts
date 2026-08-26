@@ -13,6 +13,7 @@ function result(): { runs: ReturnType<typeof createRun>[]; handoff: string } {
   run.state = 'success';
   run.exitCode = 0;
   run.finishedAt = Date.now();
+  run.outputFile = { path: '/tmp/pi/files/wake-source.md', size: 20 };
   return { runs: [run], handoff: 'bounded handoff evidence' };
 }
 

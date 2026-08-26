@@ -1,6 +1,5 @@
 import {
   actionIdPresentation,
-  artifactRetrievePresentation,
   backgroundPresentation,
   type CustomToolKind,
   delegateBranchesPresentation,
@@ -86,19 +85,6 @@ function customOutcomeFacts(kind: CustomToolKind, result: unknown): string[] {
     const chars = finiteResultNumber(details, 'selectedChars');
     return chars === undefined ? [] : [`${chars.toLocaleString()} chars`];
   }
-  if (kind === 'artifact_retrieve') {
-    const mode = details.mode;
-    const lines = finiteResultNumber(details, 'returnedLines');
-    const matches = finiteResultNumber(details, 'totalMatches');
-    const bytes = finiteResultNumber(details, 'totalBytes');
-    if (mode === 'lines' && lines !== undefined)
-      return [`${lines.toLocaleString()} lines`];
-    if (mode === 'search' && matches !== undefined)
-      return [`${matches.toLocaleString()} matches`];
-    if (mode === 'metadata' && bytes !== undefined)
-      return [`${bytes.toLocaleString()} bytes`];
-    return [];
-  }
   if (kind === 'background') {
     const process =
       details.process &&
@@ -173,7 +159,6 @@ function ResultBody({
     kind === 'web_search' ||
     kind === 'fetch_content' ||
     kind === 'get_search_content' ||
-    kind === 'artifact_retrieve' ||
     kind === 'delegate';
   return (
     <>
@@ -271,19 +256,6 @@ function GetSearchContentSummary({ args }: { args: unknown }) {
       title="Search content"
     />
   );
-}
-
-function ArtifactSummary({ args }: { args: unknown }) {
-  const model = artifactRetrievePresentation(args);
-  const range =
-    model.mode === 'lines' && model.offset !== undefined
-      ? `lines ${model.offset + 1}${model.limit === undefined ? '' : `–${model.offset + model.limit}`}`
-      : model.query
-        ? compact(model.query, 80)
-        : model.pointer
-          ? compact(model.pointer, 80)
-          : model.mode;
-  return <Summary detail={range} title={model.handle ?? 'Artifact'} />;
 }
 
 function DelegateSummary({ args }: { args: unknown }) {
@@ -489,7 +461,6 @@ const SUMMARIES: Record<CustomToolKind, (args: unknown) => ReactNode> = {
   web_search: (args) => <WebSearchSummary args={args} />,
   fetch_content: (args) => <FetchSummary args={args} />,
   get_search_content: (args) => <GetSearchContentSummary args={args} />,
-  artifact_retrieve: (args) => <ArtifactSummary args={args} />,
   delegate: (args) => <DelegateSummary args={args} />,
   delegate_jobs: (args) => <ActionSummary args={args} title="Delegate jobs" />,
   delegate_branches: (args) => <BranchesSummary args={args} />,

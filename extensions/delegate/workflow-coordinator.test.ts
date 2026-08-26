@@ -30,6 +30,10 @@ function result(
   run.state = state;
   run.exitCode = state === 'success' ? 0 : 1;
   run.finishedAt = Date.now();
+  run.outputFile = {
+    path: `/tmp/pi/files/${task}.md`,
+    size: Buffer.byteLength(task),
+  };
   return { runs: [run], handoff: `${state}: ${task}` };
 }
 
@@ -557,8 +561,12 @@ describe('DelegateWorkflowCoordinator', () => {
   test('binds lazy symbolic inputs before later continuations and blocks missing reports', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const missingReport = result('no report', 'error');
+    const missingRun = missingReport.runs[0];
+    if (!missingRun) throw new Error('missing upstream run');
+    delete missingRun.outputFile;
     const upstream = coordinator.schedule(
-      scheduleOptions('impl', async () => result('no report', 'error')),
+      scheduleOptions('impl', async () => missingReport),
     );
     await vi.waitFor(() =>
       expect(coordinator.require(upstream.identity).state).toBe('error'),

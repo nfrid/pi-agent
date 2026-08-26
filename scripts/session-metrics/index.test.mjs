@@ -776,12 +776,15 @@ describe('delegate measurements', () => {
     const result = parseSessionJsonl(
       delegateFixture([
         {
-          text: 'Outcome: partial\nArtifact: art_safe\nExact output artifact unavailable',
+          text: 'Outcome: partial\nOutput file: /tmp/delegate-report.md',
           details: {
             runs: [
               {
                 state: 'timed-out',
-                artifact: { handle: 'art_safe' },
+                outputFile: {
+                  path: '/tmp/delegate-report.md',
+                  size: 128,
+                },
                 worktree: { branch: 'delegate/task' },
               },
             ],
@@ -792,8 +795,6 @@ describe('delegate measurements', () => {
     expect(result).toMatchObject({
       delegateOutcomePartial: 1,
       delegateProcessTimeouts: 1,
-      delegateArtifactReferences: 1,
-      delegateArtifactFallbacks: 1,
       delegateWorktreeReturns: 1,
     });
   });

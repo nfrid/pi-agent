@@ -45,7 +45,7 @@ export interface RestoredDelegateDependencies {
   loadWorktree?: typeof loadWorktree;
   restoreWorktreeSession?: typeof restoreWorktreeSession;
   finalizeWorktreeRun?: typeof finalizeWorktreeRun;
-  /** Existing owner-session artifact/handoff materialization seam. */
+  /** Existing output-file and parent-handoff materialization seam. */
   materialize?: (runs: DelegatedRun[]) => Promise<DelegateJobResult>;
   /** Feed restored live activity into the existing status store. */
   onRunUpdate?: (run: DelegatedRun) => void;
@@ -438,7 +438,7 @@ export function restoreHostedDelegateAttempt(
       try {
         result = await materialize(runs);
       } catch (error) {
-        // An owner artifact/materialization failure is a workflow failure, not
+        // An output-file/materialization failure is a workflow failure, not
         // an unreported exception after the status row has already succeeded.
         if (detachSignal?.aborted) throw new DetachedDelegateError();
         if (signal.aborted) return cancellationResult();
@@ -533,7 +533,6 @@ export function restoreHostedDelegateAttempt(
     if (!claimHeld) throw new RestoreBindingConflictError(identity);
     job = options.manager.observeExisting({
       name: session.name ?? label,
-      ownerSessionId: options.parentSessionId,
       ownerBranchId: link.ownerBranchId,
       mode: 'single',
       tasks: [label],

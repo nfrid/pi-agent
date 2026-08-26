@@ -558,9 +558,6 @@ describe('transcript payload inspection', () => {
     expect(toolPresentationKind({ name: 'get_search_content' })).toBe(
       'get_search_content',
     );
-    expect(toolPresentationKind({ name: 'artifact_retrieve' })).toBe(
-      'artifact_retrieve',
-    );
     expect(toolPresentationKind({ name: 'delegate' })).toBe('delegate');
     expect(toolPresentationKind({ name: 'delegate_jobs' })).toBe(
       'delegate_jobs',
@@ -656,31 +653,6 @@ describe('transcript payload inspection', () => {
       />,
     );
     expect(content).toContain('32 chars');
-
-    const artifact = renderToStaticMarkup(
-      <ToolInspector
-        tool={{
-          name: 'artifact_retrieve',
-          arguments: {
-            handle: 'art_abcdefghijklmnopqrstuv',
-            mode: 'lines',
-            offset: 4,
-            limit: 3,
-          },
-          result: {
-            content: [{ type: 'text', text: 'line 5\nline 6\nline 7' }],
-            details: {
-              mode: 'lines',
-              totalBytes: 200,
-              startLine: 5,
-              returnedLines: 3,
-              remainingLines: 0,
-            },
-          },
-        }}
-      />,
-    );
-    expect(artifact).toContain('3 lines');
 
     const backgroundOutcome = renderToStaticMarkup(
       <ToolInspector

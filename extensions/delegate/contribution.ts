@@ -50,8 +50,11 @@ const DelegateLifecycleSchema = Type.Object(
   {
     reason: DelegateLifecycleReasonSchema,
     diagnostic: Type.Optional(Type.String({ maxLength: 65_536 })),
-    diagnosticArtifact: Type.Optional(
-      Type.Record(Type.String(), Type.Unknown()),
+    diagnosticFile: Type.Optional(
+      Type.Object({
+        path: Type.String({ minLength: 1, maxLength: 4096 }),
+        size: Type.Integer({ minimum: 0 }),
+      }),
     ),
     continuationUsable: Type.Boolean(),
     writableBranchRetained: Type.Boolean(),

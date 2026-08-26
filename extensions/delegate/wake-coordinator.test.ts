@@ -17,6 +17,10 @@ function result(
   run.state = state;
   run.exitCode = state === 'success' ? 0 : 1;
   run.finishedAt = Date.now();
+  run.outputFile = {
+    path: `/tmp/pi/files/${task}.md`,
+    size: Buffer.byteLength(task),
+  };
   return {
     runs: [run],
     handoff: `Status: ${state}\nOutcome: ${task} complete`,
@@ -164,12 +168,14 @@ describe('WakeCoordinator', () => {
       wake.register({
         id: 'blocked-wake',
         condition: { node: blocked.identity },
+        payload: ['metadata'],
       }).state,
     ).toBe('ready');
     expect(
       wake.register({
         id: 'cancelled-wake',
         condition: { node: cancelled.identity },
+        payload: ['metadata'],
       }).state,
     ).toBe('ready');
     await workflow.dispose();
@@ -282,7 +288,7 @@ describe('WakeCoordinator', () => {
     const workflow = new DelegateWorkflowCoordinator();
     const handoff = 'secret exact report prose should not be persisted';
     const attempt = workflow.schedule({
-      ...options('build', async () => ({ runs: [], handoff })),
+      ...options('build', async () => ({ ...result('secret'), handoff })),
     });
     await settled(workflow, attempt.identity);
     const wake = new WakeCoordinator({ workflow });
@@ -351,8 +357,8 @@ describe('WakeCoordinator', () => {
     });
     wake.register({ id: 'both', condition: { all: [a.identity, b.identity] } });
     expect(Object.keys(payload.sources)).toEqual(['a@1', 'b@1']);
-    expect(payload.sources['a@1']?.handoff).toContain('a complete');
-    expect(payload.sources['b@1']?.handoff).toContain('b complete');
+    expect(payload.sources['a@1']?.handoff).toContain('/tmp/pi/files/a.md');
+    expect(payload.sources['b@1']?.handoff).toContain('/tmp/pi/files/b.md');
     expect(Object.isFrozen(payload.sources['a@1']?.metadata)).toBe(true);
     expect(payload.handoff).toBeUndefined();
     let explicitPayload!: WakeDispatch['payload'];
@@ -370,7 +376,9 @@ describe('WakeCoordinator', () => {
         { kind: 'metadata', node: b.identity },
       ],
     });
-    expect(explicitPayload.sources['a@1']?.handoff).toContain('a complete');
+    expect(explicitPayload.sources['a@1']?.handoff).toContain(
+      '/tmp/pi/files/a.md',
+    );
     expect(explicitPayload.sources['b@1']?.metadata?.identity).toBe('b@1');
     await workflow.dispose();
   });

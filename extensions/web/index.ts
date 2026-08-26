@@ -11,8 +11,6 @@ export default defineExtension('web', (pi: ExtensionAPI) => {
   const resultStore = createWebResultStore();
   const lifecycle = createLifecycleGuard(
     {
-      onSessionStart: (ctx) => resultStore.restore(ctx),
-      onSessionTree: (ctx) => resultStore.restore(ctx),
       onSessionShutdown: () => resultStore.clear(),
       boundaryError: 'Web operation crossed a session lifecycle boundary.',
     },

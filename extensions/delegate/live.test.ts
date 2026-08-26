@@ -146,7 +146,7 @@ describe('delegate live surface', () => {
       { id: 'review-ready', state: 'pending', waitingFor: ['review@1'] },
     ]);
     expect(JSON.stringify(model.statuses[0]?.workflow)).not.toMatch(
-      /handoff|payload|artifact|diagnostic|transcript/i,
+      /handoff|payload|outputFile|diagnostic|transcript/i,
     );
   });
 

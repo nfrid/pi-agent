@@ -2991,7 +2991,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
               },
               {
                 type: 'custom',
-                customType: 'artifact:v1',
+                customType: 'private-state:v1',
                 data: { bytes: 12 },
               },
               {
@@ -3246,7 +3246,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(
     page.getByText(/Background command finished · Dashboard build · 2s/),
   ).toBeVisible();
-  await expect(page.getByText('artifact:v1')).toHaveCount(0);
+  await expect(page.getByText('private-state:v1')).toHaveCount(0);
   await expect(page.getByText('Do not render this context.')).toHaveCount(0);
   await page.getByText('Context compacted', { exact: true }).click();
   await expect(page.getByText('Compaction checkpoint')).toBeVisible();

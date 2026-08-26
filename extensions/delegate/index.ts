@@ -65,7 +65,7 @@ import { DelegateStatusStore } from './status';
 
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
-import { buildSessionBoundArtifactBackedHandoff } from './tool-result';
+import { buildOutputFileHandoff } from './tool-result';
 import { registerDelegateTranscriptCommand } from './transcript';
 import { createRun, type DelegatedRun } from './types';
 import { WakeCoordinator } from './wake-coordinator';
@@ -643,8 +643,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = new DelegateJobManager({
       scopeId: sessionScopeId,
       pendingProcesses: scopedServices.pendingProcesses,
-      isOwnerBranchActive: (ownerBranchId) =>
-        ownerBranchIsActive(ownerBranchId),
       // Coordinator-owned jobs settle through workflow terminal listeners and
       // must not also appear as legacy automatic completions.
       onSettled: (job) => {
@@ -716,33 +714,11 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const pendingRestoredRuns = new Map<string, DelegatedRun>();
     const restoreDependencies: RestoredDelegateDependencies = {
       materialize: async (runs) => {
-        const ownerActive =
-          generation === runtimeGeneration &&
-          runtimeActive &&
-          activeRuntime?.branchId === initialRuntime.branchId;
-        const handoff = await buildSessionBoundArtifactBackedHandoff(
-          pi,
-          ctx,
-          sessionScopeId,
-          runs,
-          initialRuntime.branchId,
-          () =>
-            generation === runtimeGeneration &&
-            runtimeActive &&
-            activeRuntime?.branchId === initialRuntime.branchId,
-        );
+        const handoff = await buildOutputFileHandoff(runs);
         const publicRuns = runs.map((run) =>
-          serializeDelegateRunForPublic(run, {
-            includeArtifacts: ownerActive,
-          }),
+          serializeDelegateRunForPublic(run),
         );
-        return {
-          runs: ownerActive
-            ? publicRuns
-            : publicRuns.map(({ artifact: _artifact, ...run }) => run),
-          retainedRuns: runs,
-          handoff,
-        };
+        return { runs: publicRuns, retainedRuns: runs, handoff };
       },
       onRunUpdate: (run) => {
         const identity = run.workflowAttempt?.identity;

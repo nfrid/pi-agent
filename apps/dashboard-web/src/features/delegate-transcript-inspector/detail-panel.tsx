@@ -84,12 +84,14 @@ export function DelegateInspectorMetadata({
   );
 }
 
-function artifactHandle(row: DelegateStatus): string | undefined {
-  const artifact = row.lifecycle?.diagnosticArtifact;
-  return artifact &&
-    typeof artifact === 'object' &&
-    typeof (artifact as { handle?: unknown }).handle === 'string'
-    ? (artifact as { handle: string }).handle
+function diagnosticFile(
+  row: DelegateStatus,
+): { path: string; size?: number } | undefined {
+  const file = row.lifecycle?.diagnosticFile;
+  return file &&
+    typeof file === 'object' &&
+    typeof (file as { path?: unknown }).path === 'string'
+    ? (file as { path: string; size?: number })
     : undefined;
 }
 
@@ -107,7 +109,7 @@ export function DelegateInspectorDetails({
   const runs = row.runs ?? [];
   const warnings = structuredDetails?.runConfig?.warnings ?? row.warnings ?? [];
   const runKeyOccurrences = new Map<string, number>();
-  const handle = artifactHandle(row);
+  const file = diagnosticFile(row);
   const setup = structuredDetails?.setup;
   const runConfig = structuredDetails?.runConfig;
   const fallbackInputIdentities = new Set(
@@ -296,9 +298,10 @@ export function DelegateInspectorDetails({
           <strong>Recovery</strong>
           <span>{lifecycle.reason}</span>
           {lifecycle.diagnostic && <pre>{lifecycle.diagnostic}</pre>}
-          {handle && (
+          {file && (
             <p>
-              Diagnostic artifact: <code>{handle}</code>
+              Diagnostic file: <code>{file.path}</code>{' '}
+              {file.size !== undefined ? `(${file.size} bytes)` : null}
             </p>
           )}
         </div>

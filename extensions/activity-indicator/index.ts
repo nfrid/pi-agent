@@ -46,7 +46,6 @@ function modelPhaseLabel(batch: ToolBatch): string {
 }
 
 const TOOL_ACTIONS: Readonly<Record<string, string>> = {
-  artifact_retrieve: 'Retrieving artifact',
   bash: 'Running command',
   delegate: 'Delegating',
   edit: 'Editing',

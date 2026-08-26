@@ -42,8 +42,6 @@ const METRIC_KEYS = [
   'delegateProcessErrors',
   'delegateProcessTimeouts',
   'delegateProcessAborts',
-  'delegateArtifactReferences',
-  'delegateArtifactFallbacks',
   'delegateWorktreeReturns',
   'delegateCleanReadOnlySnapshotRetirements',
   'delegateSameSnapshotContinuations',
@@ -254,10 +252,6 @@ function recordBackgroundDelivery(state, text, details, source) {
 function recordDeliveredText(state, text, deliveries) {
   state.metrics.delegateBackgroundDeliveries += deliveries;
   state.metrics.delegateHandoffBytes += Buffer.byteLength(text, 'utf8');
-  state.metrics.delegateArtifactFallbacks += countOccurrences(
-    text,
-    'Exact output artifact unavailable',
-  );
 }
 
 /** Emitted once per run envelope by the current delegate build. */
@@ -361,10 +355,6 @@ function recordDelegateResult(state, message, executionNumber, entries = []) {
     for (let index = 0; index < runs.length; index += 1)
       recordLifecycleRun(state, ids[index], entries[index], runs[index]);
   metrics.delegateHandoffBytes += Buffer.byteLength(text, 'utf8');
-  metrics.delegateArtifactFallbacks += countOccurrences(
-    text,
-    'Exact output artifact unavailable',
-  );
   recordTruncatedTasks(state, ids, text);
   return { runs, background: false };
 }
@@ -403,7 +393,6 @@ function recordRunIndicators(state, run, id, outcome) {
       `delegateOutcome${outcome[0].toUpperCase()}${outcome.slice(1)}`
     ] += 1;
   else state.metrics.delegateOutcomeUnreported += 1;
-  if (run?.artifact) state.metrics.delegateArtifactReferences += 1;
   if (run?.worktree) state.metrics.delegateWorktreeReturns += 1;
   if (run?.state === 'timed-out' || run?.exitCode === 124)
     state.metrics.delegateProcessTimeouts += 1;

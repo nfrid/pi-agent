@@ -413,13 +413,11 @@ function statusSnapshot(
                   return diagnostic === undefined ? {} : { diagnostic };
                 })()
               : {}),
-            ...(typeof status.lifecycle.diagnosticArtifact?.handle === 'string'
+            ...(typeof status.lifecycle.diagnosticFile?.path === 'string'
               ? {
-                  diagnosticArtifact: {
-                    handle: text(
-                      status.lifecycle.diagnosticArtifact.handle,
-                      256,
-                    ),
+                  diagnosticFile: {
+                    path: text(status.lifecycle.diagnosticFile.path, 4096),
+                    size: status.lifecycle.diagnosticFile.size,
                   },
                 }
               : {}),

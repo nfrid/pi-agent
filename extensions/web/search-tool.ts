@@ -8,6 +8,7 @@ import { Type } from 'typebox';
 import { fetchAllContent } from './extract';
 import { renderSearchCall, renderWebResult } from './render';
 import {
+  appendCacheFileNotice,
   boundedPreview,
   persistenceDetails,
   persistWebResult,
@@ -187,7 +188,7 @@ export function createWebSearchTool(options: {
           `All web searches failed: ${queryResults.map((item) => item.error).join('; ')}`,
         );
       const summary = `${output}\n\nResponse ID: ${id}`;
-      const artifact = await persistWebResult(
+      const cacheFile = await persistWebResult(
         pi,
         ctx,
         resultStore,
@@ -200,19 +201,19 @@ export function createWebSearchTool(options: {
         },
         assertCurrent,
       );
-      const initial = boundedPreview(
-        summary,
-        id,
-        'view: "summary"',
-        artifact.continuationAvailable,
-      );
+      const initial = boundedPreview(summary, id, 'view: "summary"', true);
       return {
-        content: [{ type: 'text', text: initial.rendered }],
+        content: [
+          {
+            type: 'text',
+            text: appendCacheFileNotice(initial.rendered, cacheFile),
+          },
+        ],
         details: {
           responseId: id,
           queryCount: queries.length,
           failed,
-          ...persistenceDetails(artifact),
+          ...persistenceDetails(cacheFile),
           ...initial.details,
         },
       };

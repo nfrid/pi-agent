@@ -6,7 +6,7 @@ import {
   pageContent,
 } from './content-retrieval';
 import { renderGetContentCall, renderWebResult } from './render';
-import { artifactDetails } from './result-support';
+import { persistenceDetails } from './result-support';
 import type { WebResultStore } from './storage';
 import { throwIfAborted } from './utils';
 
@@ -67,7 +67,7 @@ export function createGetSearchContentTool(resultStore: WebResultStore) {
     parameters,
     async execute(_callId, params, signal) {
       throwIfAborted(signal);
-      const artifact = resultStore.artifact(params.responseId);
+      const cacheFile = resultStore.cacheFile(params.responseId);
       const respond = (text: string) => {
         const page = pageContent(text, {
           offset: params.offset,
@@ -79,7 +79,7 @@ export function createGetSearchContentTool(resultStore: WebResultStore) {
           content: [{ type: 'text' as const, text: page.text }],
           details: {
             responseId: params.responseId,
-            ...(artifact ? { artifact: artifactDetails(artifact) } : {}),
+            ...persistenceDetails(cacheFile ? { cacheFile } : {}),
             ...page.details,
           },
         };

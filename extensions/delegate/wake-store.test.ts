@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { createRun } from './types';
 import {
   WAKE_MAX_SUBSCRIPTIONS,
   WAKE_RELOAD_ORPHAN_REASON,
@@ -15,6 +16,15 @@ import {
   DelegateWorkflowCoordinator,
   WORKFLOW_RELOAD_ORPHAN_REASON,
 } from './workflow-coordinator';
+
+function outputRun() {
+  const run = createRun('wake source');
+  run.state = 'success';
+  run.exitCode = 0;
+  run.finishedAt = Date.now();
+  run.outputFile = { path: '/tmp/pi/files/wake-source.md', size: 20 };
+  return run;
+}
 
 function branch(entries: unknown[]) {
   return {
@@ -37,7 +47,7 @@ describe('wake store', () => {
       mode: 'single',
       tasks: ['build'],
       execute: async () => ({
-        runs: [],
+        runs: [outputRun()],
         handoff: 'exact report prose must never enter the session entry',
       }),
     });
@@ -65,7 +75,7 @@ describe('wake store', () => {
       continuation: true,
       mode: 'single',
       tasks: ['build-again'],
-      execute: async () => ({ runs: [], handoff: 'later' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'later' }),
     });
 
     const restored = new WakeCoordinator({ workflow });
@@ -95,7 +105,7 @@ describe('wake store', () => {
         new Promise((resolve) =>
           signal.addEventListener(
             'abort',
-            () => resolve({ runs: [], handoff: 'gate aborted' }),
+            () => resolve({ runs: [outputRun()], handoff: 'gate aborted' }),
             { once: true },
           ),
         ),
@@ -105,7 +115,7 @@ describe('wake store', () => {
       mode: 'single',
       tasks: ['later'],
       after: [gate.identity],
-      execute: async () => ({ runs: [], handoff: 'later' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'later' }),
     });
     const wake = new WakeCoordinator({ workflow });
     const detach = attachWakeStore(wake, pi);
@@ -125,7 +135,7 @@ describe('wake store', () => {
       logicalId: 'queued',
       mode: 'single',
       tasks: ['queued'],
-      execute: async () => ({ runs: [], handoff: 'queued' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'queued' }),
     });
     await vi.waitFor(() =>
       expect(workflow.require('queued@1').settledAt).toBeDefined(),
@@ -181,7 +191,7 @@ describe('wake store', () => {
       mode: 'single',
       tasks: ['queued-reload'],
       execute: async () => ({
-        runs: [],
+        runs: [outputRun()],
         handoff: 'raw report must stay out of wake metadata',
       }),
     });
@@ -233,7 +243,7 @@ describe('wake store', () => {
         new Promise((resolve) =>
           signal.addEventListener(
             'abort',
-            () => resolve({ runs: [], handoff: 'cancelled' }),
+            () => resolve({ runs: [outputRun()], handoff: 'cancelled' }),
             { once: true },
           ),
         ),
@@ -249,7 +259,7 @@ describe('wake store', () => {
       logicalId: 'ready-orphan',
       mode: 'single',
       tasks: ['ready-orphan'],
-      execute: async () => ({ runs: [], handoff: 'ready' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'ready' }),
     });
     await vi.waitFor(() =>
       expect(readyWorkflow.require('ready-orphan@1').settledAt).toBeDefined(),
@@ -327,7 +337,7 @@ describe('wake store', () => {
       logicalId: 'orphan',
       mode: 'single',
       tasks: ['orphan'],
-      execute: async () => ({ runs: [], handoff: 'not used' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'not used' }),
     });
     await vi.waitFor(() =>
       expect(readyWorkflow.require('orphan@1').settledAt).toBeDefined(),
@@ -389,7 +399,7 @@ describe('wake store', () => {
       logicalId: 'owned',
       mode: 'single',
       tasks: ['owned'],
-      execute: async () => ({ runs: [], handoff: 'owned' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'owned' }),
     });
     await vi.waitFor(() =>
       expect(workflow.require('owned@1').settledAt).toBeDefined(),
@@ -435,7 +445,7 @@ describe('wake store', () => {
         new Promise((resolve) =>
           signal.addEventListener(
             'abort',
-            () => resolve({ runs: [], handoff: 'gate' }),
+            () => resolve({ runs: [outputRun()], handoff: 'gate' }),
             { once: true },
           ),
         ),
@@ -446,7 +456,7 @@ describe('wake store', () => {
         mode: 'single',
         tasks: [`cap-node-${index}`],
         after: [gate.identity],
-        execute: async () => ({ runs: [], handoff: 'cap' }),
+        execute: async () => ({ runs: [outputRun()], handoff: 'cap' }),
       });
     const source = new WakeCoordinator({ workflow });
     for (let index = 0; index < WAKE_MAX_SUBSCRIPTIONS; index++)
@@ -471,7 +481,7 @@ describe('wake store', () => {
       logicalId: 'live',
       mode: 'single',
       tasks: ['live'],
-      execute: async () => ({ runs: [], handoff: 'live' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'live' }),
     });
     await vi.waitFor(() =>
       expect(workflow.require('live@1').settledAt).toBeDefined(),
@@ -506,13 +516,13 @@ describe('wake store', () => {
       logicalId: 'ready-a',
       mode: 'single',
       tasks: ['ready-a'],
-      execute: async () => ({ runs: [], handoff: 'a' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'a' }),
     });
     const b = workflow.schedule({
       logicalId: 'ready-b',
       mode: 'single',
       tasks: ['ready-b'],
-      execute: async () => ({ runs: [], handoff: 'b' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'b' }),
     });
     await vi.waitFor(() =>
       expect(workflow.require(a.identity).settledAt).toBeDefined(),
@@ -548,7 +558,7 @@ describe('wake store', () => {
         new Promise((resolve) =>
           signal.addEventListener(
             'abort',
-            () => resolve({ runs: [], handoff: 'gate' }),
+            () => resolve({ runs: [outputRun()], handoff: 'gate' }),
             { once: true },
           ),
         ),
@@ -557,7 +567,7 @@ describe('wake store', () => {
       logicalId: 'many-tombstones-terminal',
       mode: 'single',
       tasks: ['many-tombstones-terminal'],
-      execute: async () => ({ runs: [], handoff: 'terminal' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'terminal' }),
     });
     await vi.waitFor(() =>
       expect(
@@ -613,7 +623,7 @@ describe('wake store', () => {
       logicalId: 'tombstone-history',
       mode: 'single',
       tasks: ['tombstone-history'],
-      execute: async () => ({ runs: [], handoff: 'not persisted' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'not persisted' }),
     });
     await vi.waitFor(() =>
       expect(workflow.require(attempt.identity).settledAt).toBeDefined(),
@@ -678,7 +688,7 @@ describe('wake store', () => {
       logicalId: 'history',
       mode: 'single',
       tasks: ['history'],
-      execute: async () => ({ runs: [], handoff: 'history' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'history' }),
     });
     await vi.waitFor(() =>
       expect(workflow.require('history@1').settledAt).toBeDefined(),
@@ -748,7 +758,10 @@ describe('wake store', () => {
 
   test('uses bounded replacement deltas for hundreds of wake lifecycles and reloads them', async () => {
     const workflow = new DelegateWorkflowCoordinator();
-    let finishGate!: (result: { runs: []; handoff: string }) => void;
+    let finishGate!: (result: {
+      runs: ReturnType<typeof outputRun>[];
+      handoff: string;
+    }) => void;
     const gate = workflow.schedule({
       logicalId: 'wake-gate',
       mode: 'single',
@@ -786,7 +799,10 @@ describe('wake store', () => {
       ),
     ).toBe(true);
 
-    finishGate({ runs: [], handoff: 'raw wake report must not persist' });
+    finishGate({
+      runs: [outputRun()],
+      handoff: 'raw wake report must not persist',
+    });
     await vi.waitFor(() =>
       expect(wake.require('wake-219').state).toBe('ready'),
     );
@@ -817,7 +833,7 @@ describe('wake store', () => {
       logicalId: 'dirty-gate',
       mode: 'single',
       tasks: ['dirty-gate'],
-      execute: async () => ({ runs: [], handoff: 'dirty' }),
+      execute: async () => ({ runs: [outputRun()], handoff: 'dirty' }),
     });
     const entries: unknown[] = [];
     let fail = true;
@@ -850,7 +866,7 @@ describe('wake store', () => {
         new Promise((resolve) =>
           signal.addEventListener(
             'abort',
-            () => resolve({ runs: [], handoff: 'hidden' }),
+            () => resolve({ runs: [outputRun()], handoff: 'hidden' }),
             { once: true },
           ),
         ),

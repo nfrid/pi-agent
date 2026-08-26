@@ -9,7 +9,6 @@ import {
   updateDelegateSessionScope,
   updateDelegateSessionWorktree,
 } from './session';
-import type { DelegateHandoffFrom } from './tool';
 import type {
   DelegateChildCapability,
   DelegateContext,
@@ -52,9 +51,7 @@ export interface DelegateTaskPlan {
   worktreePath?: string;
   /** Explicit source for a read-only continuation replacement snapshot. */
   refresh?: WorktreeBase;
-  /** Parent-owned artifact reference resolved before child setup. */
-  handoffFrom?: DelegateHandoffFrom[];
-  /** Resolved artifact text, kept out of run details. */
+  /** Resolved symbolic input guidance, bounded and untrusted. */
   handoffText?: string;
   /** Bounded symbolic input evidence retained for selected-run inspection. */
   inputEvidence?: import('./types').DelegateInputEvidence[];

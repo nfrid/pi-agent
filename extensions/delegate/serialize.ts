@@ -6,7 +6,6 @@ import {
   copyDelegateLifecycle,
   ensureDelegateLifecycle,
   getDelegateLifecycle,
-  hydrateDelegateLifecycle,
 } from './lifecycle';
 import type { DelegatedActivity, DelegatedRun } from './types';
 
@@ -41,12 +40,8 @@ function publicActivities(run: DelegatedRun): DelegatedActivity[] {
     .map(serializeActivityForPublic);
 }
 
-export function serializeDelegateRunForPublic(
-  run: DelegatedRun,
-  options: { includeArtifacts?: boolean } = {},
-): DelegatedRun {
+export function serializeDelegateRunForPublic(run: DelegatedRun): DelegatedRun {
   const lifecycle = ensureDelegateLifecycle(run);
-  const includeArtifacts = options.includeArtifacts !== false;
   const compatibilityLineageId =
     run.lineageId ??
     (run.continuation
@@ -64,45 +59,15 @@ export function serializeDelegateRunForPublic(
     ...(compatibilityLineageId ? { lineageId: compatibilityLineageId } : {}),
   };
   const publicRun: DelegatedRun = lifecycle
-    ? {
-        ...base,
-        stderr: '',
-        activities: publicActivities(run),
-      }
+    ? { ...base, stderr: '', activities: publicActivities(run) }
     : {
         ...base,
         activities: publicActivities(run),
         ...(run.errorMessage ? { errorMessage: run.errorMessage } : {}),
       };
-  const projected = lifecycle
-    ? getDelegateLifecycle(run, { includeArtifact: includeArtifacts })
-    : undefined;
-  if (projected) {
-    publicRun.lifecycle = projected;
-    copyDelegateLifecycle(run, publicRun, {
-      includeArtifact: includeArtifacts,
-    });
-  }
-  if (!includeArtifacts) delete publicRun.artifact;
-  return publicRun;
-}
-
-export function serializeDelegateRunForStaleSession(
-  run: DelegatedRun,
-): DelegatedRun {
-  const { artifact: _artifact, ...safeRun } = serializeDelegateRunForPublic(
-    run,
-    {
-      includeArtifacts: false,
-    },
-  );
-  const lifecycle = getDelegateLifecycle(run, {
-    includeArtifact: false,
-    includeBoundedFallback: true,
-  });
   if (lifecycle) {
-    safeRun.lifecycle = lifecycle;
-    hydrateDelegateLifecycle(safeRun, lifecycle);
+    publicRun.lifecycle = getDelegateLifecycle(run);
+    copyDelegateLifecycle(run, publicRun);
   }
-  return safeRun;
+  return publicRun;
 }

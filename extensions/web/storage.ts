@@ -1,16 +1,6 @@
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { type ArtifactMetadata, artifactConsumer } from '../shared/artifacts';
+import type { CacheFile } from '../shared/cache-files';
 import type { ExtractedContent } from './extract';
 import type { SearchResult } from './types';
-
-export const WEB_REFERENCE_TYPE = 'web-artifact-reference:v1';
-
-export interface WebArtifactReference {
-  version: 1;
-  responseId: string;
-  resultType: 'search' | 'fetch';
-  artifact: ArtifactMetadata;
-}
 
 export interface QueryResultData {
   query: string;
@@ -32,13 +22,12 @@ export interface StoredSearchData {
 }
 
 export interface WebResultStore {
-  store(id: string, data: StoredSearchData, artifact?: ArtifactMetadata): void;
+  store(id: string, data: StoredSearchData, cacheFile?: CacheFile): void;
   get(id: string): StoredSearchData | null;
   all(): StoredSearchData[];
-  artifact(id: string): ArtifactMetadata | undefined;
+  cacheFile(id: string): CacheFile | undefined;
   delete(id: string): boolean;
   clear(): void;
-  restore(ctx: ExtensionContext): void;
 }
 
 export function generateId(): string {
@@ -57,72 +46,28 @@ export function isValidStoredData(data: unknown): data is StoredSearchData {
   return true;
 }
 
-function validReference(data: unknown): data is WebArtifactReference {
-  if (!data || typeof data !== 'object') return false;
-  const value = data as Record<string, unknown>;
-  const artifact = value.artifact as Record<string, unknown> | undefined;
-  return (
-    value.version === 1 &&
-    typeof value.responseId === 'string' &&
-    (value.resultType === 'search' || value.resultType === 'fetch') &&
-    artifact?.producer === 'web' &&
-    artifact.contentClass === 'json'
-  );
-}
-
-/** Create branch-local continuation state for exactly one web extension instance. */
+/** Create in-memory continuation state for one web extension instance. */
 export function createWebResultStore(): WebResultStore {
   const results = new Map<string, StoredSearchData>();
-  const artifacts = new Map<string, ArtifactMetadata>();
+  const files = new Map<string, CacheFile>();
   const clear = () => {
     results.clear();
-    artifacts.clear();
+    files.clear();
   };
 
   return {
-    store(id, data, artifact) {
+    store(id, data, cacheFile) {
       results.set(id, data);
-      if (artifact) artifacts.set(id, artifact);
-      else artifacts.delete(id);
+      if (cacheFile) files.set(id, cacheFile);
+      else files.delete(id);
     },
     get: (id) => results.get(id) ?? null,
     all: () => Array.from(results.values()),
-    artifact: (id) => artifacts.get(id),
+    cacheFile: (id) => files.get(id),
     delete(id) {
-      artifacts.delete(id);
+      files.delete(id);
       return results.delete(id);
     },
     clear,
-    restore(ctx) {
-      clear();
-      const branch = ctx.sessionManager.getBranch();
-      for (const entry of branch) {
-        if (entry.type !== 'custom') continue;
-        if (
-          entry.customType !== WEB_REFERENCE_TYPE ||
-          !validReference(entry.data)
-        )
-          continue;
-        const reference = entry.data;
-        const recovered = artifactConsumer.recoverFromEntries(
-          branch,
-          reference.artifact,
-        );
-        if (!recovered) continue;
-        try {
-          const data = JSON.parse(recovered.bytes.toString('utf8')) as unknown;
-          if (
-            isValidStoredData(data) &&
-            data.id === reference.responseId &&
-            data.type === reference.resultType
-          ) {
-            results.set(data.id, data);
-            artifacts.set(data.id, recovered.metadata);
-          }
-        } catch {
-          // Ignore malformed or unavailable artifact payloads.
-        }
-      }
-    },
   };
 }

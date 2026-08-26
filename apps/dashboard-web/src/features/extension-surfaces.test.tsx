@@ -1292,7 +1292,7 @@ describe('live extension surface fixtures', () => {
           lifecycle: {
             reason: 'timeout',
             diagnostic: 'Runner disconnected after retry.',
-            diagnosticArtifact: { handle: 'artifact-1' },
+            diagnosticFile: { path: '/tmp/diagnostic.txt', size: 12 },
             continuationUsable: true,
             writableBranchRetained: false,
             readOnlySnapshotRetained: true,

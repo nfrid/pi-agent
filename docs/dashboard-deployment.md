@@ -45,7 +45,7 @@ not deploy merely because the isolated checks pass.
    socket, runtime-host socket, and a `PATH` without `sesh` or `tmux`. Verify
    authenticated health, Git and non-Git project adoption, restart, and
    idempotent project recovery. Remove every disposable process, socket, state
-   directory, and temporary artifact link afterward.
+   directory, and temporary output-file link afterward.
 4. Record the production dashboard and runtime-host service state, current
    commit, current dashboard bundle, database path, bridge socket, and the URL
    of the active session. Confirm the runtime-host service is healthy and will
