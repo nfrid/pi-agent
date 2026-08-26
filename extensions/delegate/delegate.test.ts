@@ -964,28 +964,40 @@ describe('delegate', () => {
     );
   });
 
-  test('publishes the current route catalog through delegate tool guidance', () => {
-    const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
+  test('publishes the simplified workflow guidance with the route catalog', () => {
+    const promptConfig = parseDelegateConfig({
+      routingGuidance: 'Luna routes are for bounded background work.',
+      modelCatalog: {
+        'luna-low': {
+          model: 'gpt-5.6-luna',
+          thinking: 'low',
+          relativeCost: 1,
+          useFor: 'mechanical checks',
+          avoid: 'open-ended judgement',
+        },
+      },
+    });
+    const guidelines = delegatePromptGuidelines(
+      '/tmp/project',
+      promptConfig,
+    ).join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
     expect(guidelines).toContain(
-      'Delegate any useful, independently describable chunk',
+      'Delegate useful, independently describable work',
     );
-    expect(guidelines).toContain('Default to fresh context');
+    expect(guidelines).toContain('Fresh work defaults to fresh context');
+    expect(guidelines).toContain('Use `inputs` to wait for prior delegates');
     expect(guidelines).toContain(
-      'Continue an existing child while the request belongs to the same line of work',
+      'Use `base` when a fresh child needs another delegate',
     );
+    expect(guidelines).toContain('Results arrive eagerly');
+    expect(guidelines).toContain('Use `delegate_gate` only');
     expect(guidelines).toContain(
-      'Keep final scope, branch integration, final verification',
+      'Use `delegate_changes` with a workflow `node`',
     );
-    expect(guidelines).toContain(
-      'one bounded objective and, when useful, a small ranked finish checklist',
-    );
-    expect(guidelines).toContain(
-      'a stronger route must not substitute for decomposition',
-    );
-    expect(guidelines).toContain(
-      'objective, non-discoverable constraints, scope boundaries',
-    );
+    expect(guidelines).not.toContain('delegate_wake');
+    expect(guidelines).not.toContain('delegate_branches');
+    expect(guidelines).not.toContain('Terra');
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('Luna routes are for bounded background work');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');

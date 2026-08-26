@@ -1687,13 +1687,15 @@ describe('async delegate extension', () => {
       expect(hasFinish('first task')).toBe(true);
       expect(hasFinish('second task')).toBe(true);
     });
-    await tools.get('delegate_gate')?.execute(
-      'all-gate',
-      { all: ['first-worker', 'second-worker'] },
-      undefined,
-      undefined,
-      ctx,
-    );
+    await tools
+      .get('delegate_gate')
+      ?.execute(
+        'all-gate',
+        { all: ['first-worker', 'second-worker'] },
+        undefined,
+        undefined,
+        ctx,
+      );
 
     finish('first task');
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -1823,31 +1825,17 @@ describe('async delegate extension', () => {
     await vi.waitFor(() =>
       expect(first.hasFinish('reload source task')).toBe(true),
     );
+    const gate = await first.tools
+      .get('delegate_gate')
+      ?.execute(
+        'reload-gate-call',
+        { all: ['reload-source@1'] },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    expect(gate?.details).toMatchObject({ state: 'pending' });
     first.finish('reload source task');
-    await vi.waitFor(async () => {
-      const status = await first.tools
-        .get('delegate_jobs')
-        ?.execute(
-          'reload-source-status',
-          { action: 'status', id: 'reload-source@1' },
-          undefined,
-          undefined,
-          first.ctx,
-        );
-      expect(status?.content[0]?.text).toContain('success');
-    });
-    await first.tools.get('delegate_wake')?.execute(
-      'reload-wake-call',
-      {
-        action: 'subscribe',
-        id: 'reload-ready',
-        condition: { node: 'reload-source@1' },
-        payload: ['handoff'],
-      },
-      undefined,
-      undefined,
-      first.ctx,
-    );
     await vi.waitFor(() => expect(first.sendMessage).toHaveBeenCalledOnce());
     const scheduled = first.sendMessage.mock.calls[0]?.[0] as
       | { details?: { message?: unknown } }
@@ -1895,20 +1883,16 @@ describe('async delegate extension', () => {
     await vi.waitFor(() =>
       expect(first.hasFinish('reload running task')).toBe(true),
     );
-    const pending = await first.tools.get('delegate_wake')?.execute(
-      'reload-pending-wake-call',
-      {
-        action: 'subscribe',
-        id: 'reload-pending',
-        condition: { node: 'reload-running@1' },
-      },
-      undefined,
-      undefined,
-      first.ctx,
-    );
-    expect(pending?.details).toMatchObject({
-      wake: { state: 'pending' },
-    });
+    const pending = await first.tools
+      .get('delegate_gate')
+      ?.execute(
+        'reload-pending-gate-call',
+        { all: ['reload-running@1'] },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    expect(pending?.details).toMatchObject({ state: 'pending' });
     // Snapshot the running/pending journal before letting the first runtime
     // finish; shutdown otherwise waits for the deliberately unresolved mock.
     const persistedEntries = [...first.entries];
@@ -1921,18 +1905,7 @@ describe('async delegate extension', () => {
       leafId: 'leaf-after-pending-reload',
     });
     expect(restored.activeTools).toContain('delegate_jobs');
-    const status = await restored.tools
-      .get('delegate_wake')
-      ?.execute(
-        'reload-pending-status',
-        { action: 'status', id: 'reload-pending' },
-        undefined,
-        undefined,
-        restored.ctx,
-      );
-    expect(status?.details).toMatchObject({
-      wake: { state: 'blocked' },
-    });
+    expect(restored.tools.has('delegate_gate')).toBe(true);
     expect(restored.sendMessage).not.toHaveBeenCalled();
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });

@@ -19,7 +19,7 @@ const Parameters = Type.Object({
   }),
   id: Type.Optional(
     Type.String({
-      description: 'Logical attempt or adapter ID for status/feedback',
+      description: 'Logical workflow node or exact attempt for status/feedback',
     }),
   ),
   message: Type.Optional(
@@ -30,7 +30,9 @@ const Parameters = Type.Object({
     }),
   ),
   ids: Type.Optional(
-    Type.Array(Type.String(), { description: 'Job IDs for cancel' }),
+    Type.Array(Type.String(), {
+      description: 'Logical workflow nodes or exact attempts to cancel',
+    }),
   ),
   // Legacy wait_seconds is accepted by old callers but omitted from schema.
 });

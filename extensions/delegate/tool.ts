@@ -263,7 +263,7 @@ function workflowReceipt(attempt: DelegateWorkflowAttemptSnapshot): {
     content: [
       {
         type: 'text',
-        text: `Scheduled ${attempt.identity}${waiting}; state=${attempt.state}${job}. Register delegate_wake before settling if this work gates the next decision.`,
+        text: `Scheduled ${attempt.identity}${waiting}; state=${attempt.state}${job}. Results arrive eagerly unless held by delegate_gate.`,
       },
     ],
     details: {
@@ -316,7 +316,7 @@ export function registerDelegateTool(
     label: 'Delegate',
     description: DELEGATE_TOOL_DESCRIPTION,
     promptSnippet:
-      'Schedule one focused async delegate with a stable id; compose with inputs or base, register delegate_wake for required results, then continue or settle without polling.',
+      'Schedule one focused async delegate with a stable id; compose with inputs or base, and use delegate_gate only to batch results that need fan-in.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
     parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,
