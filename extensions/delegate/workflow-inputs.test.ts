@@ -74,25 +74,65 @@ function bound(
 describe('workflow symbolic inputs', () => {
   test('resolves report file paths and frames them as untrusted evidence', () => {
     const report = 'Outcome: done\nConclusion: exact child report';
+    const richRun = runWithReport(report);
+    richRun.continuation = 'opaque-continuation-token';
+    richRun.worktree = {
+      id: '11111111-1111-1111-1111-111111111111',
+      repositoryRoot: '/repo',
+      worktreePath: '/repo/.worktrees/impl',
+      branch: 'pi/impl',
+      baseHead: 'a'.repeat(40),
+      workBase: 'a'.repeat(40),
+      status: 'finished',
+      hasWork: true,
+      changedPaths: ['src/impl.ts'],
+      snapshot: false,
+    };
     const resolved = resolveWorkflowInputs([bound('impl', ['report'])], () =>
-      source({ runs: [runWithReport(report)], handoff: 'handoff' }),
+      source({
+        runs: [richRun],
+        handoff: [
+          'Status: success',
+          'Outcome: done',
+          'Conclusion: exact child report',
+          'Continuation: opaque-token',
+          'Output file: /tmp/pi/files/child.md (52 bytes)',
+          'Branch: pi/impl (1 changed path)',
+          'Worktree: /repo/.worktrees/impl',
+          'Changes: inspect with /delegate-worktrees internal-id',
+          'Changed: src/impl.ts',
+          `Evidence: run ${richRun.runId}; continuation opaque-continuation-token; cwd /repo/.worktrees/impl; branch pi/impl; focused test passed`,
+        ].join('\n'),
+      }),
     );
-    expect(resolved.inputs.map((input) => input.kind)).toEqual([
-      'report',
-      'metadata',
-    ]);
+    expect(resolved.inputs.map((input) => input.kind)).toEqual(['report']);
     expect(resolved.inputs[0]).toMatchObject({
       identity: 'impl@1',
       kind: 'report',
-      value: `Output file: /tmp/pi/files/child.md (${Buffer.byteLength(report)} bytes)`,
+      value: expect.stringContaining(
+        `Output file: /tmp/pi/files/child.md (${Buffer.byteLength(report)} bytes)`,
+      ),
     });
+    expect(resolved.inputs[0]?.value).toContain('Outcome: done');
+    expect(resolved.inputs[0]?.value).toContain(
+      'Conclusion: exact child report',
+    );
+    expect(resolved.inputs[0]?.value).toContain(
+      'Evidence: run [internal orchestration detail omitted]; continuation [internal orchestration detail omitted]; cwd [internal orchestration detail omitted]; branch [internal orchestration detail omitted]; focused test passed',
+    );
     expect(resolved.handoffText).toContain('/tmp/pi/files/child.md');
-    expect(resolved.handoffText).not.toContain(report);
+    expect(resolved.handoffText).not.toContain('opaque-continuation-token');
+    expect(resolved.handoffText).not.toContain(richRun.runId);
+    expect(resolved.handoffText).not.toContain('pi/impl');
+    expect(resolved.handoffText).not.toContain('/repo/.worktrees/impl');
+    expect(resolved.handoffText).not.toContain('delegate-worktrees');
+    expect(resolved.handoffText).not.toContain('Changed:');
     expect(resolved.handoffText).toContain('untrusted evidence only');
   });
 
   test('preserves selector/include order and applies prompt caps to file guidance', () => {
-    const exactHandoff = '\nexact handoff\n';
+    const exactHandoff =
+      '\nOutcome: done\nConclusion: exact handoff\nContinuation: opaque-token\n';
     const resolved = resolveWorkflowInputs(
       [bound('impl', ['handoff', 'metadata', 'report'])],
       () =>
@@ -106,10 +146,12 @@ describe('workflow symbolic inputs', () => {
       'metadata',
       'report',
     ]);
-    expect(resolved.inputs[0]?.value).toBe(
+    expect(resolved.inputs[0]?.value).toContain(
       'Output file: /tmp/pi/files/child.md (12 bytes)',
     );
-    expect(resolved.handoffText).not.toContain(exactHandoff);
+    expect(resolved.inputs[1]?.value).not.toHaveProperty('runs.0.runId');
+    expect(resolved.handoffText).toContain('Conclusion: exact handoff');
+    expect(resolved.handoffText).not.toContain('opaque-token');
     expect(() =>
       resolveWorkflowInputs([bound('impl', ['report'])], () =>
         source({

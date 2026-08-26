@@ -1,4 +1,4 @@
-- Use `delegate_jobs` only for compact metadata status, bounded feedback, or cancellation when work is no longer needed; status never includes reports or payloads.
-- Do not poll, wait, or consume results with `delegate_jobs`; register `delegate_wake` for selected completion evidence and settle while work continues.
-- Normal scheduling is always asynchronous: use a logical `id` for a fresh node, `continue` for another attempt, `after` for exact dependencies, and symbolic `inputs` for evidence/branches.
-- A continuation inherits its persisted exact route unless an explicit valid route replaces it; its scope is inherited when omitted and replaced when supplied. A fresh node must choose an exact route.
+- Never wait for delegates by alternating sleeps with `delegate_jobs list` or `status`. Settle naturally; results arrive eagerly unless intentionally held by `delegate_gate`.
+- Use `delegate_jobs status` at most once when its current metadata changes an immediate feedback or cancellation decision. It does not confirm or retrieve results.
+- Use `feedback` for one corrective message to active work and `cancel` to stop obsolete work.
+- Address workflow attempts by logical node reference rather than adapter job IDs whenever possible.

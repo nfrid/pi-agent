@@ -11,7 +11,7 @@ import {
 } from './worktree';
 import { registerDelegateWorktreesCommand } from './worktrees-command';
 
-test('show guides review and merge through delegate_branches', async () => {
+test('show points change integration back to the workflow node', async () => {
   const prepared = await prepareWorktree({
     cwd: repository,
     name: 'Show task',
@@ -35,8 +35,7 @@ test('show guides review and merge through delegate_branches', async () => {
   } as unknown as ExtensionCommandContext;
   await handler(record.id, ctx);
 
-  expect(message).toContain(`delegate_branches review ${record.id}`);
-  expect(message).toContain(`delegate_branches merge ${record.id}`);
+  expect(message).toContain('use delegate_changes with the workflow node');
   expect(message).not.toContain(`git merge ${record.branch}`);
 });
 
@@ -70,7 +69,7 @@ test('show gives continuation and drop guidance for retired snapshots', async ()
   await handler(record.id, ctx);
 
   expect(message).toContain('Read-only snapshot:');
-  expect(message).toContain(`Cleanup: delegate_branches drop ${record.id}`);
-  expect(message).not.toContain('delegate_branches review');
-  expect(message).not.toContain('delegate_branches merge');
+  expect(message).toContain(`Cleanup: /delegate-worktrees ${record.id} drop`);
+  expect(message).not.toContain('delegate_changes review');
+  expect(message).not.toContain('delegate_changes merge');
 });

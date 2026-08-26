@@ -211,19 +211,19 @@ export function activityStepParts(
       (arrayArg(tool.args, 'ids').length
         ? countLabel(arrayArg(tool.args, 'ids').length, 'job')
         : undefined);
-  } else if (name === 'delegate_branches') {
+  } else if (name === 'delegate_changes') {
     role = 'command';
     const operation = stringArg(tool.args, 'action') ?? 'list';
     action =
       operation === 'review'
-        ? 'Reviewing delegate branch'
+        ? 'Reviewing delegate changes'
         : operation === 'merge'
-          ? 'Merging delegate branch'
+          ? 'Merging delegate changes'
           : operation === 'drop'
-            ? 'Dropping delegate branch'
-            : 'Listing delegate branches';
-    const id = stringArg(tool.args, 'id');
-    if (id) argument = id;
+            ? 'Dropping delegate changes'
+            : 'Listing delegate changes';
+    const node = stringArg(tool.args, 'node');
+    if (node) argument = node;
   } else if (name === 'background') {
     role = 'command';
     const operation = stringArg(tool.args, 'action') ?? 'list';

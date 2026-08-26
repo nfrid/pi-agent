@@ -2,7 +2,8 @@ import {
   actionIdPresentation,
   backgroundPresentation,
   type CustomToolKind,
-  delegateBranchesPresentation,
+  delegateChangesPresentation,
+  delegateGatePresentation,
   delegatePresentation,
   fetchContentPresentation,
   getSearchContentPresentation,
@@ -280,8 +281,8 @@ function DelegateSummary({ args }: { args: unknown }) {
   );
 }
 
-function BranchesSummary({ args }: { args: unknown }) {
-  const model = delegateBranchesPresentation(args);
+function ChangesSummary({ args }: { args: unknown }) {
+  const model = delegateChangesPresentation(args);
   const target =
     model.id ??
     (model.ids.length === 1
@@ -306,7 +307,7 @@ function BranchesSummary({ args }: { args: unknown }) {
         detail={[model.action ?? 'list', target, ...selectors]
           .filter(Boolean)
           .join(' · ')}
-        title="Delegate branches"
+        title="Delegate changes"
       />
       {model.paths.length > 0 ? (
         <ul className="tool-custom-list">
@@ -316,6 +317,21 @@ function BranchesSummary({ args }: { args: unknown }) {
         </ul>
       ) : null}
     </>
+  );
+}
+
+function GateSummary({ args }: { args: unknown }) {
+  const model = delegateGatePresentation(args);
+  const target = model.references.length
+    ? `${model.references.length} node${model.references.length === 1 ? '' : 's'}`
+    : undefined;
+  return (
+    <Summary
+      detail={[model.mode, target, model.delivery ?? 'safe']
+        .filter(Boolean)
+        .join(' · ')}
+      title="Delegate gate"
+    />
   );
 }
 
@@ -463,8 +479,8 @@ const SUMMARIES: Record<CustomToolKind, (args: unknown) => ReactNode> = {
   get_search_content: (args) => <GetSearchContentSummary args={args} />,
   delegate: (args) => <DelegateSummary args={args} />,
   delegate_jobs: (args) => <ActionSummary args={args} title="Delegate jobs" />,
-  delegate_branches: (args) => <BranchesSummary args={args} />,
-  delegate_wake: (args) => <ActionSummary args={args} title="Delegate wake" />,
+  delegate_changes: (args) => <ChangesSummary args={args} />,
+  delegate_gate: (args) => <GateSummary args={args} />,
   background: (args) => <BackgroundSummary args={args} />,
   todo: (args) => <TodoSummary args={args} />,
 };

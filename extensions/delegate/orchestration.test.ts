@@ -177,6 +177,16 @@ describe('buildDelegatePlans', () => {
     expect(built.tasks[0]?.preflight).toBeDefined();
   });
 
+  test('derives a model-facing display name from its logical id', () => {
+    const built = buildDelegatePlans(
+      { id: 'logical-task', task: 'inspect', route: 'quick' },
+      ctx,
+      config,
+      () => null,
+    );
+    expect(built.tasks[0]?.plan.name).toBe('logical-task');
+  });
+
   test('defaults fresh capability and isolation independently', () => {
     const build = (params: Record<string, unknown>) =>
       buildDelegatePlans(

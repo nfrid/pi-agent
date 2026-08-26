@@ -29,6 +29,7 @@ import {
   loadWorktree,
   type PreparedWorktree,
   worktreeSummary,
+  writeWorktreeRecord,
 } from './worktree';
 import {
   failedLifecycleRun,
@@ -584,6 +585,10 @@ export async function prepareDelegateWorkflowLaunch(
     throw new Error(
       `Delegate setup failed with effective configuration: ${effectiveDelegatePlanConfiguration(finalPlan)}. Cause: ${errorText(error)}`,
     );
+  }
+  if (branch && prepared.worktree) {
+    prepared.worktree.record.integrationBase = branch.workBase;
+    writeWorktreeRecord(prepared.worktree.record);
   }
   const pending = pendingRuns({ mode: 'single', tasks: [prepared] })[0];
   if (pending) hooks.onRunUpdate?.(pending);

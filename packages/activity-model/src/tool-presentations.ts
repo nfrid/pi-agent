@@ -15,8 +15,8 @@ export const CUSTOM_TOOL_KIND_BY_NAME = {
   delegate: 'delegate',
   delegates: 'delegate',
   delegate_jobs: 'delegate_jobs',
-  delegate_branches: 'delegate_branches',
-  delegate_wake: 'delegate_wake',
+  delegate_changes: 'delegate_changes',
+  delegate_gate: 'delegate_gate',
   background: 'background',
   todo: 'todo',
   tasks: 'todo',
@@ -122,10 +122,11 @@ export type DelegatePresentation = {
 export function delegatePresentation(args: unknown): DelegatePresentation {
   const tasks = recordArgs(args)?.tasks;
   return {
-    name: stringArg(args, 'name'),
+    name: stringArg(args, 'id') ?? stringArg(args, 'name'),
     task: stringArg(args, 'task'),
     route: stringArg(args, 'route'),
-    continuation: stringArg(args, 'continuation'),
+    continuation:
+      stringArg(args, 'continue') ?? stringArg(args, 'continuation'),
     taskCount: Array.isArray(tasks) ? tasks.length : 0,
   };
 }
@@ -232,7 +233,7 @@ export function todoResultIsRedundant(
   return compact === restated;
 }
 
-export type DelegateBranchesPresentation = ActionIdPresentation & {
+export type DelegateChangesPresentation = ActionIdPresentation & {
   scope?: string;
   incremental: boolean;
   summaryOnly: boolean;
@@ -240,13 +241,14 @@ export type DelegateBranchesPresentation = ActionIdPresentation & {
   patchBudget?: number;
 };
 
-export function delegateBranchesPresentation(
+export function delegateChangesPresentation(
   args: unknown,
-): DelegateBranchesPresentation {
+): DelegateChangesPresentation {
   const record = recordArgs(args);
   const patchBudget = record?.patchBudget;
   return {
     ...actionIdPresentation(args),
+    id: stringArg(args, 'node') ?? stringArg(args, 'id'),
     scope: stringArg(args, 'scope'),
     incremental: record?.incremental === true,
     summaryOnly: record?.summaryOnly === true,
@@ -255,5 +257,23 @@ export function delegateBranchesPresentation(
       typeof patchBudget === 'number' && Number.isFinite(patchBudget)
         ? patchBudget
         : undefined,
+  };
+}
+
+export type DelegateGatePresentation = {
+  mode?: 'all' | 'any';
+  references: readonly string[];
+  delivery?: string;
+};
+
+export function delegateGatePresentation(
+  args: unknown,
+): DelegateGatePresentation {
+  const all = stringList(args, 'all');
+  const any = stringList(args, 'any');
+  return {
+    mode: all.length ? 'all' : any.length ? 'any' : undefined,
+    references: all.length ? all : any,
+    delivery: stringArg(args, 'delivery'),
   };
 }

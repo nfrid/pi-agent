@@ -150,14 +150,19 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     if (run.worktree.snapshot) {
       lines.push(
         `Read-only snapshot: ${run.worktree.id} (checkout retired)`,
-        `Cleanup: delegate_branches drop ${run.worktree.id}`,
+        `Cleanup: /delegate-worktrees ${run.worktree.id} drop`,
         `Continue: omit refresh to rehydrate this exact snapshot; use refresh wip or head for targeted verification. A refreshed continuation is not independent review; use a fresh delegate for that.`,
       );
     } else {
+      const changeNode = run.workflowAttempt?.logicalId;
       lines.push(
         `Branch: ${run.worktree.branch} (${run.worktree.status === 'active' ? 'changes pending finalization' : run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.workBase.slice(0, 8)})`,
         `Worktree: ${run.worktree.worktreePath}`,
-        `Integrate with: delegate_branches review then merge, id ${run.worktree.id}`,
+        ...(run.worktree.ownership === 'caller'
+          ? ['Integration: manage this caller-owned branch in its checkout.']
+          : changeNode
+            ? [`Changes: delegate_changes review/merge node ${changeNode}`]
+            : [`Changes: inspect with /delegate-worktrees ${run.worktree.id}`]),
       );
     }
     if (run.worktree.changedPaths?.length)

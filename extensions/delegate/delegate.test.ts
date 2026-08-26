@@ -182,12 +182,10 @@ describe('delegate', () => {
         'tool-call',
         {
           id: 'branch-review',
-          name: 'Branch review',
           task: 'Review the implementation',
           route: 'luna-low',
-          inputs: [{ node: 'implementation', include: ['branch'] }],
+          base: 'implementation',
           cwd: '/tmp/explicit-cwd',
-          isolation: 'shared',
         },
         undefined,
         undefined,
@@ -197,7 +195,7 @@ describe('delegate', () => {
         },
       ),
     ).rejects.toThrow(
-      /Symbolic branch input preflight failed.*cwd must be omitted.*explicit isolation must be "worktree".*Effective configuration/s,
+      /Symbolic branch input preflight failed.*cwd must be omitted.*Effective configuration/s,
     );
     expect(schedule).not.toHaveBeenCalled();
     expect(ensureBranchOwner).not.toHaveBeenCalled();
@@ -249,10 +247,12 @@ describe('delegate', () => {
       'tool-call',
       {
         id: 'branch-review',
-        name: 'Branch review',
         task: 'Review the implementation',
         route: 'luna-low',
-        inputs: [{ node: 'implementation', include: ['branch'] }],
+        base: 'implementation',
+        inputs: ['audit'],
+        write: true,
+        web: true,
       },
       undefined,
       undefined,
@@ -262,6 +262,18 @@ describe('delegate', () => {
       },
     );
     expect(ordering).toEqual(['owner', 'schedule']);
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        logicalId: 'branch-review',
+        name: 'branch-review',
+        allowWrites: true,
+        capabilities: ['web'],
+        inputs: [
+          { node: 'implementation', include: ['branch', 'report'] },
+          { node: 'audit' },
+        ],
+      }),
+    );
   });
 
   test('keeps the serialized delegate schema compact', () => {
@@ -283,7 +295,54 @@ describe('delegate', () => {
     expect(serialized).not.toContain('"continuation"');
     expect(serialized).not.toContain('"handoffFrom"');
     const schema = parameters as Parameters<typeof Value.Check>[0];
+    const properties = Object.keys(
+      (parameters as { properties: Record<string, unknown> }).properties,
+    ).sort();
+    expect(properties).toEqual(
+      [
+        'id',
+        'continue',
+        'task',
+        'route',
+        'inputs',
+        'base',
+        'scope',
+        'write',
+        'cwd',
+        'web',
+      ].sort(),
+    );
+    for (const removed of [
+      'name',
+      'after',
+      'context',
+      'contextNote',
+      'isolation',
+      'from',
+      'refresh',
+      'worktreePath',
+      'capabilities',
+      'selectors',
+    ])
+      expect(properties).not.toContain(removed);
     expect(Value.Check(schema, { id: 'impl', task: 'implement' })).toBe(true);
+    expect(
+      Value.Check(schema, {
+        id: 'impl',
+        task: 'implement',
+        inputs: ['prepare'],
+        base: 'prepare',
+        write: true,
+        web: true,
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(schema, {
+        id: 'impl',
+        task: 'implement',
+        inputs: [{ node: 'prepare' }],
+      }),
+    ).toBe(false);
     expect(Value.Check(schema, { continue: 'impl', task: 'fix' })).toBe(true);
     expect(Value.Check(schema, { task: 'missing identity' })).toBe(false);
     expect(
@@ -905,28 +964,40 @@ describe('delegate', () => {
     );
   });
 
-  test('publishes the current route catalog through delegate tool guidance', () => {
-    const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
+  test('publishes the simplified workflow guidance with the route catalog', () => {
+    const promptConfig = parseDelegateConfig({
+      routingGuidance: 'Luna routes are for bounded background work.',
+      modelCatalog: {
+        'luna-low': {
+          model: 'gpt-5.6-luna',
+          thinking: 'low',
+          relativeCost: 1,
+          useFor: 'mechanical checks',
+          avoid: 'open-ended judgement',
+        },
+      },
+    });
+    const guidelines = delegatePromptGuidelines(
+      '/tmp/project',
+      promptConfig,
+    ).join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
     expect(guidelines).toContain(
-      'Delegate any useful, independently describable chunk',
+      'Delegate useful, independently describable work',
     );
-    expect(guidelines).toContain('Default to fresh context');
+    expect(guidelines).toContain('Fresh work defaults to fresh context');
+    expect(guidelines).toContain('Use `inputs` to wait for prior delegates');
     expect(guidelines).toContain(
-      'Continue an existing child while the request belongs to the same line of work',
+      'Use `base` when a fresh child needs another delegate',
     );
+    expect(guidelines).toContain('Results arrive eagerly');
+    expect(guidelines).toContain('Use `delegate_gate` only');
     expect(guidelines).toContain(
-      'Keep final scope, branch integration, final verification',
+      'Use `delegate_changes` with a workflow `node`',
     );
-    expect(guidelines).toContain(
-      'one bounded objective and, when useful, a small ranked finish checklist',
-    );
-    expect(guidelines).toContain(
-      'a stronger route must not substitute for decomposition',
-    );
-    expect(guidelines).toContain(
-      'objective, non-discoverable constraints, scope boundaries',
-    );
+    expect(guidelines).not.toContain('delegate_wake');
+    expect(guidelines).not.toContain('delegate_branches');
+    expect(guidelines).not.toContain('Terra');
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('Luna routes are for bounded background work');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');

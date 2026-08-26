@@ -189,8 +189,54 @@ function outputFileGuidance(
     .join('\n');
 }
 
+const FORWARDED_HANDOFF_LINE =
+  /^(?:## Task \d+|Status:|Outcome:|Conclusion:|Evidence:|Risks:|Blocked:|Failure:)/;
+const INTERNAL_DETAIL_MARKER = '[internal orchestration detail omitted]';
+
+function internalWorkflowValues(result: WorkflowSourceResult): string[] {
+  const values = canonicalRuns(result).flatMap((run) => [
+    run.runId,
+    run.sessionId,
+    run.lineageId,
+    run.continuation,
+    run.worktree?.id,
+    run.worktree?.worktreePath,
+    run.worktree?.branch,
+  ]);
+  if (isCompactResult(result)) values.push(result.continuationToken);
+  return [...new Set(values.filter((value): value is string => !!value))]
+    .filter((value) => value.length >= 8 || value.startsWith('pi/'))
+    .sort((left, right) => right.length - left.length);
+}
+
+/**
+ * Parent handoffs contain operational recovery details. Downstream children
+ * receive only the child-authored result envelope; workspace and continuation
+ * identifiers remain internal to orchestration, even when a child repeats one
+ * inside an otherwise useful Evidence field.
+ */
+function compactHandoff(source: WorkflowInputSource): string {
+  const result = source.result;
+  if (!result) return '';
+  const handoff = isCompactResult(result)
+    ? result.handoff.text
+    : result.handoff;
+  let forwarded = handoff
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => FORWARDED_HANDOFF_LINE.test(line))
+    .join('\n');
+  for (const value of internalWorkflowValues(result))
+    forwarded = forwarded.replaceAll(value, INTERNAL_DETAIL_MARKER);
+  return forwarded;
+}
+
 function resolveReport(source: WorkflowInputSource): string {
-  return outputFileGuidance(source, 'report');
+  const outputFile = outputFileGuidance(source, 'report');
+  const handoff = compactHandoff(source).trim();
+  // Keep the bounded actionable handoff inline while retaining the exact
+  // report's durable path for deeper inspection.
+  return handoff ? `${handoff}\n${outputFile}` : outputFile;
 }
 
 function resolveHandoff(source: WorkflowInputSource): string {
@@ -201,7 +247,6 @@ function compactMetadataRun(
   run: DelegateWorkflowRunProjection,
 ): Record<string, unknown> {
   return {
-    runId: run.runId,
     name: run.name,
     state: run.state,
     exitCode: run.exitCode,
@@ -233,7 +278,6 @@ function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
               includeFile: false,
             });
             return {
-              runId: run.runId,
               name: run.name,
               state: run.state,
               exitCode: run.exitCode,
@@ -310,7 +354,8 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
       `Branch source for ${source.attempt.identity} has no recorded head.`,
     );
   const record = loadWorktree(summary.id);
-  const workBase = record?.carryCommit ?? record?.baseHead;
+  const workBase =
+    record?.integrationBase ?? record?.carryCommit ?? record?.baseHead;
   const normalizedWorkingDirectory = record
     ? path.normalize(record.workingDirectory)
     : '';
@@ -352,11 +397,9 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
 function kindsForSelector(
   selector: BoundWorkflowSelector,
 ): WorkflowInputKind[] {
-  const include = selector.selector.include?.length
+  return selector.selector.include?.length
     ? [...selector.selector.include]
     : (['report'] as WorkflowInputKind[]);
-  if (!include.includes('metadata')) include.push('metadata');
-  return include;
 }
 
 /** Resolve exact retained sources and build bounded untrusted evidence frames. */

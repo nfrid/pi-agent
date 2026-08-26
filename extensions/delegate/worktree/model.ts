@@ -22,6 +22,13 @@ export type WorktreeOwnership = GenericWorktreeOwnership;
 
 export interface WorktreeRecord extends GenericWorktreeRecord {
   sessionToken?: string;
+  /** Earliest integration base inherited through a delegate `base` chain. */
+  integrationBase?: string;
+  /** Leaf worktree whose cumulative merge integrated this record's changes. */
+  integratedBy?: string;
+  /** Exact recorded head covered by integratedBy; later continuations invalidate it. */
+  integratedHead?: string;
+  integratedAt?: string;
   /** Parent Pi session that first created this retained record. */
   creatorSessionId?: string;
   /** Bounded recent parent-session touches; creatorSessionId is never evicted. */

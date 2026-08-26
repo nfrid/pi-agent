@@ -86,7 +86,7 @@ describe('render', () => {
       'Read-only snapshot: 11111111-1111-1111-1111-111111111111 (checkout retired)',
     );
     expect(lines.join('\n')).toContain(
-      'Cleanup: delegate_branches drop 11111111-1111-1111-1111-111111111111',
+      'Cleanup: /delegate-worktrees 11111111-1111-1111-1111-111111111111 drop',
     );
     expect(lines.join('\n')).toContain('fresh delegate');
     expect(lines.join('\n')).not.toContain('abc123de (checkout retired)');
@@ -257,6 +257,11 @@ describe('render', () => {
       context: 'fresh',
       allowWrites: true,
       scope: ['src'],
+      workflowAttempt: {
+        logicalId: 'implement-safely',
+        ordinal: 1,
+        identity: 'implement-safely@1',
+      },
       worktree: {
         id: '11111111-1111-1111-1111-111111111111',
         branch: 'pi/implement-safely-a1b2',
@@ -283,10 +288,7 @@ describe('render', () => {
     expect(output).toContain('pi/implement-safely-a1b2');
     expect(output).toContain('src/file.ts');
     expect(output).toContain(
-      'delegate_branches review 11111111-1111-1111-1111-111111111111',
-    );
-    expect(output).toContain(
-      'delegate_branches merge 11111111-1111-1111-1111-111111111111',
+      'delegate_changes review/merge node implement-safely',
     );
     expect(output).not.toContain('git merge pi/implement-safely-a1b2');
     expect(output).toContain('Expected scope: src');
@@ -296,9 +298,9 @@ describe('render', () => {
     const run = createRun(
       'Inspect the project',
       {
-        route: 'terra-medium',
+        route: 'luna-medium',
         provider: 'openai-codex',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-5.6-luna',
         thinking: 'medium',
         relativeCost: 8,
       },
@@ -321,7 +323,7 @@ describe('render', () => {
       .join('\n');
     expect(output).toContain('<muted>…</muted>');
     expect(output).toContain('<dim>Starting subagent</dim>');
-    expect(output).toContain('<accent>terra-medium</accent>');
+    expect(output).toContain('<accent>luna-medium</accent>');
     expect(output).not.toContain('<warning>…</warning>');
   });
 
@@ -345,9 +347,9 @@ describe('render', () => {
     const run = createRun(
       'Inspect the project',
       {
-        route: 'terra-medium',
+        route: 'luna-medium',
         provider: 'openai-codex',
-        model: 'gpt-5.6-terra',
+        model: 'gpt-5.6-luna',
         thinking: 'medium',
         relativeCost: 8,
       },
@@ -355,7 +357,7 @@ describe('render', () => {
     );
     run.state = 'success';
     run.exitCode = 0;
-    run.model = 'gpt-5.6-terra';
+    run.model = 'gpt-5.6-luna';
     run.messages = [assistantMessage as never];
     run.finishedAt = Date.now();
     for (const expanded of [false, true]) {
@@ -369,7 +371,7 @@ describe('render', () => {
       const modeLine = output
         .split('\n')
         .find((line) => line.includes('Fresh context · Read-only'));
-      expect(modeLine).toContain('terra-medium');
+      expect(modeLine).toContain('luna-medium');
       expect(output).not.toMatch(/\n[ \t]*\nResult/);
     }
   });

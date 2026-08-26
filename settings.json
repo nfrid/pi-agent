@@ -19,7 +19,7 @@
   },
   "delegate": {
     "provider": "openai-codex",
-    "routingGuidance": "Luna routes are for bounded background work, Terra routes trade higher cost for lower latency when the parent is blocked, and Sol routes are for maintainer judgement rather than harder implementation. Escalate thinking only within a matching task shape.",
+    "routingGuidance": "Luna routes are for bounded background work, while Sol routes are for maintainer judgement rather than harder implementation. Escalate thinking only within a matching task shape.",
     "timeoutMs": 1800000,
     "modelCatalog": {
       "luna-low": {
@@ -68,7 +68,7 @@
         "thinking": "medium",
         "relativeCost": 75,
         "useFor": "Judgement about the work rather than a generic strength escalation: decide whether a diff overclaims, whether complexity is earned, what completion should mean when criteria are unclear, or assess ambiguous or high-stakes security concerns. Strict maintainer-style review.",
-        "avoid": "Mechanical correctness sweeps, implementation against explicit acceptance criteria, or any task adequately served by a Luna background route or Terra latency route."
+        "avoid": "Mechanical correctness sweeps, implementation against explicit acceptance criteria, or any task adequately served by a Luna route."
       },
       "sol-high": {
         "provider": "openai-codex",

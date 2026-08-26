@@ -563,11 +563,11 @@ describe('transcript payload inspection', () => {
     expect(toolPresentationKind({ name: 'delegate_jobs' })).toBe(
       'delegate_jobs',
     );
-    expect(toolPresentationKind({ name: 'delegate_branches' })).toBe(
-      'delegate_branches',
+    expect(toolPresentationKind({ name: 'delegate_changes' })).toBe(
+      'delegate_changes',
     );
-    expect(toolPresentationKind({ name: 'delegate_wake' })).toBe(
-      'delegate_wake',
+    expect(toolPresentationKind({ name: 'delegate_gate' })).toBe(
+      'delegate_gate',
     );
     expect(toolPresentationKind({ name: 'background' })).toBe('background');
     expect(toolPresentationKind({ name: 'todo' })).toBe('todo');
@@ -804,10 +804,10 @@ describe('transcript payload inspection', () => {
     const branches = renderToStaticMarkup(
       <ToolInspector
         tool={{
-          name: 'delegate_branches',
+          name: 'delegate_changes',
           arguments: {
             action: 'review',
-            id: 'wt-1',
+            node: 'wt-1',
             incremental: true,
             paths: ['src/a.ts', 'src/b.ts'],
           },
@@ -816,10 +816,23 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(branches).toContain('tool-delegate_branches-presentation');
+    expect(branches).toContain('tool-delegate_changes-presentation');
+    expect(branches).toContain('Delegate changes');
+    expect(branches).toContain('wt-1');
     expect(branches).toContain('incremental');
     expect(branches).toContain('src/a.ts');
     expect(branches).toContain('2 paths');
+
+    const gate = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'delegate_gate',
+          arguments: { any: ['audit-a', 'audit-b'], delivery: 'idle' },
+        }}
+      />,
+    );
+    expect(gate).toContain('Delegate gate');
+    expect(gate).toContain('any · 2 nodes · idle');
   });
 
   it('formats command exit code and duration for collapsed step meta', () => {

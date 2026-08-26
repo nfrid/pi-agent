@@ -15,7 +15,7 @@ describe('delegate status store', () => {
       },
     );
     run.routing = {
-      route: 'terra-high',
+      route: 'luna-high',
       provider: 'test',
       model: 'test-model',
       thinking: 'high',
@@ -33,7 +33,7 @@ describe('delegate status store', () => {
         name: 'Audit for regressions',
         kind: 'foreground',
         state: 'queued',
-        route: 'terra-high',
+        route: 'luna-high',
         context: 'branch',
         allowWrites: false,
       },
@@ -62,7 +62,7 @@ describe('delegate status store', () => {
     store.update(id, run);
     expect(store.list()[0]).toMatchObject({
       state: 'running',
-      route: 'terra-high',
+      route: 'luna-high',
       context: 'continuation',
       allowWrites: true,
       activity: {

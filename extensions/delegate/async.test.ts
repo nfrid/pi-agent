@@ -1640,83 +1640,71 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
-  test('arms one implicit all-settled wake when the parent idles without an explicit wake', async () => {
+  test('delivers a settled workflow delegate eagerly without an explicit gate', async () => {
     const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
-      await createAsyncHarness('implicit-wake-parent');
+      await createAsyncHarness('eager-delivery-parent');
     await tools
       .get('delegate')
       ?.execute(
-        'implicit-call',
-        { id: 'implicit-worker', task: 'implicit task', route: 'quick' },
+        'eager-call',
+        { id: 'eager-worker', task: 'eager task', route: 'quick' },
         undefined,
         undefined,
         ctx,
       );
-    await vi.waitFor(() => expect(hasFinish('implicit task')).toBe(true));
+    await vi.waitFor(() => expect(hasFinish('eager task')).toBe(true));
 
-    handlers.get('agent_settled')?.({}, ctx);
-    handlers.get('agent_settled')?.({}, ctx);
-    const listed = await tools
-      .get('delegate_wake')
-      ?.execute('implicit-list', { action: 'list' }, undefined, undefined, ctx);
-    expect(listed?.content[0]?.text).toContain('implicit-all-');
-    expect(listed?.content[0]?.text).toContain('implicit-worker@1');
-
-    finish('implicit task');
+    finish('eager task');
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
     expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: false });
     expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
       customType: 'pi-keyed-turn-control',
-      details: { timing: 'followUp' },
+      details: { timing: 'steer' },
     });
+    expect(JSON.stringify(sendMessage.mock.calls[0]?.[0])).toContain(
+      'eager-worker@1',
+    );
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
-  test('an explicit wake supersedes an armed implicit fallback', async () => {
+  test('holds selected results until an all gate is satisfied', async () => {
     const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
-      await createAsyncHarness('explicit-supersedes-implicit-parent');
+      await createAsyncHarness('explicit-gate-parent');
+    for (const [id, task] of [
+      ['first-worker', 'first task'],
+      ['second-worker', 'second task'],
+    ] as const)
+      await tools
+        .get('delegate')
+        ?.execute(
+          `${id}-call`,
+          { id, task, route: 'quick' },
+          undefined,
+          undefined,
+          ctx,
+        );
+    await vi.waitFor(() => {
+      expect(hasFinish('first task')).toBe(true);
+      expect(hasFinish('second task')).toBe(true);
+    });
     await tools
-      .get('delegate')
+      .get('delegate_gate')
       ?.execute(
-        'superseded-call',
-        { id: 'superseded-worker', task: 'superseded task', route: 'quick' },
+        'all-gate',
+        { all: ['first-worker', 'second-worker'] },
         undefined,
         undefined,
         ctx,
       );
-    await vi.waitFor(() => expect(hasFinish('superseded task')).toBe(true));
-    handlers.get('agent_settled')?.({}, ctx);
-    await tools.get('delegate_wake')?.execute(
-      'explicit-wake',
-      {
-        action: 'register',
-        id: 'explicit-ready',
-        condition: { node: 'superseded-worker@1' },
-        payload: ['metadata'],
-        nonObstructive: true,
-      },
-      undefined,
-      undefined,
-      ctx,
-    );
-    const listed = (await tools
-      .get('delegate_wake')
-      ?.execute(
-        'explicit-list',
-        { action: 'list' },
-        undefined,
-        undefined,
-        ctx,
-      )) as { details?: { wakes?: Array<{ id: string }> } } | undefined;
-    expect(listed?.details?.wakes?.map((wake) => wake.id)).toEqual([
-      'explicit-ready',
-    ]);
 
-    finish('superseded task');
+    finish('first task');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sendMessage).not.toHaveBeenCalled();
+    finish('second task');
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
-    expect(JSON.stringify(sendMessage.mock.calls[0]?.[0])).toContain(
-      'explicit-ready',
-    );
+    const delivery = JSON.stringify(sendMessage.mock.calls[0]?.[0]);
+    expect(delivery).toContain('first-worker@1');
+    expect(delivery).toContain('second-worker@1');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
@@ -1837,31 +1825,17 @@ describe('async delegate extension', () => {
     await vi.waitFor(() =>
       expect(first.hasFinish('reload source task')).toBe(true),
     );
+    const gate = await first.tools
+      .get('delegate_gate')
+      ?.execute(
+        'reload-gate-call',
+        { all: ['reload-source@1'] },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    expect(gate?.details).toMatchObject({ state: 'pending' });
     first.finish('reload source task');
-    await vi.waitFor(async () => {
-      const status = await first.tools
-        .get('delegate_jobs')
-        ?.execute(
-          'reload-source-status',
-          { action: 'status', id: 'reload-source@1' },
-          undefined,
-          undefined,
-          first.ctx,
-        );
-      expect(status?.content[0]?.text).toContain('success');
-    });
-    await first.tools.get('delegate_wake')?.execute(
-      'reload-wake-call',
-      {
-        action: 'subscribe',
-        id: 'reload-ready',
-        condition: { node: 'reload-source@1' },
-        payload: ['handoff'],
-      },
-      undefined,
-      undefined,
-      first.ctx,
-    );
     await vi.waitFor(() => expect(first.sendMessage).toHaveBeenCalledOnce());
     const scheduled = first.sendMessage.mock.calls[0]?.[0] as
       | { details?: { message?: unknown } }
@@ -1909,20 +1883,16 @@ describe('async delegate extension', () => {
     await vi.waitFor(() =>
       expect(first.hasFinish('reload running task')).toBe(true),
     );
-    const pending = await first.tools.get('delegate_wake')?.execute(
-      'reload-pending-wake-call',
-      {
-        action: 'subscribe',
-        id: 'reload-pending',
-        condition: { node: 'reload-running@1' },
-      },
-      undefined,
-      undefined,
-      first.ctx,
-    );
-    expect(pending?.details).toMatchObject({
-      wake: { state: 'pending' },
-    });
+    const pending = await first.tools
+      .get('delegate_gate')
+      ?.execute(
+        'reload-pending-gate-call',
+        { all: ['reload-running@1'] },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    expect(pending?.details).toMatchObject({ state: 'pending' });
     // Snapshot the running/pending journal before letting the first runtime
     // finish; shutdown otherwise waits for the deliberately unresolved mock.
     const persistedEntries = [...first.entries];
@@ -1935,18 +1905,7 @@ describe('async delegate extension', () => {
       leafId: 'leaf-after-pending-reload',
     });
     expect(restored.activeTools).toContain('delegate_jobs');
-    const status = await restored.tools
-      .get('delegate_wake')
-      ?.execute(
-        'reload-pending-status',
-        { action: 'status', id: 'reload-pending' },
-        undefined,
-        undefined,
-        restored.ctx,
-      );
-    expect(status?.details).toMatchObject({
-      wake: { state: 'blocked' },
-    });
+    expect(restored.tools.has('delegate_gate')).toBe(true);
     expect(restored.sendMessage).not.toHaveBeenCalled();
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
