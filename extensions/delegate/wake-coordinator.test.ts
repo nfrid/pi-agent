@@ -360,6 +360,7 @@ describe('WakeCoordinator', () => {
     expect(payload.sources['a@1']?.handoff).toContain('/tmp/pi/files/a.md');
     expect(payload.sources['b@1']?.handoff).toContain('/tmp/pi/files/b.md');
     expect(Object.isFrozen(payload.sources['a@1']?.metadata)).toBe(true);
+    expect(JSON.stringify(payload)).not.toContain('runId');
     expect(payload.handoff).toBeUndefined();
     let explicitPayload!: WakeDispatch['payload'];
     const explicitWake = new WakeCoordinator({

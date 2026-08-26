@@ -189,10 +189,25 @@ function outputFileGuidance(
     .join('\n');
 }
 
+const FORWARDED_HANDOFF_LINE =
+  /^(?:## Task \d+|Status:|Outcome:|Conclusion:|Evidence:|Risks:|Blocked:|Failure:)/;
+
+/**
+ * Parent handoffs contain operational recovery details. Downstream children
+ * receive only the child-authored result envelope; workspace and continuation
+ * identifiers remain internal to orchestration.
+ */
 function compactHandoff(source: WorkflowInputSource): string {
   const result = source.result;
   if (!result) return '';
-  return isCompactResult(result) ? result.handoff.text : result.handoff;
+  const handoff = isCompactResult(result)
+    ? result.handoff.text
+    : result.handoff;
+  return handoff
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => FORWARDED_HANDOFF_LINE.test(line))
+    .join('\n');
 }
 
 function resolveReport(source: WorkflowInputSource): string {
@@ -211,7 +226,6 @@ function compactMetadataRun(
   run: DelegateWorkflowRunProjection,
 ): Record<string, unknown> {
   return {
-    runId: run.runId,
     name: run.name,
     state: run.state,
     exitCode: run.exitCode,
@@ -243,7 +257,6 @@ function resolveMetadata(source: WorkflowInputSource): Record<string, unknown> {
               includeFile: false,
             });
             return {
-              runId: run.runId,
               name: run.name,
               state: run.state,
               exitCode: run.exitCode,
@@ -363,11 +376,9 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
 function kindsForSelector(
   selector: BoundWorkflowSelector,
 ): WorkflowInputKind[] {
-  const include = selector.selector.include?.length
+  return selector.selector.include?.length
     ? [...selector.selector.include]
     : (['report'] as WorkflowInputKind[]);
-  if (!include.includes('metadata')) include.push('metadata');
-  return include;
 }
 
 /** Resolve exact retained sources and build bounded untrusted evidence frames. */

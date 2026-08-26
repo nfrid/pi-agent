@@ -15,7 +15,7 @@ import type {
 const Parameters = Type.Object({
   action: StringEnum(['list', 'status', 'feedback', 'cancel'] as const, {
     description:
-      'list shows tracked jobs; status shows bounded metadata; feedback sends corrective guidance to a queued or running job; cancel stops one or more jobs. Results arrive through eager delivery or delegate_gate; use status rather than polling.',
+      'list shows tracked work once; status supports a one-time operational decision; feedback sends one correction to active work; cancel stops work. Never loop, sleep, or repeatedly call list/status to wait for settlement. Results arrive eagerly or through delegate_gate.',
   }),
   id: Type.Optional(
     Type.String({
@@ -38,7 +38,7 @@ const Parameters = Type.Object({
 });
 
 const DELEGATE_JOBS_DESCRIPTION =
-  'Inspect bounded metadata, steer, and cancel asynchronous delegate workflow attempts. Results arrive eagerly unless held by delegate_gate. Use feedback with one bounded message to steer a running child; this tool never polls or consumes result bodies.';
+  'Inspect metadata once for an immediate operational decision, send one bounded correction, or cancel work. Never use list/status repeatedly or pair them with sleeps to wait for settlement. Results arrive eagerly unless held by delegate_gate; this tool never returns result bodies.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -244,7 +244,12 @@ export function registerDelegateJobsTool(
           const attempt = activeWorkflow?.get(id);
           if (attempt) {
             return {
-              content: [{ type: 'text', text: attemptSummary(attempt) }],
+              content: [
+                {
+                  type: 'text',
+                  text: `${attemptSummary(attempt)}\nStatus is a one-time operational snapshot. Do not wait, sleep, or call status again to detect settlement; results arrive eagerly.`,
+                },
+              ],
               details: { action: 'status', attempt: compactAttempt(attempt) },
             };
           }

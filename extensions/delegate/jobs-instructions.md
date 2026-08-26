@@ -1,3 +1,4 @@
-- Do not poll, wait, or consume result bodies with `delegate_jobs`; delegate results arrive eagerly unless intentionally held by `delegate_gate`.
-- Use `delegate_jobs status` only for bounded operational metadata, `feedback` for one corrective message to active work, and `cancel` to stop obsolete work.
+- Never wait for delegates by alternating sleeps with `delegate_jobs list` or `status`. Settle naturally; results arrive eagerly unless intentionally held by `delegate_gate`.
+- Use `delegate_jobs status` at most once when its current metadata changes an immediate feedback or cancellation decision. It does not confirm or retrieve results.
+- Use `feedback` for one corrective message to active work and `cancel` to stop obsolete work.
 - Address workflow attempts by logical node reference rather than adapter job IDs whenever possible.

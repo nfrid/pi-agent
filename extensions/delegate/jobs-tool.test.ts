@@ -67,14 +67,16 @@ describe('delegate_jobs rendering', () => {
 
     expect(tool?.description).toContain('eagerly unless held by delegate_gate');
     expect(tool?.description).toContain(
-      'Use feedback with one bounded message to steer a running child',
+      'Never use list/status repeatedly or pair them with sleeps',
     );
     const actionDescription = tool?.parameters.properties?.action?.description;
-    expect(actionDescription).toContain('list shows tracked jobs');
-    expect(actionDescription).toContain('status shows bounded metadata');
+    expect(actionDescription).toContain('list shows tracked work once');
+    expect(actionDescription).toContain(
+      'status supports a one-time operational decision',
+    );
     expect(actionDescription).not.toContain('peek');
-    expect(actionDescription).toContain('feedback sends corrective guidance');
-    expect(actionDescription).toContain('cancel stops one or more jobs');
+    expect(actionDescription).toContain('feedback sends one correction');
+    expect(actionDescription).toContain('cancel stops work');
     expect(tool?.description).not.toContain('Actions:');
     expect(tool?.promptGuidelines).toBeUndefined();
     expect(tool?.description).not.toContain('peek');
@@ -109,6 +111,9 @@ describe('delegate_jobs rendering', () => {
     });
     expect(status?.content[0]?.text).toContain(
       'Required symbolic report is unavailable.',
+    );
+    expect(status?.content[0]?.text).toContain(
+      'Do not wait, sleep, or call status again',
     );
     expect(status?.details).toMatchObject({
       attempt: {

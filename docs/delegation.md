@@ -110,7 +110,7 @@ Every exact final report is also written to an owner-readable Markdown file unde
 
 ## Operational controls
 
-`delegate_jobs` remains available for bounded status, one feedback message to active work, and cancellation. Address work by logical node reference when possible. It is not a polling or result-retrieval API.
+`delegate_jobs` remains available for one status snapshot when it changes an immediate feedback or cancellation decision, one feedback message to active work, and cancellation. Address work by logical node reference when possible. Never alternate sleeps with `list` or `status` to wait for settlement; this is not a result-retrieval API.
 
 `/pause` gates the parent and active delegates at provider-safe boundaries. `/continue` releases them and resumes queued delivery.
 

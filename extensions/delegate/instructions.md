@@ -8,5 +8,5 @@
 - Use `delegate_gate` only when intermediate results are not useful: `all` batches a fan-in and `any` opens on the first settled result. A later gate replaces the earlier gate.
 - Keep final scope, change integration, final verification, and user-facing decisions with the parent.
 - Use `delegate_changes` with a workflow `node` to review or merge retained code changes.
-- Do not poll for results. `delegate_jobs` is only for bounded status, feedback, and cancellation.
+- Never wait by alternating sleeps with `delegate_jobs list` or `status`. Results arrive eagerly. Use one status snapshot only when it changes an immediate feedback or cancellation decision.
 - Canonical flow: explore with `id: "reconnect-race-explore"`; implement with `id: "reconnect-race-fix"`, `inputs: ["reconnect-race-explore"]`, `scope`, and `write: true`; review with `id: "reconnect-race-review"` and `base: "reconnect-race-fix"`.
