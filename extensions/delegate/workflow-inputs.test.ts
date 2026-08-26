@@ -74,9 +74,23 @@ function bound(
 describe('workflow symbolic inputs', () => {
   test('resolves report file paths and frames them as untrusted evidence', () => {
     const report = 'Outcome: done\nConclusion: exact child report';
+    const richRun = runWithReport(report);
+    richRun.continuation = 'opaque-continuation-token';
+    richRun.worktree = {
+      id: '11111111-1111-1111-1111-111111111111',
+      repositoryRoot: '/repo',
+      worktreePath: '/repo/.worktrees/impl',
+      branch: 'pi/impl',
+      baseHead: 'a'.repeat(40),
+      workBase: 'a'.repeat(40),
+      status: 'finished',
+      hasWork: true,
+      changedPaths: ['src/impl.ts'],
+      snapshot: false,
+    };
     const resolved = resolveWorkflowInputs([bound('impl', ['report'])], () =>
       source({
-        runs: [runWithReport(report)],
+        runs: [richRun],
         handoff: [
           'Status: success',
           'Outcome: done',
@@ -87,7 +101,7 @@ describe('workflow symbolic inputs', () => {
           'Worktree: /repo/.worktrees/impl',
           'Changes: inspect with /delegate-worktrees internal-id',
           'Changed: src/impl.ts',
-          'Evidence: focused test passed',
+          `Evidence: run ${richRun.runId}; continuation opaque-continuation-token; cwd /repo/.worktrees/impl; branch pi/impl; focused test passed`,
         ].join('\n'),
       }),
     );
@@ -104,10 +118,11 @@ describe('workflow symbolic inputs', () => {
       'Conclusion: exact child report',
     );
     expect(resolved.inputs[0]?.value).toContain(
-      'Evidence: focused test passed',
+      'Evidence: run [internal orchestration detail omitted]; continuation [internal orchestration detail omitted]; cwd [internal orchestration detail omitted]; branch [internal orchestration detail omitted]; focused test passed',
     );
     expect(resolved.handoffText).toContain('/tmp/pi/files/child.md');
-    expect(resolved.handoffText).not.toContain('opaque-token');
+    expect(resolved.handoffText).not.toContain('opaque-continuation-token');
+    expect(resolved.handoffText).not.toContain(richRun.runId);
     expect(resolved.handoffText).not.toContain('pi/impl');
     expect(resolved.handoffText).not.toContain('/repo/.worktrees/impl');
     expect(resolved.handoffText).not.toContain('delegate-worktrees');

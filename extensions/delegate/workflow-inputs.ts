@@ -191,11 +191,29 @@ function outputFileGuidance(
 
 const FORWARDED_HANDOFF_LINE =
   /^(?:## Task \d+|Status:|Outcome:|Conclusion:|Evidence:|Risks:|Blocked:|Failure:)/;
+const INTERNAL_DETAIL_MARKER = '[internal orchestration detail omitted]';
+
+function internalWorkflowValues(result: WorkflowSourceResult): string[] {
+  const values = canonicalRuns(result).flatMap((run) => [
+    run.runId,
+    run.sessionId,
+    run.lineageId,
+    run.continuation,
+    run.worktree?.id,
+    run.worktree?.worktreePath,
+    run.worktree?.branch,
+  ]);
+  if (isCompactResult(result)) values.push(result.continuationToken);
+  return [...new Set(values.filter((value): value is string => !!value))]
+    .filter((value) => value.length >= 8 || value.startsWith('pi/'))
+    .sort((left, right) => right.length - left.length);
+}
 
 /**
  * Parent handoffs contain operational recovery details. Downstream children
  * receive only the child-authored result envelope; workspace and continuation
- * identifiers remain internal to orchestration.
+ * identifiers remain internal to orchestration, even when a child repeats one
+ * inside an otherwise useful Evidence field.
  */
 function compactHandoff(source: WorkflowInputSource): string {
   const result = source.result;
@@ -203,11 +221,14 @@ function compactHandoff(source: WorkflowInputSource): string {
   const handoff = isCompactResult(result)
     ? result.handoff.text
     : result.handoff;
-  return handoff
+  let forwarded = handoff
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => FORWARDED_HANDOFF_LINE.test(line))
     .join('\n');
+  for (const value of internalWorkflowValues(result))
+    forwarded = forwarded.replaceAll(value, INTERNAL_DETAIL_MARKER);
+  return forwarded;
 }
 
 function resolveReport(source: WorkflowInputSource): string {
