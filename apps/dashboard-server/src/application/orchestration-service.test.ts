@@ -1699,7 +1699,7 @@ describe('OrchestrationService', () => {
     }
   });
 
-  it('holds the second isolated run at maxParallelRuns until the first settles', async () => {
+  it('launches isolated runs concurrently when maxParallelRuns is one', async () => {
     const fixture = await isolatedServiceFixture();
     try {
       const first = (await fixture.service.createThread(fixture.projectId, {
@@ -1707,43 +1707,19 @@ describe('OrchestrationService', () => {
         title: 'First isolated run',
         prompt: 'First',
       })) as { run: { id: string } };
-      await new Promise((resolve) => setTimeout(resolve, 5));
       const second = (await fixture.service.createThread(fixture.projectId, {
         commandId: 'parallel-thread-2',
         title: 'Second isolated run',
         prompt: 'Second',
       })) as { run: { id: string } };
       await fixture.service.start();
-      await waitFor(() => fixture.launches.length === 1);
-      const repository = fixture.metadata.orchestration;
-      expect(repository.getRun(second.run.id)?.status).toBe('queued');
-      const firstRun = repository.getRun(first.run.id);
-      const firstRuntime = firstRun?.runtimeId as string;
-      const firstPath = String(fixture.launches[0]?.checkoutCwd);
-      fixture.service.onRegistryChange({
-        kind: 'registered',
-        snapshot: {
-          ...runtimeHello(firstRuntime),
-          cwd: firstPath,
-          session: { id: 'parallel-session-1', entries: [] },
-        } as never,
-      });
-      await waitFor(
-        () => repository.getRun(first.run.id)?.status === 'running',
-      );
-      expect(fixture.launches).toHaveLength(1);
-      fixture.service.onRegistryChange({
-        kind: 'event',
-        runtimeId: firstRuntime,
-        event: { type: 'agent.settled', sessionId: 'parallel-session-1' },
-        snapshot: {} as never,
-      });
-      await waitFor(
-        () => repository.getRun(first.run.id)?.status === 'completed',
-      );
       await waitFor(() => fixture.launches.length === 2);
+      const repository = fixture.metadata.orchestration;
+      expect(repository.getRun(first.run.id)?.status).toBe('starting');
       expect(repository.getRun(second.run.id)?.status).toBe('starting');
-      expect(fixture.launches[1]?.checkoutCwd).not.toBe(firstPath);
+      expect(fixture.launches[0]?.checkoutCwd).not.toBe(
+        fixture.launches[1]?.checkoutCwd,
+      );
     } finally {
       await fixture.close();
     }

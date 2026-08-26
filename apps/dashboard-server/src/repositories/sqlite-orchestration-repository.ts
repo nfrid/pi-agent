@@ -1010,23 +1010,6 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return this.withTransaction(() => {
       const current = this.getRun(id);
       if (current?.status !== 'queued') return undefined;
-      const project = this.db
-        .prepare(
-          `SELECT p.max_parallel_runs AS max_parallel_runs, t.project_id AS project_id
-           FROM thread t JOIN project p ON p.id=t.project_id
-           WHERE t.id=?`,
-        )
-        .get(current.threadId) as Record<string, unknown> | undefined;
-      if (!project || String(project.project_id) === '') return undefined;
-      const active = this.db
-        .prepare(
-          `SELECT count(*) AS count FROM orchestration_run r
-           JOIN thread t ON t.id=r.thread_id
-           WHERE t.project_id=? AND r.status IN ('preparing','starting','running','waiting')`,
-        )
-        .get(String(project.project_id)) as Record<string, unknown>;
-      if (Number(active.count) >= Number(project.max_parallel_runs))
-        return undefined;
       try {
         const result = this.db
           .prepare(

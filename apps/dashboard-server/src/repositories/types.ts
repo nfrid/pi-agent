@@ -234,7 +234,7 @@ export interface OrchestrationRepository {
   deleteRun(id: string): void;
   runSummaries(): RunSummary[];
   transitionRun(id: string, status: RunStatus, now?: number): Run;
-  /** Atomically claim a queued run while respecting its project's parallelism. */
+  /** Atomically claim a queued run, subject to checkout writer safety. */
   claimQueuedRun(id: string, now?: number): Run | undefined;
   transitionThread(id: string, status: Thread['status'], now?: number): Thread;
   /** Atomic visibility/order commands; each accepted call appends one event. */

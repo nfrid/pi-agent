@@ -872,7 +872,7 @@ describe('SqliteOrchestrationRepository', () => {
     ).toContain('isolated-checkout');
   });
 
-  it('keeps a second isolated run queued until the project parallel slot settles', async () => {
+  it('claims isolated runs concurrently when maxParallelRuns is one', async () => {
     const value = await fixture();
     value.repository.updateProject(value.project.id, { maxParallelRuns: 1 });
     const secondCheckout = value.repository.createCheckout({
@@ -906,10 +906,6 @@ describe('SqliteOrchestrationRepository', () => {
       initialPrompt: 'Second',
     });
     expect(value.repository.claimQueuedRun(first.id)?.status).toBe('preparing');
-    expect(value.repository.claimQueuedRun(second.id)).toBeUndefined();
-    value.repository.transitionRun(first.id, 'starting');
-    value.repository.transitionRun(first.id, 'running');
-    value.repository.transitionRun(first.id, 'completed');
     expect(value.repository.claimQueuedRun(second.id)?.status).toBe(
       'preparing',
     );
