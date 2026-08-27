@@ -4,6 +4,7 @@ import {
   settingsQueryOptions,
 } from '@pi-dashboard/client';
 import type {
+  DashboardSettings,
   ModelDisplayPreference,
   ModelDisplayPreferences,
 } from '@pi-dashboard/protocol';
@@ -83,7 +84,7 @@ export function removeStoredModelDisplayPreferences(): void {
   }
 }
 
-function mergeMissingPreferences(
+export function mergeModelDisplayPreferences(
   server: ModelDisplayPreferences,
   local: ModelDisplayPreferences,
 ): ModelDisplayPreferences {
@@ -96,6 +97,48 @@ function mergeMissingPreferences(
       merged[key] = preference;
   }
   return merged;
+}
+
+export async function migrateModelDisplayPreferences(
+  settings: DashboardSettings,
+  update: (settings: DashboardSettings) => Promise<DashboardSettings>,
+  setSettings: (settings: DashboardSettings) => void,
+): Promise<DashboardSettings> {
+  const local = readModelDisplayPreferences();
+  const merged = mergeModelDisplayPreferences(
+    settings.modelDisplayPreferences,
+    local,
+  );
+  const localKeys = Object.keys(local);
+  const hasMissingLocalPreference = localKeys.some(
+    (key) =>
+      settings.modelDisplayPreferences[key] === undefined &&
+      merged[key] !== undefined,
+  );
+  if (!hasMissingLocalPreference) {
+    if (
+      localKeys.length === 0 ||
+      localKeys.every(
+        (key) => settings.modelDisplayPreferences[key] !== undefined,
+      )
+    )
+      removeStoredModelDisplayPreferences();
+    return settings;
+  }
+  const mergedSettings = {
+    ...settings,
+    modelDisplayPreferences: merged,
+  };
+  setSettings(mergedSettings);
+  try {
+    const updated = await update(mergedSettings);
+    setSettings(updated);
+    removeStoredModelDisplayPreferences();
+    return updated;
+  } catch (error) {
+    setSettings(settings);
+    throw error;
+  }
 }
 
 /** Query-backed server state with a one-time local-v1 migration. */
@@ -111,37 +154,18 @@ export function useModelDisplayPreferences(): ModelDisplayPreferences {
     attempted.current = true;
     migrationStarted = true;
     const serverSettings = query.data;
-    const local = readModelDisplayPreferences();
-    const merged = mergeMissingPreferences(
-      serverSettings.modelDisplayPreferences,
-      local,
-    );
-    const hasMissingLocalPreference = Object.keys(local).some(
-      (key) =>
-        serverSettings.modelDisplayPreferences[key] === undefined &&
-        merged[key] !== undefined,
-    );
-    if (!hasMissingLocalPreference) {
-      removeStoredModelDisplayPreferences();
-      return;
-    }
-    setMigrationPreferences(merged);
-    const mergedSettings = {
-      ...serverSettings,
-      modelDisplayPreferences: merged,
-    };
-    queryClient.setQueryData(dashboardQueryKeys.settings(), mergedSettings);
-    void dashboardHttpClient.updateSettings(mergedSettings).then(
-      (updated) => {
-        if (updated) {
-          setMigrationPreferences(updated.modelDisplayPreferences);
-          queryClient.setQueryData(dashboardQueryKeys.settings(), updated);
-        }
-        removeStoredModelDisplayPreferences();
+    void migrateModelDisplayPreferences(
+      serverSettings,
+      (settings) => dashboardHttpClient.updateSettings(settings),
+      (settings) => {
+        setMigrationPreferences(settings.modelDisplayPreferences);
+        queryClient.setQueryData(dashboardQueryKeys.settings(), settings);
       },
+    ).then(
+      () => undefined,
       () => {
         migrationStarted = false;
-        queryClient.setQueryData(dashboardQueryKeys.settings(), serverSettings);
+        attempted.current = false;
         setMigrationPreferences(undefined);
       },
     );

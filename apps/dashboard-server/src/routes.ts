@@ -394,9 +394,9 @@ export const dashboardRoutes: FastifyPluginAsync<{
       },
       async (request, reply) => {
         try {
-          return await (context.updateSettings
-            ? context.updateSettings(request.body as DashboardSettings)
-            : (request.body as DashboardSettings));
+          return await requireOperation(context.updateSettings)(
+            request.body as DashboardSettings,
+          );
         } catch (error) {
           return sendError(reply, error);
         }

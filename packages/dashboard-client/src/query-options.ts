@@ -299,6 +299,7 @@ export function updateSettingsMutationOptions(client: DashboardHttpClient) {
   return mutationOptions<DashboardSettings, Error, DashboardSettings>({
     mutationFn: (settings) => client.updateSettings(settings),
     retry: false,
+    scope: { id: 'dashboard-settings' },
   });
 }
 

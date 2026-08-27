@@ -8,10 +8,12 @@ import {
 } from '@pi-dashboard/client';
 import {
   type BrowserSnapshot,
+  type DashboardSettings,
   MAX_MODEL_DISPLAY_ALIAS,
+  type ModelDisplayPreferences,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { errorMessage } from '../shared/lib/error-message';
 import {
   modelDisplayPreferenceKey,
@@ -66,22 +68,46 @@ function ModelDisplayPreferencesEditor({
   const updateMutation = useMutation(
     updateSettingsMutationOptions(dashboardHttpClient),
   );
+  const confirmedSettings = useRef<DashboardSettings | undefined>(undefined);
+  const saveSequence = useRef(0);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    if (saveSequence.current === 0 && settingsQuery.data)
+      confirmedSettings.current = settingsQuery.data;
+  }, [settingsQuery.data]);
   const models = modelOptionsFromSnapshot(snapshot);
   const controlsDisabled = !settingsQuery.data;
-  const savePreferences = (nextPreferences: typeof preferences): void => {
-    const current = settingsQuery.data;
+  const savePreferences = (
+    edit: (current: ModelDisplayPreferences) => ModelDisplayPreferences,
+  ): void => {
+    const current =
+      queryClient.getQueryData<DashboardSettings>(
+        dashboardQueryKeys.settings(),
+      ) ?? settingsQuery.data;
     if (!current) return;
     const next = {
       ...current,
-      modelDisplayPreferences: nextPreferences,
+      modelDisplayPreferences: edit(current.modelDisplayPreferences),
     };
+    const sequence = ++saveSequence.current;
     queryClient.setQueryData(dashboardQueryKeys.settings(), next);
-    updateMutation.mutate(next, {
-      onSuccess: (saved) =>
-        queryClient.setQueryData(dashboardQueryKeys.settings(), saved),
-      onError: () =>
-        queryClient.setQueryData(dashboardQueryKeys.settings(), current),
-    });
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(() => updateMutation.mutateAsync(next))
+      .then(
+        (saved) => {
+          confirmedSettings.current = saved;
+          if (sequence === saveSequence.current)
+            queryClient.setQueryData(dashboardQueryKeys.settings(), saved);
+        },
+        () => {
+          if (sequence === saveSequence.current)
+            queryClient.setQueryData(
+              dashboardQueryKeys.settings(),
+              confirmedSettings.current ?? current,
+            );
+        },
+      );
   };
 
   return (
@@ -107,10 +133,10 @@ function ModelDisplayPreferencesEditor({
           const preference = preferences[key] ?? {};
           const selectedColor = preference.color ?? DEFAULT_MODEL_COLOR;
           const setColor = (color: string) =>
-            savePreferences({
-              ...preferences,
-              [key]: { ...preference, color },
-            });
+            savePreferences((current) => ({
+              ...current,
+              [key]: { ...(current[key] ?? {}), color },
+            }));
           return (
             <div className={styles.modelPreference} key={key}>
               <span className={styles.modelPreferenceId} title={key}>
@@ -126,10 +152,10 @@ function ModelDisplayPreferencesEditor({
                   maxLength={MAX_MODEL_DISPLAY_ALIAS}
                   disabled={controlsDisabled}
                   onChange={(event) =>
-                    savePreferences({
-                      ...preferences,
+                    savePreferences((current) => ({
+                      ...current,
                       [key]: {
-                        ...preference,
+                        ...(current[key] ?? {}),
                         ...(event.target.value.trim()
                           ? {
                               alias: event.target.value
@@ -138,7 +164,7 @@ function ModelDisplayPreferencesEditor({
                             }
                           : { alias: undefined }),
                       },
-                    })
+                    }))
                   }
                 />
               </label>
@@ -150,11 +176,13 @@ function ModelDisplayPreferencesEditor({
                   (preference.alias === undefined &&
                     preference.color === undefined)
                 }
-                onClick={() => {
-                  const next = { ...preferences };
-                  delete next[key];
-                  savePreferences(next);
-                }}
+                onClick={() =>
+                  savePreferences((current) => {
+                    const next = { ...current };
+                    delete next[key];
+                    return next;
+                  })
+                }
               >
                 Reset
               </button>

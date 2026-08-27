@@ -161,6 +161,26 @@ describe('Fastify dashboard route plugin', () => {
     expect(invalid.statusCode).toBe(400);
   });
 
+  it('rejects settings updates when persistence is unavailable', async () => {
+    const app = Fastify();
+    apps.push(app);
+    await app.register(dashboardRoutes, { context: context() });
+    await app.ready();
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+      payload: { modelDisplayPreferences: {} },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'Orchestration is unavailable.',
+    });
+  });
+
   it('serves authenticated delegate history by session ID', async () => {
     const app = Fastify();
     apps.push(app);

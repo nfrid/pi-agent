@@ -63,6 +63,7 @@ describe('dashboard query and mutation factories', () => {
     expect(updateSettings).toHaveBeenCalledWith({
       modelDisplayPreferences: {},
     });
+    expect(mutation.scope).toEqual({ id: 'dashboard-settings' });
   });
 
   it('refreshes open usage history views once a minute', async () => {
