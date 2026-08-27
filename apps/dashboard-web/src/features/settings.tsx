@@ -41,6 +41,15 @@ export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
 }
 
 const DEFAULT_MODEL_COLOR = '#8be9fd';
+const DRACULA_MODEL_COLORS = [
+  { name: 'Purple', value: '#bd93f9' },
+  { name: 'Pink', value: '#ff79c6' },
+  { name: 'Cyan', value: '#8be9fd' },
+  { name: 'Green', value: '#50fa7b' },
+  { name: 'Orange', value: '#ffb86c' },
+  { name: 'Red', value: '#ff5555' },
+  { name: 'Yellow', value: '#f1fa8c' },
+] as const;
 
 function ModelDisplayPreferencesEditor({
   snapshot,
@@ -51,11 +60,14 @@ function ModelDisplayPreferencesEditor({
   const models = modelOptionsFromSnapshot(snapshot);
 
   return (
-    <section
-      className={styles.section}
+    <details
+      className={`${styles.section} ${styles.disclosure}`}
       aria-labelledby="settings-model-display-heading"
     >
-      <h3 id="settings-model-display-heading">Model display</h3>
+      <summary id="settings-model-display-heading">
+        <span className={styles.disclosureTitle}>Model display</span>
+        <small className={styles.disclosureSummary}>Aliases and colors</small>
+      </summary>
       <p className={styles.hint}>
         Choose compact aliases and colors for thread metadata. These stay in
         this browser.
@@ -64,6 +76,12 @@ function ModelDisplayPreferencesEditor({
         {models.map((model) => {
           const key = modelDisplayPreferenceKey(model.provider, model.model);
           const preference = preferences[key] ?? {};
+          const selectedColor = preference.color ?? DEFAULT_MODEL_COLOR;
+          const setColor = (color: string) =>
+            setModelDisplayPreference(model.provider, model.model, {
+              ...preference,
+              color,
+            });
           return (
             <div className={styles.modelPreference} key={key}>
               <span className={styles.modelPreferenceId} title={key}>
@@ -84,20 +102,6 @@ function ModelDisplayPreferencesEditor({
                   }
                 />
               </label>
-              <label className={styles.modelColor}>
-                <span className="sr-only">Color for {key}</span>
-                <input
-                  type="color"
-                  aria-label={`Color for ${key}`}
-                  value={preference.color ?? DEFAULT_MODEL_COLOR}
-                  onChange={(event) =>
-                    setModelDisplayPreference(model.provider, model.model, {
-                      ...preference,
-                      color: event.target.value,
-                    })
-                  }
-                />
-              </label>
               <button
                 type="button"
                 className="secondary-button"
@@ -111,12 +115,36 @@ function ModelDisplayPreferencesEditor({
               >
                 Reset
               </button>
+              <fieldset className={styles.modelColorControls}>
+                <legend className="sr-only">Colors for {key}</legend>
+                {DRACULA_MODEL_COLORS.map((color) => (
+                  <button
+                    key={color.value}
+                    type="button"
+                    className={styles.modelColorPreset}
+                    style={{ backgroundColor: color.value }}
+                    aria-label={`Use ${color.name} for ${key}`}
+                    aria-pressed={selectedColor === color.value}
+                    title={color.name}
+                    onClick={() => setColor(color.value)}
+                  />
+                ))}
+                <label className={styles.modelColor}>
+                  <span className="sr-only">Custom color for {key}</span>
+                  <input
+                    type="color"
+                    aria-label={`Custom color for ${key}`}
+                    value={selectedColor}
+                    onChange={(event) => setColor(event.target.value)}
+                  />
+                </label>
+              </fieldset>
             </div>
           );
         })}
       </div>
       {!models.length && <p className="muted">No observed models yet.</p>}
-    </section>
+    </details>
   );
 }
 

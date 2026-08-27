@@ -35,7 +35,12 @@ describe('settings drawer', () => {
     expect(markup).not.toContain('Notifications');
     expect(markup).not.toContain('Browser alerts');
     expect(markup).toContain('Model display');
+    expect(markup).toContain('<details');
+    expect(markup).not.toContain('<details open=""');
     expect(markup).toContain('Alias for openai/gpt-5');
+    expect(markup).toContain('Use Purple for openai/gpt-5');
+    expect(markup).toContain('Use Yellow for openai/gpt-5');
+    expect(markup).toContain('Custom color for openai/gpt-5');
     expect(markup).toContain('Projects');
     expect(markup).toContain('Dashboard');
     expect(markup).toContain('Rename');

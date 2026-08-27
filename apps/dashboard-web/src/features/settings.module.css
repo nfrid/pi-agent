@@ -11,6 +11,43 @@
   color: var(--fg);
   font-size: 12px;
 }
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.disclosure > summary::before {
+  width: 10px;
+  color: var(--purple);
+  content: "›";
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+.disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+.disclosureTitle {
+  font-weight: 650;
+}
+.disclosureSummary {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 500;
+}
+.disclosure > summary:focus-visible {
+  border-radius: 4px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
 .hint {
   margin: -3px 0 0;
   color: var(--dim);
@@ -21,8 +58,9 @@
   gap: 4px;
 }
 .modelPreference {
-  display: flex;
+  display: grid;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: center;
   gap: 5px;
   border-bottom: 1px solid var(--line-soft);
@@ -61,23 +99,51 @@
   font: inherit;
   font-size: 10px;
 }
+.modelColorControls {
+  display: flex;
+  grid-column: 2 / -1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.modelColorPreset {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  border-radius: 50%;
+  padding: 0;
+  cursor: pointer;
+}
+.modelColorPreset:hover,
+.modelColorPreset:focus-visible,
+.modelColorPreset[aria-pressed="true"] {
+  border-color: var(--fg);
+  outline: 1px solid var(--bg);
+  outline-offset: -3px;
+}
+.modelColorPreset[aria-pressed="true"] {
+  box-shadow: 0 0 0 1px var(--purple);
+}
 .modelColor {
   display: inline-grid;
-  width: 25px;
-  height: 25px;
-  flex: none;
+  width: 22px;
+  height: 22px;
   place-items: center;
 }
 .modelColor input {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border: 0;
   border-radius: 50%;
   background: transparent;
   padding: 0;
   cursor: pointer;
 }
-.modelPreference button {
+.modelPreference > button {
   flex: none;
   padding: 4px 6px;
   font-size: 10px;
