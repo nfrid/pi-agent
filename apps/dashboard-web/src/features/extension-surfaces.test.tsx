@@ -12,14 +12,12 @@ import {
   delegateHistorySettledRunIds,
 } from './delegate-history';
 import {
-  DelegateInspectorDetails,
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
+  DelegateParentRequest,
   delegateDetailHasError,
   delegateTranscriptItems,
   delegateTranscriptSessionId,
-  omitDelegateRenderedPrompt,
-  selectedDelegateRunId,
 } from './delegate-transcript-inspector';
 import {
   createDelegateHistoryRefreshCoordinator,
@@ -201,43 +199,6 @@ describe('live extension surface fixtures', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it('omits only the initial rendered prompt from a canonical child transcript', () => {
-    const projection = {
-      sessionId: 'child',
-      order: ['prompt', 'answer', 'follow-up'],
-      items: {
-        prompt: {
-          kind: 'message' as const,
-          messageId: 'prompt',
-          role: 'user',
-          content: 'full rendered prompt',
-          status: 'finished' as const,
-        },
-        answer: {
-          kind: 'message' as const,
-          messageId: 'answer',
-          role: 'assistant',
-          content: 'done',
-          status: 'finished' as const,
-        },
-        'follow-up': {
-          kind: 'message' as const,
-          messageId: 'follow-up',
-          role: 'user',
-          content: 'continue',
-          status: 'finished' as const,
-        },
-      },
-      lastCursor: 3,
-      lastRuntimeSeq: 0,
-      retiredEpochs: [],
-    };
-    const filtered = omitDelegateRenderedPrompt(projection);
-    expect(filtered.order).toEqual(['answer', 'follow-up']);
-    expect(filtered.items.prompt).toBeUndefined();
-    expect(filtered.items['follow-up']).toBeDefined();
   });
 
   it('fetches persisted detail alongside canonical child transcripts', () => {
@@ -482,36 +443,6 @@ describe('live extension surface fixtures', () => {
       ],
     } as unknown as DelegateHistoryResponse);
     expect([...settled]).toEqual(['settled-run']);
-  });
-
-  it('preserves an inspected historical run across refreshed options', () => {
-    const option = (id: string) => ({
-      id,
-      label: id,
-      row: {
-        id,
-        runId: id,
-        lineageId: 'lineage-1',
-        name: id,
-        kind: 'background' as const,
-        state: 'success' as const,
-        createdAt: 1,
-        allowWrites: false,
-      },
-    });
-    const first = [option('run-1'), option('run-2')];
-    expect(selectedDelegateRunId('run-1', first, false)).toBe('run-1');
-    expect(
-      selectedDelegateRunId(
-        'run-1',
-        [option('run-1'), option('run-2'), option('run-3')],
-        false,
-      ),
-    ).toBe('run-1');
-    expect(selectedDelegateRunId('run-1', [option('run-2')], false)).toBe(
-      'run-2',
-    );
-    expect(selectedDelegateRunId('run-1', first, true)).toBe('run-2');
   });
 
   it('inspects the shared continuation session even when a selected run omitted it', () => {
@@ -1288,6 +1219,36 @@ describe('live extension surface fixtures', () => {
     );
   });
 
+  it('renders continuation runs as consecutive parent messages without a switcher', () => {
+    const run = (id: string, task: string) => ({
+      id,
+      label: id,
+      row: {
+        id,
+        runId: id,
+        lineageId: 'lineage-1',
+        name: 'Review',
+        task,
+        kind: 'background' as const,
+        state: 'success' as const,
+        createdAt: 1,
+        allowWrites: false,
+      },
+    });
+    const latest = run('run-2', 'Also check the outline.');
+    const runs = [run('run-1', 'Review the inspector.'), latest];
+    const markup = renderToStaticMarkup(
+      <DelegateInspectorTranscript row={latest.row} runOptions={runs} isOpen />,
+    );
+
+    expect(markup).toContain('Parent request');
+    expect(markup).toContain('Parent follow-up');
+    expect(markup).toContain('Review the inspector.');
+    expect(markup).toContain('Also check the outline.');
+    expect(markup).not.toContain('Runs in this continuation');
+    expect(markup).not.toContain('Run 1');
+  });
+
   it('keeps stable transcript keys when a bounded window rotates', () => {
     const retained = {
       id: '2:tool-7',
@@ -1338,8 +1299,8 @@ describe('live extension surface fixtures', () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Delegate details"');
-    expect(markup).toContain('2 attempts');
+    expect(markup).toContain('aria-label="Delegate setup"');
+    expect(markup).not.toContain('attempts');
     expect(markup).toContain('web');
     expect(markup).toContain('snapshot retained');
     expect(markup).not.toContain('continuation ready');
@@ -1497,141 +1458,66 @@ describe('live extension surface fixtures', () => {
     ).toBe('current action · resumes parent');
   });
 
-  it('renders bounded dependency and input relationships in the inspector', () => {
-    const row = {
-      id: 'review-lineage',
-      runId: 'review-run',
-      lineageId: 'review-lineage',
-      name: 'Review implementation',
-      kind: 'background' as const,
-      state: 'queued' as const,
-      createdAt: 1,
-      allowWrites: false,
-      workflow: {
-        logicalId: 'review',
-        attempt: 1,
-        identity: 'review@1',
-        state: 'scheduled' as const,
-        dependencies: ['impl@1', 'gate@1'],
-        inputs: [
-          {
-            node: 'impl',
-            identity: 'impl@1',
-            include: ['report' as const, 'branch' as const],
+  it('renders parent requests inline with useful setup and a Markdown exact prompt', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateParentRequest
+        index={1}
+        run={{
+          id: 'review-run',
+          label: 'Review',
+          row: {
+            id: 'review-run',
+            runId: 'review-run',
+            lineageId: 'review-lineage',
+            name: 'Review implementation',
+            kind: 'background',
+            state: 'success',
+            createdAt: 1,
+            allowWrites: false,
+            route: 'luna-high',
+            usage: {
+              input: 10,
+              output: 2,
+              cacheRead: 3,
+              cacheWrite: 0,
+              contextTokens: 136_000,
+              cost: 0.1,
+              turns: 2,
+            },
           },
-        ],
-        createdAt: 1,
-        scheduledAt: 1,
-      },
-    };
-    const markup = renderToStaticMarkup(
-      <DelegateInspectorDetails row={row} now={2_000} />,
-    );
-    expect(markup).toContain('After');
-    expect(markup).toContain('gate@1');
-    expect(markup).not.toContain('<dd>impl@1</dd>');
-    expect(markup).toContain('Inputs');
-    expect(markup).toContain('report + branch');
-    expect(markup).not.toContain('upstream evidence');
-  });
-
-  it('renders structured task, mutable run scope, input evidence, and prompt', () => {
-    const row = {
-      id: 'review-lineage',
-      runId: 'review-run',
-      lineageId: 'review-lineage',
-      name: 'Review implementation',
-      kind: 'background' as const,
-      state: 'success' as const,
-      createdAt: 1,
-      allowWrites: false,
-      isolation: 'worktree' as const,
-    };
-    const markup = renderToStaticMarkup(
-      <DelegateInspectorDetails
-        row={row}
-        now={2_000}
+        }}
         details={{
-          task: 'Review the **complete** implementation.\n\n- Check behavior\n- Check layout',
+          task: 'Review the **complete** implementation.',
           setup: {
             cwd: '/repo',
             isolation: 'worktree',
             worktree: { branch: 'pi/review' },
           },
           runConfig: {
-            scope: ['apps/dashboard-web', 'extensions/delegate'],
-            parentContextNote: 'Keep it concise.\nCheck the drawer.',
+            scope: ['apps/dashboard-web'],
             inputs: [
               {
                 identity: 'impl@1',
                 kind: 'report',
                 label: 'Implementation report',
-                content: 'Outcome: done\nChanged the inspector.',
+                content: 'Outcome: **done**',
               },
             ],
           },
-          renderedPrompt: 'You are a child.\n\nReview the implementation.',
+          renderedPrompt: '## Child prompt\n\nReview the implementation.',
           truncated: false,
         }}
       />,
     );
+    expect(markup).toContain('Parent follow-up');
     expect(markup).toContain(
       'Review the <strong>complete</strong> implementation.',
     );
-    expect(markup).toContain('<li>Check behavior</li>');
-    expect(markup).toContain('class="markdown');
-    expect(markup).toContain('apps/dashboard-web');
-    expect(markup).toContain('Keep it concise.');
-    expect(markup).toContain('Implementation report');
-    expect(markup).toContain('Outcome: done');
-    expect(markup).toContain('<summary>Rendered prompt</summary>');
-    expect(markup).toContain('You are a child.');
-    expect(markup).not.toContain('impl@1');
-  });
-
-  it('renders live structured details as primary inspector content with a collapsed prompt', () => {
-    const row = {
-      id: 'live-review',
-      runId: 'live-review-run',
-      lineageId: 'live-review-lineage',
-      name: 'Live review',
-      kind: 'background' as const,
-      state: 'running' as const,
-      createdAt: 1,
-      allowWrites: false,
-      details: {
-        task: 'Review the live change.',
-        setup: { cwd: '/repo', isolation: 'shared' as const },
-        runConfig: {
-          scope: ['extensions/delegate'],
-          after: ['gate@1'],
-          parentContextNote: 'Parent context is bounded.',
-          refreshSource: 'wip' as const,
-          inputs: [
-            {
-              identity: 'report@1',
-              kind: 'report' as const,
-              label: 'Prior report',
-              content: 'bounded evidence',
-            },
-          ],
-          warnings: ['A setup warning'],
-        },
-        renderedPrompt: 'exact live prompt',
-        truncated: false,
-      },
-    };
-    const markup = renderToStaticMarkup(
-      <DelegateInspectorDetails row={row} now={2_000} />,
-    );
-    expect(markup).toContain('Review the live change.');
-    expect(markup).toContain('Delegate setup');
-    expect(markup).toContain('extensions/delegate');
-    expect(markup).toContain('Parent context is bounded.');
-    expect(markup).toContain('Prior report');
-    expect(markup).toContain('A setup warning');
-    expect(markup).toContain('<details class="delegate-rendered-prompt">');
-    expect(markup).toContain('<summary>Rendered prompt</summary>');
+    expect(markup).toContain('scope apps/dashboard-web');
+    expect(markup).toContain('50%');
+    expect(markup).toContain('<summary>Exact prompt</summary>');
+    expect(markup).toContain('<h2>Child prompt</h2>');
+    expect(markup).not.toContain('<pre>');
   });
 
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {

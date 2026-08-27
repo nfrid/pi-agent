@@ -18,6 +18,7 @@ import {
   transcriptToolOutcome,
   transcriptToolRecord,
 } from '@pi-dashboard/domain';
+import type { ReactNode } from 'react';
 
 export interface TranscriptTodoTask {
   id: string;
@@ -80,6 +81,14 @@ export interface TranscriptModelItem {
   tool?: TranscriptRenderToolItem;
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
+  /** Feature-owned replacement rendered in the normal transcript flow. */
+  customMessage?: ReactNode;
+  /** Optional outline presentation without changing transcript semantics. */
+  landmark?: {
+    label: string;
+    typeLabel?: string;
+    variant?: string;
+  };
 }
 
 export type TranscriptInput = TranscriptProjection | readonly unknown[];

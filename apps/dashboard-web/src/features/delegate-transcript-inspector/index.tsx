@@ -1,5 +1,5 @@
 import type { DashboardLiveStore } from '@pi-dashboard/client';
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { delegateDisplayName } from '../delegate/display-name';
 import { delegateHistoryInvocationToStatus } from '../delegate/history-compose';
@@ -7,12 +7,10 @@ import { SurfaceDrawer } from '../surface-drawer';
 import { DelegateInspectorTranscript } from './canonical-transcript';
 import {
   type DelegateInspectorDetailState,
-  DelegateInspectorDetails,
   DelegateInspectorMetadata,
   type DelegateInspectorRunOption,
   delegateDetailHasError,
   delegateTranscriptSessionId,
-  selectedDelegateRunId,
 } from './detail-panel';
 
 export function DelegateTranscriptInspector({
@@ -40,38 +38,26 @@ export function DelegateTranscriptInspector({
 }) {
   const go = useDashboardNavigate();
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string>();
-  const lineageRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    const lineageChanged = lineageRef.current !== row.lineageId;
-    lineageRef.current = row.lineageId;
-    const nextId = selectedDelegateRunId(
-      selectedRunId,
-      runOptions,
-      lineageChanged,
-    );
-    if (nextId !== selectedRunId) setSelectedRunId(nextId);
-  }, [row.lineageId, runOptions, selectedRunId]);
-  const selectedRun = runOptions?.find((run) => run.id === selectedRunId);
-  const inspectedRow = selectedRun?.row ?? row;
-  const selectedDetail =
-    detail?.run &&
-    detail.run.runId === (selectedRun?.id ?? inspectedRow.runId) &&
-    detail.run.lineageId === inspectedRow.lineageId
-      ? delegateHistoryInvocationToStatus(detail.run.run)
-      : undefined;
-  const displayedRow = selectedDetail ?? inspectedRow;
+  const displayedRow = row;
+  const currentRun = runOptions?.at(-1);
+  const currentDetails =
+    detail?.run?.runId === (currentRun?.id ?? row.runId)
+      ? detail.run.run.details
+      : row.details;
   const transcriptSessionId = delegateTranscriptSessionId(
     row,
     runOptions,
     detail,
   );
+  const detailedTranscriptRow =
+    detail?.run?.lineageId === row.lineageId
+      ? delegateHistoryInvocationToStatus(detail.run.run)
+      : displayedRow;
   const transcriptRow = transcriptSessionId
-    ? { ...displayedRow, sessionId: transcriptSessionId }
-    : displayedRow;
+    ? { ...detailedTranscriptRow, sessionId: transcriptSessionId }
+    : detailedTranscriptRow;
   const headerContent = (
     <div className="delegate-inspector-header-content">
-      <DelegateInspectorMetadata row={displayedRow} now={now} />
       {transcriptSessionId && (
         <button
           type="button"
@@ -92,27 +78,6 @@ export function DelegateTranscriptInspector({
       ref={transcriptScrollRef}
       className="delegate-transcript-inspector-body"
     >
-      {runOptions && runOptions.length > 1 && (
-        <fieldset
-          className="delegate-inspector-run-picker"
-          aria-label="Select delegate run"
-        >
-          <legend>Runs in this continuation</legend>
-          {runOptions.map((run) => (
-            <button
-              type="button"
-              key={run.id}
-              aria-pressed={run.id === selectedRunId}
-              onClick={() => {
-                setSelectedRunId(run.id);
-                onRunSelected?.(run);
-              }}
-            >
-              {run.label}
-            </button>
-          ))}
-        </fieldset>
-      )}
       {detail?.loading && !transcriptSessionId && (
         <p className="delegate-transcript-loading" role="status">
           Loading persisted delegate transcript…
@@ -123,24 +88,21 @@ export function DelegateTranscriptInspector({
           Unable to load this persisted delegate transcript.
         </p>
       )}
-      <DelegateInspectorDetails
-        row={displayedRow}
-        now={now}
-        details={
-          selectedDetail && detail?.run?.run.runId === displayedRow.runId
-            ? detail.run.run.details
-            : displayedRow.details
-        }
-      />
-      <div className="delegate-transcript-heading">
-        <h2>Transcript</h2>
-        {transcriptSessionId && <span>Child session</span>}
+      <div className="delegate-inspector-sticky-setup">
+        <DelegateInspectorMetadata
+          row={displayedRow}
+          now={now}
+          details={currentDetails}
+        />
       </div>
       <DelegateInspectorTranscript
         row={transcriptRow}
         store={store}
         isOpen={isOpen}
         scrollElementRef={transcriptScrollRef}
+        runOptions={runOptions}
+        detail={detail}
+        onRunSelected={onRunSelected}
       />
     </div>
   );
@@ -183,16 +145,12 @@ export function DelegateTranscriptInspector({
 }
 
 export { DelegateTranscript, delegateTranscriptItems } from './adaptation';
-export {
-  DelegateInspectorTranscript,
-  omitDelegateRenderedPrompt,
-} from './canonical-transcript';
+export { DelegateInspectorTranscript } from './canonical-transcript';
 export {
   type DelegateInspectorDetailState,
-  DelegateInspectorDetails,
   DelegateInspectorMetadata,
   type DelegateInspectorRunOption,
+  DelegateParentRequest,
   delegateDetailHasError,
   delegateTranscriptSessionId,
-  selectedDelegateRunId,
 } from './detail-panel';

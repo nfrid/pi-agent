@@ -40,6 +40,10 @@
 .transcript-outline-item.outline-user i {
   background: var(--pink);
 }
+.transcript-outline-item.outline-delegate-request i {
+  border-radius: 1px;
+  background: var(--purple);
+}
 .transcript-outline-item.outline-steering i {
   background: var(--orange);
 }

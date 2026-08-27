@@ -60,6 +60,10 @@
 .transcript-minimap-marker.outline-user i {
   background: var(--pink);
 }
+.transcript-minimap-marker.outline-delegate-request i {
+  border-radius: 1px;
+  background: var(--purple);
+}
 .transcript-minimap-marker.outline-steering i {
   background: var(--orange);
 }

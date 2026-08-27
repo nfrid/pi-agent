@@ -14,7 +14,9 @@ import {
 function landmarkType(
   kind: TranscriptLandmark['kind'],
   deliveryMode?: TranscriptLandmark['deliveryMode'],
+  typeLabel?: string,
 ): string {
+  if (typeLabel) return typeLabel;
   if (kind === 'user')
     return deliveryMode === 'steer' ? 'Steering message' : 'User message';
   if (kind === 'assistant') return 'Agent update';
@@ -121,7 +123,7 @@ export function TranscriptOutline({
         outlineLandmarks.map((landmark) => (
           <button
             type="button"
-            className={`surface-row transcript-outline-item outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}`}
+            className={`surface-row transcript-outline-item outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}${landmark.variant ? ` outline-${landmark.variant}` : ''}`}
             key={landmark.key}
             onClick={() => {
               onJump(landmark);
@@ -149,7 +151,7 @@ export function TranscriptOutline({
         {minimapLandmarks.map((landmark) => (
           <button
             type="button"
-            className={`transcript-minimap-marker outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}${activeKey === landmark.key ? ' active' : ''}`}
+            className={`transcript-minimap-marker outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}${landmark.variant ? ` outline-${landmark.variant}` : ''}${activeKey === landmark.key ? ' active' : ''}`}
             key={landmark.key}
             aria-label={landmark.label}
             data-preview={landmark.label}
@@ -158,7 +160,7 @@ export function TranscriptOutline({
             <span
               className="transcript-minimap-preview"
               data-label={landmark.label}
-              data-meta={`${landmarkType(landmark.kind, landmark.deliveryMode)}${landmarkTime(landmark.timestamp) ? ` · ${landmarkTime(landmark.timestamp)}` : ''}`}
+              data-meta={`${landmarkType(landmark.kind, landmark.deliveryMode, landmark.typeLabel)}${landmarkTime(landmark.timestamp) ? ` · ${landmarkTime(landmark.timestamp)}` : ''}`}
               aria-hidden="true"
             />
             <i aria-hidden="true" />

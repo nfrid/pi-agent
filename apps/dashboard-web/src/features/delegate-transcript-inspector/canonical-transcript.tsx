@@ -5,23 +5,32 @@ import {
   selectTranscript,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import type { TranscriptProjection } from '@pi-dashboard/domain';
-import { type RefObject, useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { Transcript } from '../../entities/transcript';
+import { toTranscriptEntries } from '../../transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
 import { useOlderSessionHistory } from '../session/history';
 import { useSessionScroll } from '../session/scroll';
 import { SessionHistoryControl } from '../session/views';
 import { DelegateTranscript } from './adaptation';
+import {
+  type DelegateInspectorDetailState,
+  type DelegateInspectorRunOption,
+  DelegateParentRequest,
+} from './detail-panel';
 
 function DelegateBoundedFallback({
   row,
   reason,
+  omitTasks = false,
 }: {
   row: DelegateInspectionStatus;
   reason: string;
+  omitTasks?: boolean;
 }) {
-  const entries = row.transcript ?? [];
+  const entries = omitTasks
+    ? (row.transcript ?? []).filter((entry) => entry.type !== 'task')
+    : (row.transcript ?? []);
   return (
     <section aria-label="Bounded delegate transcript fallback">
       <p className="delegate-transcript-truncated">{reason}</p>
@@ -46,35 +55,24 @@ function DelegateBoundedFallback({
   );
 }
 
-/** The initial child user message is the rendered delegate prompt shown above as a disclosure. */
-export function omitDelegateRenderedPrompt(
-  projection: TranscriptProjection,
-): TranscriptProjection {
-  const promptId = projection.order.find((id) => {
-    const item = projection.items[id];
-    return item?.kind === 'message' && item.role === 'user';
-  });
-  if (!promptId) return projection;
-  const { [promptId]: _prompt, ...items } = projection.items;
-  return {
-    ...projection,
-    order: projection.order.filter((id) => id !== promptId),
-    items,
-  };
-}
-
 function DelegateCanonicalTranscript({
   sessionId,
   store,
   fallback,
   isOpen,
   scrollElementRef,
+  runOptions,
+  detail,
+  onRunSelected,
 }: {
   sessionId: string;
   store: DashboardLiveStore;
   fallback: DelegateInspectionStatus;
   isOpen: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
+  runOptions: readonly DelegateInspectorRunOption[];
+  detail?: DelegateInspectorDetailState;
+  onRunSelected?: (run: DelegateInspectorRunOption) => void;
 }) {
   const projection = useDashboardStore(store, selectTranscript(sessionId));
   const runtime = useDashboardStore(store, selectRuntimeForSession(sessionId));
@@ -84,6 +82,7 @@ function DelegateCanonicalTranscript({
     (state) => state.sessionSyncById[sessionId],
   );
   const fallbackScrollRef = useRef<HTMLDivElement>(null);
+  const [requestedRunId, setRequestedRunId] = useState<string>();
   const transcriptScrollRef = scrollElementRef ?? fallbackScrollRef;
   useEffect(() => {
     const handle = store.acquireSession(sessionId);
@@ -113,6 +112,61 @@ function DelegateCanonicalTranscript({
     sessionMounted: mounted,
     autoloadAll: true,
   });
+  const modelItems = useMemo(() => {
+    if (!projection) return undefined;
+    let requestIndex = 0;
+    return toTranscriptEntries(projection).map((item) => {
+      if (item.role !== 'user' || item.deliveryMode) return item;
+      const index = requestIndex++;
+      const run = runOptions[index];
+      if (!run) return item;
+      const runDetails =
+        detail?.run?.runId === run.id ? detail.run.run.details : undefined;
+      const task =
+        runDetails?.task ??
+        run.row.details?.task ??
+        run.row.task ??
+        'Delegate request';
+      return {
+        ...item,
+        text: task,
+        customMessage: (
+          <DelegateParentRequest
+            run={run}
+            index={index}
+            details={runDetails}
+            loading={detail?.loading === true && requestedRunId === run.id}
+            error={detail?.error != null && requestedRunId === run.id}
+            onDetailsRequested={() => {
+              setRequestedRunId(run.id);
+              onRunSelected?.(run);
+            }}
+          />
+        ),
+        landmark: {
+          label: task.replace(/\s+/gu, ' ').trim().slice(0, 240),
+          typeLabel: index === 0 ? 'Parent request' : 'Parent follow-up',
+          variant: 'delegate-request',
+        },
+      };
+    });
+  }, [detail, onRunSelected, projection, requestedRunId, runOptions]);
+  const delegateOutline = useMemo(() => {
+    if (!snapshot?.outline) return snapshot?.outline;
+    let requestIndex = 0;
+    return snapshot.outline.map((landmark) => {
+      if (landmark.kind !== 'user') return landmark;
+      const run = runOptions[requestIndex++];
+      if (!run) return landmark;
+      const task = run.row.details?.task ?? run.row.task;
+      return task
+        ? {
+            ...landmark,
+            label: task.replace(/\s+/gu, ' ').trim().slice(0, 240),
+          }
+        : landmark;
+    });
+  }, [runOptions, snapshot?.outline]);
   if (!mounted)
     return (
       <DelegateBoundedFallback
@@ -143,12 +197,12 @@ function DelegateCanonicalTranscript({
           </output>
         ))}
       <Transcript
-        projection={omitDelegateRenderedPrompt(projection)}
+        modelItems={modelItems}
         runtime={runtime}
         tailScrollRequest={follow.tailScrollRequest}
         onBeforeScroll={follow.stopFollowing}
         scrollElementRef={transcriptScrollRef}
-        outline={snapshot?.outline}
+        outline={delegateOutline}
         onJumpToLandmark={(landmark) =>
           landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
             ? loadThroughOrdinal(landmark.ordinal)
@@ -179,16 +233,51 @@ function DelegateCanonicalTranscript({
   );
 }
 
+function DelegateBoundedRequests({
+  runOptions,
+  detail,
+  onRunSelected,
+}: {
+  runOptions: readonly DelegateInspectorRunOption[];
+  detail?: DelegateInspectorDetailState;
+  onRunSelected?: (run: DelegateInspectorRunOption) => void;
+}) {
+  const [requestedRunId, setRequestedRunId] = useState<string>();
+  return runOptions.map((run, index) => (
+    <div data-transcript-key={`delegate-request-${run.id}`} key={run.id}>
+      <DelegateParentRequest
+        run={run}
+        index={index}
+        details={
+          detail?.run?.runId === run.id ? detail.run.run.details : undefined
+        }
+        loading={detail?.loading === true && requestedRunId === run.id}
+        error={detail?.error != null && requestedRunId === run.id}
+        onDetailsRequested={() => {
+          setRequestedRunId(run.id);
+          onRunSelected?.(run);
+        }}
+      />
+    </div>
+  ));
+}
+
 export function DelegateInspectorTranscript({
   row,
   store,
   isOpen,
   scrollElementRef,
+  runOptions = [],
+  detail,
+  onRunSelected,
 }: {
   row: DelegateInspectionStatus;
   store?: DashboardLiveStore;
   isOpen: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
+  runOptions?: readonly DelegateInspectorRunOption[];
+  detail?: DelegateInspectorDetailState;
+  onRunSelected?: (run: DelegateInspectorRunOption) => void;
 }) {
   return isOpen && row.sessionId && store ? (
     <DelegateCanonicalTranscript
@@ -198,15 +287,26 @@ export function DelegateInspectorTranscript({
       fallback={row}
       isOpen={isOpen}
       scrollElementRef={scrollElementRef}
+      runOptions={runOptions}
+      detail={detail}
+      onRunSelected={onRunSelected}
     />
   ) : (
-    <DelegateBoundedFallback
-      row={row}
-      reason={
-        row.sessionId
-          ? 'Limited transcript — open this delegate to load its child session.'
-          : 'Limited transcript — this older delegate has no child session.'
-      }
-    />
+    <>
+      <DelegateBoundedRequests
+        runOptions={runOptions}
+        detail={detail}
+        onRunSelected={onRunSelected}
+      />
+      <DelegateBoundedFallback
+        row={row}
+        omitTasks={runOptions.length > 0}
+        reason={
+          row.sessionId
+            ? 'Limited transcript — open this delegate to load its child session.'
+            : 'Limited transcript — this older delegate has no child session.'
+        }
+      />
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildTranscriptLandmarks,
   sampleTranscriptLandmarks,
   sampleTranscriptMinimapLandmarks,
   type TranscriptLandmark,
@@ -19,6 +20,31 @@ function landmarks(
 }
 
 describe('transcript landmark sampling', () => {
+  it('retains custom labels for feature-owned user landmarks', () => {
+    const [landmark] = buildTranscriptLandmarks([
+      {
+        key: 'delegate-request',
+        entry: { kind: 'other' },
+        raw: {},
+        role: 'user',
+        text: 'raw child prompt',
+        landmark: {
+          label: 'Review the inspector',
+          typeLabel: 'Parent request',
+          variant: 'delegate-request',
+        },
+      },
+    ]);
+
+    expect(landmark).toMatchObject({
+      key: 'delegate-request',
+      kind: 'user',
+      label: 'Review the inspector',
+      typeLabel: 'Parent request',
+      variant: 'delegate-request',
+    });
+  });
+
   it('retains every user landmark before sampling activity landmarks', () => {
     const input = landmarks(300, [2, 100, 297]);
     const sampled = sampleTranscriptLandmarks(input, 8);

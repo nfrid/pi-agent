@@ -9,6 +9,8 @@ export type TranscriptLandmark = {
   itemIndex: number;
   deliveryMode?: 'steer' | 'followUp';
   timestamp?: number | string;
+  typeLabel?: string;
+  variant?: string;
 };
 
 function landmarkLabel(item: TranscriptModelItem, fallback: string): string {
@@ -99,9 +101,15 @@ export function buildTranscriptLandmarks(
     if (item.role === 'user')
       result.push({
         key: item.key,
-        label: landmarkLabel(item, 'User turn'),
+        label: item.landmark?.label ?? landmarkLabel(item, 'User turn'),
         kind: 'user',
         itemIndex: index,
+        ...(item.landmark?.typeLabel === undefined
+          ? {}
+          : { typeLabel: item.landmark.typeLabel }),
+        ...(item.landmark?.variant === undefined
+          ? {}
+          : { variant: item.landmark.variant }),
         ...(item.deliveryMode === undefined
           ? {}
           : { deliveryMode: item.deliveryMode }),
@@ -141,7 +149,10 @@ export function mergeTranscriptLandmarks(
     );
     if (loaded) {
       matchedLoadedKeys.add(loaded.key);
-      return { ...loaded, label: landmark.label };
+      return {
+        ...loaded,
+        label: loaded.variant ? loaded.label : landmark.label,
+      };
     }
     return {
       key: landmark.id,

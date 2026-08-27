@@ -11,7 +11,10 @@ import {
   useRef,
   useState,
 } from 'react';
-import { toTranscriptEntries } from '../../../transcript';
+import {
+  type TranscriptModelItem,
+  toTranscriptEntries,
+} from '../../../transcript';
 import { invokeActivityExpansion } from '../activity-expansion';
 import { TranscriptActivityGroup } from '../activity-group';
 import { TranscriptEntry } from '../entries';
@@ -28,6 +31,7 @@ import { VirtualizedTranscript } from './virtualized';
 export function Transcript({
   entries,
   projection,
+  modelItems,
   runtime,
   outline,
   onJumpToLandmark,
@@ -45,6 +49,8 @@ export function Transcript({
   entries?: unknown[];
   /** Preferred canonical domain projection input. */
   projection?: TranscriptProjection;
+  /** Prepared items for feature-owned transcript message presentations. */
+  modelItems?: readonly TranscriptModelItem[];
   runtime?: RuntimeSnapshot;
   outline?: readonly SessionOutlineLandmark[];
   onJumpToLandmark?: (
@@ -70,8 +76,11 @@ export function Transcript({
   const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
   const items = useMemo(
-    () => toTranscriptEntries(input, { leadingContinuation }),
-    [input, leadingContinuation],
+    () =>
+      modelItems
+        ? [...modelItems]
+        : toTranscriptEntries(input, { leadingContinuation }),
+    [input, leadingContinuation, modelItems],
   );
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
   const groups = useMemo(

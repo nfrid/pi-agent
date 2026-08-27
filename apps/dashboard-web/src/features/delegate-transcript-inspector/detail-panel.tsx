@@ -1,19 +1,95 @@
-import type { DelegateHistoryRunDetailResponse } from '@pi-dashboard/protocol';
-import type { DelegateStatus } from '../../../../../extensions/delegate/contribution';
+import type {
+  DelegateHistoryRunDetailResponse,
+  DelegateUsage,
+} from '@pi-dashboard/protocol';
 import { Markdown } from '../../Markdown';
+import { formatCompactCount } from '../../shared/lib/format';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
 import {
   surfaceElapsed,
   surfaceStateClass,
   surfaceStateLabel,
 } from '../delegate/surface-state';
+import { DashboardTime } from '../timestamp';
+
+const DEFAULT_CONTEXT_WINDOW = 272_000;
+
+function ContextUsage({
+  usage,
+  label,
+  compact = false,
+}: {
+  usage: DelegateUsage | undefined;
+  label: string;
+  compact?: boolean;
+}) {
+  if (!usage) return null;
+  const limit = usage.contextWindow || DEFAULT_CONTEXT_WINDOW;
+  const percent = Math.round((usage.contextTokens / limit) * 100);
+  return (
+    <details className={`delegate-context-usage${compact ? ' compact' : ''}`}>
+      <summary aria-label={`${label} context window ${percent}%`}>
+        <span className="delegate-context-wide">
+          {formatCompactCount(usage.contextTokens)} /{' '}
+          {formatCompactCount(limit)} ·{' '}
+        </span>
+        <strong>{percent}%</strong>
+      </summary>
+      <div className="delegate-context-popover">
+        <strong>{label} context</strong>
+        <dl>
+          <div>
+            <dt>Used</dt>
+            <dd>{formatCompactCount(usage.contextTokens)}</dd>
+          </div>
+          <div>
+            <dt>Limit</dt>
+            <dd>{formatCompactCount(limit)}</dd>
+          </div>
+          <div>
+            <dt>Input</dt>
+            <dd>{formatCompactCount(usage.input)}</dd>
+          </div>
+          <div>
+            <dt>Output</dt>
+            <dd>{formatCompactCount(usage.output)}</dd>
+          </div>
+          <div>
+            <dt>Cache read</dt>
+            <dd>{formatCompactCount(usage.cacheRead)}</dd>
+          </div>
+          <div>
+            <dt>Cache write</dt>
+            <dd>{formatCompactCount(usage.cacheWrite)}</dd>
+          </div>
+          <div>
+            <dt>Turns</dt>
+            <dd>{usage.turns}</dd>
+          </div>
+          <div>
+            <dt>Cost</dt>
+            <dd>${usage.cost.toFixed(4)}</dd>
+          </div>
+        </dl>
+      </div>
+    </details>
+  );
+}
+
+function setupBranch(
+  details: DelegateHistoryRunDetailResponse['run']['details'] | undefined,
+): string | undefined {
+  return details?.setup?.worktree?.branch;
+}
 
 export function DelegateInspectorMetadata({
   row,
   now,
+  details,
 }: {
   row: DelegateInspectionStatus;
   now: number;
+  details?: DelegateHistoryRunDetailResponse['run']['details'];
 }) {
   const state = surfaceStateLabel(
     row.pauseState ?? row.workflow?.state ?? row.state,
@@ -24,10 +100,12 @@ export function DelegateInspectorMetadata({
     row.pausedAt ?? now,
   );
   const lifecycle = row.lifecycle;
+  const route = row.route ?? row.workflow?.route;
+  const branch = setupBranch(details ?? row.details);
   return (
     <fieldset
       className="delegate-inspector-metadata"
-      aria-label="Delegate details"
+      aria-label="Delegate setup"
     >
       <span className={`delegate-meta-status ${surfaceStateClass(state)}`}>
         {state}
@@ -48,9 +126,9 @@ export function DelegateInspectorMetadata({
           </span>
         </span>
       )}
-      {row.isolation && (
+      {row.isolation && !branch && (
         <span className="delegate-meta-workspace">
-          {row.isolation} workspace
+          {row.isolation === 'worktree' ? 'isolated' : 'shared'}
         </span>
       )}
       {row.capabilities?.map((capability) => (
@@ -58,17 +136,8 @@ export function DelegateInspectorMetadata({
           {capability}
         </span>
       ))}
-      {row.context && (
-        <span className="delegate-meta-context">{row.context}</span>
-      )}
-      {(row.route ?? row.workflow?.route) && (
-        <span className="delegate-meta-route">
-          {row.route ?? row.workflow?.route}
-        </span>
-      )}
-      {row.runCount && row.runCount > 1 && (
-        <span className="delegate-meta-attempts">{row.runCount} attempts</span>
-      )}
+      {route && <span className="delegate-meta-route">{route}</span>}
+      {branch && <span className="delegate-meta-branch">{branch}</span>}
       {lifecycle && (
         <span className="delegate-meta-recovery surface-failed">
           {!lifecycle.continuationUsable
@@ -80,233 +149,146 @@ export function DelegateInspectorMetadata({
                 : `recovery ${lifecycle.reason}`}
         </span>
       )}
+      <ContextUsage
+        usage={row.usage}
+        label={row.state === 'running' ? 'Current' : 'Final'}
+      />
     </fieldset>
   );
 }
 
-function diagnosticFile(
-  row: DelegateStatus,
-): { path: string; size?: number } | undefined {
-  const file = row.lifecycle?.diagnosticFile;
-  return file &&
-    typeof file === 'object' &&
-    typeof (file as { path?: unknown }).path === 'string'
-    ? (file as { path: string; size?: number })
-    : undefined;
-}
-
-export function DelegateInspectorDetails({
-  row,
-  now,
+export function DelegateParentRequest({
+  run,
+  index,
   details,
+  loading,
+  error,
+  onDetailsRequested,
 }: {
-  row: DelegateInspectionStatus;
-  now: number;
+  run: DelegateInspectorRunOption;
+  index: number;
   details?: DelegateHistoryRunDetailResponse['run']['details'];
+  loading?: boolean;
+  error?: boolean;
+  onDetailsRequested?: () => void;
 }) {
-  const lifecycle = row.lifecycle;
-  const structuredDetails = details ?? row.details;
-  const runs = row.runs ?? [];
-  const warnings = structuredDetails?.runConfig?.warnings ?? row.warnings ?? [];
-  const runKeyOccurrences = new Map<string, number>();
-  const file = diagnosticFile(row);
-  const setup = structuredDetails?.setup;
-  const runConfig = structuredDetails?.runConfig;
-  const fallbackInputIdentities = new Set(
-    (row.workflow?.inputs ?? []).map((input) => input.identity),
-  );
-  const fallbackAfter = (row.workflow?.dependencies ?? []).filter(
-    (dependency) => !fallbackInputIdentities.has(dependency),
-  );
-  type DisplayInput = {
-    identity: string;
-    label: string;
-    kind: 'report' | 'handoff' | 'branch' | 'metadata';
-    include?: readonly string[];
-    content?: string;
-    branch?: { branch?: string };
-  };
-  const fallbackInputs: DisplayInput[] = (row.workflow?.inputs ?? []).map(
-    (input) => ({
-      identity: input.identity,
-      label: input.label ?? input.node,
-      kind: input.include?.[0] ?? 'report',
-      include: input.include?.length ? input.include : ['report'],
-    }),
-  );
-  const inputs: DisplayInput[] = runConfig?.inputs?.length
-    ? runConfig.inputs.map((input) => ({ ...input }))
-    : fallbackInputs;
-  const failed = ['error', 'aborted', 'timed-out'].includes(row.state);
+  const row = run.row;
+  const effectiveDetails = details ?? row.details;
+  const task = effectiveDetails?.task ?? row.task ?? 'Delegate request';
+  const setup = effectiveDetails?.setup;
+  const config = effectiveDetails?.runConfig;
+  const branch = setupBranch(effectiveDetails);
+  const immediate = [
+    ...(config?.scope?.length ? [`scope ${config.scope.join(', ')}`] : []),
+    ...(config?.inputs?.length
+      ? [
+          `${config.inputs.length} input${config.inputs.length === 1 ? '' : 's'}`,
+        ]
+      : []),
+    ...(config?.after?.length ? [`after ${config.after.join(', ')}`] : []),
+  ];
   return (
-    <div className="delegate-inspector-details">
-      {structuredDetails?.task && (
-        <section className="delegate-inspector-task" aria-label="Task">
-          <h2>Task</h2>
-          <Markdown>{structuredDetails.task}</Markdown>
-        </section>
+    <article className="delegate-parent-request">
+      <header>
+        <strong>{index === 0 ? 'Parent request' : 'Parent follow-up'}</strong>
+        <ContextUsage
+          usage={row.usage}
+          label={row.state === 'running' ? 'Current' : 'Final'}
+          compact
+        />
+        <DashboardTime className="transcript-time" timestamp={row.createdAt} />
+      </header>
+      <Markdown>{task}</Markdown>
+      {immediate.length > 0 && (
+        <p className="delegate-request-summary">{immediate.join(' · ')}</p>
       )}
-      {setup && (
-        <section
-          className="delegate-inspector-section"
-          aria-labelledby="delegate-setup-title"
-        >
-          <h2 id="delegate-setup-title">Delegate setup</h2>
-          <dl>
-            {setup.cwd && (
-              <div>
-                <dt>Working directory</dt>
-                <dd>{setup.cwd}</dd>
-              </div>
-            )}
-            {setup.isolation && (
-              <div>
-                <dt>Workspace</dt>
-                <dd>{setup.isolation}</dd>
-              </div>
-            )}
-            {setup.worktree?.branch && (
-              <div>
-                <dt>Checkout</dt>
-                <dd>{setup.worktree.branch}</dd>
-              </div>
-            )}
-            {setup.worktree?.worktreePath && (
-              <div>
-                <dt>Worktree</dt>
-                <dd>{setup.worktree.worktreePath}</dd>
-              </div>
-            )}
-            {setup.worktree?.baseRef && (
-              <div>
-                <dt>Original base</dt>
-                <dd>{setup.worktree.baseRef}</dd>
-              </div>
-            )}
-            {setup.worktree?.baseHead && (
-              <div>
-                <dt>Base commit</dt>
-                <dd>{setup.worktree.baseHead}</dd>
-              </div>
-            )}
-          </dl>
-        </section>
-      )}
-      {(runConfig ||
-        fallbackAfter.length > 0 ||
-        inputs.length > 0 ||
-        warnings.length > 0) && (
-        <section
-          className="delegate-inspector-section"
-          aria-labelledby="delegate-run-config-title"
-        >
-          <h2 id="delegate-run-config-title">Run configuration</h2>
-          <dl>
-            {runConfig?.scope && (
-              <div>
-                <dt>Scope</dt>
-                <dd>{runConfig.scope.join(', ')}</dd>
-              </div>
-            )}
-            {(runConfig?.after ?? fallbackAfter).length > 0 && (
-              <div>
-                <dt>After</dt>
-                <dd>{(runConfig?.after ?? fallbackAfter).join(', ')}</dd>
-              </div>
-            )}
-            {runConfig?.parentContextNote && (
-              <div>
-                <dt>Parent context</dt>
-                <dd className="delegate-inspector-context-note">
-                  {runConfig.parentContextNote}
-                </dd>
-              </div>
-            )}
-            {runConfig?.refreshSource && (
-              <div>
-                <dt>Refresh source</dt>
-                <dd>{runConfig.refreshSource}</dd>
-              </div>
-            )}
-          </dl>
-          {inputs.length > 0 && (
-            <div className="delegate-inspector-inputs">
-              <h3>Inputs</h3>
-              {inputs.map((input) => (
-                <details key={`${input.label}:${input.kind}:${input.identity}`}>
-                  <summary>
-                    {input.label}{' '}
-                    <small>{input.include?.join(' + ') ?? input.kind}</small>
-                  </summary>
-                  {input.content ? (
-                    <pre>{input.content}</pre>
-                  ) : input.branch ? (
-                    <p>Branch: {input.branch.branch ?? 'source branch'}</p>
-                  ) : (
-                    <p>No bounded content retained.</p>
-                  )}
-                </details>
-              ))}
-            </div>
-          )}
-          {warnings.length > 0 && (
-            <div className="delegate-inspector-warnings" role="note">
-              <strong>Setup warnings</strong>
-              <ul>
-                {warnings.map((warning) => (
+      <details
+        className="delegate-request-details"
+        onToggle={(event) => {
+          if (event.currentTarget.open && !effectiveDetails)
+            onDetailsRequested?.();
+        }}
+      >
+        <summary>Details</summary>
+        {loading && !effectiveDetails ? (
+          <p role="status">Loading setup…</p>
+        ) : error && !effectiveDetails ? (
+          <p role="alert">Unable to load setup details.</p>
+        ) : effectiveDetails ? (
+          <div className="delegate-request-details-body">
+            <dl>
+              {setup?.cwd && (
+                <div>
+                  <dt>Working directory</dt>
+                  <dd>{setup.cwd}</dd>
+                </div>
+              )}
+              {branch && (
+                <div>
+                  <dt>Branch</dt>
+                  <dd>{branch}</dd>
+                </div>
+              )}
+              {setup?.worktree?.worktreePath && (
+                <div>
+                  <dt>Worktree</dt>
+                  <dd>{setup.worktree.worktreePath}</dd>
+                </div>
+              )}
+              {setup?.worktree?.baseRef && (
+                <div>
+                  <dt>Base</dt>
+                  <dd>{setup.worktree.baseRef}</dd>
+                </div>
+              )}
+              {config?.parentContextNote && (
+                <div>
+                  <dt>Parent context</dt>
+                  <dd>
+                    <Markdown>{config.parentContextNote}</Markdown>
+                  </dd>
+                </div>
+              )}
+              {config?.refreshSource && (
+                <div>
+                  <dt>Refresh source</dt>
+                  <dd>{config.refreshSource}</dd>
+                </div>
+              )}
+            </dl>
+            {config?.inputs?.map((input) => (
+              <details className="delegate-request-input" key={input.identity}>
+                <summary>{input.label}</summary>
+                {input.content ? (
+                  <Markdown>{input.content}</Markdown>
+                ) : input.branch ? (
+                  <p>{input.branch.branch ?? 'Source branch'}</p>
+                ) : (
+                  <p>No retained content.</p>
+                )}
+              </details>
+            ))}
+            {config?.warnings?.length ? (
+              <ul className="delegate-inspector-warnings">
+                {config.warnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>
-            </div>
-          )}
-        </section>
-      )}
-      {structuredDetails?.renderedPrompt && (
-        <details className="delegate-rendered-prompt">
-          <summary>Rendered prompt</summary>
-          <pre>{structuredDetails.renderedPrompt}</pre>
-        </details>
-      )}
-      {runs.length > 1 && (
-        <ol className="delegate-inspector-runs" aria-label="Run history">
-          {runs.map((run, index) => {
-            const duration = surfaceElapsed(
-              run.startedAt,
-              run.finishedAt,
-              row.pausedAt ?? now,
-            );
-            const baseKey = `${run.state}:${run.startedAt ?? ''}:${run.finishedAt ?? ''}`;
-            const occurrence = (runKeyOccurrences.get(baseKey) ?? 0) + 1;
-            runKeyOccurrences.set(baseKey, occurrence);
-            const key = occurrence === 1 ? baseKey : `${baseKey}:${occurrence}`;
-            return (
-              <li key={key}>
-                <strong>Run {index + 1}</strong>
-                <span
-                  className={surfaceStateClass(surfaceStateLabel(run.state))}
-                >
-                  {surfaceStateLabel(run.state)}
-                </span>
-                {duration && <small>{duration}</small>}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-      {lifecycle && (failed || lifecycle.reason) && (
-        <div className="delegate-inspector-recovery" role="alert">
-          <strong>Recovery</strong>
-          <span>{lifecycle.reason}</span>
-          {lifecycle.diagnostic && <pre>{lifecycle.diagnostic}</pre>}
-          {file && (
-            <p>
-              Diagnostic file: <code>{file.path}</code>{' '}
-              {file.size !== undefined ? `(${file.size} bytes)` : null}
-            </p>
-          )}
-        </div>
-      )}
-    </div>
+            ) : null}
+            {effectiveDetails.renderedPrompt && (
+              <details className="delegate-rendered-prompt">
+                <summary>Exact prompt</summary>
+                <div className="delegate-rendered-prompt-markdown">
+                  <Markdown>{effectiveDetails.renderedPrompt}</Markdown>
+                </div>
+              </details>
+            )}
+          </div>
+        ) : (
+          <p>No retained setup details.</p>
+        )}
+      </details>
+    </article>
   );
 }
 
@@ -330,21 +312,6 @@ export function delegateDetailHasError(
   detail: DelegateInspectorDetailState | undefined,
 ): boolean {
   return detail?.error != null && detail.loading !== true;
-}
-
-/** Keep a historical selection stable while the live composite is refreshed. */
-export function selectedDelegateRunId(
-  previousId: string | undefined,
-  options: readonly DelegateInspectorRunOption[] | undefined,
-  lineageChanged: boolean,
-): string | undefined {
-  if (
-    !lineageChanged &&
-    previousId &&
-    options?.some((run) => run.id === previousId)
-  )
-    return previousId;
-  return options?.at(-1)?.id;
 }
 
 /** Continuations share one child session; inspect that session, not per-run parent details. */

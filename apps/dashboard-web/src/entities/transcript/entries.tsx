@@ -545,6 +545,12 @@ function TranscriptEntry({
   const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
     return <TranscriptEventEntry event={item.event} timestamp={timestamp} />;
+  if (item.customMessage)
+    return (
+      <div className="transcript-message-entry delegate-parent-request-entry">
+        {item.customMessage}
+      </div>
+    );
   if (
     item.role &&
     suppressAssistantText &&

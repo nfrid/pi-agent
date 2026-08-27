@@ -5,14 +5,12 @@ export type {
   DelegateInspectorRunOption,
 } from './delegate-transcript-inspector/index';
 export {
-  DelegateInspectorDetails,
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
+  DelegateParentRequest,
   DelegateTranscript,
   DelegateTranscriptInspector,
   delegateDetailHasError,
   delegateTranscriptItems,
   delegateTranscriptSessionId,
-  omitDelegateRenderedPrompt,
-  selectedDelegateRunId,
 } from './delegate-transcript-inspector/index';

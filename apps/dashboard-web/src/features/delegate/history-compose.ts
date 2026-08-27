@@ -19,6 +19,8 @@ import { delegateSettlementKey } from './runtime-surfaces';
 
 /** Extra inspection facts which are only present on the persisted adapter. */
 export type DelegateInspectionStatus = DelegateStatus & {
+  /** Lightweight invocation task retained on persisted summaries. */
+  task?: string;
   /** Selected-run bounded detail projection, absent on summary/live rows. */
   details?: DelegateHistoryDetails;
   historical?: boolean;
@@ -183,6 +185,7 @@ export function delegateHistoryInvocationToStatus(
     ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId }),
     lineageId: run.lineageId,
     name: run.name,
+    ...(run.task === undefined ? {} : { task: run.task }),
     kind: run.kind,
     state: legacyHistoryState(run.state),
     createdAt: run.createdAt,
@@ -192,6 +195,7 @@ export function delegateHistoryInvocationToStatus(
     ...(run.route === undefined ? {} : { route: run.route }),
     ...(run.context === undefined ? {} : { context: run.context }),
     allowWrites: run.allowWrites,
+    ...(run.usage === undefined ? {} : { usage: { ...run.usage } }),
     ...(run.capabilities === undefined
       ? {}
       : { capabilities: [...run.capabilities] }),

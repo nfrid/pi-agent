@@ -28,7 +28,18 @@ const historicalRun = {
   state: 'success',
   createdAt: 1,
   finishedAt: 2,
+  route: 'luna-high',
+  isolation: 'worktree',
   allowWrites: false,
+  usage: {
+    input: 10_000,
+    output: 2_000,
+    cacheRead: 4_000,
+    cacheWrite: 0,
+    contextTokens: 136_000,
+    cost: 0.12,
+    turns: 3,
+  },
 };
 
 const history = {
@@ -38,6 +49,7 @@ const history = {
     {
       id: 'lineage-e2e',
       ...historicalRun,
+      usage: undefined,
       runCount: 1,
       runs: [historicalRun],
     },
@@ -55,7 +67,8 @@ const historyDetail = {
       task: 'Inspect the historical fixture',
       setup: {
         cwd: '/tmp',
-        isolation: 'shared',
+        isolation: 'worktree',
+        worktree: { branch: 'pi/history-review' },
       },
       runConfig: {
         scope: ['apps/dashboard-web'],
@@ -89,14 +102,21 @@ const historyDetail = {
 
 async function inspectPersistedDelegate(
   page: Page,
-  { canonicalTranscript = false } = {},
+  { canonicalTranscript = false, compactContext = false } = {},
 ) {
   const selectedRun = canonicalTranscript
     ? { ...historicalRun, sessionId: 'historical-session' }
     : historicalRun;
   const selectedHistory = {
     ...history,
-    groups: [{ ...history.groups[0], ...selectedRun, runs: [selectedRun] }],
+    groups: [
+      {
+        ...history.groups[0],
+        ...selectedRun,
+        usage: undefined,
+        runs: [selectedRun],
+      },
+    ],
   };
   const selectedHistoryDetail = {
     ...historyDetail,
@@ -222,30 +242,58 @@ async function inspectPersistedDelegate(
   await expect(delegateLauncher).toBeVisible();
   await delegateLauncher.click();
   await page.getByRole('button', { name: /Offline historical worker/ }).click();
+  const inspector = page.getByRole('dialog', {
+    name: 'Delegate · Offline historical worker',
+  });
   await expect(
-    page.getByLabel('Task').getByText('Inspect the historical fixture'),
+    inspector.getByText('Inspect the historical fixture', { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText('apps/dashboard-web')).toBeVisible();
-  await expect(page.getByText('Keep the review concise.')).toBeVisible();
+  await expect(inspector.getByText('scope apps/dashboard-web')).toBeVisible();
+  const stickySetup = inspector.locator('.delegate-inspector-sticky-setup');
+  await expect(stickySetup.getByText('luna-high')).toBeVisible();
+  await expect(stickySetup.getByText('pi/history-review')).toBeVisible();
+  await expect(stickySetup.getByText('50%')).toBeVisible();
+  if (compactContext)
+    await expect(stickySetup.getByText('136k / 272k')).toBeHidden();
+  else await expect(stickySetup.getByText('136k / 272k')).toBeVisible();
+  await stickySetup.getByLabel('Final context window 50%').click();
+  const contextPopover = stickySetup.locator('.delegate-context-popover');
+  await expect(contextPopover.getByText('136k')).toBeVisible();
+  await expect(contextPopover.getByText('$0.1200')).toBeVisible();
+  await stickySetup.getByLabel('Final context window 50%').click();
+  await expect(inspector.getByText('Keep the review concise.')).toBeHidden();
+  await inspector.getByText('Details', { exact: true }).click();
+  await expect(inspector.getByText('Keep the review concise.')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
   await expect(
     page.getByRole('button', { name: /Offline historical worker/ }),
   ).toBeVisible();
   await page.getByRole('button', { name: /Offline historical worker/ }).click();
+  await page.getByText('Details', { exact: true }).click();
   await page.getByText('Source report').click();
   await expect(
     page.getByText('The source delegate completed its scan.'),
   ).toBeVisible();
   const renderedPrompt = page.getByText('You are a coding subagent.');
   await expect(renderedPrompt).toBeHidden();
-  await page.getByText('Rendered prompt').click();
+  await page.getByText('Exact prompt').click();
   await expect(renderedPrompt).toBeVisible();
   if (canonicalTranscript) {
     const drawer = page.getByRole('dialog', {
       name: 'Delegate · Offline historical worker',
     });
     const body = page.locator('.delegate-transcript-inspector-body');
+    const requestMarker = drawer
+      .locator('.transcript-minimap-marker.outline-delegate-request')
+      .first();
+    await expect(requestMarker).toHaveAttribute(
+      'aria-label',
+      'Inspect the historical fixture',
+    );
+    await expect(
+      requestMarker.locator('.transcript-minimap-preview'),
+    ).toHaveAttribute('data-meta', /Parent request/);
     const layout = await drawer.evaluate((element) => {
       const body = element.querySelector<HTMLElement>(
         '.delegate-transcript-inspector-body',
@@ -263,9 +311,9 @@ async function inspectPersistedDelegate(
       };
     });
     expect(layout).toEqual({
-      drawerWidth: 1017,
-      transcriptWidth: 760,
-      bodyPaddingRight: 238,
+      drawerWidth: 917,
+      transcriptWidth: 856,
+      bodyPaddingRight: 42,
     });
     await expect(body.getByText('Show persisted delegate work')).toHaveCount(0);
     await expect
@@ -281,6 +329,15 @@ async function inspectPersistedDelegate(
       );
       element.dispatchEvent(new Event('scroll'));
     });
+    const stickyGeometry = await stickySetup.evaluate((element) => {
+      const body = element.parentElement;
+      if (!body) throw new Error('delegate transcript body missing');
+      return {
+        stickyTop: Math.round(element.getBoundingClientRect().top),
+        bodyTop: Math.round(body.getBoundingClientRect().top),
+      };
+    });
+    expect(stickyGeometry.stickyTop - stickyGeometry.bodyTop).toBe(14);
     const jump = page.getByRole('button', {
       name: 'Jump to latest delegate transcript activity',
     });
@@ -351,13 +408,17 @@ async function inspectPersistedDelegate(
     }),
   ).toBeVisible();
   await expect(
-    page.getByLabel('Task').getByText('Inspect the historical fixture'),
+    page
+      .getByRole('dialog', {
+        name: 'Delegate · Offline historical worker',
+      })
+      .getByText('Inspect the historical fixture', { exact: true }),
   ).toBeVisible();
 }
 
 test('shows and inspects a persisted delegate in an offline session', async ({
   page,
-}) => inspectPersistedDelegate(page));
+}) => inspectPersistedDelegate(page, { compactContext: true }));
 
 test('shows and inspects a persisted delegate in an offline session @desktop', async ({
   page,
