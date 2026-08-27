@@ -100,23 +100,26 @@ export function resetModelDisplayPreference(
 }
 
 function subscribe(listener: () => void): () => void {
-  const onChange = () => {
+  const onLocalChange = () => listener();
+  const onStorageChange = () => {
     cached = undefined;
     listener();
   };
-  globalThis.addEventListener(CHANGE_EVENT, onChange);
-  globalThis.addEventListener('storage', onChange);
+  globalThis.addEventListener(CHANGE_EVENT, onLocalChange);
+  globalThis.addEventListener('storage', onStorageChange);
   return () => {
-    globalThis.removeEventListener(CHANGE_EVENT, onChange);
-    globalThis.removeEventListener('storage', onChange);
+    globalThis.removeEventListener(CHANGE_EVENT, onLocalChange);
+    globalThis.removeEventListener('storage', onStorageChange);
   };
 }
+
+const EMPTY_MODEL_DISPLAY_PREFERENCES: ModelDisplayPreferences = {};
 
 export function useModelDisplayPreferences(): ModelDisplayPreferences {
   return useSyncExternalStore(
     subscribe,
     snapshotModelDisplayPreferences,
-    () => ({}),
+    () => EMPTY_MODEL_DISPLAY_PREFERENCES,
   );
 }
 
