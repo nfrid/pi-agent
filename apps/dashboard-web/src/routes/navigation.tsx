@@ -2,6 +2,7 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { useDashboardUtility } from '../features/dashboard-utility-context';
+import { consumeActiveDrawerHistoryEntry } from '../features/drawer-history';
 import { usePrefersReducedMotion } from '../shared/hooks/use-prefers-reduced-motion';
 
 export function newProjectThreadPath(
@@ -63,9 +64,12 @@ export function useDashboardNavigate(): (
       // Navigation from a utility panel must never leave the old panel over the
       // destination. The panel state is intentionally independent of the URL.
       utility?.close();
+      const replaceDrawerEntry = consumeActiveDrawerHistoryEntry();
       void navigate({
         to: path,
-        ...dashboardNavigateOptions(options),
+        ...dashboardNavigateOptions({
+          replace: options?.replace || replaceDrawerEntry,
+        }),
         viewTransition: shouldUseDashboardViewTransition({
           currentPath,
           targetPath: path,
