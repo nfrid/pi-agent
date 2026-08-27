@@ -1,7 +1,9 @@
+import { dashboardHttpClient, dashboardQueryKeys } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { act, create } from 'react-test-renderer';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsView } from './settings';
 
 const snapshot = {
@@ -22,6 +24,8 @@ const snapshot = {
 } as unknown as BrowserSnapshot;
 
 describe('settings drawer', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it('keeps delivery controls and project administration compact', () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
@@ -45,5 +49,42 @@ describe('settings drawer', () => {
     expect(markup).toContain('Dashboard');
     expect(markup).toContain('Rename');
     expect(markup).not.toContain('Remove');
+  });
+
+  it('captures alias text before asynchronously cancelling stale queries', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(dashboardQueryKeys.settings(), {
+      modelDisplayPreferences: {},
+    });
+    const update = vi
+      .spyOn(dashboardHttpClient, 'updateModelDisplayPreference')
+      .mockResolvedValue({
+        modelDisplayPreferences: {
+          'openai/gpt-5': { alias: 'Turbo model' },
+        },
+      });
+    const target = { value: 'Turbo model' };
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <QueryClientProvider client={queryClient}>
+          <SettingsView snapshot={snapshot} />
+        </QueryClientProvider>,
+      );
+    });
+    const input = renderer.root.findByProps({
+      'aria-label': 'Alias for openai/gpt-5',
+    });
+    await act(async () => {
+      input.props.onChange({ currentTarget: target });
+      target.value = '';
+      await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    });
+    expect(update).toHaveBeenCalledWith('openai/gpt-5', {
+      alias: 'Turbo model',
+    });
+    renderer.unmount();
   });
 });

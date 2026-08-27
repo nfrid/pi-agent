@@ -209,18 +209,16 @@ function ModelDisplayPreferencesEditor({
                   placeholder={model.model}
                   maxLength={MAX_MODEL_DISPLAY_ALIAS}
                   disabled={controlsDisabled}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const alias = event.currentTarget.value.slice(
+                      0,
+                      MAX_MODEL_DISPLAY_ALIAS,
+                    );
                     savePreferences(key, (current) => ({
                       ...current,
-                      ...(event.target.value.trim()
-                        ? {
-                            alias: event.target.value
-                              .trim()
-                              .slice(0, MAX_MODEL_DISPLAY_ALIAS),
-                          }
-                        : { alias: undefined }),
-                    }))
-                  }
+                      ...(alias ? { alias } : { alias: undefined }),
+                    }));
+                  }}
                 />
               </label>
               <button
