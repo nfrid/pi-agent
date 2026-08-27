@@ -217,18 +217,19 @@ export function analyticsSeries(
   }
   const colors = seriesColors(data.spend.map((series) => series.id));
   return data.spend.map((series) => {
+    const preference = modelDisplayPreference(
+      preferences,
+      series.provider,
+      series.modelId,
+    );
     const byBucket = new Map(
       series.points.map((point) => [point.bucketStart, point]),
     );
     let total = 0;
     return {
       id: series.id,
-      label: series.label,
-      color:
-        modelDisplayPreference(preferences, series.provider, series.modelId)
-          .color ??
-        colors.get(series.id) ??
-        SERIES_COLORS[0],
+      label: preference.alias ?? series.label,
+      color: preference.color ?? colors.get(series.id) ?? SERIES_COLORS[0],
       values: data.buckets.map((bucket) => {
         const value = spendValue(
           byBucket.get(bucket) ?? {

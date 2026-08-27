@@ -629,7 +629,7 @@ button.shelfHeading:focus-visible {
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
-  gap: 3px;
+  gap: 5px;
 }
 .threadCopy strong,
 .threadCopy small {
@@ -671,8 +671,19 @@ button.shelfHeading:focus-visible {
 }
 .threadWorkspaceName {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.threadWorkspaceCheckout {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 3px;
+}
+.threadWorkspaceSeparator {
+  flex: none;
+  color: var(--dim);
 }
 .threadMeta {
   display: inline-flex;
@@ -699,7 +710,7 @@ button.shelfHeading:focus-visible {
   padding: 5px 7px;
 }
 .threadRow:global(.agent-thread-slim) .threadCopy {
-  gap: 2px;
+  gap: 4px;
 }
 .threadRow:global(.agent-thread-slim) .threadWorkspace {
   font-size: 9px;
@@ -713,9 +724,9 @@ button.shelfHeading:focus-visible {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
 }
-.threadBranch,
+.threadCheckout,
 .threadModel,
 .threadEffort,
 .threadQueue {
@@ -723,9 +734,17 @@ button.shelfHeading:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.threadBranch {
-  color: var(--fg);
-  font-weight: 650;
+.threadCheckout {
+  font-weight: 500;
+}
+.threadCheckout[data-checkout-kind="main"] {
+  color: var(--green);
+}
+.threadCheckout[data-checkout-kind="worktree"] {
+  color: var(--purple);
+}
+.threadCheckout[data-checkout-kind="external"] {
+  color: var(--cyan);
 }
 .threadModel {
   max-width: 10ch;

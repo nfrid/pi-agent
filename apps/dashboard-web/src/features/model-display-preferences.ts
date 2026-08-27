@@ -128,5 +128,11 @@ export function modelDisplayPreference(
   provider: string,
   model: string,
 ): ModelDisplayPreference {
-  return preferences[modelDisplayPreferenceKey(provider, model)] ?? {};
+  const exact = preferences[modelDisplayPreferenceKey(provider, model)];
+  if (exact) return exact;
+  const suffix = `/${model}`;
+  const matches = Object.entries(preferences).filter(([key]) =>
+    key.endsWith(suffix),
+  );
+  return matches.length === 1 ? (matches[0]?.[1] ?? {}) : {};
 }

@@ -649,6 +649,7 @@ describe('workspace-first agent navigation', () => {
         [
           {
             id: 'checkout-1',
+            kind: 'worktree',
             branch: 'feature/thread-metadata',
             path: '/repo/.worktrees/thread-metadata',
           },
@@ -657,6 +658,7 @@ describe('workspace-first agent navigation', () => {
       ),
     ).toMatchObject({
       branch: 'feature/thread-metadata',
+      checkoutKind: 'worktree',
       model: {
         id: 'runtime/current',
         alias: 'Current',
@@ -673,6 +675,7 @@ describe('workspace-first agent navigation', () => {
       ),
     ).toMatchObject({
       branch: 'main',
+      checkoutKind: 'main',
       model: { id: 'indexed/old', alias: 'old' },
       effort: { full: 'medium', compact: 'm', color: 'cyan' },
     });

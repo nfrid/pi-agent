@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  modelDisplayPreference,
   modelDisplayPreferenceKey,
   readModelDisplayPreferences,
   resetModelDisplayPreference,
@@ -44,5 +45,24 @@ describe('model display preferences', () => {
       delete (globalThis as { localStorage?: unknown }).localStorage;
       vi.restoreAllMocks();
     }
+  });
+
+  it('reuses one unambiguous model preference across provider identities', () => {
+    const preferences = {
+      'runtime-provider/gpt-5.6-sol': { alias: 'sol', color: '#ff79c6' },
+    };
+    expect(
+      modelDisplayPreference(preferences, 'usage-provider', 'gpt-5.6-sol'),
+    ).toEqual({ alias: 'sol', color: '#ff79c6' });
+    expect(
+      modelDisplayPreference(
+        {
+          ...preferences,
+          'other-provider/gpt-5.6-sol': { alias: 'other' },
+        },
+        'usage-provider',
+        'gpt-5.6-sol',
+      ),
+    ).toEqual({});
   });
 });

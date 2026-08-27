@@ -33,13 +33,16 @@ describe('usage analytics series', () => {
       ],
     } as never;
     const preferences = {
-      'provider-a/model-a': { color: '#ff79c6' },
+      'runtime-provider/model-a': {
+        alias: 'Short model',
+        color: '#ff79c6',
+      },
     };
 
     const spend = analyticsSeries(data, 'cost', false, preferences);
     expect(spend).toMatchObject([
-      { id: 'series-a', color: '#ff79c6' },
-      { id: 'series-b', color: 'var(--pink)' },
+      { id: 'series-a', label: 'Short model', color: '#ff79c6' },
+      { id: 'series-b', label: 'Other model', color: 'var(--pink)' },
     ]);
 
     const limits = analyticsSeries(data, 'limit', false, preferences);

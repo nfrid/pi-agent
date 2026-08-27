@@ -279,6 +279,7 @@ function ProjectChooser({
 
 export type ThreadMetadataPresentation = {
   branch: string;
+  checkoutKind: CheckoutSummary['kind'];
   model?: {
     provider: string;
     id: string;
@@ -371,6 +372,9 @@ export function activeThreadDetails(
     : undefined;
   return {
     branch: checkout?.branch ?? 'main',
+    checkoutKind:
+      checkout?.kind ??
+      (row.draft?.location?.kind === 'worktree' ? 'worktree' : 'main'),
     ...(model ? { model } : {}),
     effort,
     ...((row.runtime?.queueDrafts?.length ?? 0) > 0
@@ -440,11 +444,14 @@ function AgentThreadLink({
     row.durableThread?.settledAt !== undefined
       ? row.durableThread.settledAt
       : row.updatedAt;
-  const details =
-    density === 'card'
-      ? activeThreadDetails(row, runtimes, checkouts, preferences, timestamp)
-      : undefined;
-  const showDetails = density === 'card' && details !== undefined;
+  const details = activeThreadDetails(
+    row,
+    runtimes,
+    checkouts,
+    preferences,
+    timestamp,
+  );
+  const showDetails = density === 'card';
   return (
     <button
       {...lifecycleProps}
@@ -461,6 +468,23 @@ function AgentThreadLink({
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
         <span className={styles.threadWorkspace} data-row-content="project">
           <span className={styles.threadWorkspaceName}>{row.projectName}</span>
+          {density === 'slim' && (
+            <span className={styles.threadWorkspaceCheckout}>
+              <span
+                className={styles.threadWorkspaceSeparator}
+                aria-hidden="true"
+              >
+                /
+              </span>
+              <span
+                className={styles.threadCheckout}
+                data-checkout-kind={details.checkoutKind}
+                title={details.checkoutPath || details.branch}
+              >
+                {details.branch}
+              </span>
+            </span>
+          )}
           {density === 'card' && row.durableThread?.pinnedAt !== undefined && (
             <span
               className={styles.threadPin}
@@ -505,7 +529,12 @@ function AgentThreadLink({
                 : []),
             ].join('; ')}
           >
-            <span className={styles.threadBranch}>{details.branch}</span>
+            <span
+              className={styles.threadCheckout}
+              data-checkout-kind={details.checkoutKind}
+            >
+              {details.branch}
+            </span>
             <span className={styles.threadSeparator} aria-hidden="true">
               ·
             </span>
