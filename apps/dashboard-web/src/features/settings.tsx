@@ -77,7 +77,6 @@ function ModelDisplayPreferencesEditor({
   const latestEditByKey = useRef(new Map<string, number>());
   const models = modelOptionsFromSnapshot(snapshot);
   const controlsDisabled = !settingsQuery.data;
-  const saving = updateMutation.isPending || resetMutation.isPending;
   const saveModelPreference = (
     modelKey: string,
     edit?: (current: ModelDisplayPreference) => ModelDisplayPreference,
@@ -182,7 +181,6 @@ function ModelDisplayPreferencesEditor({
         Choose compact aliases and colors for thread metadata. These settings
         are shared across connected devices.
       </p>
-      {saving && <small>Saving…</small>}
       {(updateMutation.isError || resetMutation.isError) && (
         <small role="alert">Could not save model display settings.</small>
       )}
