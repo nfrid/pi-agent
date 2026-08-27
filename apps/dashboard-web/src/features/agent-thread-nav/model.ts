@@ -13,6 +13,7 @@ import { dashboardStatus } from '../presentation-status';
 
 export type DurableThreadMetadata = {
   threadId: string;
+  checkoutId?: string;
   archivedAt?: number;
   settledAt?: number;
   pinnedAt?: number;
@@ -123,7 +124,7 @@ export function durableThreadForSession(
   sessionId: string,
   threads: readonly Pick<
     Thread,
-    'id' | 'archivedAt' | 'pinnedAt' | 'settledAt'
+    'id' | 'checkoutId' | 'archivedAt' | 'pinnedAt' | 'settledAt'
   >[],
   directLinks: readonly SessionThreadLink[] = [],
 ): DurableThreadMetadata | undefined {
@@ -142,8 +143,14 @@ export function durableThreadForSession(
     // different thread is a conflict, never a reason to guess.
     if ([...runThreadIds].some((threadId) => threadId !== directLink.threadId))
       return undefined;
+    const directThread = threads.find(
+      (candidate) => candidate.id === directLink.threadId,
+    );
     return {
       threadId: directLink.threadId,
+      ...(directThread?.checkoutId
+        ? { checkoutId: directThread.checkoutId }
+        : {}),
       ...(directLink.archivedAt === undefined
         ? {}
         : { archivedAt: directLink.archivedAt }),
@@ -172,6 +179,7 @@ export function durableThreadForSession(
   if (!thread) return undefined;
   return {
     threadId,
+    ...(thread.checkoutId ? { checkoutId: thread.checkoutId } : {}),
     ...(thread.archivedAt === undefined
       ? {}
       : { archivedAt: thread.archivedAt }),
