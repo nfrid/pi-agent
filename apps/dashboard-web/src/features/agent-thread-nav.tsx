@@ -377,7 +377,7 @@ export function activeThreadDetails(
       ? { queue: row.runtime?.queueDrafts?.length }
       : {}),
     time,
-    checkoutPath: checkout?.path ?? row.cwd ?? '',
+    checkoutPath: checkout?.path ?? '',
   };
 }
 
@@ -496,7 +496,14 @@ function AgentThreadLink({
           <small
             className={styles.threadDetails}
             data-row-content="details"
-            title={`Model: ${details.model?.id ?? 'unknown'}; Effort: ${details.effort.full}; Branch: ${details.branch}; Checkout: ${details.checkoutPath}`}
+            title={[
+              `Model: ${details.model?.id ?? 'unknown'}`,
+              `Effort: ${details.effort.full}`,
+              `Branch: ${details.branch}`,
+              ...(details.checkoutPath
+                ? [`Checkout: ${details.checkoutPath}`]
+                : []),
+            ].join('; ')}
           >
             <span className={styles.threadBranch}>{details.branch}</span>
             <span className={styles.threadSeparator} aria-hidden="true">
@@ -527,13 +534,6 @@ function AgentThreadLink({
                 </span>
               </>
             )}
-            <span
-              className={styles.threadInfo}
-              role="img"
-              aria-label={`Full metadata: model ${details.model?.id ?? 'unknown'}, effort ${details.effort.full}, branch ${details.branch}, checkout ${details.checkoutPath}`}
-            >
-              ⓘ
-            </span>
             {details.time !== undefined && (
               <DashboardTime
                 className={`agent-thread-time ${styles.threadTime}`}

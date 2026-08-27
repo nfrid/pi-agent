@@ -108,8 +108,8 @@ function subscribe(listener: () => void): () => void {
   globalThis.addEventListener(CHANGE_EVENT, onLocalChange);
   globalThis.addEventListener('storage', onStorageChange);
   return () => {
-    globalThis.removeEventListener(CHANGE_EVENT, onLocalChange);
-    globalThis.removeEventListener('storage', onStorageChange);
+    globalThis.removeEventListener?.(CHANGE_EVENT, onLocalChange);
+    globalThis.removeEventListener?.('storage', onStorageChange);
   };
 }
 

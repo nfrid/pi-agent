@@ -718,6 +718,26 @@
   background: color-mix(in srgb, var(--purple) 14%, transparent);
   color: var(--fg);
 }
+.draft-picker-chip.selected {
+  font-weight: 700;
+}
+.draft-picker-chip[data-thinking="off"] {
+  color: var(--muted);
+}
+.draft-picker-chip[data-thinking="minimal"],
+.draft-picker-chip[data-thinking="low"] {
+  color: var(--green);
+}
+.draft-picker-chip[data-thinking="medium"] {
+  color: var(--cyan);
+}
+.draft-picker-chip[data-thinking="high"] {
+  color: var(--orange);
+}
+.draft-picker-chip[data-thinking="xhigh"],
+.draft-picker-chip[data-thinking="max"] {
+  color: var(--pink);
+}
 .draft-picker-chip[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.45;

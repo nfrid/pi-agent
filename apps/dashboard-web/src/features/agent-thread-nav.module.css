@@ -741,12 +741,6 @@ button.shelfHeading:focus-visible {
   flex: none;
   color: var(--dim);
 }
-.threadInfo {
-  flex: none;
-  color: var(--dim);
-  cursor: help;
-  font-size: 11px;
-}
 .threadEffort[data-effort="off"] {
   color: var(--muted);
 }
