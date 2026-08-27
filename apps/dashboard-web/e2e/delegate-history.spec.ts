@@ -249,7 +249,7 @@ async function inspectPersistedDelegate(
     inspector.getByText('Inspect the historical fixture', { exact: true }),
   ).toBeVisible();
   await expect(inspector.getByText('scope apps/dashboard-web')).toBeVisible();
-  const stickySetup = inspector.locator('.delegate-inspector-sticky-setup');
+  const stickySetup = inspector.locator('.delegate-inspector-setup');
   await expect(stickySetup.getByText('luna-high')).toBeVisible();
   await expect(stickySetup.getByText('pi/history-review')).toBeVisible();
   await expect(stickySetup.getByText('50%')).toBeVisible();

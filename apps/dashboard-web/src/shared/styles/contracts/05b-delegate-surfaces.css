@@ -298,18 +298,13 @@
 .delegate-open-session {
   color: var(--purple);
 }
-.delegate-inspector-sticky-setup {
-  position: sticky;
-  top: 0;
-  z-index: 25;
-  margin: -14px -18px 12px;
+.delegate-inspector-setup {
   border-bottom: 1px solid var(--line-soft);
   padding: 8px 18px;
   background: color-mix(in srgb, var(--bg) 94%, transparent);
-  backdrop-filter: blur(10px);
   container-type: inline-size;
 }
-.delegate-inspector-sticky-setup .delegate-inspector-metadata {
+.delegate-inspector-setup .delegate-inspector-metadata {
   overflow: visible;
 }
 .delegate-context-usage {
@@ -334,7 +329,7 @@
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 8;
+  z-index: 25;
   width: 250px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -362,7 +357,7 @@
   margin: 1px 0 0;
 }
 @container (max-width: 560px) {
-  .delegate-inspector-sticky-setup .delegate-context-wide {
+  .delegate-inspector-setup .delegate-context-wide {
     display: none;
   }
 }
@@ -512,14 +507,21 @@
   color: var(--dim);
 }
 
+.delegate-surface-drawer {
+  & .surface-stat-glyph {
+    display: inline;
+    margin-right: 5px;
+  }
+  & .surface-stat-label {
+    display: none;
+  }
+}
+
 @media (pointer: fine) and (min-width: 821px) {
   .surface-drawer.delegate-transcript-drawer {
     width: min(917px, 100vw);
   }
   .delegate-transcript-drawer .delegate-transcript-inspector-body {
     padding-right: 42px;
-  }
-  .delegate-inspector-sticky-setup {
-    margin-right: -42px;
   }
 }

@@ -77,37 +77,39 @@ export function DelegateTranscriptInspector({
     ? { ...detailedTranscriptRow, sessionId: transcriptSessionId }
     : detailedTranscriptRow;
   return (
-    <div
-      ref={transcriptScrollRef}
-      className="delegate-transcript-inspector-body"
-    >
-      {detail?.loading && !transcriptSessionId && (
-        <p className="delegate-transcript-loading" role="status">
-          Loading persisted delegate transcript…
-        </p>
-      )}
-      {delegateDetailHasError(detail) && !transcriptSessionId && (
-        <p className="delegate-transcript-error" role="alert">
-          Unable to load this persisted delegate transcript.
-        </p>
-      )}
-      <div className="delegate-inspector-sticky-setup">
+    <>
+      <div className="delegate-inspector-setup">
         <DelegateInspectorMetadata
           row={displayedRow}
           now={now}
           details={currentDetails}
         />
       </div>
-      <DelegateInspectorTranscript
-        row={transcriptRow}
-        store={store}
-        isOpen={isOpen}
-        scrollElementRef={transcriptScrollRef}
-        runOptions={runOptions}
-        detail={detail}
-        onRunSelected={onRunSelected}
-      />
-    </div>
+      <div
+        ref={transcriptScrollRef}
+        className="delegate-transcript-inspector-body"
+      >
+        {detail?.loading && !transcriptSessionId && (
+          <p className="delegate-transcript-loading" role="status">
+            Loading persisted delegate transcript…
+          </p>
+        )}
+        {delegateDetailHasError(detail) && !transcriptSessionId && (
+          <p className="delegate-transcript-error" role="alert">
+            Unable to load this persisted delegate transcript.
+          </p>
+        )}
+        <DelegateInspectorTranscript
+          row={transcriptRow}
+          store={store}
+          isOpen={isOpen}
+          scrollElementRef={transcriptScrollRef}
+          runOptions={runOptions}
+          detail={detail}
+          onRunSelected={onRunSelected}
+        />
+      </div>
+    </>
   );
 }
 
