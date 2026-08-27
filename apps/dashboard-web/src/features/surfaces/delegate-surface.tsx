@@ -377,7 +377,7 @@ export function DelegateSurface({
           {
             id: `delegate-${inspectorRow.lineageId}`,
             title: `Delegate · ${delegateDisplayName(inspectorRow)}`,
-            eyebrow: 'Delegate',
+            eyebrow: null,
             backLabel: 'Back to delegates',
             headerContent: (
               <div className="delegate-inspector-header-content">

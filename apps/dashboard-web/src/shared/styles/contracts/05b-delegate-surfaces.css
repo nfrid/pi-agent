@@ -272,17 +272,6 @@
   overscroll-behavior-y: contain;
   padding: 0 18px 18px;
 }
-@media (pointer: fine) and (min-width: 821px) {
-  .surface-drawer.delegate-transcript-drawer {
-    width: min(917px, 100vw);
-  }
-  .delegate-transcript-drawer .delegate-transcript-inspector-body {
-    padding-right: 42px;
-  }
-  .delegate-inspector-sticky-setup {
-    margin-right: -42px;
-  }
-}
 .delegate-inspector-header-content {
   display: flex;
   align-items: center;
@@ -311,7 +300,7 @@
 }
 .delegate-inspector-sticky-setup {
   position: sticky;
-  top: 14px;
+  top: 0;
   z-index: 25;
   margin: -14px -18px 12px;
   border-bottom: 1px solid var(--line-soft);
@@ -521,4 +510,16 @@
 }
 .surface-state.surface-dropped {
   color: var(--dim);
+}
+
+@media (pointer: fine) and (min-width: 821px) {
+  .surface-drawer.delegate-transcript-drawer {
+    width: min(917px, 100vw);
+  }
+  .delegate-transcript-drawer .delegate-transcript-inspector-body {
+    padding-right: 42px;
+  }
+  .delegate-inspector-sticky-setup {
+    margin-right: -42px;
+  }
 }

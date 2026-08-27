@@ -21,7 +21,7 @@ export type SurfacePage = {
   id: string;
   title: string;
   children: ReactNode;
-  eyebrow?: string;
+  eyebrow?: string | null;
   headerContent?: ReactNode;
   headerSummary?: ReactNode;
   hideTitle?: boolean;
@@ -201,12 +201,14 @@ export function SurfaceStack({
                   {!page.hideHeader && (
                     <header className="surface-drawer-header">
                       <div className="surface-drawer-heading">
-                        <p
-                          className="eyebrow"
-                          id={page.hideTitle ? titleId : undefined}
-                        >
-                          {page.eyebrow ?? 'Dashboard'}
-                        </p>
+                        {page.eyebrow !== null && (
+                          <p
+                            className="eyebrow"
+                            id={page.hideTitle ? titleId : undefined}
+                          >
+                            {page.eyebrow ?? 'Dashboard'}
+                          </p>
+                        )}
                         {!page.hideTitle && <h2 id={titleId}>{page.title}</h2>}
                         {page.headerSummary && (
                           <div className="surface-drawer-summary">
