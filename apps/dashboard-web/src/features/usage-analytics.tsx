@@ -19,6 +19,7 @@ import {
   useState,
 } from 'react';
 import {
+  type ModelDisplayPreferences,
   modelDisplayPreference,
   useModelDisplayPreferences,
 } from './model-display-preferences';
@@ -187,7 +188,7 @@ export function analyticsSeries(
   data: UsageHistoryResponse,
   measurement: Measurement,
   cumulative: boolean,
-  preferences: ReturnType<typeof useModelDisplayPreferences> = {},
+  preferences: ModelDisplayPreferences = {},
 ): ChartSeries[] {
   if (measurement === 'limit') {
     const colors = seriesColors(data.series.map((series) => series.id));

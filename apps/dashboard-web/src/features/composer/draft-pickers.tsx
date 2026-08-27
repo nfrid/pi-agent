@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { type DraftLocation, setDraftLocation, setDraftModel } from '../drafts';
 import {
+  type ModelDisplayPreferences,
   modelDisplayPreference,
   useModelDisplayPreferences,
 } from '../model-display-preferences';
@@ -24,7 +25,7 @@ import {
 function modelName(
   model: ModelSelection | undefined,
   models: readonly RuntimeModelOption[],
-  preferences: ReturnType<typeof useModelDisplayPreferences>,
+  preferences: ModelDisplayPreferences,
 ): string {
   if (!model) return 'Agent';
   const option = models.find(
