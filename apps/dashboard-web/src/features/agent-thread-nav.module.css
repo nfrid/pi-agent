@@ -715,10 +715,54 @@ button.shelfHeading:focus-visible {
   align-items: center;
   gap: 6px;
 }
-.threadContext {
+.threadBranch,
+.threadModel,
+.threadEffort,
+.threadQueue {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.threadBranch {
+  color: var(--fg);
+  font-weight: 650;
+}
+.threadModel {
+  max-width: 10ch;
+}
+.threadEffort {
+  flex: none;
+  font-weight: 650;
+}
+.threadQueue {
+  flex: none;
+}
+.threadSeparator {
+  flex: none;
+  color: var(--dim);
+}
+.threadInfo {
+  flex: none;
+  color: var(--dim);
+  cursor: help;
+  font-size: 11px;
+}
+.threadEffort[data-effort="off"] {
+  color: var(--muted);
+}
+.threadEffort[data-effort="minimal"],
+.threadEffort[data-effort="low"] {
+  color: var(--green);
+}
+.threadEffort[data-effort="medium"] {
+  color: var(--cyan);
+}
+.threadEffort[data-effort="high"] {
+  color: var(--orange);
+}
+.threadEffort[data-effort="xhigh"],
+.threadEffort[data-effort="max"] {
+  color: var(--pink);
 }
 .threadTime {
   flex: none;

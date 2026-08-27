@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { SettingsView } from './settings';
 
 const snapshot = {
+  runtimes: [
+    {
+      model: { provider: 'openai', model: 'gpt-5' },
+      modelCatalog: [{ provider: 'openai', model: 'gpt-5', name: 'GPT-5' }],
+    },
+  ],
   projects: [
     {
       id: 'project-1',
@@ -28,6 +34,8 @@ describe('settings drawer', () => {
     expect(markup).not.toContain('Read all');
     expect(markup).not.toContain('Notifications');
     expect(markup).not.toContain('Browser alerts');
+    expect(markup).toContain('Model display');
+    expect(markup).toContain('Alias for openai/gpt-5');
     expect(markup).toContain('Projects');
     expect(markup).toContain('Dashboard');
     expect(markup).toContain('Rename');

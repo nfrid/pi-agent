@@ -11,6 +11,77 @@
   color: var(--fg);
   font-size: 12px;
 }
+.hint {
+  margin: -3px 0 0;
+  color: var(--dim);
+  font-size: 10px;
+}
+.modelPreferences {
+  display: grid;
+  gap: 4px;
+}
+.modelPreference {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 5px 0;
+}
+.modelPreferenceId {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 8em;
+  gap: 2px;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modelPreferenceId small {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 9px;
+  text-overflow: ellipsis;
+}
+.modelAlias {
+  min-width: 0;
+  flex: 1 1 8em;
+}
+.modelAlias input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 10px;
+}
+.modelColor {
+  display: inline-grid;
+  width: 25px;
+  height: 25px;
+  flex: none;
+  place-items: center;
+}
+.modelColor input {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.modelPreference button {
+  flex: none;
+  padding: 4px 6px;
+  font-size: 10px;
+}
 .controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

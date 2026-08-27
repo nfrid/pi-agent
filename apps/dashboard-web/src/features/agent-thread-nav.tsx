@@ -9,7 +9,7 @@ import {
   unpinThreadMutationOptions,
   unsettleThreadMutationOptions,
 } from '@pi-dashboard/client';
-import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import type { BrowserSnapshot, CheckoutSummary } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   type KeyboardEvent,
@@ -24,7 +24,6 @@ import {
   newProjectThreadPath,
   useDashboardNavigate,
 } from '../routes/navigation';
-import { formatCompactCount } from '../shared/lib/format';
 import {
   type AgentThreadRow,
   agentThreadRows,
@@ -57,6 +56,11 @@ import {
   hasActiveDrawerHistoryEntry,
   useDrawerHistory,
 } from './drawer-history';
+import {
+  type ModelDisplayPreferences,
+  modelDisplayPreference,
+  useModelDisplayPreferences,
+} from './model-display-preferences';
 import {
   AgentThreadActionMenu,
   DurableThreadActions,
@@ -273,39 +277,108 @@ function ProjectChooser({
   );
 }
 
+export type ThreadMetadataPresentation = {
+  branch: string;
+  model?: {
+    provider: string;
+    id: string;
+    alias: string;
+    color: string;
+  };
+  effort: {
+    full: string;
+    compact: string;
+    color: string;
+  };
+  queue?: number;
+  time?: number;
+  checkoutPath: string;
+};
+
+const EFFORT_LABELS: Record<string, string> = {
+  off: '–',
+  minimal: 'min',
+  low: 'l',
+  medium: 'm',
+  high: 'h',
+  xhigh: 'xh',
+  max: 'max',
+};
+const EFFORT_COLORS: Record<string, string> = {
+  off: 'muted',
+  minimal: 'green',
+  low: 'green',
+  medium: 'cyan',
+  high: 'orange',
+  xhigh: 'pink',
+  max: 'pink',
+};
+const DEFAULT_MODEL_COLOR = '#8be9fd';
+
+function checkoutIdForRow(row: AgentThreadRow): string | undefined {
+  if (row.runtime?.checkoutId) return row.runtime.checkoutId;
+  if (row.durableThread?.checkoutId) return row.durableThread.checkoutId;
+  const location = row.draft?.location;
+  return location?.kind === 'checkout' ? location.checkoutId : undefined;
+}
+
 export function activeThreadDetails(
   row: AgentThreadRow,
   runtimes: BrowserSnapshot['runtimes'],
-): string[] {
-  if (row.draft) {
-    const model = row.draft.model;
-    return [
-      model ? model.model : '? model',
-      model?.thinking ?? '? effort',
-      '? ctx',
-    ];
-  }
-  const details: string[] = [];
+  checkouts: readonly CheckoutSummary[] = [],
+  preferences: ModelDisplayPreferences = {},
+  time = row.updatedAt,
+): ThreadMetadataPresentation {
   const indexed = dormantResumeMetadata(row.session, runtimes);
-  const model = row.runtime?.model ?? indexed.model;
-  if (model) details.push(model.model);
-  else
-    details.push(
-      row.status === 'dormant' ? 'Resumes on send' : 'Controls unavailable',
-    );
-  const thinking = row.runtime?.model?.thinking ?? indexed.thinking;
-  details.push(thinking ?? '? effort');
-  const runtimeTokens = row.runtime?.contextUsage?.tokens;
-  const tokens =
-    typeof runtimeTokens === 'number' && Number.isFinite(runtimeTokens)
-      ? runtimeTokens
-      : indexed.contextTokens;
-  details.push(
-    tokens === undefined ? '? ctx' : `${formatCompactCount(tokens)} ctx`,
-  );
-  const queued = row.runtime?.queueDrafts?.length ?? 0;
-  if (queued > 0) details.push(`${queued} queued`);
-  return details;
+  const selectedModel = row.draft?.model ?? row.runtime?.model ?? indexed.model;
+  const catalogModel = selectedModel
+    ? runtimes
+        .flatMap((runtime) => runtime.modelCatalog ?? [])
+        .find(
+          (candidate) =>
+            candidate.provider === selectedModel.provider &&
+            candidate.model === selectedModel.model,
+        )
+    : undefined;
+  const preference = selectedModel
+    ? modelDisplayPreference(
+        preferences,
+        selectedModel.provider,
+        selectedModel.model,
+      )
+    : {};
+  const model = selectedModel
+    ? {
+        provider: selectedModel.provider,
+        id: `${selectedModel.provider}/${selectedModel.model}`,
+        alias: preference.alias ?? catalogModel?.name ?? selectedModel.model,
+        color: preference.color ?? DEFAULT_MODEL_COLOR,
+      }
+    : undefined;
+  const fullEffort =
+    row.draft?.model?.thinking ??
+    row.runtime?.model?.thinking ??
+    indexed.thinking;
+  const effortKey = fullEffort ?? '';
+  const effort = {
+    full: fullEffort ?? '? effort',
+    compact: EFFORT_LABELS[effortKey] ?? fullEffort ?? '?',
+    color: EFFORT_COLORS[effortKey] ?? 'purple',
+  };
+  const checkoutId = checkoutIdForRow(row);
+  const checkout = checkoutId
+    ? checkouts.find((candidate) => candidate.id === checkoutId)
+    : undefined;
+  return {
+    branch: checkout?.branch ?? 'main',
+    ...(model ? { model } : {}),
+    effort,
+    ...((row.runtime?.queueDrafts?.length ?? 0) > 0
+      ? { queue: row.runtime?.queueDrafts?.length }
+      : {}),
+    time,
+    checkoutPath: checkout?.path ?? row.cwd ?? '',
+  };
 }
 
 // Per-row actions are rendered in the shared accessible context menu below.
@@ -344,6 +417,8 @@ function AgentThreadLink({
   lifecycleProps,
   lifecycleStatus,
   runtimes,
+  checkouts,
+  preferences,
 }: {
   row: AgentThreadRow;
   selected: boolean;
@@ -356,16 +431,20 @@ function AgentThreadLink({
   lifecycleProps?: RuntimeLifecycleThreadProps;
   lifecycleStatus?: 'restarting';
   runtimes: BrowserSnapshot['runtimes'];
+  checkouts: readonly CheckoutSummary[];
+  preferences: ModelDisplayPreferences;
 }) {
-  const details = density === 'card' ? activeThreadDetails(row, runtimes) : [];
   const timestamp =
     density === 'slim' &&
     !isArchivedThread(row) &&
     row.durableThread?.settledAt !== undefined
       ? row.durableThread.settledAt
       : row.updatedAt;
-  const showDetails =
-    density === 'card' && (details.length > 0 || timestamp !== undefined);
+  const details =
+    density === 'card'
+      ? activeThreadDetails(row, runtimes, checkouts, preferences, timestamp)
+      : undefined;
+  const showDetails = density === 'card' && details !== undefined;
   return (
     <button
       {...lifecycleProps}
@@ -414,16 +493,51 @@ function AgentThreadLink({
         </span>
         <strong>{row.title}</strong>
         {showDetails && (
-          <small className={styles.threadDetails} data-row-content="details">
-            {details.length > 0 && (
-              <span className={styles.threadContext}>
-                {details.join(' · ')}
-              </span>
+          <small
+            className={styles.threadDetails}
+            data-row-content="details"
+            title={`Model: ${details.model?.id ?? 'unknown'}; Effort: ${details.effort.full}; Branch: ${details.branch}; Checkout: ${details.checkoutPath}`}
+          >
+            <span className={styles.threadBranch}>{details.branch}</span>
+            <span className={styles.threadSeparator} aria-hidden="true">
+              ·
+            </span>
+            <span
+              className={styles.threadModel}
+              style={details.model ? { color: details.model.color } : undefined}
+            >
+              {details.model?.alias ?? '? model'}
+            </span>
+            <span className={styles.threadSeparator} aria-hidden="true">
+              ·
+            </span>
+            <span
+              className={styles.threadEffort}
+              data-effort={details.effort.full}
+            >
+              {details.effort.compact}
+            </span>
+            {details.queue !== undefined && (
+              <>
+                <span className={styles.threadSeparator} aria-hidden="true">
+                  ·
+                </span>
+                <span className={styles.threadQueue}>
+                  {details.queue} queued
+                </span>
+              </>
             )}
-            {timestamp !== undefined && (
+            <span
+              className={styles.threadInfo}
+              role="img"
+              aria-label={`Full metadata: model ${details.model?.id ?? 'unknown'}, effort ${details.effort.full}, branch ${details.branch}, checkout ${details.checkoutPath}`}
+            >
+              ⓘ
+            </span>
+            {details.time !== undefined && (
               <DashboardTime
                 className={`agent-thread-time ${styles.threadTime}`}
-                timestamp={timestamp}
+                timestamp={details.time}
                 context="sidebar-relative"
               />
             )}
@@ -480,6 +594,7 @@ export function AgentThreadNav({
     BulkThreadAction | undefined
   >(undefined);
   const [bulkError, setBulkError] = useState<string | undefined>(undefined);
+  const modelDisplayPreferences = useModelDisplayPreferences();
   const selectionAnchorId = useRef<string | undefined>(undefined);
   useDrawerHistory(mode === 'session' && open, () => onOpenChange?.(false));
   const drafts = useDrafts();
@@ -860,6 +975,8 @@ export function AgentThreadNav({
           lifecycleProps={lifecycleProps}
           lifecycleStatus={lifecycleStatus}
           runtimes={snapshot.runtimes}
+          checkouts={snapshot.checkouts ?? []}
+          preferences={modelDisplayPreferences}
         />
         {row.draft && (
           <QuickDeleteDraftAction draftId={row.id} title={row.title} />

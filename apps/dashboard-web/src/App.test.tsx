@@ -619,7 +619,7 @@ describe('shared transcript projection web integration', () => {
 });
 
 describe('workspace-first agent navigation', () => {
-  it('prefers runtime, indexed, then configured resume metadata', () => {
+  it('derives branch-first metadata from runtime, indexed, and configured resume data', () => {
     const runtimes = [
       {
         model: { provider: 'configured', model: 'default', thinking: 'low' },
@@ -640,25 +640,51 @@ describe('workspace-first agent navigation', () => {
           status: 'idle',
           runtime: {
             model: { provider: 'runtime', model: 'current', thinking: 'high' },
-            contextUsage: { tokens: 123 },
+            checkoutId: 'checkout-1',
+            queueDrafts: [{ clientId: 'q1' }, { clientId: 'q2' }],
           },
           session: indexed,
         } as never,
         runtimes,
+        [
+          {
+            id: 'checkout-1',
+            branch: 'feature/thread-metadata',
+            path: '/repo/.worktrees/thread-metadata',
+          },
+        ] as never,
       ),
-    ).toEqual(['current', 'high', '123 ctx']);
+    ).toMatchObject({
+      branch: 'feature/thread-metadata',
+      model: {
+        id: 'runtime/current',
+        alias: 'current',
+      },
+      effort: { full: 'high', compact: 'h', color: 'orange' },
+      queue: 2,
+      checkoutPath: '/repo/.worktrees/thread-metadata',
+    });
     expect(
       activeThreadDetails(
         { status: 'dormant', runtime: {}, session: indexed } as never,
         runtimes,
       ),
-    ).toEqual(['old', 'medium', '42 ctx']);
+    ).toMatchObject({
+      branch: 'main',
+      model: { id: 'indexed/old', alias: 'old' },
+      effort: { full: 'medium', compact: 'm', color: 'cyan' },
+    });
     expect(
       activeThreadDetails(
         { status: 'dormant', session: {} } as never,
         runtimes,
       ),
-    ).toEqual(['default', 'low', '? ctx']);
+    ).toMatchObject({
+      branch: 'main',
+      model: { id: 'configured/default', alias: 'default' },
+      effort: { full: 'low', compact: 'l', color: 'green' },
+      checkoutPath: '',
+    });
   });
 
   it('keeps unindexed live rows stable until session metadata arrives', () => {

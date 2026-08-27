@@ -7,6 +7,17 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { errorMessage } from '../shared/lib/error-message';
+import {
+  modelDisplayPreferenceKey,
+  resetModelDisplayPreference,
+  setModelDisplayPreference,
+  useModelDisplayPreferences,
+} from './model-display-preferences';
+import {
+  configuredModelOptions,
+  modelOptionValue,
+  type RuntimeModelOption,
+} from './model-option';
 import { PushButton } from './notifications';
 import styles from './settings.module.css';
 
@@ -23,9 +34,107 @@ export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
           <PushButton />
         </div>
       </section>
+      <ModelDisplayPreferencesEditor snapshot={snapshot} />
       <ProjectAdministration snapshot={snapshot} />
     </section>
   );
+}
+
+const DEFAULT_MODEL_COLOR = '#8be9fd';
+
+function ModelDisplayPreferencesEditor({
+  snapshot,
+}: {
+  snapshot: BrowserSnapshot;
+}) {
+  const preferences = useModelDisplayPreferences();
+  const models = modelOptionsFromSnapshot(snapshot);
+
+  return (
+    <section
+      className={styles.section}
+      aria-labelledby="settings-model-display-heading"
+    >
+      <h3 id="settings-model-display-heading">Model display</h3>
+      <p className={styles.hint}>
+        Choose compact aliases and colors for thread metadata. These stay in
+        this browser.
+      </p>
+      <div className={styles.modelPreferences}>
+        {models.map((model) => {
+          const key = modelDisplayPreferenceKey(model.provider, model.model);
+          const preference = preferences[key] ?? {};
+          return (
+            <div className={styles.modelPreference} key={key}>
+              <span className={styles.modelPreferenceId} title={key}>
+                {model.name ?? model.model}
+                <small>{model.provider}</small>
+              </span>
+              <label className={styles.modelAlias}>
+                <span className="sr-only">Alias for {key}</span>
+                <input
+                  aria-label={`Alias for ${key}`}
+                  value={preference.alias ?? ''}
+                  placeholder={model.model}
+                  onChange={(event) =>
+                    setModelDisplayPreference(model.provider, model.model, {
+                      ...preference,
+                      alias: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <label className={styles.modelColor}>
+                <span className="sr-only">Color for {key}</span>
+                <input
+                  type="color"
+                  aria-label={`Color for ${key}`}
+                  value={preference.color ?? DEFAULT_MODEL_COLOR}
+                  onChange={(event) =>
+                    setModelDisplayPreference(model.provider, model.model, {
+                      ...preference,
+                      color: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={
+                  preference.alias === undefined &&
+                  preference.color === undefined
+                }
+                onClick={() =>
+                  resetModelDisplayPreference(model.provider, model.model)
+                }
+              >
+                Reset
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {!models.length && <p className="muted">No observed models yet.</p>}
+    </section>
+  );
+}
+
+function modelOptionsFromSnapshot(
+  snapshot: BrowserSnapshot,
+): readonly RuntimeModelOption[] {
+  const observed = (snapshot.runtimes ?? []).flatMap((runtime) =>
+    runtime.model
+      ? [{ provider: runtime.model.provider, model: runtime.model.model }]
+      : [],
+  );
+  return [
+    ...new Map(
+      [...configuredModelOptions(snapshot.runtimes ?? []), ...observed].map(
+        (model) => [modelOptionValue(model.provider, model.model), model],
+      ),
+    ).values(),
+  ];
 }
 
 function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
