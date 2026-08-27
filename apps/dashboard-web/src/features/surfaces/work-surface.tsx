@@ -1,6 +1,6 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-import { SurfaceDrawer } from '../surface-drawer';
+import { type SurfacePage, SurfaceStack } from '../surface-stack';
 
 function focusAfterSurfaceHides(launcher: HTMLButtonElement | null) {
   if (
@@ -29,10 +29,8 @@ export function WorkSurface({
   drawerTitle,
   drawerEyebrow,
   drawerSummary,
-  drawerHeaderContent,
-  drawerContent,
-  hideDrawerHeader = false,
-  onDrawerClose,
+  pages = [],
+  onPageDepthChange,
   children,
 }: {
   title: string;
@@ -47,11 +45,8 @@ export function WorkSurface({
   drawerTitle?: string;
   drawerEyebrow?: string;
   drawerSummary?: ReactNode;
-  drawerHeaderContent?: ReactNode;
-  drawerContent?: ReactNode;
-  hideDrawerHeader?: boolean;
-  /** Return false to consume the close request without closing the drawer. */
-  onDrawerClose?: () => boolean | undefined;
+  pages?: readonly SurfacePage[];
+  onPageDepthChange?: (depth: number) => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -69,6 +64,31 @@ export function WorkSurface({
     }, 180);
     return () => window.clearTimeout(timeout);
   }, [visibleCount]);
+  const stackPages = useMemo<readonly SurfacePage[]>(
+    () => [
+      {
+        id: `${label.toLowerCase()}-list`,
+        title: drawerTitle ?? title,
+        eyebrow: drawerEyebrow ?? label,
+        hideTitle: !drawerTitle,
+        headerSummary: drawerSummary ?? summary,
+        headerContent: headerStats,
+        children: <div className="work-surface-content">{children}</div>,
+      },
+      ...pages,
+    ],
+    [
+      children,
+      drawerEyebrow,
+      drawerSummary,
+      drawerTitle,
+      headerStats,
+      label,
+      pages,
+      summary,
+      title,
+    ],
+  );
   if (!visible) return null;
   return (
     <>
@@ -79,7 +99,12 @@ export function WorkSurface({
           className="surface-launcher"
           aria-haspopup="dialog"
           aria-expanded={open}
-          onPress={() => setOpen((current) => !current)}
+          onPress={() => {
+            if (open) {
+              setOpen(false);
+              onPageDepthChange?.(0);
+            } else setOpen(true);
+          }}
         >
           <span className="surface-title">
             <span className="surface-title-line">
@@ -94,23 +119,21 @@ export function WorkSurface({
           </span>
         </AriaButton>
       </article>
-      <SurfaceDrawer
-        title={drawerTitle ?? title}
-        eyebrow={drawerEyebrow ?? label}
-        hideTitle={!drawerTitle}
-        hideHeader={hideDrawerHeader}
-        headerSummary={drawerSummary ?? summary}
+      <SurfaceStack
+        pages={stackPages}
+        kind="work"
         className={drawerClassName}
-        headerContent={drawerHeaderContent ?? headerStats}
         isOpen={open}
         paused={paused}
-        onClose={() => {
-          if (onDrawerClose?.() === false) return;
-          setOpen(false);
+        onDepthChange={(depth) => {
+          if (depth < 1) setOpen(false);
+          onPageDepthChange?.(depth);
         }}
-      >
-        <div className="work-surface-content">{drawerContent ?? children}</div>
-      </SurfaceDrawer>
+        onClose={() => {
+          setOpen(false);
+          onPageDepthChange?.(0);
+        }}
+      />
     </>
   );
 }

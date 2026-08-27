@@ -4934,6 +4934,108 @@ test('shows structured delegate content while the delegate is running @desktop',
   await mocks.close();
 });
 
+test('layers delegate details over the preserved list @desktop', async ({
+  page,
+}) => {
+  const mocks = await installPhase6Mocks(page, {
+    snapshot: phase6Snapshot({
+      extensionSurfaces: [
+        {
+          id: 'delegate-status',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'live-review',
+                runId: 'live-review-run',
+                sessionId: 'child-session',
+                lineageId: 'live-review-lineage',
+                name: 'Live review',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                startedAt: 2,
+                allowWrites: false,
+                isolation: 'shared',
+                details: {
+                  task: 'Review the running implementation.',
+                  setup: { cwd: '/tmp/project', isolation: 'shared' },
+                  runConfig: {
+                    scope: ['extensions/delegate'],
+                    after: ['gate@1'],
+                    parentContextNote: 'Keep the live review focused.',
+                  },
+                  renderedPrompt: 'Full rendered child prompt',
+                  truncated: false,
+                },
+                transcript: [],
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+  await page.setViewportSize({ width: 960, height: 760 });
+  await page.goto('/sessions/s1');
+
+  const launcher = page.getByRole('button', {
+    name: /Delegates.*1 running/u,
+  });
+  await launcher.click();
+  const delegateRow = page.getByRole('button', { name: /Live review/u });
+  await delegateRow.focus();
+  await delegateRow.click();
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Delegate · Live review',
+  });
+  const surfacePages = page.locator('.surface-stack-page');
+  const delegateListPage = surfacePages.first();
+  await expect(dialog).toHaveAttribute('data-surface-depth', '2');
+  await expect(surfacePages).toHaveCount(2);
+  await expect(delegateListPage).toHaveAttribute('aria-hidden', 'true');
+  await expect(delegateListPage).toHaveAttribute('inert', '');
+  await expect(
+    page.locator('.delegate-transcript-inspector-body'),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Back to delegates' }).click();
+  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(delegateRow).toBeVisible();
+  await expect(delegateRow).toBeFocused();
+
+  await delegateRow.click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(delegateRow).toBeFocused();
+
+  await delegateRow.click();
+  await page.goBack();
+  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(page).toHaveURL(/\/sessions\/s1$/u);
+  await page.goBack();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(launcher).toBeFocused();
+
+  await launcher.click();
+  await delegateRow.click();
+  await swipe(page.locator('.surface-drawer'), { dx: 104, dy: 8 });
+  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+
+  await delegateRow.click();
+  await page
+    .locator('.surface-drawer-layer')
+    .click({ position: { x: 8, y: 8 } });
+  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(launcher).toBeFocused();
+  await mocks.close();
+});
+
 test('runtime restart stays on the current thread with pending status', async ({
   page,
 }) => {

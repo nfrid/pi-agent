@@ -2,11 +2,11 @@ import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useState } from 'react';
 import { AgentThreadNav } from '../features/agent-thread-nav';
 import {
-  DashboardUtilityProvider,
-  useDashboardUtility,
-} from '../features/dashboard-utility-context';
+  DashboardSurfaceProvider,
+  useDashboardSurfaces,
+} from '../features/dashboard-surface-context';
 import { SessionNavigationContext } from '../features/session-navigation-context';
-import { SurfaceDrawer } from '../features/surface-drawer';
+import { SurfaceStack } from '../features/surface-stack';
 import { Header, SettingsView } from '../routes/dashboard';
 import { useDashboardContext } from './dashboard-context';
 
@@ -63,7 +63,7 @@ export function RouteShell() {
   );
   return (
     <div className="app">
-      <DashboardUtilityProvider
+      <DashboardSurfaceProvider
         blocked={false}
         locationKey={routeState.pathname}
       >
@@ -81,29 +81,34 @@ export function RouteShell() {
         >
           {routeContent}
         </main>
-        <DashboardUtilityOverlay snapshot={dashboard.snapshot} />
-      </DashboardUtilityProvider>
+        <DashboardSurfaceOverlay snapshot={dashboard.snapshot} />
+      </DashboardSurfaceProvider>
     </div>
   );
 }
 
-function DashboardUtilityOverlay({
+function DashboardSurfaceOverlay({
   snapshot,
 }: {
   snapshot: NonNullable<ReturnType<typeof useDashboardContext>['snapshot']>;
 }) {
-  const utility = useDashboardUtility();
-  const title =
-    utility?.panel === 'settings' ? 'Settings' : 'Dashboard utility';
+  const surfaces = useDashboardSurfaces();
+  const pages =
+    surfaces?.stack.map((surface) => ({
+      id: surface.type,
+      title: 'Settings',
+      eyebrow: 'Dashboard utility',
+      children: <SettingsView snapshot={snapshot} />,
+    })) ?? [];
   return (
-    <SurfaceDrawer
-      title={title}
-      eyebrow="Dashboard utility"
+    <SurfaceStack
+      pages={pages}
+      kind="utility"
+      size="compact"
       className="surface-drawer utility-drawer"
-      isOpen={Boolean(utility?.open && utility.panel)}
-      onClose={() => utility?.close()}
-    >
-      {utility?.panel === 'settings' && <SettingsView snapshot={snapshot} />}
-    </SurfaceDrawer>
+      isOpen={pages.length > 0}
+      onDepthChange={(depth) => surfaces?.truncate(depth)}
+      onClose={() => surfaces?.close()}
+    />
   );
 }

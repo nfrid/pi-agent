@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SurfaceDrawer, SurfaceStats } from '../../features/surface-drawer';
+import { SurfaceStack, SurfaceStats } from '../../features/surface-stack';
 import {
   DashboardTime,
   formatDashboardTimestamp,
@@ -167,24 +167,32 @@ export function TranscriptOutline({
           </button>
         ))}
       </aside>
-      <SurfaceDrawer
+      <SurfaceStack
         isOpen={open}
-        title="Transcript outline"
-        eyebrow="Transcript outline"
-        hideTitle
-        headerSummary="Navigate transcript landmarks"
-        headerContent={
-          <SurfaceStats
-            className="work-header-stats"
-            showZero
-            stats={[{ label: 'landmarks', value: outlineLandmarks.length }]}
-          />
-        }
+        kind="work"
+        pages={[
+          {
+            id: 'transcript-outline',
+            title: 'Transcript outline',
+            eyebrow: 'Transcript outline',
+            hideTitle: true,
+            headerSummary: 'Navigate transcript landmarks',
+            headerContent: (
+              <SurfaceStats
+                className="work-header-stats"
+                showZero
+                stats={[{ label: 'landmarks', value: outlineLandmarks.length }]}
+              />
+            ),
+            children: <div className="work-surface-content">{list}</div>,
+          },
+        ]}
         className="surface-drawer work-surface-drawer outline-sheet"
+        onDepthChange={(depth) => {
+          if (depth < 1) onOpenChange?.(false);
+        }}
         onClose={() => onOpenChange?.(false)}
-      >
-        <div className="work-surface-content">{list}</div>
-      </SurfaceDrawer>
+      />
     </>
   );
 }

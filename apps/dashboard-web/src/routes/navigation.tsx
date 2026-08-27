@@ -1,7 +1,7 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback } from 'react';
-import { useDashboardUtility } from '../features/dashboard-utility-context';
+import { useDashboardSurfaces } from '../features/dashboard-surface-context';
 import { consumeActiveDrawerHistoryEntry } from '../features/drawer-history';
 import { usePrefersReducedMotion } from '../shared/hooks/use-prefers-reduced-motion';
 
@@ -58,12 +58,12 @@ export function useDashboardNavigate(): (
     select: (state) => state.location.pathname,
   });
   const reducedMotion = usePrefersReducedMotion();
-  const utility = useDashboardUtility();
+  const surfaces = useDashboardSurfaces();
   return useCallback(
     (path: string, options?: DashboardNavigateOptions) => {
       // Navigation from a utility panel must never leave the old panel over the
       // destination. The panel state is intentionally independent of the URL.
-      utility?.close();
+      surfaces?.close();
       const replaceDrawerEntry = consumeActiveDrawerHistoryEntry();
       void navigate({
         to: path,
@@ -77,7 +77,7 @@ export function useDashboardNavigate(): (
         }),
       });
     },
-    [currentPath, navigate, reducedMotion, utility],
+    [currentPath, navigate, reducedMotion, surfaces],
   );
 }
 

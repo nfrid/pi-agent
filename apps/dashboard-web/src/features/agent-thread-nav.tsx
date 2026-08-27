@@ -51,7 +51,7 @@ import {
 } from './agent-thread-nav/use-agent-thread-drawer';
 import styles from './agent-thread-nav.module.css';
 import { dormantResumeMetadata } from './composer/runtime';
-import { useDashboardUtility } from './dashboard-utility-context';
+import { useDashboardSurfaces } from './dashboard-surface-context';
 import { deleteDraft, draftPath, useDrafts } from './drafts';
 import {
   hasActiveDrawerHistoryEntry,
@@ -65,7 +65,7 @@ import {
   type RuntimeLifecycleThreadProps,
   refreshDurableThreadMetadata,
 } from './runtime-actions';
-import { AgentNavDrawerShell } from './surface-drawer';
+import { AgentNavDrawerShell } from './surface-stack';
 import { DashboardTime } from './timestamp';
 import { UsageCapsule } from './usage-indicator';
 
@@ -450,7 +450,7 @@ export function AgentThreadNav({
   onOpenChange?: (open: boolean) => void;
 }) {
   const go = useDashboardNavigate();
-  const utility = useDashboardUtility();
+  const surfaces = useDashboardSurfaces();
   const queryClient = useQueryClient();
   const archive = useMutation(
     archiveThreadMutationOptions(dashboardHttpClient),
@@ -757,17 +757,21 @@ export function AgentThreadNav({
     if (
       mode === 'session' &&
       open &&
-      utility &&
+      surfaces &&
       hasActiveDrawerHistoryEntry()
     ) {
-      window.addEventListener('popstate', () => utility.openPanel('settings'), {
-        once: true,
-      });
+      window.addEventListener(
+        'popstate',
+        () => surfaces.open({ type: 'settings' }),
+        {
+          once: true,
+        },
+      );
       onOpenChange?.(false);
       return;
     }
     onOpenChange?.(false);
-    utility?.openPanel('settings');
+    surfaces?.open({ type: 'settings' });
   };
   const openNewThread = () => {
     if (projects.length === 0) {

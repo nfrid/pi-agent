@@ -5,6 +5,7 @@ export type {
   DelegateInspectorRunOption,
 } from './delegate-transcript-inspector/index';
 export {
+  DelegateInspectorHeaderActions,
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
   DelegateParentRequest,

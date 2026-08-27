@@ -23,10 +23,11 @@ import {
 } from '../delegate/surface-state';
 import {
   type DelegateInspectorDetailState,
+  DelegateInspectorHeaderActions,
   type DelegateInspectorRunOption,
   DelegateTranscriptInspector,
 } from '../delegate-transcript-inspector';
-import { SurfaceStats } from '../surface-drawer';
+import { SurfaceStats } from '../surface-stack';
 import { short, stateGlyph } from './state-glyphs';
 import { WorkSurface } from './work-surface';
 
@@ -370,21 +371,39 @@ export function DelegateSurface({
       label: string;
       groups: readonly DelegateCompositeGroup[];
     }[]);
-  const inspectorContent =
-    inspectorRow && inspectorOpen ? (
-      <DelegateTranscriptInspector
-        row={inspectorRow}
-        now={now}
-        runOptions={inspectorRuns}
-        detail={detail}
-        onRunSelected={onRunSelected}
-        store={store}
-        isOpen={inspectorOpen}
-        paused={pausedAt !== undefined}
-        inline
-        onClose={() => setInspectorOpen(false)}
-      />
-    ) : undefined;
+  const inspectorPages =
+    inspectorRow && inspectorOpen
+      ? [
+          {
+            id: `delegate-${inspectorRow.lineageId}`,
+            title: `Delegate · ${delegateDisplayName(inspectorRow)}`,
+            eyebrow: 'Delegate',
+            backLabel: 'Back to delegates',
+            headerContent: (
+              <div className="delegate-inspector-header-content">
+                <DelegateInspectorHeaderActions
+                  row={inspectorRow}
+                  runOptions={inspectorRuns}
+                  detail={detail}
+                />
+              </div>
+            ),
+            children: (
+              <div className="delegate-inspector-inline">
+                <DelegateTranscriptInspector
+                  row={inspectorRow}
+                  now={now}
+                  runOptions={inspectorRuns}
+                  detail={detail}
+                  onRunSelected={onRunSelected}
+                  store={store}
+                  isOpen={inspectorOpen}
+                />
+              </div>
+            ),
+          },
+        ]
+      : [];
   return (
     <WorkSurface
       title={title}
@@ -417,23 +436,16 @@ export function DelegateSurface({
         (historyIncomplete ? 1 : 0) +
         (historyLoading || historyError ? 1 : 0)
       }
-      drawerClassName={`surface-drawer work-surface-drawer delegate-surface-drawer${inspectorContent ? ' delegate-transcript-drawer' : ''}`}
+      drawerClassName={`surface-drawer work-surface-drawer delegate-surface-drawer${inspectorPages.length ? ' delegate-transcript-drawer' : ''}`}
       headerStats={statsView}
       paused={pausedAt !== undefined}
-      drawerTitle={
-        inspectorRow && inspectorOpen
-          ? `Delegate · ${delegateDisplayName(inspectorRow)}`
-          : undefined
-      }
-      drawerContent={inspectorContent}
-      hideDrawerHeader={inspectorContent !== undefined}
-      onDrawerClose={() => {
-        if (inspectorOpen) {
-          setInspectorOpen(false);
-          return false;
+      pages={inspectorPages}
+      onPageDepthChange={(depth) => {
+        if (depth <= 1) setInspectorOpen(false);
+        if (depth < 1) {
+          setSelectedLineageId(undefined);
+          setLastInspectorRow(undefined);
         }
-        setSelectedLineageId(undefined);
-        setLastInspectorRow(undefined);
       }}
     >
       <div className="delegate-scroll surface-scroll-region">

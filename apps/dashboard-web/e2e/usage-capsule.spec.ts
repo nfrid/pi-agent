@@ -128,6 +128,17 @@ test('browser Back closes the active settings drawer', async ({ page }) => {
   await page.getByRole('button', { name: 'Open settings' }).click();
   const settingsDrawer = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDrawer).toBeVisible();
+  await expect(settingsDrawer).toHaveAttribute('data-surface-kind', 'utility');
+  await expect
+    .poll(async () => (await settingsDrawer.boundingBox())?.x)
+    .toBeLessThanOrEqual(1);
+  const settingsBox = await settingsDrawer.boundingBox();
+  const viewport = page.viewportSize();
+  if (!settingsBox || !viewport)
+    throw new Error('Mobile settings sheet is not laid out.');
+  expect(settingsBox.y).toBeLessThanOrEqual(1);
+  expect(Math.abs(settingsBox.width - viewport.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(settingsBox.height - viewport.height)).toBeLessThanOrEqual(2);
 
   await page.goBack();
 
@@ -177,6 +188,19 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await settings.click();
   const settingsDrawer = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDrawer).toBeVisible();
+  await expect(settingsDrawer).toHaveAttribute('data-surface-kind', 'utility');
+  const panelBox = await settingsDrawer.boundingBox();
+  const viewport = page.viewportSize();
+  if (!panelBox || !viewport)
+    throw new Error('Desktop settings panel is not laid out.');
+  expect(panelBox.x).toBeGreaterThanOrEqual(20);
+  expect(panelBox.y).toBeGreaterThanOrEqual(20);
+  expect(viewport.width - panelBox.x - panelBox.width).toBeGreaterThanOrEqual(
+    20,
+  );
+  expect(viewport.height - panelBox.y - panelBox.height).toBeGreaterThanOrEqual(
+    20,
+  );
   await expect(
     settingsDrawer.getByRole('heading', { name: 'Alert delivery' }),
   ).toBeVisible();
