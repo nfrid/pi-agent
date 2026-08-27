@@ -229,6 +229,11 @@ export function Transcript({
               items={groupItems}
               runtime={runtime}
               expanded={open.has(groupKey)}
+              compacting={
+                runtime?.online !== false &&
+                runtime?.liveState === 'compacting' &&
+                group.id === groups.at(-1)?.id
+              }
               onToggle={(nextExpanded) => {
                 setOpen((current) => {
                   const next = new Set(current);

@@ -186,6 +186,11 @@ export function VirtualizedTranscript({
         items={groupItems}
         runtime={runtime}
         expanded={open.has(groupKey)}
+        compacting={
+          runtime?.online !== false &&
+          runtime?.liveState === 'compacting' &&
+          group.id === groups.at(-1)?.id
+        }
         captureScrollAnchor={captureScrollAnchor}
         onToggle={(nextExpanded) => {
           affectedRowKeyRef.current = `group-${groupKey}`;

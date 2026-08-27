@@ -222,7 +222,8 @@
   color: var(--fg);
 }
 .activity-metadata-separator,
-.activity-metadata-duration {
+.activity-metadata-duration,
+.activity-metadata-compaction {
   color: var(--dim);
 }
 .activity-metadata-changes {

@@ -20,12 +20,14 @@ export function TranscriptActivityGroup({
   expanded,
   onToggle,
   captureScrollAnchor,
+  compacting = false,
 }: {
   group: TranscriptGroup;
   groupKey: string;
   items: readonly TranscriptModelItem[];
   runtime?: RuntimeSnapshot;
   expanded: boolean;
+  compacting?: boolean;
   onToggle: (expanded: boolean) => void;
   captureScrollAnchor?: (key: string) => void;
 }) {
@@ -132,6 +134,7 @@ export function TranscriptActivityGroup({
           group={group}
           items={items}
           cwd={runtime?.cwd}
+          compacting={compacting}
         />
       )}
       {expanded && (

@@ -81,6 +81,62 @@ describe('TranscriptActivityGroup', () => {
     );
   });
 
+  it('shows compaction state as the final dim metadata item', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-compaction',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Inspecting before compaction.' },
+            { type: 'toolCall', id: 'call-compaction', name: 'read' },
+          ],
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'call-compaction',
+          name: 'read',
+          status: 'complete',
+          result: 'workspace contents',
+        },
+      },
+      {
+        type: 'compaction',
+        summary: 'Earlier context retained.',
+      },
+    ]);
+    const [group] = projectActivityGroups(items.map(({ entry }) => entry));
+    expect(group).toBeDefined();
+    if (!group) throw new Error('expected an activity group');
+    const render = (compacting: boolean) =>
+      renderToStaticMarkup(
+        <TranscriptActivityGroup
+          group={group}
+          groupKey="assistant-compaction"
+          items={items.slice(group.start, group.end + 1)}
+          expanded={false}
+          compacting={compacting}
+          onToggle={() => {}}
+        />,
+      );
+
+    const compacted = render(false);
+    expect(compacted).toContain('title="Inspected · 1 tool · Compacted"');
+    expect(compacted).toContain(
+      'class="activity-metadata-compaction">Compacted</span></small>',
+    );
+
+    const compacting = render(true);
+    expect(compacting).toContain('title="Inspected · 1 tool · Compacting"');
+    expect(compacting).toContain(
+      'class="activity-metadata-compaction">Compacting</span></small>',
+    );
+    expect(compacting).not.toContain('>Compacted</span>');
+  });
+
   it('keeps block-first Markdown semantic and outside the toggle', () => {
     const items = toTranscriptEntries([
       {

@@ -94,13 +94,20 @@ function CollapsedActivitySummary({
   group,
   items,
   cwd,
+  compacting = false,
 }: {
   group: TranscriptGroup;
   items: readonly TranscriptModelItem[];
   cwd?: string;
+  compacting?: boolean;
 }) {
   const summary = activityGroupSummary(group);
   const metadata = activityGroupMetadataModel(group, summary);
+  const compactionLabel = compacting
+    ? 'Compacting'
+    : items.some((item) => item.event?.kind === 'compaction')
+      ? 'Compacted'
+      : undefined;
   const hasLineChanges = Boolean(
     metadata.lineChanges.added ||
       metadata.lineChanges.changed ||
@@ -149,7 +156,9 @@ function CollapsedActivitySummary({
       )}
       <small
         className={`activity-metadata activity-metadata-${group.kind}`}
-        title={activityGroupMetadata(group, summary)}
+        title={[activityGroupMetadata(group, summary), compactionLabel]
+          .filter(Boolean)
+          .join(' · ')}
       >
         <span className="activity-metadata-kind">{metadata.kindLabel}</span>
         <span className="activity-metadata-separator" aria-hidden="true">
@@ -197,6 +206,16 @@ function CollapsedActivitySummary({
             </span>
             <span className="activity-metadata-failure">
               {metadata.failure}
+            </span>
+          </>
+        ) : null}
+        {compactionLabel ? (
+          <>
+            <span className="activity-metadata-separator" aria-hidden="true">
+              {' · '}
+            </span>
+            <span className="activity-metadata-compaction">
+              {compactionLabel}
             </span>
           </>
         ) : null}
