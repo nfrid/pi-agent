@@ -24,10 +24,12 @@ import {
   SettleThreadCommandSchema,
   UnpinThreadCommandSchema,
   UnsettleThreadCommandSchema,
+  type UsageHistoryQuery,
+  UsageHistoryQuerySchema,
   type UsageHistoryRange,
-  UsageHistoryRangeSchema,
   type UsageHistoryResponse,
   UsageHistoryResponseSchema,
+  usageHistoryPeriod,
 } from '@pi-dashboard/protocol';
 import type {
   FastifyInstance,
@@ -45,10 +47,6 @@ const MAX_JSON_BODY = 512 * 1024;
 const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
 const objectBody = Type.Object({}, { additionalProperties: true });
 const anyBody = Type.Any();
-const UsageHistoryQuerySchema = Type.Object(
-  { range: Type.Optional(UsageHistoryRangeSchema) },
-  { additionalProperties: false },
-);
 const ThreadListQuerySchema = Type.Object(
   {
     projectId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -124,7 +122,10 @@ export interface DashboardRouteContext {
     sequence: number,
   ): Promise<AuthoritativeSessionSnapshot>;
   usage(): Promise<{ usage: unknown; error?: string }>;
-  usageHistory?(range: UsageHistoryRange): UsageHistoryResponse;
+  usageHistory?(
+    range: UsageHistoryRange,
+    before?: number,
+  ): Promise<UsageHistoryResponse> | UsageHistoryResponse;
   readDelegateHistory(id: string): Promise<DelegateHistoryResponse>;
   sessionImage?(
     sessionId: string,
@@ -387,15 +388,25 @@ export const dashboardRoutes: FastifyPluginAsync<{
     },
     async (request, reply) => {
       try {
-        const query = request.query as { range?: UsageHistoryRange };
+        const query = request.query as UsageHistoryQuery;
         const range = query.range ?? '24h';
-        return (
-          context.usageHistory?.(range) ?? {
-            range,
-            generatedAt: Date.now(),
-            series: [],
-          }
+        if (context.usageHistory)
+          return await context.usageHistory(range, query.before);
+        const generatedAt = Date.now();
+        const period = usageHistoryPeriod(
+          range,
+          Math.min(query.before ?? generatedAt, generatedAt),
         );
+        return {
+          range,
+          generatedAt,
+          periodStart: period.periodStart,
+          periodEnd: period.periodEnd,
+          bucket: period.bucket,
+          buckets: period.buckets,
+          series: [],
+          spend: [],
+        };
       } catch (error) {
         return sendError(reply, error);
       }

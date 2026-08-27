@@ -761,6 +761,47 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 16,
+    name: 'session-usage-events',
+    up(db) {
+      db.exec(`
+        CREATE TABLE session_usage_event (
+          event_key TEXT PRIMARY KEY CHECK (length(event_key)=64),
+          occurred_at INTEGER NOT NULL CHECK (occurred_at BETWEEN 0 AND 8640000000000000),
+          provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 128),
+          model_id TEXT NOT NULL CHECK (length(model_id) BETWEEN 1 AND 128),
+          label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 256),
+          calls INTEGER NOT NULL CHECK (calls > 0),
+          input_tokens INTEGER NOT NULL CHECK (input_tokens >= 0),
+          output_tokens INTEGER NOT NULL CHECK (output_tokens >= 0),
+          cache_read_tokens INTEGER NOT NULL CHECK (cache_read_tokens >= 0),
+          cache_write_tokens INTEGER NOT NULL CHECK (cache_write_tokens >= 0),
+          total_tokens INTEGER NOT NULL CHECK (total_tokens >= 0),
+          cost_usd REAL NOT NULL CHECK (cost_usd >= 0)
+        );
+        CREATE INDEX session_usage_event_time
+          ON session_usage_event(occurred_at);
+        CREATE INDEX session_usage_event_model_time
+          ON session_usage_event(provider,model_id,occurred_at);
+        CREATE TABLE session_usage_source (
+          path TEXT PRIMARY KEY,
+          size INTEGER NOT NULL CHECK (size >= 0),
+          mtime_ms REAL NOT NULL CHECK (mtime_ms >= 0),
+          ctime_ms REAL NOT NULL CHECK (ctime_ms >= 0),
+          fingerprint TEXT NOT NULL CHECK (length(fingerprint)=64),
+          indexed_at INTEGER NOT NULL CHECK (indexed_at BETWEEN 0 AND 8640000000000000)
+        );
+        CREATE TABLE session_usage_source_event (
+          source_path TEXT NOT NULL REFERENCES session_usage_source(path) ON DELETE CASCADE,
+          event_key TEXT NOT NULL REFERENCES session_usage_event(event_key) ON DELETE CASCADE,
+          PRIMARY KEY (source_path,event_key)
+        );
+        CREATE INDEX session_usage_source_event_key
+          ON session_usage_source_event(event_key);
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

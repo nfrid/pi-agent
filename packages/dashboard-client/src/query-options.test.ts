@@ -43,13 +43,20 @@ describe('dashboard query and mutation factories', () => {
     const options = usageHistoryQueryOptions(
       { usageHistory } as unknown as DashboardHttpClient,
       '24h',
+      100,
     );
-    expect(options.queryKey).toEqual(['dashboard', 'usage-history', '24h']);
+    expect(options.queryKey).toEqual([
+      'dashboard',
+      'usage-history',
+      '24h',
+      100,
+    ]);
     expect(options.refetchInterval).toBe(60_000);
     if (!options.queryFn) throw new Error('Query function is missing.');
     await expect(
       options.queryFn({ signal: undefined } as never),
     ).resolves.toEqual({ range: '24h', generatedAt: 1, series: [] });
+    expect(usageHistory).toHaveBeenCalledWith('24h', 100);
   });
 
   it('queries persisted delegate history by session ID', async () => {

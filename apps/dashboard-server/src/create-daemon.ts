@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { DashboardApplication } from './application/dashboard-application.js';
 import { OrchestrationService } from './application/orchestration-service.js';
+import { SessionUsageService } from './application/session-usage-service.js';
 import {
   ChangeRelay,
   type DashboardConfiguration,
@@ -10,6 +11,7 @@ import {
   type DashboardServerOptions,
   delegateSessionDirectory,
   sessionDirectory,
+  sessionUsageDirectories,
 } from './composition.js';
 import { HeadlessRuntimeProvider } from './headless-runtime-provider.js';
 import { type DashboardServer, DashboardServerImpl } from './http.js';
@@ -209,6 +211,10 @@ function dependencies(
     sessions,
     metadata,
     usage,
+    sessionUsage: new SessionUsageService(
+      metadata.sessionUsage,
+      sessionUsageDirectories(options),
+    ),
     push,
     stateDir: config.stateDir,
     orchestration: orchestrationService,

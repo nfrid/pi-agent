@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  analyticsSeries,
   clampUsagePointIndex,
   UsageSparkline,
   usageProjection,
@@ -10,10 +11,32 @@ import {
   parseUsage,
   selectUrgentWindow,
   UsageCapsule,
+  usageLimitsWithActivity,
   usageTone,
 } from './usage-indicator';
 
 describe('usage parsing and formatting', () => {
+  it('keeps current limits visible until historical activity is available', () => {
+    const limits = parseUsage({
+      snapshots: [{ limitId: 'codex', primary: { usedPercent: 50 } }],
+    });
+    const emptyHistory = {
+      range: '24h' as const,
+      generatedAt: 2,
+      periodStart: 0,
+      periodEnd: 2,
+      bucket: 'hour' as const,
+      buckets: [0],
+      series: [],
+      spend: [],
+    };
+    expect(usageLimitsWithActivity(limits, undefined)).toEqual(limits);
+    expect(usageLimitsWithActivity(limits, emptyHistory, false)).toEqual(
+      limits,
+    );
+    expect(usageLimitsWithActivity(limits, emptyHistory)).toEqual([]);
+  });
+
   it('normalizes both windows and seconds or milliseconds reset timestamps', () => {
     const [limit] = parseUsage({
       snapshots: [
@@ -168,13 +191,84 @@ describe('usage parsing and formatting', () => {
       <UsageSparkline
         label="5h"
         points={[
-          { capturedAt: 1, usedPercent: 10 },
-          { capturedAt: 2, usedPercent: 40 },
+          {
+            bucketStart: 0,
+            capturedAt: 1,
+            usedPercent: 10,
+            consumedPercent: 0,
+          },
+          {
+            bucketStart: 1,
+            capturedAt: 2,
+            usedPercent: 40,
+            consumedPercent: 30,
+          },
         ]}
       />,
     );
     expect(markup).toContain('aria-label="5h usage history"');
     expect(markup).toContain('<path');
     expect(markup).not.toContain('40%');
+  });
+
+  it('switches one combined series between interval and cumulative values', () => {
+    const data = {
+      range: '24h' as const,
+      generatedAt: 2,
+      periodStart: 0,
+      periodEnd: 2,
+      bucket: 'hour' as const,
+      buckets: [0, 1],
+      series: [],
+      spend: [
+        {
+          id: 'openai:gpt',
+          provider: 'openai',
+          modelId: 'gpt',
+          label: 'GPT',
+          points: [
+            {
+              bucketStart: 0,
+              calls: 1,
+              costUsd: 2,
+              inputTokens: 10,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 11,
+            },
+            {
+              bucketStart: 1,
+              calls: 1,
+              costUsd: 3,
+              inputTokens: 20,
+              outputTokens: 2,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: 22,
+            },
+          ],
+        },
+      ],
+    };
+    expect(analyticsSeries(data, 'cost', false)[0]?.values).toEqual([2, 3]);
+    expect(analyticsSeries(data, 'cost', true)[0]?.values).toEqual([2, 5]);
+    expect(analyticsSeries(data, 'totalTokens', true)[0]?.values).toEqual([
+      11, 33,
+    ]);
+
+    const colors = analyticsSeries(
+      {
+        ...data,
+        spend: ['sol', 'luna', 'codex', 'compaction'].map((id) => ({
+          ...data.spend[0],
+          id,
+          label: id,
+        })),
+      },
+      'cost',
+      false,
+    ).map((series) => series.color);
+    expect(new Set(colors).size).toBe(colors.length);
   });
 });

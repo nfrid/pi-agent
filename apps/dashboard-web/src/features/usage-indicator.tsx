@@ -6,6 +6,7 @@ import {
   type BrowserSnapshot,
   boundedUsageResetAfterSeconds,
   parseUsageTimestamp,
+  type UsageHistoryResponse,
 } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
@@ -220,6 +221,21 @@ function limitWindows(limit: UsageLimit): UsageWindow[] {
   );
 }
 
+export function usageLimitsWithActivity(
+  limits: readonly UsageLimit[],
+  history: UsageHistoryResponse | undefined,
+  filterByHistory = true,
+): readonly UsageLimit[] {
+  if (!history || !filterByHistory) return limits;
+  return limits.filter((limit) =>
+    limitWindows(limit).some((window) =>
+      history.series.some(
+        (item) => item.limitId === limit.id && item.windowKind === window.kind,
+      ),
+    ),
+  );
+}
+
 function UsageHistoryDetails({
   limits,
   now,
@@ -232,9 +248,20 @@ function UsageHistoryDetails({
   const history = useQuery(
     usageHistoryQueryOptions(dashboardHttpClient, '24h'),
   );
+  const visibleLimits = usageLimitsWithActivity(
+    limits,
+    history.data,
+    !history.isFetching && !history.isError,
+  );
   return (
     <>
-      {limits.map((limit) => (
+      {history.isPending && (
+        <span className={styles.historyStatus}>Loading history…</span>
+      )}
+      {history.isError && (
+        <span className={styles.historyStatus}>History unavailable</span>
+      )}
+      {visibleLimits.map((limit) => (
         <section className={styles.historyLimit} key={limit.id}>
           <strong>{limit.name} history</strong>
           {limitWindows(limit).map((window) => {
@@ -253,16 +280,10 @@ function UsageHistoryDetails({
                   <span>{window.label}</span>
                   <span>{countdown ?? 'reset unknown'}</span>
                 </div>
-                {history.isError ? (
-                  <span className={styles.historyStatus}>
-                    History unavailable
-                  </span>
-                ) : (
-                  <UsageSparkline
-                    points={series?.points ?? []}
-                    label={`${limit.name} ${window.label}`}
-                  />
-                )}
+                <UsageSparkline
+                  points={series?.points ?? []}
+                  label={`${limit.name} ${window.label}`}
+                />
               </div>
             );
           })}

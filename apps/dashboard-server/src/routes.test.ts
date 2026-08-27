@@ -1,3 +1,4 @@
+import { usageHistoryPeriod } from '@pi-dashboard/protocol';
 import Fastify from 'fastify';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -31,11 +32,20 @@ function context(): DashboardRouteContext {
       },
     ],
     usage: async () => ({ usage: null }),
-    usageHistory: (range) => ({
-      range,
-      generatedAt: 123,
-      series: [],
-    }),
+    usageHistory: (range, before) => {
+      const generatedAt = before ?? 100 * 24 * 60 * 60_000;
+      const period = usageHistoryPeriod(range, generatedAt);
+      return {
+        range,
+        generatedAt,
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+        bucket: period.bucket,
+        buckets: period.buckets,
+        series: [],
+        spend: [],
+      };
+    },
     readDelegateHistory: async () => ({
       version: 2,
       sessionId: 's',
@@ -252,17 +262,20 @@ describe('Fastify dashboard route plugin', () => {
     ).resolves.toMatchObject({ statusCode: 200 });
     const history = await app.inject({
       method: 'GET',
-      url: '/api/usage/history?range=all',
+      url: '/api/usage/history?range=7d&before=864000000',
       headers: {
         origin: 'http://dashboard.test',
         'x-dashboard-token': 'route-token',
       },
     });
     expect(history.statusCode).toBe(200);
-    expect(history.json()).toEqual({
-      range: 'all',
-      generatedAt: 123,
+    expect(history.json()).toMatchObject({
+      range: '7d',
+      generatedAt: 864000000,
+      periodEnd: 864000000,
+      bucket: 'day',
       series: [],
+      spend: [],
     });
     await expect(
       app.inject({

@@ -107,3 +107,17 @@ export function delegateSessionDirectory(
     path.join(path.dirname(sessionDirectory(options)), '.delegate-sessions')
   );
 }
+
+export function sessionUsageDirectories(
+  options: DashboardServerOptions,
+): readonly string[] {
+  const sessions = sessionDirectory(options);
+  const delegates = delegateSessionDirectory(options);
+  const archive = (directory: string) =>
+    path.join(
+      path.dirname(directory),
+      'session-archive',
+      path.basename(directory),
+    );
+  return [sessions, delegates, archive(sessions), archive(delegates)];
+}

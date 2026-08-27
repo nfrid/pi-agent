@@ -66,7 +66,7 @@ describe('UsageService', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(provider.get).toHaveBeenCalledTimes(3);
 
-    service.stop();
+    await service.stop();
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(provider.get).toHaveBeenCalledTimes(3);
   });
@@ -88,9 +88,34 @@ describe('UsageService', () => {
 
     service.start();
     expect(requestSignal?.aborted).toBe(false);
-    service.stop();
+    await service.stop();
     expect(requestSignal?.aborted).toBe(true);
     await vi.waitFor(() => expect(provider.get).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not commit a provider result that arrives after stop', async () => {
+    let resolve: ((value: unknown) => void) | undefined;
+    const provider = {
+      get: vi.fn(
+        () =>
+          new Promise<unknown>((complete) => {
+            resolve = complete;
+          }),
+      ),
+    };
+    const history = { append: vi.fn(), read: vi.fn() };
+    const service = new UsageService(provider, undefined, { history });
+    const pending = service.get();
+
+    await service.stop();
+    resolve?.({ remaining: 7 });
+
+    await expect(pending).resolves.toMatchObject({
+      usage: undefined,
+      error: 'Usage service stopped.',
+    });
+    expect(service.cached()).toBeUndefined();
+    expect(history.append).not.toHaveBeenCalled();
   });
 
   it('records each successful provider refresh without recording cache reads', async () => {
@@ -107,9 +132,17 @@ describe('UsageService', () => {
     const history = {
       append: vi.fn(),
       read: vi.fn(
-        (range: '24h' | '7d' | '30d' | 'all', generatedAt: number) => ({
+        (
+          range: '24h' | '7d' | '30d',
+          _before: number | undefined,
+          generatedAt: number,
+        ) => ({
           range,
           generatedAt,
+          periodStart: 0,
+          periodEnd: generatedAt,
+          bucket: 'hour' as const,
+          buckets: [0],
           series: [],
         }),
       ),
@@ -129,10 +162,15 @@ describe('UsageService', () => {
     expect(history.append.mock.calls[0]?.[0]).toMatchObject([
       { capturedAt: 1_000, limitId: 'codex', usedPercent: 20 },
     ]);
-    expect(service.history('all')).toEqual({
-      range: 'all',
+    await expect(service.history('24h')).resolves.toEqual({
+      range: '24h',
       generatedAt: 2_000,
+      periodStart: 0,
+      periodEnd: 2_000,
+      bucket: 'hour',
+      buckets: [0],
       series: [],
+      spend: [],
     });
   });
 

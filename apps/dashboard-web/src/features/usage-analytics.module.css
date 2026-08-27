@@ -1,187 +1,563 @@
-.collecting {
+.analytics {
   display: grid;
-  min-height: 28px;
-  place-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.periodToolbar,
+.measureToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rangeSelector {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.rangeSelector button,
+.periodPager button,
+.cumulativeToggle {
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 9px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rangeSelector button[aria-pressed="true"],
+.cumulativeToggle[aria-pressed="true"] {
+  color: var(--fg);
+  background: var(--purple-hover-bg);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.periodPager {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) auto minmax(70px, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: min(100%, 320px);
+}
+
+.periodPager strong {
+  min-width: 110px;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.periodPager button:first-child {
+  text-align: left;
+}
+
+.periodPager button:last-child {
+  text-align: right;
+}
+
+.periodPager button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.measureToolbar {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+
+.measurementRadios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.measurementRadios label {
+  position: relative;
+}
+
+.measurementRadios input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.measurementRadios span {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 6px 9px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.measurementRadios input:checked + span {
+  color: var(--fg);
+  background: var(--purple-hover-bg);
+}
+
+.measurementRadios input:focus-visible + span {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.measurementSelect {
+  display: none;
+}
+
+.measurementSelect select,
+.seriesSelector > button {
+  min-height: 34px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 6px 30px 6px 10px;
+  color: var(--fg);
+  background: var(--bg-alt);
+  font: inherit;
+  font-size: 12px;
+}
+
+.measurementSelect select {
+  max-width: 230px;
+}
+
+.seriesSelector {
+  position: relative;
+}
+
+.seriesSelector > button {
+  display: flex;
+  min-width: 150px;
+  align-items: center;
+  gap: 12px;
+  padding-right: 11px;
+  cursor: pointer;
+}
+
+.seriesSelector > button::after {
+  width: 6px;
+  height: 6px;
+  margin: -3px 1px 0 auto;
+  border-right: 1.5px solid var(--dim);
+  border-bottom: 1.5px solid var(--dim);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.seriesMenu {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  gap: 2px;
+  min-width: 220px;
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px;
+  background: var(--bg-alt);
+  box-shadow: 0 14px 40px rgb(0 0 0 / 32%);
+}
+
+.seriesMenu label {
+  display: grid;
+  grid-template-columns: auto 8px 1fr;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.seriesMenu label:hover {
+  color: var(--fg);
+  background: var(--purple-hover-bg);
+}
+
+.seriesMenu i,
+.legend i,
+.chartTooltip i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.cumulativeToggle {
+  min-height: 34px;
+  margin-left: auto;
+  border: 1px solid var(--line-soft);
+}
+
+.metricSummary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 0 2px;
+  color: var(--muted);
+}
+
+.totalValue {
+  display: inline-grid;
+  flex: 0 0 auto;
+  gap: 1px;
+}
+
+.totalValue h3 {
+  margin: 0;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.totalValue strong {
+  color: var(--fg);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seriesTotals {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  border-left: 1px solid var(--line-soft);
+  padding-left: 14px;
+}
+
+.seriesTotal {
+  display: inline-grid;
+  grid-template-columns: 7px auto auto;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+}
+
+.seriesTotal i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.seriesTotal strong {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.graphCard {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--bg-alt) 72%, transparent);
+}
+
+.combinedChart {
+  position: relative;
+  min-height: 270px;
+  outline: none;
+  touch-action: pan-y;
+}
+
+.combinedChart:focus-visible {
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--purple);
+}
+
+.plotArea {
+  position: relative;
+  margin-left: 44px;
+}
+
+.combinedChart svg {
+  display: block;
+  width: 100%;
+  height: 230px;
+  overflow: visible;
+}
+
+.yAxis {
+  position: absolute;
+  top: 23px;
+  left: 0;
+  display: flex;
+  width: 38px;
+  height: 184px;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.xAxis {
+  display: grid;
+  min-height: 22px;
+  margin: -8px 0 0 44px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.xAxis span {
+  justify-self: center;
+  white-space: nowrap;
+}
+
+.gridLine {
+  fill: none;
+  stroke: var(--line-soft);
+  stroke-width: 0.3;
+  vector-effect: non-scaling-stroke;
+}
+
+.measureLine {
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.measureBar {
+  opacity: 0.82;
+}
+
+.activeGuide,
+.resetGuide {
+  fill: none;
+  stroke-width: 0.6;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.activeGuide {
+  stroke: var(--dim);
+}
+
+.resetGuide {
+  stroke: var(--orange);
+  opacity: 0.65;
+}
+
+.chartTooltip {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  max-width: 240px;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 8px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 24%);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.chartTooltip > strong {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--fg);
+}
+
+.chartTooltip em {
+  color: var(--orange);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.tooltipSeries {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.chartTooltip b {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.projections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 9px;
+}
+
+.projectionItem {
+  margin: 0;
   color: var(--muted);
   font-size: 10px;
 }
+
+.projections strong {
+  color: var(--fg);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 9px;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.legendReset {
+  color: var(--orange);
+  font-style: normal;
+}
+
+.status,
+.emptyChart,
+.collecting {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.status {
+  margin: 16px 0;
+  text-align: center;
+}
+
+.emptyChart {
+  display: grid;
+  min-height: 250px;
+  place-items: center;
+}
+
 .sparkline {
   display: block;
   width: 100%;
   height: 30px;
-  overflow: visible;
 }
+
 .sparkline path {
   fill: none;
   stroke: var(--purple);
-  stroke-linecap: round;
-  stroke-linejoin: round;
   stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-.analytics {
-  display: grid;
-  gap: 16px;
-  min-height: 0;
-  padding: 16px;
-}
-.rangeSelector {
-  display: flex;
-  width: fit-content;
-  margin: 0;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--bg-alt);
-  padding: 2px;
-}
-.rangeSelector button {
-  min-width: 46px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  padding: 6px 9px;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-.rangeSelector button[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--purple) 16%, var(--bg));
-  color: var(--fg);
-}
-.status {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.seriesList {
-  display: grid;
-  gap: 14px;
-}
-.seriesCard {
-  min-width: 0;
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
-  padding: 14px;
-}
-.seriesCard > header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
-}
-.seriesCard h3,
-.limitName,
-.projection,
-.resetAt {
-  margin: 0;
-}
-.seriesCard h3 {
-  font-size: 14px;
-}
-.limitName {
-  margin-bottom: 2px;
-  color: var(--muted);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.currentUsage {
-  color: var(--purple);
-  font-size: 18px;
-}
-.chart {
-  position: relative;
-  outline: none;
-}
-.chart:focus-visible {
-  border-radius: 6px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--purple) 55%, transparent);
-}
-.chart svg {
-  display: block;
-  width: 100%;
-  height: 180px;
-  overflow: visible;
-}
-.gridLine,
-.resetLine,
-.historyLine {
-  fill: none;
-  vector-effect: non-scaling-stroke;
-}
-.gridLine {
-  stroke: var(--line-soft);
-  stroke-width: 1;
-}
-.resetLine {
-  stroke: color-mix(in srgb, var(--muted) 65%, transparent);
-  stroke-dasharray: 3 3;
-  stroke-width: 1;
-}
-.historyLine {
-  stroke: var(--purple);
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2;
-}
-.activePoint {
-  fill: var(--bg);
-  stroke: var(--purple);
-  stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
-.tooltip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 24px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.tooltip strong {
-  color: var(--fg);
-}
-.tooltip span {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--purple) 14%, transparent);
-  padding: 2px 6px;
-  color: var(--purple);
-}
-.emptyChart {
-  display: grid;
-  min-height: 180px;
-  place-items: center;
-  border-block: 1px solid var(--line-soft);
-  color: var(--muted);
-  font-size: 12px;
-}
-.projection,
-.resetAt {
-  color: var(--muted);
-  font-size: 11px;
-}
-.projection strong {
-  color: var(--fg);
-}
-.resetAt {
-  margin-top: 4px;
-}
+
 @media (max-width: 700px) {
-  .analytics {
-    padding: 12px;
+  .periodToolbar,
+  .measureToolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
+
   .rangeSelector {
+    align-self: flex-start;
+  }
+
+  .periodPager {
     width: 100%;
   }
-  .rangeSelector button {
-    flex: 1;
+
+  .measurementRadios {
+    display: none;
   }
-  .chart svg,
-  .emptyChart {
-    height: 150px;
-    min-height: 150px;
+
+  .measurementSelect {
+    display: block;
+  }
+
+  .measureToolbar > label,
+  .measureToolbar select,
+  .seriesSelector,
+  .seriesSelector > button {
+    width: 100%;
+    max-width: none;
+  }
+
+  .seriesSelector {
+    margin-top: 0;
+  }
+
+  .metricSummary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .seriesTotals {
+    border-top: 1px solid var(--line-soft);
+    border-left: 0;
+    padding-top: 7px;
+    padding-left: 0;
+  }
+
+  .cumulativeToggle {
+    align-self: stretch;
+    margin-left: 0;
+  }
+
+  .combinedChart {
+    min-height: 240px;
+  }
+
+  .combinedChart svg {
+    height: 200px;
+  }
+
+  .yAxis {
+    top: 20px;
+    height: 160px;
+  }
+
+  .periodPager button span {
+    display: none;
+  }
+
+  .chartTooltip {
+    max-width: 190px;
   }
 }

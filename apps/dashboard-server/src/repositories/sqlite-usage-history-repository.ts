@@ -5,14 +5,13 @@ import {
   isUsageResetBoundary,
   parseUsageTimestamp,
   type UsageBurnRate,
-  type UsageHistoryPoint,
   type UsageHistoryRange,
   type UsageHistoryResponse,
   type UsageHistorySeries,
+  usageHistoryPeriod,
 } from '@pi-dashboard/protocol';
 
 const MAX_SERIES = 64;
-const MAX_POINTS_PER_SERIES = 720;
 const BURN_RATE_POINTS = 2_000;
 const MIN_BURN_RATE_HOURS = 10 / 60;
 
@@ -26,6 +25,8 @@ export type UsageHistorySample = {
   usedPercent: number;
   resetsAt?: number;
 };
+
+export type UsageLimitHistoryResponse = Omit<UsageHistoryResponse, 'spend'>;
 
 type UsageRow = Record<string, unknown>;
 
@@ -178,14 +179,7 @@ export function normalizeUsageHistorySamples(
   });
 }
 
-function rangeStart(range: UsageHistoryRange, now: number): number | undefined {
-  if (range === '24h') return now - 24 * 60 * 60_000;
-  if (range === '7d') return now - 7 * 24 * 60 * 60_000;
-  if (range === '30d') return now - 30 * 24 * 60 * 60_000;
-  return undefined;
-}
-
-function point(row: UsageRow): UsageHistoryPoint {
+function rawPoint(row: UsageRow) {
   return {
     capturedAt: Number(row.captured_at),
     usedPercent: Number(row.used_percent),
@@ -194,12 +188,11 @@ function point(row: UsageRow): UsageHistoryPoint {
 }
 
 function burnRate(
-  points: readonly UsageHistoryPoint[],
+  points: ReturnType<typeof rawPoint>[],
   windowMinutes: number | undefined,
 ): UsageBurnRate | undefined {
-  if (points.length < 2) return undefined;
   const latest = points.at(-1);
-  if (!latest) return undefined;
+  if (!latest || points.length < 2) return undefined;
   let cycleStart = 0;
   for (let index = 1; index < points.length; index += 1) {
     const current = points[index];
@@ -214,23 +207,23 @@ function burnRate(
   const cutoff = latest.capturedAt - lookback;
   const cycle = points
     .slice(cycleStart)
-    .filter((item) => item.capturedAt >= cutoff);
+    .filter((point) => point.capturedAt >= cutoff);
   const first = cycle[0];
   if (!first || cycle.length < 2) return undefined;
   const observedHours = (latest.capturedAt - first.capturedAt) / 3_600_000;
   if (observedHours < MIN_BURN_RATE_HOURS) return undefined;
   const xMean =
     cycle.reduce(
-      (sum, item) => sum + (item.capturedAt - first.capturedAt) / 3_600_000,
+      (sum, point) => sum + (point.capturedAt - first.capturedAt) / 3_600_000,
       0,
     ) / cycle.length;
   const yMean =
-    cycle.reduce((sum, item) => sum + item.usedPercent, 0) / cycle.length;
+    cycle.reduce((sum, point) => sum + point.usedPercent, 0) / cycle.length;
   let covariance = 0;
   let variance = 0;
-  for (const item of cycle) {
-    const x = (item.capturedAt - first.capturedAt) / 3_600_000 - xMean;
-    covariance += x * (item.usedPercent - yMean);
+  for (const point of cycle) {
+    const x = (point.capturedAt - first.capturedAt) / 3_600_000 - xMean;
+    covariance += x * (point.usedPercent - yMean);
     variance += x * x;
   }
   const percentPerHour = variance > 0 ? covariance / variance : 0;
@@ -281,18 +274,22 @@ export class SqliteUsageHistoryRepository {
     }
   }
 
-  read(range: UsageHistoryRange, now = Date.now()): UsageHistoryResponse {
-    const since = rangeStart(range, now);
-    const filter = since === undefined ? '' : 'WHERE captured_at >= ?';
+  read(
+    range: UsageHistoryRange,
+    before: number | undefined,
+    now = Date.now(),
+  ): UsageLimitHistoryResponse {
+    const period = usageHistoryPeriod(range, Math.min(before ?? now, now));
     const identities = this.db
       .prepare(
-        `SELECT limit_id,window_kind,MAX(captured_at) AS latest_at
-         FROM usage_sample ${filter}
+        `SELECT limit_id,window_kind
+         FROM usage_sample
+         WHERE captured_at>=? AND captured_at<?
          GROUP BY limit_id,window_kind
          ORDER BY limit_id,window_kind
          LIMIT ${MAX_SERIES}`,
       )
-      .all(...(since === undefined ? [] : [since])) as UsageRow[];
+      .all(period.periodStart, period.periodEnd) as UsageRow[];
     const series = identities.flatMap((identity) => {
       const limitId = String(identity.limit_id);
       const windowKind = String(identity.window_kind) as
@@ -302,68 +299,119 @@ export class SqliteUsageHistoryRepository {
         .prepare(
           `SELECT limit_name,window_label,window_minutes
            FROM usage_sample
-           WHERE limit_id=? AND window_kind=?
+           WHERE limit_id=? AND window_kind=? AND captured_at<?
            ORDER BY captured_at DESC,id DESC LIMIT 1`,
         )
-        .get(limitId, windowKind) as UsageRow | undefined;
+        .get(limitId, windowKind, period.periodEnd) as UsageRow | undefined;
       if (!latest) return [];
-      const countRow = this.db
+      const prior = this.db
         .prepare(
-          `SELECT COUNT(*) AS count FROM usage_sample
-           WHERE limit_id=? AND window_kind=?${since === undefined ? '' : ' AND captured_at>=?'}`,
+          `SELECT captured_at,used_percent,resets_at
+           FROM usage_sample
+           WHERE limit_id=? AND window_kind=? AND captured_at<?
+           ORDER BY captured_at DESC,id DESC LIMIT 1`,
         )
-        .get(limitId, windowKind, ...(since === undefined ? [] : [since])) as
-        | UsageRow
-        | undefined;
-      const count = Number(countRow?.count ?? 0);
-      const stride = Math.max(
-        1,
-        Math.ceil(count / (MAX_POINTS_PER_SERIES - 2)),
-      );
+        .get(limitId, windowKind, period.periodStart) as UsageRow | undefined;
       const rows = this.db
         .prepare(
-          `WITH ordered AS (
-             SELECT id,captured_at,used_percent,resets_at,
-               ROW_NUMBER() OVER (ORDER BY captured_at,id) AS position,
-               COUNT(*) OVER () AS total
-             FROM usage_sample
-             WHERE limit_id=? AND window_kind=?${since === undefined ? '' : ' AND captured_at>=?'}
-           )
-           SELECT id,captured_at,used_percent,resets_at FROM ordered
-           WHERE total<=${MAX_POINTS_PER_SERIES}
-             OR position=1 OR position=total OR position % ?=0
+          `SELECT captured_at,used_percent,resets_at
+           FROM usage_sample
+           WHERE limit_id=? AND window_kind=? AND captured_at>=? AND captured_at<?
            ORDER BY captured_at,id`,
         )
         .all(
           limitId,
           windowKind,
-          ...(since === undefined ? [] : [since]),
-          stride,
+          period.periodStart,
+          period.periodEnd,
         ) as UsageRow[];
-      const recent = this.db
-        .prepare(
-          `SELECT captured_at,used_percent,resets_at FROM usage_sample
-           WHERE limit_id=? AND window_kind=?
-           ORDER BY captured_at DESC,id DESC LIMIT ${BURN_RATE_POINTS}`,
+      const buckets = new Map<
+        number,
+        {
+          capturedAt: number;
+          usedPercent: number;
+          consumedPercent: number;
+          reset?: boolean;
+          resetsAt?: number;
+        }
+      >();
+      let previous = prior ? rawPoint(prior) : undefined;
+      for (const row of rows) {
+        const current = rawPoint(row);
+        const bucketIndex = Math.min(
+          period.buckets.length - 1,
+          Math.floor(
+            (current.capturedAt - period.periodStart) / period.bucketMs,
+          ),
+        );
+        const bucketStart = period.buckets[bucketIndex];
+        if (bucketStart === undefined) continue;
+        const existing = buckets.get(bucketStart);
+        const reset = previous
+          ? isUsageResetBoundary(previous, current)
+          : false;
+        const increase = reset
+          ? current.usedPercent
+          : previous
+            ? Math.max(0, current.usedPercent - previous.usedPercent)
+            : 0;
+        buckets.set(bucketStart, {
+          capturedAt: current.capturedAt,
+          usedPercent: current.usedPercent,
+          consumedPercent: (existing?.consumedPercent ?? 0) + increase,
+          ...(existing?.reset || reset ? { reset: true } : {}),
+          ...(current.resetsAt === undefined
+            ? {}
+            : { resetsAt: current.resetsAt }),
+        });
+        previous = current;
+      }
+      const points = [...buckets].map(([bucketStart, point]) => ({
+        bucketStart,
+        ...point,
+      }));
+      if (
+        !points.some(
+          (point) => point.usedPercent > 0 || point.consumedPercent > 0,
         )
-        .all(limitId, windowKind)
-        .reverse() as UsageRow[];
+      )
+        return [];
       const windowMinutes =
         latest.window_minutes == null
           ? undefined
           : Number(latest.window_minutes);
-      const rate = burnRate(recent.map(point), windowMinutes);
+      const recent =
+        period.periodEnd >= now - 2 * 60_000
+          ? (this.db
+              .prepare(
+                `SELECT captured_at,used_percent,resets_at FROM usage_sample
+                 WHERE limit_id=? AND window_kind=? AND captured_at<?
+                 ORDER BY captured_at DESC,id DESC LIMIT ${BURN_RATE_POINTS}`,
+              )
+              .all(limitId, windowKind, period.periodEnd)
+              .reverse() as UsageRow[])
+          : [];
+      const rate = burnRate(recent.map(rawPoint), windowMinutes);
       const item: UsageHistorySeries = {
+        id: `${limitId}:${windowKind}`,
         limitId,
         limitName: String(latest.limit_name),
         windowKind,
         windowLabel: String(latest.window_label),
         ...(windowMinutes === undefined ? {} : { windowMinutes }),
-        points: rows.map(point),
+        points,
         ...(rate === undefined ? {} : { burnRate: rate }),
       };
       return [item];
     });
-    return { range, generatedAt: now, series };
+    return {
+      range,
+      generatedAt: now,
+      periodStart: period.periodStart,
+      periodEnd: period.periodEnd,
+      bucket: period.bucket,
+      buckets: period.buckets,
+      series,
+    };
   }
 }

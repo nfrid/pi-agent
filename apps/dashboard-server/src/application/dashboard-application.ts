@@ -43,6 +43,7 @@ import { NotificationService } from './notification-service.js';
 import type { OrchestrationService } from './orchestration-service.js';
 import { RuntimeService } from './runtime-service.js';
 import { SessionService } from './session-service.js';
+import type { SessionUsageService } from './session-usage-service.js';
 import { UploadService } from './upload-service.js';
 import { UsageService } from './usage-service.js';
 
@@ -67,6 +68,7 @@ export interface DashboardApplicationOptions {
   sessions: SessionIndex;
   metadata: MetadataStore;
   usage: UsageProvider;
+  sessionUsage?: SessionUsageService;
   push: PushSender;
   stateDir: string;
   onChange?: () => void;
@@ -774,6 +776,7 @@ export class DashboardApplication {
     );
     this.usage = new UsageService(options.usage, options.onChange, {
       history: options.metadata.usageHistory,
+      sessionUsage: options.sessionUsage,
       freshMs: () =>
         this.runtime
           .snapshots()

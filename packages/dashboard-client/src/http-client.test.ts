@@ -752,16 +752,29 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       return new Response(
         JSON.stringify({
           range: '7d',
-          generatedAt: 123,
+          generatedAt: 700,
+          periodStart: 100,
+          periodEnd: 700,
+          bucket: 'day',
+          buckets: [100],
           series: [
             {
+              id: 'codex:primary',
               limitId: 'codex',
               limitName: 'Codex',
               windowKind: 'primary',
               windowLabel: '5h',
-              points: [{ capturedAt: 100, usedPercent: 25 }],
+              points: [
+                {
+                  bucketStart: 100,
+                  capturedAt: 200,
+                  usedPercent: 25,
+                  consumedPercent: 5,
+                },
+              ],
             },
           ],
+          spend: [],
         }),
         { status: 200 },
       );
@@ -773,13 +786,13 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       tokenStore: tokenStore(),
     });
 
-    await expect(client.usageHistory('7d')).resolves.toMatchObject({
+    await expect(client.usageHistory('7d', 700)).resolves.toMatchObject({
       range: '7d',
       series: [{ windowLabel: '5h' }],
     });
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
       '/lan/trpc/protocolInfo',
-      '/lan/api/usage/history?range=7d',
+      '/lan/api/usage/history?range=7d&before=700',
     ]);
   });
 

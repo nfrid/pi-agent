@@ -258,7 +258,8 @@ export class DashboardServerImpl implements DashboardServer {
       sessionSnapshotAt: (id, sequence) =>
         this.buildSessionSnapshot(id, undefined, sequence),
       usage: () => this.application.usage.get(),
-      usageHistory: (range) => this.application.usage.history(range),
+      usageHistory: (range, before) =>
+        this.application.usage.history(range, before),
       readDelegateHistory: (id) => this.delegateHistoryResult(id),
       readDelegateHistoryRun: (id, runId, query) =>
         this.delegateHistoryRunResult(id, runId, query),
@@ -634,7 +635,7 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   private async stopInternal(): Promise<void> {
-    this.application.usage.stop();
+    await this.application.usage.stop();
     if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
     this.feedSweepTimer = undefined;
     await this.application.orchestrationService?.stop();
@@ -657,7 +658,7 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   private async cleanupFailedStart(): Promise<void> {
-    this.application.usage.stop();
+    await this.application.usage.stop();
     if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
     this.feedSweepTimer = undefined;
     await this.application.orchestrationService?.stop();

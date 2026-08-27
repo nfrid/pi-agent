@@ -662,9 +662,12 @@ export class DashboardHttpClient {
 
   async usageHistory(
     range: UsageHistoryRange = '24h',
+    before?: number,
   ): Promise<UsageHistoryResponse> {
+    const query = new URLSearchParams({ range });
+    if (before !== undefined) query.set('before', String(before));
     const value = await this.request<unknown>(
-      `/api/usage/history?range=${encodeURIComponent(range)}`,
+      `/api/usage/history?${query.toString()}`,
     );
     const response = tryParseUsageHistoryResponse(value);
     if (!response || response.range !== range)

@@ -20,55 +20,95 @@ const usage = {
   ],
 };
 
-const usageHistory = {
-  generatedAt: Date.now(),
-  series: [
-    {
-      limitId: 'codex',
-      limitName: 'Codex',
-      windowKind: 'primary',
-      windowLabel: '5h',
-      windowMinutes: 300,
-      points: [
-        { capturedAt: Date.now() - 2 * 60 * 60_000, usedPercent: 18 },
-        { capturedAt: Date.now() - 60 * 60_000, usedPercent: 45 },
-        {
-          capturedAt: Date.now(),
-          usedPercent: 73,
-          resetsAt: usage.snapshots[0]?.primary.resetsAt,
-        },
-      ],
-      burnRate: {
+function usageHistory(range: string, before: number) {
+  const duration =
+    range === '24h'
+      ? 24 * 60 * 60_000
+      : range === '7d'
+        ? 7 * 24 * 60 * 60_000
+        : 30 * 24 * 60 * 60_000;
+  const bucket = range === '24h' ? 'hour' : range === '7d' ? 'day' : 'week';
+  const bucketMs =
+    bucket === 'hour'
+      ? 60 * 60_000
+      : bucket === 'day'
+        ? 24 * 60 * 60_000
+        : 7 * 24 * 60 * 60_000;
+  const periodStart = before - duration;
+  const buckets = Array.from(
+    { length: Math.ceil(duration / bucketMs) },
+    (_, index) => periodStart + index * bucketMs,
+  );
+  const limit = (
+    id: string,
+    windowKind: 'primary' | 'secondary',
+    windowLabel: string,
+    usedPercent: number,
+    burnRate: Record<string, unknown>,
+  ) => ({
+    id,
+    limitId: 'codex',
+    limitName: 'Codex',
+    windowKind,
+    windowLabel,
+    windowMinutes: windowKind === 'primary' ? 300 : 10_080,
+    points: buckets.map((bucketStart, index) => ({
+      bucketStart,
+      capturedAt: Math.min(before - 1, bucketStart + bucketMs - 1),
+      usedPercent: Math.min(usedPercent, 10 + index * 3),
+      consumedPercent: 3,
+    })),
+    burnRate,
+  });
+  return {
+    range,
+    generatedAt: before,
+    periodStart,
+    periodEnd: before,
+    bucket,
+    buckets,
+    series: [
+      limit('codex:primary', 'primary', '5h', 73, {
         percentPerHour: 27.5,
         observedHours: 2,
-        projectedExhaustionAt: Date.now() + 60 * 60_000,
+        projectedExhaustionAt: before + 60 * 60_000,
         exhaustsBeforeReset: true,
-      },
-    },
-    {
-      limitId: 'codex',
-      limitName: 'Codex',
-      windowKind: 'secondary',
-      windowLabel: 'wk',
-      windowMinutes: 10_080,
-      points: [
-        { capturedAt: Date.now() - 2 * 24 * 60 * 60_000, usedPercent: 20 },
-        { capturedAt: Date.now() - 24 * 60 * 60_000, usedPercent: 30 },
-        {
-          capturedAt: Date.now(),
-          usedPercent: 41,
-          resetsAt: usage.snapshots[0]?.secondary.resetsAt,
-        },
-      ],
-      burnRate: {
+      }),
+      limit('codex:secondary', 'secondary', 'wk', 41, {
         percentPerHour: 0.45,
         observedHours: 24,
-        projectedExhaustionAt: Date.now() + 6 * 24 * 60 * 60_000,
+        projectedExhaustionAt: before + 6 * 24 * 60 * 60_000,
         exhaustsBeforeReset: false,
+      }),
+      {
+        ...limit('reviews:primary', 'primary', '5h', 99, {
+          percentPerHour: 1,
+          observedHours: 1,
+        }),
+        limitId: 'reviews',
+        limitName: 'Reviews',
       },
-    },
-  ],
-};
+    ],
+    spend: [
+      {
+        id: 'openai-codex:gpt-5.6-sol',
+        provider: 'openai-codex',
+        modelId: 'gpt-5.6-sol',
+        label: 'gpt-5.6-sol',
+        points: buckets.map((bucketStart) => ({
+          bucketStart,
+          calls: 2,
+          costUsd: 1.5,
+          inputTokens: 20_000,
+          outputTokens: 2_000,
+          cacheReadTokens: 40_000,
+          cacheWriteTokens: 0,
+          totalTokens: 62_000,
+        })),
+      },
+    ],
+  };
+}
 
 async function openSession(
   page: Page,
@@ -76,10 +116,12 @@ async function openSession(
   usageValue: unknown = usage,
 ) {
   await page.route('**/api/usage/history?*', (route) => {
-    const range = new URL(route.request().url()).searchParams.get('range');
+    const query = new URL(route.request().url()).searchParams;
+    const range = query.get('range') ?? '24h';
+    const before = Number(query.get('before') ?? Date.now());
     return route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ ...usageHistory, range }),
+      body: JSON.stringify(usageHistory(range, before)),
     });
   });
   await page.route('**/api/usage', (route) =>
@@ -333,21 +375,54 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await expect(analytics).toBeVisible();
   await expect(analytics).toHaveAttribute('data-surface-kind', 'utility');
   await expect(
-    analytics.getByRole('heading', { name: '5h window' }),
-  ).toBeVisible();
+    analytics.getByRole('radio', { name: 'Limit usage %' }),
+  ).toBeChecked();
+  await expect(analytics.getByText('visible series')).toHaveCount(0);
+  const chart = analytics.getByRole('slider', {
+    name: 'Usage analytics interval',
+  });
+  await expect(chart).toHaveAttribute('aria-valuetext', /Codex 5h.*Codex wk/u);
+  await expect(analytics.getByRole('status')).toHaveCount(0);
+  await chart.hover();
+  await expect(analytics.getByRole('status')).toBeVisible();
+  await analytics.getByRole('button', { name: 'Cumulative' }).hover();
+  await expect(analytics.getByRole('status')).toHaveCount(0);
+  const seriesSelector = analytics.getByRole('button', { name: 'All series' });
+  await seriesSelector.click();
   await expect(
-    analytics.getByRole('heading', { name: 'wk window' }),
+    analytics.getByRole('group', { name: 'Visible usage series' }),
   ).toBeVisible();
-  await expect(analytics.getByText('27.5%/h')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(
+    analytics.getByRole('group', { name: 'Visible usage series' }),
+  ).toHaveCount(0);
+  await expect(analytics).toBeVisible();
+  await expect(seriesSelector).toBeFocused();
+  await expect(analytics.getByText('27.50%/h')).toBeVisible();
   await expect(analytics.getByText('0.45%/h')).toBeVisible();
   await expect(
     analytics.getByText('Reset should arrive before the limit.'),
   ).toBeVisible();
+  await analytics.getByRole('radio', { name: 'API-equivalent cost' }).check();
+  const totals = analytics.getByRole('region', { name: 'Period total' });
+  await expect(totals).toContainText('Period total$36');
+  await expect(totals).toContainText('gpt-5.6-sol$36');
+  await expect(
+    analytics.getByText('gpt-5.6-sol', { exact: true }).last(),
+  ).toBeVisible();
+  await analytics.getByRole('button', { name: 'Cumulative' }).click();
+  await expect(
+    analytics.getByRole('button', { name: 'Cumulative' }),
+  ).toHaveAttribute('aria-pressed', 'true');
   await analytics.getByRole('button', { name: '7d' }).click();
   await expect(analytics.getByRole('button', { name: '7d' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
+  await analytics.getByRole('button', { name: /Previous/ }).click();
+  await expect(analytics.getByRole('button', { name: /Next/ })).toBeEnabled();
+  await analytics.getByRole('button', { name: /Next/ }).click();
+  await expect(analytics.getByRole('button', { name: /Next/ })).toBeDisabled();
   await page.goBack();
   await expect(analytics).toHaveCount(0);
   await expect(trigger).toBeFocused();

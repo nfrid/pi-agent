@@ -27,8 +27,8 @@ export const dashboardQueryKeys = {
   all: ['dashboard'] as const,
   snapshot: () => ['dashboard', 'snapshot'] as const,
   usage: () => ['dashboard', 'usage'] as const,
-  usageHistory: (range: UsageHistoryRange) =>
-    ['dashboard', 'usage-history', range] as const,
+  usageHistory: (range: UsageHistoryRange, before?: number) =>
+    ['dashboard', 'usage-history', range, before ?? 'current'] as const,
   session: (id: string) => ['dashboard', 'session', id] as const,
   delegateHistory: (id: string) =>
     ['dashboard', 'delegate-history', id] as const,
@@ -206,10 +206,11 @@ export function usageQueryOptions(client: DashboardHttpClient) {
 export function usageHistoryQueryOptions(
   client: DashboardHttpClient,
   range: UsageHistoryRange,
+  before?: number,
 ) {
   return queryOptions({
-    queryKey: dashboardQueryKeys.usageHistory(range),
-    queryFn: () => client.usageHistory(range),
+    queryKey: dashboardQueryKeys.usageHistory(range, before),
+    queryFn: () => client.usageHistory(range, before),
     staleTime: 60_000,
     refetchInterval: 60_000,
     retry: networkRetry,
