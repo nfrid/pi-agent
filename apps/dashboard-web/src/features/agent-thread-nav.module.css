@@ -671,7 +671,7 @@ button.shelfHeading:focus-visible {
 }
 .threadWorkspaceName {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -736,6 +736,7 @@ button.shelfHeading:focus-visible {
 }
 .threadCheckout {
   font-weight: 500;
+  flex: 1;
 }
 .threadCheckout[data-checkout-kind="main"] {
   color: var(--green);
