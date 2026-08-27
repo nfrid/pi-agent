@@ -8,7 +8,7 @@
   position: fixed;
   top: 50%;
   right: 13px;
-  z-index: 30;
+  z-index: 31;
   display: none;
   max-height: calc(100vh - 96px);
   flex-direction: column;

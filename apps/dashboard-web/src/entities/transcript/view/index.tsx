@@ -17,6 +17,7 @@ import { TranscriptActivityGroup } from '../activity-group';
 import { TranscriptEntry } from '../entries';
 import {
   buildTranscriptLandmarks,
+  mergeTranscriptLandmarks,
   type TranscriptLandmark,
 } from '../landmarks';
 import { TranscriptOutline } from '../outline';
@@ -131,27 +132,10 @@ export function Transcript({
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
   );
-  const landmarks = useMemo<TranscriptLandmark[]>(() => {
-    if (outline === undefined) return loadedLandmarks;
-    return outline.map((landmark) => {
-      const loaded = loadedLandmarks.find(
-        (candidate) =>
-          candidate.key === landmark.id ||
-          candidate.key === `group-${landmark.id}`,
-      );
-      return loaded
-        ? { ...loaded, label: landmark.label }
-        : {
-            key: landmark.id,
-            label: landmark.label,
-            kind: landmark.kind,
-            itemIndex: landmark.ordinal,
-            ...(landmark.timestamp === undefined
-              ? {}
-              : { timestamp: landmark.timestamp }),
-          };
-    });
-  }, [loadedLandmarks, outline]);
+  const landmarks = useMemo<TranscriptLandmark[]>(
+    () => mergeTranscriptLandmarks(loadedLandmarks, outline),
+    [loadedLandmarks, outline],
+  );
   useLayoutEffect(() => {
     // Re-run after a pending ordinal load commits its rendered items.
     void loadedLandmarks;

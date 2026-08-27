@@ -1,3 +1,4 @@
+import type { SessionOutlineLandmark } from '@pi-dashboard/protocol';
 import type { TranscriptModelItem } from '../../transcript';
 import type { TranscriptGroup } from './activity';
 
@@ -124,6 +125,40 @@ export function buildTranscriptLandmarks(
       });
   }
   return result;
+}
+
+export function mergeTranscriptLandmarks(
+  loadedLandmarks: readonly TranscriptLandmark[],
+  outline: readonly SessionOutlineLandmark[] | undefined,
+): TranscriptLandmark[] {
+  if (outline === undefined) return [...loadedLandmarks];
+  const matchedLoadedKeys = new Set<string>();
+  const merged = outline.map((landmark) => {
+    const loaded = loadedLandmarks.find(
+      (candidate) =>
+        candidate.key === landmark.id ||
+        candidate.key === `group-${landmark.id}`,
+    );
+    if (loaded) {
+      matchedLoadedKeys.add(loaded.key);
+      return { ...loaded, label: landmark.label };
+    }
+    return {
+      key: landmark.id,
+      label: landmark.label,
+      kind: landmark.kind,
+      itemIndex: landmark.ordinal,
+      ...(landmark.timestamp === undefined
+        ? {}
+        : { timestamp: landmark.timestamp }),
+    };
+  });
+  return [
+    ...merged,
+    ...loadedLandmarks.filter(
+      (landmark) => !matchedLoadedKeys.has(landmark.key),
+    ),
+  ];
 }
 
 function evenlySampleLandmarks(

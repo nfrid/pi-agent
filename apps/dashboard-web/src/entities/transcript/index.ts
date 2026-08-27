@@ -20,6 +20,7 @@ export type { TranscriptLandmark } from './landmarks';
 export {
   activityStepTimestamps,
   buildTranscriptLandmarks,
+  mergeTranscriptLandmarks,
   sampleTranscriptLandmarks,
   transcriptItemTimestamp,
   transcriptRoleLabel,

@@ -5553,6 +5553,55 @@ test('started session keeps location fixed and agent controls editable', async (
   await mocks.close();
 });
 
+test('outline preview stays above the composer @desktop', async ({ page }) => {
+  const mocks = await installPhase6Mocks(page);
+  await page.goto('/sessions/s1');
+  await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
+
+  const marker = page.locator(
+    '.transcript-minimap-marker[data-preview="Earlier history 1"]',
+  );
+  await marker.hover();
+  const preview = marker.locator('.transcript-minimap-preview');
+  await expect(preview).toBeVisible();
+  await expect(preview).toHaveAttribute('data-meta', /User message · .+/u);
+  await expect(preview).toHaveAttribute('data-label', 'Earlier history 1');
+  const geometry = await marker.evaluate((element) => {
+    const previewElement = element.querySelector<HTMLElement>(
+      '.transcript-minimap-preview',
+    );
+    return {
+      markerWidth: element.getBoundingClientRect().width,
+      previewDoesNotCapturePointer:
+        previewElement !== null &&
+        getComputedStyle(previewElement).pointerEvents === 'none',
+      minimapStackLevel: Number(
+        getComputedStyle(element.closest('.transcript-minimap') as Element)
+          .zIndex,
+      ),
+      composerStackLevel: Number(
+        getComputedStyle(
+          document.querySelector('.session-control-layer') as Element,
+        ).zIndex,
+      ),
+      wraps:
+        previewElement !== null &&
+        getComputedStyle(previewElement).whiteSpace === 'normal',
+    };
+  });
+  expect(geometry).toMatchObject({
+    markerWidth: 64,
+    previewDoesNotCapturePointer: true,
+    minimapStackLevel: 31,
+    composerStackLevel: 30,
+    wraps: true,
+  });
+  expect(geometry.minimapStackLevel).toBeGreaterThan(
+    geometry.composerStackLevel,
+  );
+  await mocks.close();
+});
+
 test('phase six mocked session flow covers semantic controls and reconnect safety', async ({
   page,
 }) => {
@@ -5607,48 +5656,6 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(dockMarker).toHaveCount(1);
   await expect(dockMarker).toHaveAttribute('aria-label', 'Earlier history 1');
   await expect(dockMarker).not.toHaveAttribute('title', 'Earlier history 1');
-  const supportsOutlineHover = await page.evaluate(
-    () => window.matchMedia('(pointer: fine) and (min-width: 821px)').matches,
-  );
-  if (supportsOutlineHover) {
-    await dockMarker.hover();
-    const outlinePreview = dockMarker.locator('.transcript-minimap-preview');
-    await expect(outlinePreview).toBeVisible();
-    await expect(outlinePreview).toHaveAttribute(
-      'data-meta',
-      /User message · .+/u,
-    );
-    await expect(outlinePreview).toHaveAttribute(
-      'data-label',
-      'Earlier history 1',
-    );
-    const outlineGeometry = await dockMarker.evaluate((marker) => {
-      const preview = marker.querySelector<HTMLElement>(
-        '.transcript-minimap-preview',
-      );
-      const markerBox = marker.getBoundingClientRect();
-      return {
-        markerWidth: markerBox.width,
-        previewDoesNotCapturePointer: preview
-          ? getComputedStyle(preview).pointerEvents === 'none'
-          : false,
-        stackLevel: Number(
-          getComputedStyle(marker.closest('.transcript-minimap') as Element)
-            .zIndex,
-        ),
-        wraps: preview
-          ? getComputedStyle(preview).whiteSpace === 'normal'
-          : false,
-      };
-    });
-    expect(outlineGeometry).toMatchObject({
-      markerWidth: 64,
-      previewDoesNotCapturePointer: true,
-      stackLevel: 30,
-      wraps: true,
-    });
-  }
-
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   const activity = page.getByRole('button', {
     name: /Inspecting history/,

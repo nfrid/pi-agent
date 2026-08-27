@@ -21,6 +21,7 @@ import {
   buildTranscriptLandmarks,
   buildVirtualTranscriptRows,
   displayActivityPath,
+  mergeTranscriptLandmarks,
   parseSkillInvocation,
   preserveVirtualScrollOffset,
   restoreVirtualBottom,
@@ -152,6 +153,37 @@ describe('activity row views and virtual transcript construction', () => {
     expect(item && transcriptItemTimestamp(item)).toBe(
       '2026-08-05T18:42:00.000Z',
     );
+  });
+
+  it('appends live landmarks missing from the indexed outline', () => {
+    const loaded = buildTranscriptLandmarks(
+      toTranscriptEntries([
+        {
+          type: 'message',
+          id: 'indexed-user',
+          message: { role: 'user', content: 'Loaded historical label' },
+        },
+        {
+          type: 'message',
+          id: 'live-user',
+          message: { role: 'user', content: 'New live request' },
+        },
+      ]),
+    );
+
+    expect(
+      mergeTranscriptLandmarks(loaded, [
+        {
+          id: 'indexed-user',
+          kind: 'user',
+          label: 'Indexed historical label',
+          ordinal: 10,
+        },
+      ]),
+    ).toMatchObject([
+      { key: 'indexed-user', label: 'Indexed historical label' },
+      { key: 'live-user', label: 'New live request' },
+    ]);
   });
 
   it('uses agent labels and associates tool steps with their turn timestamp', () => {
