@@ -366,6 +366,51 @@ describe('delegate history composition', () => {
     expect(model.wakes).toHaveLength(1);
   });
 
+  it('does not regress a durable entered wake to stale live pending state', () => {
+    const enteredWake = {
+      id: 'old-fan-in',
+      state: 'entered' as const,
+      references: ['one@1', 'two@1'],
+      createdAt: 1,
+      enteredAt: 2,
+      revision: 4,
+      dispatchAttempts: 1,
+    };
+    const model = composeDelegateHistory(
+      {
+        version: 2,
+        sessionId: 'stale-live-session',
+        groups: [
+          {
+            id: 'wake-lineage',
+            runId: 'wake-run',
+            lineageId: 'wake:old-fan-in',
+            name: 'Wake old-fan-in',
+            kind: 'background',
+            state: 'success',
+            createdAt: 1,
+            allowWrites: false,
+            runCount: 1,
+            wake: enteredWake,
+            runs: [],
+          },
+        ],
+      } as DelegateHistoryResponse,
+      [],
+      [
+        {
+          id: 'old-fan-in',
+          state: 'pending',
+          references: ['one@1', 'two@1'],
+          waitingFor: ['one@1', 'two@1'],
+          createdAt: 1,
+        },
+      ],
+    );
+
+    expect(model.wakes).toEqual([enteredWake]);
+  });
+
   it('reconciles a workflow placeholder with a unique live run before wake annotation', () => {
     const placeholderWorkflow = {
       logicalId: 'impl-inline-wake-ui',

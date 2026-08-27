@@ -592,8 +592,18 @@ export function composeDelegateHistory(
     .filter((wake): wake is DelegateWakeMetadata => wake !== undefined);
   const wakesById = new Map<string, DelegateWakePresentation>();
   for (const wake of durableWakes) wakesById.set(wake.id, wake);
-  // Runtime wake state is authoritative while the branch is mounted.
-  for (const wake of liveWakes) wakesById.set(wake.id, wake);
+  // Runtime state is authoritative unless a stale mounted process would
+  // regress a durable terminal wake back to a nonterminal state.
+  for (const wake of liveWakes) {
+    const durable = wakesById.get(wake.id);
+    const durableTerminal =
+      durable && ['entered', 'cancelled', 'blocked'].includes(durable.state);
+    const liveTerminal = ['entered', 'cancelled', 'blocked'].includes(
+      wake.state,
+    );
+    if (durableTerminal && !liveTerminal) continue;
+    wakesById.set(wake.id, wake);
+  }
   const wakes = [...wakesById.values()];
   const liveByLineage = new Map(
     liveRows

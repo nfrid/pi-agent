@@ -60,6 +60,18 @@ function delegateStats(rows: readonly DelegateStatus[]) {
   };
 }
 
+export function isParentResumeGate(wake: {
+  id: string;
+  state: string;
+  references: readonly string[];
+}): boolean {
+  return (
+    wake.references.length > 1 &&
+    !wake.id.startsWith('eager-') &&
+    !['entered', 'cancelled', 'blocked'].includes(wake.state)
+  );
+}
+
 function delegateWakeEffect(
   row: DelegateInspectionStatus,
   wakes: readonly DelegateWakePresentation[] | undefined,
@@ -240,11 +252,7 @@ export function DelegateSurface({
   );
   const rows = composite?.groups.map((group) => group.row) ?? liveRows;
   const wakes = composite?.wakes ?? model.wakes ?? [];
-  const wakeConditions = wakes.filter(
-    (wake) =>
-      wake.references.length > 1 &&
-      !['entered', 'cancelled', 'blocked'].includes(wake.state),
-  );
+  const wakeConditions = wakes.filter(isParentResumeGate);
   const historyIncomplete = history?.truncated === true;
   const stats = delegateStats(rows);
   const [selectedLineageId, setSelectedLineageId] = useState<string>();

@@ -44,7 +44,10 @@ import {
   humanizeDelegateLogicalId,
   selectedDelegateInspectionRow,
 } from './live-surface-renderers';
-import { selectedDelegateCompositeRun } from './surfaces/delegate-surface';
+import {
+  isParentResumeGate,
+  selectedDelegateCompositeRun,
+} from './surfaces/delegate-surface';
 
 const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
@@ -686,6 +689,30 @@ describe('live extension surface fixtures', () => {
     );
     expect(markup).not.toContain('Wake review-ready');
     expect(markup).not.toContain('wake:review-ready');
+  });
+
+  it('shows only explicit nonterminal multi-node gates as parent resume gates', () => {
+    expect(
+      isParentResumeGate({
+        id: 'mapping-fan-in',
+        state: 'pending',
+        references: ['one@1', 'two@1'],
+      }),
+    ).toBe(true);
+    expect(
+      isParentResumeGate({
+        id: 'eager-wave',
+        state: 'pending',
+        references: ['one@1', 'two@1'],
+      }),
+    ).toBe(false);
+    expect(
+      isParentResumeGate({
+        id: 'mapping-fan-in',
+        state: 'entered',
+        references: ['one@1', 'two@1'],
+      }),
+    ).toBe(false);
   });
 
   it('renders unresolved multi-reference wakes as a non-clickable condition banner', () => {
