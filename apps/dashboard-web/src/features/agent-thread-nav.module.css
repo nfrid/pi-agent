@@ -680,6 +680,7 @@ button.shelfHeading:focus-visible {
   min-width: 0;
   align-items: baseline;
   gap: 3px;
+  filter: saturate(0.5);
 }
 .threadWorkspaceSeparator {
   flex: none;
