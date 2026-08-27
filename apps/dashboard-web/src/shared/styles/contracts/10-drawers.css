@@ -155,7 +155,8 @@
   flex: 1;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior-x: auto;
+  overscroll-behavior-y: contain;
   scrollbar-color: var(--line) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;

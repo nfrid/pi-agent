@@ -53,7 +53,8 @@
 .surface-detail-list {
   max-height: min(260px, 42vh);
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior-x: auto;
+  overscroll-behavior-y: contain;
 }
 .delegate-row,
 .task-row {
@@ -267,7 +268,8 @@
   flex-direction: column;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior-x: auto;
+  overscroll-behavior-y: contain;
   padding: 0 18px 18px;
 }
 @media (pointer: fine) and (min-width: 821px) {
