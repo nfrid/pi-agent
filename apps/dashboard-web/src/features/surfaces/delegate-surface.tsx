@@ -305,20 +305,15 @@ export function DelegateSurface({
     : stats.aborted
       ? `${stats.aborted} stopped`
       : 'All delegates complete';
-  const summaryText = historyLoading
-    ? 'Loading delegate history…'
-    : historyError
-      ? 'Delegate history unavailable'
-      : historyIncomplete
-        ? 'History incomplete · some work omitted'
-        : activeRows.length
-          ? `${activeRows.length} active`
-          : fallbackSummary;
+  const summaryText = historyIncomplete
+    ? 'History incomplete · some work omitted'
+    : activeRows.length
+      ? `${activeRows.length} active`
+      : historyLoading
+        ? 'Loading delegate history…'
+        : fallbackSummary;
   const summary =
-    !historyLoading &&
-    !historyError &&
-    !historyIncomplete &&
-    activeRows.length ? (
+    !historyIncomplete && activeRows.length ? (
       <span className="surface-launcher-items">
         {activeRows.map((row) => {
           const state = row.pauseState ?? surfaceStateLabel(workflowState(row));
@@ -455,9 +450,8 @@ export function DelegateSurface({
           </p>
         )}
         {historyError !== undefined && !historyLoading && (
-          <p className="delegate-history-status" role="alert">
-            Unable to load delegate history. Live delegate status remains
-            available.
+          <p className="delegate-history-status" role="status">
+            No delegate history.
           </p>
         )}
         {wakeConditions.length > 0 && (

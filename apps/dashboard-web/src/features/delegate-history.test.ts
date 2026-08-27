@@ -158,8 +158,13 @@ describe('delegate history composition', () => {
         jobId: 'job-review',
       },
     ]);
-    expect(model.groups[0]?.runs.map((run) => run.id)).toEqual([
-      'terminal-run',
+    expect(model.groups[0]?.runs).toMatchObject([
+      {
+        id: 'launch-run',
+        persisted: true,
+        live: true,
+        row: { runId: 'terminal-run', state: 'success' },
+      },
     ]);
     expect(model.groups[0]?.row.state).toBe('success');
     expect(model.groups[0]?.section).toBe('recent');

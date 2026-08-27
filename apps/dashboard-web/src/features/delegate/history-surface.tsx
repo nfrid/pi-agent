@@ -202,9 +202,7 @@ export function DelegateHistorySurface({
   if (
     !historyQuery.data?.groups.length &&
     !historyQuery.data?.truncated &&
-    liveRows.length === 0 &&
-    !historyLoading &&
-    !historyError
+    liveRows.length === 0
   )
     return null;
   const surface =

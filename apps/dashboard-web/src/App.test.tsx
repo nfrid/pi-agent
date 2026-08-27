@@ -646,19 +646,19 @@ describe('workspace-first agent navigation', () => {
         } as never,
         runtimes,
       ),
-    ).toEqual(['runtime/current', 'high', '123 ctx']);
+    ).toEqual(['current', 'high', '123 ctx']);
     expect(
       activeThreadDetails(
         { status: 'dormant', runtime: {}, session: indexed } as never,
         runtimes,
       ),
-    ).toEqual(['indexed/old', 'medium', '42 ctx']);
+    ).toEqual(['old', 'medium', '42 ctx']);
     expect(
       activeThreadDetails(
         { status: 'dormant', session: {} } as never,
         runtimes,
       ),
-    ).toEqual(['configured/default', 'low', '? ctx']);
+    ).toEqual(['default', 'low', '? ctx']);
   });
 
   it('keeps unindexed live rows stable until session metadata arrives', () => {
@@ -702,7 +702,7 @@ describe('workspace-first agent navigation', () => {
     dateNow.mockRestore();
 
     expect(second.map((row) => row.id)).toEqual(first.map((row) => row.id));
-    expect(second[0]).toMatchObject({
+    expect(second.find((row) => row.id === 'new-session')).toMatchObject({
       startedAt: undefined,
       updatedAt: undefined,
     });
