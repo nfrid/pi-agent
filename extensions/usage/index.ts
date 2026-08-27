@@ -6,7 +6,8 @@ import { defineExtension } from '../shared/runtime/extension';
 import { queryUsage } from './backends';
 import { createSharedUsageQuery } from './cache';
 import {
-  REFRESH_INTERVAL_MS,
+  ACTIVE_REFRESH_INTERVAL_MS,
+  IDLE_REFRESH_INTERVAL_MS,
   SETTLED_REFRESH_DEBOUNCE_MS,
   STATUS_KEY,
 } from './constants';
@@ -27,7 +28,7 @@ export function registerUsage(
   let timer: NodeJS.Timeout | undefined;
   let currentContext: ExtensionContext | undefined;
   const sharedQuery = createSharedUsageQuery(query, {
-    freshMs: REFRESH_INTERVAL_MS,
+    freshMs: ACTIVE_REFRESH_INTERVAL_MS,
     // The built-in backend is stable across extension reloads. A supplied
     // query remains isolated by function identity, which keeps test/custom
     // backends from accidentally sharing another provider's account state.
@@ -42,7 +43,9 @@ export function registerUsage(
     debounceMs: SETTLED_REFRESH_DEBOUNCE_MS,
     query: sharedQuery,
     canRefresh: (ctx) => ctx.hasUI && isCodexModel(ctx.model),
-    isFresh: (report) => Date.now() - report.capturedAt < REFRESH_INTERVAL_MS,
+    isFresh: (report, ctx) =>
+      Date.now() - report.capturedAt <
+      (ctx.isIdle() ? IDLE_REFRESH_INTERVAL_MS : ACTIVE_REFRESH_INTERVAL_MS),
     onLoading: (ctx) =>
       ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg('dim', 'loading…')),
     onReport: (report, ctx) =>
@@ -58,7 +61,7 @@ export function registerUsage(
     if (timer) clearInterval(timer);
     timer = setInterval(() => {
       if (currentContext) void coordinator.periodic(currentContext);
-    }, REFRESH_INTERVAL_MS);
+    }, ACTIVE_REFRESH_INTERVAL_MS);
     timer.unref?.();
   });
 

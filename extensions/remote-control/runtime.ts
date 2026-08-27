@@ -228,6 +228,11 @@ export function createRemoteControlRuntime(
     },
   });
 
+  const usageBroker = {
+    read: (force: boolean, signal?: AbortSignal) =>
+      client.requestUsage(force, signal),
+  };
+
   const setContext = (ctx: ExtensionContext, refreshSnapshot = true) => {
     try {
       lastError = undefined;
@@ -239,6 +244,7 @@ export function createRemoteControlRuntime(
         previousScope !== undefined && previousScope !== nextScope;
       if (replacingScope) eventNormalizer.reset();
       scopedServices = nextServices;
+      scopedServices.dashboardUsage = usageBroker;
       liveSurfaceHub = nextServices.liveSurfaceHub;
       // Detach old observers before releasing the old hub, so a late cleanup
       // cannot publish an old session patch into the replacement.

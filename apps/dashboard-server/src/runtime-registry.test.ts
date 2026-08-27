@@ -80,6 +80,53 @@ describe('runtime registry', () => {
     rejected.close();
   });
 
+  it('answers bounded runtime-to-dashboard usage requests', async () => {
+    const handleRequest = vi.fn(async (request) => ({
+      usage: { capturedAt: 123, force: request.force === true },
+    }));
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      handleRequest,
+    });
+    const bridge = new PassThrough();
+    const frames: string[] = [];
+    bridge.on('data', (chunk) =>
+      frames.push(...String(chunk).split('\n').filter(Boolean)),
+    );
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+
+    bridge.write(
+      serializeFrame({
+        kind: 'request',
+        request: { id: 'usage-request', type: 'usage.read', force: true },
+      }),
+    );
+    const acknowledgement = await eventually(() =>
+      frames
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((frame) => frame.kind === 'ack' && frame.id === 'usage-request'),
+    );
+    expect(acknowledgement).toMatchObject({
+      kind: 'ack',
+      id: 'usage-request',
+      ok: true,
+      result: { usage: { capturedAt: 123, force: true } },
+    });
+    expect(handleRequest).toHaveBeenCalledWith(
+      { id: 'usage-request', type: 'usage.read', force: true },
+      expect.objectContaining({ runtimeId: 'runtime-1' }),
+    );
+    registry.close();
+  });
+
   it('owns external runtime project association and re-resolves cwd changes', async () => {
     const resolveRuntime = vi.fn((cwd: string) =>
       cwd === '/tmp/project'

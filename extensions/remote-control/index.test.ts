@@ -1404,6 +1404,118 @@ describe('remote-control bridge', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('requests usage after hello and resolves the daemon acknowledgement', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-usage-bridge-'));
+    const socketPath = path.join(directory, 'bridge.sock');
+    const received: Array<Record<string, unknown>> = [];
+    const server = net.createServer((socket) => {
+      let buffer = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        buffer += String(chunk);
+        let newline = buffer.indexOf('\n');
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (line) {
+            const frame = JSON.parse(line) as Record<string, unknown>;
+            received.push(frame);
+            if (
+              frame.kind === 'event' &&
+              (frame.event as { type?: string }).type === 'runtime.hello'
+            ) {
+              socket.write(
+                serializeFrame({
+                  kind: 'ready',
+                  capabilities: { usageRead: true },
+                }),
+              );
+            } else if (frame.kind === 'request') {
+              const request = frame.request as { id: string };
+              socket.write(
+                serializeFrame({
+                  kind: 'ack',
+                  id: request.id,
+                  ok: true,
+                  result: {
+                    usage: { capturedAt: 123, snapshots: [] },
+                  },
+                }),
+              );
+            }
+          }
+          newline = buffer.indexOf('\n');
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const client = new BridgeClient({
+      socketPath,
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+
+    client.start();
+    await expect(client.requestUsage(true)).resolves.toEqual({
+      usage: { capturedAt: 123, snapshots: [] },
+    });
+    expect(
+      received.map((frame) =>
+        frame.kind === 'event'
+          ? (frame.event as { type: string }).type
+          : (frame.request as { type: string }).type,
+      ),
+    ).toEqual(['runtime.hello', 'usage.read']);
+
+    client.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('falls back cleanly without disconnecting from an older daemon', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-usage-legacy-'));
+    const socketPath = path.join(directory, 'bridge.sock');
+    const received: Array<Record<string, unknown>> = [];
+    const server = net.createServer((socket) => {
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        for (const line of String(chunk).split('\n').filter(Boolean))
+          received.push(JSON.parse(line) as Record<string, unknown>);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const client = new BridgeClient({
+      socketPath,
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+
+    client.start();
+    await waitFor(() => received.length > 0);
+    vi.useFakeTimers();
+    try {
+      const rejection = expect(client.requestUsage()).rejects.toThrow(
+        'Dashboard daemon does not advertise usage reads.',
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejection;
+      expect(
+        client.sendEvent({
+          type: 'session.snapshot',
+          session: snapshot.session,
+        }),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    client.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('reconnects from a cached snapshot without touching a replaced session context', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-bridge-stale-'));
     const socketPath = path.join(directory, 'bridge.sock');

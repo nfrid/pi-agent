@@ -35,6 +35,7 @@ export type {
   BridgeEventSchemaValue,
   BridgeFrame,
   BridgeImageAttachment,
+  BridgeRequest,
   ComposerCommandEntry,
   ComposerCommandSource,
   DelegateLiveRun,
@@ -71,6 +72,7 @@ export type {
   SessionSnapshotFull,
   SessionSnapshotPatch,
   ToolLivePayload,
+  UsageReadRequest,
 } from './schemas.js';
 export {
   ActionCommandEnvelopeSchema,
@@ -79,6 +81,7 @@ export {
   BridgeEventSchema,
   BridgeFrameSchema,
   BridgeImageAttachmentSchema,
+  BridgeRequestSchema,
   ComposerCommandEntrySchema,
   ComposerCommandSourceSchema,
   DelegateTranscriptEntrySchema,
@@ -135,4 +138,5 @@ export {
   tryParseRuntimeCapabilitySnapshot,
   tryParseRuntimeExtensionSurface,
   tryParseRuntimeExtensionSurfaceList,
+  UsageReadRequestSchema,
 } from './schemas.js';

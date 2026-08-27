@@ -13,7 +13,7 @@ export interface UsageRefreshHooks {
     options?: UsageQueryOptions,
   ) => Promise<UsageReport>;
   canRefresh: (ctx: ExtensionContext) => boolean;
-  isFresh: (report: UsageReport) => boolean;
+  isFresh: (report: UsageReport, ctx: ExtensionContext) => boolean;
   onLoading: (ctx: ExtensionContext) => void;
   onReport: (report: UsageReport, ctx: ExtensionContext) => void;
   onError: (ctx: ExtensionContext) => void;
@@ -107,7 +107,7 @@ export function createUsageRefresh(hooks: UsageRefreshHooks): UsageRefresh {
       hooks.onClear(ctx);
       return Promise.resolve();
     }
-    if (!force && cache && hooks.isFresh(cache)) {
+    if (!force && cache && hooks.isFresh(cache, ctx)) {
       hooks.onReport(cache, ctx);
       return Promise.resolve();
     }
@@ -146,7 +146,7 @@ export function createUsageRefresh(hooks: UsageRefreshHooks): UsageRefresh {
     modelChanged(ctx) {
       advanceGeneration();
       if (!active) return Promise.resolve();
-      return request(ctx, true, true);
+      return request(ctx, false, true);
     },
     sessionShutdown(ctx) {
       active = false;
@@ -160,7 +160,7 @@ export function createUsageRefresh(hooks: UsageRefreshHooks): UsageRefresh {
       debounceTimer = setTimeout(() => {
         debounceTimer = undefined;
         if (!active || settledGeneration !== generation) return;
-        void request(ctx, true, true);
+        void request(ctx, false, true);
       }, hooks.debounceMs);
       debounceTimer.unref?.();
     },

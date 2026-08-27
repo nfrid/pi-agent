@@ -3,7 +3,11 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { REFRESH_INTERVAL_MS, SETTLED_REFRESH_DEBOUNCE_MS } from './constants';
+import {
+  ACTIVE_REFRESH_INTERVAL_MS,
+  IDLE_REFRESH_INTERVAL_MS,
+  SETTLED_REFRESH_DEBOUNCE_MS,
+} from './constants';
 import { registerUsage } from './index';
 import type { UsageReport } from './types';
 
@@ -17,7 +21,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function context(id = 'codex-test'): ExtensionContext {
+function context(id = 'codex-test', idle = false): ExtensionContext {
   return {
     hasUI: true,
     model: {
@@ -25,6 +29,7 @@ function context(id = 'codex-test'): ExtensionContext {
       id,
       name: id,
     },
+    isIdle: () => idle,
     ui: {
       setStatus: vi.fn(),
       theme: {
@@ -58,7 +63,7 @@ describe('usage lifecycle wiring', () => {
     return { handlers, pending, query };
   }
 
-  it('waits through multi-turn/retry-like events and queries once after agent_settled', async () => {
+  it('does not force a provider query when fresh usage settles', async () => {
     vi.useFakeTimers();
     const { handlers, pending, query } = harness();
     const ctx = context();
@@ -83,11 +88,10 @@ describe('usage lifecycle wiring', () => {
     await vi.advanceTimersByTimeAsync(SETTLED_REFRESH_DEBOUNCE_MS - 1);
     expect(query).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(1);
 
-    pending[1]?.resolve({ capturedAt: Date.now(), snapshots: [] });
     await vi.advanceTimersByTimeAsync(SETTLED_REFRESH_DEBOUNCE_MS * 2);
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(1);
     handlers.get('session_shutdown')?.({}, ctx);
   });
 
@@ -101,13 +105,35 @@ describe('usage lifecycle wiring', () => {
     pending[0]?.resolve({ capturedAt: Date.now(), snapshots: [] });
     await vi.advanceTimersByTimeAsync(0);
     handlers.get('model_select')?.({}, selected);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(query).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(ACTIVE_REFRESH_INTERVAL_MS);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[0]).toBe(selected);
     pending[1]?.resolve({ capturedAt: Date.now(), snapshots: [] });
     await vi.advanceTimersByTimeAsync(0);
-
-    await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
-    expect(query).toHaveBeenCalledTimes(3);
-    expect(query.mock.calls[2]?.[0]).toBe(selected);
     handlers.get('session_shutdown')?.({}, selected);
+  });
+
+  it('checks the broker every minute but leaves idle usage alone for twenty minutes', async () => {
+    vi.useFakeTimers();
+    const { handlers, pending, query } = harness();
+    const ctx = context('idle-session', true);
+
+    handlers.get('session_start')?.({}, ctx);
+    pending[0]?.resolve({ capturedAt: Date.now(), snapshots: [] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(
+      IDLE_REFRESH_INTERVAL_MS - ACTIVE_REFRESH_INTERVAL_MS,
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(ACTIVE_REFRESH_INTERVAL_MS);
+    expect(query).toHaveBeenCalledTimes(2);
+    pending[1]?.resolve({ capturedAt: Date.now(), snapshots: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    handlers.get('session_shutdown')?.({}, ctx);
   });
 
   it('reuses fresh process usage across sessions and refreshes it periodically', async () => {
@@ -121,12 +147,14 @@ describe('usage lifecycle wiring', () => {
     await vi.advanceTimersByTimeAsync(0);
     handlers.get('session_shutdown')?.({}, first);
     handlers.get('session_start')?.({}, second);
-    pending[1]?.resolve({ capturedAt: Date.now(), snapshots: [] });
     await vi.advanceTimersByTimeAsync(0);
+    expect(query).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(ACTIVE_REFRESH_INTERVAL_MS);
     expect(query).toHaveBeenCalledTimes(2);
     expect(query.mock.calls[1]?.[0]).toBe(second);
+    pending[1]?.resolve({ capturedAt: Date.now(), snapshots: [] });
+    await vi.advanceTimersByTimeAsync(0);
     handlers.get('session_shutdown')?.({}, second);
   });
 });

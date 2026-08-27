@@ -27,6 +27,22 @@ describe('UsageService', () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
+  it('forces a broker refresh while still coalescing in-flight work', async () => {
+    const provider = {
+      get: vi
+        .fn()
+        .mockResolvedValueOnce({ remaining: 7 })
+        .mockResolvedValueOnce({ remaining: 6 }),
+    };
+    const service = new UsageService(provider);
+
+    await expect(service.get()).resolves.toEqual({ usage: { remaining: 7 } });
+    await expect(service.get(true)).resolves.toEqual({
+      usage: { remaining: 6 },
+    });
+    expect(provider.get).toHaveBeenCalledTimes(2);
+  });
+
   it('polls once a minute while honoring active and idle freshness', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));

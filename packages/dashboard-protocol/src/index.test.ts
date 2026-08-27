@@ -633,6 +633,11 @@ describe('dashboard protocol', () => {
     expect(
       parseBridgeCommand({ id: 'cancel-compact', type: 'compact.cancel' }),
     ).toEqual({ id: 'cancel-compact', type: 'compact.cancel' });
+    const request = {
+      kind: 'request' as const,
+      request: { id: 'usage-1', type: 'usage.read' as const, force: true },
+    };
+    expect(parseFrame(serializeFrame(request))).toEqual(request);
   });
 
   it('accepts, normalizes, and bounds dashboard queue draft commands', () => {

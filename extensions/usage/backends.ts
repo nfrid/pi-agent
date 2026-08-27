@@ -1,6 +1,10 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { fetchHeaders } from '../shared/provider-headers';
 import { withAbort } from '../shared/runtime/async';
+import {
+  findScopedServices,
+  getSessionScopeId,
+} from '../shared/runtime/scoped-services';
 import { queryViaCodexAppServer } from './app-server';
 import { CODEX_USAGE_URL, TIMEOUT_MS } from './constants';
 import { isCodexModel } from './display';
@@ -80,10 +84,56 @@ export async function queryViaPiAuth(
   return normalizeBackendPayload(JSON.parse(text) as BackendPayload);
 }
 
+class DashboardUsageUnavailableError extends Error {}
+
+async function queryViaDashboard(
+  ctx: ExtensionContext,
+  signal: AbortSignal,
+  force: boolean,
+): Promise<UsageReport> {
+  const broker = findScopedServices(getSessionScopeId(ctx))?.dashboardUsage;
+  if (!broker)
+    throw new DashboardUsageUnavailableError(
+      'Dashboard usage broker is unavailable.',
+    );
+  let result: unknown;
+  try {
+    result = await broker.read(force, signal);
+  } catch (error) {
+    throw new DashboardUsageUnavailableError(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  const response =
+    result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as { usage?: unknown; error?: unknown })
+      : undefined;
+  const usage = response?.usage as Partial<UsageReport> | undefined;
+  if (
+    usage &&
+    typeof usage.capturedAt === 'number' &&
+    Number.isFinite(usage.capturedAt) &&
+    Array.isArray(usage.snapshots)
+  )
+    return usage as UsageReport;
+  throw new Error(
+    typeof response?.error === 'string'
+      ? response.error
+      : 'Dashboard returned invalid usage data.',
+  );
+}
+
 export async function queryUsage(
   ctx: ExtensionContext,
   signal: AbortSignal,
+  force = false,
 ): Promise<UsageReport> {
+  try {
+    return await queryViaDashboard(ctx, signal, force);
+  } catch (error) {
+    if (signal.aborted || !(error instanceof DashboardUsageUnavailableError))
+      throw error;
+  }
   try {
     return await queryViaPiAuth(ctx, signal);
   } catch (error) {

@@ -23,6 +23,7 @@ import {
   serializeFrame,
   validateBridgeCommand,
 } from '@pi-dashboard/protocol';
+import type { BridgeRequest } from '@pi-dashboard/protocol/pi-runtime-protocol';
 
 const MAX_BUFFER = 1024 * 1024;
 const ACK_TIMEOUT_MS = 15_000;
@@ -30,6 +31,7 @@ const PRE_HELLO_TIMEOUT_MS = 5_000;
 export const RUNTIME_COMMAND_QUEUE_LIMIT = 64;
 export const RUNTIME_HEARTBEAT_TIMEOUT_MS = 30_000;
 export const RUNTIME_DISCONNECT_GRACE_MS = 1_000;
+const RUNTIME_BRIDGE_REQUEST_LIMIT = 8;
 
 type QueuedCommand = {
   command: BridgeCommand;
@@ -55,6 +57,7 @@ type RuntimeRecord = {
   commandQueue: QueuedCommand[];
   commandRunning: boolean;
   queueDraftCommandsRunning: number;
+  bridgeRequestsRunning: number;
   writeBlocked: boolean;
   disconnectTimer?: NodeJS.Timeout;
   disconnectGraceMs: number;
@@ -119,6 +122,10 @@ export interface RuntimeRegistryOptions {
   allowExternalWithoutToken?: boolean;
   commandTimeoutMs?: number;
   disconnectGraceMs?: number;
+  handleRequest?: (
+    request: BridgeRequest,
+    runtime: RuntimeSnapshot,
+  ) => Promise<unknown>;
   onChange?: (change: RegistryChange) => void;
 }
 
@@ -341,6 +348,7 @@ export class RuntimeRegistry {
             commandQueue: [],
             commandRunning: false,
             queueDraftCommandsRunning: 0,
+            bridgeRequestsRunning: 0,
             writeBlocked: false,
             disconnectGraceMs: hello.capabilities?.heartbeat
               ? (this.options.disconnectGraceMs ?? RUNTIME_DISCONNECT_GRACE_MS)
@@ -349,6 +357,12 @@ export class RuntimeRegistry {
           };
           this.runtimes.set(snapshot.runtimeId, record);
           helloSeen = true;
+          socket.write(
+            serializeFrame({
+              kind: 'ready',
+              capabilities: { usageRead: true },
+            }),
+          );
           this.options.onChange?.({
             kind: 'registered',
             snapshot: record.snapshot,
@@ -698,6 +712,10 @@ export class RuntimeRegistry {
       }
       return;
     }
+    if (frame.kind === 'request') {
+      this.handleRequest(record, frame.request);
+      return;
+    }
     if (frame.kind !== 'event') return;
     const event = redactBridgeEvent(frame.event);
     const reduced = applyRuntimeEvent(record.reducerState, {
@@ -763,5 +781,56 @@ export class RuntimeRegistry {
       runtimeEpoch: record.runtimeEpoch,
       runtimeSeq: frame.seq,
     });
+  }
+
+  private handleRequest(record: RuntimeRecord, request: BridgeRequest): void {
+    const socket = record.socket;
+    if (!socket || socket.destroyed) return;
+    const reply = (
+      response: { ok: true; result: unknown } | { ok: false; error: string },
+    ): void => {
+      if (record.socket !== socket || socket.destroyed) return;
+      try {
+        socket.write(
+          serializeFrame({
+            kind: 'ack',
+            id: request.id,
+            ...response,
+          }),
+        );
+      } catch {
+        if (response.ok)
+          reply({
+            ok: false,
+            error: 'Usage response could not be serialized.',
+          });
+      }
+    };
+    if (record.bridgeRequestsRunning >= RUNTIME_BRIDGE_REQUEST_LIMIT) {
+      reply({ ok: false, error: 'Runtime bridge request capacity is full.' });
+      return;
+    }
+    record.bridgeRequestsRunning += 1;
+    void Promise.resolve()
+      .then(() => {
+        if (!this.options.handleRequest)
+          throw new Error('Runtime bridge requests are unavailable.');
+        return this.options.handleRequest(request, record.snapshot);
+      })
+      .then(
+        (result) => reply({ ok: true, result }),
+        (error) =>
+          reply({
+            ok: false,
+            error:
+              (error instanceof Error ? error.message : String(error)).slice(
+                0,
+                1_000,
+              ) || 'Usage request failed.',
+          }),
+      )
+      .finally(() => {
+        record.bridgeRequestsRunning -= 1;
+      });
   }
 }

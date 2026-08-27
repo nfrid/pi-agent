@@ -60,9 +60,10 @@ export class UsageService {
     return this.get();
   }
 
-  async get(): Promise<UsageResult> {
+  async get(force = false): Promise<UsageResult> {
     try {
       if (
+        !force &&
         this.snapshot !== undefined &&
         Date.now() - this.updatedAt < this.freshMs()
       )

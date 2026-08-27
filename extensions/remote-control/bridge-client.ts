@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { NonIdempotentActionIdGuard } from '@pi-dashboard/extension-contributions';
 import {
@@ -26,6 +27,8 @@ const BRIDGE_WRITE_QUEUE_LIMIT = 128;
 const BRIDGE_WRITE_QUEUE_BYTES = 1 * 1024 * 1024;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const COMPLETED_SEMANTIC_COMMAND_LIMIT = 128;
+const BRIDGE_REQUEST_TIMEOUT_MS = 20_000;
+const BRIDGE_CAPABILITY_TIMEOUT_MS = 1_000;
 
 type DelegateTranscriptSurfaceEntry = {
   key: string;
@@ -204,6 +207,22 @@ export class BridgeClient {
   private reconnectDelay = RECONNECT_MIN_MS;
   private buffer = '';
   private seq = 0;
+  private usageRequestsAvailable = false;
+  private readonly usageReadyWaiters = new Set<{
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: NodeJS.Timeout;
+    removeAbort?: () => void;
+  }>();
+  private readonly pendingRequests = new Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      timer: NodeJS.Timeout;
+      removeAbort?: () => void;
+    }
+  >();
   private commandQueue: Array<{
     command: BridgeCommand;
     socket: net.Socket;
@@ -318,9 +337,69 @@ export class BridgeClient {
     this.commandQueue = [];
     this.resolveInFlightSemanticCommandsAsStale();
     this.completedSemanticCommands.clear();
+    this.usageRequestsAvailable = false;
+    this.rejectUsageReadyWaiters(new Error('Dashboard bridge stopped.'));
+    this.rejectPendingRequests(new Error('Dashboard bridge stopped.'));
     this.clearOutboundQueue();
     this.socket?.destroy();
     this.socket = undefined;
+  }
+
+  async requestUsage(force = false, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted)
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error('Dashboard usage request aborted.');
+    const socket = await this.connectedSocket(signal);
+    await this.waitForUsageBroker(signal);
+    const id = randomUUID();
+    return new Promise<unknown>((resolve, reject) => {
+      const finish = () => {
+        const pending = this.pendingRequests.get(id);
+        if (!pending) return undefined;
+        this.pendingRequests.delete(id);
+        clearTimeout(pending.timer);
+        pending.removeAbort?.();
+        return pending;
+      };
+      const timer = setTimeout(() => {
+        const pending = finish();
+        pending?.reject(new Error('Dashboard usage request timed out.'));
+      }, BRIDGE_REQUEST_TIMEOUT_MS);
+      timer.unref?.();
+      const onAbort = () => {
+        const pending = finish();
+        pending?.reject(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error('Dashboard usage request aborted.'),
+        );
+      };
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      this.pendingRequests.set(id, {
+        resolve,
+        reject,
+        timer,
+        ...(signal
+          ? {
+              removeAbort: () => signal.removeEventListener('abort', onAbort),
+            }
+          : {}),
+      });
+      try {
+        socket.write(
+          serializeFrame({
+            kind: 'request',
+            request: { id, type: 'usage.read', ...(force ? { force } : {}) },
+          }),
+        );
+      } catch (error) {
+        const pending = finish();
+        pending?.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    });
   }
 
   sendEvent(event: BridgeEvent): boolean {
@@ -420,6 +499,11 @@ export class BridgeClient {
         (item) => item.socket !== socket,
       );
       for (const item of abandoned) this.discardSemanticCommand(item);
+      this.usageRequestsAvailable = false;
+      this.rejectUsageReadyWaiters(
+        new Error('Dashboard usage broker disconnected.'),
+      );
+      this.rejectPendingRequests(new Error('Dashboard bridge disconnected.'));
       this.clearOutboundQueue();
       this.socket = undefined;
       this.buffer = '';
@@ -445,6 +529,26 @@ export class BridgeClient {
         try {
           const frame = parseFrame(line);
           if (frame.kind === 'command') this.enqueue(frame.command, socket);
+          else if (frame.kind === 'ready') {
+            if (frame.capabilities.usageRead) {
+              this.usageRequestsAvailable = true;
+              for (const waiter of this.usageReadyWaiters) {
+                clearTimeout(waiter.timer);
+                waiter.removeAbort?.();
+                waiter.resolve();
+              }
+              this.usageReadyWaiters.clear();
+            }
+          } else if (frame.kind === 'ack') {
+            const pending = this.pendingRequests.get(frame.id);
+            if (pending) {
+              this.pendingRequests.delete(frame.id);
+              clearTimeout(pending.timer);
+              pending.removeAbort?.();
+              if (frame.ok) pending.resolve(frame.result);
+              else pending.reject(new Error(frame.error));
+            }
+          }
         } catch {
           // Malformed browser/daemon data is ignored; the socket remains
           // usable for the next bounded frame.
@@ -452,6 +556,109 @@ export class BridgeClient {
       }
       newline = this.buffer.indexOf('\n');
     }
+  }
+
+  private connectedSocket(signal?: AbortSignal): Promise<net.Socket> {
+    const socket = this.socket;
+    if (!socket || socket.destroyed)
+      return Promise.reject(new Error('Dashboard bridge is offline.'));
+    if (!socket.connecting) return Promise.resolve(socket);
+    return new Promise<net.Socket>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        socket.off('connect', onConnect);
+        socket.off('close', onClose);
+        signal?.removeEventListener('abort', onAbort);
+        if (error) reject(error);
+        else if (socket !== this.socket || socket.destroyed)
+          reject(new Error('Dashboard bridge connection was replaced.'));
+        else resolve(socket);
+      };
+      const onConnect = () => finish();
+      const onClose = () => finish(new Error('Dashboard bridge is offline.'));
+      const onAbort = () =>
+        finish(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error('Dashboard bridge connection aborted.'),
+        );
+      const timer = setTimeout(
+        () => finish(new Error('Dashboard bridge connection timed out.')),
+        BRIDGE_REQUEST_TIMEOUT_MS,
+      );
+      timer.unref?.();
+      socket.once('connect', onConnect);
+      socket.once('close', onClose);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private waitForUsageBroker(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted)
+      return Promise.reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new Error('Dashboard usage broker wait aborted.'),
+      );
+    if (this.usageRequestsAvailable) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      let waiter: {
+        resolve: () => void;
+        reject: (error: Error) => void;
+        timer: NodeJS.Timeout;
+        removeAbort?: () => void;
+      };
+      const finish = (error?: Error) => {
+        this.usageReadyWaiters.delete(waiter);
+        clearTimeout(waiter.timer);
+        waiter.removeAbort?.();
+        if (error) reject(error);
+        else resolve();
+      };
+      const onAbort = () =>
+        finish(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new Error('Dashboard usage broker wait aborted.'),
+        );
+      waiter = {
+        resolve: () => finish(),
+        reject: (error) => finish(error),
+        timer: setTimeout(
+          () =>
+            finish(
+              new Error('Dashboard daemon does not advertise usage reads.'),
+            ),
+          BRIDGE_CAPABILITY_TIMEOUT_MS,
+        ),
+        ...(signal
+          ? {
+              removeAbort: () => signal.removeEventListener('abort', onAbort),
+            }
+          : {}),
+      };
+      waiter.timer.unref?.();
+      this.usageReadyWaiters.add(waiter);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private rejectUsageReadyWaiters(error: Error): void {
+    for (const waiter of this.usageReadyWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.removeAbort?.();
+      waiter.reject(error);
+    }
+    this.usageReadyWaiters.clear();
+  }
+
+  private rejectPendingRequests(error: Error): void {
+    for (const pending of this.pendingRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.removeAbort?.();
+      pending.reject(error);
+    }
+    this.pendingRequests.clear();
   }
 
   private enqueue(command: BridgeCommand, socket: net.Socket): void {

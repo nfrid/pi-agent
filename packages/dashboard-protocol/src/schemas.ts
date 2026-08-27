@@ -1303,6 +1303,18 @@ export const BridgeCommandSchema = Type.Union([
 export type BridgeCommand = Static<typeof BridgeCommandSchema>;
 export type BridgeCommandBase = { id: string };
 
+export const UsageReadRequestSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    type: Type.Literal('usage.read'),
+    force: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type UsageReadRequest = Static<typeof UsageReadRequestSchema>;
+export const BridgeRequestSchema = Type.Union([UsageReadRequestSchema]);
+export type BridgeRequest = Static<typeof BridgeRequestSchema>;
+
 /** Caller-owned IDs for durable browser lifecycle mutations. */
 export const LifecycleCommandIdSchema = Type.String({
   minLength: 1,
@@ -1355,6 +1367,20 @@ const CommandFrameSchema = Type.Object(
   { kind: Type.Literal('command'), command: BridgeCommandSchema },
   { additionalProperties: false },
 );
+const RequestFrameSchema = Type.Object(
+  { kind: Type.Literal('request'), request: BridgeRequestSchema },
+  { additionalProperties: false },
+);
+const ReadyFrameSchema = Type.Object(
+  {
+    kind: Type.Literal('ready'),
+    capabilities: Type.Object(
+      { usageRead: Type.Optional(Type.Literal(true)) },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
 const AckFrameSchema = Type.Union([
   Type.Object(
     {
@@ -1380,12 +1406,16 @@ const AckFrameSchema = Type.Union([
 export const BridgeFrameSchema = Type.Union([
   EventFrameSchema,
   CommandFrameSchema,
+  RequestFrameSchema,
+  ReadyFrameSchema,
   AckFrameSchema,
 ]);
 type BridgeFrameStatic = Static<typeof BridgeFrameSchema>;
 export type BridgeFrame =
   | { kind: 'event'; event: BridgeEvent; seq: number }
   | Extract<BridgeFrameStatic, { kind: 'command' }>
+  | Extract<BridgeFrameStatic, { kind: 'request' }>
+  | Extract<BridgeFrameStatic, { kind: 'ready' }>
   | Extract<BridgeFrameStatic, { kind: 'ack' }>;
 
 export const SessionIndexEntrySchema = Type.Object(

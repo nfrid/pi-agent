@@ -140,6 +140,7 @@ function dependencies(
     );
   const projectResolver = new ProjectResolver(metadata.orchestration);
   let manager!: RuntimeManager;
+  let application!: DashboardApplication;
   const registry =
     options.registry ??
     new RuntimeRegistry({
@@ -147,6 +148,8 @@ function dependencies(
       resolveRuntime: (cwd) => projectResolver.resolve(cwd),
       expectedToken: (runtimeId, launchToken, identityToken) =>
         manager.expectedToken(runtimeId, launchToken, identityToken),
+      handleRequest: (request) =>
+        application.usage.get(request.type === 'usage.read' && request.force),
       onChange: (change) => registryChanges.publish(change),
     });
   const runtimeProvider =
@@ -178,7 +181,6 @@ function dependencies(
     metadata.orchestration,
   );
   const sessionTitleGenerator = createDashboardSessionTitleGenerator();
-  let application!: DashboardApplication;
   const orchestrationService = new OrchestrationService({
     repository: metadata.orchestration,
     manager,

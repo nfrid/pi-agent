@@ -11,6 +11,7 @@ const CACHE_SYMBOL = Symbol.for('pi.usage.process-cache');
 type UsageQuery = (
   ctx: ExtensionContext,
   signal: AbortSignal,
+  force?: boolean,
 ) => Promise<UsageReport>;
 
 interface CachedUsageReport {
@@ -108,7 +109,7 @@ export function createSharedUsageQuery(
     let pending = state.inFlight.get(key);
     if (!pending) {
       const controller = new AbortController();
-      pending = query(ctx, controller.signal)
+      pending = query(ctx, controller.signal, queryOptions.force === true)
         .then((report) => {
           const withProvider = report.provider
             ? report

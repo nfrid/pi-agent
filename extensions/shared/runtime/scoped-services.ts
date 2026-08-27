@@ -43,12 +43,18 @@ export class PendingProcessAccounting {
   }
 }
 
+export interface DashboardUsageBroker {
+  read(force: boolean, signal?: AbortSignal): Promise<unknown>;
+}
+
 export interface ScopedServices {
   readonly scopeId: SessionScopeId;
   readonly backgroundDeliveries: BackgroundDeliveryBroker;
   readonly liveSurfaceHub: LiveSurfaceHub;
   readonly pendingProcesses: PendingProcessAccounting;
   readonly capabilities: CapabilityRegistry;
+  /** Existing authenticated runtime bridge used for account-level usage reads. */
+  dashboardUsage?: DashboardUsageBroker;
   /** Session-owned delegate workflow identity for extension integrations. */
   delegateWorkflow?: DelegateWorkflowCoordinator;
 }
