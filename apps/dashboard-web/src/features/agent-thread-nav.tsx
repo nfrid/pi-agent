@@ -1,12 +1,19 @@
 import {
+  archiveThreadMutationOptions,
   dashboardHttpClient,
+  pinThreadMutationOptions,
+  restoreThreadMutationOptions,
   sessionThreadLinksQueryOptions,
+  settleThreadMutationOptions,
   threadsQueryOptions,
+  unpinThreadMutationOptions,
+  unsettleThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   type KeyboardEvent,
+  type MouseEvent,
   useEffect,
   useMemo,
   useRef,
@@ -21,6 +28,8 @@ import { formatCompactCount } from '../shared/lib/format';
 import {
   type AgentThreadRow,
   agentThreadRows,
+  type BulkThreadAction,
+  bulkThreadActions,
   canSettleThread,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
@@ -50,6 +59,7 @@ import {
   QuickSettleThreadAction,
   RuntimeLifecycleActions,
   type RuntimeLifecycleThreadProps,
+  refreshDurableThreadMetadata,
 } from './runtime-actions';
 import { AgentNavDrawerShell } from './surface-drawer';
 import { DashboardTime } from './timestamp';
@@ -63,6 +73,15 @@ export {
 } from './agent-thread-nav/model';
 
 const EXPANDED_ARCHIVED_KEY = 'pi-dashboard-expanded-archived-v1';
+
+const BULK_ACTION_LABELS: Record<BulkThreadAction, string> = {
+  archive: 'Archive',
+  restore: 'Restore',
+  pin: 'Pin',
+  unpin: 'Unpin',
+  settle: 'Settle',
+  unsettle: 'Unsettle',
+};
 
 type ExpandedArchived = Record<string, boolean>;
 
@@ -312,9 +331,11 @@ function QuickDeleteDraftAction({
 function AgentThreadLink({
   row,
   selected,
+  bulkSelected,
   unread,
   activeResult,
   density,
+  selectionDisabled,
   onSelect,
   lifecycleProps,
   lifecycleStatus,
@@ -322,10 +343,12 @@ function AgentThreadLink({
 }: {
   row: AgentThreadRow;
   selected: boolean;
+  bulkSelected: boolean;
   unread: boolean;
   activeResult: boolean;
   density: 'card' | 'slim';
-  onSelect: () => void;
+  selectionDisabled: boolean;
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
   lifecycleProps?: RuntimeLifecycleThreadProps;
   lifecycleStatus?: 'restarting';
   runtimes: BrowserSnapshot['runtimes'];
@@ -344,10 +367,12 @@ function AgentThreadLink({
       {...lifecycleProps}
       type="button"
       className={styles.threadLink}
+      disabled={selectionDisabled}
       aria-current={selected ? 'page' : undefined}
+      data-bulk-selected={bulkSelected ? 'true' : undefined}
       data-row-density={density}
       data-search-active={activeResult ? '' : undefined}
-      aria-label={`${row.title} ${lifecycleStatus ?? statusLabel(row)}${unread ? ' unread' : ''}`}
+      aria-label={`${row.title} ${lifecycleStatus ?? statusLabel(row)}${unread ? ' unread' : ''}${bulkSelected ? ' selected for bulk actions' : ''}`}
       onClick={onSelect}
     >
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
@@ -422,6 +447,19 @@ export function AgentThreadNav({
 }) {
   const go = useDashboardNavigate();
   const utility = useDashboardUtility();
+  const queryClient = useQueryClient();
+  const archive = useMutation(
+    archiveThreadMutationOptions(dashboardHttpClient),
+  );
+  const restore = useMutation(
+    restoreThreadMutationOptions(dashboardHttpClient),
+  );
+  const pin = useMutation(pinThreadMutationOptions(dashboardHttpClient));
+  const unpin = useMutation(unpinThreadMutationOptions(dashboardHttpClient));
+  const settle = useMutation(settleThreadMutationOptions(dashboardHttpClient));
+  const unsettle = useMutation(
+    unsettleThreadMutationOptions(dashboardHttpClient),
+  );
   const [query, setQuery] = useState('');
   const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [projectScope, setProjectScope] = useState('all');
@@ -431,6 +469,14 @@ export function AgentThreadNav({
     Boolean(readExpandedArchived().all),
   );
   const [activeResultId, setActiveResultId] = useState<string>();
+  const [selectedThreadIds, setSelectedThreadIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkPendingAction, setBulkPendingAction] = useState<
+    BulkThreadAction | undefined
+  >(undefined);
+  const [bulkError, setBulkError] = useState<string | undefined>(undefined);
+  const selectionAnchorId = useRef<string | undefined>(undefined);
   const drafts = useDrafts();
   const {
     state: unreadState,
@@ -524,6 +570,27 @@ export function AgentThreadNav({
     [sections],
   );
   const hiddenRowCount = hiddenAgentThreadRowCount(filtered, visibleRows);
+  const displayedArchivedRows = useMemo(
+    () =>
+      archivedExpanded || query.trim()
+        ? sections.archived
+        : sections.archived.filter((row) => row.id === currentSessionId),
+    [archivedExpanded, currentSessionId, query, sections.archived],
+  );
+  const selectableRows = useMemo(
+    () =>
+      [
+        ...sections.pinned,
+        ...sections.active,
+        ...sections.settled,
+        ...displayedArchivedRows,
+      ].filter((row) => row.durableThread !== undefined),
+    [displayedArchivedRows, sections],
+  );
+  const selectedRows = selectableRows.filter((row) =>
+    selectedThreadIds.has(row.id),
+  );
+  const availableBulkActions = bulkThreadActions(selectedRows);
   const searchResultRows = query.trim() ? visibleRows : [];
   useEffect(() => {
     if (
@@ -532,6 +599,18 @@ export function AgentThreadNav({
     )
       setActiveResultId(undefined);
   }, [activeResultId, searchResultRows]);
+  useEffect(() => {
+    const selectableIds = new Set(selectableRows.map((row) => row.id));
+    setSelectedThreadIds((current) => {
+      const next = new Set([...current].filter((id) => selectableIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+    if (
+      selectionAnchorId.current &&
+      !selectableIds.has(selectionAnchorId.current)
+    )
+      selectionAnchorId.current = undefined;
+  }, [selectableRows]);
   useEffect(() => {
     visitCurrent(rows);
   }, [rows, visitCurrent]);
@@ -560,10 +639,85 @@ export function AgentThreadNav({
       // Clipboard permissions are optional; navigation should remain usable.
     }
   };
+  const clearBulkSelection = () => {
+    setSelectedThreadIds(new Set());
+    selectionAnchorId.current = undefined;
+    setBulkError(undefined);
+  };
+  const runBulkAction = async (action: BulkThreadAction) => {
+    const selectedThreads = selectedRows.flatMap((row) =>
+      row.durableThread ? [row.durableThread] : [],
+    );
+    if (!selectedThreads.length || !availableBulkActions.includes(action))
+      return;
+    setBulkPendingAction(action);
+    setBulkError(undefined);
+    const results = await Promise.allSettled(
+      selectedThreads.map((thread) => {
+        const variables = { threadId: thread.threadId };
+        if (action === 'archive') return archive.mutateAsync(variables);
+        if (action === 'restore') return restore.mutateAsync(variables);
+        if (action === 'pin') return pin.mutateAsync(variables);
+        if (action === 'unpin') return unpin.mutateAsync(variables);
+        if (action === 'settle') return settle.mutateAsync(variables);
+        return unsettle.mutateAsync(variables);
+      }),
+    );
+    await refreshDurableThreadMetadata(queryClient);
+    const failedIds = selectedRows.flatMap((row, index) =>
+      results[index]?.status === 'rejected' ? [row.id] : [],
+    );
+    if (failedIds.length) {
+      setSelectedThreadIds(new Set(failedIds));
+      selectionAnchorId.current = failedIds.at(-1);
+      setBulkError(
+        `${BULK_ACTION_LABELS[action]} failed for ${failedIds.length} of ${results.length} threads.`,
+      );
+    } else {
+      clearBulkSelection();
+    }
+    setBulkPendingAction(undefined);
+  };
   const select = (id: string) => {
+    clearBulkSelection();
     const row = rows.find((candidate) => candidate.id === id);
     go(row?.draft ? draftPath(id) : `/sessions/${encodeURIComponent(id)}`);
     if (mode === 'session') onOpenChange?.(false);
+  };
+  const handleThreadClick = (
+    row: AgentThreadRow,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    const additive = event.metaKey || event.ctrlKey;
+    if (!row.durableThread || (!additive && !event.shiftKey)) {
+      select(row.id);
+      return;
+    }
+    event.preventDefault();
+    setBulkError(undefined);
+    if (event.shiftKey) {
+      const anchorIndex = selectableRows.findIndex(
+        (candidate) => candidate.id === selectionAnchorId.current,
+      );
+      const rowIndex = selectableRows.findIndex(
+        (candidate) => candidate.id === row.id,
+      );
+      if (anchorIndex >= 0 && rowIndex >= 0) {
+        const start = Math.min(anchorIndex, rowIndex);
+        const end = Math.max(anchorIndex, rowIndex);
+        setSelectedThreadIds(
+          new Set(selectableRows.slice(start, end + 1).map((item) => item.id)),
+        );
+        return;
+      }
+    }
+    setSelectedThreadIds((current) => {
+      const next = new Set(current);
+      if (next.has(row.id)) next.delete(row.id);
+      else next.add(row.id);
+      return next;
+    });
+    selectionAnchorId.current = row.id;
   };
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Escape') {
@@ -624,6 +778,7 @@ export function AgentThreadNav({
     const selected = row.draft
       ? row.id === currentDraftId
       : row.id === currentSessionId;
+    const bulkSelected = selectedThreadIds.has(row.id);
     const unread = row.draft ? false : isThreadUnread(row, unreadState);
     const activeResult = row.id === activeResultId;
     const rowClassName = `agent-thread-row ${density === 'card' ? 'agent-thread-card' : 'agent-thread-slim'} ${styles.threadRow} ${selected ? 'selected' : ''} ${unread ? 'unread' : ''} ${activeResult ? 'active-result' : ''} status-${row.status}`;
@@ -675,10 +830,12 @@ export function AgentThreadNav({
         <AgentThreadLink
           row={row}
           selected={selected}
+          bulkSelected={bulkSelected}
           unread={unread}
           activeResult={activeResult}
           density={density}
-          onSelect={() => select(row.id)}
+          selectionDisabled={bulkPendingAction !== undefined}
+          onSelect={(event) => handleThreadClick(row, event)}
           lifecycleProps={lifecycleProps}
           lifecycleStatus={lifecycleStatus}
           runtimes={snapshot.runtimes}
@@ -818,6 +975,37 @@ export function AgentThreadNav({
           <option value="unassigned">Unassigned</option>
         </select>
       </label>
+      {selectedRows.length > 0 && (
+        <div
+          className={styles.bulkActions}
+          role="toolbar"
+          aria-label={`Actions for ${selectedRows.length} selected threads`}
+        >
+          <span>{selectedRows.length} selected</span>
+          <div>
+            {availableBulkActions.map((action) => (
+              <button
+                key={action}
+                type="button"
+                disabled={bulkPendingAction !== undefined}
+                onClick={() => void runBulkAction(action)}
+              >
+                {bulkPendingAction === action
+                  ? `${BULK_ACTION_LABELS[action]}…`
+                  : BULK_ACTION_LABELS[action]}
+              </button>
+            ))}
+            <button
+              type="button"
+              disabled={bulkPendingAction !== undefined}
+              onClick={clearBulkSelection}
+            >
+              Clear
+            </button>
+          </div>
+          {bulkError && <span role="alert">{bulkError}</span>}
+        </div>
+      )}
       <div className={styles.list}>
         {!visibleRows.length && (
           <p className={styles.empty}>No matching threads.</p>
@@ -870,10 +1058,7 @@ export function AgentThreadNav({
               className={styles.compactShelf}
               aria-label="Archived threads"
             >
-              {(archivedExpanded || query.trim()
-                ? sections.archived
-                : sections.archived.filter((row) => row.id === currentSessionId)
-              ).map((row) => renderThreadRow(row, 'slim'))}
+              {displayedArchivedRows.map((row) => renderThreadRow(row, 'slim'))}
             </section>
           </>
         )}

@@ -211,6 +211,43 @@
   letter-spacing: normal;
   text-transform: none;
 }
+.bulkActions {
+  display: grid;
+  gap: 5px;
+  margin: 0 10px 9px;
+  border: 1px solid color-mix(in srgb, var(--purple) 55%, var(--line-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--purple) 10%, var(--bg));
+  padding: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.bulkActions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.bulkActions button {
+  border: var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-alt);
+  color: var(--fg);
+  padding: 4px 6px;
+  cursor: pointer;
+  font: inherit;
+}
+.bulkActions button:hover:not(:disabled),
+.bulkActions button:focus-visible {
+  border-color: var(--purple);
+  outline: none;
+}
+.bulkActions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.bulkActions [role="alert"] {
+  color: var(--red);
+}
 .search button {
   border: 0;
   background: transparent;
@@ -380,6 +417,9 @@ button.shelfHeading:focus-visible {
   outline: 2px solid var(--purple);
   outline-offset: 1px;
 }
+.threadLink:disabled {
+  cursor: wait;
+}
 .quickDeleteDraft {
   position: absolute;
   z-index: 2;
@@ -506,6 +546,12 @@ button.shelfHeading:focus-visible {
 }
 .threadRow:global(.selected) {
   box-shadow: inset 2px 0 var(--purple);
+}
+.threadRow:has(.threadLink[data-bulk-selected="true"]) {
+  border-color: color-mix(in srgb, var(--purple) 55%, var(--line-soft));
+  background: color-mix(in srgb, var(--purple) 18%, var(--bg));
+  color: var(--fg);
+  box-shadow: inset 3px 0 var(--purple);
 }
 .threadRow:global(.active-result) {
   border-color: color-mix(in srgb, var(--purple) 65%, var(--line-soft));
