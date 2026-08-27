@@ -1,4 +1,7 @@
-import { usageHistoryPeriod } from '@pi-dashboard/protocol';
+import {
+  type DashboardSettings,
+  usageHistoryPeriod,
+} from '@pi-dashboard/protocol';
 import Fastify from 'fastify';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -101,6 +104,118 @@ describe('Fastify dashboard route plugin', () => {
         activeRunId: 'run-1',
       },
     ]);
+  });
+
+  it('atomically updates, resets, and imports authenticated model settings', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    let settings: DashboardSettings = { modelDisplayPreferences: {} };
+    routeContext.settings = () => settings;
+    routeContext.updateModelDisplayPreference = vi.fn((key, preference) => {
+      settings = {
+        modelDisplayPreferences: {
+          ...settings.modelDisplayPreferences,
+          [key]: preference,
+        },
+      };
+      return settings;
+    });
+    routeContext.resetModelDisplayPreference = vi.fn((key) => {
+      const next = { ...settings.modelDisplayPreferences };
+      delete next[key];
+      settings = { modelDisplayPreferences: next };
+      return settings;
+    });
+    routeContext.importModelDisplayPreferences = vi.fn((preferences) => {
+      settings = {
+        modelDisplayPreferences: {
+          ...preferences,
+          ...settings.modelDisplayPreferences,
+        },
+      };
+      return settings;
+    });
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const initial = await app.inject({
+      method: 'GET',
+      url: '/api/settings',
+      headers,
+    });
+    expect(initial.statusCode).toBe(200);
+    const updated = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/model-display-preferences/openai%2Fgpt-5',
+      headers,
+      payload: { alias: 'GPT', color: '#ff79c6' },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toEqual({
+      modelDisplayPreferences: {
+        'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
+      },
+    });
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/settings/model-display-preferences/import',
+      headers,
+      payload: {
+        modelDisplayPreferences: {
+          'openai/gpt-5': { alias: 'Stale local' },
+          'anthropic/claude-3': { alias: 'Claude' },
+        },
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json()).toEqual({
+      modelDisplayPreferences: {
+        'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
+        'anthropic/claude-3': { alias: 'Claude' },
+      },
+    });
+    const reset = await app.inject({
+      method: 'DELETE',
+      url: '/api/settings/model-display-preferences/openai%2Fgpt-5',
+      headers,
+    });
+    expect(reset.statusCode).toBe(200);
+    expect(reset.json()).toEqual({
+      modelDisplayPreferences: {
+        'anthropic/claude-3': { alias: 'Claude' },
+      },
+    });
+    const invalid = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/model-display-preferences/openai%2Fgpt-5',
+      headers,
+      payload: { color: 'red' },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
+  it('rejects settings updates when persistence is unavailable', async () => {
+    const app = Fastify();
+    apps.push(app);
+    await app.register(dashboardRoutes, { context: context() });
+    await app.ready();
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/model-display-preferences/openai%2Fgpt-5',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+      payload: { alias: 'GPT' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'Orchestration is unavailable.',
+    });
   });
 
   it('serves authenticated delegate history by session ID', async () => {

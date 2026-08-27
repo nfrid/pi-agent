@@ -1,9 +1,12 @@
 import type {
   AuthoritativeSessionSnapshot,
   BrowserSnapshot,
+  DashboardSettings,
   DelegateHistoryResponse,
   DelegateHistoryRunDetailResponse,
   GitContext,
+  ModelDisplayPreference,
+  ModelDisplayPreferences,
   ProjectAdoptCommand,
   ProjectCreateCommand,
   ProjectRenameCommand,
@@ -284,11 +287,49 @@ export function pushVapidPublicKeyQueryOptions(client: DashboardHttpClient) {
 }
 
 export function settingsQueryOptions(client: DashboardHttpClient) {
-  return queryOptions({
+  return queryOptions<DashboardSettings>({
     queryKey: dashboardQueryKeys.settings(),
-    queryFn: () => client.request<unknown>('/api/settings'),
-    staleTime: Number.POSITIVE_INFINITY,
+    queryFn: ({ signal }) => client.settings(signal),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
     retry: networkRetry,
+  });
+}
+
+export function updateModelDisplayPreferenceMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<
+    DashboardSettings,
+    Error,
+    { modelKey: string; preference: ModelDisplayPreference }
+  >({
+    mutationFn: ({ modelKey, preference }) =>
+      client.updateModelDisplayPreference(modelKey, preference),
+    retry: false,
+    scope: { id: 'dashboard-model-display-preferences' },
+  });
+}
+
+export function resetModelDisplayPreferenceMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<DashboardSettings, Error, { modelKey: string }>({
+    mutationFn: ({ modelKey }) => client.resetModelDisplayPreference(modelKey),
+    retry: false,
+    scope: { id: 'dashboard-model-display-preferences' },
+  });
+}
+
+export function importModelDisplayPreferencesMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<DashboardSettings, Error, ModelDisplayPreferences>({
+    mutationFn: (preferences) =>
+      client.importModelDisplayPreferences(preferences),
+    retry: false,
+    scope: { id: 'dashboard-model-display-preferences' },
   });
 }
 

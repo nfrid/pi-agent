@@ -3,24 +3,36 @@ import { Button } from 'react-aria-components';
 import { act, create } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { setDraftLocation, setDraftModel } = vi.hoisted(() => ({
-  setDraftLocation: vi.fn(),
-  setDraftModel: vi.fn(),
-}));
+const { setDraftLocation, setDraftModel, modelPreferences } = vi.hoisted(
+  () => ({
+    setDraftLocation: vi.fn(),
+    setDraftModel: vi.fn(),
+    modelPreferences: {} as Record<string, { alias?: string; color?: string }>,
+  }),
+);
 
 vi.mock('@pi-dashboard/client', () => ({
   dashboardHttpClient: {},
   gitContextQueryOptions: () => ({ queryKey: ['git-context'] }),
+  importModelDisplayPreferencesMutationOptions: () => ({}),
+  settingsQueryOptions: () => ({ queryKey: ['dashboard', 'settings'] }),
 }));
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({
-    data: {
-      branch: 'main',
-      dirty: true,
-      changedFileCount: 2,
-      localBranches: ['main', 'develop', 'feature/auth'],
-    },
+  useMutation: () => ({
+    mutateAsync: async () => ({ modelDisplayPreferences: {} }),
   }),
+  useQueryClient: () => ({ setQueryData: vi.fn() }),
+  useQuery: (options: { queryKey?: readonly unknown[] }) =>
+    options.queryKey?.[1] === 'settings'
+      ? { data: { modelDisplayPreferences: modelPreferences } }
+      : {
+          data: {
+            branch: 'main',
+            dirty: true,
+            changedFileCount: 2,
+            localBranches: ['main', 'develop', 'feature/auth'],
+          },
+        },
 }));
 vi.mock('react-aria-components', () => ({
   Button: ({
@@ -41,10 +53,6 @@ vi.mock('react-aria-components', () => ({
 }));
 vi.mock('../drafts', () => ({ setDraftLocation, setDraftModel }));
 
-import {
-  resetModelDisplayPreference,
-  setModelDisplayPreference,
-} from '../model-display-preferences';
 import { DraftAgentPicker, DraftLocationPicker } from './draft-pickers';
 
 const checkouts = [
@@ -212,13 +220,11 @@ describe('draft location picker', () => {
 describe('draft agent picker', () => {
   it('uses configured aliases and colors while retaining full model identities', () => {
     installKeyboard();
-    setModelDisplayPreference('test', 'fast', {
+    modelPreferences['test/fast'] = {
       alias: 'Turbo',
       color: '#ff79c6',
-    });
-    setModelDisplayPreference('test', 'careful', {
-      color: '#50fa7b',
-    });
+    };
+    modelPreferences['test/careful'] = { color: '#50fa7b' };
     let renderer!: ReturnType<typeof create>;
     act(() => {
       renderer = create(
@@ -255,8 +261,8 @@ describe('draft agent picker', () => {
       renderer.root.findAll((node) => node.props.style?.color === '#50fa7b'),
     ).not.toHaveLength(0);
     renderer.unmount();
-    resetModelDisplayPreference('test', 'fast');
-    resetModelDisplayPreference('test', 'careful');
+    delete modelPreferences['test/fast'];
+    delete modelPreferences['test/careful'];
   });
 
   it('keeps model choice deliberate, updates thinking, and has a reachable Done', () => {

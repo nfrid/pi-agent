@@ -1,6 +1,10 @@
 export const MAX_ID = 256;
 export const MAX_PATH = 4096;
 export const MAX_TEXT = 100_000;
+/** Bounds for server-persisted model display preferences. */
+export const MAX_MODEL_DISPLAY_PREFERENCE_KEY = 512;
+export const MAX_MODEL_DISPLAY_PREFERENCES = 512;
+export const MAX_MODEL_DISPLAY_ALIAS = 80;
 /** Aggregate cap for the authoritative lightweight shell query response. */
 export const MAX_SHELL_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 export const SESSION_NAME_MAX_LENGTH = 512;

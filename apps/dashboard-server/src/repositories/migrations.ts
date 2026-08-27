@@ -802,6 +802,57 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 17,
+    name: 'model-display-preferences',
+    up(db) {
+      db.exec(`
+        CREATE TABLE model_display_preference (
+          model_key TEXT NOT NULL PRIMARY KEY
+            CHECK (length(model_key) BETWEEN 1 AND 512),
+          alias TEXT
+            CHECK (alias IS NULL OR length(alias) BETWEEN 0 AND 80),
+          color TEXT
+            CHECK (
+              color IS NULL OR
+              color GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+            )
+        );
+      `);
+    },
+  },
+  {
+    version: 18,
+    name: 'model-display-preferences-not-null-model-key',
+    up(db) {
+      db.exec(`
+        CREATE TABLE model_display_preference_v18 (
+          model_key TEXT NOT NULL PRIMARY KEY
+            CHECK (length(model_key) BETWEEN 1 AND 512),
+          alias TEXT
+            CHECK (alias IS NULL OR length(alias) BETWEEN 0 AND 80),
+          color TEXT
+            CHECK (
+              color IS NULL OR
+              color GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+            )
+        );
+        INSERT INTO model_display_preference_v18 (model_key,alias,color)
+          SELECT model_key,alias,color
+          FROM model_display_preference
+          WHERE model_key IS NOT NULL
+            AND length(model_key) BETWEEN 1 AND 512
+            AND (alias IS NULL OR length(alias) BETWEEN 0 AND 80)
+            AND (
+              color IS NULL OR
+              color GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+            );
+        DROP TABLE model_display_preference;
+        ALTER TABLE model_display_preference_v18
+          RENAME TO model_display_preference;
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

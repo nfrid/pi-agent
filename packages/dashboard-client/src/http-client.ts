@@ -6,16 +6,20 @@ import {
   type Checkout,
   type CommandReceipt,
   DASHBOARD_PROTOCOL_VERSION,
+  type DashboardSettings,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   type GitContext,
+  type ModelDisplayPreference,
+  type ModelDisplayPreferences,
   type PinThreadCommand,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
   type ProjectRenameCommand,
   type ProtocolInfo,
+  parseDashboardSettings,
   parseRenameSessionMutationOutput,
   parseRestartRuntimeMutationOutput,
   parseStartRuntimeMutationOutput,
@@ -265,6 +269,14 @@ function dashboardErrorFromTrpc(cause: unknown): DashboardHttpError {
 
 export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
   return tryParseBrowserSnapshot(value);
+}
+
+function parseSettingsResponse(value: unknown): DashboardSettings {
+  try {
+    return parseDashboardSettings(value);
+  } catch {
+    throw malformedOutput('Dashboard returned invalid settings data.', value);
+  }
 }
 
 export function asSessionResponse(
@@ -658,6 +670,48 @@ export class DashboardHttpClient {
 
   async usage(): Promise<{ usage?: unknown; error?: string }> {
     return this.request('/api/usage');
+  }
+
+  async settings(signal?: AbortSignal): Promise<DashboardSettings> {
+    const value = await this.request<unknown>(
+      '/api/settings',
+      signal ? { signal } : {},
+    );
+    return parseSettingsResponse(value);
+  }
+
+  async updateModelDisplayPreference(
+    modelKey: string,
+    preference: ModelDisplayPreference,
+  ): Promise<DashboardSettings> {
+    const value = await this.request<unknown>(
+      `/api/settings/model-display-preferences/${encodeURIComponent(modelKey)}`,
+      { method: 'PUT', body: JSON.stringify(preference) },
+    );
+    return parseSettingsResponse(value);
+  }
+
+  async resetModelDisplayPreference(
+    modelKey: string,
+  ): Promise<DashboardSettings> {
+    const value = await this.request<unknown>(
+      `/api/settings/model-display-preferences/${encodeURIComponent(modelKey)}`,
+      { method: 'DELETE' },
+    );
+    return parseSettingsResponse(value);
+  }
+
+  async importModelDisplayPreferences(
+    preferences: ModelDisplayPreferences,
+  ): Promise<DashboardSettings> {
+    const value = await this.request<unknown>(
+      '/api/settings/model-display-preferences/import',
+      {
+        method: 'POST',
+        body: JSON.stringify({ modelDisplayPreferences: preferences }),
+      },
+    );
+    return parseSettingsResponse(value);
   }
 
   async usageHistory(
