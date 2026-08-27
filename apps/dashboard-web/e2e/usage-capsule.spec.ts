@@ -110,6 +110,31 @@ test('shows compact usage in the mobile agent drawer', async ({ page }) => {
   ).toBeVisible();
 });
 
+test('browser Back closes the mobile agent drawer', async ({ page }) => {
+  await openSession(page);
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const agentDrawer = page.locator('.agent-nav-drawer.open');
+  await expect(agentDrawer).toBeVisible();
+
+  await page.goBack();
+
+  await expect(agentDrawer).toHaveCount(0);
+  await expect(page).toHaveURL(/\/sessions\/session-usage$/u);
+});
+
+test('browser Back closes the active settings drawer', async ({ page }) => {
+  await openSession(page);
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const settingsDrawer = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settingsDrawer).toBeVisible();
+
+  await page.goBack();
+
+  await expect(settingsDrawer).toHaveCount(0);
+  await expect(page).toHaveURL(/\/sessions\/session-usage$/u);
+});
+
 test('shares the desktop sidebar footer with Settings @desktop', async ({
   page,
 }) => {

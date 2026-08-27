@@ -54,6 +54,10 @@ import { dormantResumeMetadata } from './composer/runtime';
 import { useDashboardUtility } from './dashboard-utility-context';
 import { deleteDraft, draftPath, useDrafts } from './drafts';
 import {
+  hasActiveDrawerHistoryEntry,
+  useDrawerHistory,
+} from './drawer-history';
+import {
   AgentThreadActionMenu,
   DurableThreadActions,
   QuickSettleThreadAction,
@@ -477,6 +481,7 @@ export function AgentThreadNav({
   >(undefined);
   const [bulkError, setBulkError] = useState<string | undefined>(undefined);
   const selectionAnchorId = useRef<string | undefined>(undefined);
+  useDrawerHistory(mode === 'session' && open, () => onOpenChange?.(false));
   const drafts = useDrafts();
   const {
     state: unreadState,
@@ -749,6 +754,18 @@ export function AgentThreadNav({
     }
   };
   const openSettings = () => {
+    if (
+      mode === 'session' &&
+      open &&
+      utility &&
+      hasActiveDrawerHistoryEntry()
+    ) {
+      window.addEventListener('popstate', () => utility.openPanel('settings'), {
+        once: true,
+      });
+      onOpenChange?.(false);
+      return;
+    }
     onOpenChange?.(false);
     utility?.openPanel('settings');
   };

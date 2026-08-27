@@ -7,6 +7,7 @@ import {
   useId,
 } from 'react';
 import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
+import { useDrawerHistory } from './drawer-history';
 import { useOverlayFocusRestore, useOverlayPresence } from './overlay-presence';
 import { useSwipeToDismiss } from './swipe-to-dismiss';
 
@@ -90,6 +91,7 @@ export function SurfaceDrawer({
   const resolvedCloseLabel = closeLabel ?? `Close ${title}`;
   const { present, exiting } = useOverlayPresence(isOpen);
   const swipeHandlers = useSwipeToDismiss(onClose);
+  useDrawerHistory(isOpen, onClose);
   useOverlayFocusRestore(isOpen);
   if (!present) return null;
   return (
