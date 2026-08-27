@@ -12,7 +12,7 @@ import {
 export const PARENT_HANDOFF_CAPS = {
   singleMaxBytes: 12 * 1024,
   aggregateMaxBytes: 50 * 1024,
-  /** Retained for compatibility; exact reports are no longer inline. */
+  /** Retained for compatibility with callers that override the old shape. */
   perTaskMaxBytes: 8 * 1024,
 } as const;
 
@@ -122,11 +122,7 @@ interface PreparedRun {
 
 function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
   const { text: originalBody, originalReport } = runBody(run);
-  const lines = [
-    `Status: ${getRunState(run)}`,
-    `Outcome: ${extractReportField(originalBody, 'Outcome', 32) ?? '(not reported)'}`,
-    `Conclusion: ${extractReportField(originalBody, 'Conclusion', 600) ?? '(not reported)'}`,
-  ];
+  const lines = [`Status: ${getRunState(run)}`];
   const workflowNode = run.workflowAttempt?.logicalId;
   if (run.continuation)
     lines.push(
@@ -219,10 +215,6 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
   );
   if (warnings.length)
     lines.push(`Warnings: ${clip(warnings.join('; '), 120)}`);
-  const evidence = extractReportField(originalBody, 'Evidence', 400);
-  if (evidence) lines.push(`Evidence: ${evidence}`);
-  const risks = extractReportField(originalBody, 'Risks', 240);
-  if (risks) lines.push(`Risks: ${risks}`);
   return {
     run,
     envelope: lines.join('\n'),
@@ -245,9 +237,24 @@ function envelopeBlock(items: PreparedRun[], parallel: boolean): string {
 
 export interface ParentHandoffResult {
   text: string;
+  requiresOutputFiles: readonly DelegatedRun[];
 }
 
-/** Builds a bounded envelope; exact final reports are represented by output files. */
+export const INLINE_REPORT_START = '--- begin untrusted delegate report ---';
+export const INLINE_REPORT_END = '--- end untrusted delegate report ---';
+
+function reportBlock(
+  item: PreparedRun,
+  parallel: boolean,
+  index: number,
+): string {
+  if (!item.originalReport || item.run.outputFile || item.inlineFallbackBody)
+    return '';
+  const heading = parallel ? `### Task ${index + 1} report\n` : 'Report\n';
+  return `${heading}${INLINE_REPORT_START}\n${item.originalReport}\n${INLINE_REPORT_END}`;
+}
+
+/** Build a lean parent message, inlining exact reports only when the whole message fits. */
 export function buildParentHandoffResult(
   runs: DelegatedRun[],
   caps: ParentHandoffCaps = PARENT_HANDOFF_CAPS,
@@ -258,46 +265,85 @@ export function buildParentHandoffResult(
   let prepared = runs.map((run) =>
     prepareRun(run, options.inlineFallbackRuns?.has(run) ?? false),
   );
-  const mandatory = envelopeBlock(prepared, parallel);
-  const overflow = Buffer.byteLength(mandatory, 'utf8') > totalCap;
+  const envelopes = envelopeBlock(prepared, parallel);
+  const perReportCap = parallel ? caps.perTaskMaxBytes : totalCap;
+  const requiredOutputFiles: DelegatedRun[] = [];
+  const inlineReports = prepared
+    .map((item, index) => ({
+      run: item.run,
+      block: reportBlock(item, parallel, index),
+    }))
+    .filter(({ block }) => block.length > 0)
+    .filter(({ run, block }) => {
+      if (Buffer.byteLength(block, 'utf8') <= perReportCap) return true;
+      requiredOutputFiles.push(run);
+      return false;
+    });
+  const renderExact = () => {
+    const reports = inlineReports.map(({ block }) => block).join('\n\n');
+    return `${envelopes}${reports ? `${envelopes ? '\n\n' : ''}${reports}` : ''}`;
+  };
+  let exact = renderExact();
+  while (
+    Buffer.byteLength(exact, 'utf8') > totalCap &&
+    inlineReports.length > 0
+  ) {
+    const removed = inlineReports.pop();
+    if (removed) requiredOutputFiles.unshift(removed.run);
+    exact = renderExact();
+  }
+  if (
+    Buffer.byteLength(exact, 'utf8') <= totalCap &&
+    !options.inlineFallbackRuns?.size
+  )
+    return { text: exact, requiresOutputFiles: requiredOutputFiles };
   const fallbackCap = parallel ? caps.perTaskMaxBytes : caps.singleMaxBytes;
-  let remaining = Math.max(0, totalCap - Buffer.byteLength(mandatory, 'utf8'));
+  let remaining = Math.max(0, totalCap - Buffer.byteLength(envelopes, 'utf8'));
   let emittedFallback = false;
   prepared = prepared.map((item, index) => {
     if (!item.inlineFallbackBody || remaining <= 0)
       return { ...item, body: '' };
-    const prefix = `${emittedFallback ? '\n\n---\n\n' : '\n\n'}${
-      parallel
-        ? `### Task ${index + 1} inline fallback (output file unavailable)\n`
-        : 'Inline fallback (output file unavailable)\n'
-    }`;
-    const prefixBytes = Buffer.byteLength(prefix, 'utf8');
-    if (remaining <= prefixBytes) return { ...item, body: '' };
-    const available = Math.min(fallbackCap, remaining - prefixBytes);
+    const heading = parallel
+      ? `### Task ${index + 1} inline fallback (output file unavailable)\n`
+      : 'Inline fallback (output file unavailable)\n';
+    const delimiter = emittedFallback ? '\n\n---\n\n' : envelopes ? '\n\n' : '';
+    const framingBytes = Buffer.byteLength(
+      `${delimiter}${heading}${INLINE_REPORT_START}\n\n${INLINE_REPORT_END}`,
+      'utf8',
+    );
+    if (remaining <= framingBytes) return { ...item, body: '' };
+    const available = Math.min(fallbackCap, remaining - framingBytes);
     const body = truncateBytes(item.inlineFallbackBody, available);
+    remaining -= framingBytes + Buffer.byteLength(body, 'utf8');
     emittedFallback = true;
-    remaining -= prefixBytes + Buffer.byteLength(body, 'utf8');
     return { ...item, body };
   });
   const fallbackBlocks = prepared
     .map((item, index) =>
       item.body
-        ? `${parallel ? `### Task ${index + 1} inline fallback (output file unavailable)\n` : 'Inline fallback (output file unavailable)\n'}${item.body}`
+        ? `${parallel ? `### Task ${index + 1} inline fallback (output file unavailable)\n` : 'Inline fallback (output file unavailable)\n'}${INLINE_REPORT_START}\n${item.body}\n${INLINE_REPORT_END}`
         : '',
     )
     .filter(Boolean)
     .join('\n\n---\n\n');
-  const overflowWarning = options.inlineFallbackRuns?.size
-    ? 'Mandatory metadata exceeds the handoff size cap; inline fallbacks may not fit and the child session remains authoritative.'
-    : 'Mandatory metadata exceeds the handoff size cap; exact reports remain in the child session.';
-  const envelopes = envelopeBlock(prepared, parallel);
-  const text = `${overflow ? `${overflowWarning}\n\n` : ''}${envelopes}${fallbackBlocks ? `${envelopes ? '\n\n' : ''}${fallbackBlocks}` : ''}`;
-  return { text };
+  const metadataOverflow = Buffer.byteLength(envelopes, 'utf8') > totalCap;
+  const warning = metadataOverflow
+    ? 'Mandatory delegate metadata exceeds the parent handoff size cap.'
+    : requiredOutputFiles.length > 0
+      ? 'Delegate report exceeds the parent handoff size cap.'
+      : undefined;
+  const text = `${warning ? `${warning}\n\n` : ''}${envelopes}${fallbackBlocks ? `${envelopes ? '\n\n' : ''}${fallbackBlocks}` : ''}`;
+  return { text, requiresOutputFiles: requiredOutputFiles };
 }
 
 export function buildParentHandoff(
   runs: DelegatedRun[],
   caps: ParentHandoffCaps = PARENT_HANDOFF_CAPS,
 ): string {
-  return buildParentHandoffResult(runs, caps).text;
+  const result = buildParentHandoffResult(runs, caps);
+  return result.requiresOutputFiles.length > 0
+    ? buildParentHandoffResult(runs, caps, {
+        inlineFallbackRuns: new Set(result.requiresOutputFiles),
+      }).text
+    : result.text;
 }

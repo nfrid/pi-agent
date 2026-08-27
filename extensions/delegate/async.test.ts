@@ -1072,7 +1072,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(peek?.content[0]?.text).not.toContain('Background finding.');
+    expect(peek?.content[0]?.text).toContain('Background finding.');
     expect(entries).toHaveLength(0);
 
     await handlers.get('session_shutdown')?.({}, ctx);
@@ -1228,7 +1228,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(peek?.content[0]?.text).not.toContain('first finding.');
+    expect(peek?.content[0]?.text).toContain('first finding.');
     expect(peek?.details).not.toHaveProperty('delivery');
     expect(error).toHaveBeenCalledWith(
       'delegate: failed to deliver background completion',
@@ -1268,7 +1268,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(peek?.content[0]?.text).not.toContain('first finding.');
+    expect(peek?.content[0]?.text).toContain('first finding.');
     expect(peek?.details).not.toHaveProperty('delivery');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
@@ -2248,7 +2248,7 @@ describe('async delegate extension', () => {
     sessionId = 'branch';
     finish(successfulRun());
     const foregroundResult = await foreground;
-    expect(foregroundResult?.content[0]?.text).toContain('Output file: ');
+    expect(foregroundResult?.content[0]?.text).toContain('Background finding.');
     expect(entries).toHaveLength(0);
     handlers.get('agent_settled')?.({}, ctx);
     const afterSettlement =
@@ -2277,7 +2277,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(crossBranch?.content[0]?.text).toContain('Output file:');
+    expect(crossBranch?.content[0]?.text).toContain('Background finding.');
     expect(crossBranch?.details).toMatchObject({
       action: 'peek',
       job: { runs: [{ task: 'inspect independently' }] },
@@ -2287,7 +2287,7 @@ describe('async delegate extension', () => {
         job?: { runs?: Array<{ outputFile?: unknown }> };
       }
     ).job;
-    expect(crossBranchJob?.runs?.[0]?.outputFile).toBeDefined();
+    expect(crossBranchJob?.runs?.[0]?.outputFile).toBeUndefined();
     expect(entries).toHaveLength(0);
 
     sessionId = 'parent';
@@ -2303,14 +2303,14 @@ describe('async delegate extension', () => {
       );
     expect(inspected?.details).toMatchObject({
       action: 'peek',
-      job: {
-        runs: [
-          {
-            outputFile: { path: expect.any(String), size: expect.any(Number) },
-          },
-        ],
-      },
+      job: { runs: [{ task: 'inspect independently' }] },
     });
+    const inspectedJob = (
+      inspected?.details as {
+        job?: { runs?: Array<{ outputFile?: unknown }> };
+      }
+    ).job;
+    expect(inspectedJob?.runs?.[0]?.outputFile).toBeUndefined();
     expect(entries).toHaveLength(entriesBeforeInspected);
 
     await tools

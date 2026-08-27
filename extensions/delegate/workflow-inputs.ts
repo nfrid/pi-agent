@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import type { DelegateJobResult } from './jobs';
 import { ensureDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
+import { INLINE_REPORT_END, INLINE_REPORT_START } from './output';
 import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
 
 import type {
@@ -172,25 +173,20 @@ function legacyRuns(result: WorkflowSourceResult): readonly DelegatedRun[] {
   return isCompactResult(result) ? [] : (result.retainedRuns ?? result.runs);
 }
 
-function outputFileGuidance(
-  source: WorkflowInputSource,
-  kind: 'report' | 'handoff',
-): string {
+function outputFileGuidance(source: WorkflowInputSource): string | undefined {
   const runs = source.result ? canonicalRuns(source.result) : [];
   const files = runs
     .map((run) => run.outputFile)
     .filter((file): file is NonNullable<typeof file> => Boolean(file));
-  if (files.length === 0)
-    throw new WorkflowInputBlockedError(
-      `Required ${kind} output file is unavailable for ${source.attempt.identity}.`,
-    );
-  return files
-    .map((file) => `Output file: ${file.path} (${file.size} bytes)`)
-    .join('\n');
+  return files.length > 0
+    ? files
+        .map((file) => `Output file: ${file.path} (${file.size} bytes)`)
+        .join('\n')
+    : undefined;
 }
 
 const FORWARDED_HANDOFF_LINE =
-  /^(?:## Task \d+|Status:|Outcome:|Conclusion:|Evidence:|Risks:|Blocked:|Failure:)/;
+  /^(?:## Task \d+|Status:|Blocked:|Failure:|Failure file:|Output file:|Inline fallback|Warnings:)/;
 const INTERNAL_DETAIL_MARKER = '[internal orchestration detail omitted]';
 
 function internalWorkflowValues(result: WorkflowSourceResult): string[] {
@@ -221,22 +217,37 @@ function compactHandoff(source: WorkflowInputSource): string {
   const handoff = isCompactResult(result)
     ? result.handoff.text
     : result.handoff;
+  let inReport = false;
   let forwarded = handoff
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => FORWARDED_HANDOFF_LINE.test(line))
-    .join('\n');
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (trimmed === INLINE_REPORT_START) {
+        inReport = true;
+        return true;
+      }
+      if (trimmed === INLINE_REPORT_END) {
+        inReport = false;
+        return true;
+      }
+      return inReport || FORWARDED_HANDOFF_LINE.test(trimmed);
+    })
+    .join('\n')
+    .trim();
   for (const value of internalWorkflowValues(result))
     forwarded = forwarded.replaceAll(value, INTERNAL_DETAIL_MARKER);
   return forwarded;
 }
 
 function resolveReport(source: WorkflowInputSource): string {
-  const outputFile = outputFileGuidance(source, 'report');
   const handoff = compactHandoff(source).trim();
-  // Keep the bounded actionable handoff inline while retaining the exact
-  // report's durable path for deeper inspection.
-  return handoff ? `${handoff}\n${outputFile}` : outputFile;
+  if (handoff.includes(INLINE_REPORT_START) || /^Output file:/mu.test(handoff))
+    return handoff;
+  const outputFile = outputFileGuidance(source);
+  if (outputFile) return outputFile;
+  throw new WorkflowInputBlockedError(
+    `Required report output is unavailable for ${source.attempt.identity}.`,
+  );
 }
 
 function resolveHandoff(source: WorkflowInputSource): string {

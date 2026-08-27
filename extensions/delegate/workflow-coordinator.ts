@@ -535,9 +535,8 @@ function durableResult(
 ): DelegateWorkflowResultRecord {
   return Object.freeze({
     version: 1,
-    // Exact reports live in ordinary output files. Keeping them out of the
-    // append-only workflow journal bounds restart evidence independently of
-    // child prose while preserving handoff, continuation, and code state.
+    // The bounded handoff contains either a complete small report or an exact
+    // output-file reference. Keep duplicate report copies out of the journal.
     reports: Object.freeze([]),
     handoff: Object.freeze({ ...result.handoff }),
     runs: Object.freeze(

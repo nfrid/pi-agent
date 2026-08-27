@@ -60,32 +60,33 @@ async function publishLifecycleDiagnostic(
   }
 }
 
-/** Materialize every exact final report and return the bounded parent handoff. */
+/** Inline exact reports that fit; materialize exact files only after overflow. */
 export async function buildOutputFileHandoff(
   runs: DelegatedRun[],
   write: CacheWriter = (bytes, extension) => writeCacheFile(bytes, extension),
 ): Promise<string> {
+  for (const run of runs) await publishLifecycleDiagnostic(run, write);
+
   let result = buildParentHandoffResult(runs);
   const failedRuns = new Set<DelegatedRun>();
-  for (const run of runs) {
-    if (await publishLifecycleDiagnostic(run, write))
-      result = buildParentHandoffResult(runs);
-    if (run.outputFile || failedRuns.has(run)) continue;
-    const exact = getExactFinalAssistantText(run.messages);
-    if (!exact) continue;
-    try {
-      run.outputFile = await write(exact, '.md');
-      run.warnings = (run.warnings ?? []).filter(
-        (warning) => warning !== EXACT_OUTPUT_FILE_WARNING,
-      );
-    } catch {
-      run.warnings = [
-        ...(run.warnings ?? []).filter(
+  while (result.requiresOutputFiles.length > 0) {
+    for (const run of result.requiresOutputFiles) {
+      const exact = getExactFinalAssistantText(run.messages);
+      if (!exact) continue;
+      try {
+        run.outputFile = await write(exact, '.md');
+        run.warnings = (run.warnings ?? []).filter(
           (warning) => warning !== EXACT_OUTPUT_FILE_WARNING,
-        ),
-        EXACT_OUTPUT_FILE_WARNING,
-      ];
-      failedRuns.add(run);
+        );
+      } catch {
+        run.warnings = [
+          ...(run.warnings ?? []).filter(
+            (warning) => warning !== EXACT_OUTPUT_FILE_WARNING,
+          ),
+          EXACT_OUTPUT_FILE_WARNING,
+        ];
+        failedRuns.add(run);
+      }
     }
     result = buildParentHandoffResult(runs, undefined, {
       inlineFallbackRuns: failedRuns,

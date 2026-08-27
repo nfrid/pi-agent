@@ -36,7 +36,7 @@ describe('output', () => {
     expect(output).toContain('Output truncated');
   });
 
-  test('keeps a blocker and its continuation when no body fits', () => {
+  test('keeps a blocker and continuation when an inline fallback cannot fit', () => {
     const run = reportedRun(
       [
         'Outcome: blocked',
@@ -52,10 +52,6 @@ describe('output', () => {
       singleMaxBytes: 1,
     });
 
-    expect(handoff).toContain('Outcome: blocked');
-    expect(handoff).toContain(
-      'Conclusion: implementation needs a parent decision',
-    );
     expect(handoff).toContain(
       'Blocked: should a 429 retry despite the stated never-retry rule?',
     );
@@ -63,11 +59,14 @@ describe('output', () => {
       'Continuation available in the retained child context.',
     );
     expect(handoff).not.toContain('continue-blocked-child');
-    expect(handoff).toContain('Mandatory metadata exceeds');
-    expect(handoff).not.toContain('Output\nOutcome: blocked');
+    expect(handoff).toContain('Mandatory delegate metadata exceeds');
+    expect(handoff).not.toContain('Outcome: blocked');
+    expect(handoff).not.toContain(
+      'Conclusion: implementation needs a parent decision',
+    );
   });
 
-  test('keeps every conclusion in a maximum-width parallel fan when bodies cannot fit', () => {
+  test('keeps task identity in a maximum-width parallel fan when reports cannot fit', () => {
     const runs = Array.from({ length: 20 }, (_, index) =>
       reportedRun(
         `Outcome: partial\nConclusion: conclusion ${index + 1}\nEvidence: src/${index}.ts:1\n\n${'details '.repeat(3_000)}`,
@@ -79,13 +78,13 @@ describe('output', () => {
       aggregateMaxBytes: 1,
     });
 
-    expect(handoff).toContain('Mandatory metadata exceeds');
+    expect(handoff).toContain('Mandatory delegate metadata exceeds');
     for (let index = 1; index <= 20; index++) {
       expect(handoff).toContain(`## Task ${index}\n`);
-      expect(handoff).toContain(`Conclusion: conclusion ${index}`);
+      expect(handoff).not.toContain(`Conclusion: conclusion ${index}`);
       expect(handoff).not.toContain(`continue-${index}`);
     }
-    expect(handoff).not.toContain('### Task 1 output');
+    expect(handoff).not.toContain('### Task 1 report');
   });
 
   test('uses process-neutral summary wording that cannot contradict Outcome', () => {
@@ -127,7 +126,7 @@ describe('output', () => {
     );
   });
 
-  test('keeps evidence and risks in the mandatory envelope', () => {
+  test('uses a bounded marked fallback when synchronous callers cannot publish a file', () => {
     const handoff = buildParentHandoff(
       [
         reportedRun(
@@ -141,6 +140,8 @@ describe('output', () => {
     expect(handoff).toContain('Evidence: npm test passed');
     expect(handoff).toContain('Risks: integration coverage remains manual');
     expect(handoff).toContain('Conclusion: complete');
+    expect(handoff).toContain('--- begin untrusted delegate report ---');
+    expect(handoff).toContain('Output truncated for parent context');
   });
 
   test('describes active worktree changes as pending finalization', () => {
@@ -331,7 +332,7 @@ describe('output', () => {
     expect(handoff).not.toContain('this continuation completed');
   });
 
-  test('writes every exact report and keeps the parent result envelope-only', async () => {
+  test('inlines a complete small report without publishing a file', async () => {
     const exact =
       'Outcome: done\nConclusion: the guard is correct\nEvidence: src/guard.ts:10\nRisks: none';
     const run = reportedRun(exact);
@@ -346,30 +347,57 @@ describe('output', () => {
 
     const handoff = await buildOutputFileHandoff([run], put as never);
 
-    expect(put).toHaveBeenCalledTimes(1);
-    expect(persisted).toEqual([exact]);
-    expect(run.outputFile).toEqual({
-      path: '/tmp/output.md',
-      size: Buffer.byteLength(exact),
-    });
-    expect(handoff).toContain(
-      `Output file: /tmp/output.md (${Buffer.byteLength(exact)} bytes)`,
-    );
-    expect(handoff).not.toContain(exact);
+    expect(put).not.toHaveBeenCalled();
+    expect(persisted).toEqual([]);
+    expect(run.outputFile).toBeUndefined();
+    expect(handoff).toContain(exact);
+    expect(handoff).toContain('--- begin untrusted delegate report ---');
+    expect(handoff).toContain('--- end untrusted delegate report ---');
+    expect(handoff).not.toContain('Output file:');
   });
 
-  test('uses a bounded inline fallback when output-file publication fails', async () => {
-    const exact =
-      'Outcome: partial\nConclusion: the report is still available inline\nEvidence: child-check\nRisks: publication failed';
+  test('keeps small fan-in reports inline while publishing only oversized neighbors', async () => {
+    const small = 'Outcome: done\nConclusion: small report stays inline';
+    const large = `Outcome: done\nConclusion: oversized report\n${'detail '.repeat(3_000)}`;
+    const smallRun = reportedRun(small);
+    const largeRun = reportedRun(large);
+    const put = vi.fn().mockResolvedValue({
+      path: '/tmp/large.md',
+      size: Buffer.byteLength(large),
+    });
+
+    const handoff = await buildOutputFileHandoff(
+      [smallRun, largeRun],
+      put as never,
+    );
+
+    expect(put).toHaveBeenCalledOnce();
+    expect(put).toHaveBeenCalledWith(large, '.md');
+    expect(smallRun.outputFile).toBeUndefined();
+    expect(largeRun.outputFile?.path).toBe('/tmp/large.md');
+    expect(handoff).toContain(small);
+    expect(handoff).toContain(
+      `Output file: /tmp/large.md (${Buffer.byteLength(large)} bytes)`,
+    );
+    expect(handoff).not.toContain(large);
+  });
+
+  test('uses a bounded inline fallback when oversized report publication fails', async () => {
+    const exact = `Outcome: partial\nConclusion: the report is still available inline\nEvidence: child-check\nRisks: publication failed\n\n${'detail '.repeat(4_000)}`;
     const run = reportedRun(exact);
     const put = vi.fn().mockRejectedValue(new Error('output file unavailable'));
 
     const handoff = await buildOutputFileHandoff([run], put as never);
 
+    expect(put).toHaveBeenCalledOnce();
     expect(handoff).toContain('Inline fallback (output file unavailable)');
-    expect(handoff).toContain(exact);
+    expect(handoff).toContain('Outcome: partial');
+    expect(handoff).toContain('Output truncated for parent context');
     expect(handoff).toContain('Warnings: Exact output file unavailable');
+    expect(handoff).toContain('--- begin untrusted delegate report ---');
+    expect(handoff).not.toContain(exact);
     expect(run.outputFile).toBeUndefined();
+    expect(run.state).toBe('success');
   });
 
   test('preserves the exact long report in the output file', async () => {
@@ -410,12 +438,12 @@ describe('output', () => {
     );
 
     expect(Buffer.byteLength(handoff, 'utf8')).toBeGreaterThan(1);
-    expect(handoff).toContain('Mandatory metadata exceeds');
+    expect(handoff).toContain('Mandatory delegate metadata exceeds');
     expect(handoff).toContain(
       'Continuation available in the retained child context.',
     );
     expect(handoff).not.toContain(continuation);
-    expect(handoff).toContain('Conclusion: a decision is required');
+    expect(handoff).not.toContain('Conclusion: a decision is required');
   });
 
   test('uses the restored safety bounds', () => {

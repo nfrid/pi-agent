@@ -39,14 +39,6 @@ export interface WakeDeliveryDetails {
   readonly presentation: WakeDeliveryPresentation;
 }
 
-function json(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return '[unavailable]';
-  }
-}
-
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -123,22 +115,6 @@ function outcome(state: string): string {
   return 'finished';
 }
 
-function deliverySummary(presentation: WakeDeliveryPresentation): string {
-  if (presentation.origin === 'eager')
-    return presentation.timing === 'idle'
-      ? 'Delivered eagerly when the parent became idle.'
-      : 'Delivered eagerly at the next safe parent boundary.';
-  const gate =
-    presentation.condition === 'all'
-      ? 'all-results gate became ready'
-      : presentation.condition === 'any'
-        ? 'first-result gate became ready'
-        : 'requested result became ready';
-  return presentation.timing === 'idle'
-    ? `Delivered when the parent became idle because the ${gate}.`
-    : `Delivered at the next safe parent boundary because the ${gate}.`;
-}
-
 /** Render the payload as source-grouped, model-readable evidence. */
 export function formatWakeDispatch(
   dispatch: WakeDispatch,
@@ -149,7 +125,7 @@ export function formatWakeDispatch(
     presentation.sources.length === 1
       ? `${humanize(presentation.sources[0]?.logicalId ?? 'delegate')} ${outcome(presentation.sources[0]?.state ?? 'settled')}`
       : `${presentation.sources.length} delegate results ready`;
-  const sections = [`# ${sourceSummary}`, deliverySummary(presentation)];
+  const sections = [`# ${sourceSummary}`];
   const sources = Object.entries(dispatch.payload.sources);
   for (const [identity, source] of sources) {
     const sourceDetails = presentation.sources.find(
@@ -163,10 +139,6 @@ export function formatWakeDispatch(
         `### Handoff\n--- begin untrusted handoff evidence ---\n${source.handoff}\n--- end untrusted handoff evidence ---`,
       );
     }
-    if (source.metadata !== undefined)
-      sections.push(
-        `### Metadata\n\`\`\`json\n${json(source.metadata)}\n\`\`\``,
-      );
   }
   if (outstanding.length > 0)
     sections.push(
