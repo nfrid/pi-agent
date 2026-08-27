@@ -2,6 +2,7 @@ import type {
   Checkout,
   CheckoutSummary,
   CommandReceipt,
+  DashboardSettings,
   ModelSelection,
   NotificationEvent,
   OrchestrationRuntime,
@@ -20,6 +21,11 @@ import type {
   ThreadSummary,
 } from '@pi-dashboard/protocol';
 import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
+
+export interface ModelDisplayPreferenceRepository {
+  read(): DashboardSettings;
+  replace(settings: DashboardSettings): DashboardSettings;
+}
 
 export interface PushSubscriptionRecord {
   endpoint: string;

@@ -1,6 +1,7 @@
 import type {
   AuthoritativeSessionSnapshot,
   BrowserSnapshot,
+  DashboardSettings,
   DelegateHistoryResponse,
   DelegateHistoryRunDetailResponse,
   GitContext,
@@ -284,11 +285,20 @@ export function pushVapidPublicKeyQueryOptions(client: DashboardHttpClient) {
 }
 
 export function settingsQueryOptions(client: DashboardHttpClient) {
-  return queryOptions({
+  return queryOptions<DashboardSettings>({
     queryKey: dashboardQueryKeys.settings(),
-    queryFn: () => client.request<unknown>('/api/settings'),
-    staleTime: Number.POSITIVE_INFINITY,
+    queryFn: ({ signal }) => client.settings(signal),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
     retry: networkRetry,
+  });
+}
+
+export function updateSettingsMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions<DashboardSettings, Error, DashboardSettings>({
+    mutationFn: (settings) => client.updateSettings(settings),
+    retry: false,
   });
 }
 

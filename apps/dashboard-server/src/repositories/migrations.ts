@@ -802,6 +802,25 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 17,
+    name: 'model-display-preferences',
+    up(db) {
+      db.exec(`
+        CREATE TABLE model_display_preference (
+          model_key TEXT PRIMARY KEY
+            CHECK (length(model_key) BETWEEN 1 AND 512),
+          alias TEXT
+            CHECK (alias IS NULL OR length(alias) BETWEEN 0 AND 80),
+          color TEXT
+            CHECK (
+              color IS NULL OR
+              color GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+            )
+        );
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

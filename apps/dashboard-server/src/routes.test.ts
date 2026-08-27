@@ -103,6 +103,64 @@ describe('Fastify dashboard route plugin', () => {
     ]);
   });
 
+  it('reads and idempotently replaces authenticated dashboard settings', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    let settings = { modelDisplayPreferences: {} };
+    routeContext.settings = () => settings;
+    routeContext.updateSettings = vi.fn((next) => {
+      settings = next;
+      return settings;
+    });
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const initial = await app.inject({
+      method: 'GET',
+      url: '/api/settings',
+      headers,
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toEqual({ modelDisplayPreferences: {} });
+    const body = {
+      modelDisplayPreferences: {
+        'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
+      },
+    };
+    const updated = await app.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      headers,
+      payload: body,
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toEqual(body);
+    const replay = await app.inject({
+      method: 'PATCH',
+      url: '/api/settings',
+      headers,
+      payload: body,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(body);
+    expect(routeContext.updateSettings).toHaveBeenCalledTimes(2);
+    const invalid = await app.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      headers,
+      payload: {
+        modelDisplayPreferences: {
+          'openai/gpt-5': { color: 'red' },
+        },
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
   it('serves authenticated delegate history by session ID', async () => {
     const app = Fastify();
     apps.push(app);

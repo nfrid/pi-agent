@@ -6,6 +6,7 @@ import {
   type Checkout,
   type CommandReceipt,
   DASHBOARD_PROTOCOL_VERSION,
+  type DashboardSettings,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
@@ -16,6 +17,7 @@ import {
   type ProjectCreateCommand,
   type ProjectRenameCommand,
   type ProtocolInfo,
+  parseDashboardSettings,
   parseRenameSessionMutationOutput,
   parseRestartRuntimeMutationOutput,
   parseStartRuntimeMutationOutput,
@@ -658,6 +660,36 @@ export class DashboardHttpClient {
 
   async usage(): Promise<{ usage?: unknown; error?: string }> {
     return this.request('/api/usage');
+  }
+
+  async settings(signal?: AbortSignal): Promise<DashboardSettings> {
+    const value = await this.request<unknown>(
+      '/api/settings',
+      signal ? { signal } : {},
+    );
+    try {
+      return parseDashboardSettings(value);
+    } catch {
+      throw malformedOutput('Dashboard returned invalid settings data.', value);
+    }
+  }
+
+  async getSettings(signal?: AbortSignal): Promise<DashboardSettings> {
+    return this.settings(signal);
+  }
+
+  async updateSettings(
+    settings: DashboardSettings,
+  ): Promise<DashboardSettings> {
+    const value = await this.request<unknown>('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    });
+    try {
+      return parseDashboardSettings(value);
+    } catch {
+      throw malformedOutput('Dashboard returned invalid settings data.', value);
+    }
   }
 
   async usageHistory(

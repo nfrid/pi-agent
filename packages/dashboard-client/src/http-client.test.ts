@@ -92,6 +92,40 @@ describe('DashboardHttpClient session images', () => {
   });
 });
 
+describe('DashboardHttpClient settings requests', () => {
+  it('validates authenticated reads and full updates', async () => {
+    const settings = {
+      modelDisplayPreferences: {
+        'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
+      },
+    };
+    const fetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PUT')
+          expect(JSON.parse(String(init.body))).toEqual(settings);
+        return new Response(JSON.stringify(settings), { status: 200 });
+      },
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await expect(client.settings()).resolves.toEqual(settings);
+    await expect(client.updateSettings(settings)).resolves.toEqual(settings);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      '/api/settings',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/settings',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+  });
+});
+
 describe('DashboardHttpClient command requests', () => {
   it('patches project titles and validates the renamed project', async () => {
     const project = {

@@ -3,13 +3,20 @@ import {
   modelDisplayPreference,
   modelDisplayPreferenceKey,
   readModelDisplayPreferences,
-  resetModelDisplayPreference,
-  setModelDisplayPreference,
+  removeStoredModelDisplayPreferences,
 } from './model-display-preferences';
 
 describe('model display preferences', () => {
-  it('stores aliases and colors by provider/model, validates colors, and resets entries', () => {
-    const values = new Map<string, string>();
+  it('reads and removes the v1 migration store while validating colors', () => {
+    const values = new Map<string, string>([
+      [
+        'pi-dashboard-model-display-preferences-v1',
+        JSON.stringify({
+          'anthropic/claude-3': { alias: 'Claude', color: 'red' },
+          'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
+        }),
+      ],
+    ]);
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: {
@@ -22,25 +29,14 @@ describe('model display preferences', () => {
       expect(modelDisplayPreferenceKey('anthropic', 'claude-3')).toBe(
         'anthropic/claude-3',
       );
-      setModelDisplayPreference('anthropic', 'claude-3', {
-        alias: 'Claude',
-        color: 'red',
-      });
       expect(readModelDisplayPreferences()).toEqual({
         'anthropic/claude-3': { alias: 'Claude' },
+        'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
       });
-      setModelDisplayPreference('anthropic', 'claude-3', {
-        alias: 'Claude',
-        color: '#ff79c6',
-      });
-      expect(readModelDisplayPreferences()).toMatchObject({
-        'anthropic/claude-3': { alias: 'Claude', color: '#ff79c6' },
-      });
-      resetModelDisplayPreference('anthropic', 'claude-3');
-      expect(readModelDisplayPreferences()).toEqual({});
-      expect(values.get('pi-dashboard-model-display-preferences-v1')).toBe(
-        undefined,
-      );
+      removeStoredModelDisplayPreferences();
+      expect(
+        values.get('pi-dashboard-model-display-preferences-v1'),
+      ).toBeUndefined();
     } finally {
       delete (globalThis as { localStorage?: unknown }).localStorage;
       vi.restoreAllMocks();

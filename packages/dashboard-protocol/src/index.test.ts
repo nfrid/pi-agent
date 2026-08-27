@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ComposerCommandCatalogueSchema,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
+  DashboardSettingsSchema,
   DelegateWorkflowMetadataSchema,
   deriveSessionTitle,
   ExtensionSurfaceSchema,
@@ -10,6 +11,8 @@ import {
   LiveDiagnosticsResponseSchema,
   LiveExtensionSurfaceSchema,
   MAX_FRAME_BYTES,
+  MAX_MODEL_DISPLAY_ALIAS,
+  MAX_MODEL_DISPLAY_PREFERENCES,
   MAX_QUEUE_DRAFT_TEXT,
   MAX_QUEUE_DRAFTS,
   MAX_RUNTIME_EXTENSION_SURFACES,
@@ -20,6 +23,7 @@ import {
   parseBridgeEvent,
   parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
+  parseDashboardSettings,
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
   parseFrame,
@@ -56,6 +60,32 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates server-persisted model display settings strictly', () => {
+    const settings = {
+      modelDisplayPreferences: {
+        'anthropic/claude-3': { alias: 'Claude', color: '#ff79c6' },
+      },
+    };
+    expect(parseDashboardSettings(settings)).toEqual(settings);
+    expect(DashboardSettingsSchema).toBeDefined();
+    expect(MAX_MODEL_DISPLAY_ALIAS).toBe(80);
+    expect(MAX_MODEL_DISPLAY_PREFERENCES).toBeGreaterThan(0);
+    expect(() =>
+      parseDashboardSettings({
+        modelDisplayPreferences: {
+          'openai/gpt-5': { alias: 'x'.repeat(MAX_MODEL_DISPLAY_ALIAS + 1) },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseDashboardSettings({
+        modelDisplayPreferences: {
+          'openai/gpt-5': { color: '#fff' },
+        },
+      }),
+    ).toThrow();
+  });
+
   it('accepts bounded Git context and rejects unknown fields', () => {
     expect(
       parseGitContext({

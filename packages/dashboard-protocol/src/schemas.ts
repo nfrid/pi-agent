@@ -33,6 +33,9 @@ import {
   MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
   MAX_DELEGATE_HISTORY_TASK,
   MAX_ID,
+  MAX_MODEL_DISPLAY_ALIAS,
+  MAX_MODEL_DISPLAY_PREFERENCE_KEY,
+  MAX_MODEL_DISPLAY_PREFERENCES,
   MAX_PATH,
   MAX_SESSION_INDEX_DELTA_ITEMS,
   MAX_SHELL_INDEX_ITEMS,
@@ -248,6 +251,40 @@ const IdentifierSchema = Type.String({
   maxLength: MAX_ID,
   pattern: '^[^\\u0000-\\u001F\\u007F]*$',
 });
+
+/** One user-facing alias/color override for a model identity. */
+export const ModelDisplayPreferenceSchema = Type.Object(
+  {
+    alias: Type.Optional(Type.String({ maxLength: MAX_MODEL_DISPLAY_ALIAS })),
+    color: Type.Optional(Type.String({ pattern: '^#[0-9a-fA-F]{6}$' })),
+  },
+  { additionalProperties: false },
+);
+export type ModelDisplayPreference = Static<
+  typeof ModelDisplayPreferenceSchema
+>;
+
+const ModelDisplayPreferenceKeySchema = Type.String({
+  minLength: 1,
+  maxLength: MAX_MODEL_DISPLAY_PREFERENCE_KEY,
+  pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+});
+export const ModelDisplayPreferencesSchema = Type.Record(
+  ModelDisplayPreferenceKeySchema,
+  ModelDisplayPreferenceSchema,
+  { maxProperties: MAX_MODEL_DISPLAY_PREFERENCES },
+);
+export type ModelDisplayPreferences = Static<
+  typeof ModelDisplayPreferencesSchema
+>;
+
+/** Durable settings exchanged by the dashboard settings endpoints. */
+export const DashboardSettingsSchema = Type.Object(
+  { modelDisplayPreferences: ModelDisplayPreferencesSchema },
+  { additionalProperties: false },
+);
+export type DashboardSettings = Static<typeof DashboardSettingsSchema>;
+
 const FiniteNumberSchema = Type.Number();
 const UnknownSchema = Type.Unknown();
 

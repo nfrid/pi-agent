@@ -28,6 +28,8 @@ import {
   ComposerCommandCatalogueSchema,
   type DashboardEventEnvelope,
   DashboardEventEnvelopeSchema,
+  type DashboardSettings,
+  DashboardSettingsSchema,
   type DelegateHistoryResponse,
   DelegateHistoryResponseSchema,
   type DelegateHistoryRunDetailResponse,
@@ -114,6 +116,14 @@ import {
 export function parseProtocolInfo(value: unknown): ProtocolInfo {
   return parseSchema(ProtocolInfoSchema, value, 'protocol info');
 }
+
+export function parseDashboardSettings(value: unknown): DashboardSettings {
+  return parseSchema(DashboardSettingsSchema, value, 'dashboard settings');
+}
+export const tryParseDashboardSettings = (
+  value: unknown,
+): DashboardSettings | undefined =>
+  tryParseSchema(DashboardSettingsSchema, value);
 
 export function parseGitContext(value: unknown): GitContext {
   return parseSchema(GitContextSchema, value, 'git context');

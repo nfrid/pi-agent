@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type {
+  DashboardSettings,
   NotificationEvent,
   RuntimeLocation,
   RuntimeSnapshot,
@@ -10,6 +11,7 @@ import type {
 import { credentialHash } from './metadata-credentials.js';
 import { runMigrations } from './repositories/migrations.js';
 import { SqliteMetadataRepository } from './repositories/sqlite-metadata-repository.js';
+import { SqliteModelDisplayPreferenceRepository } from './repositories/sqlite-model-display-preference-repository.js';
 import { SqliteNotificationRepository } from './repositories/sqlite-notification-repository.js';
 import { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
 import { SqliteSessionUsageRepository } from './repositories/sqlite-session-usage-repository.js';
@@ -40,6 +42,7 @@ export { credentialHash };
 export class MetadataStore {
   readonly db: DatabaseSync;
   readonly metadata: SqliteMetadataRepository;
+  readonly modelDisplayPreferences: SqliteModelDisplayPreferenceRepository;
   readonly notifications: SqliteNotificationRepository;
   /** Durable project/thread/run state; runtime and transcript storage stay separate. */
   readonly orchestration: SqliteOrchestrationRepository;
@@ -62,6 +65,9 @@ export class MetadataStore {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     runMigrations(this.db);
     this.metadata = new SqliteMetadataRepository(this.db);
+    this.modelDisplayPreferences = new SqliteModelDisplayPreferenceRepository(
+      this.db,
+    );
     this.notifications = new SqliteNotificationRepository(this.db);
     this.orchestration = new SqliteOrchestrationRepository(this.db);
     this.usageHistory = new SqliteUsageHistoryRepository(this.db);
@@ -105,6 +111,17 @@ export class MetadataStore {
 
   markManagedStopped(runtimeId: string): void {
     this.metadata.markManagedStopped(runtimeId);
+  }
+
+  getDashboardSettings(): DashboardSettings {
+    return {
+      modelDisplayPreferences:
+        this.modelDisplayPreferences.read().modelDisplayPreferences,
+    };
+  }
+
+  replaceDashboardSettings(settings: DashboardSettings): DashboardSettings {
+    return this.modelDisplayPreferences.replace(settings);
   }
 
   addNotification(event: NotificationEvent): void {

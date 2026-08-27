@@ -17,6 +17,7 @@ import {
   renameSessionMutationOptions,
   restartRuntimeMutationOptions,
   restoreThreadMutationOptions,
+  settingsQueryOptions,
   settleThreadMutationOptions,
   snapshotQueryOptions,
   snapshotRequestGeneration,
@@ -24,6 +25,7 @@ import {
   stopRuntimeMutationOptions,
   unpinThreadMutationOptions,
   unsettleThreadMutationOptions,
+  updateSettingsMutationOptions,
   usageHistoryQueryOptions,
 } from './query-options.js';
 import { DashboardLiveStore } from './store.js';
@@ -34,6 +36,35 @@ const client = {
 } as unknown as DashboardHttpClient;
 
 describe('dashboard query and mutation factories', () => {
+  it('queries and updates typed dashboard settings with refreshes', async () => {
+    const settings = vi.fn(async () => ({ modelDisplayPreferences: {} }));
+    const options = settingsQueryOptions({
+      settings,
+    } as unknown as DashboardHttpClient);
+    expect(options.queryKey).toEqual(['dashboard', 'settings']);
+    expect(options.refetchInterval).toBe(60_000);
+    expect(options.refetchOnWindowFocus).toBe(true);
+    if (!options.queryFn) throw new Error('Query function is missing.');
+    await expect(
+      options.queryFn({ signal: undefined } as never),
+    ).resolves.toEqual({
+      modelDisplayPreferences: {},
+    });
+    expect(settings).toHaveBeenCalledWith(undefined);
+
+    const updateSettings = vi.fn(async (value: unknown) => value);
+    const mutation = updateSettingsMutationOptions({
+      updateSettings,
+    } as unknown as DashboardHttpClient);
+    if (!mutation.mutationFn) throw new Error('Mutation function is missing.');
+    await expect(
+      mutation.mutationFn({ modelDisplayPreferences: {} }, undefined as never),
+    ).resolves.toEqual({ modelDisplayPreferences: {} });
+    expect(updateSettings).toHaveBeenCalledWith({
+      modelDisplayPreferences: {},
+    });
+  });
+
   it('refreshes open usage history views once a minute', async () => {
     const usageHistory = vi.fn(async () => ({
       range: '24h' as const,
