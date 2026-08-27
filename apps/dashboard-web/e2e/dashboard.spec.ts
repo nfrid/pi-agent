@@ -5326,6 +5326,71 @@ test('activity header preserves block-first Markdown semantics @desktop', async 
   ).toBe('const blockFirst = true;');
 });
 
+test('composer text wraps around top-right actions @desktop', async ({
+  page,
+}) => {
+  await installPhase6Mocks(page, {
+    entries: repeatedActivityEntries(),
+  });
+  await page.setViewportSize({ width: 960, height: 760 });
+  await page.goto('/sessions/s1');
+
+  const editor = page.getByRole('textbox', { name: 'Message Pi' });
+  await expect(editor).toBeVisible();
+  await editor.fill('Composer text '.repeat(80));
+
+  const geometry = await page
+    .locator('.composer-rich-surface')
+    .evaluate((surface) => {
+      const mount = surface.querySelector<HTMLElement>(
+        '.composer-editor-mount',
+      );
+      const actions = surface.querySelector<HTMLElement>('.composer-actions');
+      const editable = surface.querySelector<HTMLElement>('[role="textbox"]');
+      const textNode = editable
+        ? document.createTreeWalker(editable, NodeFilter.SHOW_TEXT).nextNode()
+        : null;
+      if (!mount || !actions || !textNode)
+        throw new Error('Composer layout is incomplete');
+
+      const surfaceRect = surface.getBoundingClientRect();
+      const mountRect = mount.getBoundingClientRect();
+      const actionsRect = actions.getBoundingClientRect();
+      const lines = new Map<number, { left: number; right: number }>();
+      const range = document.createRange();
+      const text = textNode.textContent ?? '';
+      for (let index = 0; index < text.length; index += 1) {
+        range.setStart(textNode, index);
+        range.setEnd(textNode, index + 1);
+        const rect = range.getBoundingClientRect();
+        const line = Math.round(rect.top);
+        const bounds = lines.get(line);
+        lines.set(line, {
+          left: Math.min(bounds?.left ?? rect.left, rect.left),
+          right: Math.max(bounds?.right ?? rect.right, rect.right),
+        });
+      }
+      const lineBounds = [...lines.entries()]
+        .sort(([topA], [topB]) => topA - topB)
+        .map(([, bounds]) => bounds);
+      return {
+        surfaceWidth: surfaceRect.width,
+        mountWidth: mountRect.width,
+        actionsLeft: actionsRect.left,
+        firstLineRight: lineBounds[0]?.right ?? 0,
+        laterLineRight: Math.max(
+          ...lineBounds.slice(2).map(({ right }) => right),
+        ),
+        lineCount: lineBounds.length,
+      };
+    });
+
+  expect(Math.abs(geometry.surfaceWidth - geometry.mountWidth)).toBeLessThan(2);
+  expect(geometry.lineCount).toBeGreaterThan(3);
+  expect(geometry.firstLineRight).toBeLessThan(geometry.actionsLeft);
+  expect(geometry.laterLineRight).toBeGreaterThan(geometry.actionsLeft);
+});
+
 test('virtual transcript focus and group layout stay inside simple contracts', async ({
   page,
 }) => {

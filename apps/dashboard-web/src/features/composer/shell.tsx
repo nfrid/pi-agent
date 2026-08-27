@@ -6,6 +6,8 @@ import {
   type ReactNode,
   type RefObject,
   Suspense,
+  useLayoutEffect,
+  useRef,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import type { ComposerCommandOption } from '../composer-autocomplete';
@@ -38,8 +40,33 @@ export function ComposerRichSurface({
   submissionDisabled?: boolean;
   children: ReactNode;
 }) {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+    const actions = surface?.querySelector<HTMLElement>('.composer-actions');
+    if (!surface || !actions) return;
+
+    const reserveActionSpace = () => {
+      surface.style.setProperty(
+        '--composer-actions-width',
+        `${actions.offsetWidth}px`,
+      );
+      surface.style.setProperty(
+        '--composer-actions-height',
+        `${actions.offsetHeight}px`,
+      );
+    };
+
+    reserveActionSpace();
+    const observer = new ResizeObserver(reserveActionSpace);
+    observer.observe(actions);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div
+      ref={surfaceRef}
       className="composer-primary composer-rich-surface"
       onPasteCapture={onPasteCapture}
       onKeyDownCapture={(event) => submitOnShortcut(event, submissionDisabled)}

@@ -56,10 +56,25 @@
 }
 .composer-primary.composer-rich-surface {
   position: relative;
+  --composer-actions-width: 0px;
+  --composer-actions-height: 0px;
+}
+.composer-rich-surface > .composer-actions {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 0;
+  inset-inline-end: 0;
 }
 .composer-editor-mount {
   flex: 1 1 auto;
   min-width: 0;
+}
+.composer-rich-editor::before {
+  float: inline-end;
+  width: var(--composer-actions-width);
+  height: var(--composer-actions-height);
+  margin-inline-start: 8px;
+  content: "";
 }
 .composer-editor-loading {
   min-height: 48px;
