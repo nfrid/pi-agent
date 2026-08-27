@@ -303,6 +303,16 @@ describe('authoritative application snapshot lifecycle', () => {
                 createdAt: 1,
                 allowWrites: false,
                 capabilities: ['web'],
+                workflow: {
+                  logicalId: 'worker',
+                  attempt: 1,
+                  identity: 'worker@1',
+                  state: 'running',
+                  dependencies: [],
+                  createdAt: 1,
+                  scheduledAt: 1,
+                  startedAt: 1,
+                },
                 details: {
                   task: 'Primary task',
                   setup: { cwd: '/repo', isolation: 'worktree' },
@@ -372,6 +382,11 @@ describe('authoritative application snapshot lifecycle', () => {
       setup: { cwd: '/repo', isolation: 'worktree' },
       runConfig: { scope: ['extensions/delegate'] },
       truncated: true,
+    });
+    expect(snapshot.active.delegates[0]?.workflow).toMatchObject({
+      logicalId: 'worker',
+      identity: 'worker@1',
+      state: 'running',
     });
     expect(snapshot.active.delegates[0]?.transcript[0]?.id).toBe(
       'd'.repeat(300),

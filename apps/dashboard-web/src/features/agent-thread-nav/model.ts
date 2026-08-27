@@ -64,14 +64,21 @@ export function sessionThreadIdentityKey(
       .filter((session) => session.sessionKind !== 'delegate')
       .map((session) => session.id),
   );
+  const sessionByRuntimeId = new Map(
+    snapshot.sessions.flatMap((session) =>
+      session.activeRuntimeId
+        ? [[session.activeRuntimeId, session.id] as const]
+        : [],
+    ),
+  );
+  for (const runtime of snapshot.runtimes)
+    sessionByRuntimeId.set(runtime.runtimeId, runtime.session.id);
   const managed = new Set(
     (snapshot.runs ?? []).flatMap((run) => {
       if (run.piSessionId) return [run.piSessionId];
       if (!run.runtimeId) return [];
-      const runtime = snapshot.runtimes.find(
-        (candidate) => candidate.runtimeId === run.runtimeId,
-      );
-      return runtime ? [runtime.session.id] : [];
+      const sessionId = sessionByRuntimeId.get(run.runtimeId);
+      return sessionId ? [sessionId] : [];
     }),
   );
   return [
@@ -219,7 +226,7 @@ export function resolvedDraftPromotionIds(
       drafts,
       session.id,
       snapshot.runtimes.find((runtime) => runtime.session.id === session.id)
-        ?.runtimeId,
+        ?.runtimeId ?? session.activeRuntimeId,
     );
     return draft ? [draft.id] : [];
   });
@@ -298,6 +305,7 @@ export function agentThreadRows(
       directLinks,
       drafts,
       session.id,
+      session.activeRuntimeId,
     );
     if (promotedDraft) representedPromotedDraftIds.add(promotedDraft.id);
     rows.set(session.id, {
