@@ -1495,7 +1495,6 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     await server.start();
     const url = `http://127.0.0.1:${server.port}/api/usage`;
     const headers = { 'x-dashboard-token': 'test-token' };
-    const beforeUsage = server.snapshot();
     const [first, second] = await Promise.all([
       fetch(url, { headers }),
       fetch(url, { headers }),
@@ -1505,8 +1504,7 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     expect((await (await fetch(url, { headers })).json()) as unknown).toEqual({
       usage: { calls: 1 },
     });
-    expect(server.snapshot().revision).toBeGreaterThan(beforeUsage.revision);
-    expect(server.snapshot().cursor).toBeGreaterThan(beforeUsage.cursor);
+    expect(server.snapshot().usage).toEqual({ calls: 1 });
     expect(calls).toBe(1);
   });
 

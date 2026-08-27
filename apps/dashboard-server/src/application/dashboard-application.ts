@@ -58,6 +58,9 @@ export interface ApplicationChange {
 
 export type InternalSessionSnapshot = AuthoritativeSessionSnapshot;
 
+const ACTIVE_USAGE_FRESH_MS = 60_000;
+const IDLE_USAGE_FRESH_MS = 20 * 60_000;
+
 export interface DashboardApplicationOptions {
   registry: RuntimeRegistry;
   manager: RuntimeManager;
@@ -766,7 +769,19 @@ export class DashboardApplication {
       options.metadata,
       options.push,
     );
-    this.usage = new UsageService(options.usage, options.onChange);
+    this.usage = new UsageService(options.usage, options.onChange, {
+      freshMs: () =>
+        this.runtime
+          .snapshots()
+          .some(
+            (runtime) =>
+              runtime.online !== false &&
+              (runtime.liveState === 'working' ||
+                runtime.liveState === 'compacting'),
+          )
+          ? ACTIVE_USAGE_FRESH_MS
+          : IDLE_USAGE_FRESH_MS,
+    });
     this.uploads = new UploadService(options.stateDir);
   }
 

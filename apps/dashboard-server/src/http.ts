@@ -585,6 +585,7 @@ export class DashboardServerImpl implements DashboardServer {
         )
           throw error;
       }
+      this.application.usage.start();
     } catch (error) {
       await this.cleanupFailedStart();
       this.lifecycle = 'stopped';
@@ -632,6 +633,7 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   private async stopInternal(): Promise<void> {
+    this.application.usage.stop();
     if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
     this.feedSweepTimer = undefined;
     await this.application.orchestrationService?.stop();
@@ -654,6 +656,7 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   private async cleanupFailedStart(): Promise<void> {
+    this.application.usage.stop();
     if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
     this.feedSweepTimer = undefined;
     await this.application.orchestrationService?.stop();
