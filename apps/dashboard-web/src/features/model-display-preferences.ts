@@ -52,6 +52,12 @@ export function readStoredModelDisplayPreferences(): StoredModelDisplayPreferenc
         continue;
       }
       const candidate = value as Record<string, unknown>;
+      if (
+        Object.keys(candidate).some((key) => key !== 'alias' && key !== 'color')
+      ) {
+        complete = false;
+        continue;
+      }
       const hasAlias = candidate.alias !== undefined;
       const hasColor = candidate.color !== undefined;
       const validAlias =
@@ -93,6 +99,15 @@ export function readStoredModelDisplayPreferences(): StoredModelDisplayPreferenc
   } catch {
     return { preferences: {}, complete: false };
   }
+}
+
+export function normalizeModelDisplayPreference(
+  preference: ModelDisplayPreference,
+): ModelDisplayPreference | undefined {
+  const normalized: ModelDisplayPreference = {};
+  if (preference.alias !== undefined) normalized.alias = preference.alias;
+  if (preference.color !== undefined) normalized.color = preference.color;
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 export function removeStoredModelDisplayPreferences(): void {
@@ -159,8 +174,8 @@ export function modelDisplayPreference(
   provider: string,
   model: string,
 ): ModelDisplayPreference {
-  const exact = preferences[modelDisplayPreferenceKey(provider, model)];
-  if (exact) return exact;
+  const exactKey = modelDisplayPreferenceKey(provider, model);
+  if (Object.hasOwn(preferences, exactKey)) return preferences[exactKey] ?? {};
   const suffix = `/${model}`;
   const matches = Object.entries(preferences).filter(([key]) =>
     key.endsWith(suffix),

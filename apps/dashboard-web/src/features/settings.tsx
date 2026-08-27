@@ -18,6 +18,7 @@ import { type FormEvent, useRef, useState } from 'react';
 import { errorMessage } from '../shared/lib/error-message';
 import {
   modelDisplayPreferenceKey,
+  normalizeModelDisplayPreference,
   useModelDisplayPreferences,
 } from './model-display-preferences';
 import {
@@ -93,21 +94,31 @@ function ModelDisplayPreferencesEditor({
             ) ?? settingsQuery.data;
           if (!current || latestEditByKey.current.get(modelKey) !== sequence)
             return;
-          const currentPreference =
-            current.modelDisplayPreferences[modelKey] ?? {};
-          const preference = edit ? edit(currentPreference) : undefined;
+          const currentPreference = Object.hasOwn(
+            current.modelDisplayPreferences,
+            modelKey,
+          )
+            ? current.modelDisplayPreferences[modelKey]
+            : {};
+          const preference = edit
+            ? normalizeModelDisplayPreference(edit(currentPreference))
+            : undefined;
           const nextPreferences = { ...current.modelDisplayPreferences };
-          if (preference && Object.keys(preference).length > 0)
-            nextPreferences[modelKey] = preference;
-          else delete nextPreferences[modelKey];
+          if (preference) {
+            Object.defineProperty(nextPreferences, modelKey, {
+              configurable: true,
+              enumerable: true,
+              value: preference,
+              writable: true,
+            });
+          } else delete nextPreferences[modelKey];
           queryClient.setQueryData(dashboardQueryKeys.settings(), {
             ...current,
             modelDisplayPreferences: nextPreferences,
           });
-          const request =
-            preference && Object.keys(preference).length > 0
-              ? updateMutation.mutateAsync({ modelKey, preference })
-              : resetMutation.mutateAsync({ modelKey });
+          const request = preference
+            ? updateMutation.mutateAsync({ modelKey, preference })
+            : resetMutation.mutateAsync({ modelKey });
           void request
             .then((saved) => {
               if (latestEditByKey.current.get(modelKey) !== sequence) return;
@@ -122,11 +133,14 @@ function ModelDisplayPreferencesEditor({
                   const latestPreferences = {
                     ...latest.modelDisplayPreferences,
                   };
-                  const savedPreference =
-                    saved.modelDisplayPreferences[modelKey];
-                  if (savedPreference)
-                    latestPreferences[modelKey] = savedPreference;
-                  else delete latestPreferences[modelKey];
+                  if (Object.hasOwn(saved.modelDisplayPreferences, modelKey)) {
+                    Object.defineProperty(latestPreferences, modelKey, {
+                      configurable: true,
+                      enumerable: true,
+                      value: saved.modelDisplayPreferences[modelKey],
+                      writable: true,
+                    });
+                  } else delete latestPreferences[modelKey];
                   return {
                     ...latest,
                     modelDisplayPreferences: latestPreferences,
@@ -175,7 +189,9 @@ function ModelDisplayPreferencesEditor({
       <div className={styles.modelPreferences}>
         {models.map((model) => {
           const key = modelDisplayPreferenceKey(model.provider, model.model);
-          const preference = preferences[key] ?? {};
+          const preference = Object.hasOwn(preferences, key)
+            ? preferences[key]
+            : {};
           const selectedColor = preference.color ?? DEFAULT_MODEL_COLOR;
           const setColor = (color: string) =>
             savePreferences(key, (current) => ({ ...current, color }));

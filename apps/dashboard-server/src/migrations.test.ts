@@ -58,9 +58,68 @@ it('applies numbered dashboard migrations idempotently', async () => {
 });
 
 describe('migration metadata', () => {
+  it('upgrades nullable model keys from migration 17', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 16));
+      // Simulate a database that applied the legacy nullable v17 schema.
+      db.exec(`
+        CREATE TABLE model_display_preference (
+          model_key TEXT PRIMARY KEY
+            CHECK (length(model_key) BETWEEN 1 AND 512),
+          alias TEXT
+            CHECK (alias IS NULL OR length(alias) BETWEEN 0 AND 80),
+          color TEXT
+            CHECK (
+              color IS NULL OR
+              color GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+            )
+        );
+        PRAGMA ignore_check_constraints = ON;
+        INSERT INTO model_display_preference (model_key,alias,color)
+        VALUES
+          (NULL,'discarded',NULL),
+          ('invalid-color','Bad','red'),
+          ('openai/gpt-5','GPT','#ff79c6');
+        PRAGMA ignore_check_constraints = OFF;
+        INSERT INTO schema_migrations (version,name,applied_at)
+        VALUES (17,'model-display-preferences',0);
+      `);
+      expect(
+        db
+          .prepare('PRAGMA table_info(model_display_preference)')
+          .all()
+          .find((row) => row.name === 'model_key'),
+      ).toMatchObject({ notnull: 0 });
+      runMigrations(db);
+      expect(
+        db
+          .prepare('PRAGMA table_info(model_display_preference)')
+          .all()
+          .find((row) => row.name === 'model_key'),
+      ).toMatchObject({ notnull: 1 });
+      expect(
+        db
+          .prepare('SELECT model_key,alias,color FROM model_display_preference')
+          .all(),
+      ).toEqual([
+        { model_key: 'openai/gpt-5', alias: 'GPT', color: '#ff79c6' },
+      ]);
+      runMigrations(db);
+      expect(
+        db
+          .prepare('SELECT version FROM schema_migrations ORDER BY version')
+          .all()
+          .at(-1),
+      ).toEqual({ version: 18 });
+    } finally {
+      db.close();
+    }
+  });
+
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
     ]);
   });
 

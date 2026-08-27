@@ -4,6 +4,7 @@ import {
   migrateModelDisplayPreferences,
   modelDisplayPreference,
   modelDisplayPreferenceKey,
+  normalizeModelDisplayPreference,
   readStoredModelDisplayPreferences,
   removeStoredModelDisplayPreferences,
 } from './model-display-preferences';
@@ -157,9 +158,11 @@ describe('model display preferences', () => {
     }
   });
 
-  it('retains malformed local data for a later migration attempt', async () => {
+  it('retains local data with unknown fields for a later migration attempt', async () => {
     const key = 'pi-dashboard-model-display-preferences-v1';
-    const values = new Map([[key, '{"openai/gpt-5":null}']]);
+    const values = new Map([
+      [key, '{"openai/gpt-5":{"alias":"x","extra":true}}'],
+    ]);
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: {
@@ -179,6 +182,18 @@ describe('model display preferences', () => {
     } finally {
       delete (globalThis as { localStorage?: unknown }).localStorage;
     }
+  });
+
+  it('normalizes undefined fields before choosing an update or reset', () => {
+    expect(
+      normalizeModelDisplayPreference({ alias: undefined }),
+    ).toBeUndefined();
+    expect(
+      normalizeModelDisplayPreference({ alias: undefined, color: '#ff79c6' }),
+    ).toEqual({ color: '#ff79c6' });
+    expect(normalizeModelDisplayPreference({ alias: 'GPT' })).toEqual({
+      alias: 'GPT',
+    });
   });
 
   it('reuses one unambiguous model preference across provider identities', () => {
