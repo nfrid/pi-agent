@@ -650,6 +650,9 @@ button.shelfHeading:focus-visible {
   color: var(--dim);
   font-size: 10px;
 }
+:global(.agent-thread-card) {
+  margin: 6px 0;
+}
 .threadRow:global(.agent-thread-card) .threadLink {
   align-items: flex-start;
   padding: 6px 8px;
@@ -680,6 +683,7 @@ button.shelfHeading:focus-visible {
   min-width: 0;
   align-items: baseline;
   gap: 3px;
+  filter: saturate(0.5);
 }
 .threadWorkspaceSeparator {
   flex: none;

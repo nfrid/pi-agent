@@ -535,17 +535,11 @@ function AgentThreadLink({
             >
               {details.branch}
             </span>
-            <span className={styles.threadSeparator} aria-hidden="true">
-              ·
-            </span>
             <span
               className={styles.threadModel}
               style={details.model ? { color: details.model.color } : undefined}
             >
               {details.model?.alias ?? '? model'}
-            </span>
-            <span className={styles.threadSeparator} aria-hidden="true">
-              ·
             </span>
             <span
               className={styles.threadEffort}
