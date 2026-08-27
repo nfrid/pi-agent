@@ -226,7 +226,7 @@ export function usageLimitsWithActivity(
   history: UsageHistoryResponse | undefined,
   filterByHistory = true,
 ): readonly UsageLimit[] {
-  if (!history || !filterByHistory) return limits;
+  if (!history || !filterByHistory) return [];
   return limits.filter((limit) =>
     limitWindows(limit).some((window) =>
       history.series.some(
