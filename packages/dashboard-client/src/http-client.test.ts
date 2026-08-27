@@ -138,6 +138,9 @@ describe('DashboardHttpClient settings requests', () => {
       '/api/settings/model-display-preferences/openai%2Fgpt-5',
       expect.objectContaining({ method: 'DELETE' }),
     );
+    const deleteHeaders = fetch.mock.calls[2]?.[1]?.headers;
+    expect(deleteHeaders).toBeInstanceOf(Headers);
+    expect((deleteHeaders as Headers).has('content-type')).toBe(false);
   });
 });
 

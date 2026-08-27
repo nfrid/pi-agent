@@ -454,7 +454,12 @@ export class DashboardHttpClient {
   ): Promise<T> {
     const token = this.tokenStore.get();
     const headers = new Headers(init.headers);
-    if (!headers.has('content-type') && !(init.body instanceof FormData))
+    if (
+      init.body !== undefined &&
+      init.body !== null &&
+      !headers.has('content-type') &&
+      !(init.body instanceof FormData)
+    )
       headers.set('content-type', 'application/json');
     if (token && !headers.has('authorization'))
       headers.set('x-dashboard-token', token);
