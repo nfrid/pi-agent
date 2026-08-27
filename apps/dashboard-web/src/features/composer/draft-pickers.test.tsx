@@ -14,9 +14,13 @@ const { setDraftLocation, setDraftModel, modelPreferences } = vi.hoisted(
 vi.mock('@pi-dashboard/client', () => ({
   dashboardHttpClient: {},
   gitContextQueryOptions: () => ({ queryKey: ['git-context'] }),
+  importModelDisplayPreferencesMutationOptions: () => ({}),
   settingsQueryOptions: () => ({ queryKey: ['dashboard', 'settings'] }),
 }));
 vi.mock('@tanstack/react-query', () => ({
+  useMutation: () => ({
+    mutateAsync: async () => ({ modelDisplayPreferences: {} }),
+  }),
   useQueryClient: () => ({ setQueryData: vi.fn() }),
   useQuery: (options: { queryKey?: readonly unknown[] }) =>
     options.queryKey?.[1] === 'settings'

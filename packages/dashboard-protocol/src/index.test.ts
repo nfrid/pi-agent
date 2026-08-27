@@ -30,6 +30,7 @@ import {
   parseGitContext,
   parseLiveDiagnosticsRequest,
   parseLiveDiagnosticsResponse,
+  parseModelDisplayPreferenceImport,
   parseNormalizedMessagePayload,
   parsePinThreadCommand,
   parseProtocolInfo,
@@ -84,6 +85,15 @@ describe('dashboard protocol', () => {
         },
       }),
     ).toThrow();
+    expect(
+      parseModelDisplayPreferenceImport({
+        modelDisplayPreferences: {
+          'openai/gpt-5': { alias: 'GPT' },
+        },
+      }),
+    ).toEqual({
+      modelDisplayPreferences: { 'openai/gpt-5': { alias: 'GPT' } },
+    });
   });
 
   it('accepts bounded Git context and rejects unknown fields', () => {

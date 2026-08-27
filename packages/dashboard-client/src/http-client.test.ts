@@ -93,16 +93,18 @@ describe('DashboardHttpClient session images', () => {
 });
 
 describe('DashboardHttpClient settings requests', () => {
-  it('validates authenticated reads and full updates', async () => {
+  it('validates authenticated reads and atomic model updates', async () => {
     const settings = {
       modelDisplayPreferences: {
         'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
       },
     };
     const fetch = vi.fn(
-      async (_input: RequestInfo | URL, init?: RequestInit) => {
-        if (init?.method === 'PUT')
-          expect(JSON.parse(String(init.body))).toEqual(settings);
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('import'))
+          expect(JSON.parse(String(init?.body))).toEqual({
+            modelDisplayPreferences: settings.modelDisplayPreferences,
+          });
         return new Response(JSON.stringify(settings), { status: 200 });
       },
     );
@@ -112,7 +114,15 @@ describe('DashboardHttpClient settings requests', () => {
     });
 
     await expect(client.settings()).resolves.toEqual(settings);
-    await expect(client.updateSettings(settings)).resolves.toEqual(settings);
+    await expect(
+      client.updateModelDisplayPreference('openai/gpt-5', { alias: 'GPT' }),
+    ).resolves.toEqual(settings);
+    await expect(
+      client.resetModelDisplayPreference('openai/gpt-5'),
+    ).resolves.toEqual(settings);
+    await expect(
+      client.importModelDisplayPreferences(settings.modelDisplayPreferences),
+    ).resolves.toEqual(settings);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       '/api/settings',
@@ -120,8 +130,13 @@ describe('DashboardHttpClient settings requests', () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      '/api/settings',
+      '/api/settings/model-display-preferences/openai%2Fgpt-5',
       expect.objectContaining({ method: 'PUT' }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      '/api/settings/model-display-preferences/openai%2Fgpt-5',
+      expect.objectContaining({ method: 'DELETE' }),
     );
   });
 });

@@ -5,6 +5,8 @@ import type {
   DelegateHistoryResponse,
   DelegateHistoryRunDetailResponse,
   GitContext,
+  ModelDisplayPreference,
+  ModelDisplayPreferences,
   ProjectAdoptCommand,
   ProjectCreateCommand,
   ProjectRenameCommand,
@@ -295,11 +297,39 @@ export function settingsQueryOptions(client: DashboardHttpClient) {
   });
 }
 
-export function updateSettingsMutationOptions(client: DashboardHttpClient) {
-  return mutationOptions<DashboardSettings, Error, DashboardSettings>({
-    mutationFn: (settings) => client.updateSettings(settings),
+export function updateModelDisplayPreferenceMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<
+    DashboardSettings,
+    Error,
+    { modelKey: string; preference: ModelDisplayPreference }
+  >({
+    mutationFn: ({ modelKey, preference }) =>
+      client.updateModelDisplayPreference(modelKey, preference),
     retry: false,
-    scope: { id: 'dashboard-settings' },
+    scope: { id: 'dashboard-model-display-preferences' },
+  });
+}
+
+export function resetModelDisplayPreferenceMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<DashboardSettings, Error, { modelKey: string }>({
+    mutationFn: ({ modelKey }) => client.resetModelDisplayPreference(modelKey),
+    retry: false,
+    scope: { id: 'dashboard-model-display-preferences' },
+  });
+}
+
+export function importModelDisplayPreferencesMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<DashboardSettings, Error, ModelDisplayPreferences>({
+    mutationFn: (preferences) =>
+      client.importModelDisplayPreferences(preferences),
+    retry: false,
+    scope: { id: 'dashboard-model-display-preferences' },
   });
 }
 

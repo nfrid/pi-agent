@@ -1,11 +1,10 @@
-import type { DashboardSettings } from '@pi-dashboard/protocol';
+import { MAX_MODEL_DISPLAY_PREFERENCES } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  mergeModelDisplayPreferences,
   migrateModelDisplayPreferences,
   modelDisplayPreference,
   modelDisplayPreferenceKey,
-  readModelDisplayPreferences,
+  readStoredModelDisplayPreferences,
   removeStoredModelDisplayPreferences,
 } from './model-display-preferences';
 
@@ -32,10 +31,10 @@ describe('model display preferences', () => {
       expect(modelDisplayPreferenceKey('anthropic', 'claude-3')).toBe(
         'anthropic/claude-3',
       );
-      expect(readModelDisplayPreferences()).toEqual({
-        'anthropic/claude-3': { alias: 'Claude' },
+      expect(readStoredModelDisplayPreferences().preferences).toEqual({
         'openai/gpt-5': { alias: 'GPT', color: '#ff79c6' },
       });
+      expect(readStoredModelDisplayPreferences().complete).toBe(false);
       removeStoredModelDisplayPreferences();
       expect(
         values.get('pi-dashboard-model-display-preferences-v1'),
@@ -63,33 +62,23 @@ describe('model display preferences', () => {
         removeItem: (key: string) => values.delete(key),
       },
     });
-    const server = {
-      modelDisplayPreferences: {
-        'openai/gpt-5': { alias: 'Server name' },
-      },
-    } as const;
     const uploaded = {
       modelDisplayPreferences: {
         'openai/gpt-5': { alias: 'Server name' },
         'anthropic/claude-3': { alias: 'Claude' },
       },
     } as const;
-    const states: unknown[] = [];
+    const invalidate = vi.fn(async () => undefined);
     const update = vi.fn(async () => uploaded);
     try {
-      expect(
-        mergeModelDisplayPreferences(
-          server.modelDisplayPreferences,
-          readModelDisplayPreferences(),
-        ),
-      ).toEqual(uploaded.modelDisplayPreferences);
       await expect(
-        migrateModelDisplayPreferences(server, update, (settings) =>
-          states.push(settings),
-        ),
-      ).resolves.toEqual(uploaded);
-      expect(update).toHaveBeenCalledWith(uploaded);
-      expect(states).toEqual([uploaded, uploaded]);
+        migrateModelDisplayPreferences(update, invalidate),
+      ).resolves.toBe(true);
+      expect(update).toHaveBeenCalledWith({
+        'openai/gpt-5': { alias: 'Stale local' },
+        'anthropic/claude-3': { alias: 'Claude' },
+      });
+      expect(invalidate).toHaveBeenCalledOnce();
       expect(values.has('pi-dashboard-model-display-preferences-v1')).toBe(
         false,
       );
@@ -110,35 +99,83 @@ describe('model display preferences', () => {
         removeItem: (name: string) => values.delete(name),
       },
     });
-    const server: DashboardSettings = { modelDisplayPreferences: {} };
-    const states: unknown[] = [];
+    const invalidate = vi.fn(async () => undefined);
     let fail = true;
-    const update = vi.fn(async (settings: DashboardSettings) => {
+    const update = vi.fn(async (preferences) => {
       if (fail) {
         fail = false;
         throw new Error('offline');
       }
-      return settings;
+      return { modelDisplayPreferences: preferences };
     });
     try {
       await expect(
-        migrateModelDisplayPreferences(server, update, (settings) =>
-          states.push(settings),
-        ),
+        migrateModelDisplayPreferences(update, invalidate),
       ).rejects.toThrow('offline');
-      expect(states).toEqual([
-        { modelDisplayPreferences: { 'openai/gpt-5': { alias: 'GPT' } } },
-        server,
-      ]);
+      expect(invalidate).not.toHaveBeenCalled();
       expect(values.get(key)).toBeDefined();
       await expect(
-        migrateModelDisplayPreferences(server, update, (settings) =>
-          states.push(settings),
-        ),
-      ).resolves.toEqual({
-        modelDisplayPreferences: { 'openai/gpt-5': { alias: 'GPT' } },
-      });
+        migrateModelDisplayPreferences(update, invalidate),
+      ).resolves.toBe(true);
       expect(values.get(key)).toBeUndefined();
+    } finally {
+      delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
+  });
+
+  it('retains oversized local data instead of truncating and deleting it', async () => {
+    const key = 'pi-dashboard-model-display-preferences-v1';
+    const local = Object.fromEntries(
+      Array.from({ length: MAX_MODEL_DISPLAY_PREFERENCES + 1 }, (_, index) => [
+        `provider/model-${index}`,
+        { alias: `Model ${index}` },
+      ]),
+    );
+    const values = new Map([[key, JSON.stringify(local)]]);
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (name: string) => values.get(name) ?? null,
+        removeItem: (name: string) => values.delete(name),
+      },
+    });
+    const update = vi.fn();
+    const invalidate = vi.fn(async () => undefined);
+    try {
+      const parsed = readStoredModelDisplayPreferences();
+      expect(parsed.complete).toBe(false);
+      expect(Object.keys(parsed.preferences)).toHaveLength(
+        MAX_MODEL_DISPLAY_PREFERENCES + 1,
+      );
+      await expect(
+        migrateModelDisplayPreferences(update, invalidate),
+      ).resolves.toBe(false);
+      expect(update).not.toHaveBeenCalled();
+      expect(values.get(key)).toBeDefined();
+    } finally {
+      delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
+  });
+
+  it('retains malformed local data for a later migration attempt', async () => {
+    const key = 'pi-dashboard-model-display-preferences-v1';
+    const values = new Map([[key, '{"openai/gpt-5":null}']]);
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (name: string) => values.get(name) ?? null,
+        removeItem: (name: string) => values.delete(name),
+      },
+    });
+    const update = vi.fn();
+    const invalidate = vi.fn(async () => undefined);
+    try {
+      expect(readStoredModelDisplayPreferences().complete).toBe(false);
+      await expect(
+        migrateModelDisplayPreferences(update, invalidate),
+      ).resolves.toBe(false);
+      expect(values.get(key)).toBeDefined();
+      expect(update).not.toHaveBeenCalled();
     } finally {
       delete (globalThis as { localStorage?: unknown }).localStorage;
     }

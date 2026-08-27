@@ -13,6 +13,10 @@ import {
   type DelegateHistoryRunQuery,
   DelegateHistoryRunQuerySchema,
   GitContextSchema,
+  type ModelDisplayPreference,
+  ModelDisplayPreferenceImportSchema,
+  ModelDisplayPreferenceKeySchema,
+  ModelDisplayPreferenceSchema,
   PinThreadCommandSchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
@@ -125,7 +129,14 @@ export interface DashboardRouteContext {
   ): Promise<AuthoritativeSessionSnapshot>;
   usage(): Promise<{ usage: unknown; error?: string }>;
   settings?(): DashboardSettings;
-  updateSettings?(settings: DashboardSettings): DashboardSettings;
+  updateModelDisplayPreference?(
+    modelKey: string,
+    preference: ModelDisplayPreference,
+  ): DashboardSettings;
+  resetModelDisplayPreference?(modelKey: string): DashboardSettings;
+  importModelDisplayPreferences?(
+    preferences: DashboardSettings['modelDisplayPreferences'],
+  ): DashboardSettings;
   usageHistory?(
     range: UsageHistoryRange,
     before?: number,
@@ -290,7 +301,7 @@ function installCorsAndAuth(
       );
       reply.header(
         'access-control-allow-methods',
-        'GET, POST, PUT, PATCH, OPTIONS',
+        'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       );
       if (request.headers['access-control-request-private-network'] === 'true')
         reply.header('access-control-allow-private-network', 'true');
@@ -383,26 +394,66 @@ export const dashboardRoutes: FastifyPluginAsync<{
     { schema: { response: { 200: DashboardSettingsSchema } } },
     async () => context.settings?.() ?? { modelDisplayPreferences: {} },
   );
-  for (const method of ['PUT', 'PATCH'] as const) {
-    app[method.toLowerCase() as 'put' | 'patch'](
-      '/api/settings',
-      {
-        schema: {
-          body: DashboardSettingsSchema,
-          response: { 200: DashboardSettingsSchema },
-        },
+  app.post(
+    '/api/settings/model-display-preferences/import',
+    {
+      schema: {
+        body: ModelDisplayPreferenceImportSchema,
+        response: { 200: DashboardSettingsSchema },
       },
-      async (request, reply) => {
-        try {
-          return await requireOperation(context.updateSettings)(
-            request.body as DashboardSettings,
-          );
-        } catch (error) {
-          return sendError(reply, error);
-        }
+    },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.importModelDisplayPreferences)(
+          (
+            request.body as {
+              modelDisplayPreferences: DashboardSettings['modelDisplayPreferences'];
+            }
+          ).modelDisplayPreferences,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.put<{ Params: { modelKey: string } }>(
+    '/api/settings/model-display-preferences/:modelKey',
+    {
+      schema: {
+        params: Type.Object({ modelKey: ModelDisplayPreferenceKeySchema }),
+        body: ModelDisplayPreferenceSchema,
+        response: { 200: DashboardSettingsSchema },
       },
-    );
-  }
+    },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.updateModelDisplayPreference)(
+          request.params.modelKey,
+          request.body as ModelDisplayPreference,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.delete<{ Params: { modelKey: string } }>(
+    '/api/settings/model-display-preferences/:modelKey',
+    {
+      schema: {
+        params: Type.Object({ modelKey: ModelDisplayPreferenceKeySchema }),
+        response: { 200: DashboardSettingsSchema },
+      },
+    },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.resetModelDisplayPreference)(
+          request.params.modelKey,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.get('/api/usage', async (_request, reply) => {
     try {
       return await context.usage();

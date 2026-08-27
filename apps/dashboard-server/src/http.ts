@@ -259,8 +259,12 @@ export class DashboardServerImpl implements DashboardServer {
         this.buildSessionSnapshot(id, undefined, sequence),
       usage: () => this.application.usage.get(),
       settings: () => this.metadata.getDashboardSettings(),
-      updateSettings: (settings) =>
-        this.metadata.replaceDashboardSettings(settings),
+      updateModelDisplayPreference: (modelKey, preference) =>
+        this.metadata.updateModelDisplayPreference(modelKey, preference),
+      resetModelDisplayPreference: (modelKey) =>
+        this.metadata.resetModelDisplayPreference(modelKey),
+      importModelDisplayPreferences: (preferences) =>
+        this.metadata.importModelDisplayPreferences(preferences),
       usageHistory: (range, before) =>
         this.application.usage.history(range, before),
       readDelegateHistory: (id) => this.delegateHistoryResult(id),

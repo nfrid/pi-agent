@@ -3,6 +3,8 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type {
   DashboardSettings,
+  ModelDisplayPreference,
+  ModelDisplayPreferences,
   NotificationEvent,
   RuntimeLocation,
   RuntimeSnapshot,
@@ -120,8 +122,21 @@ export class MetadataStore {
     };
   }
 
-  replaceDashboardSettings(settings: DashboardSettings): DashboardSettings {
-    return this.modelDisplayPreferences.replace(settings);
+  updateModelDisplayPreference(
+    modelKey: string,
+    preference: ModelDisplayPreference,
+  ): DashboardSettings {
+    return this.modelDisplayPreferences.set(modelKey, preference);
+  }
+
+  resetModelDisplayPreference(modelKey: string): DashboardSettings {
+    return this.modelDisplayPreferences.reset(modelKey);
+  }
+
+  importModelDisplayPreferences(
+    preferences: ModelDisplayPreferences,
+  ): DashboardSettings {
+    return this.modelDisplayPreferences.importMissing(preferences);
   }
 
   addNotification(event: NotificationEvent): void {

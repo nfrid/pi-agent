@@ -43,6 +43,12 @@ it('applies numbered dashboard migrations idempotently', async () => {
         )
         .get(),
     ).toEqual({ name: 'model_display_preference' });
+    expect(
+      db
+        .prepare('PRAGMA table_info(model_display_preference)')
+        .all()
+        .find((row) => row.name === 'model_key'),
+    ).toMatchObject({ notnull: 1 });
     expect(columns.find((row) => row.name === 'workspace_id')).toMatchObject({
       notnull: 0,
     });

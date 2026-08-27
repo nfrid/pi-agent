@@ -11,6 +11,8 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   type GitContext,
+  type ModelDisplayPreference,
+  type ModelDisplayPreferences,
   type PinThreadCommand,
   type Project,
   type ProjectAdoptCommand,
@@ -267,6 +269,14 @@ function dashboardErrorFromTrpc(cause: unknown): DashboardHttpError {
 
 export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
   return tryParseBrowserSnapshot(value);
+}
+
+function parseSettingsResponse(value: unknown): DashboardSettings {
+  try {
+    return parseDashboardSettings(value);
+  } catch {
+    throw malformedOutput('Dashboard returned invalid settings data.', value);
+  }
 }
 
 export function asSessionResponse(
@@ -667,29 +677,41 @@ export class DashboardHttpClient {
       '/api/settings',
       signal ? { signal } : {},
     );
-    try {
-      return parseDashboardSettings(value);
-    } catch {
-      throw malformedOutput('Dashboard returned invalid settings data.', value);
-    }
+    return parseSettingsResponse(value);
   }
 
-  async getSettings(signal?: AbortSignal): Promise<DashboardSettings> {
-    return this.settings(signal);
-  }
-
-  async updateSettings(
-    settings: DashboardSettings,
+  async updateModelDisplayPreference(
+    modelKey: string,
+    preference: ModelDisplayPreference,
   ): Promise<DashboardSettings> {
-    const value = await this.request<unknown>('/api/settings', {
-      method: 'PUT',
-      body: JSON.stringify(settings),
-    });
-    try {
-      return parseDashboardSettings(value);
-    } catch {
-      throw malformedOutput('Dashboard returned invalid settings data.', value);
-    }
+    const value = await this.request<unknown>(
+      `/api/settings/model-display-preferences/${encodeURIComponent(modelKey)}`,
+      { method: 'PUT', body: JSON.stringify(preference) },
+    );
+    return parseSettingsResponse(value);
+  }
+
+  async resetModelDisplayPreference(
+    modelKey: string,
+  ): Promise<DashboardSettings> {
+    const value = await this.request<unknown>(
+      `/api/settings/model-display-preferences/${encodeURIComponent(modelKey)}`,
+      { method: 'DELETE' },
+    );
+    return parseSettingsResponse(value);
+  }
+
+  async importModelDisplayPreferences(
+    preferences: ModelDisplayPreferences,
+  ): Promise<DashboardSettings> {
+    const value = await this.request<unknown>(
+      '/api/settings/model-display-preferences/import',
+      {
+        method: 'POST',
+        body: JSON.stringify({ modelDisplayPreferences: preferences }),
+      },
+    );
+    return parseSettingsResponse(value);
   }
 
   async usageHistory(

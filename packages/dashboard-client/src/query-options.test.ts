@@ -12,9 +12,11 @@ import {
   dashboardQueryKeys,
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
+  importModelDisplayPreferencesMutationOptions,
   pinThreadMutationOptions,
   regenerateThreadTitleMutationOptions,
   renameSessionMutationOptions,
+  resetModelDisplayPreferenceMutationOptions,
   restartRuntimeMutationOptions,
   restoreThreadMutationOptions,
   settingsQueryOptions,
@@ -25,7 +27,7 @@ import {
   stopRuntimeMutationOptions,
   unpinThreadMutationOptions,
   unsettleThreadMutationOptions,
-  updateSettingsMutationOptions,
+  updateModelDisplayPreferenceMutationOptions,
   usageHistoryQueryOptions,
 } from './query-options.js';
 import { DashboardLiveStore } from './store.js';
@@ -36,7 +38,7 @@ const client = {
 } as unknown as DashboardHttpClient;
 
 describe('dashboard query and mutation factories', () => {
-  it('queries and updates typed dashboard settings with refreshes', async () => {
+  it('queries and atomically updates typed model settings', async () => {
     const settings = vi.fn(async () => ({ modelDisplayPreferences: {} }));
     const options = settingsQueryOptions({
       settings,
@@ -52,18 +54,43 @@ describe('dashboard query and mutation factories', () => {
     });
     expect(settings).toHaveBeenCalledWith(undefined);
 
-    const updateSettings = vi.fn(async (value: unknown) => value);
-    const mutation = updateSettingsMutationOptions({
-      updateSettings,
+    const updateModelDisplayPreference = vi.fn(
+      async (key: string, preference: unknown) => ({
+        modelDisplayPreferences: { [key]: preference },
+      }),
+    );
+    const mutation = updateModelDisplayPreferenceMutationOptions({
+      updateModelDisplayPreference,
     } as unknown as DashboardHttpClient);
     if (!mutation.mutationFn) throw new Error('Mutation function is missing.');
     await expect(
-      mutation.mutationFn({ modelDisplayPreferences: {} }, undefined as never),
-    ).resolves.toEqual({ modelDisplayPreferences: {} });
-    expect(updateSettings).toHaveBeenCalledWith({
-      modelDisplayPreferences: {},
+      mutation.mutationFn(
+        { modelKey: 'openai/gpt-5', preference: { alias: 'GPT' } },
+        undefined as never,
+      ),
+    ).resolves.toEqual({
+      modelDisplayPreferences: { 'openai/gpt-5': { alias: 'GPT' } },
     });
-    expect(mutation.scope).toEqual({ id: 'dashboard-settings' });
+    expect(updateModelDisplayPreference).toHaveBeenCalledWith('openai/gpt-5', {
+      alias: 'GPT',
+    });
+    expect(mutation.scope).toEqual({
+      id: 'dashboard-model-display-preferences',
+    });
+    const reset = resetModelDisplayPreferenceMutationOptions({
+      resetModelDisplayPreference: vi.fn(async () => ({
+        modelDisplayPreferences: {},
+      })),
+    } as unknown as DashboardHttpClient);
+    expect(reset.scope).toEqual({
+      id: 'dashboard-model-display-preferences',
+    });
+    const imported = importModelDisplayPreferencesMutationOptions({
+      importModelDisplayPreferences: vi.fn(),
+    } as unknown as DashboardHttpClient);
+    expect(imported.scope).toEqual({
+      id: 'dashboard-model-display-preferences',
+    });
   });
 
   it('refreshes open usage history views once a minute', async () => {

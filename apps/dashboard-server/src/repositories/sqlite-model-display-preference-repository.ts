@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   type DashboardSettings,
   MAX_MODEL_DISPLAY_PREFERENCES,
+  type ModelDisplayPreference,
+  type ModelDisplayPreferences,
   parseDashboardSettings,
 } from '@pi-dashboard/protocol';
 import type { ModelDisplayPreferenceRepository } from './types.js';
@@ -28,29 +30,56 @@ export class SqliteModelDisplayPreferenceRepository
     return parseDashboardSettings({ modelDisplayPreferences: preferences });
   }
 
-  replace(settings: DashboardSettings): DashboardSettings {
-    const next = parseDashboardSettings(settings);
-    if (
-      Object.keys(next.modelDisplayPreferences).length >
-      MAX_MODEL_DISPLAY_PREFERENCES
-    )
-      throw new Error('Too many model display preferences.');
+  set(modelKey: string, preference: ModelDisplayPreference): DashboardSettings {
+    const parsed = parseDashboardSettings({
+      modelDisplayPreferences: { [modelKey]: preference },
+    }).modelDisplayPreferences[modelKey];
+    // The schema above guarantees this key exists for a valid modelKey.
+    if (!parsed) throw new Error('Invalid model display preference key.');
+    return this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO model_display_preference (model_key,alias,color)
+           VALUES (?,?,?)
+           ON CONFLICT(model_key) DO UPDATE SET alias=excluded.alias,color=excluded.color`,
+        )
+        .run(modelKey, parsed.alias ?? null, parsed.color ?? null);
+    });
+  }
 
-    this.db.exec('BEGIN');
-    try {
-      this.db.exec('DELETE FROM model_display_preference');
+  reset(modelKey: string): DashboardSettings {
+    parseDashboardSettings({ modelDisplayPreferences: { [modelKey]: {} } });
+    return this.transaction(() => {
+      this.db
+        .prepare('DELETE FROM model_display_preference WHERE model_key=?')
+        .run(modelKey);
+    });
+  }
+
+  importMissing(preferences: ModelDisplayPreferences): DashboardSettings {
+    const parsed = parseDashboardSettings({
+      modelDisplayPreferences: preferences,
+    }).modelDisplayPreferences;
+    if (Object.keys(parsed).length > MAX_MODEL_DISPLAY_PREFERENCES)
+      throw new Error('Too many model display preferences.');
+    return this.transaction(() => {
       const insert = this.db.prepare(
-        'INSERT INTO model_display_preference (model_key,alias,color) VALUES (?,?,?)',
+        `INSERT OR IGNORE INTO model_display_preference
+         (model_key,alias,color) VALUES (?,?,?)`,
       );
-      for (const [modelKey, preference] of Object.entries(
-        next.modelDisplayPreferences,
-      )) {
+      for (const [modelKey, preference] of Object.entries(parsed))
         insert.run(
           modelKey,
           preference.alias ?? null,
           preference.color ?? null,
         );
-      }
+    });
+  }
+
+  private transaction(operation: () => void): DashboardSettings {
+    this.db.exec('BEGIN');
+    try {
+      operation();
       this.db.exec('COMMIT');
     } catch (error) {
       try {

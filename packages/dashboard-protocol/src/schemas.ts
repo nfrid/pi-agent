@@ -264,7 +264,7 @@ export type ModelDisplayPreference = Static<
   typeof ModelDisplayPreferenceSchema
 >;
 
-const ModelDisplayPreferenceKeySchema = Type.String({
+export const ModelDisplayPreferenceKeySchema = Type.String({
   minLength: 1,
   maxLength: MAX_MODEL_DISPLAY_PREFERENCE_KEY,
   pattern: '^[^\\u0000-\\u001F\\u007F]*$',
@@ -284,6 +284,14 @@ export const DashboardSettingsSchema = Type.Object(
   { additionalProperties: false },
 );
 export type DashboardSettings = Static<typeof DashboardSettingsSchema>;
+
+export const ModelDisplayPreferenceImportSchema = Type.Object(
+  { modelDisplayPreferences: ModelDisplayPreferencesSchema },
+  { additionalProperties: false },
+);
+export type ModelDisplayPreferenceImport = Static<
+  typeof ModelDisplayPreferenceImportSchema
+>;
 
 const FiniteNumberSchema = Type.Number();
 const UnknownSchema = Type.Unknown();

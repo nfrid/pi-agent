@@ -1,6 +1,7 @@
 import {
   dashboardHttpClient,
   dashboardQueryKeys,
+  importModelDisplayPreferencesMutationOptions,
   settingsQueryOptions,
 } from '@pi-dashboard/client';
 import type {
@@ -13,14 +14,20 @@ import {
   MAX_MODEL_DISPLAY_PREFERENCE_KEY,
   MAX_MODEL_DISPLAY_PREFERENCES,
 } from '@pi-dashboard/protocol';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 
 export type { ModelDisplayPreference, ModelDisplayPreferences };
 
 const STORAGE_KEY = 'pi-dashboard-model-display-preferences-v1';
 const EMPTY_MODEL_DISPLAY_PREFERENCES: ModelDisplayPreferences = {};
 let migrationStarted = false;
+
+export interface StoredModelDisplayPreferences {
+  preferences: ModelDisplayPreferences;
+  /** False when valid local entries cannot all fit the server contract. */
+  complete: boolean;
+}
 
 export function modelDisplayPreferenceKey(
   provider: string,
@@ -30,49 +37,61 @@ export function modelDisplayPreferenceKey(
 }
 
 /** Read the pre-server v1 store for one-time migration only. */
-export function readModelDisplayPreferences(): ModelDisplayPreferences {
+export function readStoredModelDisplayPreferences(): StoredModelDisplayPreferences {
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
-    if (!raw) return {};
+    if (!raw) return { preferences: {}, complete: true };
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-      return {};
-    const preferences: ModelDisplayPreferences = {};
+      return { preferences: {}, complete: false };
+    const entries: Array<[string, ModelDisplayPreference]> = [];
+    let complete = true;
     for (const [key, value] of Object.entries(parsed)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        complete = false;
+        continue;
+      }
+      const candidate = value as Record<string, unknown>;
+      const hasAlias = candidate.alias !== undefined;
+      const hasColor = candidate.color !== undefined;
+      const validAlias =
+        !hasAlias ||
+        (typeof candidate.alias === 'string' &&
+          candidate.alias.length <= MAX_MODEL_DISPLAY_ALIAS);
+      const validColor =
+        !hasColor ||
+        (typeof candidate.color === 'string' &&
+          /^#[0-9a-f]{6}$/i.test(candidate.color));
+      if (!validAlias || !validColor) {
+        complete = false;
+        continue;
+      }
+      const alias = hasAlias ? (candidate.alias as string) : undefined;
+      const color = hasColor ? (candidate.color as string) : undefined;
+      if (alias === undefined && color === undefined) continue;
       if (
         !key ||
         key.length > MAX_MODEL_DISPLAY_PREFERENCE_KEY ||
         Array.from(key).some((character) => {
           const code = character.charCodeAt(0);
           return code < 32 || code === 127;
-        }) ||
-        !value ||
-        typeof value !== 'object' ||
-        Array.isArray(value)
-      )
+        })
+      ) {
+        complete = false;
         continue;
-      const candidate = value as Record<string, unknown>;
-      const alias =
-        typeof candidate.alias === 'string' &&
-        candidate.alias.length <= MAX_MODEL_DISPLAY_ALIAS
-          ? candidate.alias
-          : undefined;
-      const color =
-        typeof candidate.color === 'string' &&
-        /^#[0-9a-f]{6}$/i.test(candidate.color)
-          ? candidate.color
-          : undefined;
-      if (alias !== undefined || color !== undefined)
-        preferences[key] = {
+      }
+      entries.push([
+        key,
+        {
           ...(alias === undefined ? {} : { alias }),
           ...(color === undefined ? {} : { color }),
-        };
+        },
+      ]);
     }
-    return Object.fromEntries(
-      Object.entries(preferences).slice(0, MAX_MODEL_DISPLAY_PREFERENCES),
-    );
+    if (entries.length > MAX_MODEL_DISPLAY_PREFERENCES) complete = false;
+    return { preferences: Object.fromEntries(entries), complete };
   } catch {
-    return {};
+    return { preferences: {}, complete: false };
   }
 }
 
@@ -84,97 +103,55 @@ export function removeStoredModelDisplayPreferences(): void {
   }
 }
 
-export function mergeModelDisplayPreferences(
-  server: ModelDisplayPreferences,
-  local: ModelDisplayPreferences,
-): ModelDisplayPreferences {
-  const merged = { ...server };
-  for (const [key, preference] of Object.entries(local)) {
-    if (
-      merged[key] === undefined &&
-      Object.keys(merged).length < MAX_MODEL_DISPLAY_PREFERENCES
-    )
-      merged[key] = preference;
-  }
-  return merged;
-}
-
+/** Import local v1 values atomically on the server, then refresh its query. */
 export async function migrateModelDisplayPreferences(
-  settings: DashboardSettings,
-  update: (settings: DashboardSettings) => Promise<DashboardSettings>,
-  setSettings: (settings: DashboardSettings) => void,
-): Promise<DashboardSettings> {
-  const local = readModelDisplayPreferences();
-  const merged = mergeModelDisplayPreferences(
-    settings.modelDisplayPreferences,
-    local,
-  );
-  const localKeys = Object.keys(local);
-  const hasMissingLocalPreference = localKeys.some(
-    (key) =>
-      settings.modelDisplayPreferences[key] === undefined &&
-      merged[key] !== undefined,
-  );
-  if (!hasMissingLocalPreference) {
-    if (
-      localKeys.length === 0 ||
-      localKeys.every(
-        (key) => settings.modelDisplayPreferences[key] !== undefined,
-      )
-    )
-      removeStoredModelDisplayPreferences();
-    return settings;
-  }
-  const mergedSettings = {
-    ...settings,
-    modelDisplayPreferences: merged,
-  };
-  setSettings(mergedSettings);
-  try {
-    const updated = await update(mergedSettings);
-    setSettings(updated);
+  importMissing: (
+    preferences: ModelDisplayPreferences,
+  ) => Promise<DashboardSettings>,
+  invalidate: () => Promise<unknown>,
+): Promise<boolean> {
+  const local = readStoredModelDisplayPreferences();
+  if (!local.complete) return false;
+  if (Object.keys(local.preferences).length === 0) {
     removeStoredModelDisplayPreferences();
-    return updated;
-  } catch (error) {
-    setSettings(settings);
-    throw error;
+    return false;
   }
+  await importMissing(local.preferences);
+  removeStoredModelDisplayPreferences();
+  await invalidate();
+  return true;
 }
 
 /** Query-backed server state with a one-time local-v1 migration. */
 export function useModelDisplayPreferences(): ModelDisplayPreferences {
   const query = useQuery(settingsQueryOptions(dashboardHttpClient));
+  const importMutation = useMutation(
+    importModelDisplayPreferencesMutationOptions(dashboardHttpClient),
+  );
+  const importPreferences = importMutation.mutateAsync;
   const queryClient = useQueryClient();
-  const [migrationPreferences, setMigrationPreferences] = useState<
-    ModelDisplayPreferences | undefined
-  >();
   const attempted = useRef(false);
   useEffect(() => {
     if (!query.data || attempted.current || migrationStarted) return;
     attempted.current = true;
     migrationStarted = true;
-    const serverSettings = query.data;
     void migrateModelDisplayPreferences(
-      serverSettings,
-      (settings) => dashboardHttpClient.updateSettings(settings),
-      (settings) => {
-        setMigrationPreferences(settings.modelDisplayPreferences);
-        queryClient.setQueryData(dashboardQueryKeys.settings(), settings);
-      },
+      (preferences) => importPreferences(preferences),
+      () =>
+        queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.settings(),
+        }),
     ).then(
-      () => undefined,
+      () => {
+        migrationStarted = false;
+      },
       () => {
         migrationStarted = false;
         attempted.current = false;
-        setMigrationPreferences(undefined);
       },
     );
-  }, [query.data, queryClient]);
-  return (
-    migrationPreferences ??
-    query.data?.modelDisplayPreferences ??
-    EMPTY_MODEL_DISPLAY_PREFERENCES
-  );
+  }, [importPreferences, query.data, queryClient]);
+  return query.data?.modelDisplayPreferences ?? EMPTY_MODEL_DISPLAY_PREFERENCES;
 }
 
 export function modelDisplayPreference(

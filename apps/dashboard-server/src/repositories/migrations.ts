@@ -808,7 +808,7 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
     up(db) {
       db.exec(`
         CREATE TABLE model_display_preference (
-          model_key TEXT PRIMARY KEY
+          model_key TEXT NOT NULL PRIMARY KEY
             CHECK (length(model_key) BETWEEN 1 AND 512),
           alias TEXT
             CHECK (alias IS NULL OR length(alias) BETWEEN 0 AND 80),

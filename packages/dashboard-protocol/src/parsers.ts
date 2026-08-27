@@ -45,6 +45,8 @@ import {
   type LiveDiagnosticsResponse,
   LiveDiagnosticsResponseSchema,
   MAX_FRAME_BYTES,
+  type ModelDisplayPreferenceImport,
+  ModelDisplayPreferenceImportSchema,
   type NormalizedMessagePayload,
   NormalizedMessagePayloadSchema,
   type NormalizedToolPayload,
@@ -124,6 +126,20 @@ export const tryParseDashboardSettings = (
   value: unknown,
 ): DashboardSettings | undefined =>
   tryParseSchema(DashboardSettingsSchema, value);
+
+export function parseModelDisplayPreferenceImport(
+  value: unknown,
+): ModelDisplayPreferenceImport {
+  return parseSchema(
+    ModelDisplayPreferenceImportSchema,
+    value,
+    'model display preference import',
+  );
+}
+export const tryParseModelDisplayPreferenceImport = (
+  value: unknown,
+): ModelDisplayPreferenceImport | undefined =>
+  tryParseSchema(ModelDisplayPreferenceImportSchema, value);
 
 export function parseGitContext(value: unknown): GitContext {
   return parseSchema(GitContextSchema, value, 'git context');
