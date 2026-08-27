@@ -1,251 +1,193 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  TurnEndEvent,
-} from '@earendil-works/pi-coding-agent';
-import { describe, expect, test, vi } from 'vitest';
-import { hasPendingProcesses } from '../shared/runtime/pending-processes';
-import midRunCompaction, { shouldCompactMidRun } from './index';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import {
+  installMidturnCompactionShim,
+  type MidturnCompactionRuntime,
+} from './runtime.js';
 
-function context(tokens: number | null, contextWindow = 200_000) {
-  return {
-    getContextUsage: () => ({
-      tokens,
-      contextWindow,
-      percent: tokens === null ? null : (tokens / contextWindow) * 100,
-    }),
-  } as ExtensionContext;
+interface FakeContext {
+  messages: Array<{ role?: string }>;
+  systemPrompt?: string;
+  tools?: unknown[];
 }
 
-function turnEnd(toolResults: number | string[]): TurnEndEvent {
-  const contents =
-    typeof toolResults === 'number'
-      ? Array.from({ length: toolResults }, () => '')
-      : toolResults;
-  return {
-    type: 'turn_end',
-    turnIndex: 0,
-    message: {} as TurnEndEvent['message'],
-    toolResults: contents.map((text, index) => ({
-      role: 'toolResult',
-      toolCallId: `call-${index}`,
-      toolName: 'read',
-      content: [{ type: 'text', text }],
-      isError: false,
-      timestamp: 1,
-    })),
-  };
-}
-
-describe('mid-run compaction', () => {
-  test('uses conservative dynamic headroom only during tool loops', () => {
-    expect(shouldCompactMidRun(turnEnd(1), context(160_000))).toBe(false);
-    expect(shouldCompactMidRun(turnEnd(1), context(180_000))).toBe(true);
-    expect(shouldCompactMidRun(turnEnd(0), context(190_000))).toBe(false);
-    expect(shouldCompactMidRun(turnEnd(1), context(null))).toBe(false);
-
-    expect(shouldCompactMidRun(turnEnd(1), context(90_000, 128_000))).toBe(
-      false,
-    );
-    expect(shouldCompactMidRun(turnEnd(1), context(100_000, 128_000))).toBe(
-      true,
-    );
-  });
-
-  test('accounts for the completed tool batch before the next request', () => {
-    const nearLimit = context(231_655, 272 * 1024);
-    expect(shouldCompactMidRun(turnEnd(1), nearLimit)).toBe(false);
-    expect(
-      shouldCompactMidRun(turnEnd(['x'.repeat(31 * 1024)]), nearLimit),
-    ).toBe(true);
-  });
-
-  test('awaits one compaction before resuming through a hidden custom message', async () => {
-    let turnEndHandler:
-      | ((event: TurnEndEvent, ctx: ExtensionContext) => void | Promise<void>)
-      | undefined;
-    const sendMessage = vi.fn();
-    const api = {
-      on: vi.fn((name: string, handler: typeof turnEndHandler) => {
-        if (name === 'turn_end') turnEndHandler = handler;
-      }),
-      sendMessage,
-    } as unknown as ExtensionAPI;
-    midRunCompaction(api);
-
-    let onComplete: (() => void) | undefined;
-    const compact = vi.fn(
-      (options: { onComplete?: () => void }) =>
-        (onComplete = options.onComplete),
-    );
-    const ctx = {
-      ...context(180_000),
-      compact,
-      ui: { setStatus: vi.fn(), notify: vi.fn() },
-    } as unknown as ExtensionContext;
-
-    const waiting = turnEndHandler?.(turnEnd(1), ctx);
-    turnEndHandler?.(turnEnd(1), ctx);
-    expect(compact).toHaveBeenCalledTimes(1);
-    expect(hasPendingProcesses()).toBe(true);
-    let handlerSettled = false;
-    void waiting?.then(() => {
-      handlerSettled = true;
-    });
-    await Promise.resolve();
-    expect(handlerSettled).toBe(false);
-
-    onComplete?.();
-    await waiting;
-    expect(handlerSettled).toBe(true);
-    expect(hasPendingProcesses()).toBe(false);
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customType: 'mid-run-compaction',
-        display: false,
-      }),
-      { triggerTurn: true, deliverAs: 'followUp' },
-    );
-  });
-
-  test('isolates replacement work from stale lifecycle and duplicate callbacks', () => {
-    let turnEndHandler:
-      | ((event: TurnEndEvent, ctx: ExtensionContext) => void)
-      | undefined;
-    type LifecycleHandler = (event: unknown, ctx: ExtensionContext) => void;
-    let shutdownHandler: LifecycleHandler | undefined;
-    let startHandler: LifecycleHandler | undefined;
-    const sendMessage = vi.fn();
-    const api = {
-      on: vi.fn((name: string, handler: unknown) => {
-        if (name === 'turn_end')
-          turnEndHandler = handler as typeof turnEndHandler;
-        if (name === 'session_start')
-          startHandler = handler as LifecycleHandler;
-        if (name === 'session_shutdown')
-          shutdownHandler = handler as LifecycleHandler;
-      }),
-      sendMessage,
-    } as unknown as ExtensionAPI;
-    midRunCompaction(api);
-
-    let oldOnError: ((error: Error) => void) | undefined;
-    let stale = false;
-    const oldContext = {
-      ...context(180_000),
-      sessionManager: {},
-      compact: vi.fn(
-        (options: { onError?: (error: Error) => void }) =>
-          (oldOnError = options.onError),
-      ),
-      ui: {
-        setStatus: vi.fn(() => {
-          if (stale) throw new Error('stale context');
-        }),
-        notify: vi.fn(() => {
-          if (stale) throw new Error('stale context');
-        }),
+function fakeRuntime(options: {
+  tokens: number;
+  compact?: () => Promise<boolean>;
+}) {
+  class FakeAgentSession {
+    agent = {
+      prepareNextTurnWithContext: undefined as
+        | ((
+            turn: { context: FakeContext; toolResults: unknown[] },
+            signal?: AbortSignal,
+          ) => Promise<{ context: FakeContext }>)
+        | undefined,
+      state: {
+        messages: [{ role: 'assistant' }],
+        model: { contextWindow: 272_000 },
       },
-    } as unknown as ExtensionContext;
+    };
+    settingsManager = {
+      getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384 }),
+    };
+    leafId = 'tool-result-leaf';
+    sessionManager = {
+      getLeafId: vi.fn(() => this.leafId),
+      appendCustomMessageEntry: vi.fn(() => {
+        this.leafId = 'continuation-marker';
+        return this.leafId;
+      }),
+      buildSessionContext: vi.fn(() => ({
+        messages:
+          this.leafId === 'continuation-marker'
+            ? [{ role: 'custom' }]
+            : [{ role: 'toolResult' }],
+      })),
+      branch: vi.fn((entryId: string) => {
+        this.leafId = entryId;
+      }),
+    };
+    compact = vi.fn(options.compact ?? (async () => true));
 
-    turnEndHandler?.(turnEnd(1), oldContext);
-    expect(hasPendingProcesses()).toBe(true);
-    shutdownHandler?.({}, oldContext);
-    expect(hasPendingProcesses()).toBe(false);
+    constructor() {
+      this._installAgentNextTurnRefresh();
+    }
 
-    let newOnComplete: (() => void) | undefined;
-    const newContext = {
-      ...context(180_000),
-      sessionManager: {},
-      compact: vi.fn(
-        (options: { onComplete?: () => void }) =>
-          (newOnComplete = options.onComplete),
-      ),
-      ui: { setStatus: vi.fn(), notify: vi.fn() },
-    } as unknown as ExtensionContext;
-    startHandler?.({}, newContext);
-    turnEndHandler?.(turnEnd(1), newContext);
-    expect(hasPendingProcesses()).toBe(true);
+    _installAgentNextTurnRefresh() {
+      this.agent.prepareNextTurnWithContext = async (turn) => ({
+        context: {
+          ...turn.context,
+          systemPrompt: 'refreshed',
+        },
+      });
+    }
 
-    stale = true;
-    shutdownHandler?.({}, oldContext);
-    expect(hasPendingProcesses()).toBe(true);
-    expect(() => oldOnError?.(new Error('late failure'))).not.toThrow();
-    expect(hasPendingProcesses()).toBe(true);
-    expect(sendMessage).not.toHaveBeenCalled();
+    async _runAutoCompaction(
+      _reason: 'threshold',
+      _willRetry: boolean,
+    ): Promise<boolean> {
+      return this.compact();
+    }
+  }
 
-    newOnComplete?.();
-    newOnComplete?.();
-    expect(hasPendingProcesses()).toBe(false);
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+  const shouldCompact = vi.fn(
+    (
+      tokens: number,
+      contextWindow: number,
+      settings: { reserveTokens: number },
+    ) => tokens > contextWindow - settings.reserveTokens,
+  );
+  const runtime = {
+    AgentSession: FakeAgentSession,
+    estimateContextTokens: vi.fn(() => ({ tokens: options.tokens })),
+    shouldCompact,
+  } as unknown as MidturnCompactionRuntime;
+  installMidturnCompactionShim(runtime);
+  return { FakeAgentSession, runtime, shouldCompact };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('mid-run compaction runtime shim', () => {
+  test('awaits native compaction and returns rebuilt messages before the next turn', async () => {
+    const order: string[] = [];
+    let session: InstanceType<
+      ReturnType<typeof fakeRuntime>['FakeAgentSession']
+    >;
+    const setup = fakeRuntime({
+      tokens: 260_000,
+      compact: async () => {
+        order.push('compact:start');
+        await Promise.resolve();
+        session.agent.state.messages = [{ role: 'user' }];
+        order.push('compact:end');
+        return true;
+      },
+    });
+    session = new setup.FakeAgentSession();
+
+    const snapshot = await session.agent.prepareNextTurnWithContext?.({
+      context: { messages: [{ role: 'toolResult' }] },
+      toolResults: [{}],
+    });
+    order.push('next-request');
+
+    expect(order).toEqual(['compact:start', 'compact:end', 'next-request']);
+    expect(snapshot?.context.messages).toBe(session.agent.state.messages);
+    expect(snapshot?.context.systemPrompt).toBe('refreshed');
+    expect(session.compact).toHaveBeenCalledOnce();
+    expect(session.compact).toHaveBeenCalledWith();
+    expect(
+      session.sessionManager.appendCustomMessageEntry,
+    ).toHaveBeenCalledWith('pi-mid-run-compaction-continue', [], false);
+    expect(setup.shouldCompact).toHaveBeenCalledWith(260_000, 272_000, {
+      enabled: true,
+      reserveTokens: 16_384,
+    });
   });
 
-  test('cleans pending accounting when compaction setup throws', () => {
-    let turnEndHandler:
-      | ((event: TurnEndEvent, ctx: ExtensionContext) => void)
-      | undefined;
-    const sendMessage = vi.fn();
-    const api = {
-      on: vi.fn((name: string, handler: typeof turnEndHandler) => {
-        if (name === 'turn_end') turnEndHandler = handler;
-      }),
-      sendMessage,
-    } as unknown as ExtensionAPI;
-    midRunCompaction(api);
+  test('uses Pi policy and skips compaction below its configured threshold', async () => {
+    const { FakeAgentSession, shouldCompact } = fakeRuntime({
+      tokens: 250_000,
+    });
+    const session = new FakeAgentSession();
 
-    const ctx = {
-      ...context(180_000),
-      compact: vi.fn(() => {
-        throw new Error('setup failed');
-      }),
-      ui: { setStatus: vi.fn(), notify: vi.fn() },
-    } as unknown as ExtensionContext;
+    const originalMessages = [{ role: 'toolResult' }];
+    const snapshot = await session.agent.prepareNextTurnWithContext?.({
+      context: { messages: originalMessages },
+      toolResults: [{}],
+    });
 
-    expect(() => turnEndHandler?.(turnEnd(1), ctx)).not.toThrow();
-    expect(hasPendingProcesses()).toBe(false);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining('setup failed'),
-      'warning',
-    );
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(shouldCompact).toHaveBeenCalledOnce();
+    expect(session.compact).not.toHaveBeenCalled();
+    expect(snapshot?.context.messages).toBe(originalMessages);
   });
 
-  test('resumes but disables further attempts after compaction fails', () => {
-    let turnEndHandler:
-      | ((event: TurnEndEvent, ctx: ExtensionContext) => void)
-      | undefined;
-    const sendMessage = vi.fn();
-    const api = {
-      on: vi.fn((name: string, handler: typeof turnEndHandler) => {
-        if (name === 'turn_end') turnEndHandler = handler;
-      }),
-      sendMessage,
-    } as unknown as ExtensionAPI;
-    midRunCompaction(api);
+  test('rolls back the invisible boundary when native compaction cannot run', async () => {
+    const { FakeAgentSession } = fakeRuntime({
+      tokens: 260_000,
+      compact: async () => false,
+    });
+    const session = new FakeAgentSession();
 
-    let onError: ((error: Error) => void) | undefined;
-    const compact = vi.fn(
-      (options: { onError?: (error: Error) => void }) =>
-        (onError = options.onError),
+    const snapshot = await session.agent.prepareNextTurnWithContext?.({
+      context: { messages: [{ role: 'toolResult' }] },
+      toolResults: [{}],
+    });
+
+    expect(session.sessionManager.branch).toHaveBeenCalledWith(
+      'tool-result-leaf',
     );
-    const notify = vi.fn();
-    const ctx = {
-      ...context(180_000),
-      compact,
-      ui: { setStatus: vi.fn(), notify },
-    } as unknown as ExtensionContext;
+    expect(session.leafId).toBe('tool-result-leaf');
+    expect(snapshot?.context.messages).toEqual([{ role: 'toolResult' }]);
+  });
 
-    turnEndHandler?.(turnEnd(1), ctx);
-    expect(hasPendingProcesses()).toBe(true);
-    onError?.(new Error('no summary'));
-    expect(hasPendingProcesses()).toBe(false);
-    turnEndHandler?.(turnEnd(1), ctx);
+  test('does not compact turns without newly completed tool results', async () => {
+    const { FakeAgentSession, shouldCompact } = fakeRuntime({
+      tokens: 260_000,
+    });
+    const session = new FakeAgentSession();
 
-    expect(compact).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining('no summary'),
-      'warning',
+    await session.agent.prepareNextTurnWithContext?.({
+      context: { messages: [{ role: 'assistant' }] },
+      toolResults: [],
+    });
+
+    expect(shouldCompact).not.toHaveBeenCalled();
+    expect(session.compact).not.toHaveBeenCalled();
+  });
+
+  test('installs only once per AgentSession prototype', () => {
+    const setup = fakeRuntime({ tokens: 260_000 });
+    const installed =
+      setup.FakeAgentSession.prototype._installAgentNextTurnRefresh;
+
+    installMidturnCompactionShim(setup.runtime);
+
+    expect(setup.FakeAgentSession.prototype._installAgentNextTurnRefresh).toBe(
+      installed,
     );
   });
 });

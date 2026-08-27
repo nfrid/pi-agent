@@ -1,179 +1,99 @@
+import { readFile, realpath } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  estimateTokens,
-  type TurnEndEvent,
-} from '@earendil-works/pi-coding-agent';
-import {
-  getScopedServices,
-  getSessionScopeId,
-  type PendingProcessAccounting,
-  type SessionScopeId,
-} from '../shared/runtime/scoped-services';
+  installMidturnCompactionShim,
+  MIDTURN_CONTINUE_CUSTOM_TYPE,
+  type MidturnCompactionRuntime,
+} from './runtime.js';
 
-const MIN_HEADROOM_TOKENS = 32_768;
-const MAX_CONTEXT_FRACTION = 0.85;
-const CONTINUATION_MESSAGE =
-  'Context was automatically compacted during the tool loop. Continue the task from where you left off. Do not wait for user input unless it is genuinely required.';
+const SUPPORTED_PI_VERSION = '0.84.1';
+const PACKAGE_NAME = '@earendil-works/pi-coding-agent';
 
-export function shouldCompactMidRun(
-  event: TurnEndEvent,
-  ctx: ExtensionContext,
-): boolean {
-  if (event.toolResults.length === 0) return false;
-
-  const usage = ctx.getContextUsage();
-  if (usage?.tokens === null || usage?.tokens === undefined) return false;
-
-  const threshold = Math.min(
-    usage.contextWindow - MIN_HEADROOM_TOKENS,
-    usage.contextWindow * MAX_CONTEXT_FRACTION,
+async function findPackageRoot(startPath: string): Promise<string | undefined> {
+  let directory = path.dirname(
+    await realpath(startPath).catch(() => startPath),
   );
-  // Context usage comes from the latest assistant response, before this tool
-  // batch entered the transcript. Include the finalized results so one large
-  // batch cannot cross the threshold immediately before the next request.
-  const completedToolResultTokens = event.toolResults.reduce(
-    (total, result) => total + estimateTokens(result),
-    0,
-  );
-  return usage.tokens + completedToolResultTokens > threshold;
+  for (;;) {
+    const packageJsonPath = path.join(directory, 'package.json');
+    try {
+      const packageJson = JSON.parse(
+        await readFile(packageJsonPath, 'utf8'),
+      ) as { name?: string };
+      if (packageJson.name === PACKAGE_NAME) return directory;
+    } catch {
+      // Keep walking toward the filesystem root.
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
 }
 
-export default function midRunCompaction(pi: ExtensionAPI): void {
-  type InFlightCompaction = {
-    generation: number;
-    accounting: PendingProcessAccounting;
-    source: object;
-    settle: () => void;
-  };
-  let active = true;
-  let generation = 0;
-  let sessionOwner: object | undefined;
-  let sessionScopeId: SessionScopeId | undefined;
-  let compactionInFlight = false;
-  let disabledAfterFailure = false;
-  let inFlight: InFlightCompaction | undefined;
+async function resolveRunningPackageRoot(): Promise<string> {
+  const executable = process.argv[1];
+  if (executable) {
+    const executableRoot = await findPackageRoot(executable);
+    if (executableRoot) return executableRoot;
+  }
 
-  const clearPending = (work = inFlight) => {
-    work?.accounting.set(work.source, 0);
-    work?.settle();
-    if (inFlight === work) inFlight = undefined;
-  };
+  const require = createRequire(path.join(__dirname, 'index.js'));
+  const packageEntry = require.resolve(PACKAGE_NAME);
+  const resolvedRoot = await findPackageRoot(packageEntry);
+  if (resolvedRoot) return resolvedRoot;
+  throw new Error(`Could not resolve the running ${PACKAGE_NAME} package.`);
+}
 
-  const finish = (
-    ctx: ExtensionContext,
-    work: InFlightCompaction,
-    error?: Error,
-  ) => {
-    const ownsCurrentAttempt = inFlight === work;
-    clearPending(work);
-    // A late callback owns only its captured accounting registration. Never
-    // let it mutate or resume a replacement session generation, and make each
-    // attempt's completion callback single-use.
-    if (!ownsCurrentAttempt || !active || work.generation !== generation)
-      return;
-    compactionInFlight = false;
-    try {
-      ctx.ui.setStatus('mid-run-compaction', undefined);
-      if (error) {
-        disabledAfterFailure = true;
-        ctx.ui.notify(
-          `Mid-run compaction failed; continuing without another attempt: ${error.message}`,
-          'warning',
-        );
-      }
-      pi.sendMessage(
-        {
-          customType: 'mid-run-compaction',
-          content: CONTINUATION_MESSAGE,
-          display: false,
-        },
-        { triggerTurn: true, deliverAs: 'followUp' },
-      );
-    } catch {
-      // A replacement can race the callback after the active check. The new
-      // extension instance owns the new session; this stale callback has no
-      // valid follow-up work to perform.
-    }
-  };
+async function loadRuntime(): Promise<MidturnCompactionRuntime> {
+  const packageRoot = await resolveRunningPackageRoot();
+  const packageJson = JSON.parse(
+    await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+  ) as { version?: string };
+  if (packageJson.version !== SUPPORTED_PI_VERSION) {
+    throw new Error(
+      `Unsupported Pi version ${String(packageJson.version)}; mid-run compaction expects ${SUPPORTED_PI_VERSION}.`,
+    );
+  }
 
-  pi.on('session_start', (_event, ctx) => {
-    const nextOwner = ctx.sessionManager ?? ctx;
-    const nextScopeId = getSessionScopeId(ctx);
-    if (sessionOwner !== nextOwner || sessionScopeId !== nextScopeId)
-      clearPending();
-    generation += 1;
-    sessionOwner = nextOwner;
-    sessionScopeId = nextScopeId;
-    active = true;
-    compactionInFlight = false;
-    disabledAfterFailure = false;
+  const [agentSessionModule, compactionModule] = await Promise.all([
+    import(
+      pathToFileURL(path.join(packageRoot, 'dist/core/agent-session.js')).href
+    ),
+    import(
+      pathToFileURL(path.join(packageRoot, 'dist/core/compaction/index.js'))
+        .href
+    ),
+  ]);
+  if (typeof agentSessionModule.AgentSession !== 'function') {
+    throw new Error('Running Pi package does not export AgentSession.');
+  }
+  if (typeof compactionModule.estimateContextTokens !== 'function') {
+    throw new Error(
+      'Running Pi package does not export estimateContextTokens.',
+    );
+  }
+  if (typeof compactionModule.shouldCompact !== 'function') {
+    throw new Error('Running Pi package does not export shouldCompact.');
+  }
+  return {
+    AgentSession: agentSessionModule.AgentSession,
+    estimateContextTokens: compactionModule.estimateContextTokens,
+    shouldCompact: compactionModule.shouldCompact,
+  } as MidturnCompactionRuntime;
+}
+
+export default async function midRunCompaction(
+  pi: ExtensionAPI,
+): Promise<void> {
+  pi.on('context', (event) => {
+    const messages = event.messages.filter(
+      (message) =>
+        message.role !== 'custom' ||
+        message.customType !== MIDTURN_CONTINUE_CUSTOM_TYPE,
+    );
+    if (messages.length !== event.messages.length) return { messages };
   });
-
-  pi.on('session_shutdown', (_event, ctx) => {
-    const closingOwner = ctx.sessionManager ?? ctx;
-    const closingScopeId = getSessionScopeId(ctx);
-    if (
-      (sessionOwner && sessionOwner !== closingOwner) ||
-      (sessionScopeId && sessionScopeId !== closingScopeId)
-    )
-      return;
-    clearPending();
-    generation += 1;
-    sessionOwner = undefined;
-    sessionScopeId = undefined;
-    active = false;
-    compactionInFlight = false;
-  });
-
-  pi.on('turn_end', async (event, ctx) => {
-    sessionOwner ??= ctx.sessionManager ?? ctx;
-    sessionScopeId ??= getSessionScopeId(ctx);
-    if (
-      compactionInFlight ||
-      disabledAfterFailure ||
-      !shouldCompactMidRun(event, ctx)
-    ) {
-      return;
-    }
-
-    compactionInFlight = true;
-    const accounting = getScopedServices(
-      getSessionScopeId(ctx),
-    ).pendingProcesses;
-    let resolveWait: () => void = () => {};
-    const wait = new Promise<void>((resolve) => {
-      resolveWait = resolve;
-    });
-    let settled = false;
-    const work: InFlightCompaction = {
-      generation,
-      accounting,
-      source: {},
-      settle: () => {
-        if (settled) return;
-        settled = true;
-        resolveWait();
-      },
-    };
-    inFlight = work;
-    accounting.set(work.source, 1);
-    try {
-      ctx.ui.setStatus('mid-run-compaction', 'compacting context…');
-      ctx.compact({
-        onComplete: () => finish(ctx, work),
-        onError: (error) => finish(ctx, work, error),
-      });
-    } catch (error) {
-      finish(
-        ctx,
-        work,
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    }
-    // Extension handlers are awaited by Pi. Hold this boundary until the
-    // compaction callback completes so the automatic tool-loop request cannot
-    // race ahead with the oversized pre-compaction context.
-    await wait;
-  });
+  installMidturnCompactionShim(await loadRuntime());
 }

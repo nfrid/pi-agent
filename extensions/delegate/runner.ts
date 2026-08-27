@@ -57,11 +57,11 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
 );
-const WEB_EXTENSION = path.resolve(__dirname, '../web/index.ts');
 const MID_RUN_COMPACTION_EXTENSION = path.resolve(
   __dirname,
   '../mid-run-compaction/index.ts',
 );
+const WEB_EXTENSION = path.resolve(__dirname, '../web/index.ts');
 const TOOL_ARGUMENT_VALIDATION_EXTENSION = path.resolve(
   __dirname,
   '../tool-argument-validation/index.ts',
