@@ -141,6 +141,46 @@ describe('agent thread view model', () => {
     ]);
   });
 
+  it('promotes through indexed active runtime identity before the runtime snapshot arrives', () => {
+    const draft = {
+      id: 'draft-1',
+      projectId: 'project-1',
+      createdAt: 1,
+      updatedAt: 20,
+      isolation: 'worktree' as const,
+      promotedThreadId: 'thread-1',
+    };
+    const snapshot = {
+      runtimes: [],
+      sessions: [
+        {
+          id: 'session-1',
+          cwd: '/work/one',
+          activeRuntimeId: 'runtime-1',
+          startedAt: 21,
+        },
+      ],
+      runs: [
+        {
+          threadId: 'thread-1',
+          runtimeId: 'runtime-1',
+          status: 'running',
+        },
+      ],
+      projects: [
+        { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+      ],
+    } as never;
+
+    expect(agentThreadRows(snapshot, undefined, [], [draft])).toEqual([
+      expect.objectContaining({ id: 'session-1', startedAt: 21 }),
+    ]);
+    expect(resolvedDraftPromotionIds(snapshot, [], [draft])).toEqual([
+      'draft-1',
+    ]);
+    expect(sessionThreadIdentityKey(snapshot)).toBe('');
+  });
+
   it('cleans up promotion metadata only after indexed chronology arrives', () => {
     const draft = {
       id: 'draft-1',

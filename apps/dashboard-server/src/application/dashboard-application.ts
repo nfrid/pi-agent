@@ -466,6 +466,9 @@ function activeDelegateRuns(runtime: RuntimeSnapshot): {
       ...(value.details && typeof value.details === 'object'
         ? { details: value.details as DelegateLiveRun['details'] }
         : {}),
+      ...(value.workflow && typeof value.workflow === 'object'
+        ? { workflow: value.workflow as DelegateLiveRun['workflow'] }
+        : {}),
       transcript: transcript.slice(0, 128),
       ...(value.transcriptTruncated === true
         ? { transcriptTruncated: true }

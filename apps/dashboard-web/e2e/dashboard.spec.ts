@@ -722,21 +722,18 @@ test('promoted draft is replaced by its started thread in the sidebar @desktop',
         createdAt: 20,
       },
     ],
-    runtimes: [
+    runtimes: [],
+    sessions: [
       {
-        runtimeId: 'runtime-1',
+        id: 'session-1',
         projectId: 'project-1',
+        activeRuntimeId: 'runtime-1',
         cwd: '/work/one',
-        liveState: 'working',
-        online: true,
-        session: {
-          id: 'session-1',
-          title: 'Started thread',
-          entries: [],
-        },
+        title: 'Started thread',
+        startedAt: 21,
+        updatedAt: 21,
       },
     ],
-    sessions: [],
     unread: [],
   } as never);
 
@@ -746,7 +743,7 @@ test('promoted draft is replaced by its started thread in the sidebar @desktop',
   });
   await expect(nav.locator('.agent-thread-row')).toHaveCount(1);
   await expect(
-    nav.getByRole('button', { name: /Started thread working/ }),
+    nav.getByRole('button', { name: /Started thread dormant/ }),
   ).toBeVisible();
   await expect(nav.getByText('Promoted draft')).toHaveCount(0);
 });
