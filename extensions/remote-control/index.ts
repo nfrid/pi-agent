@@ -63,13 +63,31 @@ export function emitCompactionCompleted(
   ctx: ExtensionContext,
   entry: unknown,
 ): void {
-  emitState(runtime, ctx);
   if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({
     type: 'session.compacted',
     sessionId: ctx.sessionManager.getSessionId(),
     entry,
   });
+}
+
+export function emitCompactionEnded(
+  runtime: import('./runtime').RemoteControlRuntime,
+  ctx: ExtensionContext,
+  event: unknown,
+): void {
+  const result = eventRecord(directValue(eventRecord(event), 'result'));
+  const estimatedTokensAfter = directValue(result, 'estimatedTokensAfter');
+  emitState(
+    runtime,
+    ctx,
+    undefined,
+    typeof estimatedTokensAfter === 'number' &&
+      Number.isFinite(estimatedTokensAfter) &&
+      estimatedTokensAfter >= 0
+      ? estimatedTokensAfter
+      : undefined,
+  );
 }
 
 export function shutdownRemoteControlRuntime(
@@ -264,6 +282,9 @@ export default defineExtension('remote-control', (pi) => {
   );
   onCurrentTransportEvent('queue_update', (_event, ctx) =>
     emitState(runtime, ctx),
+  );
+  onCurrentTransportEvent('compaction_end', (event, ctx) =>
+    emitCompactionEnded(runtime, ctx, event),
   );
   pi.on('session_shutdown', (event, ctx) => {
     shutdownRemoteControlRuntime(runtime, event, ctx, stopSteeringUpdates);
