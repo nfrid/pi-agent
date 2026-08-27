@@ -33,6 +33,7 @@ import {
   dispatchDashboardInput,
   emitAgentSettlement,
   emitCompactionCompleted,
+  emitCompactionEnded,
   emitCompactionStarted,
   expandDashboardInput,
   flushQueueDrafts,
@@ -82,8 +83,18 @@ describe('remote-control session lifecycle', () => {
       snapshotPatch: (
         _ctx: ExtensionContext,
         state: RuntimeSnapshot['liveState'],
+        contextTokens?: number,
       ) => ({
         liveState: state,
+        ...(contextTokens === undefined
+          ? {}
+          : {
+              contextUsage: {
+                tokens: contextTokens,
+                contextWindow: 0,
+                percent: null,
+              },
+            }),
       }),
       client: { sendEvent: (event: unknown) => events.push(event) },
     } as unknown as Parameters<typeof emitCompactionStarted>[0];
@@ -108,6 +119,9 @@ describe('remote-control session lifecycle', () => {
     };
     emitCompactionStarted(runtime, ctx);
     emitCompactionCompleted(runtime, ctx, compactionEntry);
+    emitCompactionEnded(runtime, ctx, {
+      result: { estimatedTokensAfter: 32_000 },
+    });
 
     expect(events).toEqual([
       {
@@ -116,14 +130,21 @@ describe('remote-control session lifecycle', () => {
         snapshot: { liveState: 'compacting' },
       },
       {
-        type: 'runtime.stateChanged',
-        state: 'idle',
-        snapshot: { liveState: 'idle' },
-      },
-      {
         type: 'session.compacted',
         sessionId: 'session-compact',
         entry: compactionEntry,
+      },
+      {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: {
+          liveState: 'idle',
+          contextUsage: {
+            tokens: 32_000,
+            contextWindow: 0,
+            percent: null,
+          },
+        },
       },
     ]);
     expect(runtime.setContext).toHaveBeenCalled();
@@ -1115,6 +1136,40 @@ describe('dashboard-owned queue drafts', () => {
       getContextUsage: () => usage,
       isIdle: () => false,
     }) as unknown as ExtensionContext;
+
+  it('caches estimated context usage after compaction', () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const context = turnEndContext('session-compaction-context', {
+      tokens: null,
+      contextWindow: 100_000,
+      percent: null,
+    });
+    runtime.setContext(context);
+    const sendEvent = vi.spyOn(runtime.client, 'sendEvent');
+
+    emitCompactionEnded(runtime, context, {
+      result: { estimatedTokensAfter: 32_000 },
+    });
+
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.stateChanged',
+      state: 'working',
+      snapshot: expect.objectContaining({
+        contextUsage: {
+          tokens: 32_000,
+          contextWindow: 100_000,
+          percent: 32,
+        },
+      }),
+    });
+    expect(runtime.snapshot().contextUsage).toEqual({
+      tokens: 32_000,
+      contextWindow: 100_000,
+      percent: 32,
+    });
+    runtime.clearContext(context);
+  });
 
   it('publishes context usage at turn_end while the agent remains working', () => {
     const runtime = createRemoteControlRuntime({} as ExtensionAPI);

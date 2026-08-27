@@ -50,6 +50,7 @@ export interface RemoteControlRuntime {
   snapshotPatch?(
     ctx: ExtensionContext,
     state?: RuntimeLiveState,
+    contextTokens?: number,
   ): RuntimeSnapshotPatch;
   snapshot(): RuntimeSnapshot;
 }
@@ -96,8 +97,21 @@ export function createRemoteControlRuntime(
   const runtimePatchFrom = (
     ctx: ExtensionContext,
     state = liveState(ctx),
+    contextTokens?: number,
   ): RuntimeSnapshotPatch => {
-    const usage = ctx.getContextUsage();
+    const currentUsage = ctx.getContextUsage();
+    const contextWindow =
+      currentUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+    const usage =
+      contextTokens === undefined
+        ? currentUsage
+        : {
+            tokens: contextTokens,
+            contextWindow,
+            percent: contextWindow
+              ? (contextTokens / contextWindow) * 100
+              : null,
+          };
     const sessionId = ctx.sessionManager.getSessionId();
     const currentLeafId = ctx.sessionManager.getLeafId();
     const leafId =
@@ -256,8 +270,9 @@ export function createRemoteControlRuntime(
   const snapshotPatch = (
     ctx: ExtensionContext,
     state?: RuntimeLiveState,
+    contextTokens?: number,
   ): RuntimeSnapshotPatch => {
-    const patch = runtimePatchFrom(ctx, state);
+    const patch = runtimePatchFrom(ctx, state, contextTokens);
     // Keep reconnect/hello authoritative while replacing any cached transcript
     // branch with the bounded invalidation session metadata.
     cachedSnapshot = { ...cachedSnapshot, ...patch };
@@ -368,6 +383,7 @@ export function emitState(
   runtime: RemoteControlRuntime,
   ctx: ExtensionContext,
   forcedState?: RuntimeLiveState,
+  contextTokens?: number,
 ): void {
   if (!runtime.isCurrent(ctx)) return;
   runtime.setContext(ctx, false);
@@ -377,7 +393,9 @@ export function emitState(
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',
     state,
-    snapshot: runtime.snapshotPatch?.(ctx, state) ?? { liveState: state },
+    snapshot: runtime.snapshotPatch?.(ctx, state, contextTokens) ?? {
+      liveState: state,
+    },
   });
 }
 
