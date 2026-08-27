@@ -603,6 +603,44 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
+  it('summarizes semantic delegate delivery without expanding the event', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'custom_message',
+        customType: 'delegate-wake-result',
+        display: true,
+        content:
+          '# Reconnect Race Review success\n\nDelivered eagerly at the next safe parent boundary.',
+        details: {
+          sources: ['reconnect-race-review@1'],
+          presentation: {
+            origin: 'eager',
+            condition: 'node',
+            timing: 'safe',
+            sources: [
+              {
+                identity: 'reconnect-race-review@1',
+                logicalId: 'reconnect-race-review',
+                state: 'success',
+                route: 'luna-high',
+                durationMs: 42_000,
+              },
+            ],
+            outstanding: [],
+          },
+        },
+      },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.event).toMatchObject({
+      kind: 'delegate-result',
+      label: 'Reconnect Race Review finished · eager · safe boundary',
+      status: 'success',
+      content: expect.stringContaining('Delivered eagerly'),
+    });
+  });
+
   it('keeps todo events inside activity ranges while user messages remain boundaries', () => {
     const todoSnapshot = (status: string) => ({
       type: 'custom',

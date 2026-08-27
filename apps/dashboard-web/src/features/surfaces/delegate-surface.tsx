@@ -126,7 +126,7 @@ function delegateWaitingRelationship(
     (dependency) => !inputIdentities.has(dependency),
   );
   return after.length
-    ? `after ${delegateReferencesLabel(after, rows)}`
+    ? `waiting for ${delegateReferencesLabel(after, rows)}`
     : undefined;
 }
 
@@ -456,7 +456,7 @@ export function DelegateSurface({
               );
               return (
                 <aside className="delegate-wake-condition" key={wake.id}>
-                  <strong>Resume condition</strong>
+                  <strong>Parent resume gate</strong>
                   <span>
                     {ready}/{wake.references.length} ready · waiting for{' '}
                     {waitingFor

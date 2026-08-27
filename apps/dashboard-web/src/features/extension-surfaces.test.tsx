@@ -1411,7 +1411,7 @@ describe('live extension surface fixtures', () => {
       },
     ];
     expect(delegateRowActivityLabel(row, wakes, 'queued')).toBe(
-      'after Impl · resumes parent',
+      'waiting for Impl · resumes parent',
     );
     const markup = renderToStaticMarkup(
       <DelegateSurface

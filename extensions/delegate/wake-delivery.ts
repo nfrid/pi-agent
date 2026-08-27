@@ -11,6 +11,22 @@ import type {
 
 export const DELEGATE_WAKE_MESSAGE_TYPE = 'delegate-wake-result';
 
+export interface WakeDeliverySourcePresentation {
+  readonly identity: string;
+  readonly logicalId: string;
+  readonly state: string;
+  readonly route?: string;
+  readonly durationMs?: number;
+}
+
+export interface WakeDeliveryPresentation {
+  readonly origin: 'eager' | 'gate';
+  readonly condition: 'node' | 'all' | 'any';
+  readonly timing: 'safe' | 'idle';
+  readonly sources: readonly WakeDeliverySourcePresentation[];
+  readonly outstanding: readonly string[];
+}
+
 export interface WakeDeliveryDetails {
   readonly dedupeKey: string;
   readonly deliveryKey: string;
@@ -20,6 +36,7 @@ export interface WakeDeliveryDetails {
   readonly state: 'queued';
   readonly acknowledgement: WakeAcknowledgement;
   readonly sources: readonly string[];
+  readonly presentation: WakeDeliveryPresentation;
 }
 
 function json(value: unknown): string {
@@ -30,15 +47,117 @@ function json(value: unknown): string {
   }
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function conditionKind(
+  condition: WakeSnapshot['condition'],
+): 'node' | 'all' | 'any' {
+  if ('all' in condition) return 'all';
+  if ('any' in condition) return 'any';
+  return 'node';
+}
+
+function sourcePresentation(
+  identity: string,
+  source: WakeDispatch['payload']['sources'][string],
+): WakeDeliverySourcePresentation {
+  const metadata = record(source.metadata);
+  const logicalId =
+    typeof metadata?.logicalId === 'string'
+      ? metadata.logicalId
+      : identity.replace(/@\d+$/u, '');
+  const state =
+    typeof metadata?.state === 'string' ? metadata.state : 'settled';
+  const route =
+    typeof metadata?.route === 'string' ? metadata.route : undefined;
+  const startedAt =
+    typeof metadata?.startedAt === 'number' ? metadata.startedAt : undefined;
+  const settledAt =
+    typeof metadata?.settledAt === 'number' ? metadata.settledAt : undefined;
+  const durationMs =
+    startedAt !== undefined && settledAt !== undefined
+      ? Math.max(0, settledAt - startedAt)
+      : undefined;
+  return {
+    identity,
+    logicalId,
+    state,
+    ...(route ? { route } : {}),
+    ...(durationMs === undefined ? {} : { durationMs }),
+  };
+}
+
+function deliveryPresentation(
+  dispatch: WakeDispatch,
+  outstanding: readonly string[],
+): WakeDeliveryPresentation {
+  return {
+    origin: dispatch.wake.id.startsWith('eager-') ? 'eager' : 'gate',
+    condition: conditionKind(dispatch.wake.condition),
+    timing: dispatch.wake.nonObstructive ? 'idle' : 'safe',
+    sources: Object.entries(dispatch.payload.sources).map(
+      ([identity, source]) => sourcePresentation(identity, source),
+    ),
+    outstanding: [...outstanding],
+  };
+}
+
+function humanize(value: string): string {
+  return value
+    .split(/[-_.]+/u)
+    .filter(Boolean)
+    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function outcome(state: string): string {
+  if (state === 'error') return 'failed';
+  if (state === 'timed-out') return 'timed out';
+  if (state === 'aborted') return 'aborted';
+  if (state === 'cancelled') return 'cancelled';
+  if (state === 'blocked') return 'blocked';
+  return 'finished';
+}
+
+function deliverySummary(presentation: WakeDeliveryPresentation): string {
+  if (presentation.origin === 'eager')
+    return presentation.timing === 'idle'
+      ? 'Delivered eagerly when the parent became idle.'
+      : 'Delivered eagerly at the next safe parent boundary.';
+  const gate =
+    presentation.condition === 'all'
+      ? 'all-results gate became ready'
+      : presentation.condition === 'any'
+        ? 'first-result gate became ready'
+        : 'requested result became ready';
+  return presentation.timing === 'idle'
+    ? `Delivered when the parent became idle because the ${gate}.`
+    : `Delivered at the next safe parent boundary because the ${gate}.`;
+}
+
 /** Render the payload as source-grouped, model-readable evidence. */
 export function formatWakeDispatch(
   dispatch: WakeDispatch,
   outstanding: readonly string[] = [],
 ): string {
-  const sections = ['# Delegate result'];
+  const presentation = deliveryPresentation(dispatch, outstanding);
+  const sourceSummary =
+    presentation.sources.length === 1
+      ? `${humanize(presentation.sources[0]?.logicalId ?? 'delegate')} ${outcome(presentation.sources[0]?.state ?? 'settled')}`
+      : `${presentation.sources.length} delegate results ready`;
+  const sections = [`# ${sourceSummary}`, deliverySummary(presentation)];
   const sources = Object.entries(dispatch.payload.sources);
   for (const [identity, source] of sources) {
-    sections.push(`\n## Source ${identity}`);
+    const sourceDetails = presentation.sources.find(
+      (candidate) => candidate.identity === identity,
+    );
+    sections.push(
+      `\n## ${humanize(sourceDetails?.logicalId ?? identity.replace(/@\d+$/u, ''))}`,
+    );
     if (source.handoff !== undefined) {
       sections.push(
         `### Handoff\n--- begin untrusted handoff evidence ---\n${source.handoff}\n--- end untrusted handoff evidence ---`,
@@ -56,7 +175,10 @@ export function formatWakeDispatch(
   return sections.join('\n\n');
 }
 
-function deliveryDetails(dispatch: WakeDispatch): WakeDeliveryDetails {
+function deliveryDetails(
+  dispatch: WakeDispatch,
+  outstanding: readonly string[],
+): WakeDeliveryDetails {
   return {
     dedupeKey: dispatch.deliveryKey,
     deliveryKey: dispatch.deliveryKey,
@@ -66,6 +188,7 @@ function deliveryDetails(dispatch: WakeDispatch): WakeDeliveryDetails {
     state: 'queued',
     acknowledgement: dispatch.acknowledgement,
     sources: Object.keys(dispatch.payload.sources),
+    presentation: deliveryPresentation(dispatch, outstanding),
   };
 }
 
@@ -140,14 +263,13 @@ export function createWakeDelivery(options: {
       active.ownerEpoch !== value.ownerEpoch
     )
       throw new Error('Wake delivery branch is no longer active.');
+    const outstanding =
+      options.getOutstanding?.(Object.keys(value.payload.sources)) ?? [];
     const message = {
       customType: DELEGATE_WAKE_MESSAGE_TYPE,
-      content: formatWakeDispatch(
-        value,
-        options.getOutstanding?.(Object.keys(value.payload.sources)) ?? [],
-      ),
+      content: formatWakeDispatch(value, outstanding),
       display: true,
-      details: deliveryDetails(value),
+      details: deliveryDetails(value, outstanding),
     };
     const broker = options.getDeliveryBroker?.();
     if (broker) {

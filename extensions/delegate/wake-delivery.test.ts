@@ -49,9 +49,24 @@ describe('wake delivery', () => {
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         customType: DELEGATE_WAKE_MESSAGE_TYPE,
+        content: expect.stringContaining(
+          'Delivered at the next safe parent boundary because the requested result became ready.',
+        ),
         details: expect.objectContaining({
           dedupeKey: 'session:3:ready',
           deliveryKey: 'session:3:ready',
+          presentation: {
+            origin: 'gate',
+            condition: 'node',
+            timing: 'safe',
+            sources: [
+              expect.objectContaining({
+                logicalId: 'source',
+                state: 'success',
+              }),
+            ],
+            outstanding: [],
+          },
         }),
       }),
       { deliverAs: 'steer', triggerTurn: true },
@@ -98,7 +113,15 @@ describe('wake delivery', () => {
     });
 
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ customType: DELEGATE_WAKE_MESSAGE_TYPE }),
+      expect.objectContaining({
+        customType: DELEGATE_WAKE_MESSAGE_TYPE,
+        details: expect.objectContaining({
+          presentation: expect.objectContaining({
+            origin: 'gate',
+            timing: 'idle',
+          }),
+        }),
+      }),
       { deliverAs: 'followUp', triggerTurn: true },
     );
     await workflow.dispose();

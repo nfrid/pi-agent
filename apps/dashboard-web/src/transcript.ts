@@ -303,6 +303,90 @@ function asyncResultEvent(
   const customType = stringField(raw, 'customType');
   const content = contentText(raw.content).trim();
   const details = record(raw.details);
+  if (customType === 'delegate-wake-result') {
+    const presentation = record(details?.presentation);
+    const presentedSources = Array.isArray(presentation?.sources)
+      ? presentation.sources.flatMap((value) => {
+          const source = record(value);
+          return source ? [source] : [];
+        })
+      : [];
+    const retainedSources = Array.isArray(details?.sources)
+      ? details.sources.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [];
+    const sources =
+      presentedSources.length > 0
+        ? presentedSources
+        : retainedSources.map((identity) => ({
+            identity,
+            logicalId: identity.replace(/@\d+$/u, ''),
+            state: 'settled',
+          }));
+    const failedStates = new Set([
+      'error',
+      'timed-out',
+      'aborted',
+      'cancelled',
+      'blocked',
+    ]);
+    const status = sources.some((source) =>
+      failedStates.has(stringField(source, 'state') ?? ''),
+    )
+      ? 'error'
+      : 'success';
+    const humanize = (value: string) =>
+      value
+        .replace(/@\d+$/u, '')
+        .split(/[-_.]+/u)
+        .filter(Boolean)
+        .map((word) => word[0]?.toUpperCase() + word.slice(1))
+        .join(' ');
+    const stateLabel = (state: string | undefined) => {
+      if (state === 'error') return 'failed';
+      if (state === 'timed-out') return 'timed out';
+      if (state === 'aborted') return 'aborted';
+      if (state === 'cancelled') return 'cancelled';
+      if (state === 'blocked') return 'blocked';
+      return 'finished';
+    };
+    const first = sources[0];
+    const subject =
+      sources.length === 1
+        ? humanize(
+            stringField(first, 'logicalId') ??
+              stringField(first, 'identity') ??
+              'delegate',
+          )
+        : `${sources.length || 1} delegates`;
+    const result =
+      sources.length === 1
+        ? `${subject} ${stateLabel(stringField(first, 'state'))}`
+        : `${subject} ${status === 'error' ? 'settled with failures' : 'finished'}`;
+    const wakeId = stringField(details, 'wakeId');
+    const origin =
+      stringField(presentation, 'origin') ??
+      (wakeId?.startsWith('eager-') ? 'eager' : 'gate');
+    const condition = stringField(presentation, 'condition') ?? 'node';
+    const timing = stringField(presentation, 'timing') ?? 'safe';
+    const delivery =
+      origin === 'eager'
+        ? 'eager'
+        : condition === 'all'
+          ? 'all-results gate'
+          : condition === 'any'
+            ? 'first-result gate'
+            : 'requested result';
+    const boundary = timing === 'idle' ? 'parent idle' : 'safe boundary';
+    return {
+      kind: 'delegate-result',
+      label: `${result} · ${delivery} · ${boundary}`,
+      status,
+      ...(content ? { content } : {}),
+      ...(details ? { details } : {}),
+    };
+  }
   if (customType === 'delegate-job-result') {
     const jobs = Array.isArray(details?.jobs)
       ? details.jobs.flatMap((value) => {
