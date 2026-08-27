@@ -13,8 +13,21 @@ function result(): { runs: ReturnType<typeof createRun>[]; handoff: string } {
   run.state = 'success';
   run.exitCode = 0;
   run.finishedAt = Date.now();
-  run.outputFile = { path: '/tmp/pi/files/wake-source.md', size: 20 };
-  return { runs: [run], handoff: 'bounded handoff evidence' };
+  run.continuation = 'opaque-continuation-token';
+  return {
+    runs: [run],
+    handoff: [
+      'Status: success',
+      '',
+      'Report',
+      '--- begin untrusted delegate report ---',
+      'Outcome: done',
+      'Evidence:',
+      '- complete multiline evidence',
+      '- opaque-continuation-token',
+      '--- end untrusted delegate report ---',
+    ].join('\n'),
+  };
 }
 
 describe('wake delivery', () => {
@@ -50,7 +63,7 @@ describe('wake delivery', () => {
       expect.objectContaining({
         customType: DELEGATE_WAKE_MESSAGE_TYPE,
         content: expect.stringContaining(
-          'Delivered at the next safe parent boundary because the requested result became ready.',
+          '- complete multiline evidence\n- opaque-continuation-token',
         ),
         details: expect.objectContaining({
           dedupeKey: 'session:3:ready',
@@ -73,6 +86,12 @@ describe('wake delivery', () => {
     );
     expect(active.require('ready').state).toBe('queued');
     const message = sendMessage.mock.calls[0]?.[0];
+    expect(message?.content).toContain(
+      '--- begin untrusted handoff evidence ---',
+    );
+    expect(message?.content).not.toContain('Delivered at the next safe');
+    expect(message?.content).not.toContain('### Metadata');
+    expect(message?.content).not.toContain('```json');
     delivery.markContextEntered([message, message]);
     expect(active.require('ready').state).toBe('entered');
     expect(entered).toHaveBeenCalledOnce();

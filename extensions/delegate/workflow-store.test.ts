@@ -163,7 +163,8 @@ describe('workflow store', () => {
       tasks: ['implementation'],
       execute: async () => ({
         runs: [run],
-        handoff: 'Status: success\nOutcome: done\nConclusion: durable result',
+        handoff:
+          'Status: success\nOutput file: /tmp/pi/files/report.md (42 bytes)',
       }),
     });
     await vi.waitFor(() =>
@@ -174,7 +175,7 @@ describe('workflow store', () => {
     if (!state) throw new Error('missing persisted workflow state');
     expect(state.attempts[0]?.result).toMatchObject({
       reports: [],
-      handoff: { text: expect.stringContaining('durable result') },
+      handoff: { text: expect.stringContaining('/tmp/pi/files/report.md') },
       continuationToken: 'opaque-continuation-token',
       runs: [
         expect.objectContaining({
@@ -209,7 +210,7 @@ describe('workflow store', () => {
         selector: { node: 'implementation', include: ['report'] },
       },
     ]);
-    expect(report.handoffText).toContain('Conclusion: durable result');
+    expect(report.handoffText).not.toContain('Conclusion: durable result');
     expect(report.handoffText).toContain('/tmp/pi/files/report.md');
 
     let gateDispatch: WakeDispatch | undefined;
@@ -226,7 +227,7 @@ describe('workflow store', () => {
     });
     await vi.waitFor(() => expect(gateDispatch).toBeDefined());
     expect(gateDispatch?.payload.sources['implementation@1']).toMatchObject({
-      handoff: expect.stringContaining('Conclusion: durable result'),
+      handoff: expect.stringContaining('/tmp/pi/files/report.md'),
       metadata: expect.objectContaining({ state: 'success' }),
     });
 

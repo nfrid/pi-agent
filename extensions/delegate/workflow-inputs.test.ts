@@ -93,15 +93,12 @@ describe('workflow symbolic inputs', () => {
         runs: [richRun],
         handoff: [
           'Status: success',
-          'Outcome: done',
-          'Conclusion: exact child report',
+          `Output file: /tmp/pi/files/child.md (${Buffer.byteLength(report)} bytes)`,
           'Continuation: opaque-token',
-          'Output file: /tmp/pi/files/child.md (52 bytes)',
           'Branch: pi/impl (1 changed path)',
           'Worktree: /repo/.worktrees/impl',
           'Changes: inspect with /delegate-worktrees internal-id',
           'Changed: src/impl.ts',
-          `Evidence: run ${richRun.runId}; continuation opaque-continuation-token; cwd /repo/.worktrees/impl; branch pi/impl; focused test passed`,
         ].join('\n'),
       }),
     );
@@ -113,12 +110,9 @@ describe('workflow symbolic inputs', () => {
         `Output file: /tmp/pi/files/child.md (${Buffer.byteLength(report)} bytes)`,
       ),
     });
-    expect(resolved.inputs[0]?.value).toContain('Outcome: done');
-    expect(resolved.inputs[0]?.value).toContain(
+    expect(resolved.inputs[0]?.value).not.toContain('Outcome: done');
+    expect(resolved.inputs[0]?.value).not.toContain(
       'Conclusion: exact child report',
-    );
-    expect(resolved.inputs[0]?.value).toContain(
-      'Evidence: run [internal orchestration detail omitted]; continuation [internal orchestration detail omitted]; cwd [internal orchestration detail omitted]; branch [internal orchestration detail omitted]; focused test passed',
     );
     expect(resolved.handoffText).toContain('/tmp/pi/files/child.md');
     expect(resolved.handoffText).not.toContain('opaque-continuation-token');
@@ -131,13 +125,23 @@ describe('workflow symbolic inputs', () => {
   });
 
   test('preserves selector/include order and applies prompt caps to file guidance', () => {
-    const exactHandoff =
-      '\nOutcome: done\nConclusion: exact handoff\nContinuation: opaque-token\n';
+    const exactHandoff = [
+      'Status: success',
+      'Report',
+      '--- begin untrusted delegate report ---',
+      'Outcome: done',
+      'Conclusion: exact handoff',
+      '- multiline detail',
+      '--- end untrusted delegate report ---',
+      'Continuation: opaque-token',
+    ].join('\n');
+    const inlineRun = runWithReport('exact report');
+    delete inlineRun.outputFile;
     const resolved = resolveWorkflowInputs(
       [bound('impl', ['handoff', 'metadata', 'report'])],
       () =>
         source({
-          runs: [runWithReport('exact report')],
+          runs: [inlineRun],
           handoff: exactHandoff,
         }),
     );
@@ -148,6 +152,7 @@ describe('workflow symbolic inputs', () => {
     ]);
     expect(resolved.inputs[0]?.value).toContain('Outcome: done');
     expect(resolved.inputs[0]?.value).toContain('Conclusion: exact handoff');
+    expect(resolved.inputs[0]?.value).toContain('- multiline detail');
     expect(resolved.inputs[0]?.value).not.toContain('/tmp/pi/files/child.md');
     expect(resolved.inputs[1]?.value).not.toHaveProperty('runs.0.runId');
     expect(resolved.handoffText).toContain('Conclusion: exact handoff');

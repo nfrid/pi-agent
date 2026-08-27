@@ -1052,6 +1052,128 @@ test('desktop project thread form stays readable @desktop', async ({
   await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
 });
 
+test('modifier selection archives a settled thread range in bulk @desktop', async ({
+  page,
+}) => {
+  const sessions = ['First settled', 'Second settled', 'Third settled'].map(
+    (title, index) => ({
+      id: `session-bulk-${index + 1}`,
+      title,
+      file: `/tmp/session-bulk-${index + 1}.jsonl`,
+      cwd: '/tmp/bulk-selection',
+      startedAt: 30 - index,
+      updatedAt: 30 - index,
+    }),
+  );
+  let listedThreads = sessions.map((session, index) => ({
+    id: `thread-bulk-${index + 1}`,
+    projectId: 'project-bulk',
+    title: session.title,
+    status: 'completed',
+    settledAt: 20 - index,
+    createdAt: 1,
+    updatedAt: 20 - index,
+  }));
+  const archivedThreadIds: string[] = [];
+  let releaseArchiveRequests: (() => void) | undefined;
+  const archiveRequestsReleased = new Promise<void>((resolve) => {
+    releaseArchiveRequests = resolve;
+  });
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-bulk-selection',
+    revision: 1,
+    cursor: 1,
+    projects: [
+      {
+        id: 'project-bulk',
+        title: 'Bulk project',
+        rootPath: '/tmp/bulk-selection',
+        status: 'active',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+    checkouts: [],
+    runtimes: [],
+    sessions,
+    runs: sessions.map((session, index) => ({
+      id: `run-bulk-${index + 1}`,
+      threadId: `thread-bulk-${index + 1}`,
+      checkoutId: `checkout-bulk-${index + 1}`,
+      attempt: 1,
+      mode: 'write',
+      runtimeProvider: 'extension-bridge',
+      piSessionId: session.id,
+      initialPrompt: session.title,
+      status: 'completed',
+      createdAt: 1,
+      finishedAt: 2,
+    })),
+    unread: [],
+  } as never);
+  await page.route('**/api/session-threads', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/threads**', async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(listedThreads),
+      });
+      return;
+    }
+    if (!pathname.endsWith('/archive'))
+      throw new Error(`Unexpected bulk thread request: ${pathname}`);
+    const threadId = pathname.split('/').at(-2);
+    if (!threadId) throw new Error(`Missing thread ID in ${pathname}`);
+    archivedThreadIds.push(threadId);
+    await archiveRequestsReleased;
+    listedThreads = listedThreads.map((thread) =>
+      thread.id === threadId ? { ...thread, archivedAt: Date.now() } : thread,
+    );
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(
+        listedThreads.find((thread) => thread.id === threadId),
+      ),
+    });
+  });
+
+  await page.goto('/');
+  const nav = page.getByRole('complementary', { name: 'Agents and threads' });
+  const first = nav.getByRole('button', { name: /^First settled /u });
+  const second = nav.getByRole('button', { name: /^Second settled /u });
+  const third = nav.getByRole('button', { name: /^Third settled /u });
+
+  await second.click();
+  await expect(page).toHaveURL(/\/sessions\/session-bulk-2$/u);
+  await page.goBack();
+  await expect(first).toBeVisible();
+
+  await first.click({ modifiers: ['Meta'] });
+  await third.click({ modifiers: ['Shift'] });
+  const toolbar = nav.getByRole('toolbar', {
+    name: 'Actions for 3 selected threads',
+  });
+  await expect(toolbar).toContainText('3 selected');
+  await expect(toolbar.getByRole('button', { name: 'Archive' })).toBeVisible();
+  await toolbar.getByRole('button', { name: 'Archive' }).click();
+  await expect(first).toBeDisabled();
+  await expect(second).toBeDisabled();
+  await expect(third).toBeDisabled();
+  releaseArchiveRequests?.();
+
+  await expect
+    .poll(() => archivedThreadIds.sort())
+    .toEqual(['thread-bulk-1', 'thread-bulk-2', 'thread-bulk-3']);
+  await expect(toolbar).toHaveCount(0);
+  await expect(
+    nav.getByRole('button', { name: 'Expand Archived' }),
+  ).toBeVisible();
+});
+
 test('durable lifecycle controls require an exact persisted run mapping @desktop', async ({
   page,
 }) => {

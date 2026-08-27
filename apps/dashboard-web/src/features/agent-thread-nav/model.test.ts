@@ -3,6 +3,7 @@ import { draftPath } from '../drafts';
 import type { AgentThreadRow } from './model';
 import {
   agentThreadRows,
+  bulkThreadActions,
   canSettleThread,
   durableThreadForSession,
   filterAgentThreadRows,
@@ -635,6 +636,36 @@ describe('agent thread view model', () => {
         durableThread: { ...durable, settledAt: 10 },
       }),
     ).toBe(false);
+  });
+
+  it('offers only lifecycle actions shared by every selected thread', () => {
+    const durable = (id: string, settledAt?: number): AgentThreadRow => ({
+      ...row(id, 'Dashboard', 'dormant'),
+      durableThread: {
+        threadId: id,
+        hasActiveRun: false,
+        ...(settledAt === undefined ? {} : { settledAt }),
+      },
+    });
+    const settled = [durable('one', 1), durable('two', 2)];
+
+    expect(bulkThreadActions(settled)).toEqual(['pin', 'unsettle', 'archive']);
+    expect(
+      bulkThreadActions([
+        settled[0],
+        {
+          ...settled[1],
+          durableThread: {
+            threadId: 'two',
+            settledAt: 2,
+            hasActiveRun: true,
+          },
+        },
+      ]),
+    ).toEqual(['pin', 'unsettle']);
+    expect(bulkThreadActions([settled[0], row('draft', 'Dashboard')])).toEqual(
+      [],
+    );
   });
 
   it('uses compact distinct glyphs for passive waiting and input', () => {

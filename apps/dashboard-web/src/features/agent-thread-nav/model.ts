@@ -356,6 +356,47 @@ export function canSettleThread(row: AgentThreadRow): boolean {
   );
 }
 
+export type BulkThreadAction =
+  | 'archive'
+  | 'restore'
+  | 'pin'
+  | 'unpin'
+  | 'settle'
+  | 'unsettle';
+
+/** Lifecycle actions whose preconditions hold for every selected thread. */
+export function bulkThreadActions(
+  rows: readonly AgentThreadRow[],
+): BulkThreadAction[] {
+  if (!rows.length || rows.some((row) => !row.durableThread)) return [];
+  const actions: BulkThreadAction[] = [];
+  const threads = rows.flatMap((row) =>
+    row.durableThread ? [row.durableThread] : [],
+  );
+  if (threads.every((thread) => thread.pinnedAt === undefined))
+    actions.push('pin');
+  else if (threads.every((thread) => thread.pinnedAt !== undefined))
+    actions.push('unpin');
+  if (rows.every(canSettleThread)) actions.push('settle');
+  else if (
+    threads.every(
+      (thread) =>
+        thread.archivedAt === undefined && thread.settledAt !== undefined,
+    )
+  )
+    actions.push('unsettle');
+  if (
+    threads.every(
+      (thread) =>
+        thread.archivedAt === undefined && thread.hasActiveRun === false,
+    )
+  )
+    actions.push('archive');
+  else if (threads.every((thread) => thread.archivedAt !== undefined))
+    actions.push('restore');
+  return actions;
+}
+
 export function filterAgentThreadRows(
   rows: readonly AgentThreadRow[],
   query: string,

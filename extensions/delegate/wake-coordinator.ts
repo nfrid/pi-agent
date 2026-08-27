@@ -1110,33 +1110,34 @@ export class WakeCoordinator {
           throw new WakePayloadPendingError(
             `Wake payload source "${identity}" is not terminal yet.`,
           );
-        const symbolic: SymbolicWorkflowSelector = {
-          node: identity,
-          include: [selector.kind],
-        };
-        const bound: BoundWorkflowSelector = Object.freeze({
-          selector: Object.freeze(symbolic),
-          identity,
-        });
-        const resolved = this.workflow.resolveBoundWorkflowInputs([bound]);
-        const selected = resolved.inputs.find(
-          (candidate: ResolvedWorkflowInput) =>
-            candidate.kind === selector.kind,
-        );
-        if (!selected)
-          throw new Error(`Wake payload ${selector.kind} is unavailable.`);
         const current = sourceValues.get(identity) ?? {};
         let next: WakePayloadSource;
         if (selector.kind === 'handoff') {
-          if (typeof selected.value !== 'string')
+          const handoff =
+            this.workflow.getResultEvidence(identity)?.handoff.text;
+          if (handoff === undefined)
             throw new Error('Wake handoff payload is unavailable.');
           if (
-            Buffer.byteLength(selected.value, 'utf8') >
-            WAKE_PAYLOAD_CAPS.handoffBytes
+            Buffer.byteLength(handoff, 'utf8') > WAKE_PAYLOAD_CAPS.handoffBytes
           )
             throw new Error('Wake handoff payload exceeds its bounded limit.');
-          next = { ...current, handoff: selected.value };
+          next = { ...current, handoff };
         } else {
+          const symbolic: SymbolicWorkflowSelector = {
+            node: identity,
+            include: [selector.kind],
+          };
+          const bound: BoundWorkflowSelector = Object.freeze({
+            selector: Object.freeze(symbolic),
+            identity,
+          });
+          const resolved = this.workflow.resolveBoundWorkflowInputs([bound]);
+          const selected = resolved.inputs.find(
+            (candidate: ResolvedWorkflowInput) =>
+              candidate.kind === selector.kind,
+          );
+          if (!selected)
+            throw new Error(`Wake payload ${selector.kind} is unavailable.`);
           if (
             selected.value === undefined ||
             jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.metadataBytes
