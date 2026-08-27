@@ -93,6 +93,49 @@ describe('UsageService', () => {
     await vi.waitFor(() => expect(provider.get).toHaveBeenCalledTimes(1));
   });
 
+  it('records each successful provider refresh without recording cache reads', async () => {
+    let now = 1_000;
+    const usage = {
+      snapshots: [
+        {
+          limitId: 'codex',
+          primary: { usedPercent: 20, windowMinutes: 300 },
+        },
+      ],
+    };
+    const provider = { get: vi.fn(async () => usage) };
+    const history = {
+      append: vi.fn(),
+      read: vi.fn(
+        (range: '24h' | '7d' | '30d' | 'all', generatedAt: number) => ({
+          range,
+          generatedAt,
+          series: [],
+        }),
+      ),
+    };
+    const service = new UsageService(provider, undefined, {
+      history,
+      now: () => now,
+    });
+
+    await service.get();
+    await service.get();
+    now = 2_000;
+    await service.get(true);
+
+    expect(provider.get).toHaveBeenCalledTimes(2);
+    expect(history.append).toHaveBeenCalledTimes(2);
+    expect(history.append.mock.calls[0]?.[0]).toMatchObject([
+      { capturedAt: 1_000, limitId: 'codex', usedPercent: 20 },
+    ]);
+    expect(service.history('all')).toEqual({
+      range: 'all',
+      generatedAt: 2_000,
+      series: [],
+    });
+  });
+
   it('keeps the last valid value when a later provider response is too large', async () => {
     const provider = {
       get: vi

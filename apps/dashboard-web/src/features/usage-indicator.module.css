@@ -91,7 +91,7 @@
   right: 0;
   display: grid;
   gap: 8px;
-  min-width: 190px;
+  width: 100%;
   border: var(--border-soft);
   border-radius: 8px;
   background: var(--bg-alt);
@@ -131,11 +131,46 @@
 .details strong {
   font-size: 11px;
 }
-.details .window {
-  justify-content: space-between;
+.historyLimit,
+.historyWindow {
+  display: grid;
+  gap: 3px;
 }
-.compactWindow {
+.historyLimit + .historyLimit {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+.historyWindowHeader {
   display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.historyWindowHeader > :first-child {
+  color: var(--fg);
+  font-weight: 650;
+}
+.historyStatus {
+  display: grid;
+  min-height: 28px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.expand {
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--purple);
+  padding: 8px 0 0;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.expand:hover {
+  color: var(--fg);
 }
 @media (max-width: 1080px) {
   .windowWrap:not(.urgent) {

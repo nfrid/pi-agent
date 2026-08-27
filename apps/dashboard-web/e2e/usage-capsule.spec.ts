@@ -20,11 +20,72 @@ const usage = {
   ],
 };
 
-async function openSession(page: Page, path = '/sessions/session-usage') {
+const usageHistory = {
+  generatedAt: Date.now(),
+  series: [
+    {
+      limitId: 'codex',
+      limitName: 'Codex',
+      windowKind: 'primary',
+      windowLabel: '5h',
+      windowMinutes: 300,
+      points: [
+        { capturedAt: Date.now() - 2 * 60 * 60_000, usedPercent: 18 },
+        { capturedAt: Date.now() - 60 * 60_000, usedPercent: 45 },
+        {
+          capturedAt: Date.now(),
+          usedPercent: 73,
+          resetsAt: usage.snapshots[0]?.primary.resetsAt,
+        },
+      ],
+      burnRate: {
+        percentPerHour: 27.5,
+        observedHours: 2,
+        projectedExhaustionAt: Date.now() + 60 * 60_000,
+        exhaustsBeforeReset: true,
+      },
+    },
+    {
+      limitId: 'codex',
+      limitName: 'Codex',
+      windowKind: 'secondary',
+      windowLabel: 'wk',
+      windowMinutes: 10_080,
+      points: [
+        { capturedAt: Date.now() - 2 * 24 * 60 * 60_000, usedPercent: 20 },
+        { capturedAt: Date.now() - 24 * 60 * 60_000, usedPercent: 30 },
+        {
+          capturedAt: Date.now(),
+          usedPercent: 41,
+          resetsAt: usage.snapshots[0]?.secondary.resetsAt,
+        },
+      ],
+      burnRate: {
+        percentPerHour: 0.45,
+        observedHours: 24,
+        projectedExhaustionAt: Date.now() + 6 * 24 * 60 * 60_000,
+        exhaustsBeforeReset: false,
+      },
+    },
+  ],
+};
+
+async function openSession(
+  page: Page,
+  path = '/sessions/session-usage',
+  usageValue: unknown = usage,
+) {
+  await page.route('**/api/usage/history?*', (route) => {
+    const range = new URL(route.request().url()).searchParams.get('range');
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ...usageHistory, range }),
+    });
+  });
   await page.route('**/api/usage', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ usage }),
+      body: JSON.stringify({ usage: usageValue }),
     }),
   );
   await page.route('**/api/sessions/session-usage/delegate-history', (route) =>
@@ -65,9 +126,9 @@ async function openSession(page: Page, path = '/sessions/session-usage') {
         },
       ],
       unread: [],
-      usage,
+      usage: usageValue,
     },
-    { usage },
+    { usage: usageValue },
   );
   await page.goto(path);
 }
@@ -92,6 +153,35 @@ test('keeps usage and settings together in the home sidebar footer', async ({
   await expect(footer.getByText('History', { exact: true })).toHaveCount(0);
 });
 
+test('selects the most urgent limit and keeps every limit in quick history', async ({
+  page,
+}) => {
+  await openSession(page, '/', {
+    capturedAt: Date.now(),
+    snapshots: [
+      ...usage.snapshots,
+      {
+        limitId: 'reviews',
+        limitName: 'Reviews',
+        primary: {
+          usedPercent: 99,
+          windowDurationMins: 300,
+          resetsAt: Date.now() + 60 * 60_000,
+        },
+      },
+    ],
+  });
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const trigger = page.getByRole('button', {
+    name: 'Usage: Reviews, 5h 99%',
+  });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  const details = page.getByRole('dialog', { name: 'Usage limits' });
+  await expect(details.getByText('Codex history')).toBeVisible();
+  await expect(details.getByText('Reviews history')).toBeVisible();
+});
+
 test('shows compact usage in the mobile agent drawer', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 720 });
   await openSession(page);
@@ -105,9 +195,45 @@ test('shows compact usage in the mobile agent drawer', async ({ page }) => {
   await expect(trigger).toContainText('wk');
   await expect(trigger.getByText('in 3h', { exact: true })).toBeHidden();
   await trigger.click();
-  await expect(
-    page.getByRole('dialog', { name: 'Usage limits' }),
-  ).toBeVisible();
+  const details = page.getByRole('dialog', { name: 'Usage limits' });
+  await expect(details).toBeVisible();
+  const settings = page.getByRole('button', { name: 'Open settings' });
+  await settings.focus();
+  await expect(settings).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
+  await expect(page.locator('.agent-nav-drawer.open')).toBeVisible();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(details).toBeVisible();
+  await page.keyboard.press('Control+K');
+  const palette = page.locator('.command-palette');
+  await expect(palette).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await expect(details).toBeVisible();
+  await expect(page.locator('.agent-nav-drawer.open')).toBeVisible();
+  await expect(page.locator('.command-palette')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
+  await expect(page.locator('.agent-nav-drawer.open')).toBeVisible();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(details).toBeVisible();
+  await details.getByRole('button', { name: 'Open usage analytics' }).click();
+  const analytics = page.getByRole('dialog', { name: 'Usage analytics' });
+  await expect(analytics).toBeVisible();
+  await expect
+    .poll(async () => (await analytics.boundingBox())?.x)
+    .toBeLessThanOrEqual(1);
+  const panel = await analytics.boundingBox();
+  const viewport = page.viewportSize();
+  if (!panel || !viewport)
+    throw new Error('Mobile analytics sheet is not laid out.');
+  expect(panel.x).toBeLessThanOrEqual(1);
+  expect(panel.y).toBeLessThanOrEqual(1);
+  expect(Math.abs(panel.width - viewport.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(panel.height - viewport.height)).toBeLessThanOrEqual(2);
 });
 
 test('browser Back closes the mobile agent drawer', async ({ page }) => {
@@ -181,10 +307,50 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await trigger.click();
   const details = page.getByRole('dialog', { name: 'Usage limits' });
   await expect(details).toBeVisible();
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await expect(page.locator('.command-palette')).toHaveCount(0);
+  await expect(details).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(details).toBeVisible();
+  await expect(details.getByText('Codex history')).toBeVisible();
+  await expect(details.getByText('73%')).toHaveCount(0);
+  await expect(details.getByText('41%')).toHaveCount(0);
+  await expect(
+    details.getByRole('img', { name: /usage history/iu }),
+  ).toHaveCount(2);
   const detailsBox = await details.boundingBox();
   if (!detailsBox) throw new Error('Sidebar usage details are not laid out.');
   expect(detailsBox.y + detailsBox.height).toBeLessThanOrEqual(triggerBox.y);
-  await trigger.click();
+  await details.getByRole('button', { name: 'Open usage analytics' }).click();
+  const analytics = page.getByRole('dialog', { name: 'Usage analytics' });
+  await expect(analytics).toBeVisible();
+  await expect(analytics).toHaveAttribute('data-surface-kind', 'utility');
+  await expect(
+    analytics.getByRole('heading', { name: '5h window' }),
+  ).toBeVisible();
+  await expect(
+    analytics.getByRole('heading', { name: 'wk window' }),
+  ).toBeVisible();
+  await expect(analytics.getByText('27.5%/h')).toBeVisible();
+  await expect(analytics.getByText('0.45%/h')).toBeVisible();
+  await expect(
+    analytics.getByText('Reset should arrive before the limit.'),
+  ).toBeVisible();
+  await analytics.getByRole('button', { name: '7d' }).click();
+  await expect(analytics.getByRole('button', { name: '7d' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.goBack();
+  await expect(analytics).toHaveCount(0);
+  await expect(trigger).toBeFocused();
   await settings.click();
   const settingsDrawer = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDrawer).toBeVisible();

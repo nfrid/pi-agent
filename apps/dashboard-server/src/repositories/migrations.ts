@@ -739,6 +739,28 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 15,
+    name: 'usage-history-samples',
+    up(db) {
+      db.exec(`
+        CREATE TABLE usage_sample (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          captured_at INTEGER NOT NULL CHECK (captured_at BETWEEN 0 AND 8640000000000000),
+          limit_id TEXT NOT NULL CHECK (length(limit_id) BETWEEN 1 AND 128),
+          limit_name TEXT NOT NULL CHECK (length(limit_name) BETWEEN 1 AND 256),
+          window_kind TEXT NOT NULL CHECK (window_kind IN ('primary','secondary')),
+          window_label TEXT NOT NULL CHECK (length(window_label) BETWEEN 1 AND 64),
+          window_minutes REAL CHECK (window_minutes > 0),
+          used_percent REAL NOT NULL CHECK (used_percent BETWEEN 0 AND 100),
+          resets_at INTEGER CHECK (resets_at BETWEEN 0 AND 8640000000000000)
+        );
+        CREATE INDEX usage_sample_series_time
+          ON usage_sample(limit_id,window_kind,captured_at,id);
+        CREATE INDEX usage_sample_time ON usage_sample(captured_at);
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

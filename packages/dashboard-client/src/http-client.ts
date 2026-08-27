@@ -47,8 +47,11 @@ import {
   tryParseSessionThreadLinks,
   tryParseShellSnapshotResponse,
   tryParseThread,
+  tryParseUsageHistoryResponse,
   type UnpinThreadCommand,
   type UnsettleThreadCommand,
+  type UsageHistoryRange,
+  type UsageHistoryResponse,
 } from '@pi-dashboard/protocol';
 import {
   browserDashboardTokenStore,
@@ -655,6 +658,21 @@ export class DashboardHttpClient {
 
   async usage(): Promise<{ usage?: unknown; error?: string }> {
     return this.request('/api/usage');
+  }
+
+  async usageHistory(
+    range: UsageHistoryRange = '24h',
+  ): Promise<UsageHistoryResponse> {
+    const value = await this.request<unknown>(
+      `/api/usage/history?range=${encodeURIComponent(range)}`,
+    );
+    const response = tryParseUsageHistoryResponse(value);
+    if (!response || response.range !== range)
+      throw malformedOutput(
+        'Dashboard returned invalid usage history data.',
+        value,
+      );
+    return response;
   }
 
   async createProject(command: ProjectCreateCommand): Promise<{

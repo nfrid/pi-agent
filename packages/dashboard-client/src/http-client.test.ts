@@ -745,6 +745,65 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     ).toBe('test-token');
   });
 
+  it('parses bounded usage history from the selected endpoint', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/lan/trpc/protocolInfo') return protocolInfoResponse();
+      return new Response(
+        JSON.stringify({
+          range: '7d',
+          generatedAt: 123,
+          series: [
+            {
+              limitId: 'codex',
+              limitName: 'Codex',
+              windowKind: 'primary',
+              windowLabel: '5h',
+              points: [{ capturedAt: 100, usedPercent: 25 }],
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await expect(client.usageHistory('7d')).resolves.toMatchObject({
+      range: '7d',
+      series: [{ windowLabel: '5h' }],
+    });
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/trpc/protocolInfo',
+      '/lan/api/usage/history?range=7d',
+    ]);
+  });
+
+  it('rejects usage history returned for a different range', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/lan/trpc/protocolInfo')
+        return protocolInfoResponse();
+      return new Response(
+        JSON.stringify({ range: '24h', generatedAt: 123, series: [] }),
+        { status: 200 },
+      );
+    });
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await expect(client.usageHistory('7d')).rejects.toThrow(
+      'invalid usage history',
+    );
+  });
+
   it.each([
     ['failed', 500],
     ['unauthorized', 401],

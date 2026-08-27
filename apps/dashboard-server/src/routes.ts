@@ -24,6 +24,10 @@ import {
   SettleThreadCommandSchema,
   UnpinThreadCommandSchema,
   UnsettleThreadCommandSchema,
+  type UsageHistoryRange,
+  UsageHistoryRangeSchema,
+  type UsageHistoryResponse,
+  UsageHistoryResponseSchema,
 } from '@pi-dashboard/protocol';
 import type {
   FastifyInstance,
@@ -41,6 +45,10 @@ const MAX_JSON_BODY = 512 * 1024;
 const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
 const objectBody = Type.Object({}, { additionalProperties: true });
 const anyBody = Type.Any();
+const UsageHistoryQuerySchema = Type.Object(
+  { range: Type.Optional(UsageHistoryRangeSchema) },
+  { additionalProperties: false },
+);
 const ThreadListQuerySchema = Type.Object(
   {
     projectId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -116,6 +124,7 @@ export interface DashboardRouteContext {
     sequence: number,
   ): Promise<AuthoritativeSessionSnapshot>;
   usage(): Promise<{ usage: unknown; error?: string }>;
+  usageHistory?(range: UsageHistoryRange): UsageHistoryResponse;
   readDelegateHistory(id: string): Promise<DelegateHistoryResponse>;
   sessionImage?(
     sessionId: string,
@@ -368,6 +377,30 @@ export const dashboardRoutes: FastifyPluginAsync<{
       return sendError(reply, error);
     }
   });
+  app.get(
+    '/api/usage/history',
+    {
+      schema: {
+        querystring: UsageHistoryQuerySchema,
+        response: { 200: UsageHistoryResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const query = request.query as { range?: UsageHistoryRange };
+        const range = query.range ?? '24h';
+        return (
+          context.usageHistory?.(range) ?? {
+            range,
+            generatedAt: Date.now(),
+            series: [],
+          }
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.get('/api/push/vapid-public-key', async () => ({
     publicKey: context.vapidPublicKey(),
   }));

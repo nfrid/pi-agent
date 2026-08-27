@@ -24,6 +24,7 @@ import {
   stopRuntimeMutationOptions,
   unpinThreadMutationOptions,
   unsettleThreadMutationOptions,
+  usageHistoryQueryOptions,
 } from './query-options.js';
 import { DashboardLiveStore } from './store.js';
 
@@ -33,6 +34,24 @@ const client = {
 } as unknown as DashboardHttpClient;
 
 describe('dashboard query and mutation factories', () => {
+  it('refreshes open usage history views once a minute', async () => {
+    const usageHistory = vi.fn(async () => ({
+      range: '24h' as const,
+      generatedAt: 1,
+      series: [],
+    }));
+    const options = usageHistoryQueryOptions(
+      { usageHistory } as unknown as DashboardHttpClient,
+      '24h',
+    );
+    expect(options.queryKey).toEqual(['dashboard', 'usage-history', '24h']);
+    expect(options.refetchInterval).toBe(60_000);
+    if (!options.queryFn) throw new Error('Query function is missing.');
+    await expect(
+      options.queryFn({ signal: undefined } as never),
+    ).resolves.toEqual({ range: '24h', generatedAt: 1, series: [] });
+  });
+
   it('queries persisted delegate history by session ID', async () => {
     const delegateHistory = vi.fn(async () => ({
       version: 2 as const,

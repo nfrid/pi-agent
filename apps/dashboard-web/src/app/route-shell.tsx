@@ -7,6 +7,7 @@ import {
 } from '../features/dashboard-surface-context';
 import { SessionNavigationContext } from '../features/session-navigation-context';
 import { SurfaceStack } from '../features/surface-stack';
+import { UsageAnalyticsPanel } from '../features/usage-analytics';
 import { Header, SettingsView } from '../routes/dashboard';
 import { useDashboardContext } from './dashboard-context';
 
@@ -94,18 +95,28 @@ function DashboardSurfaceOverlay({
 }) {
   const surfaces = useDashboardSurfaces();
   const pages =
-    surfaces?.stack.map((surface) => ({
-      id: surface.type,
-      title: 'Settings',
-      eyebrow: 'Dashboard utility',
-      children: <SettingsView snapshot={snapshot} />,
-    })) ?? [];
+    surfaces?.stack.map((surface) =>
+      surface.type === 'settings'
+        ? {
+            id: surface.type,
+            title: 'Settings',
+            eyebrow: 'Dashboard utility',
+            children: <SettingsView snapshot={snapshot} />,
+          }
+        : {
+            id: surface.type,
+            title: 'Usage analytics',
+            eyebrow: 'Account limits',
+            children: <UsageAnalyticsPanel />,
+          },
+    ) ?? [];
+  const analyticsOpen = surfaces?.stack.at(-1)?.type === 'usage-analytics';
   return (
     <SurfaceStack
       pages={pages}
       kind="utility"
-      size="compact"
-      className="surface-drawer utility-drawer"
+      size={analyticsOpen ? 'wide' : 'compact'}
+      className={`surface-drawer utility-drawer${analyticsOpen ? ' usage-analytics-drawer' : ''}`}
       isOpen={pages.length > 0}
       onDepthChange={(depth) => surfaces?.truncate(depth)}
       onClose={() => surfaces?.close()}

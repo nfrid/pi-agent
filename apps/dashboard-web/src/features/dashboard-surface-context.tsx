@@ -7,7 +7,9 @@ import {
   useState,
 } from 'react';
 
-export type DashboardSurface = { type: 'settings' };
+export type DashboardSurface =
+  | { type: 'settings' }
+  | { type: 'usage-analytics' };
 
 export type DashboardSurfaceContextValue = {
   stack: readonly DashboardSurface[];

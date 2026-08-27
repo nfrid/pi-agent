@@ -11,6 +11,7 @@ import type {
   SessionAdoptCommand,
   StartRuntimeRequest,
   ThreadCreateCommand,
+  UsageHistoryRange,
 } from '@pi-dashboard/protocol';
 import {
   mutationOptions,
@@ -26,6 +27,8 @@ export const dashboardQueryKeys = {
   all: ['dashboard'] as const,
   snapshot: () => ['dashboard', 'snapshot'] as const,
   usage: () => ['dashboard', 'usage'] as const,
+  usageHistory: (range: UsageHistoryRange) =>
+    ['dashboard', 'usage-history', range] as const,
   session: (id: string) => ['dashboard', 'session', id] as const,
   delegateHistory: (id: string) =>
     ['dashboard', 'delegate-history', id] as const,
@@ -196,6 +199,19 @@ export function usageQueryOptions(client: DashboardHttpClient) {
     queryKey: dashboardQueryKeys.usage(),
     queryFn: () => client.usage(),
     staleTime: 30_000,
+    retry: networkRetry,
+  });
+}
+
+export function usageHistoryQueryOptions(
+  client: DashboardHttpClient,
+  range: UsageHistoryRange,
+) {
+  return queryOptions({
+    queryKey: dashboardQueryKeys.usageHistory(range),
+    queryFn: () => client.usageHistory(range),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
     retry: networkRetry,
   });
 }

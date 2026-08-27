@@ -773,6 +773,7 @@ export class DashboardApplication {
       options.push,
     );
     this.usage = new UsageService(options.usage, options.onChange, {
+      history: options.metadata.usageHistory,
       freshMs: () =>
         this.runtime
           .snapshots()

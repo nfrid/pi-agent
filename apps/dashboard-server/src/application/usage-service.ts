@@ -1,3 +1,11 @@
+import type {
+  UsageHistoryRange,
+  UsageHistoryResponse,
+} from '@pi-dashboard/protocol';
+import {
+  normalizeUsageHistorySamples,
+  type SqliteUsageHistoryRepository,
+} from '../repositories/sqlite-usage-history-repository.js';
 import type { UsageProvider } from '../usage.js';
 
 const MAX_USAGE_BYTES = 256 * 1024;
@@ -12,6 +20,8 @@ export interface UsageResult {
 export interface UsageServiceOptions {
   freshMs?: () => number;
   pollMs?: number;
+  history?: Pick<SqliteUsageHistoryRepository, 'append' | 'read'>;
+  now?: () => number;
 }
 
 /** Bounded, coalescing usage provider cache independent of HTTP requests. */
@@ -49,13 +59,27 @@ export class UsageService {
     return this.snapshot;
   }
 
+  private now(): number {
+    return this.options.now?.() ?? Date.now();
+  }
+
   private freshMs(): number {
     return Math.max(0, this.options.freshMs?.() ?? DEFAULT_FRESH_MS);
   }
 
+  history(range: UsageHistoryRange): UsageHistoryResponse {
+    return (
+      this.options.history?.read(range, this.now()) ?? {
+        range,
+        generatedAt: this.now(),
+        series: [],
+      }
+    );
+  }
+
   private async refresh(): Promise<UsageResult> {
     const freshnessBase = this.updatedAt || this.attemptedAt;
-    if (freshnessBase && Date.now() - freshnessBase < this.freshMs())
+    if (freshnessBase && this.now() - freshnessBase < this.freshMs())
       return { usage: this.snapshot };
     return this.get();
   }
@@ -65,7 +89,7 @@ export class UsageService {
       if (
         !force &&
         this.snapshot !== undefined &&
-        Date.now() - this.updatedAt < this.freshMs()
+        this.now() - this.updatedAt < this.freshMs()
       )
         return { usage: this.snapshot };
       if (this.request) {
@@ -74,7 +98,7 @@ export class UsageService {
       }
       const controller = new AbortController();
       this.requestController = controller;
-      this.attemptedAt = Date.now();
+      this.attemptedAt = this.now();
       const request = this.provider.get(controller.signal);
       this.request = request;
       let usage: unknown;
@@ -91,8 +115,12 @@ export class UsageService {
         Buffer.byteLength(serialized) > MAX_USAGE_BYTES
       )
         throw new Error('Usage payload exceeds the dashboard size limit.');
+      const capturedAt = this.now();
+      this.options.history?.append(
+        normalizeUsageHistorySamples(usage, capturedAt),
+      );
       this.snapshot = usage;
-      this.updatedAt = Date.now();
+      this.updatedAt = capturedAt;
       this.onChange?.();
       return { usage: this.snapshot };
     } catch (error) {

@@ -1,0 +1,187 @@
+.collecting {
+  display: grid;
+  min-height: 28px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 30px;
+  overflow: visible;
+}
+.sparkline path {
+  fill: none;
+  stroke: var(--purple);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.analytics {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+}
+.rangeSelector {
+  display: flex;
+  width: fit-content;
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-alt);
+  padding: 2px;
+}
+.rangeSelector button {
+  min-width: 46px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.rangeSelector button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--purple) 16%, var(--bg));
+  color: var(--fg);
+}
+.status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.seriesList {
+  display: grid;
+  gap: 14px;
+}
+.seriesCard {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  padding: 14px;
+}
+.seriesCard > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.seriesCard h3,
+.limitName,
+.projection,
+.resetAt {
+  margin: 0;
+}
+.seriesCard h3 {
+  font-size: 14px;
+}
+.limitName {
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.currentUsage {
+  color: var(--purple);
+  font-size: 18px;
+}
+.chart {
+  position: relative;
+  outline: none;
+}
+.chart:focus-visible {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--purple) 55%, transparent);
+}
+.chart svg {
+  display: block;
+  width: 100%;
+  height: 180px;
+  overflow: visible;
+}
+.gridLine,
+.resetLine,
+.historyLine {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.gridLine {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+}
+.resetLine {
+  stroke: color-mix(in srgb, var(--muted) 65%, transparent);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+.historyLine {
+  stroke: var(--purple);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.activePoint {
+  fill: var(--bg);
+  stroke: var(--purple);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.tooltip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.tooltip strong {
+  color: var(--fg);
+}
+.tooltip span {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--purple) 14%, transparent);
+  padding: 2px 6px;
+  color: var(--purple);
+}
+.emptyChart {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  border-block: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+.projection,
+.resetAt {
+  color: var(--muted);
+  font-size: 11px;
+}
+.projection strong {
+  color: var(--fg);
+}
+.resetAt {
+  margin-top: 4px;
+}
+@media (max-width: 700px) {
+  .analytics {
+    padding: 12px;
+  }
+  .rangeSelector {
+    width: 100%;
+  }
+  .rangeSelector button {
+    flex: 1;
+  }
+  .chart svg,
+  .emptyChart {
+    height: 150px;
+    min-height: 150px;
+  }
+}

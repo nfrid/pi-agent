@@ -258,6 +258,7 @@ export class DashboardServerImpl implements DashboardServer {
       sessionSnapshotAt: (id, sequence) =>
         this.buildSessionSnapshot(id, undefined, sequence),
       usage: () => this.application.usage.get(),
+      usageHistory: (range) => this.application.usage.history(range),
       readDelegateHistory: (id) => this.delegateHistoryResult(id),
       readDelegateHistoryRun: (id, runId, query) =>
         this.delegateHistoryRunResult(id, runId, query),

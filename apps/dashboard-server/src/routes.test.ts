@@ -31,6 +31,11 @@ function context(): DashboardRouteContext {
       },
     ],
     usage: async () => ({ usage: null }),
+    usageHistory: (range) => ({
+      range,
+      generatedAt: 123,
+      series: [],
+    }),
     readDelegateHistory: async () => ({
       version: 2,
       sessionId: 's',
@@ -245,6 +250,30 @@ describe('Fastify dashboard route plugin', () => {
         },
       }),
     ).resolves.toMatchObject({ statusCode: 200 });
+    const history = await app.inject({
+      method: 'GET',
+      url: '/api/usage/history?range=all',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+    });
+    expect(history.statusCode).toBe(200);
+    expect(history.json()).toEqual({
+      range: 'all',
+      generatedAt: 123,
+      series: [],
+    });
+    await expect(
+      app.inject({
+        method: 'GET',
+        url: '/api/usage/history?range=forever',
+        headers: {
+          origin: 'http://dashboard.test',
+          'x-dashboard-token': 'route-token',
+        },
+      }),
+    ).resolves.toMatchObject({ statusCode: 400 });
   });
 
   it('keeps CORS preflight and TypeBox body schemas on the route boundary', async () => {

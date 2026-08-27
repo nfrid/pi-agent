@@ -12,6 +12,7 @@ import { runMigrations } from './repositories/migrations.js';
 import { SqliteMetadataRepository } from './repositories/sqlite-metadata-repository.js';
 import { SqliteNotificationRepository } from './repositories/sqlite-notification-repository.js';
 import { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
+import { SqliteUsageHistoryRepository } from './repositories/sqlite-usage-history-repository.js';
 
 export { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
 
@@ -41,6 +42,7 @@ export class MetadataStore {
   readonly notifications: SqliteNotificationRepository;
   /** Durable project/thread/run state; runtime and transcript storage stay separate. */
   readonly orchestration: SqliteOrchestrationRepository;
+  readonly usageHistory: SqliteUsageHistoryRepository;
 
   constructor(file: string) {
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -60,6 +62,7 @@ export class MetadataStore {
     this.metadata = new SqliteMetadataRepository(this.db);
     this.notifications = new SqliteNotificationRepository(this.db);
     this.orchestration = new SqliteOrchestrationRepository(this.db);
+    this.usageHistory = new SqliteUsageHistoryRepository(this.db);
   }
 
   saveRuntime(snapshot: RuntimeSnapshot): void {

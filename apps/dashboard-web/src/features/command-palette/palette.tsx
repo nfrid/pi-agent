@@ -55,10 +55,14 @@ export function CommandPalette({
           return !value;
         });
       }
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape' && dialogRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+      }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [disabled, rememberFocus]);
   useEffect(() => {
     if (disabled) setOpen(false);
@@ -143,6 +147,7 @@ export function CommandPalette({
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault();
+                event.stopPropagation();
                 close();
                 return;
               }
