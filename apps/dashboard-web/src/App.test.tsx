@@ -653,12 +653,14 @@ describe('workspace-first agent navigation', () => {
             path: '/repo/.worktrees/thread-metadata',
           },
         ] as never,
+        { 'runtime/current': { alias: 'Current', color: '#ff79c6' } },
       ),
     ).toMatchObject({
       branch: 'feature/thread-metadata',
       model: {
         id: 'runtime/current',
-        alias: 'current',
+        alias: 'Current',
+        color: '#ff79c6',
       },
       effort: { full: 'high', compact: 'h', color: 'orange' },
       queue: 2,
@@ -676,7 +678,7 @@ describe('workspace-first agent navigation', () => {
     });
     expect(
       activeThreadDetails(
-        { status: 'dormant', session: {} } as never,
+        { status: 'dormant', cwd: '/repo', session: {} } as never,
         runtimes,
       ),
     ).toMatchObject({

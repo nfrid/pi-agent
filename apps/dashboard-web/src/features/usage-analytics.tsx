@@ -18,6 +18,10 @@ import {
   useRef,
   useState,
 } from 'react';
+import {
+  modelDisplayPreference,
+  useModelDisplayPreferences,
+} from './model-display-preferences';
 import styles from './usage-analytics.module.css';
 
 const RANGES: ReadonlyArray<{ range: UsageHistoryRange; label: string }> = [
@@ -183,6 +187,7 @@ export function analyticsSeries(
   data: UsageHistoryResponse,
   measurement: Measurement,
   cumulative: boolean,
+  preferences: ReturnType<typeof useModelDisplayPreferences> = {},
 ): ChartSeries[] {
   if (measurement === 'limit') {
     const colors = seriesColors(data.series.map((series) => series.id));
@@ -218,7 +223,11 @@ export function analyticsSeries(
     return {
       id: series.id,
       label: series.label,
-      color: colors.get(series.id) ?? SERIES_COLORS[0],
+      color:
+        modelDisplayPreference(preferences, series.provider, series.modelId)
+          .color ??
+        colors.get(series.id) ??
+        SERIES_COLORS[0],
       values: data.buckets.map((bucket) => {
         const value = spendValue(
           byBucket.get(bucket) ?? {
@@ -545,13 +554,22 @@ export function UsageAnalyticsPanel() {
   const [measurement, setMeasurement] = useState<Measurement>('limit');
   const [cumulative, setCumulative] = useState(false);
   const [selected, setSelected] = useState<string[] | undefined>();
+  const modelDisplayPreferences = useModelDisplayPreferences();
   const before = anchor - page * RANGE_MS[range];
   const options = usageHistoryQueryOptions(dashboardHttpClient, range, before);
   const history = useQuery(options);
   const data = history.data;
   const allSeries = useMemo(
-    () => (data ? analyticsSeries(data, measurement, cumulative) : []),
-    [cumulative, data, measurement],
+    () =>
+      data
+        ? analyticsSeries(
+            data,
+            measurement,
+            cumulative,
+            modelDisplayPreferences,
+          )
+        : [],
+    [cumulative, data, measurement, modelDisplayPreferences],
   );
   const availableIds = useMemo(
     () => new Set(allSeries.map((item) => item.id)),

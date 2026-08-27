@@ -41,6 +41,10 @@ vi.mock('react-aria-components', () => ({
 }));
 vi.mock('../drafts', () => ({ setDraftLocation, setDraftModel }));
 
+import {
+  resetModelDisplayPreference,
+  setModelDisplayPreference,
+} from '../model-display-preferences';
 import { DraftAgentPicker, DraftLocationPicker } from './draft-pickers';
 
 const checkouts = [
@@ -206,6 +210,55 @@ describe('draft location picker', () => {
 });
 
 describe('draft agent picker', () => {
+  it('uses configured aliases and colors while retaining full model identities', () => {
+    installKeyboard();
+    setModelDisplayPreference('test', 'fast', {
+      alias: 'Turbo',
+      color: '#ff79c6',
+    });
+    setModelDisplayPreference('test', 'careful', {
+      color: '#50fa7b',
+    });
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(
+        <DraftAgentPicker
+          draftId="draft-1"
+          model={{ provider: 'test', model: 'fast' }}
+          runtimes={
+            [
+              {
+                runtimeId: 'runtime-1',
+                modelCatalog: [
+                  { provider: 'test', model: 'fast', name: 'Fast' },
+                  { provider: 'test', model: 'careful', name: 'Careful' },
+                ],
+              },
+            ] as never
+          }
+          disabled={false}
+        />,
+      );
+    });
+    const trigger = renderer.root.findByProps({
+      className: 'draft-agent-model',
+    });
+    expect(label(trigger.props.children)).toBe('Turbo');
+    expect(trigger.props.style).toEqual({ color: '#ff79c6' });
+    act(() => buttonWithLabel(renderer, 'Turbo')?.props.onPress());
+    expect(buttonWithLabel(renderer, 'test/fast')).toBeDefined();
+    expect(buttonWithLabel(renderer, 'test/careful')).toBeDefined();
+    expect(
+      renderer.root.findAll((node) => node.props.style?.color === '#ff79c6'),
+    ).not.toHaveLength(0);
+    expect(
+      renderer.root.findAll((node) => node.props.style?.color === '#50fa7b'),
+    ).not.toHaveLength(0);
+    renderer.unmount();
+    resetModelDisplayPreference('test', 'fast');
+    resetModelDisplayPreference('test', 'careful');
+  });
+
   it('keeps model choice deliberate, updates thinking, and has a reachable Done', () => {
     installKeyboard();
     let renderer!: ReturnType<typeof create>;
@@ -238,6 +291,14 @@ describe('draft agent picker', () => {
       model: 'careful',
     });
     expect(buttonWithLabel(renderer, 'Done')).toBeDefined();
+    const chips = renderer.root
+      .findAllByType(Button)
+      .filter((node) => node.props.className?.startsWith('draft-picker-chip'));
+    expect(chips.map((chip) => chip.props['data-thinking'])).toEqual([
+      'low',
+      'high',
+    ]);
+    expect(chips[0]?.props['aria-pressed']).toBe(false);
     act(() => buttonWithLabel(renderer, 'high')?.props.onPress());
     expect(setDraftModel).toHaveBeenLastCalledWith('draft-1', {
       provider: 'test',

@@ -12,6 +12,10 @@ import { useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { type DraftLocation, setDraftLocation, setDraftModel } from '../drafts';
 import {
+  modelDisplayPreference,
+  useModelDisplayPreferences,
+} from '../model-display-preferences';
+import {
   configuredModelOptions,
   modelOptionValue,
   type RuntimeModelOption,
@@ -20,12 +24,18 @@ import {
 function modelName(
   model: ModelSelection | undefined,
   models: readonly RuntimeModelOption[],
+  preferences: ReturnType<typeof useModelDisplayPreferences>,
 ): string {
   if (!model) return 'Agent';
   const option = models.find(
     (item) => item.provider === model.provider && item.model === model.model,
   );
-  return option?.name ?? model.model;
+  const preference = modelDisplayPreference(
+    preferences,
+    model.provider,
+    model.model,
+  );
+  return preference.alias ?? option?.name ?? model.model;
 }
 
 function checkoutReason(checkout: CheckoutSummary): string | undefined {
@@ -110,6 +120,7 @@ function PickerSurface({
 function PickerRow({
   label,
   detail,
+  color,
   selected,
   drillIn,
   disabled,
@@ -117,6 +128,7 @@ function PickerRow({
 }: {
   label: string;
   detail?: string;
+  color?: string;
   selected?: boolean;
   drillIn?: boolean;
   disabled?: boolean;
@@ -131,7 +143,7 @@ function PickerRow({
       onPress={onPress}
     >
       <span className="draft-picker-option-copy">
-        <span>{label}</span>
+        <span style={color ? { color } : undefined}>{label}</span>
         {detail && <small>{detail}</small>}
       </span>
       {(selected || drillIn) && (
@@ -449,9 +461,13 @@ export function AgentPicker({
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
   useEscapeDismiss(open, close);
+  const preferences = useModelDisplayPreferences();
   const selectedValue = model
     ? modelOptionValue(model.provider, model.model)
     : '';
+  const selectedPreference = model
+    ? modelDisplayPreference(preferences, model.provider, model.model)
+    : {};
   return (
     <div className="draft-picker draft-agent-picker">
       <Button
@@ -464,7 +480,17 @@ export function AgentPicker({
         aria-haspopup="dialog"
         onPress={() => (open ? close() : setOpen(true))}
       >
-        <span className="draft-agent-model">{modelName(model, models)}</span>
+        <span
+          className="draft-agent-model"
+          style={
+            selectedPreference.color
+              ? { color: selectedPreference.color }
+              : undefined
+          }
+          title={model ? `${model.provider}/${model.model}` : undefined}
+        >
+          {modelName(model, models, preferences)}
+        </span>
         {model?.thinking && (
           <span className="draft-agent-thinking">· {model.thinking}</span>
         )}
@@ -474,11 +500,18 @@ export function AgentPicker({
           <div className="draft-picker-section">Model</div>
           {models.map((item) => {
             const value = modelOptionValue(item.provider, item.model);
+            const preference = modelDisplayPreference(
+              preferences,
+              item.provider,
+              item.model,
+            );
+            const label = preference.alias ?? item.name ?? item.model;
             return (
               <PickerRow
                 key={value}
-                label={item.name ?? item.model}
-                detail={item.name ? item.model : item.provider}
+                label={label}
+                detail={`${item.provider}/${item.model}`}
+                color={preference.color}
                 selected={value === selectedValue}
                 disabled={pending}
                 onPress={() =>
@@ -497,6 +530,7 @@ export function AgentPicker({
                     key={level}
                     type="button"
                     className={`draft-picker-chip${model?.thinking === level ? ' selected' : ''}`}
+                    data-thinking={level}
                     isDisabled={!model || pending}
                     aria-pressed={model?.thinking === level}
                     onPress={() => onThinkingChange(level)}
