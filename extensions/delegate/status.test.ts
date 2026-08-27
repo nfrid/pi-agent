@@ -22,6 +22,15 @@ describe('delegate status store', () => {
       relativeCost: 1,
     };
     run.context = 'branch';
+    run.usage = {
+      input: 100,
+      output: 25,
+      cacheRead: 10,
+      cacheWrite: 5,
+      contextTokens: 120,
+      cost: 0.0123,
+      turns: 2,
+    };
     const [id] = store.start([run], 'foreground');
 
     expect(store.list()).toMatchObject([
@@ -36,6 +45,15 @@ describe('delegate status store', () => {
         route: 'luna-high',
         context: 'branch',
         allowWrites: false,
+        usage: {
+          input: 100,
+          output: 25,
+          cacheRead: 10,
+          cacheWrite: 5,
+          contextTokens: 120,
+          cost: 0.0123,
+          turns: 2,
+        },
       },
     ]);
 

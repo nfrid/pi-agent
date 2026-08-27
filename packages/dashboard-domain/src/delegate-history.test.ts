@@ -23,6 +23,70 @@ function oldRun(overrides: Record<string, unknown> = {}) {
 }
 
 describe('delegate history adapter', () => {
+  it('projects bounded delegate usage and omits empty legacy usage', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'usage-result',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            mode: 'single',
+            runs: [
+              oldRun({
+                runId: 'usage-run',
+                lineageId: 'usage-lineage',
+                usage: {
+                  input: 100,
+                  output: 25,
+                  cacheRead: 10,
+                  cacheWrite: 5,
+                  contextTokens: 120,
+                  cost: 0.0123,
+                  turns: 2,
+                  contextWindow: 272000,
+                },
+              }),
+              oldRun({
+                runId: 'empty-run',
+                lineageId: 'usage-lineage',
+                usage: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  contextTokens: 0,
+                  cost: 0,
+                  turns: 0,
+                },
+              }),
+            ],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups[0]?.runs[0]?.usage).toEqual({
+      input: 100,
+      output: 25,
+      cacheRead: 10,
+      cacheWrite: 5,
+      contextTokens: 120,
+      cost: 0.0123,
+      turns: 2,
+      contextWindow: 272000,
+    });
+    expect(response.groups[0]?.runs[1]).not.toHaveProperty('usage');
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      'usage-run',
+    );
+    expect(detail.run.usage?.contextTokens).toBe(120);
+  });
+
   it('round-trips explicit child session identity without deriving legacy values', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },

@@ -1,3 +1,7 @@
+import {
+  type DelegateUsage,
+  projectDelegateUsage,
+} from '@pi-dashboard/protocol';
 import { cloneDelegateLifecycle } from './lifecycle';
 import { serializeDelegateRunForPublic } from './serialize';
 
@@ -114,6 +118,8 @@ export interface DelegateStatusSnapshot {
   transcriptTruncated?: boolean;
   /** Bounded structured inspector detail for queued/running delegates. */
   details?: DelegateLiveDetails;
+  /** Aggregated provider usage for the current invocation. */
+  usage?: DelegateUsage;
   /** Harness-authored terminal projection retained in status snapshots. */
   lifecycle?: DelegateLifecycleProjection;
   /** Compact workflow identity/lifecycle metadata; never a result payload. */
@@ -528,6 +534,7 @@ export class DelegateStatusStore {
         activity: displayActivity(run, undefined),
         transcript: transcript(run, inputRun.activities),
         details: liveDetails(run, workflow),
+        usage: projectDelegateUsage(run.usage),
         lifecycle: cloneDelegateLifecycle(run.lifecycle),
         ...(workflow ? { workflow } : {}),
         resultEntered: false,
@@ -568,6 +575,7 @@ export class DelegateStatusStore {
       liveDetails(run, record.workflow),
       record.details,
     );
+    record.usage = projectDelegateUsage(run.usage);
     this.onChange();
   }
 
@@ -605,6 +613,7 @@ export class DelegateStatusStore {
         liveDetails(run, record.workflow),
         record.details,
       );
+      record.usage = projectDelegateUsage(run.usage);
       changed = true;
     }
     if (changed) this.onChange();

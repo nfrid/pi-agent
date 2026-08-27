@@ -299,6 +299,7 @@ function statusSnapshot(
         })()
       : {}),
     allowWrites: status.allowWrites,
+    ...(status.usage === undefined ? {} : { usage: status.usage }),
     ...(status.capabilities?.length
       ? { capabilities: [...status.capabilities] }
       : {}),

@@ -28,6 +28,16 @@ describe('delegate live contribution', () => {
             state: 'running',
             createdAt: 1,
             allowWrites: false,
+            usage: {
+              input: 100,
+              output: 25,
+              cacheRead: 10,
+              cacheWrite: 5,
+              contextTokens: 120,
+              cost: 0.0123,
+              turns: 2,
+              contextWindow: 272000,
+            },
             activity: {
               type: 'thinking',
               label: 'Checking files',

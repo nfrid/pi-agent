@@ -3,6 +3,7 @@ import {
   type ExtensionManifest,
   type RendererDescriptor,
 } from '@pi-dashboard/extension-contributions';
+import { DelegateUsageSchema } from '@pi-dashboard/protocol';
 import { type Static, type TSchema, Type } from 'typebox';
 
 export const DELEGATE_CAPABILITY_ID = 'delegate.live-status';
@@ -352,6 +353,7 @@ export const DelegateStatusSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    usage: Type.Optional(DelegateUsageSchema),
     capabilities: Type.Optional(
       Type.Readonly(
         Type.Array(Type.Literal('web'), { maxItems: 1, uniqueItems: true }),

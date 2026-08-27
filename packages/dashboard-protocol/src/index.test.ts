@@ -44,6 +44,7 @@ import {
   parseThreadLifecycleCommandResult,
   parseThreadLifecycleEvent,
   parseUnpinThreadCommand,
+  projectDelegateUsage,
   RuntimeExtensionSurfaceSchema,
   redactImageData,
   ShellSnapshotRequestSchema,
@@ -361,6 +362,16 @@ describe('dashboard protocol', () => {
               kind: 'foreground',
               state: 'success',
               createdAt: 1,
+              usage: {
+                input: 100,
+                output: 25,
+                cacheRead: 10,
+                cacheWrite: 5,
+                contextTokens: 120,
+                cost: 0.0123,
+                turns: 2,
+                contextWindow: 272000,
+              },
               allowWrites: false,
               workflow: {
                 logicalId: 'review',
@@ -387,6 +398,16 @@ describe('dashboard protocol', () => {
     });
     expect(response.groups[0]?.runs[0]).toMatchObject({
       sessionId: 'child-session-1',
+      usage: {
+        input: 100,
+        output: 25,
+        cacheRead: 10,
+        cacheWrite: 5,
+        contextTokens: 120,
+        cost: 0.0123,
+        turns: 2,
+        contextWindow: 272000,
+      },
     });
     expect(response.groups[0]?.runs[0]).not.toHaveProperty('details');
     expect(() =>
@@ -420,6 +441,53 @@ describe('dashboard protocol', () => {
     ).toMatchObject({
       run: { details: { response: 'The selected bounded response.' } },
     });
+  });
+
+  it('projects bounded usage and omits empty or unsafe values', () => {
+    expect(
+      projectDelegateUsage({
+        input: 100,
+        output: 25,
+        cacheRead: 10,
+        cacheWrite: 5,
+        contextTokens: 120,
+        cost: 0.0123,
+        turns: 2,
+        contextWindow: 272000,
+        ignored: 'field',
+      }),
+    ).toEqual({
+      input: 100,
+      output: 25,
+      cacheRead: 10,
+      cacheWrite: 5,
+      contextTokens: 120,
+      cost: 0.0123,
+      turns: 2,
+      contextWindow: 272000,
+    });
+    expect(
+      projectDelegateUsage({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        contextTokens: 0,
+        cost: 0,
+        turns: 0,
+      }),
+    ).toBeUndefined();
+    expect(
+      projectDelegateUsage({
+        input: Number.MAX_SAFE_INTEGER + 1,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        contextTokens: 0,
+        cost: 0,
+        turns: 0,
+      }),
+    ).toBeUndefined();
   });
 
   it('validates optional paginated session history metadata', () => {

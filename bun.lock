@@ -96,6 +96,7 @@
       "dependencies": {
         "@pi-agent/background-jobs": "workspace:*",
         "@pi-dashboard/extension-contributions": "workspace:*",
+        "@pi-dashboard/protocol": "workspace:*",
         "@pi-dashboard/worktree-manager": "workspace:*",
       },
     },

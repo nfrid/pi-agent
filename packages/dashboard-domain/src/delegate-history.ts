@@ -22,6 +22,7 @@ import {
   MAX_DELEGATE_HISTORY_TOTAL_RUNS,
   MAX_WORKFLOW_ATTEMPT_ORDINAL,
   MAX_WORKFLOW_DEPENDENCIES,
+  projectDelegateUsage,
 } from '@pi-dashboard/protocol';
 
 /**
@@ -2118,6 +2119,7 @@ function invocation(
           ...(route === undefined ? {} : { route }),
         }
       : undefined;
+  const usage = projectDelegateUsage(occurrence.run.usage);
   return {
     runId,
     ...(childSessionId === undefined ? {} : { sessionId: childSessionId }),
@@ -2130,6 +2132,7 @@ function invocation(
     ...(queuedAt === undefined ? {} : { queuedAt }),
     ...(startedAt === undefined ? {} : { startedAt }),
     ...(finishedAt === undefined ? {} : { finishedAt }),
+    ...(usage === undefined ? {} : { usage }),
     ...(jobId === undefined ? {} : { jobId }),
     ...(route === undefined ? {} : { route }),
     ...(context === undefined ? {} : { context }),

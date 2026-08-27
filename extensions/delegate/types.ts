@@ -43,6 +43,7 @@ export interface UsageStats {
   contextTokens: number;
   cost: number;
   turns: number;
+  contextWindow?: number;
 }
 
 export interface DelegatedActivity {
