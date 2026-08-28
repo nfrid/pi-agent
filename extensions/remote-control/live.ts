@@ -1,11 +1,11 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
-import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
+  type ExtensionSurface,
   SETTLED_BACKGROUND_RENDERER_ID,
   SETTLED_BACKGROUND_SURFACE_ID,
   SettledBackgroundViewModelSchema,
-} from './contribution';
+} from '@pi-dashboard/extension-contributions';
+import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
 
 const publisher = createLiveSurfacePublisher<number>({
   extensionId: 'remote-control',

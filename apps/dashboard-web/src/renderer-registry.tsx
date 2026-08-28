@@ -1,13 +1,13 @@
-import { isTypeBoxSchema } from '@pi-dashboard/extension-contributions';
-import type { ReactNode } from 'react';
-import { Value } from 'typebox/value';
-import { activityGroupsRenderer } from '../../../extensions/activity-groups/contribution';
-import { delegateStatusRenderer } from '../../../extensions/delegate/contribution';
 import {
+  activityGroupsRenderer,
+  delegateStatusRenderer,
+  isTypeBoxSchema,
   type PauseStatusViewModel,
   pauseStatusRenderer,
-} from '../../../extensions/pause/contribution';
-import { tasksRenderer } from '../../../extensions/tasks/contribution';
+  tasksRenderer,
+} from '@pi-dashboard/extension-contributions';
+import type { ReactNode } from 'react';
+import { Value } from 'typebox/value';
 import {
   renderDelegateSurface,
   renderTasksSurface,

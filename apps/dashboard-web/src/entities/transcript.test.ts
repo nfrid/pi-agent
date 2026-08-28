@@ -5,11 +5,11 @@ import {
   reduceTranscriptEvent,
   STEERING_MESSAGE_MARKER_TYPE,
 } from '@pi-dashboard/domain';
+import { ActivityGroupsViewModelSchema } from '@pi-dashboard/extension-contributions';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
-import { ActivityGroupsViewModelSchema } from '../../../../extensions/activity-groups/contribution';
 import { toolOutcome, toTranscriptEntries } from '../transcript';
 import {
   activityGroupMetadata,

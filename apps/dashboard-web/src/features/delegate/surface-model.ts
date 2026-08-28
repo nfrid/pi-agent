@@ -1,15 +1,13 @@
 import {
   type ExtensionSurface,
   type ExtensionSurfacePlacement,
+  PAUSE_RENDERER_ID,
+  type PauseStatusViewModel,
+  PauseStatusViewModelSchema,
   tryParseExtensionSurface,
 } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { Value } from 'typebox/value';
-import {
-  PAUSE_RENDERER_ID,
-  type PauseStatusViewModel,
-  PauseStatusViewModelSchema,
-} from '../../../../../extensions/pause/contribution';
 
 export type SurfacePlacement = 'main' | 'composer';
 

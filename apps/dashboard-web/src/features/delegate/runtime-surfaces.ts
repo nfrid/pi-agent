@@ -1,11 +1,11 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { Value } from 'typebox/value';
 import {
   DELEGATE_RENDERER_ID,
   type DelegateStatusViewModel,
   DelegateStatusViewModelSchema,
-} from '../../../../../extensions/delegate/contribution';
+  type ExtensionSurface,
+} from '@pi-dashboard/extension-contributions';
+import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import { Value } from 'typebox/value';
 import type { DashboardRendererContext } from '../../renderer-contract';
 import { renderDashboardContribution } from '../../renderer-registry';
 import { delegateSettlementKey } from './settlement-key';

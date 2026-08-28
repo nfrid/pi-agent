@@ -1,5 +1,10 @@
 /** Contracts exposed by the dashboard daemon to HTTP, SSE, and browsers. */
 
+export type { DelegateUsage } from '@pi-dashboard/extension-contributions';
+export {
+  DelegateUsageSchema,
+  projectDelegateUsage,
+} from '@pi-dashboard/extension-contributions';
 export {
   MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
   MAX_COMPOSER_COMMAND_DESCRIPTION,
@@ -282,7 +287,6 @@ export type {
   DelegateHistoryRunDetailResponse,
   DelegateHistoryRunQuery,
   DelegateHistoryState,
-  DelegateUsage,
   DelegateWakeMetadata,
   EventEnvelope,
   FeedCaughtUp,
@@ -375,7 +379,6 @@ export {
   DelegateHistoryRunDetailSchema,
   DelegateHistoryRunQuerySchema,
   DelegateTranscriptEntryIdSchema,
-  DelegateUsageSchema,
   DelegateWakeMetadataSchema,
   DelegateWorkflowMetadataSchema,
   EventEnvelopeSchema,
@@ -401,7 +404,6 @@ export {
   PROTOCOL_VERSION,
   ProtocolCapabilitiesSchema,
   ProtocolInfoSchema,
-  projectDelegateUsage,
   RenameSessionInputSchema,
   RenameSessionMutationInputSchema,
   RenameSessionMutationOutputSchema,

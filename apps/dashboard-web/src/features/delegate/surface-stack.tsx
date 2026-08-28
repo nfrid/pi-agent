@@ -1,10 +1,12 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
+import {
+  DELEGATE_RENDERER_ID,
+  type ExtensionSurface,
+  PAUSE_RENDERER_ID,
+  SETTLED_BACKGROUND_RENDERER_ID,
+  TASKS_RENDERER_ID,
+} from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMemo } from 'react';
-import { DELEGATE_RENDERER_ID } from '../../../../../extensions/delegate/contribution';
-import { PAUSE_RENDERER_ID } from '../../../../../extensions/pause/contribution';
-import { SETTLED_BACKGROUND_RENDERER_ID } from '../../../../../extensions/remote-control/contribution';
-import { TASKS_RENDERER_ID } from '../../../../../extensions/tasks/contribution';
 import type { DashboardRendererContext } from '../../renderer-contract';
 import { renderDashboardContribution } from '../../renderer-registry';
 import {

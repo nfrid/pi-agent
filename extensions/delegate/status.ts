@@ -1,7 +1,7 @@
 import {
   type DelegateUsage,
   projectDelegateUsage,
-} from '@pi-dashboard/protocol';
+} from '@pi-dashboard/extension-contributions';
 import { cloneDelegateLifecycle } from './lifecycle';
 import { serializeDelegateRunForPublic } from './serialize';
 

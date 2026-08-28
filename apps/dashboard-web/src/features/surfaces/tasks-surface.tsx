@@ -1,8 +1,8 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
 import type {
+  ExtensionSurface,
   TaskStateViewModel,
   TaskSurfaceTask,
-} from '../../../../../extensions/tasks/contribution';
+} from '@pi-dashboard/extension-contributions';
 import {
   surfaceStateClass,
   surfaceStateLabel,

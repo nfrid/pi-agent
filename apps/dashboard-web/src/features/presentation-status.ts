@@ -1,18 +1,14 @@
 import {
   type ExtensionSurface,
+  PAUSE_RENDERER_ID,
+  type PauseStatusViewModel,
+  PauseStatusViewModelSchema,
+  SETTLED_BACKGROUND_RENDERER_ID,
+  SettledBackgroundViewModelSchema,
   tryParseExtensionSurface,
 } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { Value } from 'typebox/value';
-import {
-  PAUSE_RENDERER_ID,
-  type PauseStatusViewModel,
-  PauseStatusViewModelSchema,
-} from '../../../../extensions/pause/contribution';
-import {
-  SETTLED_BACKGROUND_RENDERER_ID,
-  SettledBackgroundViewModelSchema,
-} from '../../../../extensions/remote-control/contribution';
 
 export type DashboardPresentationStatus =
   | RuntimeSnapshot['liveState']
