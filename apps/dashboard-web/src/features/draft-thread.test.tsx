@@ -7,7 +7,6 @@ const {
   deleteDraft,
   markDraftPromoted,
   beginDraftRetry,
-  setDraftModel,
   clearDraft,
   clearAttachments,
   createThreadWithImages,
@@ -20,7 +19,6 @@ const {
   deleteDraft: vi.fn(),
   markDraftPromoted: vi.fn(),
   beginDraftRetry: vi.fn(),
-  setDraftModel: vi.fn(),
   clearDraft: vi.fn(),
   clearAttachments: vi.fn(),
   createThreadWithImages: vi.fn(),
@@ -93,7 +91,6 @@ vi.mock('./drafts', () => ({
     `draft-retry-${id}-${attempt}`,
   markDraftPromoted,
   readDrafts: () => [draft],
-  setDraftModel,
   updateDraft: vi.fn(),
   useDrafts: () => [draft],
 }));
@@ -111,7 +108,6 @@ afterEach(() => {
   deleteDraft.mockReset();
   markDraftPromoted.mockReset();
   beginDraftRetry.mockReset();
-  setDraftModel.mockReset();
   clearDraft.mockReset();
   clearAttachments.mockReset();
   createThreadWithImages.mockReset();

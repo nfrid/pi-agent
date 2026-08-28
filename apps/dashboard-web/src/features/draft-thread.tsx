@@ -27,7 +27,6 @@ import {
   draftPromotionCommandId,
   markDraftPromoted,
   readDrafts,
-  setDraftModel,
   updateDraft,
   useDrafts,
 } from './drafts';
@@ -137,11 +136,6 @@ export function DraftThreadView({
       pendingRun?.status !== 'failed' &&
       pendingRun?.status !== 'interrupted' &&
       !pendingRuntime);
-
-  useEffect(() => {
-    if (!fallbackDraft?.model && selectedModel)
-      setDraftModel(draftId, selectedModel);
-  }, [draftId, fallbackDraft?.model, selectedModel]);
 
   useEffect(() => {
     if (text !== initialDraft) updateDraft(draftId, threadTitle(text));
