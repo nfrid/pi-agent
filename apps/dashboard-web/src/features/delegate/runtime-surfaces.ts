@@ -8,6 +8,7 @@ import {
 } from '../../../../../extensions/delegate/contribution';
 import type { DashboardRendererContext } from '../../renderer-contract';
 import { renderDashboardContribution } from '../../renderer-registry';
+import { delegateSettlementKey } from './settlement-key';
 import { runtimeExtensionSurfaces } from './surface-model';
 
 export {
@@ -59,13 +60,7 @@ function isActiveDelegateState(state: string, pauseState?: string): boolean {
   );
 }
 
-export function delegateSettlementKey(row: {
-  runId: string;
-  workflow?: { identity?: string };
-}): string {
-  const identity = row.workflow?.identity;
-  return identity ? `workflow:${identity}` : row.runId;
-}
+export { delegateSettlementKey } from './settlement-key';
 
 /** Reconcile one session's live run keys without retaining removed overlays. */
 export function reconcileDelegateLiveRuns(
