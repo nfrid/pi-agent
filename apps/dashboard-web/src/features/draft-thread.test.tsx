@@ -124,6 +124,24 @@ afterEach(() => {
 });
 
 describe('draft thread controls', () => {
+  it('prefers the configured project default and preserves its effort', () => {
+    expect(
+      draftModelSelection(
+        [
+          {
+            model: { provider: 'test', model: 'first', thinking: 'low' },
+            modelCatalog: [
+              { provider: 'test', model: 'first' },
+              { provider: 'test', model: 'default' },
+            ],
+          },
+        ] as never,
+        undefined,
+        { provider: 'test', model: 'default', thinking: 'high' },
+      ),
+    ).toEqual({ provider: 'test', model: 'default', thinking: 'high' });
+  });
+
   it('chooses a configured current model', () => {
     const runtimes = [
       {

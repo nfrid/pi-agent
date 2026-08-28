@@ -65,7 +65,12 @@ describe('composer runtime model', () => {
   it('resolves indexed metadata before configured defaults and fails closed for images', () => {
     const runtime = {
       modelCatalog: [
-        { provider: 'test', model: 'vision', supportsImages: true },
+        {
+          provider: 'test',
+          model: 'vision',
+          contextWindow: 272_000,
+          supportsImages: true,
+        },
         { provider: 'test', model: 'text', supportsImages: false },
       ],
       thinkingLevels: ['low'],
@@ -80,7 +85,11 @@ describe('composer runtime model', () => {
         [runtime],
       ),
     ).toMatchObject({
-      model: { provider: 'test', model: 'vision' },
+      model: {
+        provider: 'test',
+        model: 'vision',
+        contextWindow: 272_000,
+      },
       thinking: 'high',
       contextTokens: 4200,
     });
@@ -130,6 +139,17 @@ describe('composer runtime model', () => {
         ],
       ),
     ).toEqual({ tokens: 42, contextWindow: 100, percent: 42 });
+    expect(
+      dormantContextUsage(
+        { lastKnownContextTokens: 136_000 } as never,
+        {
+          provider: 'test',
+          model: 'careful',
+          contextWindow: 272_000,
+        },
+        [],
+      ),
+    ).toEqual({ tokens: 136_000, contextWindow: 272_000, percent: 50 });
     expect(
       dormantContextUsage(
         { lastKnownContextTokens: 42 } as never,

@@ -153,6 +153,7 @@ export const ProjectSummarySchema = Type.Object(
     id: IdentifierSchema,
     title: Type.String({ minLength: 1, maxLength: 512 }),
     rootPath: PathSchema,
+    defaultModel: Type.Optional(ModelSelectionSchema),
     /** Default checkout isolation used by the new-thread form. */
     defaultIsolation: Type.Optional(
       Type.Union([Type.Literal('worktree'), Type.Literal('main')]),

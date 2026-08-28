@@ -1168,13 +1168,16 @@ describe('dashboard protocol', () => {
             provider: 'test',
             model: 'vision',
             name: 'Vision',
+            contextWindow: 272_000,
             supportsImages: true,
           },
         ],
         thinkingLevels: ['off', 'high'],
       }),
     ).toMatchObject({
-      modelCatalog: [{ model: 'vision', supportsImages: true }],
+      modelCatalog: [
+        { model: 'vision', contextWindow: 272_000, supportsImages: true },
+      ],
       thinkingLevels: ['off', 'high'],
     });
   });

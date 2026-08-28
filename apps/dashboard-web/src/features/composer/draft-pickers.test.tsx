@@ -265,6 +265,24 @@ describe('draft agent picker', () => {
     delete modelPreferences['test/careful'];
   });
 
+  it('keeps the selected model available without a runtime catalogue', () => {
+    installKeyboard();
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(
+        <DraftAgentPicker
+          draftId="draft-1"
+          model={{ provider: 'test', model: 'default', thinking: 'high' }}
+          runtimes={[]}
+          disabled={false}
+        />,
+      );
+    });
+    act(() => buttonWithLabel(renderer, 'default')?.props.onPress());
+    expect(buttonWithLabel(renderer, 'test/default')).toBeDefined();
+    renderer.unmount();
+  });
+
   it('keeps model choice deliberate, updates thinking, and has a reachable Done', () => {
     installKeyboard();
     let renderer!: ReturnType<typeof create>;

@@ -60,6 +60,32 @@ async function fixture() {
 }
 
 describe('SqliteOrchestrationRepository', () => {
+  it('includes the configured default model in project summaries', async () => {
+    const value = await database();
+    value.repository.createProject({
+      id: 'project-default',
+      title: 'Default model',
+      rootPath: '/repo/default',
+      defaultModel: {
+        provider: 'openai-codex',
+        model: 'gpt-5.6-sol',
+        thinking: 'medium',
+      },
+      maxParallelRuns: 1,
+    });
+
+    expect(value.repository.projectSummaries()).toContainEqual(
+      expect.objectContaining({
+        id: 'project-default',
+        defaultModel: {
+          provider: 'openai-codex',
+          model: 'gpt-5.6-sol',
+          thinking: 'medium',
+        },
+      }),
+    );
+  });
+
   it('creates sorted, idempotent no-run links without catalog bloat', async () => {
     const value = await fixture();
     const sessions = [

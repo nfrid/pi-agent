@@ -97,6 +97,9 @@ export function modelCatalogSnapshot(
         provider: value.provider,
         model: value.id,
         ...(typeof value.name === 'string' ? { name: value.name } : {}),
+        ...(typeof value.contextWindow === 'number' && value.contextWindow > 0
+          ? { contextWindow: value.contextWindow }
+          : {}),
         supportsImages: input.includes('image'),
       },
     ];

@@ -313,6 +313,7 @@ export const RuntimeModelOptionSchema = Type.Object(
     provider: Type.String({ minLength: 1, maxLength: 200 }),
     model: Type.String({ minLength: 1, maxLength: 300 }),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+    contextWindow: Type.Optional(Type.Number({ minimum: 1 })),
     supportsImages: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },

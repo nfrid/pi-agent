@@ -884,6 +884,7 @@ describe('Pi 0.84 runtime catalogues', () => {
       provider: 'scoped-provider',
       id: 'scoped-model',
       name: 'Scoped model',
+      contextWindow: 272_000,
       input: ['text'],
     };
     const available = {
@@ -905,6 +906,7 @@ describe('Pi 0.84 runtime catalogues', () => {
         provider: 'scoped-provider',
         model: 'scoped-model',
         name: 'Scoped model',
+        contextWindow: 272_000,
         supportsImages: false,
       },
     ]);

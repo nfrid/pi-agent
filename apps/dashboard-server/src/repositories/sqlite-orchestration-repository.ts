@@ -284,19 +284,23 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
            ORDER BY p.updated_at DESC,p.id`,
         )
         .all(),
-    ).map((row) => ({
-      id: stringValue(row, 'id'),
-      title: stringValue(row, 'title'),
-      rootPath: stringValue(row, 'root_path'),
-      defaultIsolation: stringValue(
-        row,
-        'default_isolation',
-      ) as Project['defaultIsolation'],
-      status: stringValue(row, 'status') as Project['status'],
-      maxParallelRuns: Number(row.max_parallel_runs),
-      activeRunCount: Number(row.active_run_count),
-      updatedAt: Number(row.updated_at),
-    }));
+    ).map((row) => {
+      const defaultModel = jsonValue<ModelSelection>(row.default_model_json);
+      return {
+        id: stringValue(row, 'id'),
+        title: stringValue(row, 'title'),
+        rootPath: stringValue(row, 'root_path'),
+        ...(defaultModel === undefined ? {} : { defaultModel }),
+        defaultIsolation: stringValue(
+          row,
+          'default_isolation',
+        ) as Project['defaultIsolation'],
+        status: stringValue(row, 'status') as Project['status'],
+        maxParallelRuns: Number(row.max_parallel_runs),
+        activeRunCount: Number(row.active_run_count),
+        updatedAt: Number(row.updated_at),
+      };
+    });
   }
 
   transitionProject(

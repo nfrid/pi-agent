@@ -564,7 +564,16 @@ export function DraftAgentPicker({
   runtimes: readonly RuntimeSnapshot[];
   disabled: boolean;
 }) {
-  const models = configuredModelOptions(runtimes);
+  const configuredModels = configuredModelOptions(runtimes);
+  const models =
+    model &&
+    !configuredModels.some(
+      (option) =>
+        modelOptionValue(option.provider, option.model) ===
+        modelOptionValue(model.provider, model.model),
+    )
+      ? [model, ...configuredModels]
+      : configuredModels;
   const levels = [
     ...new Set([
       ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),

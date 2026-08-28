@@ -117,7 +117,15 @@ export function dormantResumeMetadata(
   runtimes: readonly RuntimeSnapshot[],
 ): DormantResumeMetadata {
   const persistedModel = session?.lastKnownModel;
-  const model = persistedModel ?? configuredModelOptions(runtimes)[0];
+  const configuredModels = configuredModelOptions(runtimes);
+  const persistedOption = persistedModel
+    ? configuredModels.find(
+        (model) =>
+          modelOptionValue(model.provider, model.model) ===
+          modelOptionValue(persistedModel.provider, persistedModel.model),
+      )
+    : undefined;
+  const model = persistedOption ?? persistedModel ?? configuredModels[0];
   const thinkingLevels = [
     ...new Set([
       ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),
@@ -142,15 +150,17 @@ export function dormantContextUsage(
   const value = model
     ? modelOptionValue(model.provider, model.model)
     : undefined;
-  const contextWindow = value
-    ? runtimes.find(
-        (runtime) =>
-          runtime.model &&
-          modelOptionValue(runtime.model.provider, runtime.model.model) ===
-            value &&
-          runtime.contextUsage?.contextWindow,
-      )?.contextUsage?.contextWindow
-    : undefined;
+  const contextWindow =
+    model?.contextWindow ??
+    (value
+      ? runtimes.find(
+          (runtime) =>
+            runtime.model &&
+            modelOptionValue(runtime.model.provider, runtime.model.model) ===
+              value &&
+            runtime.contextUsage?.contextWindow,
+        )?.contextUsage?.contextWindow
+      : undefined);
   const tokens = session?.lastKnownContextTokens ?? null;
   return {
     tokens,

@@ -27,6 +27,7 @@ import {
   draftPromotionCommandId,
   markDraftPromoted,
   readDrafts,
+  setDraftModel,
   updateDraft,
   useDrafts,
 } from './drafts';
@@ -53,16 +54,14 @@ function locationForDraft(draft: {
 export function draftModelSelection(
   runtimes: readonly RuntimeSnapshot[],
   selected?: ModelSelection,
+  configuredDefault?: ModelSelection,
 ): ModelSelection | undefined {
   const models = configuredModelOptions(runtimes);
   const available = new Set(
     models.map((model) => modelOptionValue(model.provider, model.model)),
   );
-  if (
-    selected &&
-    available.has(modelOptionValue(selected.provider, selected.model))
-  )
-    return selected;
+  if (selected) return selected;
+  if (configuredDefault) return configuredDefault;
   const current = runtimes.find(
     (runtime) =>
       runtime.model &&
@@ -113,6 +112,7 @@ export function DraftThreadView({
   const selectedModel = draftModelSelection(
     snapshot.runtimes,
     fallbackDraft?.model,
+    project?.defaultModel,
   );
   const attachments = useImageAttachments({
     enabled: modelSupportsImages(selectedModel, snapshot.runtimes),
@@ -137,6 +137,11 @@ export function DraftThreadView({
       pendingRun?.status !== 'failed' &&
       pendingRun?.status !== 'interrupted' &&
       !pendingRuntime);
+
+  useEffect(() => {
+    if (!fallbackDraft?.model && selectedModel)
+      setDraftModel(draftId, selectedModel);
+  }, [draftId, fallbackDraft?.model, selectedModel]);
 
   useEffect(() => {
     if (text !== initialDraft) updateDraft(draftId, threadTitle(text));
@@ -205,6 +210,7 @@ export function DraftThreadView({
       const submissionModel = draftModelSelection(
         snapshot.runtimes,
         liveDraft.model,
+        project.defaultModel,
       );
       const location = locationForDraft(liveDraft);
       if (
