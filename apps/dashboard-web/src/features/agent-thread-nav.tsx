@@ -744,16 +744,16 @@ export function AgentThreadNav({
   }, [activeResultId, searchResultRows]);
   useEffect(() => {
     const selectableIds = new Set(selectableRows.map((row) => row.id));
-    setSelectedThreadIds((current) => {
-      const next = new Set([...current].filter((id) => selectableIds.has(id)));
-      return next.size === current.size ? current : next;
-    });
+    if ([...selectedThreadIds].some((id) => !selectableIds.has(id)))
+      setSelectedThreadIds(
+        new Set([...selectedThreadIds].filter((id) => selectableIds.has(id))),
+      );
     if (
       selectionAnchorId.current &&
       !selectableIds.has(selectionAnchorId.current)
     )
       selectionAnchorId.current = undefined;
-  }, [selectableRows]);
+  }, [selectableRows, selectedThreadIds]);
   useEffect(() => {
     visitCurrent(rows);
   }, [rows, visitCurrent]);

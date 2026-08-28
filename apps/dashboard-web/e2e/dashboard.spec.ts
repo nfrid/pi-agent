@@ -318,6 +318,11 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         title: 'Demo project',
         rootPath:
           '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
+        defaultModel: {
+          provider: 'test',
+          model: 'careful',
+          thinking: 'high',
+        },
         status: 'active',
       },
     ],
