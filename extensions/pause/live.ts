@@ -1,11 +1,11 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
-import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
+  type ExtensionSurface,
   PAUSE_RENDERER_ID,
   PAUSE_SURFACE_ID,
   PauseStatusViewModelSchema,
-} from './contribution';
+} from '@pi-dashboard/extension-contributions';
+import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import { type PauseSnapshot, pauseLabel } from './state';
 
 const publisher = createLiveSurfacePublisher<PauseSnapshot>({

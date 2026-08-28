@@ -1,11 +1,11 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
-import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
+  type ExtensionSurface,
   TASKS_RENDERER_ID,
   TASKS_SURFACE_ID,
   TaskStateViewModelSchema,
-} from './contribution';
+} from '@pi-dashboard/extension-contributions';
+import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import { stats } from './domain';
 import type { TaskStore } from './store';
 

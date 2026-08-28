@@ -1,11 +1,11 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
-import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
   DELEGATE_RENDERER_ID,
   DELEGATE_SURFACE_ID,
   DelegateStatusViewModelSchema,
-} from './contribution';
+  type ExtensionSurface,
+} from '@pi-dashboard/extension-contributions';
+import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
 import type { DelegateLiveDetails } from './types';
 

@@ -5,11 +5,13 @@ import {
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
 } from '@pi-dashboard/client';
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
+import {
+  DELEGATE_RENDERER_ID,
+  type ExtensionSurface,
+} from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DELEGATE_RENDERER_ID } from '../../../../../extensions/delegate/contribution';
 import { DelegateSurface } from '../surfaces/delegate-surface';
 import {
   type DelegateCompositeRun,

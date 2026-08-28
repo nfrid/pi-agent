@@ -2,11 +2,11 @@ import {
   commandMutationOptions,
   dashboardHttpClient,
 } from '@pi-dashboard/client';
+import { CONTINUE_ACTION_ID } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-import { CONTINUE_ACTION_ID } from '../../../../../../extensions/pause/contribution';
 import { runtimePauseStatus } from '../../../features/delegate/surface-model';
 import { PauseIcon, PlayIcon } from '../../../features/pause-icon';
 import { errorMessage } from '../../../shared/lib/error-message';

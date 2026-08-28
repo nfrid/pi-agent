@@ -1,4 +1,8 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
+import {
+  DELEGATE_RENDERER_ID,
+  type ExtensionSurface,
+  TASKS_RENDERER_ID,
+} from '@pi-dashboard/extension-contributions';
 import type { ReactNode } from 'react';
 import type { DashboardRendererContext } from '../../renderer-contract';
 import { DelegateSurface } from './delegate-surface';
@@ -25,7 +29,7 @@ export function renderDelegateSurface(
 ): ReactNode {
   return (
     <DelegateSurface
-      surface={surfaceForRenderer(input, context, 'delegate.status')}
+      surface={surfaceForRenderer(input, context, DELEGATE_RENDERER_ID)}
       pausedAt={context?.pausedAt}
     />
   );
@@ -37,7 +41,7 @@ export function renderTasksSurface(
 ): ReactNode {
   return (
     <TasksSurface
-      surface={surfaceForRenderer(input, context, 'tasks.current')}
+      surface={surfaceForRenderer(input, context, TASKS_RENDERER_ID)}
       paused={context?.pausedAt !== undefined}
     />
   );

@@ -1,4 +1,4 @@
-import type { DelegateTranscriptEntry } from '../../../../../extensions/delegate/contribution';
+import type { DelegateTranscriptEntry } from '@pi-dashboard/extension-contributions';
 import { TranscriptEntry } from '../../entities/transcript/entries';
 import type { TranscriptModelItem } from '../../transcript';
 import { surfaceText } from '../delegate/surface-state';

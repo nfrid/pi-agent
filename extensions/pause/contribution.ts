@@ -1,36 +1,24 @@
 import {
+  CONTINUE_ACTION_ID,
   createRuntimeCapabilitySnapshot,
   type ExtensionManifest,
-  type RendererDescriptor,
+  pauseStatusRenderer,
 } from '@pi-dashboard/extension-contributions';
-import { type Static, Type } from 'typebox';
+import { Type } from 'typebox';
+
+export type { PauseStatusViewModel } from '@pi-dashboard/extension-contributions';
+export {
+  CONTINUE_ACTION_ID,
+  PAUSE_RENDERER_ID,
+  PAUSE_SURFACE_ID,
+  PauseStatusViewModelSchema,
+  pauseStatusRenderer,
+} from '@pi-dashboard/extension-contributions';
 
 export const PAUSE_CAPABILITY_ID = 'runtime.pause-control';
 export const PAUSE_ACTION_ID = 'runtime.pause';
-export const CONTINUE_ACTION_ID = 'runtime.continue';
-export const PAUSE_RENDERER_ID = 'runtime.pause-status';
-export const PAUSE_SURFACE_ID = 'runtime.pause-status';
 
 const EmptyInputSchema = Type.Object({}, { additionalProperties: false });
-export const PauseStatusViewModelSchema = Type.Object(
-  {
-    version: Type.Literal(1),
-    phase: Type.Union([Type.Literal('pausing'), Type.Literal('paused')]),
-    delegateCount: Type.Integer({ minimum: 0, maximum: 20 }),
-    pausedAt: Type.Optional(Type.Number({ minimum: 0 })),
-    label: Type.String({ minLength: 1, maxLength: 64 }),
-  },
-  { additionalProperties: false },
-);
-export type PauseStatusViewModel = Static<typeof PauseStatusViewModelSchema>;
-
-export const pauseStatusRenderer: RendererDescriptor = {
-  id: PAUSE_RENDERER_ID,
-  mode: 'generic',
-  inputSchema: PauseStatusViewModelSchema,
-  title: 'Pause status',
-  summary: 'Whether this runtime is pausing or paused.',
-};
 
 export const pauseManifest: ExtensionManifest = {
   id: 'pause',

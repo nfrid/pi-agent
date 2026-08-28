@@ -1,10 +1,10 @@
-import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { useEffect, useMemo, useState } from 'react';
-import { Button as AriaButton } from 'react-aria-components';
 import type {
   DelegateStatus,
   DelegateStatusViewModel,
-} from '../../../../../extensions/delegate/contribution';
+  ExtensionSurface,
+} from '@pi-dashboard/extension-contributions';
+import { useEffect, useMemo, useState } from 'react';
+import { Button as AriaButton } from 'react-aria-components';
 import {
   delegateDisplayName,
   humanizeDelegateLogicalId,

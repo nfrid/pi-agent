@@ -1,4 +1,11 @@
 import type {
+  DelegateActivity,
+  DelegateLifecycleReason,
+  DelegateStatus,
+  DelegateStatusViewModel,
+  DelegateTranscriptEntry,
+} from '@pi-dashboard/extension-contributions';
+import type {
   DelegateHistoryDetails,
   DelegateHistoryGroup,
   DelegateHistoryInvocation,
@@ -6,15 +13,6 @@ import type {
   DelegateHistoryRunDetail,
   DelegateWakeMetadata,
 } from '@pi-dashboard/protocol';
-import type {
-  DelegateStatus,
-  DelegateStatusViewModel,
-  DelegateTranscriptEntry,
-} from '../../../../../extensions/delegate/contribution';
-import type {
-  DelegatedActivity,
-  DelegateLifecycleReason,
-} from '../../../../../extensions/delegate/types';
 import { delegateSettlementKey } from './settlement-key';
 
 /** Extra inspection facts which are only present on the persisted adapter. */
@@ -155,7 +153,7 @@ function historyTranscript(
 
 function activitySummary(
   details: DelegateHistoryDetails | undefined,
-): DelegatedActivity | undefined {
+): DelegateActivity | undefined {
   const activity = details?.activities?.at(-1);
   if (!activity) return undefined;
   return {

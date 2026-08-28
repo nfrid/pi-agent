@@ -8,6 +8,9 @@
 import { type Static, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 
+export * from './built-in-renderers.js';
+export * from './delegate-usage.js';
+
 export const EXTENSION_CONTRIBUTIONS_VERSION = 1;
 export const MAX_NON_IDEMPOTENT_ACTION_IDS = 2048;
 export const UNKNOWN_FIELD_POLICY = 'reject' as const;

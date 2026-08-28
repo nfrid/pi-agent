@@ -1,7 +1,5 @@
-import type {
-  DelegateHistoryRunDetailResponse,
-  DelegateUsage,
-} from '@pi-dashboard/protocol';
+import type { DelegateUsage } from '@pi-dashboard/extension-contributions';
+import type { DelegateHistoryRunDetailResponse } from '@pi-dashboard/protocol';
 import { Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
