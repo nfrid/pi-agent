@@ -79,6 +79,7 @@ import {
   DashboardHttpError,
   DashboardProtocolMismatchError,
 } from '@pi-dashboard/client';
+import { draftRuntimeOptionsStorageKey } from '../features/model-option';
 import { DashboardBootstrap, dashboardQueryClient } from './bootstrap';
 
 describe('dashboard startup', () => {
@@ -89,6 +90,7 @@ describe('dashboard startup', () => {
     dashboardState.errorKind = undefined;
     dashboardState.connectionState = 'connected';
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   async function renderStartup(
@@ -132,6 +134,43 @@ describe('dashboard startup', () => {
     expect(
       renderer.root.findByProps({ children: 'current app/store path' }),
     ).toBeTruthy();
+  });
+
+  it('remembers live runtime options at the application snapshot boundary', async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    await renderStartup({
+      ...snapshot,
+      runtimes: [
+        {
+          modelCatalog: [
+            {
+              provider: 'cached-provider',
+              model: 'cached-vision',
+              contextWindow: 100,
+              supportsImages: true,
+            },
+          ],
+          thinkingLevels: ['low'],
+        },
+      ],
+    } as typeof snapshot);
+    expect(JSON.parse(values.get(draftRuntimeOptionsStorageKey) ?? '')).toEqual(
+      {
+        models: [
+          {
+            provider: 'cached-provider',
+            model: 'cached-vision',
+            contextWindow: 100,
+            supportsImages: true,
+          },
+        ],
+        thinkingLevels: ['low'],
+      },
+    );
   });
 
   it('blocks startup on a protocol mismatch before auth or routing', async () => {

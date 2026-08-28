@@ -11,6 +11,7 @@ import {
 import { RouterProvider } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { rememberDraftRuntimeOptions } from '../features/model-option';
 import { reloadDashboard } from '../pwa-update';
 import { dashboardRouterInstance } from '../routes/tree';
 import { DashboardContext } from './dashboard-context';
@@ -79,6 +80,10 @@ function DashboardApp() {
     if (usageQuery.data?.error)
       dashboard.store.setUsageError(usageQuery.data.error);
   }, [dashboard.store, usageQuery.data]);
+  const snapshotRuntimes = dashboard.snapshot?.runtimes;
+  useEffect(() => {
+    if (snapshotRuntimes) rememberDraftRuntimeOptions(snapshotRuntimes);
+  }, [snapshotRuntimes]);
   const startupErrorKind = dashboard.errorKind;
   if (
     dashboard.connectionState === 'blocked' &&

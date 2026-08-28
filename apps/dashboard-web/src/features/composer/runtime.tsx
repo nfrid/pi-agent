@@ -6,7 +6,6 @@ import type {
 } from '@pi-dashboard/protocol';
 import { formatCompactCount } from '../../shared/lib/format';
 import {
-  configuredModelOptions,
   draftRuntimeOptions,
   modelOptionValue,
   type RuntimeModelOption,
@@ -93,26 +92,6 @@ export type DormantResumeMetadata = {
   contextTokens?: number;
 };
 
-export function modelSupportsImages(
-  model: RuntimeModelOption | undefined,
-  runtimes: readonly RuntimeSnapshot[],
-): boolean {
-  if (!model) return false;
-  const value = modelOptionValue(model.provider, model.model);
-  return runtimes.some(
-    (runtime) =>
-      (runtime.model &&
-        modelOptionValue(runtime.model.provider, runtime.model.model) ===
-          value &&
-        runtime.model.supportsImages === true) ||
-      runtime.modelCatalog?.some(
-        (option) =>
-          modelOptionValue(option.provider, option.model) === value &&
-          option.supportsImages === true,
-      ),
-  );
-}
-
 /** Drafts may be created before a runtime reports capability metadata. */
 export function draftModelSupportsImages(
   model: RuntimeModelOption | undefined,
@@ -121,6 +100,7 @@ export function draftModelSupportsImages(
   if (!model) return true;
   const value = modelOptionValue(model.provider, model.model);
   const available = [
+    ...(model ? [model] : []),
     ...runtimes.flatMap((runtime) => [
       ...(runtime.model ? [runtime.model] : []),
       ...(runtime.modelCatalog ?? []),
@@ -139,7 +119,8 @@ export function dormantResumeMetadata(
   runtimes: readonly RuntimeSnapshot[],
 ): DormantResumeMetadata {
   const persistedModel = session?.lastKnownModel;
-  const configuredModels = configuredModelOptions(runtimes);
+  const runtimeOptions = draftRuntimeOptions(runtimes);
+  const configuredModels = runtimeOptions.models;
   const persistedOption = persistedModel
     ? configuredModels.find(
         (model) =>
@@ -150,7 +131,7 @@ export function dormantResumeMetadata(
   const model = persistedOption ?? persistedModel ?? configuredModels[0];
   const thinkingLevels = [
     ...new Set([
-      ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),
+      ...runtimeOptions.thinkingLevels,
       ...(session?.lastKnownThinking ? [session.lastKnownThinking] : []),
     ]),
   ];
@@ -172,8 +153,14 @@ export function dormantContextUsage(
   const value = model
     ? modelOptionValue(model.provider, model.model)
     : undefined;
+  const rememberedOption = value
+    ? draftRuntimeOptions(runtimes).models.find(
+        (option) => modelOptionValue(option.provider, option.model) === value,
+      )
+    : undefined;
   const contextWindow =
     model?.contextWindow ??
+    rememberedOption?.contextWindow ??
     (value
       ? runtimes.find(
           (runtime) =>

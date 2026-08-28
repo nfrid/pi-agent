@@ -1,6 +1,7 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { draftRuntimeOptionsStorageKey } from '../model-option';
 
 const mutateAsync = vi.fn(async () => ({ result: { runtimeId: 'runtime-1' } }));
 const sendCommandWithImages = vi.fn(async () => undefined);
@@ -118,6 +119,7 @@ afterEach(() => {
   clearDraft.mockClear();
   clearAttachments.mockClear();
   mockedAttachments = [];
+  vi.unstubAllGlobals();
 });
 
 describe('Composer dormant resume transition', () => {
@@ -222,6 +224,56 @@ describe('Composer dormant resume transition', () => {
     expect(
       renderer.root.findByProps({ children: 'Attach' }).props.disabled,
     ).toBe(false);
+  });
+
+  it('uses remembered model metadata for a no-runtime dormant composer', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) =>
+        key === draftRuntimeOptionsStorageKey
+          ? JSON.stringify({
+              models: [
+                {
+                  provider: 'cached',
+                  model: 'vision',
+                  contextWindow: 100,
+                  supportsImages: true,
+                },
+              ],
+              thinkingLevels: ['cached-level'],
+            })
+          : null,
+      setItem: vi.fn(),
+    });
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={undefined}
+          runtimes={[]}
+          session={{
+            id: 'session-1',
+            file: '',
+            cwd: '/tmp',
+            updatedAt: 1,
+            lastKnownModel: { provider: 'cached', model: 'vision' },
+            lastKnownContextTokens: 42,
+          }}
+          sessionId="session-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
+        />,
+      );
+    });
+    expect(
+      renderer.root.findByProps({ children: 'Attach' }).props.disabled,
+    ).toBe(false);
+    expect(
+      renderer.root.findByProps({
+        'aria-label': 'Context window 42% [42/100]',
+      }),
+    ).toBeTruthy();
+    renderer.unmount();
   });
 
   it('uses active-style controls and launches with dormant selections', async () => {
