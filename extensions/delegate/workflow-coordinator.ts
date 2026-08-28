@@ -36,6 +36,14 @@ import {
   type WorkflowInputSource,
 } from './workflow-inputs';
 import {
+  boundedSessionId,
+  boundedWorkflowName,
+  normalizePreparedLaunch,
+  validatePreparedLaunch,
+  validateScheduleInput,
+  validProcessLink,
+} from './workflow-launch-policy';
+import {
   type AttemptIdentity,
   assertWorkflowAttemptTransition,
   createWorkflowModel,
@@ -54,7 +62,6 @@ export const MAX_WORKFLOW_ATTEMPTS = 256;
 export const WORKFLOW_RELOAD_ORPHAN_REASON =
   'Workflow blocked: execution state unavailable after reload.' as const;
 const MAX_WORKFLOW_REASON_LENGTH = 256;
-const MAX_WORKFLOW_NAME_LENGTH = 2_000;
 const MAX_WORKFLOW_TOKEN_BYTES = 16 * 1024;
 const MAX_TERMINAL_FIELD_BYTES = 1024;
 const DEFAULT_PREPARATION_GRACE_MS = 100;
@@ -295,51 +302,12 @@ function copyRouting(
   return routing ? Object.freeze({ ...routing }) : undefined;
 }
 
-function boundedWorkflowName(value: unknown, fallback = 'Subagent'): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) return fallback;
-  if (
-    [...text].some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127;
-    })
-  )
-    return fallback;
-  return text.slice(0, MAX_WORKFLOW_NAME_LENGTH);
-}
-
 function boundedReason(value: unknown): string {
   const text = value instanceof Error ? value.message : String(value);
   const normalized = text.trim() || 'Delegate workflow attempt failed.';
   return normalized.length > MAX_WORKFLOW_REASON_LENGTH
     ? `${normalized.slice(0, MAX_WORKFLOW_REASON_LENGTH - 1)}…`
     : normalized;
-}
-
-function boundedSessionId(value: unknown): string | undefined {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 256)
-    return undefined;
-  if (
-    [...value].some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127;
-    })
-  )
-    return undefined;
-  return value;
-}
-
-function validProcessLink(
-  sessionId: unknown,
-  processJobId: unknown,
-): sessionId is string {
-  const hasSession = sessionId !== undefined;
-  const hasProcessJob = processJobId !== undefined;
-  if (hasSession !== hasProcessJob) return false;
-  if (!hasSession) return true;
-  return (
-    boundedSessionId(sessionId) !== undefined && isCanonicalUuid(processJobId)
-  );
 }
 
 function compactSessionId(
@@ -350,56 +318,6 @@ function compactSessionId(
     evidence?.continuationToken ??
     evidence?.runs.find((run) => run.continuation)?.continuation
   );
-}
-
-function validateScheduleInput(options: DelegateWorkflowScheduleOptions): void {
-  if (typeof options.logicalId !== 'string')
-    throw new Error('Invalid workflow logical ID: expected a string.');
-  if (
-    options.continuation !== undefined &&
-    typeof options.continuation !== 'boolean' &&
-    typeof options.continuation !== 'string'
-  )
-    throw new Error('Invalid workflow continuation reference.');
-  if (options.after !== undefined && !Array.isArray(options.after))
-    throw new Error('Invalid workflow dependencies: expected an array.');
-  if (options.after && options.after.length > MAX_WORKFLOW_DEPENDENCIES)
-    throw new Error(
-      `A workflow attempt may declare at most ${MAX_WORKFLOW_DEPENDENCIES} explicit dependencies.`,
-    );
-  if (options.after?.some((reference) => typeof reference !== 'string'))
-    throw new Error(
-      'Invalid workflow dependency: expected a string reference.',
-    );
-  if (options.inputs !== undefined && !Array.isArray(options.inputs))
-    throw new Error('Invalid symbolic workflow inputs: expected an array.');
-  if (options.prepare !== undefined && typeof options.prepare !== 'function')
-    throw new Error('Invalid lazy workflow launch factory.');
-  if (
-    options.preparationCleanup !== undefined &&
-    typeof options.preparationCleanup !== 'function'
-  )
-    throw new Error('Invalid workflow preparation cleanup.');
-  const lazy = options.prepare !== undefined;
-  if (lazy && options.execute !== undefined)
-    throw new Error(
-      'Static execute options and lazy preparation are mutually exclusive.',
-    );
-  if (!lazy) {
-    if (options.mode !== 'single' && options.mode !== 'parallel')
-      throw new Error('Invalid delegate mode.');
-    if (
-      !Array.isArray(options.tasks) ||
-      options.tasks.some((task) => typeof task !== 'string')
-    )
-      throw new Error('Invalid delegate tasks: expected an array of strings.');
-    if (typeof options.execute !== 'function')
-      throw new Error('Invalid delegate launch: execute must be a function.');
-    if (options.inputs?.length)
-      throw new Error('Symbolic workflow inputs require lazy preparation.');
-  }
-  if (options.route !== undefined && typeof options.route !== 'string')
-    throw new Error('Invalid delegate route.');
 }
 
 function copyAttempt(attempt: WorkflowAttempt): WorkflowAttempt {
@@ -587,20 +505,6 @@ function canonicalContinuationToken(
   );
 }
 
-function normalizePreparedLaunch(
-  value: DelegateJobStartOptions | DelegateWorkflowPreparedLaunch,
-): DelegateWorkflowPreparedLaunch {
-  if (
-    value &&
-    typeof value === 'object' &&
-    'launch' in value &&
-    value.launch &&
-    typeof value.launch === 'object'
-  )
-    return value as DelegateWorkflowPreparedLaunch;
-  return { launch: value as DelegateJobStartOptions };
-}
-
 function publicRunFromCompact(
   run: DelegateWorkflowRunProjection,
 ): DelegatedRun {
@@ -749,7 +653,7 @@ export class DelegateWorkflowCoordinator {
   ): DelegateWorkflowAttemptSnapshot {
     if (this.disposed)
       throw new Error('Delegate workflow coordinator is disposed.');
-    validateScheduleInput(options);
+    validateScheduleInput(options, MAX_WORKFLOW_DEPENDENCIES);
     // Admission is checked before planning or binding any new identity. A
     // legal existing reference is never evicted to make room for another one.
     if (this.records.size >= this.maxAttempts)
@@ -1706,7 +1610,7 @@ export class DelegateWorkflowCoordinator {
           this.settle(record, 'cancelled', 'Cancelled before launch.');
         return;
       }
-      this.validatePreparedLaunch(normalized.launch);
+      validatePreparedLaunch(normalized.launch);
       // A missing workflow name is intentional for semantic-ID calls. The
       // adapter still has a derived run/session label, but it must not create a
       // second persisted workflow identity during lazy preparation.
@@ -1796,25 +1700,6 @@ export class DelegateWorkflowCoordinator {
     if (!record.preparationController) return;
     if (!record.preparationController.signal.aborted)
       record.preparationController.abort(reason);
-  }
-
-  private validatePreparedLaunch(
-    value: unknown,
-  ): asserts value is DelegateJobStartOptions {
-    if (!value || typeof value !== 'object')
-      throw new Error('Lazy workflow launch factory must return job options.');
-    const launch = value as Partial<DelegateJobStartOptions>;
-    if (launch.mode !== 'single' && launch.mode !== 'parallel')
-      throw new Error('Lazy workflow launch factory returned an invalid mode.');
-    if (
-      !Array.isArray(launch.tasks) ||
-      launch.tasks.some((task) => typeof task !== 'string')
-    )
-      throw new Error('Lazy workflow launch factory returned invalid tasks.');
-    if (typeof launch.execute !== 'function')
-      throw new Error(
-        'Lazy workflow launch factory returned no execute function.',
-      );
   }
 
   private startJob(
