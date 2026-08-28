@@ -259,7 +259,6 @@ export function createTranscriptProjection(
     retiredEpochs: [],
   };
 }
-export const createTranscriptReducerState = createTranscriptProjection;
 
 function normalizedMessage(
   value: unknown,
@@ -814,8 +813,6 @@ export function reduceTranscriptEvent(
 ): TranscriptProjection {
   return applyTranscriptEvent(current, input).state;
 }
-export const transcriptReducer = reduceTranscriptEvent;
-export const reduceTranscript = reduceTranscriptEvent;
 
 function persistedMessage(
   entry: Record<string, unknown>,
@@ -1274,8 +1271,6 @@ export function persistedEntriesToTranscriptEvents(
   return events;
 }
 
-export const hydrateTranscriptProjection = hydrateTranscript;
-
 const NON_RENDERED_PI_ENTRY_TYPES = new Set([
   'session',
   'model_change',
@@ -1533,6 +1528,3 @@ export function selectLegacyTranscriptEntries(
     };
   });
 }
-export const selectLegacyRawEntries = selectLegacyTranscriptEntries;
-export const toLegacyTranscriptEntries = selectLegacyTranscriptEntries;
-export const compatibilityTranscriptEntries = selectLegacyTranscriptEntries;
