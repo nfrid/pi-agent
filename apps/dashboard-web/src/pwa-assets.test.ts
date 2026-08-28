@@ -16,7 +16,7 @@ function pngDimensions(path: string): { width: number; height: number } {
 }
 
 describe('PWA assets', () => {
-  it('declares a standalone app with regular and maskable icons', () => {
+  it('declares a standalone app with a window controls overlay', () => {
     const manifest = JSON.parse(
       readPublic('manifest.webmanifest').toString('utf8'),
     ) as {
@@ -24,6 +24,7 @@ describe('PWA assets', () => {
       start_url: string;
       scope: string;
       display: string;
+      display_override: string[];
       icons: { src: string; sizes: string; purpose: string }[];
     };
 
@@ -32,6 +33,7 @@ describe('PWA assets', () => {
       start_url: '/',
       scope: '/',
       display: 'standalone',
+      display_override: ['window-controls-overlay'],
     });
     expect(manifest.icons).toEqual(
       expect.arrayContaining([

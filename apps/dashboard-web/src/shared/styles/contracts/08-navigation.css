@@ -54,6 +54,28 @@
   background: color-mix(in srgb, var(--purple) 10%, var(--bg-alt));
   color: var(--fg);
 }
+@media (display-mode: window-controls-overlay) {
+  .global-tools {
+    top: env(titlebar-area-y, 0);
+    right: calc(
+      100vw -
+      env(titlebar-area-x, 0px) -
+      env(titlebar-area-width, 100vw) +
+      8px
+    );
+    left: auto;
+    height: env(titlebar-area-height, 40px);
+    -webkit-app-region: no-drag;
+  }
+  .session-context {
+    -webkit-app-region: drag;
+  }
+  .session-context a,
+  .session-context button,
+  .session-context input {
+    -webkit-app-region: no-drag;
+  }
+}
 .shell {
   width: min(1240px, 100%);
   max-width: none;
