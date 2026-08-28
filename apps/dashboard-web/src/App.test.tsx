@@ -257,7 +257,7 @@ describe('project thread navigation', () => {
 });
 
 describe('command palette', () => {
-  it('keeps navigation available without runtime capabilities and bounds sessions', () => {
+  it('keeps navigation available and indexes every ordinary thread', () => {
     const snapshot = {
       runtimes: [],
       sessions: Array.from({ length: 437 }, (_, index) => ({
@@ -271,10 +271,71 @@ describe('command palette', () => {
       'New thread',
       'Dashboard',
     ]);
-    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(26);
-    expect(items[3]?.title).toBe('Untitled session');
-    expect(items.at(-1)?.id).toBe('session:session-23');
-    expect(items.some((item) => item.title === 'session-436')).toBe(false);
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(439);
+    expect(items[3]?.id).toBe('session:session-436');
+    expect(items.at(-1)?.id).toBe('session:session-0');
+    expect(searchPaletteItems(items, 'session-436')[0]?.item.id).toBe(
+      'session:session-436',
+    );
+  });
+
+  it('orders matching threads by lifecycle, activity, then creation', () => {
+    const session = (id: string, updatedAt: number) => ({
+      id,
+      cwd: '/workspace',
+      title: `Needle ${id}`,
+      updatedAt,
+    });
+    const thread = (id: string, createdAt: number, updatedAt: number) => ({
+      id: `thread-${id}`,
+      projectId: 'project-1',
+      title: `Needle ${id}`,
+      status: 'completed',
+      ...(id === 'settled' ? { settledAt: 1 } : {}),
+      ...(id === 'archived' ? { archivedAt: 1 } : {}),
+      createdAt,
+      updatedAt,
+    });
+    const sessions = [
+      session('active-thread-recent', 1),
+      session('active-recent', 50),
+      session('active-created-old', 10),
+      session('active-created-new', 10),
+      session('settled', 999),
+      session('archived', 9_999),
+    ];
+    const threads = [
+      thread('active-thread-recent', 1, 1_000),
+      thread('active-recent', 1, 50),
+      thread('active-created-old', 100, 10),
+      thread('active-created-new', 200, 10),
+      thread('settled', 300, 999),
+      thread('archived', 400, 9_999),
+    ];
+    // Full thread records remain a lifecycle fallback when the direct-link
+    // projection is present but does not carry its archive/settled timestamps.
+    const links = sessions.map((entry) => ({
+      sessionId: entry.id,
+      threadId: `thread-${entry.id}`,
+    }));
+    const items = paletteItems(
+      { runtimes: [], runs: [], sessions } as never,
+      threads as never,
+      links as never,
+    );
+
+    expect(
+      searchPaletteItems(items, 'needle')
+        .filter((result) => result.item.group === 'Threads')
+        .map((result) => result.item.id),
+    ).toEqual([
+      'session:active-thread-recent',
+      'session:active-recent',
+      'session:active-created-new',
+      'session:active-created-old',
+      'session:settled',
+      'session:archived',
+    ]);
   });
 
   it('fuzzily ranks local catalogue fields and exposes visible match ranges', () => {

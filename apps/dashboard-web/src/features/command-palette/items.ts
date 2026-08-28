@@ -2,9 +2,15 @@ import {
   isActionAvailable,
   type RuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';
-import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  BrowserSnapshot,
+  RuntimeSnapshot,
+  SessionThreadLink,
+  Thread,
+} from '@pi-dashboard/protocol';
 import Fuse, { type FuseResultMatch } from 'fuse.js';
 import { sessionDisplayTitle } from '../../app-helpers';
+import { agentThreadRows, isArchivedThread } from '../agent-thread-nav/model';
 
 export function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
   const schema = action.inputSchema;
@@ -31,6 +37,11 @@ interface PaletteItemBase {
   meta?: string;
   keywords: readonly string[];
   icon: string;
+  threadOrder?: {
+    lifecycle: number;
+    updatedAt: number;
+    createdAt: number;
+  };
 }
 
 export type PaletteItem =
@@ -54,11 +65,10 @@ export type PaletteSearchResult = {
   matches: Partial<Record<PaletteVisibleField, readonly PaletteMatchRange[]>>;
 };
 
-// Keep the palette useful on large installations without creating a second
-// unbounded session browser inside the dialog.
+// Keep the queryless palette compact without limiting the searchable thread
+// catalogue.
 const MAX_PALETTE_PROJECTS = 24;
-const MAX_PALETTE_SESSIONS = 24;
-const RECENT_PALETTE_SESSIONS = 12;
+const RECENT_PALETTE_THREADS = 12;
 
 function snapshotActions(snapshot: BrowserSnapshot) {
   return snapshot.runtimes.flatMap((runtime) =>
@@ -81,7 +91,11 @@ function snapshotActions(snapshot: BrowserSnapshot) {
   );
 }
 
-export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
+export function paletteItems(
+  snapshot: BrowserSnapshot,
+  durableThreads?: readonly Thread[],
+  directLinks: readonly SessionThreadLink[] = [],
+): PaletteItem[] {
   const primary: PaletteItem[] = [
     {
       kind: 'surface',
@@ -129,18 +143,41 @@ export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
       needsInput: actionNeedsInput(action),
     }),
   );
-  const sessions = snapshot.sessions.slice(0, MAX_PALETTE_SESSIONS).map(
-    (session): PaletteItem => ({
-      kind: 'navigate',
-      id: `session:${session.id}`,
-      group: 'Threads',
-      title: sessionDisplayTitle(session),
-      description: session.cwd,
-      keywords: ['session', 'thread', session.id],
-      icon: '●',
-      path: `/sessions/${encodeURIComponent(session.id)}`,
-    }),
+  const threadsById = new Map(
+    durableThreads?.map((thread) => [thread.id, thread]) ?? [],
   );
+  const threads = agentThreadRows(snapshot, durableThreads, directLinks)
+    .filter((row) => row.session || row.runtime)
+    .map((row): PaletteItem => {
+      const durableThread = row.durableThread
+        ? threadsById.get(row.durableThread.threadId)
+        : undefined;
+      return {
+        kind: 'navigate',
+        id: `session:${row.id}`,
+        group: 'Threads',
+        title: row.title,
+        description: row.cwd,
+        keywords: ['session', 'thread', row.id],
+        icon: '●',
+        path: `/sessions/${encodeURIComponent(row.id)}`,
+        threadOrder: {
+          lifecycle:
+            isArchivedThread(row) || durableThread?.archivedAt !== undefined
+              ? 2
+              : row.durableThread?.settledAt !== undefined ||
+                  durableThread?.settledAt !== undefined
+                ? 1
+                : 0,
+          updatedAt: Math.max(
+            row.updatedAt ?? 0,
+            durableThread?.updatedAt ?? 0,
+          ),
+          createdAt: durableThread?.createdAt ?? row.startedAt ?? 0,
+        },
+      };
+    })
+    .sort(compareThreadItems);
   const projects = (snapshot.projects ?? []).slice(0, MAX_PALETTE_PROJECTS).map(
     (project): PaletteItem => ({
       kind: 'navigate',
@@ -153,7 +190,33 @@ export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
       path: `/projects/${encodeURIComponent(project.id)}`,
     }),
   );
-  return [...primary, ...actions, ...sessions, ...projects];
+  return [...primary, ...actions, ...threads, ...projects];
+}
+
+function compareThreadItems(left: PaletteItem, right: PaletteItem): number {
+  const leftOrder = left.threadOrder;
+  const rightOrder = right.threadOrder;
+  if (!leftOrder || !rightOrder) return 0;
+  return (
+    leftOrder.lifecycle - rightOrder.lifecycle ||
+    rightOrder.updatedAt - leftOrder.updatedAt ||
+    rightOrder.createdAt - leftOrder.createdAt ||
+    left.title.localeCompare(right.title)
+  );
+}
+
+function orderThreadResults(
+  results: readonly PaletteSearchResult[],
+): PaletteSearchResult[] {
+  const threadResults = results
+    .filter((result) => result.item.group === 'Threads')
+    .sort((left, right) => compareThreadItems(left.item, right.item));
+  let threadIndex = 0;
+  return results.map((result) =>
+    result.item.group === 'Threads'
+      ? (threadResults[threadIndex++] ?? result)
+      : result,
+  );
 }
 
 function visibleMatches(
@@ -196,29 +259,31 @@ export function searchPaletteItems(
     ? items.filter((item) => item.group === 'Actions')
     : items;
   if (!query) {
-    let visibleSessions = 0;
+    let visibleThreads = 0;
     return candidates.flatMap((item) => {
       if (item.group === 'Projects') return [];
       if (item.group === 'Threads') {
-        visibleSessions += 1;
-        if (visibleSessions > RECENT_PALETTE_SESSIONS) return [];
+        visibleThreads += 1;
+        if (visibleThreads > RECENT_PALETTE_THREADS) return [];
       }
       return [{ item, matches: {} }];
     });
   }
 
   if (query.length === 1) {
-    return candidates.flatMap((item) => {
-      const title = literalRanges(item.title, query);
-      const description = literalRanges(item.description, query);
-      const meta = literalRanges(item.meta, query);
-      const keyword = item.keywords.some((value) =>
-        value.toLocaleLowerCase().includes(query),
-      );
-      return title || description || meta || keyword
-        ? [{ item, matches: { title, description, meta } }]
-        : [];
-    });
+    return orderThreadResults(
+      candidates.flatMap((item) => {
+        const title = literalRanges(item.title, query);
+        const description = literalRanges(item.description, query);
+        const meta = literalRanges(item.meta, query);
+        const keyword = item.keywords.some((value) =>
+          value.toLocaleLowerCase().includes(query),
+        );
+        return title || description || meta || keyword
+          ? [{ item, matches: { title, description, meta } }]
+          : [];
+      }),
+    );
   }
 
   const fuse = new Fuse(candidates, {
@@ -238,10 +303,10 @@ export function searchPaletteItems(
   const literalResults = fuzzyResults.filter((result) =>
     hasLiteralPaletteMatch(result.item, query),
   );
-  return (literalResults.length ? literalResults : fuzzyResults).map(
-    (result) => ({
+  return orderThreadResults(
+    (literalResults.length ? literalResults : fuzzyResults).map((result) => ({
       item: result.item,
       matches: visibleMatches(result.matches),
-    }),
+    })),
   );
 }

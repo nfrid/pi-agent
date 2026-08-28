@@ -1,5 +1,10 @@
-import { dashboardHttpClient } from '@pi-dashboard/client';
+import {
+  dashboardHttpClient,
+  sessionThreadLinksQueryOptions,
+  threadsQueryOptions,
+} from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import { useQuery } from '@tanstack/react-query';
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -138,7 +143,22 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
   const [query, setQuery] = useState('');
   const [activeId, setActiveId] = useState<string>();
   const [error, setError] = useState<string>();
-  const items = useMemo(() => paletteItems(snapshot), [snapshot]);
+  const durableThreadsQuery = useQuery(
+    threadsQueryOptions(dashboardHttpClient),
+  );
+  const sessionThreadLinksQuery = useQuery(
+    sessionThreadLinksQueryOptions(dashboardHttpClient),
+  );
+  const durableThreads = durableThreadsQuery.isSuccess
+    ? durableThreadsQuery.data
+    : undefined;
+  const directLinks = sessionThreadLinksQuery.isSuccess
+    ? sessionThreadLinksQuery.data
+    : [];
+  const items = useMemo(
+    () => paletteItems(snapshot, durableThreads, directLinks),
+    [directLinks, durableThreads, snapshot],
+  );
   const results = useMemo(
     () => searchPaletteItems(items, query),
     [items, query],

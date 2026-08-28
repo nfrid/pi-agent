@@ -1900,6 +1900,12 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
       },
     ],
     sessions: [
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: `decoy-session-${index}`,
+        cwd: '/workspace/dashboard',
+        title: `Dashboard history ${index}`,
+        updatedAt: index + 2,
+      })),
       {
         id: 'session-1',
         cwd: '/workspace/dashboard',
@@ -1928,11 +1934,11 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   );
   await search.press('End');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Reconnect diagnostics',
+    'Dashboard history 18',
   );
   await search.press('ArrowDown');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Reconnect diagnostics',
+    'Dashboard history 18',
   );
   await search.press('Home');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
@@ -1940,7 +1946,7 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   );
   await search.press('PageDown');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Reconnect diagnostics',
+    'Dashboard history 27',
   );
   await search.press('PageUp');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
