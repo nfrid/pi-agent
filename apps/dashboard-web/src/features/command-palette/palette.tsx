@@ -50,7 +50,8 @@ export function CommandPaletteTrigger({
       if (
         event.ctrlKey &&
         !event.metaKey &&
-        surfaces?.stack.at(-1)?.type === 'new-thread-project'
+        (surfaces?.stack.at(-1)?.type === 'command-palette' ||
+          surfaces?.stack.at(-1)?.type === 'new-thread-project')
       )
         return;
       event.preventDefault();
@@ -142,7 +143,9 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
     () => searchPaletteItems(items, query),
     [items, query],
   );
-  const enabledResults = results.filter(isEnabled);
+  const groups = groupedResults(results);
+  const orderedResults = groups.flatMap((group) => group.items);
+  const enabledResults = orderedResults.filter(isEnabled);
   const resolvedActiveId = enabledResults.some(
     (result) => result.item.id === activeId,
   )
@@ -151,8 +154,7 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
   const activeIndex = enabledResults.findIndex(
     (result) => result.item.id === resolvedActiveId,
   );
-  const groups = groupedResults(results);
-  const activeResultIndex = results.findIndex(
+  const activeResultIndex = orderedResults.findIndex(
     (result) => result.item.id === resolvedActiveId,
   );
   const activeOptionId =
@@ -200,11 +202,23 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
       setError(errorMessage(cause));
     }
   };
+  const clearQuery = () => {
+    setQuery('');
+    setActiveId(undefined);
+    setError(undefined);
+    inputRef.current?.focus();
+  };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'ArrowDown') {
+    if (
+      event.key === 'ArrowDown' ||
+      (event.ctrlKey && event.key.toLocaleLowerCase() === 'j')
+    ) {
       event.preventDefault();
       move(1);
-    } else if (event.key === 'ArrowUp') {
+    } else if (
+      event.key === 'ArrowUp' ||
+      (event.ctrlKey && event.key.toLocaleLowerCase() === 'k')
+    ) {
       event.preventDefault();
       move(-1);
     } else if (event.key === 'PageDown') {
@@ -222,6 +236,10 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
     } else if (event.key === 'Enter') {
       event.preventDefault();
       void invoke(enabledResults[activeIndex]);
+    } else if (event.key === 'Escape' && query) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearQuery();
     }
   };
 
@@ -243,18 +261,14 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
           onKeyDown={onKeyDown}
           placeholder="Search commands, threads, and projects…"
           role="combobox"
-          type="search"
+          type="text"
           value={query}
         />
         {query && (
           <button
             type="button"
             aria-label="Clear command palette search"
-            onClick={() => {
-              setQuery('');
-              setActiveId(undefined);
-              inputRef.current?.focus();
-            }}
+            onClick={clearQuery}
           >
             ×
           </button>
@@ -271,7 +285,7 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
             <fieldset className="palette-group" key={group}>
               <legend>{group}</legend>
               {groupItems.map((result) => {
-                const index = results.indexOf(result);
+                const index = orderedResults.indexOf(result);
                 const { item, matches } = result;
                 const active = item.id === resolvedActiveId;
                 const disabled = !isEnabled(result);
@@ -337,7 +351,7 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
       <footer className="palette-footer">
         <span>↑↓ navigate</span>
         <span>Enter run</span>
-        <span>Esc close</span>
+        <span>Esc clear / close</span>
         <span>&gt; actions only</span>
       </footer>
     </div>

@@ -668,6 +668,18 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   await expect(chooser.getByRole('option', { selected: true })).toContainText(
     'One',
   );
+  await chooserSearch.fill('Tw');
+  const clearProjectSearch = chooser.getByRole('button', {
+    name: 'Clear project search',
+  });
+  await expect(clearProjectSearch).toHaveCount(1);
+  await clearProjectSearch.click();
+  await expect(chooserSearch).toHaveValue('');
+  await expect(chooserSearch).toBeFocused();
+  await chooserSearch.fill('Tw');
+  await chooserSearch.press('Escape');
+  await expect(chooserSearch).toHaveValue('');
+  await expect(chooser).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
   await expect(newThread).toBeFocused();
@@ -1852,7 +1864,33 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
     serverId: 'dashboard-palette-desktop',
     revision: 1,
     cursor: 1,
-    runtimes: [],
+    runtimes: [
+      {
+        runtimeId: 'runtime-palette',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/workspace/dashboard',
+        liveState: 'working',
+        online: true,
+        session: {
+          id: 'runtime-session',
+          title: 'Dashboard agent',
+          entries: [],
+        },
+        capabilities: {
+          version: 1,
+          capabilities: [],
+          manifests: [
+            {
+              id: 'runtime-manifest',
+              version: '1',
+              actions: [{ id: 'runtime.abort', title: 'Abort run' }],
+              renderers: [],
+            },
+          ],
+        },
+      },
+    ],
     projects: [
       {
         id: 'project-1',
@@ -1879,6 +1917,15 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
     name: 'Search commands, threads, and projects',
   });
   await expect(search).toBeFocused();
+  await expect(palette.getByRole('button', { name: /Clear/ })).toHaveCount(0);
+  await search.press('Control+j');
+  await expect(palette.getByRole('option', { selected: true })).toContainText(
+    'Abort run',
+  );
+  await search.press('Control+k');
+  await expect(palette.getByRole('option', { selected: true })).toContainText(
+    'New thread',
+  );
   await search.press('End');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
     'Reconnect diagnostics',
@@ -1905,6 +1952,17 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
     Math.abs((paletteBox?.x ?? 0) + (paletteBox?.width ?? 0) / 2 - 720),
   ).toBeLessThan(2);
 
+  await search.fill('reconect');
+  await expect(
+    palette.getByRole('button', { name: 'Clear command palette search' }),
+  ).toHaveCount(1);
+  await search.press('Escape');
+  await expect(search).toHaveValue('');
+  await expect(palette).toBeVisible();
+  await search.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open command palette' }).click();
+  await expect(search).toBeFocused();
   await search.fill('reconect');
   const fuzzyResult = palette.getByRole('option', {
     name: /Reconnect diagnostics/,

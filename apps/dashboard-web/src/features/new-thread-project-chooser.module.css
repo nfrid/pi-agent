@@ -33,6 +33,15 @@
   font-size: 13px;
 }
 
+.search > button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 1px 3px;
+  cursor: pointer;
+  font-size: 17px;
+}
+
 .results {
   min-height: 0;
   max-height: min(460px, 56vh);

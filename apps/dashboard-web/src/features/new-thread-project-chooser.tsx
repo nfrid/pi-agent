@@ -1,5 +1,12 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { type KeyboardEvent, useEffect, useId, useMemo, useState } from 'react';
+import {
+  type KeyboardEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   newProjectThreadPath,
   useDashboardNavigate,
@@ -15,6 +22,7 @@ export function NewThreadProjectChooser({
   const go = useDashboardNavigate();
   const surfaces = useDashboardSurfaces();
   const listId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
   const projects = useMemo(
     () =>
       (snapshot.projects ?? []).filter(
@@ -58,7 +66,18 @@ export function NewThreadProjectChooser({
     const next = Math.min(filtered.length - 1, Math.max(0, index + direction));
     setActiveId(filtered[next]?.id);
   };
+  const clearQuery = () => {
+    setQuery('');
+    setActiveId(undefined);
+    inputRef.current?.focus();
+  };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape' && query) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearQuery();
+      return;
+    }
     if (
       event.key === 'ArrowDown' ||
       (event.ctrlKey && event.key.toLocaleLowerCase() === 'j')
@@ -91,6 +110,7 @@ export function NewThreadProjectChooser({
       <div className={styles.search}>
         <span aria-hidden="true">⌕</span>
         <input
+          ref={inputRef}
           aria-activedescendant={activeOptionId}
           aria-controls={listId}
           aria-expanded="true"
@@ -102,9 +122,18 @@ export function NewThreadProjectChooser({
           onKeyDown={onKeyDown}
           placeholder="Search name or path"
           role="combobox"
-          type="search"
+          type="text"
           value={query}
         />
+        {query && (
+          <button
+            type="button"
+            aria-label="Clear project search"
+            onClick={clearQuery}
+          >
+            ×
+          </button>
+        )}
       </div>
       <div
         className={`${styles.results} surface-scroll-region`}
@@ -150,7 +179,7 @@ export function NewThreadProjectChooser({
       <footer className={styles.footer}>
         <span>↑↓ navigate</span>
         <span>Enter choose</span>
-        <span>Esc close</span>
+        <span>Esc clear / close</span>
       </footer>
     </div>
   );
