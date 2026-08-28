@@ -2,6 +2,7 @@ import { createTRPCClient, httpSubscriptionLink } from '@trpc/client';
 import { EventSource } from 'eventsource';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
+import { decodeFeedId } from './live-feed.js';
 import { ShellFeed } from './live-feeds.js';
 import {
   createDashboardRouter,
@@ -16,8 +17,11 @@ function shellSnapshot(sequence: number) {
     revision: sequence,
     cursor: sequence,
     runtimes: [],
-    workspaces: [],
     sessions: [],
+    projects: [],
+    checkouts: [],
+    threads: [],
+    runs: [],
     unread: [],
   };
 }
@@ -48,7 +52,6 @@ describe('production tRPC feed procedures', () => {
     await app.listen({ host: '127.0.0.1', port: 0 });
     const address = app.server.address();
     if (!address || typeof address === 'string') throw new Error('No port.');
-    const initialCursor = feed.currentId;
     const requests: {
       url: string;
       token: string | undefined;
@@ -187,9 +190,13 @@ describe('production tRPC feed procedures', () => {
       const reconnectInput = JSON.parse(
         new URL(requests[1]?.url ?? '').searchParams.get('input') ?? '{}',
       ) as { lastEventId?: string; json?: { lastEventId?: string } };
-      expect(
-        reconnectInput.lastEventId ?? reconnectInput.json?.lastEventId,
-      ).toBe(initialCursor);
+      const reconnectCursor = decodeFeedId(
+        reconnectInput.lastEventId ?? reconnectInput.json?.lastEventId ?? '',
+      );
+      expect(reconnectCursor).toMatchObject({
+        sequence: 0,
+        frame: 'caught-up',
+      });
       const payloads = values.map((item) =>
         item && typeof item === 'object' && 'id' in item && 'data' in item
           ? (item as { data: unknown }).data
@@ -389,6 +396,9 @@ describe('production tRPC feed procedures', () => {
     expect((caughtUp.value as unknown[])[1]).toMatchObject({
       type: 'caught-up',
     });
+    expect((caughtUp.value as unknown[])[0]).not.toBe(
+      (first.value as unknown[])[0],
+    );
     feed.publishSemantic('usage', 1, { usage: { refresh: true } });
     const live = await stream.next();
     expect((live.value as unknown[])[1]).toMatchObject({

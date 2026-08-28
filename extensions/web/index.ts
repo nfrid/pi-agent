@@ -19,11 +19,10 @@ export default defineExtension('web', (pi: ExtensionAPI) => {
   lifecycle.register(pi);
 
   pi.registerTool(
-    createWebSearchTool({ pi, resultStore, operationGuard: lifecycle.guard }),
+    createWebSearchTool({ resultStore, operationGuard: lifecycle.guard }),
   );
   pi.registerTool(
     createFetchContentTool({
-      pi,
       resultStore,
       operationGuard: lifecycle.guard,
     }),

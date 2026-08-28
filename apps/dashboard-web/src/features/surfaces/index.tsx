@@ -1,6 +1,6 @@
 import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
 import type { ReactNode } from 'react';
-import type { DashboardRendererContext } from '../../renderer-registry';
+import type { DashboardRendererContext } from '../../renderer-contract';
 import { DelegateSurface } from './delegate-surface';
 import { TasksSurface } from './tasks-surface';
 

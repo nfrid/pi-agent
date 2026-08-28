@@ -1,4 +1,3 @@
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { CACHE_FILE_MAX_BYTES, writeCacheFile } from '../shared/cache-files';
 import { pageContent } from './content-retrieval';
 import type { StoredSearchData, WebResultStore } from './storage';
@@ -16,15 +15,16 @@ export interface StoredPayload {
 }
 
 export async function persistWebResult(
-  _pi: unknown,
-  _ctx: ExtensionContext,
   results: WebResultStore,
   data: StoredSearchData,
   assertCurrent: () => void,
 ): Promise<StoredPayload> {
   const serialized = JSON.stringify(data);
-  if (Buffer.byteLength(serialized) > CACHE_FILE_MAX_BYTES)
+  if (Buffer.byteLength(serialized) > CACHE_FILE_MAX_BYTES) {
+    assertCurrent();
+    results.store(data.id, data);
     return { warning: CAPTURE_LIMIT_WARNING };
+  }
 
   assertCurrent();
   try {

@@ -10,8 +10,8 @@ import { Transcript } from '../../entities/transcript';
 import { toTranscriptEntries } from '../../transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
 import { useOlderSessionHistory } from '../session/history';
+import { SessionHistoryControl } from '../session/history-control';
 import { useSessionScroll } from '../session/scroll';
-import { SessionHistoryControl } from '../session/views';
 import { DelegateTranscript } from './adaptation';
 import {
   type DelegateInspectorDetailState,

@@ -1,6 +1,5 @@
 import {
   defineTool,
-  type ExtensionAPI,
   type ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import pLimit from 'p-limit';
@@ -76,11 +75,10 @@ function queryList(
 }
 
 export function createWebSearchTool(options: {
-  pi: ExtensionAPI;
   resultStore: WebResultStore;
   operationGuard: (signal?: AbortSignal) => () => void;
 }) {
-  const { pi, resultStore, operationGuard } = options;
+  const { resultStore, operationGuard } = options;
   return defineTool({
     name: 'web_search',
     label: 'Web Search',
@@ -189,8 +187,6 @@ export function createWebSearchTool(options: {
         );
       const summary = `${output}\n\nResponse ID: ${id}`;
       const cacheFile = await persistWebResult(
-        pi,
-        ctx,
         resultStore,
         {
           id,

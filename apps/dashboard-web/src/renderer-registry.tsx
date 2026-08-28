@@ -1,8 +1,4 @@
-import {
-  type ExtensionSurfacePlacement,
-  isTypeBoxSchema,
-  type RendererDescriptor,
-} from '@pi-dashboard/extension-contributions';
+import { isTypeBoxSchema } from '@pi-dashboard/extension-contributions';
 import type { ReactNode } from 'react';
 import { Value } from 'typebox/value';
 import { activityGroupsRenderer } from '../../../extensions/activity-groups/contribution';
@@ -13,22 +9,15 @@ import {
 } from '../../../extensions/pause/contribution';
 import { tasksRenderer } from '../../../extensions/tasks/contribution';
 import { renderDelegateSurface, renderTasksSurface } from './features/surfaces';
+import type {
+  DashboardRenderer,
+  DashboardRendererContext,
+} from './renderer-contract';
 
-export interface DashboardRendererContext {
-  readonly surfaceId?: string;
-  readonly rendererId?: string;
-  readonly placement?: ExtensionSurfacePlacement;
-  /** Freeze live elapsed-time renderers at the reached pause boundary. */
-  readonly pausedAt?: number;
-}
-
-export interface DashboardRenderer {
-  readonly descriptor: RendererDescriptor;
-  readonly render: (
-    input: unknown,
-    context?: DashboardRendererContext,
-  ) => ReactNode;
-}
+export type {
+  DashboardRenderer,
+  DashboardRendererContext,
+} from './renderer-contract';
 
 export function createDashboardRendererRegistry(
   renderers: readonly DashboardRenderer[],

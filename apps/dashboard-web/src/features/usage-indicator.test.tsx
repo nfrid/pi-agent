@@ -16,7 +16,7 @@ import {
 } from './usage-indicator';
 
 describe('usage parsing and formatting', () => {
-  it('keeps current limits visible until historical activity is available', () => {
+  it('hides limits until historical activity proves they are relevant', () => {
     const limits = parseUsage({
       snapshots: [{ limitId: 'codex', primary: { usedPercent: 50 } }],
     });
@@ -30,10 +30,8 @@ describe('usage parsing and formatting', () => {
       series: [],
       spend: [],
     };
-    expect(usageLimitsWithActivity(limits, undefined)).toEqual(limits);
-    expect(usageLimitsWithActivity(limits, emptyHistory, false)).toEqual(
-      limits,
-    );
+    expect(usageLimitsWithActivity(limits, undefined)).toEqual([]);
+    expect(usageLimitsWithActivity(limits, emptyHistory, false)).toEqual([]);
     expect(usageLimitsWithActivity(limits, emptyHistory)).toEqual([]);
   });
 

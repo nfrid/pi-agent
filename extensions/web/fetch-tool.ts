@@ -1,4 +1,4 @@
-import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { defineTool } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { fetchAllContent } from './extract';
 import { renderFetchCall, renderWebResult } from './render';
@@ -32,11 +32,10 @@ function urlList(
 }
 
 export function createFetchContentTool(options: {
-  pi: ExtensionAPI;
   resultStore: WebResultStore;
   operationGuard: (signal?: AbortSignal) => () => void;
 }) {
-  const { pi, resultStore, operationGuard } = options;
+  const { resultStore, operationGuard } = options;
   return defineTool({
     name: 'fetch_content',
     label: 'Fetch Content',
@@ -44,7 +43,7 @@ export function createFetchContentTool(options: {
       'Retrieve the readable content of one or more public HTTP(S) pages as Markdown. Use this for URLs supplied by the user or found in search results.',
     promptSnippet: 'Retrieve readable content from public web pages',
     parameters,
-    async execute(_callId, params, signal, onUpdate, ctx) {
+    async execute(_callId, params, signal, onUpdate) {
       const assertCurrent = operationGuard(signal);
       const urls = urlList(params.url, params.urls);
       if (urls.length === 0) throw new Error('Provide url or urls.');
@@ -59,8 +58,6 @@ export function createFetchContentTool(options: {
         const result = results[0];
         if (result.error) throw new Error(result.error);
         const cacheFile = await persistWebResult(
-          pi,
-          ctx,
           resultStore,
           {
             id,
@@ -103,8 +100,6 @@ export function createFetchContentTool(options: {
         .join('\n');
       const renderedSummary = `${summary}\n\nResponse ID: ${id}`;
       const cacheFile = await persistWebResult(
-        pi,
-        ctx,
         resultStore,
         {
           id,

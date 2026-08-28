@@ -24,9 +24,7 @@ export interface StoredSearchData {
 export interface WebResultStore {
   store(id: string, data: StoredSearchData, cacheFile?: CacheFile): void;
   get(id: string): StoredSearchData | null;
-  all(): StoredSearchData[];
   cacheFile(id: string): CacheFile | undefined;
-  delete(id: string): boolean;
   clear(): void;
 }
 
@@ -62,12 +60,7 @@ export function createWebResultStore(): WebResultStore {
       else files.delete(id);
     },
     get: (id) => results.get(id) ?? null,
-    all: () => Array.from(results.values()),
     cacheFile: (id) => files.get(id),
-    delete(id) {
-      files.delete(id);
-      return results.delete(id);
-    },
     clear,
   };
 }

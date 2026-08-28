@@ -108,10 +108,14 @@ export class FeedPayloadTooLargeError extends Error {
   }
 }
 
+type CursorFrame = 'checkpoint' | 'snapshot' | 'event' | 'caught-up';
+
 interface Cursor {
   readonly generation: string;
   readonly feed: string;
   readonly sequence: number;
+  /** Absent only on cursors issued before frame identities were introduced. */
+  readonly frame?: CursorFrame;
 }
 
 interface Subscriber<TSnapshot, TEvent> {
@@ -151,10 +155,20 @@ function decodeCursor(value: string): Cursor | undefined {
       sequence < 0
     )
       return undefined;
-    const normalized = {
+    const frame = cursor.frame;
+    if (
+      frame !== undefined &&
+      frame !== 'checkpoint' &&
+      frame !== 'snapshot' &&
+      frame !== 'event' &&
+      frame !== 'caught-up'
+    )
+      return undefined;
+    const normalized: Cursor = {
       generation: cursor.generation,
       feed: cursor.feed,
       sequence,
+      ...(frame === undefined ? {} : { frame }),
     };
     if (encodeCursor(normalized) !== value) return undefined;
     return normalized;
@@ -234,7 +248,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
   }
 
   get currentId(): string {
-    return this.id(this.sequenceValue);
+    return this.id(this.sequenceValue, 'checkpoint');
   }
 
   metrics(): FeedMetrics {
@@ -284,7 +298,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
     if (this.closed) throw new Error('Feed is closed.');
     const sequence = ++this.sequenceValue;
     const record: FeedRecord<TEvent> = {
-      id: this.id(sequence),
+      id: this.id(sequence, 'event'),
       sequence,
       event,
       bytes: bytes(event),
@@ -353,11 +367,12 @@ export class BoundedFeed<TSnapshot, TEvent> {
     this.snapshotFallbacksValue[reason] += 1;
   }
 
-  private id(sequence: number): string {
+  private id(sequence: number, frame: CursorFrame): string {
     return encodeCursor({
       generation: this.generation,
       feed: this.feed,
       sequence,
+      frame,
     });
   }
 
@@ -455,7 +470,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
         }
         const item: FeedSnapshotRecord<TSnapshot> = {
           kind: 'snapshot',
-          id: this.id(sequence),
+          id: this.id(sequence, 'snapshot'),
           sequence,
           snapshot,
         };
@@ -481,7 +496,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
       }
       this.enqueue(subscriber, {
         kind: 'caught-up',
-        id: this.id(this.sequenceValue),
+        id: this.id(this.sequenceValue, 'caught-up'),
         sequence: this.sequenceValue,
       });
 
@@ -645,6 +660,7 @@ export function decodeFeedId(value: string):
       generation: string;
       feed: string;
       sequence: number;
+      frame?: CursorFrame;
     }
   | undefined {
   return decodeCursor(value);

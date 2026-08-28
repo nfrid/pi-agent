@@ -5,16 +5,14 @@ import { DELEGATE_RENDERER_ID } from '../../../../../extensions/delegate/contrib
 import { PAUSE_RENDERER_ID } from '../../../../../extensions/pause/contribution';
 import { SETTLED_BACKGROUND_RENDERER_ID } from '../../../../../extensions/remote-control/contribution';
 import { TASKS_RENDERER_ID } from '../../../../../extensions/tasks/contribution';
-import {
-  type DashboardRendererContext,
-  renderDashboardContribution,
-} from '../../renderer-registry';
+import type { DashboardRendererContext } from '../../renderer-contract';
+import { renderDashboardContribution } from '../../renderer-registry';
 import {
   dashboardSurfacePlacement,
   runtimeExtensionSurfaces,
   runtimePauseStatus,
   type SurfacePlacement,
-} from './runtime-surfaces';
+} from './surface-model';
 
 function surfaceOrder(surface: ExtensionSurface): number {
   if (surface.rendererId === TASKS_RENDERER_ID) return 0;

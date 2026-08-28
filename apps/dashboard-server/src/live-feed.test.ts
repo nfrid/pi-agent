@@ -69,15 +69,19 @@ describe('BoundedFeed', () => {
     });
     expect(feed.metrics().queuedBytes).toBeGreaterThan(0);
     release();
-    expect((await pending).value).toMatchObject({
+    const snapshot = (await pending).value;
+    expect(snapshot).toMatchObject({
       kind: 'snapshot',
       sequence: 0,
     });
-    expect(await next(iterator)).toMatchObject({ kind: 'event', sequence: 1 });
-    expect(await next(iterator)).toMatchObject({
+    const event = await next(iterator);
+    expect(event).toMatchObject({ kind: 'event', sequence: 1 });
+    const caughtUp = await next(iterator);
+    expect(caughtUp).toMatchObject({
       kind: 'caught-up',
       sequence: 1,
     });
+    expect(new Set([snapshot.id, event.id, caughtUp.id]).size).toBe(3);
     feed.publish({ value: 2 });
     expect(await next(iterator)).toMatchObject({ kind: 'event', sequence: 2 });
     await pending;
@@ -101,8 +105,11 @@ describe('BoundedFeed', () => {
       lastEventId: first.id,
       buildSnapshot: async (sequence) => ({ value: sequence }),
     });
-    expect(await next(replay)).toMatchObject({ kind: 'event', sequence: 2 });
-    expect(await next(replay)).toMatchObject({ kind: 'caught-up' });
+    const replayed = await next(replay);
+    expect(replayed).toMatchObject({ kind: 'event', sequence: 2 });
+    const replayCaughtUp = await next(replay);
+    expect(replayCaughtUp).toMatchObject({ kind: 'caught-up' });
+    expect(replayCaughtUp.id).not.toBe(replayed.id);
     await replay.return(undefined);
 
     const foreign = feed.subscribe({

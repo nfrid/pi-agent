@@ -1,4 +1,3 @@
-import type { DelegateWorkflowCoordinator } from '../../delegate/workflow-coordinator';
 import { BackgroundDeliveryBroker } from './background-delivery';
 import {
   CapabilityRegistry,
@@ -47,6 +46,12 @@ export interface DashboardUsageBroker {
   read(force: boolean, signal?: AbortSignal): Promise<unknown>;
 }
 
+/** Shared code stores the delegate service without depending on its coordinator. */
+export interface ScopedDelegateWorkflow {
+  get(reference: string): unknown;
+  list(): readonly unknown[];
+}
+
 export interface ScopedServices {
   readonly scopeId: SessionScopeId;
   readonly backgroundDeliveries: BackgroundDeliveryBroker;
@@ -56,7 +61,7 @@ export interface ScopedServices {
   /** Existing authenticated runtime bridge used for account-level usage reads. */
   dashboardUsage?: DashboardUsageBroker;
   /** Session-owned delegate workflow identity for extension integrations. */
-  delegateWorkflow?: DelegateWorkflowCoordinator;
+  delegateWorkflow?: ScopedDelegateWorkflow;
 }
 
 const scopedServicesKey = Symbol.for('pi.dashboard.scoped-runtime-services');
