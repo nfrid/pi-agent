@@ -77,13 +77,16 @@ function readDraftRuntimeOptions(): DraftRuntimeOptions {
 
 function writeDraftRuntimeOptions(options: DraftRuntimeOptions): void {
   try {
-    globalThis.localStorage?.setItem(
-      draftRuntimeOptionsStorageKey,
-      JSON.stringify({
-        models: options.models.slice(0, FULL_CATALOG_BOUND),
-        thinkingLevels: options.thinkingLevels.slice(0, THINKING_LEVEL_BOUND),
-      }),
-    );
+    const serialized = JSON.stringify({
+      models: options.models.slice(0, FULL_CATALOG_BOUND),
+      thinkingLevels: options.thinkingLevels.slice(0, THINKING_LEVEL_BOUND),
+    });
+    if (
+      globalThis.localStorage?.getItem(draftRuntimeOptionsStorageKey) ===
+      serialized
+    )
+      return;
+    globalThis.localStorage?.setItem(draftRuntimeOptionsStorageKey, serialized);
   } catch {
     // Browser storage is best effort.
   }
