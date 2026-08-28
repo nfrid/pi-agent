@@ -41,8 +41,8 @@
   --border-soft: 1px solid var(--line-soft);
 
   /* Focus */
-  --focus-ring: 2px solid var(--pink);
-  --focus-ring-offset: 2px;
+  --focus-ring: 1px solid var(--pink);
+  --focus-ring-offset: 0;
 
   /* Pre-mixed alphas */
   --pink-7: color-mix(in srgb, var(--pink) 7%, transparent);

@@ -910,14 +910,6 @@ export function AgentThreadNav({
         <div>
           <p className="eyebrow">Pi Dashboard</p>
         </div>
-        <button
-          type="button"
-          className={styles.newThread}
-          aria-label="New thread"
-          onClick={openNewThread}
-        >
-          <span aria-hidden="true">+</span> New
-        </button>
       </div>
       <div className={styles.search}>
         <span aria-hidden="true">⌕</span>
@@ -1009,15 +1001,21 @@ export function AgentThreadNav({
             {sections.pinned.map((row) => renderThreadRow(row, 'card'))}
           </section>
         )}
-        {sections.active.length > 0 && (
-          <section aria-label="Active threads">
-            <h3 className={styles.shelfHeading}>
-              <span>Active</span>
-              <small>{sections.active.length}</small>
-            </h3>
-            {sections.active.map((row) => renderThreadRow(row, 'card'))}
-          </section>
-        )}
+        <section aria-label="Active threads">
+          <h3 className={styles.shelfHeading}>
+            <span>Active</span>
+            <small>{sections.active.length}</small>
+            <button
+              type="button"
+              className={styles.newThread}
+              aria-label="New thread"
+              onClick={openNewThread}
+            >
+              + new
+            </button>
+          </h3>
+          {sections.active.map((row) => renderThreadRow(row, 'card'))}
+        </section>
         {sections.settled.length > 0 && (
           <section aria-label="Settled threads">
             <h3 className={styles.shelfHeading}>
