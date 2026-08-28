@@ -156,34 +156,10 @@
     );
   }
   .surface-drawer:not([data-surface-kind="utility"]) .surface-drawer-header {
-    position: relative;
     align-items: center;
     min-height: var(--wco-titlebar-height);
     padding-block: var(--space-3);
     -webkit-app-region: drag;
-  }
-  .surface-drawer:not([data-surface-kind="utility"])
-    .surface-drawer-header::after {
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 0;
-    width: calc(var(--wco-controls-right) + var(--space-6));
-    height: var(--wco-controls-height);
-    border-bottom-left-radius: var(--radius-md);
-    background: linear-gradient(
-      to right,
-      transparent 0,
-      var(--bg) var(--space-6),
-      var(--bg) 100%
-    );
-    content: "";
-    filter: drop-shadow(0 var(--space-2) var(--space-3) rgb(0 0 0 / 42%));
-    pointer-events: none;
-  }
-  .surface-drawer-header > * {
-    position: relative;
-    z-index: 1;
   }
   .surface-drawer:not([data-surface-kind="utility"])
     .surface-drawer-header

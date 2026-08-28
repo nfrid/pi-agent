@@ -354,9 +354,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     page.getByRole('button', { name: 'Open agent list' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Open agent list' }).click();
-  await expect(
-    page.getByText('Project threads', { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText('Pi Dashboard', { exact: true })).toBeVisible();
   await expect(page.getByText('Agents', { exact: true })).toHaveCount(0);
   await expect(
     page.getByRole('button', {

@@ -908,7 +908,7 @@ export function AgentThreadNav({
     >
       <div className={styles.header}>
         <div>
-          <p className="eyebrow">Project threads</p>
+          <p className="eyebrow">Pi Dashboard</p>
         </div>
         <button
           type="button"
