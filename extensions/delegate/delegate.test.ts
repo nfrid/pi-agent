@@ -991,7 +991,12 @@ describe('delegate', () => {
       'Use `base` when a fresh child needs another delegate',
     );
     expect(guidelines).toContain('Results arrive eagerly');
-    expect(guidelines).toContain('Use `delegate_gate` only');
+    expect(guidelines).toContain(
+      'Do not call `delegate_gate` for default delivery',
+    );
+    expect(guidelines).toContain(
+      'Use a gate only for an `all` fan-in or for `any` with `delivery: "idle"`',
+    );
     expect(guidelines).toContain(
       'Use `delegate_changes` with a workflow `node`',
     );

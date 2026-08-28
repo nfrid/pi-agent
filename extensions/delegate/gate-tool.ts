@@ -69,7 +69,7 @@ export function registerDelegateGateTool(
     name: 'delegate_gate',
     label: 'Delegate Gate',
     description:
-      'Temporarily hold selected delegate results until an all or any condition is met. Exactly one gate is active per parent branch; a later call replaces it. delivery defaults to safe.',
+      'Override eager result delivery only for an all condition, or for an any condition with delivery=idle. Do not call this for any with safe delivery: delegates already deliver that way by default. Exactly one gate is active per parent branch; a later call replaces it.',
     parameters: Parameters,
     async execute(
       _toolCallId,

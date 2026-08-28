@@ -5,7 +5,7 @@
 - Use `base` when a fresh child needs another delegate's exact resulting code state. `base` also supplies that delegate as an input.
 - Use `continue` for the same child session and retained workspace. Continuations inherit route, cwd, write access, workspace, web access, and latest scope; provide `scope` only to replace it.
 - Parallel work is multiple independent `delegate` calls. Results arrive eagerly at the next safe model boundary and ready completions are coalesced into the same parent turn.
-- Use `delegate_gate` only when intermediate results are not useful: `all` batches a fan-in and `any` opens on the first settled result. A later gate replaces the earlier gate.
+- Do not call `delegate_gate` for default delivery. Delegates already arrive as `any` at the next safe model boundary. Use a gate only for an `all` fan-in or for `any` with `delivery: "idle"`. A later gate replaces the earlier gate.
 - Keep final scope, change integration, final verification, and user-facing decisions with the parent.
 - Use `delegate_changes` with a workflow `node` to review or merge retained code changes.
 - Never wait by alternating sleeps with `delegate_jobs list` or `status`. Results arrive eagerly. Use one status snapshot only when it changes an immediate feedback or cancellation decision.

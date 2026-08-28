@@ -313,7 +313,7 @@ export function registerDelegateTool(
     label: 'Delegate',
     description: DELEGATE_TOOL_DESCRIPTION,
     promptSnippet:
-      'Schedule one focused async delegate with a stable id; compose with inputs or base, and use delegate_gate only to batch results that need fan-in.',
+      'Schedule one focused async delegate with a stable id; compose with inputs or base. Results arrive as any at a safe boundary by default; use delegate_gate only for all fan-in or any-at-idle delivery.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
     parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,

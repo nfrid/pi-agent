@@ -11,7 +11,10 @@ function registeredTool(
   coordinator: WakeCoordinator,
   cancelled: string[] = [],
 ) {
-  let tool!: { execute: (...args: unknown[]) => Promise<unknown> };
+  let tool!: {
+    description: string;
+    execute: (...args: unknown[]) => Promise<unknown>;
+  };
   registerDelegateGateTool(
     {
       registerTool(value: unknown) {
@@ -40,7 +43,8 @@ describe('delegate_gate tool', () => {
       execute: async () => new Promise(() => {}),
     });
     const coordinator = new WakeCoordinator({ workflow });
-    const result = (await registeredTool(coordinator).execute(
+    const tool = registeredTool(coordinator);
+    const result = (await tool.execute(
       'call',
       { all: ['first', 'second'] },
       undefined,
@@ -51,6 +55,9 @@ describe('delegate_gate tool', () => {
       details: Record<string, unknown>;
     };
 
+    expect(tool.description).toContain(
+      'Do not call this for any with safe delivery',
+    );
     expect(result.content[0]?.text).toContain('all(first, second)');
     expect(result.details).toMatchObject({
       delivery: 'safe',

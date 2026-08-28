@@ -74,7 +74,7 @@ Base chains are cumulative. For `A --base--> B --base--> C`, C starts from A and
 
 Every newly settled result is delivered eagerly at the next safe model boundary. Results ready before the same boundary enter the same parent turn. When other work remains active, delivery includes a compact `Still running` list. Do not poll.
 
-Use `delegate_gate` only when intermediate results are not useful. Exactly one explicit gate is active per parent branch; a later call replaces it.
+Do not call `delegate_gate` for ordinary result delivery. Newly settled delegates already arrive as `any` at the next safe model boundary. Use a gate only to batch an `all` fan-in or to delay an `any` race until idle. Exactly one explicit gate is active per parent branch; a later call replaces it.
 
 Batch a fan-in:
 
@@ -84,15 +84,16 @@ Batch a fan-in:
 }
 ```
 
-Race alternatives:
+Delay a race until the parent would otherwise become idle:
 
 ```json
 {
-  "any": ["hypothesis-a", "hypothesis-b"]
+  "any": ["hypothesis-a", "hypothesis-b"],
+  "delivery": "idle"
 }
 ```
 
-`delivery` defaults to `safe`. `delivery: "idle"` waits until the parent would otherwise become idle. An `any` gate is consumed after the first eligible delivery; remaining delegates return to eager delivery.
+`delivery` defaults to `safe`, which is already the ordinary behavior for `any`. An `any` gate is consumed after the first eligible delivery; remaining delegates return to eager delivery.
 
 ## Report contract
 
