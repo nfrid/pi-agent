@@ -165,14 +165,14 @@
     right: 0;
     z-index: 0;
     width: calc(var(--wco-controls-right) + var(--space-6));
-    height: calc(var(--wco-titlebar-height) + var(--space-5));
-    background: linear-gradient(
-      to bottom,
-      var(--bg) 0,
-      var(--bg) var(--wco-titlebar-height),
-      transparent 100%
-    );
+    height: var(--wco-titlebar-height);
+    border-bottom-left-radius: var(--radius-md);
+    background: var(--bg);
     content: "";
+    filter: drop-shadow(
+      0 var(--space-2) var(--space-4)
+        color-mix(in srgb, var(--bg) 68%, transparent)
+    );
     mask-image: linear-gradient(to right, transparent 0, #000 var(--space-6));
     pointer-events: none;
   }
