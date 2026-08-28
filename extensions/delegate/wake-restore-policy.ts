@@ -1,0 +1,609 @@
+import type {
+  CanonicalWakePayloadSelector,
+  WakeAcknowledgement,
+  WakeCondition,
+  WakePayload,
+  WakePayloadSelector,
+  WakeState,
+  WakeSubscriptionOptions,
+} from './wake-coordinator';
+import type { DelegateWorkflowAttemptSnapshot } from './workflow-coordinator';
+import {
+  type AttemptIdentity,
+  isTerminalWorkflowAttemptState,
+  parseWorkflowReference,
+} from './workflow-model';
+
+export interface WakeRestoreRecord {
+  readonly id: string;
+  readonly ownerSessionId: string;
+  readonly ownerEpoch: number;
+  readonly condition: WakeCondition;
+  readonly references: readonly AttemptIdentity[];
+  readonly payloadSelectors: readonly CanonicalWakePayloadSelector[];
+  readonly nonObstructive: boolean;
+  readonly createdAt: number;
+  state: WakeState;
+  readyAt?: number;
+  readyReferences?: readonly AttemptIdentity[];
+  queuedAt?: number;
+  enteredAt?: number;
+  cancelledAt?: number;
+  blockedAt?: number;
+  revision: number;
+  dispatchGeneration: number;
+  enteredAcknowledgement?: WakeAcknowledgement;
+  warnings?: readonly string[];
+  dispatchAttempts: number;
+  lastDispatchFailure?: string;
+  reason?: string;
+  payload?: WakePayload;
+}
+
+type WakeRecord = WakeRestoreRecord;
+
+export interface WakeRestorePolicyOptions {
+  readonly version: number;
+  readonly ownerSessionId: string;
+  readonly ownerEpoch: number;
+  readonly maxSubscriptions: number;
+  readonly maxConditionReferences: number;
+  readonly maxPayloadSelectors: number;
+  readonly wakeIdMaxLength: number;
+  readonly wakeIdPattern: RegExp;
+  /** Look up the current workflow state for legacy readiness recovery. */
+  readonly currentWorkflowLookup: (
+    identity: AttemptIdentity,
+  ) => DelegateWorkflowAttemptSnapshot | undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validTimestamp(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isExactAttemptIdentity(value: unknown): value is AttemptIdentity {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = parseWorkflowReference(value);
+    return (
+      parsed.ordinal !== undefined &&
+      value === `${parsed.logicalId}@${parsed.ordinal}`
+    );
+  } catch {
+    return false;
+  }
+}
+
+function deliveryKey(
+  ownerSessionId: string,
+  ownerEpoch: number,
+  id: string,
+): string {
+  return `${ownerSessionId}:${ownerEpoch}:${id}`;
+}
+
+function copyPayloadSelectors(
+  selectors: readonly CanonicalWakePayloadSelector[],
+): readonly CanonicalWakePayloadSelector[] {
+  return Object.freeze(
+    selectors.map((selector) => Object.freeze({ ...selector })),
+  );
+}
+
+function normalizePayloadSelector(
+  selector: WakePayloadSelector,
+): CanonicalWakePayloadSelector {
+  if (selector === 'handoff') return Object.freeze({ kind: 'handoff' });
+  if (selector === 'metadata') return Object.freeze({ kind: 'metadata' });
+  if (!isRecord(selector)) throw new Error('Invalid wake payload selector.');
+  const candidate = selector as Record<string, unknown>;
+  const kind = candidate.kind;
+  const node =
+    candidate.node === undefined
+      ? undefined
+      : typeof candidate.node === 'string'
+        ? candidate.node
+        : (() => {
+            throw new Error('Invalid wake payload source reference.');
+          })();
+  if (kind === 'handoff')
+    return Object.freeze({
+      kind: 'handoff',
+      ...(node !== undefined ? { node } : {}),
+    });
+  if (kind === 'metadata')
+    return Object.freeze({
+      kind: 'metadata',
+      ...(node !== undefined ? { node } : {}),
+    });
+  throw new Error('Invalid wake payload selector.');
+}
+
+/** Normalize condition input without binding aliases to workflow attempts. */
+export function normalizeWakeCondition(
+  condition: WakeCondition,
+  maxConditionReferences: number,
+): {
+  condition: WakeCondition;
+  references: readonly string[];
+} {
+  if (!isRecord(condition)) throw new Error('Invalid wake condition.');
+  const keys = Object.keys(condition);
+  if (keys.length !== 1) throw new Error('Wake condition must have one form.');
+  if ('node' in condition && typeof condition.node === 'string')
+    return {
+      condition: Object.freeze({ node: condition.node }),
+      references: Object.freeze([condition.node]),
+    };
+  for (const kind of ['all', 'any'] as const) {
+    const references = (condition as Record<string, unknown>)[kind];
+    if (!Array.isArray(references)) continue;
+    if (references.length === 0)
+      throw new Error(`Wake ${kind} condition cannot be empty.`);
+    if (references.length > maxConditionReferences)
+      throw new Error(
+        `Wake ${kind} condition exceeds ${maxConditionReferences} references.`,
+      );
+    if (references.some((reference) => typeof reference !== 'string'))
+      throw new Error(`Wake ${kind} condition references must be strings.`);
+    if (new Set(references).size !== references.length)
+      throw new Error(`Duplicate wake ${kind} references are not allowed.`);
+    return {
+      condition: Object.freeze({ [kind]: Object.freeze([...references]) }),
+      references: Object.freeze([...references]),
+    } as {
+      condition: WakeCondition;
+      references: readonly string[];
+    };
+  }
+  throw new Error('Invalid wake condition.');
+}
+
+/** Normalize either payload option spelling without workflow lookups. */
+export function normalizeWakePayload(
+  options: Pick<WakeSubscriptionOptions, 'payload' | 'selectors'>,
+  maxPayloadSelectors: number,
+): readonly CanonicalWakePayloadSelector[] {
+  if (options.payload !== undefined && options.selectors !== undefined)
+    throw new Error('Wake payload and selectors are mutually exclusive.');
+  const supplied = options.payload ?? options.selectors;
+  const values: readonly WakePayloadSelector[] =
+    supplied === undefined ? ['handoff', 'metadata'] : supplied;
+  if (!Array.isArray(values) || values.length === 0)
+    throw new Error('Wake payload selectors cannot be empty.');
+  if (values.length > maxPayloadSelectors)
+    throw new Error('Too many wake payload selectors.');
+  const normalized = values.map(normalizePayloadSelector);
+  const keys = normalized.map(
+    (selector) => `${selector.node ?? ''}:${selector.kind}`,
+  );
+  if (new Set(keys).size !== keys.length)
+    throw new Error('Duplicate wake payload selectors are not allowed.');
+  return copyPayloadSelectors(normalized);
+}
+
+function bindCondition(
+  condition: WakeCondition,
+  references: readonly string[],
+): WakeCondition {
+  if ('node' in condition) return Object.freeze({ node: references[0] ?? '' });
+  if ('all' in condition)
+    return Object.freeze({ all: Object.freeze([...references]) });
+  return Object.freeze({ any: Object.freeze([...references]) });
+}
+
+function parseAcknowledgement(
+  value: unknown,
+): WakeAcknowledgement | undefined | null {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return null;
+  const dispatchGeneration = value.dispatchGeneration;
+  const dispatchAttempt = value.dispatchAttempt;
+  if (
+    typeof value.deliveryKey !== 'string' ||
+    typeof dispatchGeneration !== 'number' ||
+    !Number.isSafeInteger(dispatchGeneration) ||
+    dispatchGeneration < 1 ||
+    typeof dispatchAttempt !== 'number' ||
+    !Number.isSafeInteger(dispatchAttempt) ||
+    dispatchAttempt < 1
+  )
+    return null;
+  return Object.freeze({
+    deliveryKey: value.deliveryKey,
+    dispatchGeneration,
+    dispatchAttempt,
+  });
+}
+
+function sameAcknowledgement(
+  left: WakeAcknowledgement | undefined,
+  right: WakeAcknowledgement,
+): boolean {
+  return (
+    left?.deliveryKey === right.deliveryKey &&
+    left.dispatchGeneration === right.dispatchGeneration &&
+    left.dispatchAttempt === right.dispatchAttempt
+  );
+}
+
+function parseWarnings(
+  value: unknown,
+  wakeId: string,
+): readonly string[] | undefined | null {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 2) return null;
+  try {
+    const warnings = value.map((warning) => {
+      if (
+        typeof warning !== 'string' ||
+        warning.length === 0 ||
+        warning.length > 256 ||
+        [...warning].some((character) => character.charCodeAt(0) < 32)
+      )
+        throw new Error(`Invalid warning for wake ${wakeId}.`);
+      return warning;
+    });
+    return Object.freeze(warnings);
+  } catch {
+    return null;
+  }
+}
+
+function timestampOrderIsValid(record: WakeRecord): boolean {
+  const { createdAt, readyAt, queuedAt, enteredAt, cancelledAt, blockedAt } =
+    record;
+  if (readyAt !== undefined && readyAt < createdAt) return false;
+  if (queuedAt !== undefined && queuedAt < (readyAt ?? createdAt)) return false;
+  if (enteredAt !== undefined && enteredAt < (queuedAt ?? readyAt ?? createdAt))
+    return false;
+  if (cancelledAt !== undefined && cancelledAt < createdAt) return false;
+  if (blockedAt !== undefined && blockedAt < createdAt) return false;
+  if (record.state === 'ready' && readyAt === undefined) return false;
+  if (
+    record.state === 'queued' &&
+    (readyAt === undefined || queuedAt === undefined)
+  )
+    return false;
+  if (record.state === 'entered' && enteredAt === undefined) return false;
+  if (record.state === 'cancelled' && cancelledAt === undefined) return false;
+  if (record.state === 'blocked' && blockedAt === undefined) return false;
+  return true;
+}
+
+function validReadyReferences(
+  condition: WakeCondition,
+  references: readonly AttemptIdentity[],
+  readyReferences: readonly AttemptIdentity[],
+): boolean {
+  if (readyReferences.length === 0) return false;
+  if ('node' in condition)
+    return readyReferences.length === 1 && readyReferences[0] === references[0];
+  const referenceSet = new Set(references);
+  if (readyReferences.some((reference) => !referenceSet.has(reference)))
+    return false;
+  if ('all' in condition)
+    return (
+      readyReferences.length === references.length &&
+      references.every((reference) => readyReferences.includes(reference))
+    );
+  return true;
+}
+
+export function isWakeTerminal(state: WakeState): boolean {
+  return state === 'entered' || state === 'cancelled' || state === 'blocked';
+}
+
+export function activeWakeCount(records: Iterable<WakeRecord>): number {
+  let count = 0;
+  for (const record of records) if (!isWakeTerminal(record.state)) count++;
+  return count;
+}
+
+function wakeStateProgress(state: WakeState): number {
+  if (state === 'pending') return 0;
+  if (state === 'ready') return 1;
+  if (state === 'queued') return 2;
+  return 3;
+}
+
+export function shouldKeepWakeRestoreRecord(
+  live: WakeRecord,
+  incoming: WakeRecord,
+): boolean {
+  if (live.revision >= incoming.revision) return true;
+  const liveProgress = wakeStateProgress(live.state);
+  const incomingProgress = wakeStateProgress(incoming.state);
+  if (liveProgress > incomingProgress) return true;
+  if (liveProgress === incomingProgress && live.state !== incoming.state)
+    return true;
+  // Terminal states are one-shot and may not be rewritten by a stale branch.
+  if (isWakeTerminal(live.state) && live.state !== incoming.state) return true;
+  if (live.state === 'queued' && incoming.state !== 'queued') return true;
+  return false;
+}
+
+export interface WakeRestoreMergeResult {
+  readonly records: Map<string, WakeRecord>;
+  readonly accepted: readonly WakeRecord[];
+}
+
+/** Merge metadata without mutating either source map or emitting changes. */
+export function mergeWakeRestoreRecords(
+  live: ReadonlyMap<string, WakeRecord>,
+  incoming: ReadonlyMap<string, WakeRecord>,
+  maxSubscriptions: number,
+): WakeRestoreMergeResult | undefined {
+  const records = new Map(live);
+  const accepted: WakeRecord[] = [];
+  for (const record of incoming.values()) {
+    const prior = records.get(record.id);
+    if (prior && shouldKeepWakeRestoreRecord(prior, record)) continue;
+    records.set(record.id, record);
+    accepted.push(record);
+  }
+  if (activeWakeCount(records.values()) > maxSubscriptions) return undefined;
+  return { records, accepted: Object.freeze(accepted) };
+}
+
+/** Whether a restored pending/ready wake must be blocked after reload. */
+export function needsWakeReloadBlock(
+  record: WakeRecord,
+  currentWorkflowLookup: WakeRestorePolicyOptions['currentWorkflowLookup'],
+  workflowOrphanReason: string,
+): boolean {
+  return (
+    (record.state === 'pending' || record.state === 'ready') &&
+    record.references.some((reference) => {
+      const attempt = currentWorkflowLookup(reference);
+      return (
+        attempt === undefined ||
+        (attempt.state === 'blocked' && attempt.reason === workflowOrphanReason)
+      );
+    })
+  );
+}
+
+function parseRestoredRecord(
+  value: unknown,
+  options: WakeRestorePolicyOptions,
+): WakeRecord | undefined {
+  if (!isRecord(value)) return undefined;
+  const id = value.id;
+  if (typeof id !== 'string') return undefined;
+  if (
+    id.length === 0 ||
+    id.length > options.wakeIdMaxLength ||
+    !options.wakeIdPattern.test(id)
+  )
+    return undefined;
+  if (
+    value.ownerSessionId !== options.ownerSessionId ||
+    value.ownerEpoch !== options.ownerEpoch ||
+    value.deliveryKey !==
+      deliveryKey(options.ownerSessionId, options.ownerEpoch, id) ||
+    !validTimestamp(value.createdAt) ||
+    !isRecord(value.condition) ||
+    !Array.isArray(value.references)
+  )
+    return undefined;
+  let normalized: { condition: WakeCondition; references: readonly string[] };
+  let payloadSelectors: readonly CanonicalWakePayloadSelector[];
+  try {
+    normalized = normalizeWakeCondition(
+      value.condition as WakeCondition,
+      options.maxConditionReferences,
+    );
+    const references = normalized.references.map((reference) => {
+      if (!isExactAttemptIdentity(reference)) throw new Error('not exact');
+      return reference;
+    });
+    if (
+      value.references.length !== references.length ||
+      value.references.some(
+        (reference, index) =>
+          !isExactAttemptIdentity(reference) || reference !== references[index],
+      )
+    )
+      return undefined;
+    normalized = {
+      condition: bindCondition(normalized.condition, references),
+      references: Object.freeze(references),
+    };
+    if (
+      !Array.isArray(value.payload) ||
+      (value.nonObstructive !== undefined &&
+        typeof value.nonObstructive !== 'boolean')
+    )
+      return undefined;
+    const restoredSelectors = normalizeWakePayload(
+      {
+        payload: value.payload as readonly WakePayloadSelector[],
+      },
+      options.maxPayloadSelectors,
+    );
+    for (const selector of restoredSelectors)
+      if (
+        selector.node !== undefined &&
+        (!isExactAttemptIdentity(selector.node) ||
+          !normalized.references.includes(selector.node))
+      )
+        return undefined;
+    // Restored selectors are exact and checked against condition references.
+    // Workflow results are not needed to retain queued acknowledgements.
+    payloadSelectors = copyPayloadSelectors(restoredSelectors);
+  } catch {
+    return undefined;
+  }
+  const state = value.state;
+  if (
+    typeof state !== 'string' ||
+    !['pending', 'ready', 'queued', 'entered', 'cancelled', 'blocked'].includes(
+      state,
+    )
+  )
+    return undefined;
+  if (
+    typeof value.revision !== 'number' ||
+    !Number.isSafeInteger(value.revision) ||
+    value.revision < 1
+  )
+    return undefined;
+  let readyReferences: readonly AttemptIdentity[] | undefined;
+  try {
+    if (state === 'ready' || state === 'queued' || state === 'entered') {
+      if (value.readyReferences !== undefined) {
+        if (
+          !Array.isArray(value.readyReferences) ||
+          value.readyReferences.length === 0 ||
+          value.readyReferences.length > options.maxConditionReferences
+        )
+          return undefined;
+        const restored = value.readyReferences.map((reference) => {
+          if (
+            !isExactAttemptIdentity(reference) ||
+            !normalized.references.includes(reference)
+          )
+            throw new Error('invalid ready source');
+          return reference;
+        });
+        if (
+          new Set(restored).size !== restored.length ||
+          !validReadyReferences(
+            normalized.condition,
+            normalized.references,
+            restored,
+          )
+        )
+          return undefined;
+        readyReferences = Object.freeze(restored);
+      } else if (state === 'entered') {
+        // An old entered `any` wake cannot prove which source entered context.
+        return undefined;
+      } else {
+        // Older ready/queued entries recompute only exact condition refs.
+        const current = normalized.references.filter((reference) => {
+          const attempt = options.currentWorkflowLookup(reference);
+          return (
+            attempt !== undefined &&
+            isTerminalWorkflowAttemptState(attempt.state)
+          );
+        });
+        readyReferences = validReadyReferences(
+          normalized.condition,
+          normalized.references,
+          current,
+        )
+          ? Object.freeze(current)
+          : Object.freeze([]);
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  const warnings = parseWarnings(value.warnings, id);
+  if (warnings === null) return undefined;
+  const enteredAcknowledgement = parseAcknowledgement(
+    value.enteredAcknowledgement,
+  );
+  if (enteredAcknowledgement === null) return undefined;
+  if (state === 'entered' && enteredAcknowledgement === undefined)
+    return undefined;
+  if (state !== 'entered' && enteredAcknowledgement !== undefined)
+    return undefined;
+  if (
+    typeof value.dispatchGeneration !== 'number' ||
+    !Number.isSafeInteger(value.dispatchGeneration) ||
+    value.dispatchGeneration < 0
+  )
+    return undefined;
+  for (const timestamp of [
+    value.readyAt,
+    value.queuedAt,
+    value.enteredAt,
+    value.cancelledAt,
+    value.blockedAt,
+  ])
+    if (timestamp !== undefined && !validTimestamp(timestamp)) return undefined;
+  if (
+    typeof value.dispatchAttempts !== 'number' ||
+    !Number.isSafeInteger(value.dispatchAttempts) ||
+    value.dispatchAttempts < 0 ||
+    value.dispatchAttempts > 1000
+  )
+    return undefined;
+  if (
+    state === 'queued' &&
+    (readyReferences === undefined ||
+      readyReferences.length === 0 ||
+      value.dispatchGeneration < 1 ||
+      value.dispatchAttempts < 1)
+  )
+    return undefined;
+  const record: WakeRecord = {
+    id,
+    ownerSessionId: options.ownerSessionId,
+    ownerEpoch: options.ownerEpoch,
+    condition: normalized.condition,
+    references: normalized.references as readonly AttemptIdentity[],
+    payloadSelectors,
+    nonObstructive: value.nonObstructive === true,
+    createdAt: value.createdAt,
+    state: state as WakeState,
+    readyAt: validTimestamp(value.readyAt) ? value.readyAt : undefined,
+    readyReferences,
+    queuedAt: validTimestamp(value.queuedAt) ? value.queuedAt : undefined,
+    enteredAt: validTimestamp(value.enteredAt) ? value.enteredAt : undefined,
+    cancelledAt: validTimestamp(value.cancelledAt)
+      ? value.cancelledAt
+      : undefined,
+    blockedAt: validTimestamp(value.blockedAt) ? value.blockedAt : undefined,
+    revision: value.revision,
+    dispatchGeneration: value.dispatchGeneration,
+    enteredAcknowledgement,
+    warnings,
+    dispatchAttempts: value.dispatchAttempts,
+    // Failure/cancellation prose is not trusted from a session entry.
+    lastDispatchFailure: undefined,
+    reason: undefined,
+  };
+  if (!timestampOrderIsValid(record)) return undefined;
+  if (
+    record.enteredAcknowledgement !== undefined &&
+    !sameAcknowledgement(record.enteredAcknowledgement, {
+      deliveryKey: deliveryKey(options.ownerSessionId, options.ownerEpoch, id),
+      dispatchGeneration: record.dispatchGeneration,
+      dispatchAttempt: record.dispatchAttempts,
+    })
+  )
+    return undefined;
+  return record;
+}
+
+/** Parse and validate one complete wake metadata snapshot transactionally. */
+export function parseWakeRestoreSnapshot(
+  value: unknown,
+  options: WakeRestorePolicyOptions,
+): Map<string, WakeRecord> | undefined {
+  const candidate = isRecord(value) ? value : undefined;
+  if (
+    candidate?.version !== options.version ||
+    candidate.ownerSessionId !== options.ownerSessionId ||
+    candidate.ownerEpoch !== options.ownerEpoch ||
+    !Array.isArray(candidate.wakes)
+  )
+    return undefined;
+  const incoming = new Map<string, WakeRecord>();
+  for (const item of candidate.wakes) {
+    const record = parseRestoredRecord(item, options);
+    if (!record || incoming.has(record.id)) return undefined;
+    incoming.set(record.id, record);
+  }
+  return activeWakeCount(incoming.values()) <= options.maxSubscriptions
+    ? incoming
+    : undefined;
+}
