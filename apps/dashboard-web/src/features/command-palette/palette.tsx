@@ -17,6 +17,7 @@ import {
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
 import { useDashboardSurfaces } from '../dashboard-surface-context';
+import { DashboardTime, timestampDate } from '../timestamp';
 import {
   type PaletteGroup,
   type PaletteMatchRange,
@@ -133,6 +134,18 @@ function groupedResults(results: readonly PaletteSearchResult[]) {
 
 function isEnabled(result: PaletteSearchResult): boolean {
   return result.item.kind !== 'action' || !result.item.needsInput;
+}
+
+function creationDate(timestamp: number): string | undefined {
+  const date = timestamp > 0 ? timestampDate(timestamp) : undefined;
+  if (!date) return undefined;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(date.getFullYear() === new Date().getFullYear()
+      ? {}
+      : { year: 'numeric' }),
+  }).format(date);
 }
 
 export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -309,12 +322,20 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
                 const { item, matches } = result;
                 const active = item.id === resolvedActiveId;
                 const disabled = !isEnabled(result);
+                const threadCreatedDate = item.thread
+                  ? timestampDate(item.thread.createdAt)
+                  : undefined;
+                const threadCreatedLabel = item.thread
+                  ? creationDate(item.thread.createdAt)
+                  : undefined;
                 return (
                   <button
                     type="button"
                     aria-disabled={disabled || undefined}
                     aria-selected={active}
                     className={active ? 'palette-selected' : undefined}
+                    data-thread-lifecycle={item.thread?.lifecycle}
+                    data-thread-status={item.thread?.statusTone}
                     id={`${listId}-option-${index}`}
                     key={item.id}
                     onClick={() => void invoke(result)}
@@ -328,26 +349,81 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
                       {item.icon}
                     </span>
                     <span className="palette-item-copy">
-                      <strong>
-                        <HighlightedPaletteText
-                          text={item.title}
-                          ranges={matches.title}
-                        />
-                      </strong>
-                      <small>
-                        {disabled ? 'Requires additional input · ' : ''}
-                        <HighlightedPaletteText
-                          text={item.description}
-                          ranges={matches.description}
-                        />
-                      </small>
-                      {item.meta && (
-                        <small className="palette-item-meta">
-                          <HighlightedPaletteText
-                            text={item.meta}
-                            ranges={matches.meta}
-                          />
-                        </small>
+                      {item.thread ? (
+                        <>
+                          <span className="palette-thread-heading">
+                            <strong>
+                              <HighlightedPaletteText
+                                text={item.title}
+                                ranges={matches.title}
+                              />
+                            </strong>
+                            <span className="palette-thread-state">
+                              <span>
+                                <HighlightedPaletteText
+                                  text={item.thread.status}
+                                  ranges={matches.meta}
+                                />
+                              </span>
+                              {item.thread.activityAt > 0 && (
+                                <>
+                                  <span aria-hidden="true">·</span>
+                                  <DashboardTime
+                                    timestamp={item.thread.activityAt}
+                                    context="sidebar-relative"
+                                  />
+                                </>
+                              )}
+                            </span>
+                          </span>
+                          <small className="palette-thread-location">
+                            <span
+                              title={
+                                item.thread.checkoutPath
+                                  ? `${item.thread.checkoutKind} checkout: ${item.thread.checkoutPath}`
+                                  : `${item.thread.checkoutKind} checkout`
+                              }
+                            >
+                              <HighlightedPaletteText
+                                text={item.description}
+                                ranges={matches.description}
+                              />
+                            </span>
+                            {threadCreatedDate && threadCreatedLabel && (
+                              <time
+                                className="palette-thread-created"
+                                dateTime={threadCreatedDate.toISOString()}
+                                title={threadCreatedDate.toLocaleString()}
+                              >
+                                created {threadCreatedLabel}
+                              </time>
+                            )}
+                          </small>
+                        </>
+                      ) : (
+                        <>
+                          <strong>
+                            <HighlightedPaletteText
+                              text={item.title}
+                              ranges={matches.title}
+                            />
+                          </strong>
+                          <small>
+                            {disabled ? 'Requires additional input · ' : ''}
+                            <HighlightedPaletteText
+                              text={item.description}
+                              ranges={matches.description}
+                            />
+                          </small>
+                          {item.meta && (
+                            <small className="palette-item-meta">
+                              <HighlightedPaletteText
+                                text={item.meta}
+                                ranges={matches.meta}
+                              />
+                            </small>
+                          )}
+                        </>
                       )}
                     </span>
                     {active && !disabled && (

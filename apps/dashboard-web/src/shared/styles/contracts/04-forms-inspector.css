@@ -165,6 +165,101 @@
 .palette-item-copy .palette-item-meta {
   color: var(--dim);
 }
+.palette-thread-heading,
+.palette-thread-location {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.palette-thread-heading strong,
+.palette-thread-location > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-thread-state,
+.palette-thread-created {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.palette-thread-created {
+  font-weight: 500;
+}
+.palette-list button[data-thread-lifecycle="active"] .palette-item-icon,
+.palette-list button[data-thread-lifecycle="active"] .palette-thread-state {
+  color: var(--green);
+}
+.palette-list button[data-thread-lifecycle="settled"] .palette-item-icon,
+.palette-list button[data-thread-lifecycle="settled"] .palette-thread-state {
+  color: var(--cyan);
+}
+.palette-list button[data-thread-lifecycle="archived"] .palette-item-icon,
+.palette-list button[data-thread-lifecycle="archived"] .palette-thread-state {
+  color: var(--dim);
+}
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="failed"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="failed"]
+  .palette-thread-state {
+  color: var(--red);
+}
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="waiting"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="waiting"]
+  .palette-thread-state,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="paused"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="paused"]
+  .palette-thread-state,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="compacting"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="compacting"]
+  .palette-thread-state,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="input"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="input"]
+  .palette-thread-state {
+  color: var(--orange);
+}
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="idle"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="idle"]
+  .palette-thread-state,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="offline"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="offline"]
+  .palette-thread-state,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="dormant"]
+  .palette-item-icon,
+.palette-list
+  button[data-thread-lifecycle="active"][data-thread-status="dormant"]
+  .palette-thread-state {
+  color: var(--dim);
+}
 .palette-item-copy mark {
   border-radius: 2px;
   background: color-mix(in srgb, var(--yellow) 18%, transparent);

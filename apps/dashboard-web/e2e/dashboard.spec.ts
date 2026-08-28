@@ -1899,6 +1899,17 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
         status: 'active',
       },
     ],
+    checkouts: [
+      {
+        id: 'checkout-1',
+        projectId: 'project-1',
+        kind: 'worktree',
+        path: '/workspace/.worktrees/palette',
+        branch: 'feature/palette',
+        status: 'ready',
+        updatedAt: 1,
+      },
+    ],
     sessions: [
       ...Array.from({ length: 30 }, (_, index) => ({
         id: `decoy-session-${index}`,
@@ -1909,7 +1920,10 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
       {
         id: 'session-1',
         cwd: '/workspace/dashboard',
+        projectId: 'project-1',
+        checkoutId: 'checkout-1',
         title: 'Reconnect diagnostics',
+        startedAt: 1,
         updatedAt: 1,
       },
     ],
@@ -1975,11 +1989,30 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   });
   await expect(fuzzyResult).toBeVisible();
   await expect(fuzzyResult.locator('mark')).not.toHaveCount(0);
+  await expect(fuzzyResult).toContainText(
+    'Dashboard project / feature/palette',
+  );
+  await expect(fuzzyResult).toContainText('dormant');
+  await expect(fuzzyResult.locator('.palette-thread-created')).toHaveAttribute(
+    'datetime',
+    '1970-01-01T00:00:00.001Z',
+  );
+  await expect(
+    fuzzyResult.locator('.palette-thread-location > span').first(),
+  ).toHaveAttribute(
+    'title',
+    'worktree checkout: /workspace/.worktrees/palette',
+  );
   const activeDescendant = await search.getAttribute('aria-activedescendant');
   expect(activeDescendant).toBeTruthy();
   await expect(page.locator(`[id="${activeDescendant}"]`)).toHaveAttribute(
     'aria-selected',
     'true',
+  );
+  await search.fill('feature/palette');
+  await expect(palette.getByRole('option')).toHaveCount(1);
+  await expect(palette.getByRole('option')).toContainText(
+    'Reconnect diagnostics',
   );
 
   await search.fill('> new');

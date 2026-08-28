@@ -10,7 +10,12 @@ import type {
 } from '@pi-dashboard/protocol';
 import Fuse, { type FuseResultMatch } from 'fuse.js';
 import { sessionDisplayTitle } from '../../app-helpers';
-import { agentThreadRows, isArchivedThread } from '../agent-thread-nav/model';
+import {
+  agentThreadRows,
+  isArchivedThread,
+  statusGlyph,
+  statusLabel,
+} from '../agent-thread-nav/model';
 
 export function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
   const schema = action.inputSchema;
@@ -37,6 +42,17 @@ interface PaletteItemBase {
   meta?: string;
   keywords: readonly string[];
   icon: string;
+  thread?: {
+    lifecycle: 'active' | 'settled' | 'archived';
+    status: string;
+    statusTone: string;
+    project: string;
+    checkout: string;
+    checkoutKind: 'main' | 'worktree' | 'external';
+    checkoutPath?: string;
+    activityAt: number;
+    createdAt: number;
+  };
   threadOrder?: {
     lifecycle: number;
     updatedAt: number;
@@ -152,28 +168,72 @@ export function paletteItems(
       const durableThread = row.durableThread
         ? threadsById.get(row.durableThread.threadId)
         : undefined;
+      const lifecycle =
+        isArchivedThread(row) || durableThread?.archivedAt !== undefined
+          ? 'archived'
+          : row.durableThread?.settledAt !== undefined ||
+              durableThread?.settledAt !== undefined
+            ? 'settled'
+            : 'active';
+      const checkoutId =
+        row.runtime?.checkoutId ??
+        row.durableThread?.checkoutId ??
+        row.session?.checkoutId ??
+        durableThread?.checkoutId;
+      const checkout = (snapshot.checkouts ?? []).find(
+        (candidate) => candidate.id === checkoutId,
+      );
+      const checkoutKind = checkout?.kind ?? 'main';
+      const checkoutLabel = checkout?.branch ?? checkoutKind;
+      const displayStatus =
+        lifecycle === 'active' ? statusLabel(row) : lifecycle;
+      const activityAt = Math.max(
+        row.updatedAt ?? 0,
+        durableThread?.updatedAt ?? 0,
+      );
+      const createdAt = durableThread?.createdAt ?? row.startedAt ?? 0;
       return {
         kind: 'navigate',
         id: `session:${row.id}`,
         group: 'Threads',
         title: row.title,
-        description: row.cwd,
-        keywords: ['session', 'thread', row.id],
-        icon: '●',
+        description: `${row.projectName} / ${checkoutLabel}`,
+        meta: displayStatus,
+        keywords: [
+          'session',
+          'thread',
+          row.id,
+          row.projectName,
+          row.cwd,
+          checkoutLabel,
+          checkoutKind,
+          checkout?.path ?? '',
+          displayStatus,
+          lifecycle,
+        ],
+        icon:
+          lifecycle === 'archived'
+            ? '□'
+            : lifecycle === 'settled'
+              ? '○'
+              : statusGlyph(row.status),
         path: `/sessions/${encodeURIComponent(row.id)}`,
+        thread: {
+          lifecycle,
+          status: displayStatus,
+          statusTone: row.status,
+          project: row.projectName,
+          checkout: checkoutLabel,
+          checkoutKind,
+          ...(checkout?.path ? { checkoutPath: checkout.path } : {}),
+          activityAt,
+          createdAt,
+        },
         threadOrder: {
           lifecycle:
-            isArchivedThread(row) || durableThread?.archivedAt !== undefined
-              ? 2
-              : row.durableThread?.settledAt !== undefined ||
-                  durableThread?.settledAt !== undefined
-                ? 1
-                : 0,
-          updatedAt: Math.max(
-            row.updatedAt ?? 0,
-            durableThread?.updatedAt ?? 0,
-          ),
-          createdAt: durableThread?.createdAt ?? row.startedAt ?? 0,
+            lifecycle === 'active' ? 0 : lifecycle === 'settled' ? 1 : 2,
+          updatedAt: activityAt,
+          createdAt,
         },
       };
     })

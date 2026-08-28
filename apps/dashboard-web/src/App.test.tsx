@@ -283,6 +283,10 @@ describe('command palette', () => {
     const session = (id: string, updatedAt: number) => ({
       id,
       cwd: '/workspace',
+      projectId: 'project-1',
+      ...(id === 'active-thread-recent'
+        ? { checkoutId: 'checkout-recent' }
+        : {}),
       title: `Needle ${id}`,
       updatedAt,
     });
@@ -291,6 +295,9 @@ describe('command palette', () => {
       projectId: 'project-1',
       title: `Needle ${id}`,
       status: 'completed',
+      ...(id === 'active-thread-recent'
+        ? { checkoutId: 'checkout-recent' }
+        : {}),
       ...(id === 'settled' ? { settledAt: 1 } : {}),
       ...(id === 'archived' ? { archivedAt: 1 } : {}),
       createdAt,
@@ -319,7 +326,23 @@ describe('command palette', () => {
       threadId: `thread-${entry.id}`,
     }));
     const items = paletteItems(
-      { runtimes: [], runs: [], sessions } as never,
+      {
+        runtimes: [],
+        runs: [],
+        sessions,
+        projects: [{ id: 'project-1', title: 'Dashboard project' }],
+        checkouts: [
+          {
+            id: 'checkout-recent',
+            projectId: 'project-1',
+            kind: 'worktree',
+            path: '/workspace/.worktrees/recent',
+            branch: 'feature/recent',
+            status: 'ready',
+            updatedAt: 1_000,
+          },
+        ],
+      } as never,
       threads as never,
       links as never,
     );
@@ -336,6 +359,28 @@ describe('command palette', () => {
       'session:settled',
       'session:archived',
     ]);
+    expect(
+      items.find((item) => item.id === 'session:active-thread-recent'),
+    ).toMatchObject({
+      description: 'Dashboard project / feature/recent',
+      meta: 'dormant',
+      thread: {
+        lifecycle: 'active',
+        status: 'dormant',
+        project: 'Dashboard project',
+        checkout: 'feature/recent',
+        checkoutKind: 'worktree',
+        checkoutPath: '/workspace/.worktrees/recent',
+        activityAt: 1_000,
+        createdAt: 1,
+      },
+    });
+    expect(searchPaletteItems(items, 'feature/recent')[0]?.item.id).toBe(
+      'session:active-thread-recent',
+    );
+    expect(searchPaletteItems(items, 'settled')[0]?.item.id).toBe(
+      'session:settled',
+    );
   });
 
   it('fuzzily ranks local catalogue fields and exposes visible match ranges', () => {
@@ -345,11 +390,19 @@ describe('command palette', () => {
         {
           id: 'session-1',
           cwd: '/workspace/dashboard',
+          projectId: 'project-1',
           title: 'Reconnect diagnostics',
           updatedAt: 1,
         },
       ],
-      projects: [],
+      projects: [
+        {
+          id: 'project-1',
+          title: 'Dashboard',
+          rootPath: '/workspace/dashboard',
+          status: 'active',
+        },
+      ],
     } as never);
     const [result] = searchPaletteItems(items, 'reconect');
     expect(result?.item.id).toBe('session:session-1');
