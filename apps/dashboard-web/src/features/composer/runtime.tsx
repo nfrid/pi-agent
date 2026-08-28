@@ -7,6 +7,7 @@ import type {
 import { formatCompactCount } from '../../shared/lib/format';
 import {
   configuredModelOptions,
+  draftRuntimeOptions,
   modelOptionValue,
   type RuntimeModelOption,
 } from '../model-option';
@@ -109,6 +110,24 @@ export function modelSupportsImages(
           modelOptionValue(option.provider, option.model) === value &&
           option.supportsImages === true,
       ),
+  );
+}
+
+/** Drafts may be created before a runtime reports capability metadata. */
+export function draftModelSupportsImages(
+  model: RuntimeModelOption | undefined,
+  runtimes: readonly RuntimeSnapshot[],
+): boolean {
+  if (!model) return true;
+  const value = modelOptionValue(model.provider, model.model);
+  const available = [
+    ...runtimes.flatMap((runtime) => runtime.modelCatalog ?? []),
+    ...draftRuntimeOptions(runtimes).models,
+  ];
+  return !available.some(
+    (option) =>
+      modelOptionValue(option.provider, option.model) === value &&
+      option.supportsImages === false,
   );
 }
 

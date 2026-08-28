@@ -1,10 +1,23 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   configuredModelOptions,
+  draftModelSelection,
+  draftRuntimeOptions,
+  draftRuntimeOptionsStorageKey,
   modelOptionValue,
   parseModelOptionValue,
+  rememberDraftRuntimeOptions,
 } from './model-option';
+
+const storage = new Map<string, string>();
+
+function installStorage() {
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  });
+}
 
 describe('model option values', () => {
   it('round-trips providers and models that contain slashes', () => {
@@ -82,6 +95,59 @@ describe('model option values', () => {
     expect(
       configuredModelOptions([{ modelCatalog: full } as RuntimeSnapshot]),
     ).toEqual([]);
+  });
+
+  it('uses a validated remembered catalogue and levels for drafts', () => {
+    installStorage();
+    const runtimes = [
+      {
+        modelCatalog: [
+          {
+            provider: 'test',
+            model: 'vision',
+            name: 'Vision',
+            supportsImages: true,
+          },
+          { provider: 'test', model: 'text', supportsImages: false },
+        ],
+        thinkingLevels: ['low', 'high'],
+      },
+    ] as never;
+    rememberDraftRuntimeOptions(runtimes);
+
+    expect(draftRuntimeOptions([])).toEqual({
+      models: [
+        {
+          provider: 'test',
+          model: 'vision',
+          name: 'Vision',
+          supportsImages: true,
+        },
+        { provider: 'test', model: 'text', supportsImages: false },
+      ],
+      thinkingLevels: ['low', 'high'],
+    });
+    expect(draftModelSelection([])).toEqual({
+      provider: 'test',
+      model: 'vision',
+    });
+
+    storage.set(
+      draftRuntimeOptionsStorageKey,
+      JSON.stringify({
+        models: [
+          { provider: 'test', model: 'kept', supportsImages: false },
+          { provider: '', model: 'discarded' },
+        ],
+        thinkingLevels: ['kept', '', 42],
+      }),
+    );
+    expect(draftRuntimeOptions([])).toEqual({
+      models: [{ provider: 'test', model: 'kept', supportsImages: false }],
+      thinkingLevels: ['kept'],
+    });
+    vi.unstubAllGlobals();
+    storage.clear();
   });
 
   it('unions configured catalogues while excluding capped registries', () => {

@@ -5,6 +5,122 @@ export type RuntimeModelOption = NonNullable<
 >[number];
 
 const FULL_CATALOG_BOUND = 256;
+export const draftRuntimeOptionsStorageKey =
+  'pi-dashboard-draft-runtime-options:v1';
+const THINKING_LEVEL_BOUND = 16;
+
+type DraftRuntimeOptions = {
+  models: readonly RuntimeModelOption[];
+  thinkingLevels: readonly string[];
+};
+
+function validCachedModel(value: unknown): value is RuntimeModelOption {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const model = value as Record<string, unknown>;
+  if (
+    Object.keys(model).some(
+      (key) =>
+        key !== 'provider' &&
+        key !== 'model' &&
+        key !== 'name' &&
+        key !== 'contextWindow' &&
+        key !== 'supportsImages',
+    )
+  )
+    return false;
+  return (
+    typeof model.provider === 'string' &&
+    model.provider.length > 0 &&
+    model.provider.length <= 200 &&
+    typeof model.model === 'string' &&
+    model.model.length > 0 &&
+    model.model.length <= 300 &&
+    (model.name === undefined ||
+      (typeof model.name === 'string' &&
+        model.name.length > 0 &&
+        model.name.length <= 300)) &&
+    (model.contextWindow === undefined ||
+      (typeof model.contextWindow === 'number' &&
+        Number.isFinite(model.contextWindow) &&
+        model.contextWindow >= 1)) &&
+    (model.supportsImages === undefined ||
+      typeof model.supportsImages === 'boolean')
+  );
+}
+
+function readDraftRuntimeOptions(): DraftRuntimeOptions {
+  try {
+    const raw = globalThis.localStorage?.getItem(draftRuntimeOptionsStorageKey);
+    if (!raw) return { models: [], thinkingLevels: [] };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return { models: [], thinkingLevels: [] };
+    const value = parsed as Record<string, unknown>;
+    const models = Array.isArray(value.models)
+      ? value.models.filter(validCachedModel).slice(0, FULL_CATALOG_BOUND)
+      : [];
+    const thinkingLevels = Array.isArray(value.thinkingLevels)
+      ? value.thinkingLevels
+          .filter(
+            (level): level is string =>
+              typeof level === 'string' &&
+              level.length > 0 &&
+              level.length <= 64,
+          )
+          .slice(0, THINKING_LEVEL_BOUND)
+      : [];
+    return { models, thinkingLevels };
+  } catch {
+    return { models: [], thinkingLevels: [] };
+  }
+}
+
+function writeDraftRuntimeOptions(options: DraftRuntimeOptions): void {
+  try {
+    globalThis.localStorage?.setItem(
+      draftRuntimeOptionsStorageKey,
+      JSON.stringify({
+        models: options.models.slice(0, FULL_CATALOG_BOUND),
+        thinkingLevels: options.thinkingLevels.slice(0, THINKING_LEVEL_BOUND),
+      }),
+    );
+  } catch {
+    // Browser storage is best effort.
+  }
+}
+
+export function rememberDraftRuntimeOptions(
+  runtimes: readonly RuntimeSnapshot[],
+): void {
+  const current = readDraftRuntimeOptions();
+  const models = configuredModelOptions(runtimes).filter(validCachedModel);
+  const thinkingLevels = [
+    ...new Set(runtimes.flatMap((runtime) => runtime.thinkingLevels ?? [])),
+  ].filter(
+    (level): level is string =>
+      typeof level === 'string' && level.length > 0 && level.length <= 64,
+  );
+  writeDraftRuntimeOptions({
+    models: models.length > 0 ? models : current.models,
+    thinkingLevels:
+      thinkingLevels.length > 0 ? thinkingLevels : current.thinkingLevels,
+  });
+}
+
+export function draftRuntimeOptions(
+  runtimes: readonly RuntimeSnapshot[],
+): DraftRuntimeOptions {
+  const cached = readDraftRuntimeOptions();
+  const models = configuredModelOptions(runtimes);
+  const thinkingLevels = [
+    ...new Set(runtimes.flatMap((runtime) => runtime.thinkingLevels ?? [])),
+  ];
+  return {
+    models: models.length > 0 ? models : cached.models,
+    thinkingLevels:
+      thinkingLevels.length > 0 ? thinkingLevels : cached.thinkingLevels,
+  };
+}
 
 function withCurrentModel(
   options: readonly RuntimeModelOption[],
@@ -84,7 +200,7 @@ export function draftModelSelection(
   selected?: ModelSelection,
   configuredDefault?: ModelSelection,
 ): ModelSelection | undefined {
-  const models = configuredModelOptions(runtimes);
+  const models = draftRuntimeOptions(runtimes).models;
   const available = new Set(
     models.map((model) => modelOptionValue(model.provider, model.model)),
   );

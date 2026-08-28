@@ -16,7 +16,7 @@ import {
   DraftAgentPicker,
   DraftLocationPicker,
 } from './composer/draft-pickers';
-import { modelSupportsImages } from './composer/runtime';
+import { draftModelSupportsImages } from './composer/runtime';
 import { ComposerShell } from './composer/shell';
 import {
   beginDraftRetry,
@@ -31,6 +31,60 @@ import { latestRunForThread, threadTitle } from './project-new-thread';
 import { useSessionNavigation } from './session-navigation-context';
 
 export { draftModelSelection } from './model-option';
+
+type DraftStartupStatus =
+  | 'queued'
+  | 'preparing'
+  | 'starting'
+  | 'running'
+  | 'waiting';
+
+export function draftStartupState({
+  submitting,
+  promoted,
+  runStatus,
+  runtimeStarted,
+}: {
+  submitting: boolean;
+  promoted: boolean;
+  runStatus: string | undefined;
+  runtimeStarted: boolean;
+}): { heading: string; copy: string } | undefined {
+  if (runtimeStarted || (!submitting && !promoted)) return undefined;
+  const active = new Set<DraftStartupStatus>([
+    'queued',
+    'preparing',
+    'starting',
+    'running',
+    'waiting',
+  ]);
+  if (
+    !submitting &&
+    (!runStatus || !active.has(runStatus as DraftStartupStatus))
+  )
+    return undefined;
+  if (runStatus === 'queued')
+    return {
+      heading: 'Waiting to start',
+      copy: 'Waiting for launch capacity…',
+    };
+  if (runStatus === 'preparing')
+    return {
+      heading: 'Preparing thread',
+      copy: 'Preparing checkout/worktree…',
+    };
+  if (runStatus === 'starting')
+    return {
+      heading: 'Launching Pi',
+      copy: 'Launching Pi runtime and waiting for connection…',
+    };
+  if (runStatus === 'running' || runStatus === 'waiting')
+    return {
+      heading: 'Starting thread',
+      copy: 'Waiting for the runtime to connect…',
+    };
+  return { heading: 'Scheduling thread', copy: 'Scheduling thread…' };
+}
 
 function locationForDraft(draft: {
   isolation: 'worktree' | 'main';
@@ -84,7 +138,7 @@ export function DraftThreadView({
     project?.defaultModel,
   );
   const attachments = useImageAttachments({
-    enabled: modelSupportsImages(selectedModel, snapshot.runtimes),
+    enabled: draftModelSupportsImages(selectedModel, snapshot.runtimes),
     busy: submitting,
     onError: setError,
   });
@@ -100,12 +154,12 @@ export function DraftThreadView({
         (runtime) => runtime.runtimeId === pendingRun.runtimeId,
       )
     : undefined;
-  const starting =
-    submitting ||
-    (Boolean(promotedThreadId) &&
-      pendingRun?.status !== 'failed' &&
-      pendingRun?.status !== 'interrupted' &&
-      !pendingRuntime);
+  const startup = draftStartupState({
+    submitting,
+    promoted: Boolean(promotedThreadId),
+    runStatus: pendingRun?.status,
+    runtimeStarted: Boolean(pendingRuntime),
+  });
 
   useEffect(() => {
     if (text !== initialDraft) updateDraft(draftId, threadTitle(text));
@@ -290,20 +344,33 @@ export function DraftThreadView({
                   <h1>New thread</h1>
                 </div>
                 <span
-                  className={`session-status ${starting ? 'status-waiting' : 'status-draft'}`}
+                  className={`session-status ${startup ? 'status-waiting' : 'status-draft'}`}
                   aria-live="polite"
                 >
-                  <i aria-hidden="true">{starting ? '◐' : '●'}</i>{' '}
-                  {starting ? 'starting' : 'draft'}
+                  <i aria-hidden="true">{startup ? '◐' : '●'}</i>{' '}
+                  {startup ? 'starting' : 'draft'}
                 </span>
               </div>
             </div>
           </header>
         </div>
         <section className="session-transcript-scroll" aria-label="Transcript">
-          <div className="draft-empty-transcript">
-            <p className="eyebrow">New conversation</p>
-            <p>Send a message to start this project thread.</p>
+          <div className="draft-empty-transcript" aria-live="polite">
+            {startup ? (
+              <>
+                <span
+                  className="session-loading-indicator"
+                  aria-hidden="true"
+                />
+                <p className="eyebrow">{startup.heading}</p>
+                <p>{startup.copy}</p>
+              </>
+            ) : (
+              <>
+                <p className="eyebrow">New conversation</p>
+                <p>Send a message to start this project thread.</p>
+              </>
+            )}
           </div>
         </section>
         <div className="session-control-layer">
@@ -315,7 +382,7 @@ export function DraftThreadView({
             onDragOver={attachments.onDragOver}
             onDragLeave={attachments.onDragLeave}
             onDrop={attachments.onDrop}
-            attachmentsEnabled={modelSupportsImages(
+            attachmentsEnabled={draftModelSupportsImages(
               selectedModel,
               snapshot.runtimes,
             )}
