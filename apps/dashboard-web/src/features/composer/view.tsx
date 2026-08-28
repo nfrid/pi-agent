@@ -16,7 +16,7 @@ import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
 import { ProgressBar } from '../../shared/ui/progress-bar';
-import { configuredModelOptions, modelOptionValue } from '../model-option';
+import { draftRuntimeOptions, modelOptionValue } from '../model-option';
 import { hasSettledBackground } from '../presentation-status';
 import { useImageAttachments } from './attachments';
 import { useComposerDraft } from './draft';
@@ -35,7 +35,7 @@ import {
   contextIndicatorData,
   dormantContextUsage,
   dormantResumeMetadata,
-  modelSupportsImages,
+  draftModelSupportsImages,
   resumeRuntimeRequest,
   runtimeSupportsImages,
   waitForStartedRuntime,
@@ -127,7 +127,8 @@ export function Composer({
   const [resumeThinking, setResumeThinking] = useState(
     dormantMetadata.thinking,
   );
-  const configuredModels = configuredModelOptions(runtimes);
+  const runtimeOptions = draftRuntimeOptions(runtimes);
+  const configuredModels = runtimeOptions.models;
   const resumeModels =
     resumeModel &&
     !configuredModels.some(
@@ -139,13 +140,13 @@ export function Composer({
       : configuredModels;
   const thinkingLevels = [
     ...new Set([
-      ...runtimes.flatMap((candidate) => candidate.thinkingLevels ?? []),
+      ...runtimeOptions.thinkingLevels,
       ...(resumeThinking ? [resumeThinking] : []),
     ]),
   ];
   const attachmentsEnabled = runtime
     ? runtime.liveState !== 'compacting' && runtimeSupportsImages(runtime)
-    : modelSupportsImages(resumeModel, runtimes);
+    : draftModelSupportsImages(resumeModel, runtimes);
   const {
     attachments,
     dragging,

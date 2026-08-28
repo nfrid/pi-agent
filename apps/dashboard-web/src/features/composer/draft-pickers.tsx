@@ -20,7 +20,6 @@ import {
   draftRuntimeOptions,
   modelOptionValue,
   type RuntimeModelOption,
-  rememberDraftRuntimeOptions,
 } from '../model-option';
 
 function modelName(
@@ -582,9 +581,6 @@ export function DraftAgentPicker({
       ...(model?.thinking ? [model.thinking] : []),
     ]),
   ];
-  useEffect(() => {
-    rememberDraftRuntimeOptions(runtimes);
-  }, [runtimes]);
   return (
     <AgentPicker
       model={model}
