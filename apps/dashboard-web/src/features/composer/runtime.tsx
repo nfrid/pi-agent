@@ -121,7 +121,10 @@ export function draftModelSupportsImages(
   if (!model) return true;
   const value = modelOptionValue(model.provider, model.model);
   const available = [
-    ...runtimes.flatMap((runtime) => runtime.modelCatalog ?? []),
+    ...runtimes.flatMap((runtime) => [
+      ...(runtime.model ? [runtime.model] : []),
+      ...(runtime.modelCatalog ?? []),
+    ]),
     ...draftRuntimeOptions(runtimes).models,
   ];
   return !available.some(

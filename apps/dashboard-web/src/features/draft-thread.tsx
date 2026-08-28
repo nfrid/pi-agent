@@ -44,11 +44,13 @@ export function draftStartupState({
   promoted,
   runStatus,
   runtimeStarted,
+  preparingWorktree,
 }: {
   submitting: boolean;
   promoted: boolean;
   runStatus: string | undefined;
   runtimeStarted: boolean;
+  preparingWorktree: boolean;
 }): { heading: string; copy: string } | undefined {
   if (runtimeStarted || (!submitting && !promoted)) return undefined;
   const active = new Set<DraftStartupStatus>([
@@ -69,10 +71,15 @@ export function draftStartupState({
       copy: 'Waiting for launch capacity…',
     };
   if (runStatus === 'preparing')
-    return {
-      heading: 'Preparing thread',
-      copy: 'Preparing checkout/worktree…',
-    };
+    return preparingWorktree
+      ? {
+          heading: 'Preparing worktree',
+          copy: 'Creating the isolated checkout for this thread…',
+        }
+      : {
+          heading: 'Preparing checkout',
+          copy: 'Preparing the selected checkout…',
+        };
   if (runStatus === 'starting')
     return {
       heading: 'Launching Pi',
@@ -159,6 +166,7 @@ export function DraftThreadView({
     promoted: Boolean(promotedThreadId),
     runStatus: pendingRun?.status,
     runtimeStarted: Boolean(pendingRuntime),
+    preparingWorktree: selectedLocation.kind === 'worktree',
   });
 
   useEffect(() => {
@@ -355,7 +363,12 @@ export function DraftThreadView({
           </header>
         </div>
         <section className="session-transcript-scroll" aria-label="Transcript">
-          <div className="draft-empty-transcript" aria-live="polite">
+          <div
+            className="draft-empty-transcript"
+            role={startup ? 'status' : undefined}
+            aria-live={startup ? 'polite' : undefined}
+            aria-atomic={startup ? 'true' : undefined}
+          >
             {startup ? (
               <>
                 <span

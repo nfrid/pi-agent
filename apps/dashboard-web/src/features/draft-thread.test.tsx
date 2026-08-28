@@ -158,13 +158,18 @@ describe('draft thread controls', () => {
         />,
       );
     });
-    expect(paragraphText(renderer)).toContain('Preparing thread');
-    expect(paragraphText(renderer)).toContain('Preparing checkout/worktree…');
+    expect(paragraphText(renderer)).toContain('Preparing worktree');
+    expect(paragraphText(renderer)).toContain(
+      'Creating the isolated checkout for this thread…',
+    );
     const spinners = renderer.root.findAll(
       (node) => node.props.className === 'session-loading-indicator',
     );
     expect(spinners).toHaveLength(1);
     expect(['true', true]).toContain(spinners[0]?.props['aria-hidden']);
+    const status = renderer.root.findByProps({ role: 'status' });
+    expect(status.props['aria-live']).toBe('polite');
+    expect(status.props['aria-atomic']).toBe('true');
     renderer.unmount();
   });
 

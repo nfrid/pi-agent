@@ -116,6 +116,17 @@ describe('composer runtime model', () => {
       ]),
     ).toBe(false);
     expect(
+      draftModelSupportsImages({ provider: 'test', model: 'current' }, [
+        {
+          model: {
+            provider: 'test',
+            model: 'current',
+            supportsImages: false,
+          },
+        } as never,
+      ]),
+    ).toBe(false);
+    expect(
       draftModelSupportsImages({ provider: 'test', model: 'unknown' }, [
         {
           modelCatalog: [
