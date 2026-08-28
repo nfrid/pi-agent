@@ -133,9 +133,13 @@
 }
 @media (display-mode: window-controls-overlay) {
   .surface-drawer-layer {
+    --wco-controls-height: calc(
+      env(titlebar-area-y, 0px) +
+      env(titlebar-area-height, 0px)
+    );
     --wco-titlebar-height: max(
       var(--session-header-height),
-      calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 0px))
+      var(--wco-controls-height)
     );
     --wco-controls-right: calc(
       100vw -
@@ -165,7 +169,7 @@
     right: 0;
     z-index: 0;
     width: calc(var(--wco-controls-right) + var(--space-6));
-    height: var(--wco-titlebar-height);
+    height: var(--wco-controls-height);
     border-bottom-left-radius: var(--radius-md);
     background: var(--bg);
     content: "";
