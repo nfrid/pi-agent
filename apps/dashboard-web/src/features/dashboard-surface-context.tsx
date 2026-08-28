@@ -1,6 +1,7 @@
 import {
   createContext,
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -36,13 +37,17 @@ export function DashboardSurfaceProvider({
   children: ReactNode;
 }) {
   const [stack, setStack] = useState<readonly DashboardSurface[]>([]);
+  const clear = useCallback(
+    () => setStack((current) => (current.length === 0 ? current : [])),
+    [],
+  );
   useEffect(() => {
-    if (blocked) setStack([]);
-  }, [blocked]);
+    if (blocked) clear();
+  }, [blocked, clear]);
   useEffect(() => {
     void locationKey;
-    setStack([]);
-  }, [locationKey]);
+    clear();
+  }, [clear, locationKey]);
   const value = useMemo<DashboardSurfaceContextValue>(
     () => ({
       stack,
@@ -56,10 +61,13 @@ export function DashboardSurfaceProvider({
         );
       },
       truncate: (depth) =>
-        setStack((current) => current.slice(0, Math.max(0, depth))),
-      close: () => setStack([]),
+        setStack((current) => {
+          const length = Math.min(current.length, Math.max(0, depth));
+          return length === current.length ? current : current.slice(0, length);
+        }),
+      close: clear,
     }),
-    [blocked, stack],
+    [blocked, clear, stack],
   );
   return (
     <DashboardSurfaceContext.Provider value={value}>
