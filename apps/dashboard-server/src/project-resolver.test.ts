@@ -2,19 +2,22 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import type { Checkout, Project } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import { ProjectResolver } from './project-resolver.js';
+import type { ProjectAssociationRepository } from './repositories/types.js';
 
 function repository(value: {
-  projects: Array<Record<string, unknown>>;
-  checkouts: Array<Record<string, unknown>>;
-}) {
+  projects: Project[];
+  checkouts: Checkout[];
+}): ProjectAssociationRepository {
   return {
+    getProject: (id) => value.projects.find((project) => project.id === id),
+    getProjectByRepositoryIdentity: (identity) =>
+      value.projects.find((project) => project.repositoryIdentity === identity),
     listProjects: () => value.projects,
     listCheckouts: () => value.checkouts,
-    getProjectByRepositoryIdentity: (identity: string) =>
-      value.projects.find((project) => project.repositoryIdentity === identity),
-  } as never;
+  };
 }
 
 function gitIdentity(root: string): string {
@@ -48,26 +51,38 @@ describe('ProjectResolver', () => {
     execFileSync('git', ['-C', root, 'commit', '-m', 'base']);
     execFileSync('git', ['-C', root, 'worktree', 'add', independent, 'HEAD']);
     const identity = await realpath(path.resolve(root, gitIdentity(root)));
-    const project = {
+    const now = Date.now();
+    const project: Project = {
       id: 'project-git',
+      title: 'Git project',
       rootPath: root,
       repositoryIdentity: identity,
+      defaultIsolation: 'main',
+      maxParallelRuns: 1,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
     };
-    const main = {
+    const main: Checkout = {
       id: 'checkout-main',
       projectId: project.id,
+      kind: 'main',
       path: root,
       status: 'ready',
+      createdAt: now,
+      updatedAt: now,
     };
-    const nestedCheckout = {
+    const nestedCheckout: Checkout = {
       id: 'checkout-nested',
       projectId: project.id,
+      kind: 'worktree',
       path: nested,
       status: 'ready',
+      createdAt: now,
+      updatedAt: now,
     };
     const resolver = new ProjectResolver(
       repository({ projects: [project], checkouts: [main, nestedCheckout] }),
-      () => [main, nestedCheckout] as never,
     );
     try {
       expect(resolver.resolve(nested)).toEqual({
@@ -91,10 +106,19 @@ describe('ProjectResolver', () => {
     const outside = await mkdtemp(
       path.join(os.tmpdir(), 'dashboard-resolver-outside-'),
     );
-    const project = { id: 'project-dir', rootPath: root };
+    const now = Date.now();
+    const project: Project = {
+      id: 'project-dir',
+      title: 'Directory project',
+      rootPath: root,
+      defaultIsolation: 'main',
+      maxParallelRuns: 1,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    };
     const resolver = new ProjectResolver(
       repository({ projects: [project], checkouts: [] }),
-      () => [],
     );
     try {
       expect(resolver.resolve(root)).toEqual({

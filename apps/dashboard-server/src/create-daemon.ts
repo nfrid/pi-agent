@@ -140,9 +140,7 @@ function dependencies(
         }),
       delegateSessionDirectory(options),
     );
-  const projectResolver = new ProjectResolver(metadata.orchestration, () =>
-    metadata.orchestration.listCheckouts(),
-  );
+  const projectResolver = new ProjectResolver(metadata.orchestration);
   let manager!: RuntimeManager;
   let application!: DashboardApplication;
   const registry =

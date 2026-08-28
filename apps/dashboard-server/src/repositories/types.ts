@@ -210,7 +210,11 @@ export interface ProjectLookupRepository {
   listProjects(): Project[];
 }
 
-export interface OrchestrationRepository extends ProjectLookupRepository {
+export interface ProjectAssociationRepository extends ProjectLookupRepository {
+  listCheckouts(): Checkout[];
+}
+
+export interface OrchestrationRepository extends ProjectAssociationRepository {
   createProject(input: CreateProjectInput): Project;
   createProjectWithCheckout(
     input: CreateProjectInput,
