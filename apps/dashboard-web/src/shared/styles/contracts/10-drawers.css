@@ -7,6 +7,11 @@
   pointer-events: auto;
   background: var(--scrim-dark);
 }
+@media (display-mode: window-controls-overlay) {
+  .surface-drawer-layer {
+    top: calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 0px));
+  }
+}
 [data-swipe-dismiss="right"] {
   touch-action: pan-y;
 }
