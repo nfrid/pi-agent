@@ -81,6 +81,10 @@
   border-color: var(--purple);
   color: var(--fg);
 }
+.search:focus-within {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--purple) 18%, transparent);
+}
 .search {
   display: flex;
   align-items: center;
