@@ -690,6 +690,21 @@ describe('workspace-first agent navigation', () => {
       effort: { full: 'low', compact: 'l', color: 'green' },
       checkoutPath: '',
     });
+    expect(
+      activeThreadDetails(
+        {
+          status: 'draft',
+          draft: {
+            model: { provider: 'configured', model: 'spark' },
+            location: { kind: 'current' },
+          },
+        } as never,
+        runtimes,
+      ),
+    ).toMatchObject({
+      model: { id: 'configured/default', alias: 'default' },
+      effort: { full: 'low', compact: 'l', color: 'green' },
+    });
   });
 
   it('keeps unindexed live rows stable until session metadata arrives', () => {

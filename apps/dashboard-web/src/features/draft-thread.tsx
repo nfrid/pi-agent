@@ -4,11 +4,7 @@ import {
   dashboardHttpClient,
   retryThreadMutationOptions,
 } from '@pi-dashboard/client';
-import type {
-  BrowserSnapshot,
-  ModelSelection,
-  RuntimeSnapshot,
-} from '@pi-dashboard/protocol';
+import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
@@ -30,9 +26,11 @@ import {
   updateDraft,
   useDrafts,
 } from './drafts';
-import { configuredModelOptions, modelOptionValue } from './model-option';
+import { draftModelSelection } from './model-option';
 import { latestRunForThread, threadTitle } from './project-new-thread';
 import { useSessionNavigation } from './session-navigation-context';
+
+export { draftModelSelection } from './model-option';
 
 function locationForDraft(draft: {
   isolation: 'worktree' | 'main';
@@ -48,36 +46,6 @@ function locationForDraft(draft: {
       ? { kind: 'current' as const }
       : { kind: 'worktree' as const, base: 'work' as const })
   );
-}
-
-export function draftModelSelection(
-  runtimes: readonly RuntimeSnapshot[],
-  selected?: ModelSelection,
-  configuredDefault?: ModelSelection,
-): ModelSelection | undefined {
-  const models = configuredModelOptions(runtimes);
-  const available = new Set(
-    models.map((model) => modelOptionValue(model.provider, model.model)),
-  );
-  if (selected?.thinking) return selected;
-  if (configuredDefault?.thinking) return configuredDefault;
-  const current = runtimes.find(
-    (runtime) =>
-      runtime.model &&
-      available.has(
-        modelOptionValue(runtime.model.provider, runtime.model.model),
-      ),
-  )?.model;
-  if (current)
-    return {
-      provider: current.provider,
-      model: current.model,
-      ...(current.thinking ? { thinking: current.thinking } : {}),
-    };
-  if (selected) return selected;
-  if (configuredDefault) return configuredDefault;
-  const first = models[0];
-  return first ? { provider: first.provider, model: first.model } : undefined;
 }
 
 export function DraftThreadView({

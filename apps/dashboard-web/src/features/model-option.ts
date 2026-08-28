@@ -1,4 +1,4 @@
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type { ModelSelection, RuntimeSnapshot } from '@pi-dashboard/protocol';
 
 export type RuntimeModelOption = NonNullable<
   RuntimeSnapshot['modelCatalog']
@@ -77,6 +77,36 @@ export function configuredModelOptions(
   // Connected runtimes share Pi's configured registry. Anything else
   // fails closed to the current model rather than exposing foreign choices.
   return withCurrentModel(compatible ?? [], preferred);
+}
+
+export function draftModelSelection(
+  runtimes: readonly RuntimeSnapshot[],
+  selected?: ModelSelection,
+  configuredDefault?: ModelSelection,
+): ModelSelection | undefined {
+  const models = configuredModelOptions(runtimes);
+  const available = new Set(
+    models.map((model) => modelOptionValue(model.provider, model.model)),
+  );
+  if (selected?.thinking) return selected;
+  if (configuredDefault?.thinking) return configuredDefault;
+  const current = runtimes.find(
+    (runtime) =>
+      runtime.model &&
+      available.has(
+        modelOptionValue(runtime.model.provider, runtime.model.model),
+      ),
+  )?.model;
+  if (current)
+    return {
+      provider: current.provider,
+      model: current.model,
+      ...(current.thinking ? { thinking: current.thinking } : {}),
+    };
+  if (selected) return selected;
+  if (configuredDefault) return configuredDefault;
+  const first = models[0];
+  return first ? { provider: first.provider, model: first.model } : undefined;
 }
 
 export function modelOptionValue(provider: string, model: string): string {

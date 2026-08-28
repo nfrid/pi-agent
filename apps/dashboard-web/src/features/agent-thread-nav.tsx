@@ -61,6 +61,7 @@ import {
   modelDisplayPreference,
   useModelDisplayPreferences,
 } from './model-display-preferences';
+import { draftModelSelection } from './model-option';
 import {
   AgentThreadActionMenu,
   DurableThreadActions,
@@ -331,7 +332,12 @@ export function activeThreadDetails(
   time = row.updatedAt,
 ): ThreadMetadataPresentation {
   const indexed = dormantResumeMetadata(row.session, runtimes);
-  const selectedModel = row.draft?.model ?? row.runtime?.model ?? indexed.model;
+  const draftSelection = row.draft
+    ? draftModelSelection(runtimes, row.draft.model)
+    : undefined;
+  const selectedModel = row.draft
+    ? draftSelection
+    : (row.runtime?.model ?? indexed.model);
   const catalogModel = selectedModel
     ? runtimes
         .flatMap((runtime) => runtime.modelCatalog ?? [])
@@ -356,10 +362,9 @@ export function activeThreadDetails(
         color: preference.color ?? DEFAULT_MODEL_COLOR,
       }
     : undefined;
-  const fullEffort =
-    row.draft?.model?.thinking ??
-    row.runtime?.model?.thinking ??
-    indexed.thinking;
+  const fullEffort = row.draft
+    ? draftSelection?.thinking
+    : (row.runtime?.model?.thinking ?? indexed.thinking);
   const effortKey = fullEffort ?? '';
   const effort = {
     full: fullEffort ?? '? effort',
