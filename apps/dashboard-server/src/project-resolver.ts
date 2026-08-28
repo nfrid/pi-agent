@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import type { OrchestrationRepository } from './repositories/types.js';
+import type { ProjectAssociationRepository } from './repositories/types.js';
 
 export interface RuntimeAssociation {
   projectId: string | null;
@@ -34,7 +34,7 @@ function contains(root: string, target: string): boolean {
 export class ProjectResolver {
   private readonly gitIdentityByCwd = new Map<string, string | null>();
 
-  constructor(private readonly repository: OrchestrationRepository) {}
+  constructor(private readonly repository: ProjectAssociationRepository) {}
 
   resolve(cwd: string): RuntimeAssociation {
     const target = canonical(cwd);

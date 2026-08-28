@@ -204,15 +204,22 @@ export interface BindRuntimeInput {
   updatedAt?: number;
 }
 
-export interface OrchestrationRepository {
+export interface ProjectLookupRepository {
+  getProject(id: string): Project | undefined;
+  getProjectByRepositoryIdentity(identity: string): Project | undefined;
+  listProjects(): Project[];
+}
+
+export interface ProjectAssociationRepository extends ProjectLookupRepository {
+  listCheckouts(): Checkout[];
+}
+
+export interface OrchestrationRepository extends ProjectAssociationRepository {
   createProject(input: CreateProjectInput): Project;
   createProjectWithCheckout(
     input: CreateProjectInput,
     checkout: Omit<CreateCheckoutInput, 'projectId'>,
   ): { project: Project; checkout: Checkout };
-  getProject(id: string): Project | undefined;
-  getProjectByRepositoryIdentity(identity: string): Project | undefined;
-  listProjects(): Project[];
   updateProject(id: string, patch: ProjectPatch, now?: number): Project;
   deleteProject(id: string): void;
   projectSummaries(): ProjectSummary[];
