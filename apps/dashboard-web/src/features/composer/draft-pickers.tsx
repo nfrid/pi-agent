@@ -17,9 +17,10 @@ import {
   useModelDisplayPreferences,
 } from '../model-display-preferences';
 import {
-  configuredModelOptions,
+  draftRuntimeOptions,
   modelOptionValue,
   type RuntimeModelOption,
+  rememberDraftRuntimeOptions,
 } from '../model-option';
 
 function modelName(
@@ -564,7 +565,8 @@ export function DraftAgentPicker({
   runtimes: readonly RuntimeSnapshot[];
   disabled: boolean;
 }) {
-  const configuredModels = configuredModelOptions(runtimes);
+  const runtimeOptions = draftRuntimeOptions(runtimes);
+  const configuredModels = runtimeOptions.models;
   const models =
     model &&
     !configuredModels.some(
@@ -576,10 +578,13 @@ export function DraftAgentPicker({
       : configuredModels;
   const levels = [
     ...new Set([
-      ...runtimes.flatMap((runtime) => runtime.thinkingLevels ?? []),
+      ...runtimeOptions.thinkingLevels,
       ...(model?.thinking ? [model.thinking] : []),
     ]),
   ];
+  useEffect(() => {
+    rememberDraftRuntimeOptions(runtimes);
+  }, [runtimes]);
   return (
     <AgentPicker
       model={model}

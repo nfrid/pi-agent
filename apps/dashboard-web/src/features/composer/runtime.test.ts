@@ -7,6 +7,7 @@ import {
   contextIndicatorData,
   dormantContextUsage,
   dormantResumeMetadata,
+  draftModelSupportsImages,
   formatContextTokens,
   modelSupportsImages,
   resumeRuntimeRequest,
@@ -98,6 +99,30 @@ describe('composer runtime model', () => {
     ).toBe(false);
     expect(
       modelSupportsImages({ provider: 'test', model: 'vision' }, [runtime]),
+    ).toBe(true);
+  });
+
+  it('enables draft images for unknown capability but not explicit false', () => {
+    expect(
+      draftModelSupportsImages({ provider: 'test', model: 'unknown' }, []),
+    ).toBe(true);
+    expect(
+      draftModelSupportsImages({ provider: 'test', model: 'text' }, [
+        {
+          modelCatalog: [
+            { provider: 'test', model: 'text', supportsImages: false },
+          ],
+        } as never,
+      ]),
+    ).toBe(false);
+    expect(
+      draftModelSupportsImages({ provider: 'test', model: 'unknown' }, [
+        {
+          modelCatalog: [
+            { provider: 'test', model: 'other', supportsImages: false },
+          ],
+        } as never,
+      ]),
     ).toBe(true);
   });
 

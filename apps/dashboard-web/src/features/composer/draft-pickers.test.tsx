@@ -53,6 +53,7 @@ vi.mock('react-aria-components', () => ({
 }));
 vi.mock('../drafts', () => ({ setDraftLocation, setDraftModel }));
 
+import { draftRuntimeOptionsStorageKey } from '../model-option';
 import { DraftAgentPicker, DraftLocationPicker } from './draft-pickers';
 
 const checkouts = [
@@ -263,6 +264,40 @@ describe('draft agent picker', () => {
     renderer.unmount();
     delete modelPreferences['test/fast'];
     delete modelPreferences['test/careful'];
+  });
+
+  it('uses a remembered model and thinking levels without a runtime catalogue', () => {
+    installKeyboard();
+    const values = new Map([
+      [
+        draftRuntimeOptionsStorageKey,
+        JSON.stringify({
+          models: [
+            { provider: 'cached', model: 'vision', supportsImages: true },
+          ],
+          thinkingLevels: ['cached-level'],
+        }),
+      ],
+    ]);
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(
+        <DraftAgentPicker
+          draftId="draft-1"
+          model={{ provider: 'cached', model: 'vision' }}
+          runtimes={[]}
+          disabled={false}
+        />,
+      );
+    });
+    act(() => buttonWithLabel(renderer, 'vision')?.props.onPress());
+    expect(buttonWithLabel(renderer, 'cached/vision')).toBeDefined();
+    expect(buttonWithLabel(renderer, 'cached-level')).toBeDefined();
+    renderer.unmount();
   });
 
   it('keeps the selected model available without a runtime catalogue', () => {

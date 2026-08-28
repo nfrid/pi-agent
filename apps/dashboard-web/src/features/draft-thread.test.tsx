@@ -119,7 +119,107 @@ afterEach(() => {
   draft.model = undefined;
 });
 
+function paragraphText(renderer: ReturnType<typeof create>): string[] {
+  return renderer.root
+    .findAllByType('p')
+    .map((paragraph) =>
+      paragraph.children.filter((child) => typeof child === 'string').join(''),
+    );
+}
+
 describe('draft thread controls', () => {
+  it('shows stage-specific preparing startup feedback and an accessible spinner', async () => {
+    draft.promotedThreadId = 'thread-1';
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView
+          draftId="draft-1"
+          snapshot={
+            {
+              projects: [
+                {
+                  id: 'project-1',
+                  title: 'Project One',
+                  rootPath: '/work/one',
+                },
+              ],
+              runtimes: [],
+              runs: [
+                {
+                  threadId: 'thread-1',
+                  attempt: 1,
+                  createdAt: 10,
+                  status: 'preparing',
+                },
+              ],
+            } as never
+          }
+        />,
+      );
+    });
+    expect(paragraphText(renderer)).toContain('Preparing thread');
+    expect(paragraphText(renderer)).toContain('Preparing checkout/worktree…');
+    const spinners = renderer.root.findAll(
+      (node) => node.props.className === 'session-loading-indicator',
+    );
+    expect(spinners).toHaveLength(1);
+    expect(['true', true]).toContain(spinners[0]?.props['aria-hidden']);
+    renderer.unmount();
+  });
+
+  it('shows launching copy for starting and scheduling copy before a run snapshot', async () => {
+    draft.promotedThreadId = 'thread-1';
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView
+          draftId="draft-1"
+          snapshot={
+            {
+              projects: [
+                {
+                  id: 'project-1',
+                  title: 'Project One',
+                  rootPath: '/work/one',
+                },
+              ],
+              runtimes: [],
+              runs: [
+                {
+                  threadId: 'thread-1',
+                  attempt: 1,
+                  createdAt: 10,
+                  status: 'starting',
+                },
+              ],
+            } as never
+          }
+        />,
+      );
+    });
+    expect(paragraphText(renderer)).toContain('Launching Pi');
+    expect(paragraphText(renderer)).toContain(
+      'Launching Pi runtime and waiting for connection…',
+    );
+    renderer.unmount();
+
+    mutateAsync.mockReturnValue(new Promise(() => {}));
+    draft.promotedThreadId = undefined;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={snapshot} />,
+      );
+    });
+    await act(async () => {
+      void renderer.root.findByType('form').props.onSubmit({
+        preventDefault: vi.fn(),
+      });
+    });
+    expect(paragraphText(renderer)).toContain('Scheduling thread');
+    expect(paragraphText(renderer)).toContain('Scheduling thread…');
+    renderer.unmount();
+  });
   it('prefers the configured project default and preserves its effort', () => {
     expect(
       draftModelSelection(
