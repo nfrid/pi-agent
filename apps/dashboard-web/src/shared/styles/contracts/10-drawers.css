@@ -7,11 +7,6 @@
   pointer-events: auto;
   background: var(--scrim-dark);
 }
-@media (display-mode: window-controls-overlay) {
-  .surface-drawer-layer {
-    top: calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 0px));
-  }
-}
 [data-swipe-dismiss="right"] {
   touch-action: pan-y;
 }
@@ -135,6 +130,46 @@
 }
 .surface-drawer-header > .session-icon-button {
   flex: none;
+}
+@media (display-mode: window-controls-overlay) {
+  .surface-drawer-layer {
+    --wco-titlebar-height: calc(
+      env(titlebar-area-y, 0px) +
+      env(titlebar-area-height, 0px)
+    );
+    --wco-controls-right: calc(
+      100vw -
+      env(titlebar-area-x, 0px) -
+      env(titlebar-area-width, 100vw)
+    );
+
+    background: linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent var(--wco-titlebar-height),
+      var(--scrim-dark) var(--wco-titlebar-height),
+      var(--scrim-dark) 100%
+    );
+  }
+  .surface-drawer:not([data-surface-kind="utility"]) .surface-drawer-header {
+    min-height: var(--wco-titlebar-height);
+    background:
+      linear-gradient(
+        to right,
+        transparent 0,
+        transparent calc(100% - var(--wco-controls-right) - var(--space-6)),
+        var(--bg) calc(100% - var(--wco-controls-right)),
+        var(--bg) 100%
+      )
+      top / 100% var(--wco-titlebar-height) no-repeat;
+    padding-right: max(18px, calc(var(--wco-controls-right) + 18px));
+    -webkit-app-region: drag;
+  }
+  .surface-drawer-header button,
+  .surface-drawer-header input,
+  .surface-drawer-header a {
+    -webkit-app-region: no-drag;
+  }
 }
 .surface-drawer-body {
   min-height: 0;
