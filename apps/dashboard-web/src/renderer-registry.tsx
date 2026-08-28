@@ -8,7 +8,10 @@ import {
   pauseStatusRenderer,
 } from '../../../extensions/pause/contribution';
 import { tasksRenderer } from '../../../extensions/tasks/contribution';
-import { renderDelegateSurface, renderTasksSurface } from './features/surfaces';
+import {
+  renderDelegateSurface,
+  renderTasksSurface,
+} from './features/surfaces/adapters';
 import type {
   DashboardRenderer,
   DashboardRendererContext,

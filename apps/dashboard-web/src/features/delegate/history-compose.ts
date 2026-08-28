@@ -15,7 +15,7 @@ import type {
   DelegatedActivity,
   DelegateLifecycleReason,
 } from '../../../../../extensions/delegate/types';
-import { delegateSettlementKey } from './runtime-surfaces';
+import { delegateSettlementKey } from './settlement-key';
 
 /** Extra inspection facts which are only present on the persisted adapter. */
 export type DelegateInspectionStatus = DelegateStatus & {
