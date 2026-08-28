@@ -422,15 +422,14 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
   await expect(page.getByRole('option', { name: /Dashboard/ })).toBeVisible();
   await expect(page.getByRole('option', { name: /New thread/ })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Actions' })).toBeVisible();
+  await page
+    .getByRole('combobox', {
+      name: 'Search commands, threads, and projects',
+    })
+    .fill('does-not-exist');
   await expect(
-    page.getByRole('option', { name: /Project: Demo project/ }),
-  ).toBeVisible();
-  await expect(
-    page.getByText('No actions available from connected runtimes.'),
-  ).toBeVisible();
-  await page.getByLabel('Filter actions and navigation').fill('does-not-exist');
-  await expect(
-    page.getByText('No results for “does-not-exist”.'),
+    page.getByText('No results for "does-not-exist".'),
   ).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(
@@ -454,6 +453,13 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toHaveCount(0);
   await paletteTrigger.click();
   await page.getByRole('option', { name: /New thread/ }).click();
+  const paletteProjectChooser = page.getByRole('dialog', {
+    name: 'Choose a project',
+  });
+  await expect(paletteProjectChooser).toBeVisible();
+  await paletteProjectChooser
+    .getByRole('option', { name: /Demo project/ })
+    .click();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await expect(page.getByRole('heading', { name: 'New thread' })).toBeVisible();
   await expect(page.locator('.session-status.status-draft')).toContainText(
@@ -651,6 +657,17 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   await newThread.click();
   const chooser = page.getByRole('dialog', { name: 'Choose a project' });
   await expect(chooser).toBeVisible();
+  const chooserSearch = chooser.getByRole('combobox', {
+    name: 'Search projects',
+  });
+  await chooserSearch.press('Control+j');
+  await expect(chooser.getByRole('option', { selected: true })).toContainText(
+    'Two',
+  );
+  await chooserSearch.press('Control+k');
+  await expect(chooser.getByRole('option', { selected: true })).toContainText(
+    'One',
+  );
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
   await expect(newThread).toBeFocused();
@@ -659,18 +676,18 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   ).toBeVisible();
 
   await newThread.click();
-  await chooser.getByRole('button', { name: 'Cancel' }).click();
+  await chooser.getByRole('button', { name: 'Close Choose a project' }).click();
   await expect(chooser).toHaveCount(0);
   await expect(newThread).toBeFocused();
   await newThread.click();
   await page
-    .locator('[data-project-chooser-backdrop]')
+    .locator('.surface-drawer-layer')
     .click({ position: { x: 2, y: 2 } });
   await expect(chooser).toHaveCount(0);
   await expect(newThread).toBeFocused();
 
   await newThread.click();
-  await chooser.getByRole('button', { name: 'Two' }).click();
+  await chooser.getByRole('option', { name: /Two/ }).click();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
 });
@@ -884,10 +901,10 @@ test('desktop project scope filters threads and starts project threads @desktop'
   });
   await expect(projectChooser).toBeVisible();
   await expect(
-    projectChooser.getByRole('button', { name: 'One' }),
+    projectChooser.getByRole('option', { name: /One/ }),
   ).toBeVisible();
   await expect(
-    projectChooser.getByRole('button', { name: 'Two' }),
+    projectChooser.getByRole('option', { name: /Two/ }),
   ).toBeVisible();
   expect(
     await projectChooser.evaluate(
@@ -895,7 +912,7 @@ test('desktop project scope filters threads and starts project threads @desktop'
     ),
   ).toBe(true);
   const chooserGeometry = await projectChooser.evaluate((element) => {
-    const options = element.querySelector('[data-project-options-scroll]');
+    const options = element.querySelector('.surface-scroll-region');
     return {
       dialogHeight: element.getBoundingClientRect().height,
       viewportHeight: window.innerHeight,
@@ -909,24 +926,32 @@ test('desktop project scope filters threads and starts project threads @desktop'
   expect(chooserGeometry.optionsScrollHeight).toBeGreaterThan(
     chooserGeometry.optionsClientHeight,
   );
-  const chooserSearch = projectChooser.getByRole('textbox', {
+  const chooserSearch = projectChooser.getByRole('combobox', {
     name: 'Search projects',
   });
   await chooserSearch.fill('Two');
-  await expect(projectChooser.getByRole('button', { name: 'One' })).toHaveCount(
+  await expect(projectChooser.getByRole('option', { name: /One/ })).toHaveCount(
     0,
   );
   await chooserSearch.fill('');
+  await chooserSearch.press('Control+j');
+  await expect(
+    projectChooser.getByRole('option', { selected: true }),
+  ).toContainText('Two');
+  await chooserSearch.press('Control+k');
+  await expect(
+    projectChooser.getByRole('option', { selected: true }),
+  ).toContainText('One');
   await chooserSearch.press('Control+j');
   await chooserSearch.press('Enter');
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await page.goto('/');
   await nav.getByRole('button', { name: /New thread/ }).click();
-  const chooserCancel = projectChooser.getByRole('button', {
-    name: 'Cancel',
+  const chooserClose = projectChooser.getByRole('button', {
+    name: 'Close Choose a project',
   });
-  await chooserCancel.focus();
-  await chooserCancel.press('Enter');
+  await chooserClose.focus();
+  await chooserClose.press('Enter');
   await expect(projectChooser).toHaveCount(0);
   await expect(nav.getByRole('button', { name: /New thread/ })).toBeFocused();
   await page.goto('/');
@@ -941,17 +966,22 @@ test('desktop project scope filters threads and starts project threads @desktop'
   ).toBeVisible();
   await nav.getByRole('button', { name: /New thread/ }).click();
   await expect(projectChooser).toBeVisible();
-  await projectChooser.getByRole('button', { name: 'Two' }).click();
+  await projectChooser.getByRole('option', { name: /Two/ }).click();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await page.goto('/projects');
   const projectCards = page.locator('.workspace-card');
   await expect(projectCards.first()).toContainText('One');
   await page.getByRole('button', { name: 'Open command palette' }).click();
+  await page
+    .getByRole('combobox', {
+      name: 'Search commands, threads, and projects',
+    })
+    .fill('project');
   const paletteProjectItems = page
-    .locator('.command-palette .palette-list button')
-    .filter({ hasText: 'Project:' });
-  await expect(paletteProjectItems.first()).toContainText('Project: One');
-  await expect(paletteProjectItems.nth(1)).toContainText('Project: Two');
+    .getByRole('group', { name: 'Projects' })
+    .getByRole('option');
+  await expect(paletteProjectItems.first()).toContainText('One');
+  await expect(paletteProjectItems.nth(1)).toContainText('Two');
 });
 
 test('desktop project thread form stays readable @desktop', async ({
@@ -1814,6 +1844,95 @@ test('session title supports reliable inline renaming', async ({ page }) => {
   ]);
 });
 
+test('command palette supports fuzzy keyboard search and surface handoff @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-palette-desktop',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    projects: [
+      {
+        id: 'project-1',
+        title: 'Dashboard project',
+        rootPath: '/workspace/dashboard',
+        status: 'active',
+      },
+    ],
+    sessions: [
+      {
+        id: 'session-1',
+        cwd: '/workspace/dashboard',
+        title: 'Reconnect diagnostics',
+        updatedAt: 1,
+      },
+    ],
+    unread: [],
+  } as never);
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open command palette' }).click();
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  const search = palette.getByRole('combobox', {
+    name: 'Search commands, threads, and projects',
+  });
+  await expect(search).toBeFocused();
+  await search.press('End');
+  await expect(palette.getByRole('option', { selected: true })).toContainText(
+    'Reconnect diagnostics',
+  );
+  await search.press('ArrowDown');
+  await expect(palette.getByRole('option', { selected: true })).toContainText(
+    'Reconnect diagnostics',
+  );
+  await search.press('Home');
+  await expect(palette.getByRole('option', { selected: true })).toContainText(
+    'New thread',
+  );
+  await search.press('PageDown');
+  await expect(palette.getByRole('option', { selected: true })).toContainText(
+    'Reconnect diagnostics',
+  );
+  await search.press('PageUp');
+  await expect(palette.getByRole('option', { selected: true })).toContainText(
+    'New thread',
+  );
+  const paletteBox = await palette.boundingBox();
+  expect(paletteBox).not.toBeNull();
+  expect(
+    Math.abs((paletteBox?.x ?? 0) + (paletteBox?.width ?? 0) / 2 - 720),
+  ).toBeLessThan(2);
+
+  await search.fill('reconect');
+  const fuzzyResult = palette.getByRole('option', {
+    name: /Reconnect diagnostics/,
+  });
+  await expect(fuzzyResult).toBeVisible();
+  await expect(fuzzyResult.locator('mark')).not.toHaveCount(0);
+  const activeDescendant = await search.getAttribute('aria-activedescendant');
+  expect(activeDescendant).toBeTruthy();
+  await expect(page.locator(`[id="${activeDescendant}"]`)).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+
+  await search.fill('> new');
+  await expect(palette.getByRole('option')).toHaveCount(1);
+  await search.press('Enter');
+  await expect(palette).toHaveCount(0);
+  const chooser = page.getByRole('dialog', { name: 'Choose a project' });
+  await expect(chooser).toBeVisible();
+  await expect(
+    chooser.getByRole('combobox', { name: 'Search projects' }),
+  ).toBeFocused();
+  await chooser.getByRole('button', { name: 'Close Choose a project' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Open command palette' }),
+  ).toBeFocused();
+});
+
 test('command palette identifies the runtime before invoking repeated actions', async ({
   page,
 }) => {
@@ -1874,12 +1993,14 @@ test('command palette identifies the runtime before invoking repeated actions', 
     page.getByRole('button', { name: 'Open command palette' }),
   ).toBeVisible();
   await page.keyboard.press('Control+k');
-  await page.getByLabel('Filter actions and navigation').fill('runtime-beta');
+  await page
+    .getByRole('combobox', {
+      name: 'Search commands, threads, and projects',
+    })
+    .fill('runtime-beta');
   const option = page.getByRole('option', { name: /Abort run/ });
   await expect(option).toHaveCount(1);
-  await expect(option).toContainText(
-    'Target: runtime-beta · Beta agent · /workspace/beta',
-  );
+  await expect(option).toContainText('Beta agent · /workspace/beta');
   await option.click();
   await expect.poll(() => invokedRuntime).toBe('runtime-beta');
 });
@@ -6104,9 +6225,12 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     .poll(() => mocks.commands.some((command) => command.type === 'multipart'))
     .toBe(true);
   await page.keyboard.press('Control+K');
-  await page.getByLabel('Filter actions').fill('Unsafe');
-  await expect(page.getByText('No results for “Unsafe”.')).toBeVisible();
-  await page.getByLabel('Filter actions').fill('Compact');
+  const paletteSearch = page.getByRole('combobox', {
+    name: 'Search commands, threads, and projects',
+  });
+  await paletteSearch.fill('Unsafe');
+  await expect(page.getByText('No results for "Unsafe".')).toBeVisible();
+  await paletteSearch.fill('Compact');
   await page.keyboard.press('Enter');
   await expect
     .poll(() =>

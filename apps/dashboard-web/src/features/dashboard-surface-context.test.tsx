@@ -31,6 +31,15 @@ describe('dashboard surface context', () => {
 
     act(() => surfaces?.open({ type: 'settings' }));
     expect(surfaces?.stack).toEqual([{ type: 'settings' }]);
+    act(() => surfaces?.open({ type: 'usage-analytics' }));
+    expect(surfaces?.stack).toEqual([
+      { type: 'settings' },
+      { type: 'usage-analytics' },
+    ]);
+    act(() => surfaces?.replace({ type: 'command-palette' }));
+    expect(surfaces?.stack).toEqual([{ type: 'command-palette' }]);
+    act(() => surfaces?.replace({ type: 'new-thread-project' }));
+    expect(surfaces?.stack).toEqual([{ type: 'new-thread-project' }]);
     act(() => surfaces?.close());
     expect(surfaces?.stack).toEqual([]);
     const clearedRenders = renders;

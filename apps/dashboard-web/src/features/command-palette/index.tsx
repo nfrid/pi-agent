@@ -1,2 +1,10 @@
-export { actionNeedsInput, paletteItems } from './items';
-export { CommandPalette } from './palette';
+export {
+  actionNeedsInput,
+  paletteItems,
+  searchPaletteItems,
+} from './items';
+export {
+  CommandPalette,
+  CommandPaletteTrigger,
+  HighlightedPaletteText,
+} from './palette';

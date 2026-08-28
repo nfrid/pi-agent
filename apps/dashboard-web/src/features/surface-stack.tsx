@@ -28,6 +28,7 @@ export type SurfacePage = {
   hideHeader?: boolean;
   backLabel?: string;
   closeLabel?: string;
+  initialFocus?: string;
 };
 
 /** Shared status summary used by work surfaces and future utility panels. */
@@ -100,6 +101,7 @@ export function SurfaceStack({
   const depth = pages.length;
   const topPage = pages.at(-1);
   const topPageId = topPage?.id;
+  const topPageInitialFocus = topPage?.initialFocus;
   const { present, exiting } = useOverlayPresence(isOpen);
   const dismissTop = () => {
     if (depth > 1) onDepthChange(depth - 1);
@@ -129,12 +131,15 @@ export function SurfaceStack({
         return;
       }
     }
+    const pageSelector = `[data-surface-page="${CSS.escape(topPageId)}"]`;
     document
       .querySelector<HTMLElement>(
-        `[data-surface-page="${CSS.escape(topPageId)}"] button:not(:disabled), [data-surface-page="${CSS.escape(topPageId)}"] [href], [data-surface-page="${CSS.escape(topPageId)}"] input`,
+        topPageInitialFocus
+          ? `${pageSelector} ${topPageInitialFocus}`
+          : `${pageSelector} button:not(:disabled), ${pageSelector} [href], ${pageSelector} input`,
       )
       ?.focus({ preventScroll: true });
-  }, [depth, isOpen, topPageId]);
+  }, [depth, isOpen, topPageId, topPageInitialFocus]);
 
   if (!present || !topPage || depth < 1) return null;
   return (

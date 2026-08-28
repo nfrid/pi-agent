@@ -8,6 +8,7 @@ export {
   actionNeedsInput,
   CommandPalette,
   paletteItems,
+  searchPaletteItems,
 } from '../features/command-palette';
 export {
   Dashboard,

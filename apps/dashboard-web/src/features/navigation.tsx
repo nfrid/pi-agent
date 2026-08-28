@@ -4,7 +4,7 @@ import {
   newProjectThreadPath,
   useDashboardNavigate,
 } from '../routes/navigation';
-import { CommandPalette } from './command-palette';
+import { CommandPaletteTrigger } from './command-palette';
 
 export function runtimeStatusCounts(snapshot: BrowserSnapshot) {
   return {
@@ -59,7 +59,7 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
             +
           </button>
         )}
-        <CommandPalette snapshot={snapshot} disabled={paletteDisabled} />
+        <CommandPaletteTrigger disabled={paletteDisabled} />
       </div>
     </header>
   );

@@ -1,101 +1,192 @@
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useEffect, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
+import { useDashboardSurfaces } from '../dashboard-surface-context';
 import {
-  useOverlayFocusRestore,
-  useOverlayPresence,
-} from '../overlay-presence';
-import { paletteItems } from './items';
+  type PaletteGroup,
+  type PaletteMatchRange,
+  type PaletteSearchResult,
+  paletteItems,
+  searchPaletteItems,
+} from './items';
 
-export function CommandPalette({
-  snapshot,
+const GROUP_ORDER: readonly PaletteGroup[] = [
+  'Actions',
+  'Navigation',
+  'Threads',
+  'Projects',
+];
+const PAGE_STEP = 6;
+
+function isPaletteShortcut(event: globalThis.KeyboardEvent): boolean {
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLocaleLowerCase() === 'k'
+  );
+}
+
+export function CommandPaletteTrigger({
   disabled = false,
 }: {
-  snapshot: BrowserSnapshot;
   disabled?: boolean;
 }) {
-  const go = useDashboardNavigate();
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState(0);
-  const [error, setError] = useState<string>();
-  const { present: palettePresent, exiting: paletteExiting } =
-    useOverlayPresence(open);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useRef<HTMLElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const { rememberFocus } = useOverlayFocusRestore(open);
-  const items = paletteItems(snapshot);
-  const runtimeActionCount = items.filter(
-    (item) => item.kind === 'action',
-  ).length;
-  const filtered = items.filter((item) =>
-    `${item.title} ${item.description} ${
-      item.kind === 'action'
-        ? `${item.target} ${item.runtime.cwd} ${item.runtime.runtimeId}`
-        : ''
-    }`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
-  );
-  const enabledIndexes = filtered.flatMap((item, index) =>
-    item.kind === 'navigate' || !item.needsInput ? [index] : [],
-  );
-  const firstEnabledIndex = enabledIndexes[0] ?? 0;
-  const selectionResetKey = `${query}\u0000${enabledIndexes.join(',')}`;
+  const surfaces = useDashboardSurfaces();
+  const paletteOpen = surfaces?.stack.at(-1)?.type === 'command-palette';
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        if (disabled) return;
-        setOpen((value) => {
-          if (!value) rememberFocus();
-          return !value;
-        });
-      }
-      if (event.key === 'Escape' && dialogRef.current) {
-        event.preventDefault();
-        event.stopPropagation();
-        setOpen(false);
-      }
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!isPaletteShortcut(event)) return;
+      if (
+        event.ctrlKey &&
+        !event.metaKey &&
+        surfaces?.stack.at(-1)?.type === 'new-thread-project'
+      )
+        return;
+      event.preventDefault();
+      if (disabled || !surfaces) return;
+      if (surfaces.stack.at(-1)?.type === 'command-palette') surfaces.close();
+      else surfaces.replace({ type: 'command-palette' });
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [disabled, rememberFocus]);
+  }, [disabled, surfaces]);
+  return (
+    <button
+      type="button"
+      className="header-action palette-trigger"
+      aria-label="Open command palette"
+      aria-expanded={paletteOpen}
+      disabled={disabled}
+      onClick={() => {
+        if (!surfaces) return;
+        if (paletteOpen) surfaces.close();
+        else surfaces.replace({ type: 'command-palette' });
+      }}
+    >
+      Ctrl/⌘ K
+    </button>
+  );
+}
+
+function mergeRanges(
+  ranges: readonly PaletteMatchRange[] | undefined,
+): PaletteMatchRange[] {
+  if (!ranges?.length) return [];
+  const sorted = [...ranges].sort((left, right) => left[0] - right[0]);
+  const merged: PaletteMatchRange[] = [];
+  for (const range of sorted) {
+    const previous = merged.at(-1);
+    if (!previous || range[0] > previous[1] + 1) {
+      merged.push(range);
+      continue;
+    }
+    merged[merged.length - 1] = [previous[0], Math.max(previous[1], range[1])];
+  }
+  return merged;
+}
+
+export function HighlightedPaletteText({
+  text,
+  ranges,
+}: {
+  text: string;
+  ranges?: readonly PaletteMatchRange[];
+}) {
+  const merged = mergeRanges(ranges);
+  if (!merged.length) return text;
+  const content: ReactNode[] = [];
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    if (start > cursor) content.push(text.slice(cursor, start));
+    content.push(
+      <mark key={`${start}:${end}`}>{text.slice(start, end + 1)}</mark>,
+    );
+    cursor = end + 1;
+  }
+  if (cursor < text.length) content.push(text.slice(cursor));
+  return content;
+}
+
+function groupedResults(results: readonly PaletteSearchResult[]) {
+  return GROUP_ORDER.flatMap((group) => {
+    const items = results.filter((result) => result.item.group === group);
+    return items.length ? [{ group, items }] : [];
+  });
+}
+
+function isEnabled(result: PaletteSearchResult): boolean {
+  return result.item.kind !== 'action' || !result.item.needsInput;
+}
+
+export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
+  const go = useDashboardNavigate();
+  const surfaces = useDashboardSurfaces();
+  const listId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
+  const [activeId, setActiveId] = useState<string>();
+  const [error, setError] = useState<string>();
+  const items = useMemo(() => paletteItems(snapshot), [snapshot]);
+  const results = useMemo(
+    () => searchPaletteItems(items, query),
+    [items, query],
+  );
+  const enabledResults = results.filter(isEnabled);
+  const resolvedActiveId = enabledResults.some(
+    (result) => result.item.id === activeId,
+  )
+    ? activeId
+    : enabledResults[0]?.item.id;
+  const activeIndex = enabledResults.findIndex(
+    (result) => result.item.id === resolvedActiveId,
+  );
+  const groups = groupedResults(results);
+  const activeResultIndex = results.findIndex(
+    (result) => result.item.id === resolvedActiveId,
+  );
+  const activeOptionId =
+    activeResultIndex < 0 ? undefined : `${listId}-option-${activeResultIndex}`;
+
   useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
+    if (resolvedActiveId !== activeId) setActiveId(resolvedActiveId);
+  }, [activeId, resolvedActiveId]);
   useEffect(() => {
-    if (!open) return;
-    setError(undefined);
-    setQuery('');
-    window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [open]);
-  useEffect(() => {
-    // The derived key also changes when a query changes but results do not.
-    void selectionResetKey;
-    setSelected(firstEnabledIndex);
-  }, [selectionResetKey, firstEnabledIndex]);
-  const close = () => setOpen(false);
-  const moveSelection = (direction: 1 | -1) => {
-    if (!enabledIndexes.length) return;
-    const currentPosition = enabledIndexes.indexOf(selected);
-    const nextPosition =
-      currentPosition < 0
-        ? 0
-        : (currentPosition + direction + enabledIndexes.length) %
-          enabledIndexes.length;
-    setSelected(enabledIndexes[nextPosition] ?? 0);
+    if (!activeOptionId) return;
+    document
+      .getElementById(activeOptionId)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [activeOptionId]);
+
+  const move = (offset: number) => {
+    if (!enabledResults.length) return;
+    const next = Math.min(
+      enabledResults.length - 1,
+      Math.max(0, Math.max(0, activeIndex) + offset),
+    );
+    setActiveId(enabledResults[next]?.item.id);
   };
-  const invoke = async (index: number) => {
-    const item = filtered[index];
-    if (!item || (item.kind === 'action' && item.needsInput)) return;
+  const invoke = async (result: PaletteSearchResult | undefined) => {
+    if (!result || !isEnabled(result)) return;
     setError(undefined);
+    const { item } = result;
     if (item.kind === 'navigate') {
-      close();
+      surfaces?.close();
       go(item.path);
+      return;
+    }
+    if (item.kind === 'surface') {
+      surfaces?.replace({ type: item.surface });
       return;
     }
     try {
@@ -104,143 +195,151 @@ export function CommandPalette({
         item.action.id,
         {},
       );
-      close();
+      surfaces?.close();
     } catch (cause) {
       setError(errorMessage(cause));
     }
   };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      move(1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      move(-1);
+    } else if (event.key === 'PageDown') {
+      event.preventDefault();
+      move(PAGE_STEP);
+    } else if (event.key === 'PageUp') {
+      event.preventDefault();
+      move(-PAGE_STEP);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveId(enabledResults[0]?.item.id);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setActiveId(enabledResults.at(-1)?.item.id);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      void invoke(enabledResults[activeIndex]);
+    }
+  };
+
   return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="header-action palette-trigger"
-        aria-label="Open command palette"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={() =>
-          setOpen((value) => {
-            if (!value) rememberFocus();
-            return !value;
-          })
-        }
-      >
-        Ctrl/⌘ K
-      </button>
-      {palettePresent && (
-        // The backdrop intentionally closes on a click outside the dialog.
-        <div
-          className={`palette-backdrop${paletteExiting ? ' is-exiting' : ''}`}
-          aria-hidden={paletteExiting || undefined}
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) close();
+    <div className="command-palette">
+      <div className="palette-search">
+        <span aria-hidden="true">⌕</span>
+        <input
+          ref={inputRef}
+          aria-activedescendant={activeOptionId}
+          aria-controls={listId}
+          aria-expanded="true"
+          aria-label="Search commands, threads, and projects"
+          onChange={(event) => {
+            setQuery(event.target.value.slice(0, 512));
+            setActiveId(undefined);
+            setError(undefined);
           }}
-        >
-          <section
-            ref={dialogRef}
-            className={`command-palette${paletteExiting ? ' is-exiting' : ''}`}
-            role="dialog"
-            aria-hidden={paletteExiting || undefined}
-            aria-modal="true"
-            aria-labelledby="command-palette-heading"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                event.stopPropagation();
-                close();
-                return;
-              }
-              if (event.key !== 'Tab') return;
-              const focusable = Array.from(
-                dialogRef.current?.querySelectorAll<HTMLElement>(
-                  'input, button:not(:disabled)',
-                ) ?? [],
-              );
-              const first = focusable[0];
-              const last = focusable.at(-1);
-              if (!first || !last) return;
-              if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-              } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-              }
+          onKeyDown={onKeyDown}
+          placeholder="Search commands, threads, and projects…"
+          role="combobox"
+          type="search"
+          value={query}
+        />
+        {query && (
+          <button
+            type="button"
+            aria-label="Clear command palette search"
+            onClick={() => {
+              setQuery('');
+              setActiveId(undefined);
+              inputRef.current?.focus();
             }}
-            onMouseDown={(event) => event.stopPropagation()}
           >
-            <h2 id="command-palette-heading">Command palette</h2>
-            <input
-              ref={inputRef}
-              aria-label="Filter actions and navigation"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'ArrowDown') {
-                  event.preventDefault();
-                  moveSelection(1);
-                } else if (event.key === 'ArrowUp') {
-                  event.preventDefault();
-                  moveSelection(-1);
-                } else if (event.key === 'Enter') {
-                  event.preventDefault();
-                  void invoke(selected);
-                }
-              }}
-              placeholder="Search actions, sessions, and projects…"
-            />
-            <div
-              className="palette-list"
-              role="listbox"
-              aria-label="Commands and navigation"
-            >
-              {filtered.map((item, index) => {
-                const disabled = item.kind === 'action' && item.needsInput;
+            ×
+          </button>
+        )}
+      </div>
+      <div
+        className="palette-list surface-scroll-region"
+        id={listId}
+        role="listbox"
+        aria-label="Commands and navigation"
+      >
+        {groups.map(({ group, items: groupItems }) => {
+          return (
+            <fieldset className="palette-group" key={group}>
+              <legend>{group}</legend>
+              {groupItems.map((result) => {
+                const index = results.indexOf(result);
+                const { item, matches } = result;
+                const active = item.id === resolvedActiveId;
+                const disabled = !isEnabled(result);
                 return (
                   <button
                     type="button"
-                    role="option"
-                    aria-selected={selected === index}
-                    className={selected === index ? 'palette-selected' : ''}
-                    disabled={disabled}
+                    aria-disabled={disabled || undefined}
+                    aria-selected={active}
+                    className={active ? 'palette-selected' : undefined}
+                    id={`${listId}-option-${index}`}
                     key={item.id}
-                    onClick={() => void invoke(index)}
+                    onClick={() => void invoke(result)}
+                    onMouseMove={() => {
+                      if (!disabled) setActiveId(item.id);
+                    }}
+                    role="option"
+                    tabIndex={-1}
                   >
-                    <strong>{item.title}</strong>
-                    <small>
-                      {item.kind === 'action' && disabled
-                        ? `Requires input — open the session to complete it. ${item.description}`
-                        : item.description}
-                    </small>
-                    {item.kind === 'action' && (
-                      <small className="palette-target">
-                        Target: {item.runtime.runtimeId} · {item.target} ·{' '}
-                        {item.runtime.cwd}
+                    <span className="palette-item-icon" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span className="palette-item-copy">
+                      <strong>
+                        <HighlightedPaletteText
+                          text={item.title}
+                          ranges={matches.title}
+                        />
+                      </strong>
+                      <small>
+                        {disabled ? 'Requires additional input · ' : ''}
+                        <HighlightedPaletteText
+                          text={item.description}
+                          ranges={matches.description}
+                        />
                       </small>
+                      {item.meta && (
+                        <small className="palette-item-meta">
+                          <HighlightedPaletteText
+                            text={item.meta}
+                            ranges={matches.meta}
+                          />
+                        </small>
+                      )}
+                    </span>
+                    {active && !disabled && (
+                      <kbd className="palette-item-shortcut">↵</kbd>
                     )}
                   </button>
                 );
               })}
-              {!filtered.length && query.trim() && (
-                <p className="empty">No results for “{query.trim()}”.</p>
-              )}
-              {!query.trim() && runtimeActionCount === 0 && (
-                <p className="palette-runtime-empty">
-                  No actions available from connected runtimes. Navigation is
-                  still available above.
-                </p>
-              )}
-            </div>
-            {error && (
-              <p className="error" role="alert">
-                {error}
-              </p>
-            )}
-            <p className="muted">Esc close · ↑↓ move · Enter run</p>
-          </section>
-        </div>
+            </fieldset>
+          );
+        })}
+        {!results.length && query.trim() && (
+          <p className="palette-empty">No results for "{query.trim()}".</p>
+        )}
+      </div>
+      {error && (
+        <p className="error palette-error" role="alert">
+          {error}
+        </p>
       )}
-    </>
+      <footer className="palette-footer">
+        <span>↑↓ navigate</span>
+        <span>Enter run</span>
+        <span>Esc close</span>
+        <span>&gt; actions only</span>
+      </footer>
+    </div>
   );
 }

@@ -19,7 +19,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { createPortal } from 'react-dom';
 import {
   newProjectThreadPath,
   useDashboardNavigate,
@@ -121,161 +120,6 @@ function writeExpandedArchived(state: ExpandedArchived): void {
   } catch {
     // Storage can be unavailable in private browsing; expansion remains local.
   }
-}
-
-function ProjectChooser({
-  projects,
-  onChoose,
-  onClose,
-}: {
-  projects: NonNullable<BrowserSnapshot['projects']>;
-  onChoose: (projectId: string) => void;
-  onClose: () => void;
-}) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
-  const filtered = projects.filter((project) =>
-    `${project.title} ${project.rootPath}`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
-  );
-
-  useEffect(() => {
-    searchRef.current?.focus();
-  }, []);
-  useEffect(() => {
-    setActiveIndex((index) =>
-      Math.min(index, Math.max(0, filtered.length - 1)),
-    );
-  }, [filtered.length]);
-
-  const move = (direction: 1 | -1) => {
-    if (!filtered.length) return;
-    setActiveIndex(
-      (index) => (index + direction + filtered.length) % filtered.length,
-    );
-  };
-  const chooseActive = () => {
-    const project = filtered[activeIndex];
-    if (project) onChoose(project.id);
-  };
-
-  return createPortal(
-    // biome-ignore lint/a11y/noStaticElementInteractions: The backdrop closes the modal on outside clicks.
-    <div
-      className={styles.workspaceChooserBackdrop}
-      data-project-chooser-backdrop=""
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        className={styles.workspaceChooser}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agent-thread-project-chooser-heading"
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            onClose();
-            return;
-          }
-          if (
-            event.key === 'ArrowDown' ||
-            (event.ctrlKey && event.key.toLowerCase() === 'j')
-          ) {
-            event.preventDefault();
-            move(1);
-          } else if (
-            event.key === 'ArrowUp' ||
-            (event.ctrlKey && event.key.toLowerCase() === 'k')
-          ) {
-            event.preventDefault();
-            move(-1);
-          } else if (
-            event.key === 'Enter' &&
-            event.target instanceof HTMLInputElement
-          ) {
-            event.preventDefault();
-            chooseActive();
-            return;
-          }
-          if (event.key !== 'Tab') return;
-          event.stopPropagation();
-          const focusable = Array.from(
-            dialogRef.current?.querySelectorAll<HTMLElement>(
-              'input, button:not(:disabled)',
-            ) ?? [],
-          );
-          const first = focusable[0];
-          const last = focusable.at(-1);
-          if (!first || !last) return;
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        }}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <h2 id="agent-thread-project-chooser-heading">Choose a project</h2>
-        <p>Where should the new thread start?</p>
-        <input
-          ref={searchRef}
-          className={styles.workspaceChooserSearch}
-          aria-label="Search projects"
-          placeholder="Search name or path"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(0);
-          }}
-        />
-        <div
-          className={styles.workspaceChooserScroll}
-          data-project-options-scroll=""
-        >
-          <fieldset className={styles.workspaceChooserOptions}>
-            <legend className={styles.workspaceChooserLegend}>Projects</legend>
-            {filtered.map((project, index) => (
-              <button
-                type="button"
-                aria-label={project.title}
-                data-project-active={index === activeIndex ? 'true' : undefined}
-                key={project.id}
-                onClick={() => onChoose(project.id)}
-              >
-                <span>{project.title}</span>
-                <small className={styles.workspaceChooserPath}>
-                  {project.rootPath}
-                </small>
-              </button>
-            ))}
-            {!filtered.length && (
-              <span className={styles.workspaceChooserEmpty}>
-                No matching projects.
-              </span>
-            )}
-          </fieldset>
-        </div>
-        <button
-          type="button"
-          className={styles.workspaceChooserCancel}
-          onClick={onClose}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>,
-    document.body,
-  );
 }
 
 export type ThreadMetadataPresentation = {
@@ -609,8 +453,6 @@ export function AgentThreadNav({
   const [query, setQuery] = useState('');
   const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [projectScope, setProjectScope] = useState('all');
-  const [projectChooserOpen, setProjectChooserOpen] = useState(false);
-  const newThreadButtonRef = useRef<HTMLButtonElement>(null);
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
     Boolean(readExpandedArchived().all),
   );
@@ -917,25 +759,15 @@ export function AgentThreadNav({
     surfaces?.open({ type: 'settings' });
   };
   const openNewThread = () => {
-    if (projects.length === 0) {
-      go('/projects');
-      if (mode === 'session') onOpenChange?.(false);
+    if (projects.length > 1 && surfaces) {
+      surfaces.replace({ type: 'new-thread-project' });
       return;
     }
-    if (projects.length === 1) {
-      go(newProjectThreadPath(snapshot, projects[0].id));
-      if (mode === 'session') onOpenChange?.(false);
-      return;
-    }
-    setProjectChooserOpen(true);
-  };
-  const closeProjectChooser = () => {
-    setProjectChooserOpen(false);
-    requestAnimationFrame(() => newThreadButtonRef.current?.focus());
-  };
-  const chooseProject = (projectId: string) => {
-    setProjectChooserOpen(false);
-    go(newProjectThreadPath(snapshot, projectId));
+    go(
+      projects.length === 0
+        ? '/projects'
+        : newProjectThreadPath(snapshot, projects[0]?.id),
+    );
     if (mode === 'session') onOpenChange?.(false);
   };
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
@@ -1079,7 +911,6 @@ export function AgentThreadNav({
           <p className="eyebrow">Project threads</p>
         </div>
         <button
-          ref={newThreadButtonRef}
           type="button"
           className={styles.newThread}
           aria-label="New thread"
@@ -1088,13 +919,6 @@ export function AgentThreadNav({
           <span aria-hidden="true">+</span> New
         </button>
       </div>
-      {projectChooserOpen && (
-        <ProjectChooser
-          projects={projects}
-          onChoose={chooseProject}
-          onClose={closeProjectChooser}
-        />
-      )}
       <div className={styles.search}>
         <span aria-hidden="true">⌕</span>
         <input

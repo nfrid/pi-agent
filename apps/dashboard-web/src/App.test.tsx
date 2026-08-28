@@ -42,7 +42,11 @@ import {
   agentThreadRows,
 } from './features/agent-thread-nav';
 import { visualViewportKeyboardInset } from './features/session';
-import { actionNeedsInput, paletteItems } from './routes/dashboard';
+import {
+  actionNeedsInput,
+  paletteItems,
+  searchPaletteItems,
+} from './routes/dashboard';
 
 describe('session control geometry', () => {
   it('derives only the keyboard-covered portion of the layout viewport', () => {
@@ -264,15 +268,41 @@ describe('command palette', () => {
     } as never;
     const items = paletteItems(snapshot);
     expect(items.slice(0, 2).map((item) => item.title)).toEqual([
-      'Dashboard',
       'New thread',
+      'Dashboard',
     ]);
-    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(27);
-    expect(items[3]?.title).toBe('Session: Untitled session');
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(26);
+    expect(items[3]?.title).toBe('Untitled session');
     expect(items.at(-1)?.id).toBe('session:session-23');
-    expect(items.some((item) => item.title === 'Session: session-436')).toBe(
-      false,
-    );
+    expect(items.some((item) => item.title === 'session-436')).toBe(false);
+  });
+
+  it('fuzzily ranks local catalogue fields and exposes visible match ranges', () => {
+    const items = paletteItems({
+      runtimes: [],
+      sessions: [
+        {
+          id: 'session-1',
+          cwd: '/workspace/dashboard',
+          title: 'Reconnect diagnostics',
+          updatedAt: 1,
+        },
+      ],
+      projects: [],
+    } as never);
+    const [result] = searchPaletteItems(items, 'reconect');
+    expect(result?.item.id).toBe('session:session-1');
+    expect(
+      searchPaletteItems(items, 'dashboard').find(
+        (entry) => entry.item.id === 'session:session-1',
+      )?.matches.description,
+    ).toBeDefined();
+    expect(searchPaletteItems(items, '> new')[0]?.item.id).toBe('new-thread');
+    expect(
+      searchPaletteItems(items, '> new').every(
+        (entry) => entry.item.group === 'Actions',
+      ),
+    ).toBe(true);
   });
 
   it('disambiguates identical actions by their runtime target', () => {
@@ -308,12 +338,12 @@ describe('command palette', () => {
     expect(items).toMatchObject([
       {
         title: 'Abort run',
-        target: 'Alpha agent',
+        meta: 'Alpha agent · /workspace/alpha',
         runtime: { runtimeId: 'runtime-alpha', cwd: '/workspace/alpha' },
       },
       {
         title: 'Abort run',
-        target: 'Beta agent',
+        meta: 'Beta agent · /workspace/beta',
         runtime: { runtimeId: 'runtime-beta', cwd: '/workspace/beta' },
       },
     ]);

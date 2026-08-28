@@ -1,12 +1,14 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useState } from 'react';
 import { AgentThreadNav } from '../features/agent-thread-nav';
+import { CommandPalette } from '../features/command-palette';
 import {
   DashboardSurfaceProvider,
   useDashboardSurfaces,
 } from '../features/dashboard-surface-context';
+import { NewThreadProjectChooser } from '../features/new-thread-project-chooser';
 import { SessionNavigationContext } from '../features/session-navigation-context';
-import { SurfaceStack } from '../features/surface-stack';
+import { type SurfacePage, SurfaceStack } from '../features/surface-stack';
 import { UsageAnalyticsPanel } from '../features/usage-analytics';
 import { Header, SettingsView } from '../routes/dashboard';
 import { useDashboardContext } from './dashboard-context';
@@ -95,28 +97,56 @@ function DashboardSurfaceOverlay({
 }) {
   const surfaces = useDashboardSurfaces();
   const pages =
-    surfaces?.stack.map((surface) =>
-      surface.type === 'settings'
-        ? {
+    surfaces?.stack.map((surface): SurfacePage => {
+      switch (surface.type) {
+        case 'settings':
+          return {
             id: surface.type,
             title: 'Settings',
             eyebrow: 'Dashboard utility',
             children: <SettingsView snapshot={snapshot} />,
-          }
-        : {
+          };
+        case 'usage-analytics':
+          return {
             id: surface.type,
             title: 'Usage analytics',
             eyebrow: 'Account limits',
             children: <UsageAnalyticsPanel />,
-          },
-    ) ?? [];
-  const analyticsOpen = surfaces?.stack.at(-1)?.type === 'usage-analytics';
+          };
+        case 'command-palette':
+          return {
+            id: surface.type,
+            title: 'Command palette',
+            hideHeader: true,
+            initialFocus: '[role="combobox"]',
+            children: <CommandPalette snapshot={snapshot} />,
+          };
+        case 'new-thread-project':
+          return {
+            id: surface.type,
+            title: 'Choose a project',
+            eyebrow: 'New thread',
+            headerSummary: 'Where should the new thread start?',
+            initialFocus: '[role="combobox"]',
+            children: <NewThreadProjectChooser snapshot={snapshot} />,
+          };
+      }
+      throw new Error('Unsupported dashboard surface.');
+    }) ?? [];
+  const topSurface = surfaces?.stack.at(-1)?.type;
+  const analyticsOpen = topSurface === 'usage-analytics';
+  const surfaceClassName =
+    topSurface === 'command-palette'
+      ? 'surface-drawer command-palette-surface'
+      : topSurface === 'new-thread-project'
+        ? 'surface-drawer utility-drawer new-thread-project-surface'
+        : `surface-drawer utility-drawer${analyticsOpen ? ' usage-analytics-drawer' : ''}`;
   return (
     <SurfaceStack
       pages={pages}
       kind="utility"
       size={analyticsOpen ? 'wide' : 'compact'}
-      className={`surface-drawer utility-drawer${analyticsOpen ? ' usage-analytics-drawer' : ''}`}
+      className={surfaceClassName}
       isOpen={pages.length > 0}
       onDepthChange={(depth) => surfaces?.truncate(depth)}
       onClose={() => surfaces?.close()}
