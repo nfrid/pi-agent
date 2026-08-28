@@ -38,17 +38,22 @@ These changes need focused phases and should not be bundled with correctness fix
 
 ## Implementation status
 
-The first implementation pass completed these items:
+The bounded audit implementation completed these items:
 
-- Feed cursors now distinguish checkpoint, snapshot, event, and caught-up frames while accepting legacy cursors without a frame field.
+- Feed cursors distinguish checkpoint, snapshot, event, and caught-up frames while accepting legacy cursors without a frame field.
 - Oversized web results remain available for in-process continuation when cache-file persistence is refused.
-- The usage test now matches the intentional history relevance gate.
-- Dashboard renderer contracts and session history controls moved to leaf modules. The largest frontend import cycle fell from 18 modules to 9; the remaining registry, delegate surface, and inspector cycle still needs a separate composition change.
-- Shared scoped services no longer import the concrete delegate workflow coordinator.
-- `@pi-dashboard/activity-model` now owns the tool-sequence renderer types; the extension module is a compatibility re-export.
+- Usage tests preserve the intentional history relevance gate.
+- Dashboard renderer contracts, surface adapters, settlement keys, and session history controls moved to leaf modules. Production dashboard-web now has no strongly connected import components.
+- Browser code no longer imports contribution contracts from extension implementation directories. `@pi-dashboard/extension-contributions` owns built-in renderer IDs, view-model schemas and types, descriptors, and bounded delegate usage. Extension contribution modules retain compatibility re-exports, and the renderer registry remains static and schema-validated.
+- Shared scoped services depend on a narrow workflow scheduling capability rather than the concrete delegate workflow coordinator.
+- `@pi-dashboard/activity-model` owns tool-sequence renderer types; the extension module is a compatibility re-export.
+- Delegate-history and workflow protocol schemas moved into focused internal modules while public protocol exports remain stable.
+- Server project association uses a narrow repository capability. Session-history cursor parsing, validation, and bounded reads moved into a focused collaborator behind the existing facade.
+- Delegate workflow launch and wake restore policy moved into pure modules. Their input contracts are leaf-owned so the extraction does not introduce coordinator-policy cycles; coordinators retain lifecycle, persistence, dispatch, and mutation ownership.
+- Repository-dead dashboard-domain transcript aliases were removed after consumer inventory.
 
-The repository, session-index, protocol-schema, contribution-contract, remaining frontend-cycle, and delegate-coordinator work remains for later focused phases.
+The final cycle inventory still contains three pre-existing extension-internal components: the delegate execution/type component, the delegate plan/orchestration/tool component, and the task store/domain pair. They were not coupled to the corrected dashboard or contribution boundaries and should be handled only as separate behavior-preserving work.
 
 ## Validation baseline
 
-At audit time, repository typechecking, protocol tests, activity-model tests, dashboard-client tests, and focused extension tests passed. `apps/dashboard-web/src/features/usage-indicator.test.tsx` had one stale expectation that contradicted the intentional history relevance filter.
+The integrated change is expected to pass `bun run check`, a production dashboard-web build, focused contribution/protocol/delegate/web tests, and the usage Playwright flow. The final commands and counts belong in the implementing change record; do not treat this note as a substitute for rerunning them after later edits.

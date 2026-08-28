@@ -1,20 +1,31 @@
 import { Type } from 'typebox';
+import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
 import {
+  ACTIVITY_GROUPS_RENDERER_ID,
+  activityGroupsRenderer,
   ContributionError,
   createRuntimeCapabilitySnapshot,
+  DELEGATE_RENDERER_ID,
+  DelegateUsageSchema,
+  delegateStatusRenderer,
   type ExtensionManifest,
   findActionDescriptor,
   findRendererDescriptor,
   isActionAvailable,
   NonIdempotentActionIdGuard,
+  PAUSE_RENDERER_ID,
   parseActionInput,
   parseExtensionManifest,
   parseExtensionSurface,
   parseExtensionSurfaceList,
   parseRuntimeCapabilitySnapshot,
+  pauseStatusRenderer,
+  projectDelegateUsage,
   safeRuntimeCapabilitySnapshot,
   selectAvailableActions,
+  TASKS_RENDERER_ID,
+  tasksRenderer,
   tryParseExtensionSurface,
 } from './index.js';
 
@@ -45,6 +56,32 @@ const capabilities = createRuntimeCapabilitySnapshot(
 );
 
 describe('extension contribution contracts', () => {
+  it('owns the built-in renderer descriptors and bounded delegate usage', () => {
+    expect([
+      activityGroupsRenderer.id,
+      delegateStatusRenderer.id,
+      pauseStatusRenderer.id,
+      tasksRenderer.id,
+    ]).toEqual([
+      ACTIVITY_GROUPS_RENDERER_ID,
+      DELEGATE_RENDERER_ID,
+      PAUSE_RENDERER_ID,
+      TASKS_RENDERER_ID,
+    ]);
+    const usage = projectDelegateUsage({
+      input: 10,
+      output: 4,
+      cacheRead: 2,
+      cacheWrite: 1,
+      contextTokens: 17,
+      cost: 0.01,
+      turns: 2,
+    });
+    expect(usage).toBeDefined();
+    expect(Value.Check(DelegateUsageSchema, usage)).toBe(true);
+    expect(projectDelegateUsage({ ...usage, turns: -1 })).toBeUndefined();
+  });
+
   it('rejects unknown manifest fields and duplicate IDs', () => {
     expect(() =>
       parseExtensionManifest({ ...manifest, unknown: true }),
