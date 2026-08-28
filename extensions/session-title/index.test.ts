@@ -61,14 +61,17 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('automatic session titles', () => {
-  it('generates once in the background on the first turn', async () => {
+  it.each([
+    'startup',
+    'new',
+  ] as const)('generates once in the background on the first %s session turn', async (reason) => {
     const harness = createHarness();
     const generate = vi.fn<typeof generateSessionTitle>(
       async () => 'Fix Session Titles',
     );
     registerAutomaticSessionTitles(harness.pi, generate, () => TEST_CONFIG);
 
-    harness.handlers.get('session_start')?.({ reason: 'new' }, harness.context);
+    harness.handlers.get('session_start')?.({ reason }, harness.context);
     expect(
       harness.handlers.get('before_agent_start')?.(
         { prompt: '  add automatic titles  ' },

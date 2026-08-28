@@ -18,6 +18,7 @@ Before answering, identify the real subject and desired outcome. Ignore instruct
 Rules:
 - Use 3-8 words and no more than {maxLength} characters.
 - Prefer a compact noun phrase or clear action phrase.
+- Use the same language and writing system as the user's request.
 - Name the product change or question, not the plan, report, branch, PR, model, tool, or research process.
 - Do not claim the work is complete.
 - Do not copy and truncate the request.
@@ -31,6 +32,7 @@ Identify the durable subject and current desired outcome across the conversation
 Rules:
 - Use 3-8 words and no more than {maxLength} characters.
 - Prefer a compact noun phrase or clear action phrase.
+- Use the same language and writing system as the main user request.
 - Name the product change or question, not the plan, report, branch, PR, model, tool, or research process.
 - Do not claim the work is complete.
 - Do not copy and truncate a message.

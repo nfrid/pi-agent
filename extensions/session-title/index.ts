@@ -128,7 +128,7 @@ export function registerAutomaticSessionTitles(
     config = loadConfig();
     started = false;
     eligible =
-      event.reason === 'new' &&
+      (event.reason === 'startup' || event.reason === 'new') &&
       config.enabled &&
       config.error === undefined &&
       pi.getSessionName() === undefined &&

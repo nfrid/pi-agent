@@ -165,6 +165,36 @@ describe('session title generation', () => {
     );
   });
 
+  it('requests and preserves titles in the user’s language', async () => {
+    const complete = vi.fn(
+      async (_model: unknown, _request: unknown, _options: unknown) => ({
+        content: [{ type: 'text', text: '  `Исправить названия сессий`  ' }],
+      }),
+    );
+    const client = {
+      find: vi.fn(() => ({
+        provider: 'openai-codex',
+        id: 'gpt-5.6-luna',
+        api: 'openai-codex-responses',
+        reasoning: true,
+      })),
+      complete,
+    } as unknown as SessionTitleModelClient;
+
+    await expect(
+      generateSessionTitle(
+        client,
+        'Почему автозаголовки не работают?',
+        new AbortController().signal,
+        TEST_CONFIG,
+      ),
+    ).resolves.toBe('Исправить названия сессий');
+    const request = complete.mock.calls[0]?.[1] as { systemPrompt: string };
+    expect(request.systemPrompt).toContain(
+      "same language and writing system as the user's request",
+    );
+  });
+
   it('normalizes model output and rejects empty titles', () => {
     expect(sanitizeSessionTitle('  `Fix   title generation!`  ')).toBe(
       'Fix title generation',
