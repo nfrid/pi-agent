@@ -1,15 +1,30 @@
 import type { DelegateJobStartOptions } from './jobs';
-import type {
-  DelegateWorkflowPreparedLaunch,
-  DelegateWorkflowScheduleOptions,
-} from './workflow-coordinator';
 import { isCanonicalUuid, MAX_WORKFLOW_DEPENDENCIES } from './workflow-model';
+
+/** The coordinator's schedule shape, kept structural to avoid a policy cycle. */
+interface WorkflowScheduleValidationInput {
+  logicalId: unknown;
+  continuation?: unknown;
+  after?: unknown;
+  inputs?: unknown;
+  prepare?: unknown;
+  preparationCleanup?: unknown;
+  execute?: unknown;
+  mode?: unknown;
+  tasks?: unknown;
+  route?: unknown;
+}
+
+interface PreparedWorkflowLaunch {
+  readonly launch: DelegateJobStartOptions;
+  readonly discard?: () => void | Promise<void>;
+}
 
 const DEFAULT_MAX_WORKFLOW_NAME_LENGTH = 2_000;
 
 /** Keep schedule and prepared-launch checks independent of coordinator state. */
 export function validateScheduleInput(
-  options: DelegateWorkflowScheduleOptions,
+  options: WorkflowScheduleValidationInput,
   maxDependencies = MAX_WORKFLOW_DEPENDENCIES,
 ): void {
   if (typeof options.logicalId !== 'string')
@@ -22,11 +37,14 @@ export function validateScheduleInput(
     throw new Error('Invalid workflow continuation reference.');
   if (options.after !== undefined && !Array.isArray(options.after))
     throw new Error('Invalid workflow dependencies: expected an array.');
-  if (options.after && options.after.length > maxDependencies)
+  if (Array.isArray(options.after) && options.after.length > maxDependencies)
     throw new Error(
       `A workflow attempt may declare at most ${maxDependencies} explicit dependencies.`,
     );
-  if (options.after?.some((reference) => typeof reference !== 'string'))
+  if (
+    Array.isArray(options.after) &&
+    options.after.some((reference) => typeof reference !== 'string')
+  )
     throw new Error(
       'Invalid workflow dependency: expected a string reference.',
     );
@@ -54,7 +72,7 @@ export function validateScheduleInput(
       throw new Error('Invalid delegate tasks: expected an array of strings.');
     if (typeof options.execute !== 'function')
       throw new Error('Invalid delegate launch: execute must be a function.');
-    if (options.inputs?.length)
+    if (Array.isArray(options.inputs) && options.inputs.length)
       throw new Error('Symbolic workflow inputs require lazy preparation.');
   }
   if (options.route !== undefined && typeof options.route !== 'string')
@@ -106,8 +124,8 @@ export function boundedSessionId(value: unknown): string | undefined {
 
 /** Normalize either supported lazy factory return shape without side effects. */
 export function normalizePreparedLaunch(
-  value: DelegateJobStartOptions | DelegateWorkflowPreparedLaunch,
-): DelegateWorkflowPreparedLaunch {
+  value: DelegateJobStartOptions | PreparedWorkflowLaunch,
+): PreparedWorkflowLaunch {
   if (
     value &&
     typeof value === 'object' &&
@@ -115,7 +133,7 @@ export function normalizePreparedLaunch(
     value.launch &&
     typeof value.launch === 'object'
   )
-    return value as DelegateWorkflowPreparedLaunch;
+    return value as PreparedWorkflowLaunch;
   return { launch: value as DelegateJobStartOptions };
 }
 
