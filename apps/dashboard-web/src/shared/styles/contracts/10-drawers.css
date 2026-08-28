@@ -171,13 +171,14 @@
     width: calc(var(--wco-controls-right) + var(--space-6));
     height: var(--wco-controls-height);
     border-bottom-left-radius: var(--radius-md);
-    background: var(--bg);
-    content: "";
-    filter: drop-shadow(
-      0 var(--space-2) var(--space-4)
-        color-mix(in srgb, var(--bg) 68%, transparent)
+    background: linear-gradient(
+      to right,
+      transparent 0,
+      var(--bg) var(--space-6),
+      var(--bg) 100%
     );
-    mask-image: linear-gradient(to right, transparent 0, #000 var(--space-6));
+    content: "";
+    filter: drop-shadow(0 var(--space-2) var(--space-3) rgb(0 0 0 / 42%));
     pointer-events: none;
   }
   .surface-drawer-header > * {
