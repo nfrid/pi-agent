@@ -138,6 +138,28 @@ describe('draft thread controls', () => {
     ).toEqual({ provider: 'test', model: 'default', thinking: 'high' });
   });
 
+  it('recovers an incomplete stored model from the active runtime selection', () => {
+    const runtimes = [
+      {
+        model: { provider: 'test', model: 'sol', thinking: 'medium' },
+        modelCatalog: [
+          { provider: 'test', model: 'spark' },
+          { provider: 'test', model: 'sol' },
+        ],
+      },
+    ] as never;
+    expect(
+      draftModelSelection(runtimes, { provider: 'test', model: 'spark' }),
+    ).toEqual({ provider: 'test', model: 'sol', thinking: 'medium' });
+    expect(
+      draftModelSelection(runtimes, {
+        provider: 'test',
+        model: 'spark',
+        thinking: 'low',
+      }),
+    ).toEqual({ provider: 'test', model: 'spark', thinking: 'low' });
+  });
+
   it('chooses a configured current model', () => {
     const runtimes = [
       {

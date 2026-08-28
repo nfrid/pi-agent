@@ -59,8 +59,8 @@ export function draftModelSelection(
   const available = new Set(
     models.map((model) => modelOptionValue(model.provider, model.model)),
   );
-  if (selected) return selected;
-  if (configuredDefault) return configuredDefault;
+  if (selected?.thinking) return selected;
+  if (configuredDefault?.thinking) return configuredDefault;
   const current = runtimes.find(
     (runtime) =>
       runtime.model &&
@@ -74,6 +74,8 @@ export function draftModelSelection(
       model: current.model,
       ...(current.thinking ? { thinking: current.thinking } : {}),
     };
+  if (selected) return selected;
+  if (configuredDefault) return configuredDefault;
   const first = models[0];
   return first ? { provider: first.provider, model: first.model } : undefined;
 }
