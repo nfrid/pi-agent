@@ -67,6 +67,7 @@ describe('ProjectResolver', () => {
     };
     const resolver = new ProjectResolver(
       repository({ projects: [project], checkouts: [main, nestedCheckout] }),
+      () => [main, nestedCheckout] as never,
     );
     try {
       expect(resolver.resolve(nested)).toEqual({
@@ -93,6 +94,7 @@ describe('ProjectResolver', () => {
     const project = { id: 'project-dir', rootPath: root };
     const resolver = new ProjectResolver(
       repository({ projects: [project], checkouts: [] }),
+      () => [],
     );
     try {
       expect(resolver.resolve(root)).toEqual({
