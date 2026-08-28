@@ -166,13 +166,16 @@
     > .session-icon-button {
     margin-right: var(--wco-controls-right);
   }
-  .work-surface-drawer .surface-drawer-header {
+  .delegate-surface-drawer:not(.delegate-transcript-drawer)
+    .surface-drawer-header {
     flex-wrap: wrap;
   }
-  .work-surface-drawer .surface-drawer-heading {
+  .delegate-surface-drawer:not(.delegate-transcript-drawer)
+    .surface-drawer-heading {
     flex: 1 1 150px;
   }
-  .work-surface-drawer .surface-drawer-header-content {
+  .delegate-surface-drawer:not(.delegate-transcript-drawer)
+    .surface-drawer-header-content {
     order: 3;
     flex: 1 1 100%;
     margin: 0;
