@@ -133,9 +133,9 @@
 }
 @media (display-mode: window-controls-overlay) {
   .surface-drawer-layer {
-    --wco-titlebar-height: calc(
-      env(titlebar-area-y, 0px) +
-      env(titlebar-area-height, 0px)
+    --wco-titlebar-height: max(
+      var(--session-header-height),
+      calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 0px))
     );
     --wco-controls-right: calc(
       100vw -
@@ -147,11 +147,12 @@
       to bottom,
       transparent 0,
       transparent var(--wco-titlebar-height),
-      var(--scrim-dark) var(--wco-titlebar-height),
+      var(--scrim-dark) calc(var(--wco-titlebar-height) + var(--space-5)),
       var(--scrim-dark) 100%
     );
   }
   .surface-drawer:not([data-surface-kind="utility"]) .surface-drawer-header {
+    align-items: center;
     min-height: var(--wco-titlebar-height);
     background:
       linear-gradient(
@@ -162,8 +163,24 @@
         var(--bg) 100%
       )
       top / 100% var(--wco-titlebar-height) no-repeat;
-    padding-right: max(18px, calc(var(--wco-controls-right) + 18px));
+    padding-block: var(--space-3);
     -webkit-app-region: drag;
+  }
+  .surface-drawer:not([data-surface-kind="utility"])
+    .surface-drawer-header
+    > .session-icon-button {
+    margin-right: var(--wco-controls-right);
+  }
+  .work-surface-drawer .surface-drawer-header {
+    flex-wrap: wrap;
+  }
+  .work-surface-drawer .surface-drawer-heading {
+    flex: 1 1 150px;
+  }
+  .work-surface-drawer .surface-drawer-header-content {
+    order: 3;
+    flex: 1 1 100%;
+    margin: 0;
   }
   .surface-drawer-header button,
   .surface-drawer-header input,

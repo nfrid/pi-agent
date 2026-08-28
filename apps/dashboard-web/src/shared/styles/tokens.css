@@ -17,6 +17,9 @@
   --tool-success: #263a33;
   --tool-error: #3b2832;
 
+  /* Shell geometry */
+  --session-header-height: 48px;
+
   /* Spacing scale */
   --space-1: 4px;
   --space-2: 6px;

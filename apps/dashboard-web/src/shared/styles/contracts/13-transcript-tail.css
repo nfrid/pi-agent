@@ -220,7 +220,7 @@
 .session-page:not(.session-page-embedded) .session-context {
   position: static;
   width: 100%;
-  min-height: 48px;
+  min-height: var(--session-header-height);
   margin: 0;
   padding: 7px 0;
 }

@@ -41,7 +41,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 48px;
+  min-height: var(--session-header-height);
   margin: 0;
   border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--bg) 94%, transparent);
