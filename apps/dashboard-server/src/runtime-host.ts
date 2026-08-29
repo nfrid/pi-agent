@@ -55,6 +55,7 @@ type HostRuntime = {
   signal?: NodeJS.Signals | null;
   diagnostics: string;
   stdoutBuffer: string;
+  stdoutDiscardingLine: boolean;
   readinessId?: string;
   resolveReadiness?: () => void;
   rejectReadiness?: (error: Error) => void;
@@ -79,7 +80,7 @@ type HostResponse = {
 
 export type HostRuntimeSummary = Omit<
   HostRuntime,
-  'process' | 'stdoutBuffer' | 'launchFingerprint'
+  'process' | 'stdoutBuffer' | 'stdoutDiscardingLine' | 'launchFingerprint'
 >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,6 +105,7 @@ function summary(runtime: HostRuntime): HostRuntimeSummary {
   const {
     process: _process,
     stdoutBuffer: _stdoutBuffer,
+    stdoutDiscardingLine: _stdoutDiscardingLine,
     launchFingerprint: _launchFingerprint,
     ...result
   } = runtime;
@@ -190,23 +192,32 @@ function handleRpcLine(runtime: HostRuntime, line: string): void {
 }
 
 function drainStdout(runtime: HostRuntime, chunk: Buffer | string): void {
-  runtime.stdoutBuffer += typeof chunk === 'string' ? chunk : chunk.toString();
-  let newline = runtime.stdoutBuffer.indexOf('\n');
-  while (newline >= 0) {
-    const rawLine = runtime.stdoutBuffer.slice(0, newline);
-    runtime.stdoutBuffer = runtime.stdoutBuffer.slice(newline + 1);
-    if (Buffer.byteLength(rawLine) > RUNTIME_HOST_MAX_LINE_BYTES) {
-      appendDiagnostics(runtime, 'RPC stdout line exceeded its bound.\n');
-      runtime.process.kill('SIGTERM');
-      return;
+  let text = typeof chunk === 'string' ? chunk : chunk.toString();
+  while (text.length > 0) {
+    if (runtime.stdoutDiscardingLine) {
+      const newline = text.indexOf('\n');
+      if (newline < 0) return;
+      runtime.stdoutDiscardingLine = false;
+      text = text.slice(newline + 1);
+      continue;
     }
-    const line = rawLine.replace(/\r$/, '');
-    if (line.length > 0) handleRpcLine(runtime, line);
-    newline = runtime.stdoutBuffer.indexOf('\n');
-  }
-  if (Buffer.byteLength(runtime.stdoutBuffer) > RUNTIME_HOST_MAX_LINE_BYTES) {
-    appendDiagnostics(runtime, 'RPC stdout line exceeded its bound.\n');
-    runtime.process.kill('SIGTERM');
+    const newline = text.indexOf('\n');
+    const segment = newline < 0 ? text : text.slice(0, newline);
+    if (
+      Buffer.byteLength(runtime.stdoutBuffer) + Buffer.byteLength(segment) >
+      RUNTIME_HOST_MAX_LINE_BYTES
+    ) {
+      runtime.stdoutBuffer = '';
+      appendDiagnostics(runtime, 'Discarded oversized RPC stdout line.\n');
+      if (newline < 0) runtime.stdoutDiscardingLine = true;
+    } else if (newline < 0) runtime.stdoutBuffer += segment;
+    else {
+      const line = `${runtime.stdoutBuffer}${segment}`.replace(/\r$/, '');
+      runtime.stdoutBuffer = '';
+      if (line.length > 0) handleRpcLine(runtime, line);
+    }
+    if (newline < 0) return;
+    text = text.slice(newline + 1);
   }
 }
 
@@ -537,6 +548,7 @@ export class RuntimeHostService {
       startedAt: Date.now(),
       diagnostics: '',
       stdoutBuffer: '',
+      stdoutDiscardingLine: false,
       launchFingerprint: launchFingerprint(input),
     };
     child.stdout.on('data', (chunk) => drainStdout(runtime, chunk));

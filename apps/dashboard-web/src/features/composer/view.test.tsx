@@ -171,6 +171,40 @@ describe('Composer dormant resume transition', () => {
     );
   });
 
+  it('resumes a retained offline runtime through the dormant composer', async () => {
+    const { Composer } = await import('./view');
+    const offlineRuntime = {
+      runtimeId: 'runtime-offline',
+      liveState: 'working',
+      online: false,
+      model: { provider: 'test', model: 'text' },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={offlineRuntime}
+          sessionId="session-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
+        />,
+      );
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+      sessionId: 'session-1',
+      initialPrompt: 'resume me',
+    });
+  });
+
   it('clears pending state when the started runtime arrives', async () => {
     const { Composer } = await import('./view');
     const dormant = (

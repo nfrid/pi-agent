@@ -13,7 +13,6 @@ import type {
 import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
 import { ProgressBar } from '../../shared/ui/progress-bar';
 import { draftRuntimeOptions, modelOptionValue } from '../model-option';
@@ -72,8 +71,8 @@ function ContextIndicator({
 }
 
 export function Composer({
-  runtime,
-  runtimes = runtime ? [runtime] : [],
+  runtime: runtimeSnapshot,
+  runtimes = runtimeSnapshot ? [runtimeSnapshot] : [],
   session,
   store,
   sessionId,
@@ -94,7 +93,8 @@ export function Composer({
   onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 }) {
-  const go = useDashboardNavigate();
+  const runtime =
+    runtimeSnapshot?.online === false ? undefined : runtimeSnapshot;
   const { initialDraft, text, updateText, clearDraft } =
     useComposerDraft(sessionId);
   const editorRef = useRef<MDXEditorMethods>(null);
@@ -323,20 +323,6 @@ export function Composer({
       if (mountedRef.current) setBusy(false);
     }
   };
-  if (runtime?.online === false)
-    return (
-      <div className="composer disabled">
-        <p>Runtime offline; controls are unavailable.</p>
-        <button
-          type="button"
-          onClick={() =>
-            go(`/runtimes/${encodeURIComponent(runtime.runtimeId)}`)
-          }
-        >
-          View diagnostics
-        </button>
-      </div>
-    );
   const abortTurn = async () => {
     if (!runtime || busy || commandMutation.isPending) return;
     setError(undefined);
