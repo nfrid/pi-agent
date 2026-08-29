@@ -145,6 +145,47 @@ describe('runtime host', () => {
     }
   });
 
+  it('drops unused agent events before buffering inline image data', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'dashboard-runtime-host-filtered-event-'),
+    );
+    const socket = path.join(root, 'host.sock');
+    const marker = path.join(root, 'cancelled');
+    const executable = path.join(root, 'filtered-event-pi.mjs');
+    await writeFile(
+      executable,
+      `#!/usr/bin/env node\nimport fs from 'node:fs';\nprocess.stdout.write('{"type":"agent_end","messages":[{"role":"toolResult","content":[{"type":"image","data":"'); process.stdout.write('x'.repeat(${RUNTIME_HOST_MAX_LINE_BYTES + 1})); process.stdout.write('"}]}]}\\n'); let buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; let newline; while ((newline=buffer.indexOf('\\n')) >= 0) { const request=JSON.parse(buffer.slice(0,newline)); buffer=buffer.slice(newline+1); if (request.type === 'get_state') process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'+JSON.stringify({type:'extension_ui_request',id:'after-agent-event'})+'\\n'); if (request.id === 'after-agent-event' && request.cancelled) fs.writeFileSync(${JSON.stringify(marker)}, 'yes'); }}); setInterval(() => {}, 1000);\n`,
+    );
+    await chmod(executable, 0o700);
+    const service = new RuntimeHostService(socket, testEnvironment);
+    await service.listen();
+    const client = new RuntimeHostClient(socket);
+    try {
+      await client.start({
+        runtimeId: 'runtime-filtered-event',
+        cwd: root,
+        socketPath: path.join(root, 'bridge.sock'),
+        launchToken: 'launch',
+        identityToken: 'identity',
+        piExecutable: executable,
+      });
+      await eventually(async () => {
+        try {
+          return (await readFile(marker, 'utf8')) === 'yes';
+        } catch {
+          return false;
+        }
+      });
+      expect(await client.inspect('runtime-filtered-event')).toMatchObject({
+        status: 'running',
+        diagnostics: '',
+      });
+    } finally {
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('discards oversized child RPC lines without stopping the runtime', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'dashboard-runtime-host-oversized-'),

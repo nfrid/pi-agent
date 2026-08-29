@@ -23,6 +23,10 @@ export const RUNTIME_HOST_MAX_DIAGNOSTICS_BYTES = 32 * 1024;
 const TERM_WAIT_MS = 2_000;
 const READINESS_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const RPC_RECORD_PREFIX_CHARS = 512;
+const RPC_RECORD_TYPE_PREFIX =
+  /^\{(?:"id":"(?:\\.|[^"\\])*",)?"type":"([^"]+)"/u;
+const RETAINED_RPC_RECORD_TYPES = new Set(['response', 'extension_ui_request']);
 
 const READ_ONLY_TOOLS = 'read,grep,find,ls';
 const LOGIN_ENV_MARKER = '\0__PI_RUNTIME_ENV_START__\0';
@@ -203,7 +207,19 @@ function drainStdout(runtime: HostRuntime, chunk: Buffer | string): void {
     }
     const newline = text.indexOf('\n');
     const segment = newline < 0 ? text : text.slice(0, newline);
-    if (
+    // Pi emits canonical JSON with top-level `type` first, except responses
+    // where the short correlation id comes first. The runtime host consumes
+    // only responses and extension UI, so discard session events before their
+    // inline images or tool output enter the bounded line buffer.
+    const prefix = `${runtime.stdoutBuffer}${segment.slice(
+      0,
+      Math.max(0, RPC_RECORD_PREFIX_CHARS - runtime.stdoutBuffer.length),
+    )}`;
+    const recordType = RPC_RECORD_TYPE_PREFIX.exec(prefix)?.[1];
+    if (recordType && !RETAINED_RPC_RECORD_TYPES.has(recordType)) {
+      runtime.stdoutBuffer = '';
+      if (newline < 0) runtime.stdoutDiscardingLine = true;
+    } else if (
       Buffer.byteLength(runtime.stdoutBuffer) + Buffer.byteLength(segment) >
       RUNTIME_HOST_MAX_LINE_BYTES
     ) {
