@@ -413,7 +413,12 @@ h2 {
 }
 .message-user {
   border-color: var(--pink);
-  background: var(--bg-alt);
+  background: linear-gradient(
+    to right,
+    var(--bg-alt) 0,
+    var(--bg-alt) calc(100% - 84px),
+    transparent 100%
+  );
 }
 .message-steering {
   border-color: var(--orange);

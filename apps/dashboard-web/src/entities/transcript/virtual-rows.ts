@@ -8,7 +8,14 @@ export type TranscriptToolStreamRange = {
 
 type ToolStreamItem = Pick<
   TranscriptModelItem,
-  'key' | 'tool' | 'role' | 'thinking' | 'text' | 'imageCount'
+  | 'key'
+  | 'tool'
+  | 'role'
+  | 'thinking'
+  | 'text'
+  | 'imageCount'
+  | 'entry'
+  | 'event'
 >;
 
 function isThinkingOnly(item: ToolStreamItem | undefined): boolean {
@@ -20,14 +27,26 @@ function isThinkingOnly(item: ToolStreamItem | undefined): boolean {
   );
 }
 
-/** Return tool ranges without letting thinking-only assistant entries split them. */
+function isContinuingEvent(item: ToolStreamItem | undefined): boolean {
+  return Boolean(
+    item?.event &&
+      item.entry.kind === 'other' &&
+      item.entry.continuesGroup === true,
+  );
+}
+
+function isStreamHistory(item: ToolStreamItem | undefined): boolean {
+  return Boolean(item?.tool || isThinkingOnly(item) || isContinuingEvent(item));
+}
+
+/** Return tool ranges without letting thinking or continuing events split them. */
 export function buildTranscriptToolStreams(
   items: readonly ToolStreamItem[],
 ): TranscriptToolStreamRange[] {
   const result: TranscriptToolStreamRange[] = [];
   let index = 0;
   while (index < items.length) {
-    if (!items[index]?.tool && !isThinkingOnly(items[index])) {
+    if (!isStreamHistory(items[index])) {
       index += 1;
       continue;
     }
@@ -35,8 +54,8 @@ export function buildTranscriptToolStreams(
     let hasTool = false;
     while (index < items.length) {
       const item = items[index];
-      if (!item?.tool && !isThinkingOnly(item)) break;
-      if (item.tool) hasTool = true;
+      if (!isStreamHistory(item)) break;
+      if (item?.tool) hasTool = true;
       index += 1;
     }
     if (!hasTool) continue;

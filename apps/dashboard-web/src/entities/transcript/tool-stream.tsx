@@ -31,7 +31,7 @@ type ToolStreamHistoryEntry =
       timestamp?: number | string;
     }
   | {
-      kind: 'call';
+      kind: 'call' | 'event';
       key: string;
       item: TranscriptModelItem;
       timestampOverride?: number | string;
@@ -94,12 +94,33 @@ export function TranscriptToolStream({
         item,
         timestampOverride: latestAssistantTimestamp,
       });
+    } else if (
+      item.event &&
+      item.entry.kind === 'other' &&
+      item.entry.continuesGroup
+    ) {
+      history.push({
+        kind: 'event',
+        key: item.key,
+        item,
+        timestampOverride:
+          transcriptItemTimestamp(item) ?? latestAssistantTimestamp,
+      });
     }
   }
   const thinkingCount = history.filter(
     (entry) => entry.kind === 'thought',
   ).length;
-  const hiddenHistoryCount = Math.max(0, history.length - 3);
+  const collapsedHistory = history
+    .filter(
+      (entry) =>
+        entry.kind !== 'event' ||
+        (entry.item.event?.kind !== 'todo' &&
+          entry.item.event?.kind !== 'settings' &&
+          entry.item.event?.kind !== 'custom-message'),
+    )
+    .slice(-3);
+  const hiddenHistoryCount = history.length - collapsedHistory.length;
   const summary = toolStreamMetadata(tools);
   const kind = activityKind(tools);
   const status = toolStreamStatus(tools);
@@ -121,7 +142,7 @@ export function TranscriptToolStream({
     .filter(Boolean)
     .join(' · ');
   const detailId = useId();
-  const visibleHistory = expanded ? history : history.slice(-3);
+  const visibleHistory = expanded ? history : collapsedHistory;
   const earlierLabel = `${hiddenHistoryCount} earlier item${hiddenHistoryCount === 1 ? '' : 's'}`;
   const toggle = () => {
     captureScrollAnchor?.(streamKey);
@@ -165,7 +186,7 @@ export function TranscriptToolStream({
       );
     });
 
-  if (history.length <= 3)
+  if (hiddenHistoryCount === 0)
     return (
       <div data-transcript-key={streamKey}>
         {renderPreamble()}
@@ -177,7 +198,7 @@ export function TranscriptToolStream({
     <section
       className={`transcript-tool-stream${expanded ? ' transcript-tool-stream-expanded' : ''}`}
       data-transcript-key={streamKey}
-      aria-label="Tool calls and thinking"
+      aria-label="Tool calls, thinking, and events"
     >
       {renderPreamble()}
       <div className="tool-stream-meta" id={`${detailId}-meta`}>

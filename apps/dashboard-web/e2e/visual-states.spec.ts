@@ -41,10 +41,10 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   await expect(page.locator('.transcript-thinking')).toHaveCount(0);
   await expect(page.locator('.transcript-tool-stream')).toHaveCount(1);
   const earlierHistory = page.getByRole('button', {
-    name: /Show 7 earlier items/,
+    name: /Show 9 earlier items/,
   });
   await expect(earlierHistory).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(2);
+  await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(1);
   await expect(
     page.locator('.tool-stream-items .transcript-thinking-blob'),
   ).toHaveCount(1);
@@ -53,6 +53,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   await expect(metadata).toContainText('complete');
   await expect(metadata).toContainText('5 thoughts');
   await expect(metadata).toContainText('5 calls');
+  await expect(page.getByText(/Tasks · T1 added/)).toHaveCount(0);
   const streamGeometry = await page
     .locator('.transcript-tool-stream')
     .evaluate((stream) => {
@@ -116,6 +117,20 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   expect(
     Math.abs(streamGeometry.thoughtTimeRight - streamGeometry.toolTimeRight),
   ).toBeLessThan(1);
+  const userPresentation = await page
+    .locator('.message-user')
+    .evaluate((user) => {
+      const time = user.querySelector<HTMLElement>('.transcript-time');
+      if (!time) throw new Error('user timestamp missing');
+      return {
+        backgroundImage: getComputedStyle(user).backgroundImage,
+        timeRight: time.getBoundingClientRect().right,
+      };
+    });
+  expect(userPresentation.backgroundImage).toContain('linear-gradient');
+  expect(
+    Math.abs(userPresentation.timeRight - streamGeometry.toolTimeRight),
+  ).toBeLessThan(1);
   await expect(
     page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
   ).toBeVisible();
@@ -130,12 +145,13 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
 
   await earlierHistory.click();
   await expect(
-    page.getByRole('button', { name: /Hide 7 earlier items/ }),
+    page.getByRole('button', { name: /Hide 9 earlier items/ }),
   ).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(5);
   await expect(
     page.locator('.tool-stream-items .transcript-thinking-blob'),
   ).toHaveCount(5);
+  await expect(page.getByText(/Tasks · T1 added/)).toBeVisible();
   expect(
     await page
       .locator('.transcript-tool-stream-expanded')

@@ -255,8 +255,11 @@ const workingEntries: readonly unknown[] = [
       role: 'assistant',
       timestamp: VISUAL_TIMESTAMP - 18_000,
       content: [
-        { type: 'thinking', thinking: 'Comparing the mobile layout.' },
-        { type: 'thinking', thinking: 'Checking the disclosure behavior.' },
+        {
+          type: 'thinking',
+          thinking:
+            'Comparing the mobile layout.\nChecking the disclosure behavior.',
+        },
         {
           type: 'toolCall',
           id: 'working-style-read',

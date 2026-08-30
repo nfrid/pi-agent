@@ -176,16 +176,17 @@ function preambleTitle(text: string): string {
 
 function messageThinking(content: unknown): string[] {
   if (!Array.isArray(content)) return [];
-  return content
-    .flatMap((part) =>
-      part &&
-      typeof part === 'object' &&
-      (part as Record<string, unknown>).type === 'thinking' &&
-      typeof (part as Record<string, unknown>).thinking === 'string'
-        ? [(part as { thinking: string }).thinking.trim()]
-        : [],
-    )
-    .filter((thinking) => thinking.length > 0);
+  return content.flatMap((part) =>
+    part &&
+    typeof part === 'object' &&
+    (part as Record<string, unknown>).type === 'thinking' &&
+    typeof (part as Record<string, unknown>).thinking === 'string'
+      ? (part as { thinking: string }).thinking
+          .split(/\r?\n/u)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+      : [],
+  );
 }
 
 function messageImages(content: unknown): TranscriptImage[] {
@@ -668,13 +669,7 @@ export function toTranscriptEntries(
           : undefined;
     const visibleText = text && !isNarration(text) ? text : undefined;
     const hasAssociatedTools = item.associatedToolCallIds.length > 0;
-    if (
-      !visibleText &&
-      thinking.length === 0 &&
-      imageCount === 0 &&
-      !item.preparing
-    )
-      continue;
+    if (!visibleText && thinking.length === 0 && imageCount === 0) continue;
     const preamble =
       visibleText && hasAssociatedTools
         ? preambleTitle(visibleText)

@@ -22,7 +22,7 @@ import {
   transcriptItemTimestamp,
   transcriptRoleLabel,
 } from './transcript';
-import { SkillInvocationView, TranscriptEntry } from './transcript/entries';
+import { SkillInvocationView } from './transcript/entries';
 import { TranscriptToolStream } from './transcript/tool-stream';
 import { LivePauseEvent } from './transcript/view';
 
@@ -608,7 +608,7 @@ describe('tool row views and virtual transcript construction', () => {
     ).toBe('3 calls · +3 ~1 · 3s · 1 failed');
   });
 
-  it('keeps delegate feedback visible between flat tool streams', () => {
+  it('keeps delegate feedback visible inside a flat tool stream', () => {
     const items = toTranscriptEntries([
       { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
       {
@@ -626,15 +626,20 @@ describe('tool row views and virtual transcript construction', () => {
     expect(feedback).toBeDefined();
     if (!feedback) return;
     expect(buildTranscriptToolStreams(items)).toMatchObject([
-      { start: 0, end: 0 },
-      { start: 2, end: 2 },
+      { start: 0, end: 2 },
     ]);
     expect(
-      renderToStaticMarkup(createElement(TranscriptEntry, { item: feedback })),
+      renderToStaticMarkup(
+        createElement(TranscriptToolStream, {
+          items,
+          expanded: false,
+          onToggle: () => undefined,
+        }),
+      ),
     ).toContain('Parent feedback');
   });
 
-  it('builds virtual flat rows without swallowing non-tool events', () => {
+  it('keeps continuing events in the same virtual tool row', () => {
     const items = toTranscriptEntries([
       { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
       {
@@ -647,9 +652,80 @@ describe('tool row views and virtual transcript construction', () => {
       { type: 'tool', tool: { toolCallId: 'call-2', name: 'bash' } },
     ]);
     expect(buildVirtualTranscriptRows(items)).toEqual([
-      { kind: 'tool-stream', key: items[0]?.key, start: 0, end: 0 },
-      { kind: 'entry', key: items[1]?.key, index: 1 },
-      { kind: 'tool-stream', key: items[2]?.key, start: 2, end: 2 },
+      { kind: 'tool-stream', key: items[0]?.key, start: 0, end: 2 },
+    ]);
+  });
+
+  it('hides todo snapshots inside collapsed tool history', () => {
+    const items = toTranscriptEntries([
+      { type: 'tool', tool: { toolCallId: 'todo-call-1', name: 'read' } },
+      { type: 'tool', tool: { toolCallId: 'todo-call-2', name: 'grep' } },
+      { type: 'tool', tool: { toolCallId: 'todo-call-3', name: 'bash' } },
+      {
+        type: 'custom',
+        customType: 'lean-todo',
+        data: {
+          kind: 'snapshot',
+          state: {
+            tasks: [{ id: 'T1', text: 'Verify dashboard', status: 'doing' }],
+          },
+        },
+      },
+    ]);
+    const render = (expanded: boolean) =>
+      renderToStaticMarkup(
+        createElement(TranscriptToolStream, {
+          items,
+          expanded,
+          onToggle: () => undefined,
+        }),
+      );
+
+    expect(buildTranscriptToolStreams(items)).toMatchObject([
+      { start: 0, end: 3 },
+    ]);
+    expect(render(false)).toContain('Show 1 earlier item');
+    expect(render(false)).not.toContain('Tasks · T1 added');
+    expect(render(true)).toContain('Tasks · T1 added');
+  });
+
+  it('drops empty streaming assistant envelopes while preparing', () => {
+    let projection = hydrateTranscript([], 's1');
+    projection = reduceTranscriptEvent(projection, {
+      type: 'message.started',
+      sessionId: 's1',
+      message: {
+        messageId: 'assistant-pending',
+        role: 'assistant',
+        content: [],
+      },
+    });
+
+    expect(toTranscriptEntries(projection)).toEqual([]);
+  });
+
+  it('projects each non-empty thinking line as one activity item', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'thinking',
+              thinking:
+                'Reviewing the stream.\n\nChecking the layout.\nFinishing.',
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.thinking).toEqual([
+      'Reviewing the stream.',
+      'Checking the layout.',
+      'Finishing.',
     ]);
   });
 
@@ -988,7 +1064,7 @@ describe('tool row views and virtual transcript construction', () => {
         type: 'custom_message',
         customType: 'notice',
         display: true,
-        content: 'keep boundary',
+        content: 'stay in history',
       },
     ]);
     const assistant = items.find(({ entry }) => entry.kind === 'assistant');
@@ -1010,7 +1086,7 @@ describe('tool row views and virtual transcript construction', () => {
       ),
     ).toBe(true);
     expect(buildTranscriptToolStreams(items)).toMatchObject([
-      { start: 1, end: 1 },
+      { start: 1, end: 2 },
     ]);
   });
 
