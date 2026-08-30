@@ -53,6 +53,15 @@
   width: 100%;
   margin: 0 0 7px;
 }
+.run-status-disclosure {
+  display: contents;
+}
+.run-status-disclosure-trigger {
+  display: none;
+}
+.run-status-disclosure-content {
+  display: contents;
+}
 .pause-status {
   color: var(--color-text-muted);
   font-size: 0.82rem;

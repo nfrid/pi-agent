@@ -5,6 +5,7 @@ import type {
   SessionIndexEntry,
 } from '@pi-dashboard/protocol';
 import type { ComponentType, ReactNode, RefObject } from 'react';
+import { useId, useState } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
 import { useDashboardNavigate } from '../../routes/navigation';
 import {
@@ -248,6 +249,38 @@ export function SessionHeader({
 
 export { SessionHistoryControl } from './history-control';
 
+/**
+ * Keep task and delegate launchers available without spending a full row on
+ * narrow screens. The launcher components remain mounted so their own drawer,
+ * focus, and history state stays authoritative.
+ */
+export function RunStatusDisclosure({ children }: { children: ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  return (
+    <div className="run-status-disclosure">
+      <button
+        type="button"
+        className="run-status-disclosure-trigger"
+        aria-controls={contentId}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span className="run-status-disclosure-title">Run status</span>
+        <span className="run-status-disclosure-detail">
+          Tasks and delegates
+        </span>
+        <span className="run-status-disclosure-chevron" aria-hidden="true">
+          {expanded ? '⌃' : '⌄'}
+        </span>
+      </button>
+      <div id={contentId} className="run-status-disclosure-content">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function SessionControlLayer({
   controlLayerRef,
   awayFromLatest,
@@ -295,19 +328,21 @@ export function SessionControlLayer({
         className="extension-surfaces session-extension-surfaces"
         aria-label="Current tasks and delegates"
       >
-        <ExtensionSurfaceStack
-          runtime={runtime}
-          placement="composer"
-          excludeDelegate
-          slotsOnly
-        />
-        <DelegateHistorySurface
-          id={sessionId}
-          runtime={runtime}
-          sessionChange={sessionChange}
-          store={store}
-          slotsOnly
-        />
+        <RunStatusDisclosure>
+          <ExtensionSurfaceStack
+            runtime={runtime}
+            placement="composer"
+            excludeDelegate
+            slotsOnly
+          />
+          <DelegateHistorySurface
+            id={sessionId}
+            runtime={runtime}
+            sessionChange={sessionChange}
+            store={store}
+            slotsOnly
+          />
+        </RunStatusDisclosure>
       </section>
       <Composer
         key={sessionId}
