@@ -5,7 +5,6 @@ import {
   toolStreamDurationLabel,
   toolStreamKindLabel,
   toolStreamMetadata,
-  toolStreamStatus,
 } from './activity';
 import { TranscriptDisclosureIcon } from './disclosure-icon';
 import { ThinkingBlob, TranscriptEntry } from './entries';
@@ -37,14 +36,6 @@ type ToolStreamHistoryEntry =
       item: TranscriptModelItem;
       timestampOverride?: number | string;
     };
-
-function metadataStatusLabel(status: ReturnType<typeof toolStreamStatus>) {
-  return status === 'failed'
-    ? 'failed'
-    : status === 'in-progress'
-      ? 'in progress'
-      : 'complete';
-}
 
 function MetadataSeparator() {
   return (
@@ -126,23 +117,21 @@ export function TranscriptToolStream({
   const kind = activityKind(tools);
   const kindLabel = tools.length > 0 ? toolStreamKindLabel(kind) : 'Thinking';
   const metadataKind = tools.length > 0 ? kind : 'thinking';
-  const status = toolStreamStatus(tools);
   const metadataTitle = [
     kindLabel,
-    metadataStatusLabel(status),
     thinkingCount > 0
       ? `${thinkingCount} thought${thinkingCount === 1 ? '' : 's'}`
       : undefined,
     tools.length > 0
       ? `${tools.length} call${tools.length === 1 ? '' : 's'}`
       : undefined,
+    summary.failureCount > 0 ? `${summary.failureCount} failed` : undefined,
     summary.lineChanges.added ? `+${summary.lineChanges.added}` : undefined,
     summary.lineChanges.changed ? `~${summary.lineChanges.changed}` : undefined,
     summary.lineChanges.removed ? `-${summary.lineChanges.removed}` : undefined,
     summary.durationMs > 0
       ? toolStreamDurationLabel(summary.durationMs)
       : undefined,
-    summary.failureCount > 0 ? `${summary.failureCount} failed` : undefined,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -225,12 +214,6 @@ export function TranscriptToolStream({
           title={metadataTitle}
         >
           <span className="tool-stream-metadata-kind">{kindLabel}</span>
-          <MetadataSeparator />
-          <span
-            className={`tool-stream-metadata-status tool-stream-status-${status}`}
-          >
-            {metadataStatusLabel(status)}
-          </span>
           {thinkingCount > 0 ? (
             <>
               <MetadataSeparator />
@@ -244,6 +227,14 @@ export function TranscriptToolStream({
               <MetadataSeparator />
               <span className="tool-stream-metadata-calls">
                 {tools.length} call{tools.length === 1 ? '' : 's'}
+              </span>
+            </>
+          ) : null}
+          {summary.failureCount > 0 ? (
+            <>
+              <MetadataSeparator />
+              <span className="tool-stream-metadata-failure">
+                {summary.failureCount} failed
               </span>
             </>
           ) : null}
@@ -276,14 +267,6 @@ export function TranscriptToolStream({
               <MetadataSeparator />
               <span className="tool-stream-metadata-duration">
                 {toolStreamDurationLabel(summary.durationMs)}
-              </span>
-            </>
-          ) : null}
-          {summary.failureCount > 0 ? (
-            <>
-              <MetadataSeparator />
-              <span className="tool-stream-metadata-failure">
-                {summary.failureCount} failed
               </span>
             </>
           ) : null}

@@ -1,7 +1,6 @@
 export type {
   ActivityStepParts,
   ToolStreamMetadata,
-  ToolStreamStatus,
   ToolStreamSummary,
 } from './activity';
 export {
@@ -12,7 +11,6 @@ export {
   toolStreamKindLabel,
   toolStreamMetadata,
   toolStreamMetadataLabel,
-  toolStreamStatus,
   toolStreamSummary,
 } from './activity';
 export { parseSkillInvocation } from './entries';

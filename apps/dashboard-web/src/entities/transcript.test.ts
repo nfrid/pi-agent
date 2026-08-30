@@ -584,15 +584,20 @@ describe('tool row views and virtual transcript construction', () => {
     );
     expect(html).toContain('tool-stream-metadata-mutate');
     expect(html).toContain('tool-stream-metadata-kind');
-    expect(html).toContain(
-      'tool-stream-metadata-status tool-stream-status-failed',
-    );
+    expect(html).not.toContain('tool-stream-metadata-status');
+    expect(html).not.toContain('tool-stream-status-failed');
     expect(html).not.toContain('tool-stream-metadata-thoughts');
     expect(html).toContain('tool-stream-metadata-calls');
     expect(html).toContain('tool-stream-metadata-changes');
     expect(html).toContain('line-change-added');
     expect(html).toContain('tool-stream-metadata-duration');
     expect(html).toContain('tool-stream-metadata-failure');
+    expect(html.indexOf('tool-stream-metadata-failure')).toBeGreaterThan(
+      html.indexOf('tool-stream-metadata-calls'),
+    );
+    expect(html.indexOf('tool-stream-metadata-changes')).toBeGreaterThan(
+      html.indexOf('tool-stream-metadata-failure'),
+    );
   });
 
   it('aggregates flat stream metadata without a group kind or status', () => {

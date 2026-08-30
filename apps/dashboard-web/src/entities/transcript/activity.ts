@@ -27,21 +27,6 @@ export type ToolStreamMetadata = {
   failureCount: number;
 };
 
-export type ToolStreamStatus = 'complete' | 'in-progress' | 'failed';
-
-export function toolStreamStatus(
-  tools: readonly ActivityStepTool[],
-): ToolStreamStatus {
-  if (tools.some(isFailedActivityTool)) return 'failed';
-  if (
-    tools.some((tool) =>
-      ['pending', 'running', 'preparing'].includes(tool.status ?? ''),
-    )
-  )
-    return 'in-progress';
-  return 'complete';
-}
-
 export function toolStreamDurationLabel(milliseconds: number): string {
   return formatCommandDuration(milliseconds);
 }

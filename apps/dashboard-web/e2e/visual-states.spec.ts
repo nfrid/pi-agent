@@ -50,7 +50,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   ).toHaveCount(1);
   const metadata = page.locator('.tool-stream-metadata');
   await expect(metadata).toContainText('Edited');
-  await expect(metadata).toContainText('complete');
+  await expect(metadata).not.toContainText('complete');
   await expect(metadata).toContainText('5 thoughts');
   await expect(metadata).toContainText('5 calls');
   await expect(page.getByText(/Tasks · T1 added/)).toHaveCount(0);
@@ -70,6 +70,12 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
       const metadataNode = stream.querySelector<HTMLElement>(
         '.tool-stream-metadata',
       );
+      const thoughts = stream.querySelector<HTMLElement>(
+        '.tool-stream-metadata-thoughts',
+      );
+      const calls = stream.querySelector<HTMLElement>(
+        '.tool-stream-metadata-calls',
+      );
       const messageTime = stream.querySelector<HTMLElement>(
         '.message-assistant .transcript-time',
       );
@@ -83,6 +89,8 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
         !firstDot ||
         !kind ||
         !metadataNode ||
+        !thoughts ||
+        !calls ||
         !messageTime ||
         !thoughtTime ||
         !toolTime
@@ -103,6 +111,8 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
           firstDot.getBoundingClientRect().x + firstDot.offsetWidth / 2,
         kindColor: getComputedStyle(kind).color,
         metadataColor: getComputedStyle(metadataNode).color,
+        thoughtsColor: getComputedStyle(thoughts).color,
+        callsColor: getComputedStyle(calls).color,
         messageTimeRight: messageTime.getBoundingClientRect().right,
         thoughtTimeRight: thoughtTime.getBoundingClientRect().right,
         toolTimeRight: toolTime.getBoundingClientRect().right,
@@ -123,6 +133,9 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     Math.abs(streamGeometry.iconCenter - streamGeometry.dotCenter),
   ).toBeLessThan(1);
   expect(streamGeometry.kindColor).not.toBe(streamGeometry.metadataColor);
+  expect(streamGeometry.thoughtsColor).not.toBe(streamGeometry.metadataColor);
+  expect(streamGeometry.callsColor).not.toBe(streamGeometry.metadataColor);
+  expect(streamGeometry.thoughtsColor).not.toBe(streamGeometry.callsColor);
   expect(
     Math.abs(streamGeometry.messageTimeRight - streamGeometry.toolTimeRight),
   ).toBeLessThan(1);

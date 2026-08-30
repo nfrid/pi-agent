@@ -94,16 +94,9 @@
 .tool-stream-metadata-duration {
   color: var(--dim);
 }
-.tool-stream-metadata-status {
-  color: var(--muted);
-}
-.tool-stream-status-failed,
 .tool-stream-metadata-failure {
   color: var(--red);
   font-weight: 700;
-}
-.tool-stream-status-in-progress {
-  color: var(--cyan);
 }
 .tool-stream-metadata-changes {
   display: inline-flex;
@@ -112,7 +105,16 @@
   font-variant-numeric: tabular-nums;
 }
 .tool-stream-metadata-thoughts,
-.tool-stream-metadata-calls,
+.tool-stream-metadata-calls {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.tool-stream-metadata-thoughts {
+  color: var(--purple);
+}
+.tool-stream-metadata-calls {
+  color: var(--cyan);
+}
 .tool-stream-metadata-duration {
   font-variant-numeric: tabular-nums;
 }
