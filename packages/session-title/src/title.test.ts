@@ -165,12 +165,15 @@ describe('session title generation', () => {
     );
   });
 
-  it('requests and preserves titles in the user’s language', async () => {
-    const complete = vi.fn(
-      async (_model: unknown, _request: unknown, _options: unknown) => ({
-        content: [{ type: 'text', text: '  `Исправить названия сессий`  ' }],
-      }),
-    );
+  it('enforces Cyrillic output for predominantly Cyrillic requests', async () => {
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: '- - - Finance sync' }],
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: '  `Завершить настройку finance`  ' }],
+      });
     const client = {
       find: vi.fn(() => ({
         provider: 'openai-codex',
@@ -184,14 +187,21 @@ describe('session title generation', () => {
     await expect(
       generateSessionTitle(
         client,
-        'Почему автозаголовки не работают?',
+        'мы реализовали finance и провели sync, теперь надо закончить настройку',
         new AbortController().signal,
         TEST_CONFIG,
       ),
-    ).resolves.toBe('Исправить названия сессий');
+    ).resolves.toBe('Завершить настройку finance');
+    expect(complete).toHaveBeenCalledTimes(2);
     const request = complete.mock.calls[0]?.[1] as { systemPrompt: string };
     expect(request.systemPrompt).toContain(
-      "same language and writing system as the user's request",
+      'This request is predominantly Cyrillic',
+    );
+    const retry = complete.mock.calls[1]?.[1] as {
+      messages: Array<{ content: Array<{ text: string }> }>;
+    };
+    expect(retry.messages[0]?.content[0]?.text).toContain(
+      'The title must contain Cyrillic words',
     );
   });
 
@@ -199,6 +209,7 @@ describe('session title generation', () => {
     expect(sanitizeSessionTitle('  `Fix   title generation!`  ')).toBe(
       'Fix title generation',
     );
+    expect(sanitizeSessionTitle('- - - Finance sync')).toBe('Finance sync');
     expect(sanitizeSessionTitle('  \n  ')).toBeUndefined();
     expect(
       sanitizeSessionTitle(

@@ -56,6 +56,7 @@ export function sanitizeSessionTitle(
     .split(/\r?\n/u)[0]
     ?.trim()
     .replace(/^[\s'"`]+|[\s'"`]+$/gu, '')
+    .replace(/^(?:[\p{Dash_Punctuation}_*#]+\s*)+/gu, '')
     .replace(/\s+/gu, ' ')
     .replace(/[.!?]+$/gu, '')
     .trim();
@@ -199,12 +200,37 @@ function reasoningOptions(
   }
 }
 
+function countLetters(text: string, script: 'Cyrillic' | 'Latin'): number {
+  const pattern =
+    script === 'Cyrillic' ? /\p{Script=Cyrillic}/gu : /\p{Script=Latin}/gu;
+  return text.match(pattern)?.length ?? 0;
+}
+
+function requiresCyrillicTitle(text: string): boolean {
+  const cyrillic = countLetters(text, 'Cyrillic');
+  return cyrillic > 0 && cyrillic > countLetters(text, 'Latin');
+}
+
+function responseTitle(
+  response: AssistantMessage,
+  maxLength: number,
+): string | undefined {
+  const text = response.content
+    .filter(
+      (part): part is { type: 'text'; text: string } => part.type === 'text',
+    )
+    .map((part) => part.text)
+    .join(' ');
+  return sanitizeSessionTitle(text, maxLength);
+}
+
 async function completeSessionTitle(
   client: SessionTitleModelClient,
   input: string,
   systemTemplate: string,
   signal: AbortSignal,
   config: SessionTitleConfig,
+  languageSample = input,
 ): Promise<string | undefined> {
   const model = client.find(config.provider, config.model);
   if (!model) return undefined;
@@ -218,27 +244,47 @@ async function completeSessionTitle(
     '{maxLength}',
     String(config.maxLength),
   );
-  const systemPrompt = config.instructions
+  const requiresCyrillic = requiresCyrillicTitle(languageSample);
+  const configuredPrompt = config.instructions
     ? `${baseSystemPrompt}\n\nAdditional instructions:\n${config.instructions}`
     : baseSystemPrompt;
+  const systemPrompt = requiresCyrillic
+    ? `${configuredPrompt}\n\nThis request is predominantly Cyrillic. The title must contain Cyrillic words. An English-only title is invalid.`
+    : configuredPrompt;
   const thinking = clampThinkingLevel(model, config.thinking);
+  const options = {
+    signal,
+    cacheRetention: 'none' as const,
+    maxTokens: config.maxOutputTokens,
+    ...reasoningOptions(model, thinking),
+  };
   const response = await client.complete(
     model,
     { systemPrompt, messages: [message] },
-    {
-      signal,
-      cacheRetention: 'none',
-      maxTokens: config.maxOutputTokens,
-      ...reasoningOptions(model, thinking),
-    },
+    options,
   );
-  const title = response.content
-    .filter(
-      (part): part is { type: 'text'; text: string } => part.type === 'text',
-    )
-    .map((part) => part.text)
-    .join(' ');
-  return sanitizeSessionTitle(title, config.maxLength);
+  const title = responseTitle(response, config.maxLength);
+  if (!requiresCyrillic || (title && /\p{Script=Cyrillic}/u.test(title)))
+    return title;
+
+  const retryMessage: Message = {
+    ...message,
+    content: [
+      {
+        type: 'text',
+        text: `The title must contain Cyrillic words. Return only a corrected title for this request:\n\n${input}`,
+      },
+    ],
+  };
+  const retry = responseTitle(
+    await client.complete(
+      model,
+      { systemPrompt, messages: [retryMessage] },
+      options,
+    ),
+    config.maxLength,
+  );
+  return retry && /\p{Script=Cyrillic}/u.test(retry) ? retry : undefined;
 }
 
 export function generateSessionTitle(
@@ -264,11 +310,15 @@ export function generateSessionTitleFromHistory(
 ): Promise<string | undefined> {
   const history = buildSessionTitleHistory(entries, config.maxInputChars);
   if (!history) return Promise.resolve(undefined);
+  const firstUserMessage = liteSessionTitleMessages(entries).find(
+    (message) => message.role === 'user',
+  );
   return completeSessionTitle(
     client,
     history,
     HISTORY_TITLE_SYSTEM_PROMPT,
     signal,
     config,
+    firstUserMessage?.content ?? history,
   );
 }
