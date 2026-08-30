@@ -1,18 +1,8 @@
 /* Global transcript contract: activity group and legacy transcript entry vocabulary. */
 .activity-group {
-  margin: 8px 0;
-  border: var(--border-soft);
-  background: var(--tool-pending);
-}
-.activity-group.activity-settled {
-  background: var(--tool-pending);
-}
-.activity-group.activity-pending {
-  border-left: 2px solid var(--cyan);
-}
-.activity-group.activity-ended-error {
-  border-left: 2px solid var(--red);
-  background: var(--tool-error);
+  margin: 12px 0;
+  border: 0;
+  background: transparent;
 }
 .activity-group-header {
   min-width: 0;
@@ -20,43 +10,36 @@
   color: var(--fg);
   overflow-wrap: anywhere;
   line-height: 1.55;
-  cursor: pointer;
-  transition: background-color 150ms ease;
-}
-.activity-group > .activity-group-header:hover {
-  background: color-mix(in srgb, var(--cyan) 5%, var(--bg-alt));
 }
 .activity-group-header::after {
   display: block;
   clear: both;
   content: "";
 }
-.activity-group-toggle {
-  display: inline-grid;
-  box-sizing: border-box;
-  width: 1em;
-  height: 1em;
-  place-items: center;
-  margin-inline-end: 0.2em;
-  vertical-align: baseline;
-  border: 1px solid transparent;
-  border-radius: 3px;
+.activity-summary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
   background: transparent;
   padding: 0;
-  color: inherit;
+  color: var(--dim);
   font: inherit;
-  font-size: 1em;
-  line-height: inherit;
+  font-size: 11px;
   cursor: pointer;
 }
-.activity-group-toggle:hover {
-  border-color: var(--line-soft);
-  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+.activity-summary-toggle:hover {
+  color: var(--fg);
 }
-.activity-group-toggle:focus-visible {
-  border-color: var(--cyan);
+.activity-summary-toggle:focus-visible {
+  border-radius: 3px;
   outline: 2px solid var(--cyan);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+.activity-summary-toggle-icon {
+  color: var(--cyan);
+  font-size: 13px;
+  line-height: 1;
 }
 .activity-group-accessories {
   display: inline-flex;
@@ -113,25 +96,15 @@
   animation: tui-pulse 1.2s steps(2, end) infinite;
 }
 .activity-summary {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
   border-top: 1px solid var(--line-soft);
   padding: 7px 13px 8px;
   color: var(--muted);
   font-size: 11px;
-}
-.activity-steps {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.activity-summary .activity-steps li {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  align-items: center;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
 }
 .activity-step-meta {
   color: var(--dim);
@@ -189,15 +162,10 @@
 .line-change-removed {
   color: var(--red);
 }
-.activity-earlier {
-  display: block;
-  color: var(--dim);
-  margin-bottom: 2px;
-}
 .activity-metadata {
   display: block;
   min-width: 0;
-  margin-top: 5px;
+  margin: 0;
   overflow: hidden;
   color: var(--muted);
   text-overflow: ellipsis;

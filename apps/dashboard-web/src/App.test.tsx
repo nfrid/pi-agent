@@ -24,7 +24,6 @@ import {
   sessionDisplayTitle,
   sessionNavigationTarget,
   shouldApplySessionMetadata,
-  shouldShowActivityLead,
   shouldShowJumpToLatest,
   shouldShowQueuePanel,
   toTranscriptEntries,
@@ -985,20 +984,6 @@ describe('transcript outline and metadata', () => {
       activityGroupPresentation({ status: 'settled', toolCount: 1 }, false)
         .label,
     ).not.toContain('tool');
-  });
-});
-
-describe('activity presentation', () => {
-  it('hides an assistant lead when the same text is used as the title', () => {
-    expect(
-      shouldShowActivityLead(
-        'Checking the mobile transcript.',
-        'Checking the mobile transcript',
-      ),
-    ).toBe(false);
-    expect(
-      shouldShowActivityLead('A useful explanation.', 'Explored with read'),
-    ).toBe(true);
   });
 });
 

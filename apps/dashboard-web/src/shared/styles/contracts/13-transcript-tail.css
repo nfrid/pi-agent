@@ -4,7 +4,6 @@
   font-size: 11px;
   font-weight: 650;
 }
-.activity-earlier,
 .activity-metadata {
   padding-left: 2px;
 }
@@ -281,32 +280,22 @@
   width: 100%;
 }
 
-/* Group headers pin to the transcript edge. Expanded tool headers pin within
-   their own details boundary, below a containing group header when present. */
+/* Keep the explicit preamble visible while its activity details are inspected. */
 .activity-group {
-  --activity-header-height: 42px;
   overflow: visible;
-  border-radius: 0;
 }
 .activity-group > .activity-group-header {
   position: sticky;
   top: 0;
   z-index: 24;
   min-height: 42px;
-  border-radius: 0;
   background: var(--bg-alt);
 }
-.tool-detail[open] > summary.activity-step {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: var(--bg-alt);
-  border-bottom: 1px solid var(--line-soft);
-}
-.activity-group .tool-detail[open] > summary.activity-step {
-  top: var(--activity-header-height, 42px);
-  z-index: 22;
-  background: #2e2f3d; /* TODO: picked activity group bg, probably need to make group bg solid color */
+.activity-detail-expanded {
+  max-height: min(60vh, 32rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .session-page[data-tail-pending] .transcript {

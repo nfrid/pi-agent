@@ -5,11 +5,8 @@ import {
   activityGroupMetadata,
   activityGroupMetadataModel,
   activityGroupSummary,
-  activityStepParts,
-  commandStepMeta,
   type TranscriptGroup,
 } from './activity';
-import { activityStepTimestamps } from './landmarks';
 
 function lineCountLabel(count: number, kind: string): string {
   return `${count} line${count === 1 ? '' : 's'} ${kind}`;
@@ -90,16 +87,31 @@ function ActivityStepContent({
   );
 }
 
-function CollapsedActivitySummary({
+function activityStatusLabel(status: TranscriptGroup['status']): string {
+  if (status === 'ended-error') return 'failed';
+  if (status === 'live') return 'in progress';
+  if (status === 'preparing') return 'preparing';
+  return 'complete';
+}
+
+function ActivitySummary({
   group,
   items,
-  cwd,
+  expanded,
   compacting = false,
+  detailId,
+  labelId,
+  statusId,
+  onToggle,
 }: {
   group: TranscriptGroup;
   items: readonly TranscriptModelItem[];
-  cwd?: string;
+  expanded: boolean;
   compacting?: boolean;
+  detailId: string;
+  labelId: string;
+  statusId: string;
+  onToggle: (expanded: boolean) => void;
 }) {
   const summary = activityGroupSummary(group);
   const metadata = activityGroupMetadataModel(group, summary);
@@ -113,54 +125,41 @@ function CollapsedActivitySummary({
       metadata.lineChanges.changed ||
       metadata.lineChanges.removed,
   );
-  const allTimestamps = activityStepTimestamps(items);
-  const recentActions = group.tools
-    .slice(-summary.recentTools.length)
-    .map((tool, index) => ({
-      action: activityStepParts(tool, cwd),
-      meta: commandStepMeta(tool),
-      timestamp:
-        allTimestamps[
-          allTimestamps.length - summary.recentTools.length + index
-        ],
-    }));
-  const stepKeyCounts = new Map<string, number>();
+  const metadataTitle = [activityGroupMetadata(group, summary), compactionLabel]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <div className="activity-summary">
-      {summary.earlierToolCount > 0 && (
-        <span className="activity-earlier">
-          ⋮ {summary.earlierToolCount} earlier step
-          {summary.earlierToolCount === 1 ? '' : 's'}
-        </span>
-      )}
-      {recentActions.length > 0 && (
-        <ol className="activity-steps">
-          {recentActions.map(({ action, meta, timestamp }) => {
-            const occurrence = (stepKeyCounts.get(action.label) ?? 0) + 1;
-            stepKeyCounts.set(action.label, occurrence);
-            return (
-              <li
-                className={`activity-step role-${action.role} step-${action.state}`}
-                key={`${action.label}-${occurrence}`}
-              >
-                <ActivityStepContent
-                  action={action}
-                  meta={meta}
-                  showTimestamp={false}
-                  timestamp={timestamp}
-                />
-              </li>
-            );
-          })}
-        </ol>
-      )}
+      {summary.earlierToolCount > 0 ? (
+        <button
+          type="button"
+          className="activity-summary-toggle"
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          aria-labelledby={labelId}
+          aria-describedby={statusId}
+          onClick={() => onToggle(!expanded)}
+        >
+          <span className="activity-summary-toggle-icon" aria-hidden="true">
+            {expanded ? '⌃' : '⌄'}
+          </span>
+          <span>
+            {expanded ? 'Hide' : 'Show'} {summary.earlierToolCount} earlier call
+            {summary.earlierToolCount === 1 ? '' : 's'}
+          </span>
+        </button>
+      ) : null}
       <small
         className={`activity-metadata activity-metadata-${group.kind}`}
-        title={[activityGroupMetadata(group, summary), compactionLabel]
-          .filter(Boolean)
-          .join(' · ')}
+        title={metadataTitle}
       >
         <span className="activity-metadata-kind">{metadata.kindLabel}</span>
+        <span className="activity-metadata-separator" aria-hidden="true">
+          {' · '}
+        </span>
+        <span className="activity-metadata-status">
+          {activityStatusLabel(group.status)}
+        </span>
         <span className="activity-metadata-separator" aria-hidden="true">
           {' · '}
         </span>
@@ -224,4 +223,4 @@ function CollapsedActivitySummary({
   );
 }
 
-export { ActivityStepContent, CollapsedActivitySummary };
+export { ActivityStepContent, ActivitySummary };
