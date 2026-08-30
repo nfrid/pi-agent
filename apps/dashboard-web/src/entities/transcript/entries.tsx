@@ -9,6 +9,7 @@ import {
   activityStepParts,
   commandStepMeta,
 } from './activity';
+import { TranscriptDisclosureIcon } from './disclosure-icon';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
 
@@ -395,20 +396,26 @@ function ThinkingBlobs({
   const earlierCount = thinking.length - 3;
   return (
     <details
-      className="transcript-thinking"
+      className="transcript-thinking transcript-tool-stream"
       open={expanded}
       aria-label="Thinking"
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >
-      <summary>
-        <span className="thinking-disclosure-label">
-          <span className="transcript-disclosure-icon" aria-hidden="true">
-            {expanded ? '⌃' : '⌄'}
-          </span>
-          {expanded ? 'Hide' : 'Show'} {earlierCount} earlier thought
+      <summary className="tool-stream-meta">
+        <span className="tool-stream-toggle">
+          <TranscriptDisclosureIcon expanded={expanded} />
+          {expanded ? 'Hide' : 'Show'} {earlierCount} earlier item
           {earlierCount === 1 ? '' : 's'}
         </span>
-        <small>{thinking.length} thoughts</small>
+        <small className="tool-stream-metadata tool-stream-metadata-thinking">
+          <span className="tool-stream-metadata-kind">Thinking</span>
+          <span className="tool-stream-metadata-separator" aria-hidden="true">
+            {' · '}
+          </span>
+          <span className="tool-stream-metadata-thoughts">
+            {thinking.length} thoughts
+          </span>
+        </small>
       </summary>
       <div className="transcript-thinking-blobs">{blobs}</div>
     </details>

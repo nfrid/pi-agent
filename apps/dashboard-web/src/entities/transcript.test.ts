@@ -729,6 +729,42 @@ describe('tool row views and virtual transcript construction', () => {
     ]);
   });
 
+  it('uses the general history disclosure for standalone thinking', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'thinking',
+              thinking: 'One\nTwo\nThree\nFour\nFive',
+            },
+          ],
+        },
+      },
+    ]);
+    const html = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items,
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+
+    expect(buildTranscriptToolStreams(items)).toEqual([
+      { key: items[0]?.key, start: 0, end: 0 },
+    ]);
+    expect(html).toContain('Show 2 earlier items');
+    expect(html).toContain('tool-stream-metadata-thinking');
+    expect(html).toContain('Thinking');
+    expect(html).toContain('5 thoughts');
+    expect(html).not.toContain('tool-stream-metadata-calls');
+    expect(html).not.toContain(
+      'class="transcript-thinking transcript-tool-stream"',
+    );
+  });
+
   it('drops empty assistant messages after filtering empty thinking', () => {
     expect(
       toTranscriptEntries([

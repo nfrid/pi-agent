@@ -21,36 +21,18 @@
   display: flex;
   min-width: 0;
 }
-.transcript-thinking {
-  margin: 6px 0;
-}
 .transcript-thinking > summary {
-  box-sizing: border-box;
-  display: flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 12px;
-  padding: 5px 13px;
-  color: var(--muted);
   cursor: pointer;
-  font-size: 10px;
-  line-height: 1.2;
+  list-style: none;
 }
-.thinking-disclosure-label {
-  display: inline-flex;
-  min-height: 22px;
-  align-items: center;
-  gap: 5px;
+.transcript-thinking > summary::-webkit-details-marker {
+  display: none;
 }
-.transcript-thinking > summary small {
-  color: var(--dim);
-  line-height: 1.2;
-}
-.transcript-thinking[open] > summary {
+.transcript-thinking[open] > .tool-stream-meta {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: var(--bg-alt);
+  background: var(--bg);
 }
 .transcript-thinking-blobs {
   display: grid;

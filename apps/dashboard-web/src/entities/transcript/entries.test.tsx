@@ -50,7 +50,7 @@ describe('transcript entries', () => {
     const long = renderToStaticMarkup(
       <TranscriptEntry item={item(['one', 'two', 'three', 'four'])} />,
     );
-    expect(long).toContain('Show 1 earlier thought');
+    expect(long).toContain('Show 1 earlier item');
     expect(long).not.toContain('>one<');
     expect(long).toContain('four');
   });

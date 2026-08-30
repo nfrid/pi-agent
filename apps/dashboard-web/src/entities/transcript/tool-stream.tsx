@@ -7,6 +7,7 @@ import {
   toolStreamMetadata,
   toolStreamStatus,
 } from './activity';
+import { TranscriptDisclosureIcon } from './disclosure-icon';
 import { ThinkingBlob, TranscriptEntry } from './entries';
 import { transcriptItemTimestamp } from './landmarks';
 
@@ -123,14 +124,18 @@ export function TranscriptToolStream({
   const hiddenHistoryCount = history.length - collapsedHistory.length;
   const summary = toolStreamMetadata(tools);
   const kind = activityKind(tools);
+  const kindLabel = tools.length > 0 ? toolStreamKindLabel(kind) : 'Thinking';
+  const metadataKind = tools.length > 0 ? kind : 'thinking';
   const status = toolStreamStatus(tools);
   const metadataTitle = [
-    toolStreamKindLabel(kind),
+    kindLabel,
     metadataStatusLabel(status),
     thinkingCount > 0
       ? `${thinkingCount} thought${thinkingCount === 1 ? '' : 's'}`
       : undefined,
-    `${tools.length} call${tools.length === 1 ? '' : 's'}`,
+    tools.length > 0
+      ? `${tools.length} call${tools.length === 1 ? '' : 's'}`
+      : undefined,
     summary.lineChanges.added ? `+${summary.lineChanges.added}` : undefined,
     summary.lineChanges.changed ? `~${summary.lineChanges.changed}` : undefined,
     summary.lineChanges.removed ? `-${summary.lineChanges.removed}` : undefined,
@@ -198,7 +203,9 @@ export function TranscriptToolStream({
     <section
       className={`transcript-tool-stream${expanded ? ' transcript-tool-stream-expanded' : ''}`}
       data-transcript-key={streamKey}
-      aria-label="Tool calls, thinking, and events"
+      aria-label={
+        tools.length > 0 ? 'Tool calls, thinking, and events' : 'Thinking'
+      }
     >
       {renderPreamble()}
       <div className="tool-stream-meta" id={`${detailId}-meta`}>
@@ -210,18 +217,14 @@ export function TranscriptToolStream({
           aria-label={`${expanded ? 'Hide' : 'Show'} ${earlierLabel} · ${metadataTitle}`}
           onClick={toggle}
         >
-          <span className="transcript-disclosure-icon" aria-hidden="true">
-            {expanded ? '⌃' : '⌄'}
-          </span>
+          <TranscriptDisclosureIcon expanded={expanded} />
           {expanded ? 'Hide' : 'Show'} {earlierLabel}
         </button>
         <small
-          className={`tool-stream-metadata tool-stream-metadata-${kind}`}
+          className={`tool-stream-metadata tool-stream-metadata-${metadataKind}`}
           title={metadataTitle}
         >
-          <span className="tool-stream-metadata-kind">
-            {toolStreamKindLabel(kind)}
-          </span>
+          <span className="tool-stream-metadata-kind">{kindLabel}</span>
           <MetadataSeparator />
           <span
             className={`tool-stream-metadata-status tool-stream-status-${status}`}
@@ -236,10 +239,14 @@ export function TranscriptToolStream({
               </span>
             </>
           ) : null}
-          <MetadataSeparator />
-          <span className="tool-stream-metadata-calls">
-            {tools.length} call{tools.length === 1 ? '' : 's'}
-          </span>
+          {tools.length > 0 ? (
+            <>
+              <MetadataSeparator />
+              <span className="tool-stream-metadata-calls">
+                {tools.length} call{tools.length === 1 ? '' : 's'}
+              </span>
+            </>
+          ) : null}
           {summary.lineChanges.added ||
           summary.lineChanges.changed ||
           summary.lineChanges.removed ? (

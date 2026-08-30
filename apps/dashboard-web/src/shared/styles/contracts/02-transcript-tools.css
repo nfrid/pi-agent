@@ -20,7 +20,7 @@
   position: sticky;
   top: 0;
   z-index: 24;
-  background: var(--bg-alt);
+  background: var(--bg);
 }
 .tool-stream-toggle {
   display: inline-flex;
@@ -43,7 +43,16 @@
   flex: 0 0 14px;
   place-items: center;
   color: var(--cyan);
-  line-height: 1;
+}
+.transcript-disclosure-icon svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.75;
 }
 .tool-stream-toggle:hover {
   color: var(--fg);
@@ -74,7 +83,8 @@
 .tool-stream-metadata-validate .tool-stream-metadata-kind {
   color: var(--green);
 }
-.tool-stream-metadata-execute .tool-stream-metadata-kind {
+.tool-stream-metadata-execute .tool-stream-metadata-kind,
+.tool-stream-metadata-thinking .tool-stream-metadata-kind {
   color: var(--purple);
 }
 .tool-stream-metadata-mixed .tool-stream-metadata-kind {

@@ -278,6 +278,7 @@
   overscroll-behavior-x: auto;
   overscroll-behavior-y: contain;
   padding: 0 18px 18px;
+  background: var(--bg);
 }
 .delegate-inspector-header-content {
   display: flex;

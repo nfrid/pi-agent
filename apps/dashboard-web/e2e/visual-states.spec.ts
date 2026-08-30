@@ -62,6 +62,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
       const icon = stream.querySelector<HTMLElement>(
         '.transcript-disclosure-icon',
       );
+      const iconSvg = icon?.querySelector<SVGElement>('svg');
       const firstDot = stream.querySelector<HTMLElement>('.tool-step-dot');
       const kind = stream.querySelector<HTMLElement>(
         '.tool-stream-metadata-kind',
@@ -78,6 +79,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
         !meta ||
         !items ||
         !icon ||
+        !iconSvg ||
         !firstDot ||
         !kind ||
         !metadataNode ||
@@ -86,12 +88,17 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
         !toolTime
       )
         throw new Error('tool stream presentation missing');
+      const iconRect = icon.getBoundingClientRect();
+      const iconSvgRect = iconSvg.getBoundingClientRect();
       return {
         metaPaddingLeft: getComputedStyle(meta).paddingLeft,
         metaPaddingRight: getComputedStyle(meta).paddingRight,
         itemsPaddingLeft: getComputedStyle(items).paddingLeft,
         itemsPaddingRight: getComputedStyle(items).paddingRight,
-        iconCenter: icon.getBoundingClientRect().x + icon.offsetWidth / 2,
+        iconCenter: iconRect.x + iconRect.width / 2,
+        iconSvgCenter: iconSvgRect.x + iconSvgRect.width / 2,
+        iconSvgWidth: iconSvgRect.width,
+        iconSvgHeight: iconSvgRect.height,
         dotCenter:
           firstDot.getBoundingClientRect().x + firstDot.offsetWidth / 2,
         kindColor: getComputedStyle(kind).color,
@@ -107,6 +114,11 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     itemsPaddingLeft: '0px',
     itemsPaddingRight: '0px',
   });
+  expect(streamGeometry.iconSvgWidth).toBe(12);
+  expect(streamGeometry.iconSvgHeight).toBe(12);
+  expect(
+    Math.abs(streamGeometry.iconCenter - streamGeometry.iconSvgCenter),
+  ).toBeLessThan(0.5);
   expect(
     Math.abs(streamGeometry.iconCenter - streamGeometry.dotCenter),
   ).toBeLessThan(1);
@@ -152,24 +164,31 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     page.locator('.tool-stream-items .transcript-thinking-blob'),
   ).toHaveCount(5);
   await expect(page.getByText(/Tasks · T1 added/)).toBeVisible();
-  expect(
-    await page
-      .locator('.transcript-tool-stream-expanded')
-      .evaluate((stream) => {
-        const metadata = stream.querySelector('.tool-stream-meta');
-        const items = stream.querySelector('.tool-stream-items');
-        if (!metadata || !items) throw new Error('tool disclosure missing');
-        return {
-          metadataPosition: getComputedStyle(metadata).position,
-          itemsOverflowY: getComputedStyle(items).overflowY,
-          itemsMaxHeight: getComputedStyle(items).maxHeight,
-        };
-      }),
-  ).toEqual({
+  const expandedLayout = await page
+    .locator('.transcript-tool-stream-expanded')
+    .evaluate((stream) => {
+      const metadata = stream.querySelector('.tool-stream-meta');
+      const items = stream.querySelector('.tool-stream-items');
+      if (!metadata || !items) throw new Error('tool disclosure missing');
+      const backgroundProbe = document.createElement('div');
+      backgroundProbe.style.background = 'var(--bg)';
+      document.body.append(backgroundProbe);
+      const pageBackground = getComputedStyle(backgroundProbe).backgroundColor;
+      backgroundProbe.remove();
+      return {
+        metadataPosition: getComputedStyle(metadata).position,
+        metadataBackground: getComputedStyle(metadata).backgroundColor,
+        pageBackground,
+        itemsOverflowY: getComputedStyle(items).overflowY,
+        itemsMaxHeight: getComputedStyle(items).maxHeight,
+      };
+    });
+  expect(expandedLayout).toMatchObject({
     metadataPosition: 'sticky',
     itemsOverflowY: 'visible',
     itemsMaxHeight: 'none',
   });
+  expect(expandedLayout.metadataBackground).toBe(expandedLayout.pageBackground);
   await expect(page).toHaveScreenshot(
     'working-transcript-expanded-desktop.png',
     {

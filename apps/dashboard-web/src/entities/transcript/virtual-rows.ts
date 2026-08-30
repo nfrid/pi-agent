@@ -52,13 +52,15 @@ export function buildTranscriptToolStreams(
     }
     const historyStart = index;
     let hasTool = false;
+    let hasThinking = false;
     while (index < items.length) {
       const item = items[index];
       if (!isStreamHistory(item)) break;
       if (item?.tool) hasTool = true;
+      if (isThinkingOnly(item)) hasThinking = true;
       index += 1;
     }
-    if (!hasTool) continue;
+    if (!hasTool && !hasThinking) continue;
     const hasPreambleThoughts =
       historyStart > 0 &&
       items[historyStart]?.tool &&
