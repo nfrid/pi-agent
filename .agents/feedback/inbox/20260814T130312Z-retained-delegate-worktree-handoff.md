@@ -1,6 +1,6 @@
 # HF-20260814: Retained writable worktree cannot transfer to a replacement delegate
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-08-14
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Bounded implementation delegate followed by audit-driven corrections in the same retained writable worktree
@@ -9,6 +9,15 @@
 - **Observed cost / rework:** The parent had to create a second Git worktree and branch manually, then brief a replacement delegate against that checkout.
 - **Recurrence / confidence:** Observed once end to end with repeated continuation failures; high confidence in the blocked sequential-handoff behavior.
 - **Ticket:** —
+
+## Triage decision
+
+Parked on 2026-08-30 because the reported `worktreePath` takeover flow is no
+longer the model-facing workflow. Current delegation uses `base` to start a
+fresh child from an upstream node's exact resulting code state in a fresh
+isolated workspace, while retaining the upstream handoff. Reconsider only if a
+current `base` replacement cannot preserve a settled writable node's exact code
+state or provenance without manual Git worktree management.
 
 ## Behavior
 

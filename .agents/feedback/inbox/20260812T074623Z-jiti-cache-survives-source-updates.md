@@ -1,6 +1,6 @@
 # HF-20260812: Jiti extension cache survives source updates and fresh Pi launches
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-12
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Diagnose why newly added delegate transcript capture was absent after rebuilding and restarting Pi.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** No delegate route was used for diagnosis; multiple fresh interactive Pi processes reproduced stale extension behavior.
 - **Observed cost / rework:** Misdiagnosed a working source change as a data-pipeline defect, added and then replaced an unnecessary bridge, and required repeated restarts and live inspection.
 - **Recurrence / confidence:** Directly observed; high confidence for edited transitive extension modules.
-- **Ticket:** —
+- **Ticket:** [HFM-20260830: Invalidate Jiti extension cache on source changes](../tickets/20260830-invalidate-jiti-extension-cache.md)
 
 ## Behavior
 

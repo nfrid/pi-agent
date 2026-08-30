@@ -1,6 +1,6 @@
 # HF-20260814: Delegate handoff raw-artifact limit blocks compact result reuse
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-08-14
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Multi-stage dashboard implementation using reconnaissance artifacts as input to a bounded implementation delegate
@@ -9,6 +9,15 @@
 - **Observed cost / rework:** The parent had to remove the handoff and manually restate the reconnaissance conclusions in the implementation prompt.
 - **Recurrence / confidence:** Observed deterministically with a 20,345-byte structured-result artifact; high confidence.
 - **Ticket:** —
+
+## Triage decision
+
+Parked on 2026-08-30 because `handoffFrom` and selectable raw artifacts have
+been replaced by symbolic `inputs`. Current settled results provide a bounded
+handoff inline plus an owner-readable exact report file, and downstream inputs
+resolve that compact report representation rather than requiring the old raw
+artifact. Reconsider only after a current symbolic-input workflow loses needed
+findings despite both its bounded handoff and durable report path.
 
 ## Behavior
 

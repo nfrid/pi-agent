@@ -1,6 +1,6 @@
 # HF-20260812: Delegate merge blocks a net-neutral path that is dirty in the parent
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-12
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent` (Pi harness repository)
 - **Task shape:** Integrate an isolated delegate implementation while preserving unrelated concurrent edits in the shared checkout
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A `luna-high` implementation branch and a `luna-low` WIP-based transplant could not merge; a third `luna-low` branch that never touched the conflicting path merged successfully
 - **Observed cost / rework:** Two refused merges and two mechanical transplant delegates were needed to land an already reviewed seven-file implementation
 - **Recurrence / confidence:** Deterministically observed in this session; high confidence when a task commit history touches a parent-dirty path even though the task's final net diff does not
-- **Ticket:** —
+- **Ticket:** [HFM-20260830: Ignore net-neutral paths in delegate merge guards](../tickets/20260830-ignore-net-neutral-dirty-paths.md)
 
 ## Behavior
 

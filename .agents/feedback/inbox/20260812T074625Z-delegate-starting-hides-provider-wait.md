@@ -1,6 +1,6 @@
 # HF-20260812: Delegate starting state does not distinguish provider wait from harness setup
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-08-12
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Launch a small read-only diagnostic delegate and determine whether a recent dashboard fix caused a long startup.
@@ -9,6 +9,14 @@
 - **Observed cost / rework:** The long undifferentiated starting phase was attributed to a code/cache regression until timestamps were inspected manually.
 - **Recurrence / confidence:** One directly measured run; moderate confidence that slow first-token periods recur under provider load.
 - **Ticket:** —
+
+## Triage decision
+
+Parked on 2026-08-30. The successful run provides useful phase-attribution
+evidence, and the current widget still renders a generic `starting` state before
+first activity, but recurrence is based on one run with moderate confidence.
+Reconsider after another measured successful run shows a material pre-first-event
+wait or current lifecycle telemetry establishes a recurring baseline.
 
 ## Behavior
 

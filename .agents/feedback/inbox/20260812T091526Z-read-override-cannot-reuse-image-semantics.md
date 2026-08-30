@@ -1,6 +1,6 @@
 # HF-20260812: Read overrides cannot reuse built-in path and image semantics
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-12
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Add approved pixel crop controls to image reads while preserving existing read behavior.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** The parent implemented the override; three independent Luna reviews found compatibility and resource issues, which were fixed before merge.
 - **Observed cost / rework:** Required duplicating internal path normalization and EXIF-orientation logic, followed by multiple review/fix cycles to restore built-in semantics.
 - **Recurrence / confidence:** Directly observed; high confidence for extensions that augment rather than fully replace built-in image reads.
-- **Ticket:** —
+- **Ticket:** [HFM-20260830: Expose reusable read augmentation primitives](../tickets/20260830-expose-read-augmentation-primitives.md)
 
 ## Behavior
 
