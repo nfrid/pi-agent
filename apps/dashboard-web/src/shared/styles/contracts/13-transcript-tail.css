@@ -245,6 +245,9 @@
   color: var(--muted);
   text-align: center;
 }
+.draft-empty-transcript > .session-loading-indicator {
+  justify-self: center;
+}
 .draft-empty-transcript p {
   margin: 0;
 }
