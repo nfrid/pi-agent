@@ -68,6 +68,7 @@ describe('runtime host', () => {
     );
     const socket = path.join(root, 'host.sock');
     const marker = path.join(root, 'cancelled');
+    const injected = path.join(root, 'injected');
     const started = path.join(root, 'started');
     const executable = path.join(root, 'fake-pi.mjs');
     await writeFile(
@@ -85,7 +86,7 @@ describe('runtime host', () => {
     const input = {
       runtimeId: 'runtime-1',
       cwd: root,
-      name: 'managed',
+      name: `Сетап; touch ${injected}`,
       mode: 'read' as const,
       socketPath: path.join(root, 'bridge.sock'),
       launchToken: 'launch',
@@ -106,8 +107,11 @@ describe('runtime host', () => {
         '--tools',
         'read,grep,find,ls',
         '--name',
-        'managed',
+        `Сетап; touch ${injected}`,
       ]);
+      await expect(readFile(injected, 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
       await eventually(async () => {
         try {
           return (await readFile(marker, 'utf8')) === 'yes';

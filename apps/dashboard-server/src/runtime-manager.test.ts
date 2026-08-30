@@ -348,10 +348,15 @@ describe('managed runtime launch safety', () => {
     );
 
     await expect(
-      manager.launch({ projectId: project.id, checkoutId: checkout.id }),
+      manager.launch({
+        projectId: project.id,
+        checkoutId: checkout.id,
+        name: 'Сетап по финансам',
+      }),
     ).resolves.toMatchObject({ runtimeId: expect.any(String) });
     expect(start.mock.calls[0]?.[0]).toMatchObject({
       cwd: await realpath(root),
+      name: 'Сетап по финансам',
     });
     expect(start.mock.calls[0]?.[0]).not.toHaveProperty('workspace');
     expect(recordManagedLaunch).toHaveBeenCalledWith(

@@ -55,7 +55,8 @@ describe('dashboard security boundary', () => {
     ).toMatchObject({ status: 401 });
   });
 
-  it('sanitizes names without turning them into command strings', () => {
+  it('preserves Unicode names without turning them into command strings', () => {
+    expect(sanitizeDisplayName('Сетап по финансам')).toBe('Сетап по финансам');
     expect(sanitizeDisplayName('x; rm -rf /')).not.toContain(';');
     expect(sanitizeDisplayName('')).toBe('pi-agent');
   });

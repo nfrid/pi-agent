@@ -58,7 +58,7 @@ export function sanitizeDisplayName(
 ): string {
   const normalized = (value ?? fallback)
     .normalize('NFKC')
-    .replace(/[^a-zA-Z0-9._ -]+/g, '-')
+    .replace(/[^\p{L}\p{N}._ -]+/gu, '-')
     .trim();
-  return normalized.slice(0, 64) || fallback;
+  return [...normalized].slice(0, 64).join('') || fallback;
 }
