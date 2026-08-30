@@ -6,30 +6,48 @@ export type TranscriptToolStreamRange = {
   end: number;
 };
 
-/** Return contiguous tool ranges, including an immediately preceding thought owner. */
+type ToolStreamItem = Pick<
+  TranscriptModelItem,
+  'key' | 'tool' | 'role' | 'thinking' | 'text' | 'imageCount'
+>;
+
+function isThinkingOnly(item: ToolStreamItem | undefined): boolean {
+  return Boolean(
+    item?.role === 'assistant' &&
+      item.thinking?.length &&
+      !item.text &&
+      !item.imageCount,
+  );
+}
+
+/** Return tool ranges without letting thinking-only assistant entries split them. */
 export function buildTranscriptToolStreams(
-  items: readonly Pick<
-    TranscriptModelItem,
-    'key' | 'tool' | 'role' | 'thinking'
-  >[],
+  items: readonly ToolStreamItem[],
 ): TranscriptToolStreamRange[] {
   const result: TranscriptToolStreamRange[] = [];
   let index = 0;
   while (index < items.length) {
-    if (!items[index]?.tool) {
+    if (!items[index]?.tool && !isThinkingOnly(items[index])) {
       index += 1;
       continue;
     }
-    const toolStart = index;
-    while (index + 1 < items.length && items[index + 1]?.tool) index += 1;
-    const hasAssociatedThinking =
-      toolStart > 0 &&
-      items[toolStart - 1]?.role === 'assistant' &&
-      Boolean(items[toolStart - 1]?.thinking?.length);
-    const start = hasAssociatedThinking ? toolStart - 1 : toolStart;
+    const historyStart = index;
+    let hasTool = false;
+    while (index < items.length) {
+      const item = items[index];
+      if (!item?.tool && !isThinkingOnly(item)) break;
+      if (item.tool) hasTool = true;
+      index += 1;
+    }
+    if (!hasTool) continue;
+    const hasPreambleThoughts =
+      historyStart > 0 &&
+      items[historyStart]?.tool &&
+      items[historyStart - 1]?.role === 'assistant' &&
+      Boolean(items[historyStart - 1]?.thinking?.length);
+    const start = hasPreambleThoughts ? historyStart - 1 : historyStart;
     const key = items[start]?.key ?? `tool-stream-${start}`;
-    result.push({ key, start, end: index });
-    index += 1;
+    result.push({ key, start, end: index - 1 });
   }
   return result;
 }
@@ -40,10 +58,7 @@ export type VirtualTranscriptRow =
 
 /** Build the same flat rows used by the regular and virtual transcript views. */
 export function buildVirtualTranscriptRows(
-  items: readonly Pick<
-    TranscriptModelItem,
-    'key' | 'tool' | 'role' | 'thinking'
-  >[],
+  items: readonly ToolStreamItem[],
 ): VirtualTranscriptRow[] {
   const streams = buildTranscriptToolStreams(items);
   const streamByStart = new Map(

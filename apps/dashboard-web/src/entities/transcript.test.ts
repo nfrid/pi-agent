@@ -482,6 +482,75 @@ describe('tool row views and virtual transcript construction', () => {
     ]);
   });
 
+  it('keeps thinking-only assistant entries inside one ordered tool stream', () => {
+    const items = toTranscriptEntries([
+      { type: 'tool', tool: { toolCallId: 'split-1', name: 'read' } },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'First checkpoint.' }],
+        },
+      },
+      { type: 'tool', tool: { toolCallId: 'split-2', name: 'grep' } },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'Second checkpoint.' }],
+        },
+      },
+      { type: 'tool', tool: { toolCallId: 'split-3', name: 'bash' } },
+    ]);
+
+    expect(buildTranscriptToolStreams(items)).toEqual([
+      { key: items[0]?.key, start: 0, end: 4 },
+    ]);
+    expect(buildVirtualTranscriptRows(items)).toEqual([
+      {
+        kind: 'tool-stream',
+        key: items[0]?.key,
+        start: 0,
+        end: 4,
+      },
+    ]);
+
+    const html = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items,
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(html).toContain('Show 2 earlier items');
+    expect(html).toContain('2 thoughts');
+    expect(html).toContain('3 calls');
+    expect(html).not.toContain('First checkpoint.');
+    expect(html).toContain('Second checkpoint.');
+  });
+
+  it('keeps speaking assistant messages as tool-stream boundaries', () => {
+    const items = toTranscriptEntries([
+      { type: 'tool', tool: { toolCallId: 'boundary-1', name: 'read' } },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Starting another step.' },
+            { type: 'text', text: 'Now validating the result.' },
+          ],
+        },
+      },
+      { type: 'tool', tool: { toolCallId: 'boundary-2', name: 'bash' } },
+    ]);
+
+    expect(buildTranscriptToolStreams(items)).toEqual([
+      { key: items[0]?.key, start: 0, end: 0 },
+      { key: items[1]?.key, start: 1, end: 2 },
+    ]);
+  });
+
   it('renders structured kind, status, counts, changes, duration, and failure metadata', () => {
     const html = renderToStaticMarkup(
       createElement(TranscriptToolStream, {
@@ -894,8 +963,7 @@ describe('tool row views and virtual transcript construction', () => {
       '**Checking the timestamp**',
     ]);
     expect(buildTranscriptToolStreams(items)).toMatchObject([
-      { start: 1, end: 2 },
-      { start: 3, end: 4 },
+      { start: 1, end: 4 },
     ]);
   });
 

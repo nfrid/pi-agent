@@ -74,7 +74,7 @@
 .thinking-time {
   position: absolute;
   top: 7px;
-  right: 14px;
+  right: 0;
   z-index: 1;
   display: block;
   margin: 0;

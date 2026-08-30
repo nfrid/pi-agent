@@ -407,7 +407,7 @@ h2 {
 }
 .message-bubble {
   border-left: 3px solid var(--line);
-  padding: 10px 14px;
+  padding: 10px 0 10px 14px;
   margin: 12px 0;
   overflow-wrap: anywhere;
 }

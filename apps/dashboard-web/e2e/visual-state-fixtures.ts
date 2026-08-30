@@ -232,9 +232,6 @@ const workingEntries: readonly unknown[] = [
       content: [
         { type: 'thinking', thinking: 'Checking the project surfaces.' },
         { type: 'thinking', thinking: 'Reviewing the transcript hierarchy.' },
-        { type: 'thinking', thinking: 'Comparing the mobile layout.' },
-        { type: 'thinking', thinking: 'Checking the disclosure behavior.' },
-        { type: 'thinking', thinking: 'Preparing the visual review.' },
         { type: 'text', text: 'Inspecting the dashboard surfaces.' },
         {
           type: 'toolCall',
@@ -248,6 +245,18 @@ const workingEntries: readonly unknown[] = [
           name: 'grep',
           arguments: { pattern: 'visual state', path: 'apps/dashboard-web' },
         },
+      ],
+    },
+  },
+  {
+    type: 'message',
+    id: 'working-assistant-middle',
+    message: {
+      role: 'assistant',
+      timestamp: VISUAL_TIMESTAMP - 18_000,
+      content: [
+        { type: 'thinking', thinking: 'Comparing the mobile layout.' },
+        { type: 'thinking', thinking: 'Checking the disclosure behavior.' },
         {
           type: 'toolCall',
           id: 'working-style-read',
@@ -260,6 +269,17 @@ const workingEntries: readonly unknown[] = [
           name: 'edit',
           arguments: { path: 'apps/dashboard-web/src/App.tsx', edits: [{}] },
         },
+      ],
+    },
+  },
+  {
+    type: 'message',
+    id: 'working-assistant-tail',
+    message: {
+      role: 'assistant',
+      timestamp: VISUAL_TIMESTAMP - 16_000,
+      content: [
+        { type: 'thinking', thinking: 'Preparing the visual review.' },
         {
           type: 'toolCall',
           id: 'working-test',

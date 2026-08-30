@@ -39,14 +39,15 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     page.getByText('Inspecting the dashboard surfaces.', { exact: true }),
   ).toBeVisible();
   await expect(page.locator('.transcript-thinking')).toHaveCount(0);
+  await expect(page.locator('.transcript-tool-stream')).toHaveCount(1);
   const earlierHistory = page.getByRole('button', {
     name: /Show 7 earlier items/,
   });
   await expect(earlierHistory).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(3);
+  await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(2);
   await expect(
     page.locator('.tool-stream-items .transcript-thinking-blob'),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   const metadata = page.locator('.tool-stream-metadata');
   await expect(metadata).toContainText('Edited');
   await expect(metadata).toContainText('complete');
@@ -67,7 +68,22 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
       const metadataNode = stream.querySelector<HTMLElement>(
         '.tool-stream-metadata',
       );
-      if (!meta || !items || !icon || !firstDot || !kind || !metadataNode)
+      const messageTime = stream.querySelector<HTMLElement>(
+        '.message-assistant .transcript-time',
+      );
+      const thoughtTime = stream.querySelector<HTMLElement>('.thinking-time');
+      const toolTime = stream.querySelector<HTMLElement>('.tool-step-time');
+      if (
+        !meta ||
+        !items ||
+        !icon ||
+        !firstDot ||
+        !kind ||
+        !metadataNode ||
+        !messageTime ||
+        !thoughtTime ||
+        !toolTime
+      )
         throw new Error('tool stream presentation missing');
       return {
         metaPaddingLeft: getComputedStyle(meta).paddingLeft,
@@ -79,6 +95,9 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
           firstDot.getBoundingClientRect().x + firstDot.offsetWidth / 2,
         kindColor: getComputedStyle(kind).color,
         metadataColor: getComputedStyle(metadataNode).color,
+        messageTimeRight: messageTime.getBoundingClientRect().right,
+        thoughtTimeRight: thoughtTime.getBoundingClientRect().right,
+        toolTimeRight: toolTime.getBoundingClientRect().right,
       };
     });
   expect(streamGeometry).toMatchObject({
@@ -91,6 +110,12 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     Math.abs(streamGeometry.iconCenter - streamGeometry.dotCenter),
   ).toBeLessThan(1);
   expect(streamGeometry.kindColor).not.toBe(streamGeometry.metadataColor);
+  expect(
+    Math.abs(streamGeometry.messageTimeRight - streamGeometry.toolTimeRight),
+  ).toBeLessThan(1);
+  expect(
+    Math.abs(streamGeometry.thoughtTimeRight - streamGeometry.toolTimeRight),
+  ).toBeLessThan(1);
   await expect(
     page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
   ).toBeVisible();

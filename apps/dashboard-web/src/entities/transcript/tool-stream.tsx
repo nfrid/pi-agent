@@ -23,6 +23,20 @@ function toolDescriptor(item: TranscriptModelItem) {
   };
 }
 
+type ToolStreamHistoryEntry =
+  | {
+      kind: 'thought';
+      key: string;
+      content: string;
+      timestamp?: number | string;
+    }
+  | {
+      kind: 'call';
+      key: string;
+      item: TranscriptModelItem;
+      timestampOverride?: number | string;
+    };
+
 function metadataStatusLabel(status: ReturnType<typeof toolStreamStatus>) {
   return status === 'failed'
     ? 'failed'
@@ -56,22 +70,35 @@ export function TranscriptToolStream({
 }) {
   const first = items[0];
   const streamKey = first?.key ?? 'tool-stream';
-  const thinking =
-    first?.role === 'assistant' ? (first.thinking ?? []) : ([] as const);
   const tools = items.flatMap((item) => {
     const tool = toolDescriptor(item);
     return tool ? [tool] : [];
   });
-  const history = [
-    ...thinking.map((content, index) => ({
-      kind: 'thought' as const,
-      key: `thought-${index}`,
-      content,
-    })),
-    ...items.flatMap((item) =>
-      item.tool ? [{ kind: 'call' as const, key: item.key, item }] : [],
-    ),
-  ];
+  let latestAssistantTimestamp = timestampOverride;
+  const history: ToolStreamHistoryEntry[] = [];
+  for (const item of items) {
+    if (item.role === 'assistant') {
+      latestAssistantTimestamp =
+        transcriptItemTimestamp(item) ?? latestAssistantTimestamp;
+      for (const [index, content] of (item.thinking ?? []).entries())
+        history.push({
+          kind: 'thought',
+          key: `${item.key}:thought:${index}`,
+          content,
+          timestamp: latestAssistantTimestamp,
+        });
+    } else if (item.tool) {
+      history.push({
+        kind: 'call',
+        key: item.key,
+        item,
+        timestampOverride: latestAssistantTimestamp,
+      });
+    }
+  }
+  const thinkingCount = history.filter(
+    (entry) => entry.kind === 'thought',
+  ).length;
   const hiddenHistoryCount = Math.max(0, history.length - 3);
   const summary = toolStreamMetadata(tools);
   const kind = activityKind(tools);
@@ -79,8 +106,8 @@ export function TranscriptToolStream({
   const metadataTitle = [
     toolStreamKindLabel(kind),
     metadataStatusLabel(status),
-    thinking.length > 0
-      ? `${thinking.length} thought${thinking.length === 1 ? '' : 's'}`
+    thinkingCount > 0
+      ? `${thinkingCount} thought${thinkingCount === 1 ? '' : 's'}`
       : undefined,
     `${tools.length} call${tools.length === 1 ? '' : 's'}`,
     summary.lineChanges.added ? `+${summary.lineChanges.added}` : undefined,
@@ -100,10 +127,6 @@ export function TranscriptToolStream({
     captureScrollAnchor?.(streamKey);
     onToggle(!expanded);
   };
-  const historyTimestampOverride =
-    (first?.role === 'assistant'
-      ? transcriptItemTimestamp(first)
-      : undefined) ?? timestampOverride;
   const renderPreamble = () =>
     first && (first.text || first.imageCount) ? (
       <div key={first.key}>
@@ -122,10 +145,7 @@ export function TranscriptToolStream({
           <ThinkingBlob
             content={entry.content}
             key={entry.key}
-            timestamp={
-              (first ? transcriptItemTimestamp(first) : undefined) ??
-              timestampOverride
-            }
+            timestamp={entry.timestamp}
           />
         );
       return (
@@ -139,7 +159,7 @@ export function TranscriptToolStream({
           <TranscriptEntry
             item={entry.item}
             cwd={cwd}
-            timestampOverride={historyTimestampOverride}
+            timestampOverride={entry.timestampOverride}
           />
         </div>
       );
@@ -187,11 +207,11 @@ export function TranscriptToolStream({
           >
             {metadataStatusLabel(status)}
           </span>
-          {thinking.length > 0 ? (
+          {thinkingCount > 0 ? (
             <>
               <MetadataSeparator />
               <span className="tool-stream-metadata-thoughts">
-                {thinking.length} thought{thinking.length === 1 ? '' : 's'}
+                {thinkingCount} thought{thinkingCount === 1 ? '' : 's'}
               </span>
             </>
           ) : null}
