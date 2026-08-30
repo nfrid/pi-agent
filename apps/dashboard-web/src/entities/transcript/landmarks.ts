@@ -1,11 +1,9 @@
 import type { SessionOutlineLandmark } from '@pi-dashboard/protocol';
 import type { TranscriptModelItem } from '../../transcript';
-import type { TranscriptGroup } from './activity';
-
 export type TranscriptLandmark = {
   key: string;
   label: string;
-  kind: 'user' | 'assistant' | 'activity';
+  kind: 'user' | 'assistant';
   itemIndex: number;
   deliveryMode?: 'steer' | 'followUp';
   timestamp?: number | string;
@@ -20,7 +18,7 @@ function landmarkLabel(item: TranscriptModelItem, fallback: string): string {
       ? `${text.slice(0, 239)}…`
       : text
     : item.preparing
-      ? 'Preparing activity'
+      ? 'Preparing response'
       : item.entry.kind === 'assistant' && item.entry.title
         ? item.entry.title
         : fallback;
@@ -48,17 +46,6 @@ export function transcriptItemTimestamp(
     : undefined;
 }
 
-export function activityGroupItemTimestamps(
-  items: readonly TranscriptModelItem[],
-): Array<number | string | undefined> {
-  let associatedTimestamp: number | string | undefined;
-  return items.map((item) => {
-    const timestamp = transcriptItemTimestamp(item);
-    if (timestamp !== undefined) associatedTimestamp = timestamp;
-    return timestamp ?? associatedTimestamp;
-  });
-}
-
 export function transcriptRoleLabel(
   role: 'user' | 'assistant',
   deliveryMode?: TranscriptModelItem['deliveryMode'],
@@ -69,26 +56,11 @@ export function transcriptRoleLabel(
 
 export function buildTranscriptLandmarks(
   items: readonly TranscriptModelItem[],
-  groups: readonly TranscriptGroup[] = [],
 ): TranscriptLandmark[] {
   const result: TranscriptLandmark[] = [];
-  const groupByStart = new Map(groups.map((group) => [group.start, group]));
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     if (!item) continue;
-    const group = groupByStart.get(index);
-    if (group) {
-      result.push({
-        key: `group-${item.key}`,
-        label: group.title,
-        kind: 'activity',
-        itemIndex: index,
-        ...(transcriptItemTimestamp(item) === undefined
-          ? {}
-          : { timestamp: transcriptItemTimestamp(item) }),
-      });
-      continue;
-    }
     if (item.role === 'user')
       result.push({
         key: item.key,
@@ -115,7 +87,7 @@ export function buildTranscriptLandmarks(
     )
       result.push({
         key: item.key,
-        label: landmarkLabel(item, 'Agent activity'),
+        label: landmarkLabel(item, 'Assistant message'),
         kind: 'assistant',
         itemIndex: index,
         ...(transcriptItemTimestamp(item) === undefined
@@ -148,7 +120,7 @@ export function mergeTranscriptLandmarks(
     return {
       key: landmark.id,
       label: landmark.label,
-      kind: landmark.kind,
+      kind: landmark.kind === 'activity' ? 'assistant' : landmark.kind,
       itemIndex: landmark.ordinal,
       ...(landmark.timestamp === undefined
         ? {}

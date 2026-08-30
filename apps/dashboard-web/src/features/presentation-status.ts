@@ -78,7 +78,7 @@ export function dashboardStatus(
   )
     return {
       status: 'waiting',
-      label: count === 1 ? 'needs input' : `needs input · ${count}`,
+      label: count === 1 ? 'waiting' : `waiting · ${count}`,
     };
   if (runtime.liveState === 'idle') return { status: 'idle', label: 'ready' };
   return { status: runtime.liveState, label: runtime.liveState };

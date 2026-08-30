@@ -31,8 +31,6 @@ import {
   writeComposerDraft,
 } from './App';
 import {
-  activityGroupMetadata,
-  activityGroupPresentation,
   buildTranscriptLandmarks,
   sampleTranscriptLandmarks,
 } from './entities/transcript';
@@ -952,7 +950,7 @@ describe('workspace-first agent navigation', () => {
 });
 
 describe('transcript outline and metadata', () => {
-  it('keeps user turns and activity landmarks stable while exposing one tool count', () => {
+  it('keeps user turns and assistant landmarks stable', () => {
     const items = toTranscriptEntries([
       { type: 'message', message: { role: 'user', content: 'First request' } },
       {
@@ -963,7 +961,7 @@ describe('transcript outline and metadata', () => {
         },
       },
     ]);
-    const landmarks = buildTranscriptLandmarks(items, []);
+    const landmarks = buildTranscriptLandmarks(items);
     expect(landmarks.map((landmark) => landmark.label)).toEqual([
       'First request',
     ]);
@@ -977,13 +975,6 @@ describe('transcript outline and metadata', () => {
     expect(sampled).toHaveLength(48);
     expect(sampled[0]?.key).toBe('turn-0');
     expect(sampled.at(-1)?.key).toBe('turn-499');
-    expect(activityGroupMetadata({ toolCount: 1, failureCount: 0 })).toBe(
-      '1 tool call',
-    );
-    expect(
-      activityGroupPresentation({ status: 'settled', toolCount: 1 }, false)
-        .label,
-    ).not.toContain('tool');
   });
 });
 

@@ -1,14 +1,15 @@
 export type {
-  ActivityGroupSummary,
   ActivityStepParts,
-  TranscriptGroup,
+  ToolStreamMetadata,
+  ToolStreamSummary,
 } from './activity';
 export {
-  activityGroupMetadata,
-  activityGroupPresentation,
-  activityGroupSummary,
   activityStepParts,
+  commandStepMeta,
   displayActivityPath,
+  toolStreamMetadata,
+  toolStreamMetadataLabel,
+  toolStreamSummary,
 } from './activity';
 export { parseSkillInvocation } from './entries';
 export { boundedInspectorText, toolInspectorRows } from './inspector';
@@ -21,13 +22,14 @@ export {
   transcriptRoleLabel,
 } from './landmarks';
 export { TranscriptOutline } from './outline';
+export { TranscriptToolStream } from './tool-stream';
 export { Transcript } from './view';
 export type {
+  TranscriptToolStreamRange,
   VirtualTranscriptRow,
-  VirtualTranscriptRowBuildStats,
 } from './virtual-rows';
 export {
-  buildTranscriptGroupCoverage,
+  buildTranscriptToolStreams,
   buildVirtualTranscriptRows,
 } from './virtual-rows';
 export {

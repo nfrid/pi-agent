@@ -19,13 +19,13 @@ const waitingSurface = (count: number) => ({
 });
 
 describe('dashboard presentation status', () => {
-  it('uses plain singular and plural input labels over raw working state', () => {
+  it('uses waiting labels for settled background work without user input', () => {
     expect(
       dashboardStatus(runtime({ extensionSurfaces: [waitingSurface(1)] })),
-    ).toEqual({ status: 'waiting', label: 'needs input' });
+    ).toEqual({ status: 'waiting', label: 'waiting' });
     expect(
       dashboardStatus(runtime({ extensionSurfaces: [waitingSurface(3)] })),
-    ).toEqual({ status: 'waiting', label: 'needs input · 3' });
+    ).toEqual({ status: 'waiting', label: 'waiting · 3' });
   });
 
   it('labels idle and absent runtimes as ready', () => {

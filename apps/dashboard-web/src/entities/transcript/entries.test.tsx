@@ -32,6 +32,29 @@ describe('transcript entries', () => {
     expect(markup).not.toContain('preparing tool call');
   });
 
+  it('shows short thinking directly and collapses only longer thinking sequences', () => {
+    const item = (thinking: string[]): TranscriptModelItem => ({
+      key: `assistant-thinking-${thinking.length}`,
+      raw: {},
+      entry: { kind: 'assistant', speaks: false },
+      role: 'assistant',
+      thinking,
+    });
+    const short = renderToStaticMarkup(
+      <TranscriptEntry item={item(['one', 'two', 'three'])} />,
+    );
+    expect(short).not.toContain('transcript-thinking"');
+    expect(short).toContain('one');
+    expect(short).toContain('three');
+
+    const long = renderToStaticMarkup(
+      <TranscriptEntry item={item(['one', 'two', 'three', 'four'])} />,
+    );
+    expect(long).toContain('Show 1 earlier thought');
+    expect(long).not.toContain('>one<');
+    expect(long).toContain('four');
+  });
+
   it('copies the raw assistant Markdown and confirms the action', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { clipboard: { writeText } });
@@ -302,7 +325,7 @@ describe('transcript entries', () => {
 
     const markup = renderToStaticMarkup(<TranscriptEntry item={item} />);
 
-    expect(markup).toContain('class="activity-tool-argument-text"');
+    expect(markup).toContain('class="tool-argument-text"');
     expect(markup).toContain('class="line-change-added">+1</span>');
     expect(markup).toContain('class="line-change-changed">~2</span>');
     expect(markup).toContain('class="line-change-removed">-1</span>');
@@ -338,7 +361,7 @@ describe('transcript entries', () => {
 
     expect(markup).toContain('tool-detail role-command step-failed');
     expect(markup).toContain(
-      '<span class="activity-step-dot" aria-hidden="true">!</span>',
+      '<span class="tool-step-dot" aria-hidden="true">!</span>',
     );
   });
 });

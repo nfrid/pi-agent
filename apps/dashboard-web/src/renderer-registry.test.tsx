@@ -1,4 +1,3 @@
-import { renderToStaticMarkup } from 'react-dom/server';
 import { Type } from 'typebox';
 import { describe, expect, it } from 'vitest';
 import {
@@ -78,24 +77,5 @@ describe('dashboard renderer registry', () => {
       'missing.renderer',
     );
     expect(unknown).toMatchObject({ props: { children: expect.anything() } });
-  });
-
-  it('renders activity group status chips', () => {
-    const activity = renderToStaticMarkup(
-      renderDashboardContribution('activity-groups.activity', {
-        id: 'group-1',
-        start: 0,
-        end: 1,
-        kind: 'execute',
-        title: 'Refactor dashboard',
-        status: 'live',
-        expanded: false,
-        toolCount: 3,
-        tools: [],
-      }),
-    );
-    expect(activity).toContain('activity-renderer-chip');
-    expect(activity).toContain('Refactor dashboard');
-    expect(activity).toContain('3 tools');
   });
 });

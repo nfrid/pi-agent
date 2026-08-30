@@ -1,34 +1,29 @@
-import { projectActivityGroups } from '@pi-dashboard/activity-model';
 import {
   hydrateTranscript,
   projectTranscriptForRender,
   reduceTranscriptEvent,
   STEERING_MESSAGE_MARKER_TYPE,
 } from '@pi-dashboard/domain';
-import { ActivityGroupsViewModelSchema } from '@pi-dashboard/extension-contributions';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
 import { toolOutcome, toTranscriptEntries } from '../transcript';
 import {
-  activityGroupMetadata,
-  activityGroupPresentation,
-  activityGroupSummary,
   activityStepParts,
-  buildTranscriptGroupCoverage,
   buildTranscriptLandmarks,
+  buildTranscriptToolStreams,
   buildVirtualTranscriptRows,
   displayActivityPath,
   mergeTranscriptLandmarks,
   parseSkillInvocation,
   preserveVirtualScrollOffset,
   restoreVirtualBottom,
-  type TranscriptGroup,
+  toolStreamMetadataLabel,
   transcriptItemTimestamp,
   transcriptRoleLabel,
 } from './transcript';
-import { SkillInvocationView } from './transcript/entries';
+import { SkillInvocationView, TranscriptEntry } from './transcript/entries';
+import { TranscriptToolStream } from './transcript/tool-stream';
 import { LivePauseEvent } from './transcript/view';
 
 describe('activity row views and virtual transcript construction', () => {
@@ -397,67 +392,99 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
-  it('derives a bounded latest-step summary from the canonical group model', () => {
-    const group = {
-      toolCount: 5,
-      tools: [
-        { name: 'read', args: {} },
-        { name: 'grep', args: {} },
-        { name: 'edit', args: {}, status: 'error' },
-        { name: 'bash', args: {}, isError: true },
-        { name: 'write', args: {} },
-      ],
-    };
-    expect(activityGroupSummary(group)).toEqual({
-      recentTools: ['edit', 'bash', 'write'],
-      earlierToolCount: 2,
-      toolCount: 5,
-      failureCount: 2,
-    });
+  it('renders up to three calls directly and summarizes four or more', () => {
+    const threeItems = toTranscriptEntries([
+      { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
+      { type: 'tool', tool: { toolCallId: 'call-2', name: 'grep' } },
+      { type: 'tool', tool: { toolCallId: 'call-3', name: 'edit' } },
+    ]);
+    const threeHtml = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: threeItems,
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(threeHtml).toContain('tool-detail');
+    expect(threeHtml).not.toContain('tool-stream-meta');
+    expect(threeHtml).not.toContain('tool-stream-toggle');
+
+    const fourHtml = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: toTranscriptEntries([
+          ...threeItems.map((item) => item.raw),
+          {
+            type: 'tool',
+            tool: { toolCallId: 'call-4', name: 'bash', isError: true },
+          },
+        ]),
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(fourHtml).toContain('class="tool-stream-meta"');
+    expect(fourHtml).toContain('Show 1 earlier call');
+    expect(fourHtml).toContain('4 calls');
+    expect(fourHtml).not.toContain('activity-group');
+    expect(fourHtml).not.toContain('needs input');
   });
 
-  it('includes compact canonical work aggregates in the collapsed metadata line', () => {
+  it('aggregates flat stream metadata without a group kind or status', () => {
     expect(
-      activityGroupMetadata(
+      toolStreamMetadataLabel([
+        { name: 'write', args: { content: 'one\ntwo\n' } },
         {
-          kind: 'mutate',
-          status: 'settled',
-          toolCount: 3,
-          tools: [
-            { name: 'write', args: { content: 'one\ntwo\n' } },
-            {
-              name: 'edit',
-              args: {
-                edits: [{ oldText: 'old', newText: 'new\nextra' }],
-              },
-            },
-            { name: 'bash', args: {}, result: { durationMs: 2_500 } },
-          ],
+          name: 'edit',
+          args: { edits: [{ oldText: 'old', newText: 'new\nextra' }] },
         },
-        { failureCount: 1 },
-      ),
-    ).toBe('Edited · 3 tools · +3 ~1 · 3s · 1 failed');
+        { name: 'bash', args: {}, data: { durationMs: 2_500 }, isError: true },
+      ]),
+    ).toBe('3 calls · +3 ~1 · 3s · 1 failed');
   });
 
-  it('omits failure metadata when there are no failed calls', () => {
-    expect(activityGroupMetadata({ toolCount: 2, failureCount: 0 })).toBe(
-      '2 tool calls',
+  it('keeps delegate feedback visible between flat tool streams', () => {
+    const items = toTranscriptEntries([
+      { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
+      {
+        type: 'custom_message',
+        customType: 'delegate-control',
+        display: false,
+        content:
+          'Parent feedback (address this at this checkpoint):\nUse the corrected API.',
+      },
+      { type: 'tool', tool: { toolCallId: 'call-2', name: 'bash' } },
+    ]);
+    const feedback = items.find(
+      (item) => item.event?.kind === 'delegate-feedback',
     );
-    expect(activityGroupMetadata({ toolCount: 2, failureCount: 1 })).toBe(
-      '2 tool calls · 1 failed attempt',
-    );
+    expect(feedback).toBeDefined();
+    if (!feedback) return;
+    expect(buildTranscriptToolStreams(items)).toMatchObject([
+      { start: 0, end: 0 },
+      { start: 2, end: 2 },
+    ]);
+    expect(
+      renderToStaticMarkup(createElement(TranscriptEntry, { item: feedback })),
+    ).toContain('Parent feedback');
   });
 
-  it('shows a factual warning when the group ended on an error', () => {
-    const group = {
-      status: 'ended-error' as const,
-      toolCount: 1,
-    } as TranscriptGroup;
-    const view = activityGroupPresentation(group, false);
-    expect(view.status).toBe(group.status);
-    expect(view.className).toBe('activity-ended-error');
-    expect(view.icon).toBe('!');
-    expect(view.label).toContain('ended after an error');
+  it('builds virtual flat rows without swallowing non-tool events', () => {
+    const items = toTranscriptEntries([
+      { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
+      {
+        type: 'custom_message',
+        customType: 'delegate-control',
+        display: false,
+        content:
+          'Parent feedback (address this at this checkpoint):\nReview it.',
+      },
+      { type: 'tool', tool: { toolCallId: 'call-2', name: 'bash' } },
+    ]);
+    expect(buildVirtualTranscriptRows(items)).toEqual([
+      { kind: 'tool-stream', key: items[0]?.key, start: 0, end: 0 },
+      { kind: 'entry', key: items[1]?.key, index: 1 },
+      { kind: 'tool-stream', key: items[2]?.key, start: 2, end: 2 },
+    ]);
   });
 
   it('drops empty assistant messages after filtering empty thinking', () => {
@@ -653,94 +680,6 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
-  it('keeps todo events inside activity ranges while user messages remain boundaries', () => {
-    const todoSnapshot = (status: string) => ({
-      type: 'custom',
-      customType: 'lean-todo',
-      data: {
-        state: {
-          tasks: [{ id: 'T1', text: 'Verify dashboard', status }],
-        },
-      },
-    });
-    const activityItems = toTranscriptEntries([
-      {
-        type: 'message',
-        id: 'assistant-activity',
-        message: {
-          role: 'assistant',
-          content: [
-            { type: 'text', text: 'Inspecting the workspace.' },
-            { type: 'toolCall', id: 'call-1', name: 'read' },
-          ],
-        },
-      },
-      {
-        type: 'tool',
-        tool: { toolCallId: 'call-1', name: 'read', status: 'complete' },
-      },
-      todoSnapshot('todo'),
-      {
-        type: 'tool',
-        tool: { toolCallId: 'call-2', name: 'edit', status: 'complete' },
-      },
-    ]);
-    const activityGroups = projectActivityGroups(
-      activityItems.map(({ entry }) => entry),
-    );
-    expect(activityGroups.map(({ start, end }) => ({ start, end }))).toEqual([
-      { start: 0, end: 3 },
-    ]);
-    expect(activityItems[2]?.entry).toMatchObject({
-      kind: 'other',
-      continuesGroup: true,
-    });
-    expect(activityItems[2]?.event?.kind).toBe('todo');
-    const expandedItems = activityItems.slice(
-      activityGroups[0]?.start,
-      (activityGroups[0]?.end ?? -1) + 1,
-    );
-    expect(expandedItems.some((item) => item.event?.kind === 'todo')).toBe(
-      true,
-    );
-
-    const boundaryItems = toTranscriptEntries([
-      {
-        type: 'message',
-        id: 'assistant-boundary',
-        message: {
-          role: 'assistant',
-          content: [
-            { type: 'text', text: 'Inspecting the workspace.' },
-            { type: 'toolCall', id: 'call-boundary', name: 'read' },
-          ],
-        },
-      },
-      {
-        type: 'tool',
-        tool: {
-          toolCallId: 'call-boundary',
-          name: 'read',
-          status: 'complete',
-        },
-      },
-      {
-        type: 'message',
-        id: 'user-boundary',
-        message: { role: 'user', content: 'Please continue.' },
-      },
-    ]);
-    const boundaryGroups = projectActivityGroups(
-      boundaryItems.map(({ entry }) => entry),
-    );
-    expect(boundaryItems.find(({ role }) => role === 'user')?.entry).toEqual({
-      kind: 'other',
-    });
-    expect(boundaryGroups.map(({ start, end }) => ({ start, end }))).toEqual([
-      { start: 0, end: 1 },
-    ]);
-  });
-
   it('projects uncompleted assistant tool calls as pending activity', () => {
     const [item] = toTranscriptEntries([
       {
@@ -791,7 +730,7 @@ describe('activity row views and virtual transcript construction', () => {
     ]);
   });
 
-  it('keeps live multi-turn tools in the same group as reloaded history', () => {
+  it('keeps live multi-turn tools in canonical order after reloading history', () => {
     let projection = hydrateTranscript([], 's1');
     const reduce = (event: Parameters<typeof reduceTranscriptEvent>[1]) => {
       projection = reduceTranscriptEvent(projection, event);
@@ -857,14 +796,9 @@ describe('activity row views and virtual transcript construction', () => {
     expect(items.find(({ key }) => key === 'assistant-2')?.thinking).toEqual([
       '**Checking the timestamp**',
     ]);
-    expect(
-      projectActivityGroups(items.map(({ entry }) => entry)),
-    ).toMatchObject([
-      {
-        title: 'Inspecting the workspace',
-        toolCount: 3,
-        status: 'settled',
-      },
+    expect(buildTranscriptToolStreams(items)).toMatchObject([
+      { start: 1, end: 2 },
+      { start: 4, end: 4 },
     ]);
   });
 
@@ -910,9 +844,9 @@ describe('activity row views and virtual transcript construction', () => {
         ({ raw }) => (raw as { type?: string })?.type === 'custom_message',
       ),
     ).toBe(true);
-    expect(
-      projectActivityGroups(items.map(({ entry }) => entry))[0]?.status,
-    ).toBe('preparing');
+    expect(buildTranscriptToolStreams(items)).toMatchObject([
+      { start: 1, end: 1 },
+    ]);
   });
 
   it('normalizes historical Pi toolResult messages out of order', () => {
@@ -1008,38 +942,6 @@ describe('activity row views and virtual transcript construction', () => {
     expect(toolOutcome({ kind: 'tool', status: 'complete' })).toBe('success');
   });
 
-  it('accepts complete activity projections for every tool outcome', () => {
-    for (const tool of [
-      { name: 'read', args: {}, status: 'success' as const },
-      { name: 'bash', args: {}, status: 'error' as const, isError: true },
-      { name: 'bash', args: {}, status: 'running' as const },
-    ]) {
-      const [group] = projectActivityGroups([
-        {
-          kind: 'assistant',
-          speaks: true,
-          title: 'Running the tool',
-          titleKind: 'preamble',
-        },
-        { kind: 'tool', ...tool },
-      ]);
-      expect(Value.Check(ActivityGroupsViewModelSchema, group)).toBe(true);
-    }
-  });
-
-  it('precomputes regular transcript coverage without scanning groups per item', () => {
-    const groups = [
-      { start: 1, end: 3 },
-      { start: 6, end: 7 },
-    ] as TranscriptGroup[];
-    const { groupByStart, groupCoverage } = buildTranscriptGroupCoverage(
-      9,
-      groups,
-    );
-    expect([...groupByStart.keys()]).toEqual([1, 6]);
-    expect([...groupCoverage]).toEqual([0, 1, 1, 1, 0, 0, 1, 1, 0]);
-  });
-
   it('renders a fully reached pause as a transient transcript event', () => {
     const html = renderToStaticMarkup(
       createElement(LivePauseEvent, {
@@ -1091,51 +993,6 @@ describe('activity row views and virtual transcript construction', () => {
     );
     expect(html).toBe('');
   });
-
-  it('uses the same live presentation for regular and virtual group rows', () => {
-    const group = {
-      start: 0,
-      end: 1,
-      status: 'live' as const,
-      toolCount: 1,
-      title: 'Working',
-    } as TranscriptGroup;
-    const regular = activityGroupPresentation(group, false);
-    const [virtual] = buildVirtualTranscriptRows(
-      [{ key: 'assistant-1' }, { key: 'tool-1' }],
-      [group],
-    );
-    expect(virtual?.kind).toBe('group');
-    expect(
-      virtual?.kind === 'group'
-        ? activityGroupPresentation(virtual.group, false)
-        : undefined,
-    ).toEqual(regular);
-  });
-
-  it('constructs alternating group rows with a linear group-read invariant', () => {
-    const groupCount = 20_000;
-    const items = Array.from({ length: groupCount * 2 }, (_, index) => ({
-      key: `entry-${index}`,
-    }));
-    const groups = Array.from(
-      { length: groupCount },
-      (_, index) =>
-        ({
-          start: index * 2,
-          end: index * 2,
-          status: 'settled',
-          toolCount: 1,
-          title: 'work',
-        }) as TranscriptGroup,
-    );
-    const stats = { groupReads: 0 };
-    const rows = buildVirtualTranscriptRows(items, groups, stats);
-    expect(rows).toHaveLength(groupCount * 2);
-    expect(rows.filter((row) => row.kind === 'group')).toHaveLength(groupCount);
-    expect(rows.filter((row) => row.kind === 'entry')).toHaveLength(groupCount);
-    expect(stats.groupReads).toBeLessThan(items.length * 3);
-  });
 });
 
 describe('virtual transcript scroll preservation', () => {
@@ -1147,7 +1004,7 @@ describe('virtual transcript scroll preservation', () => {
     expect(preserveVirtualScrollOffset(240, 312, true)).toBe(0);
   });
 
-  it('restores the bottom after an expanded group is measured', () => {
+  it('restores the bottom after an expanded stream is measured', () => {
     expect(restoreVirtualBottom(2400, 720, true)).toBe(1680);
     expect(restoreVirtualBottom(2400, 720, false)).toBeUndefined();
   });

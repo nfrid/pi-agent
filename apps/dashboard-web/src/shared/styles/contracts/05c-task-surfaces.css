@@ -70,7 +70,7 @@
   color: var(--purple);
 }
 @media (prefers-reduced-motion: reduce) {
-  .activity-group.activity-pending .activity-icon,
+  .tool-step.step-pending .tool-step-dot,
   .surface-running .surface-state {
     animation: none;
   }

@@ -44,7 +44,7 @@
   text-transform: uppercase;
 }
 
-/* Live extension cards retain the compact status density of the TUI. */
+/* Live extension cards retain compact status density. */
 .extension-surfaces {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -68,17 +68,6 @@
   font-weight: 600;
   padding: 0.25rem 0;
   text-align: center;
-}
-.activity-renderer-chip {
-  display: grid;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.activity-renderer-chip {
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
 }
 .extension-surface-slot {
   min-width: 0;

@@ -1,23 +1,32 @@
-/* Global transcript contract: activity group and legacy transcript entry vocabulary. */
-.activity-group {
+/* Transcript contract: ordinary messages and compact tool-call streams. */
+.transcript-tool-stream {
   margin: 12px 0;
   border: 0;
   background: transparent;
 }
-.activity-group-header {
+.tool-stream-meta {
+  box-sizing: border-box;
+  display: flex;
   min-width: 0;
-  padding: 8px 11px;
-  color: var(--fg);
-  overflow-wrap: anywhere;
-  line-height: 1.55;
+  min-height: 32px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  border-top: 1px solid var(--line-soft);
+  padding: 5px 13px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
 }
-.activity-group-header::after {
-  display: block;
-  clear: both;
-  content: "";
+.transcript-tool-stream-expanded > .tool-stream-meta {
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  background: var(--bg-alt);
 }
-.activity-summary-toggle {
+.tool-stream-toggle {
   display: inline-flex;
+  min-height: 22px;
   align-items: center;
   gap: 5px;
   border: 0;
@@ -26,98 +35,50 @@
   color: var(--dim);
   font: inherit;
   font-size: 11px;
+  line-height: 1.2;
   cursor: pointer;
 }
-.activity-summary-toggle:hover {
+.tool-stream-toggle > span[aria-hidden="true"] {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  line-height: 1;
+}
+.tool-stream-toggle:hover {
   color: var(--fg);
 }
-.activity-summary-toggle:focus-visible {
+.tool-stream-toggle:focus-visible {
   border-radius: 3px;
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
-.activity-summary-toggle-icon {
-  color: var(--cyan);
-  font-size: 13px;
-  line-height: 1;
-}
-.activity-group-accessories {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  float: inline-end;
-  margin-inline-start: 12px;
-  color: var(--muted);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.activity-group-accessories .activity-time {
-  margin-left: 0;
-}
-.activity-group-preamble {
+.tool-stream-metadata {
   display: block;
   min-width: 0;
-  font-size: inherit;
-  line-height: inherit;
-}
-.activity-group-preamble:has(> .markdown > p:first-child) {
-  display: inline;
-}
-.activity-group-preamble .markdown {
-  min-width: 0;
-  overflow-x: auto;
-}
-.activity-group-preamble:has(> .markdown > p:first-child) > .markdown {
-  display: inline;
-  overflow-x: visible;
-}
-.activity-group-preamble:has(> .markdown > p:first-child)
-  .markdown
-  > p:first-child {
-  display: inline;
-  margin-top: 0;
-}
-.activity-group-fallback {
-  font-size: inherit;
-  font-weight: 600;
-  line-height: inherit;
-}
-.activity-icon {
-  color: var(--cyan);
-  font-weight: 700;
-}
-.activity-group-header > .activity-icon {
-  margin-inline-end: 0.2em;
-}
-.activity-settled .activity-icon {
+  overflow: hidden;
   color: var(--muted);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.activity-ended-error .activity-icon {
-  color: var(--red);
-}
-.activity-group.activity-pending .activity-icon {
-  animation: tui-pulse 1.2s steps(2, end) infinite;
-}
-.activity-summary {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
+.tool-stream-items {
   border-top: 1px solid var(--line-soft);
-  padding: 7px 13px 8px;
-  color: var(--muted);
-  font-size: 11px;
+  padding: 2px 13px 4px;
 }
-.activity-step-meta {
+.tool-stream-direct-item {
+  padding-inline: 13px;
+}
+.tool-step-meta {
   color: var(--dim);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
-.activity-step-dot {
+.tool-step-dot {
   color: var(--cyan);
 }
-.activity-tool-name {
+.tool-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -133,10 +94,10 @@
   line-height: 1.35;
   text-transform: uppercase;
 }
-.activity-tool-name-described {
+.tool-name-described {
   font-style: italic;
 }
-.activity-tool-argument {
+.tool-argument {
   display: flex;
   min-width: 0;
   align-items: baseline;
@@ -144,12 +105,12 @@
   overflow: hidden;
   color: var(--fg);
 }
-.activity-tool-argument-text {
+.tool-argument-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.activity-line-changes {
+.line-changes {
   display: inline-flex;
   flex: 0 0 auto;
   gap: 5px;
@@ -165,69 +126,10 @@
 .line-change-removed {
   color: var(--red);
 }
-.activity-metadata {
-  display: block;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.activity-metadata-kind {
-  font-weight: 650;
-}
-.activity-metadata-inspect .activity-metadata-kind {
-  color: var(--cyan);
-}
-.activity-metadata-mutate .activity-metadata-kind {
-  color: var(--orange);
-}
-.activity-metadata-validate .activity-metadata-kind {
-  color: var(--green);
-}
-.activity-metadata-execute .activity-metadata-kind {
-  color: var(--purple);
-}
-.activity-metadata-mixed .activity-metadata-kind {
-  color: var(--fg);
-}
-.activity-metadata-separator,
-.activity-metadata-duration,
-.activity-metadata-compaction {
-  color: var(--dim);
-}
-.activity-metadata-changes {
-  display: inline-flex;
-  gap: 4px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.activity-metadata-failure {
-  color: var(--red);
-  font-weight: 700;
-}
-.activity-detail {
-  border-top: 1px solid var(--line-soft);
-  padding: 0 13px;
-}
 .transcript-entry {
   border-bottom: 1px solid var(--line-soft);
   color: var(--muted);
   font-size: 11px;
-}
-.preparing-toolcall {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--cyan);
-}
-.preparing-toolcall small {
-  margin-left: auto;
-  color: var(--muted);
-}
-.preparing-toolcall .transcript-time {
-  margin-left: 0;
 }
 .transcript-entry:last-child {
   border-bottom: 0;
@@ -236,9 +138,12 @@
   cursor: pointer;
 }
 .transcript-entry pre {
-  white-space: pre-wrap;
+  max-height: 250px;
   overflow: auto;
   color: var(--fg);
   font-size: 10px;
-  max-height: 250px;
+  white-space: pre-wrap;
+}
+.skill-icon {
+  color: var(--purple);
 }

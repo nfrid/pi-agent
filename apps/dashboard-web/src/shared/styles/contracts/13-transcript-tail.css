@@ -1,20 +1,20 @@
-/* Global transcript tail contract: paused activity, thinking blobs, and virtual transcript presentation. */
+/* Global transcript tail contract: paused runtime, thinking, and virtual transcript presentation. */
 .runtime-pause-label {
   color: var(--orange);
   font-size: 11px;
   font-weight: 650;
 }
-.activity-metadata {
+.tool-stream-metadata {
   padding-left: 2px;
 }
-.tool-detail > summary.activity-step {
+.tool-detail > summary.tool-step {
   display: grid;
   grid-template-columns: 14px minmax(0, max-content) minmax(0, 1fr) auto;
   align-items: center;
   min-width: 0;
   padding: 8px 0;
 }
-.tool-detail > summary.activity-step .activity-tool-argument {
+.tool-detail > summary.tool-step .tool-argument {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -23,6 +23,27 @@
 .transcript-entry > summary {
   display: flex;
   min-width: 0;
+}
+.transcript-thinking {
+  margin: 6px 0;
+}
+.transcript-thinking > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+}
+.transcript-thinking > summary small {
+  color: var(--dim);
+}
+.transcript-thinking[open] > summary {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg-alt);
+  padding: 5px 0;
 }
 .transcript-thinking-blobs {
   display: grid;
@@ -52,13 +73,6 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
-.activity-group .thinking-time {
-  right: 0;
-}
-.activity-detail .message-bubble > .transcript-time,
-.activity-detail .message-bubble-accessories {
-  margin-right: -14px;
-}
 .transcript-thinking-blob .markdown {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -68,12 +82,6 @@
 }
 .transcript-thinking-blob .markdown > :last-child {
   margin-bottom: 0;
-}
-.activity-detail
-  .transcript-entry:has(
-    + .transcript-message-entry .transcript-thinking-blobs
-  ) {
-  border-bottom: 0;
 }
 .transcript-message-entry,
 .message-bubble {
@@ -278,24 +286,6 @@
 .session-page.session-page-embedded .session-context {
   position: static;
   width: 100%;
-}
-
-/* Keep the explicit preamble visible while its activity details are inspected. */
-.activity-group {
-  overflow: visible;
-}
-.activity-group > .activity-group-header {
-  position: sticky;
-  top: 0;
-  z-index: 24;
-  min-height: 42px;
-  background: var(--bg-alt);
-}
-.activity-detail-expanded {
-  max-height: min(60vh, 32rem);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 
 .session-page[data-tail-pending] .transcript {
