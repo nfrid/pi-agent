@@ -8,12 +8,11 @@
   box-sizing: border-box;
   display: flex;
   min-width: 0;
-  min-height: 32px;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   gap: 4px 12px;
   border-top: 1px solid var(--line-soft);
-  padding: 5px 13px;
+  padding: 7px 0 8px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.2;
@@ -23,6 +22,14 @@
   top: 0;
   z-index: 24;
   background: var(--bg-alt);
+}
+.transcript-tool-stream-expanded:has(
+    .tool-stream-items .tool-detail[open] .tool-inspector pre,
+    .tool-stream-items .tool-detail[open] .tool-inspector [class*="output"],
+    .tool-stream-items .tool-detail[open] .tool-inspector [class*="preview"]
+  )
+  > .tool-stream-meta {
+  position: static;
 }
 .tool-stream-toggle {
   display: inline-flex;
@@ -64,12 +71,55 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tool-stream-metadata-kind {
+  font-weight: 650;
+}
+.tool-stream-metadata-inspect .tool-stream-metadata-kind {
+  color: var(--cyan);
+}
+.tool-stream-metadata-mutate .tool-stream-metadata-kind {
+  color: var(--orange);
+}
+.tool-stream-metadata-validate .tool-stream-metadata-kind {
+  color: var(--green);
+}
+.tool-stream-metadata-execute .tool-stream-metadata-kind {
+  color: var(--purple);
+}
+.tool-stream-metadata-mixed .tool-stream-metadata-kind {
+  color: var(--fg);
+}
+.tool-stream-metadata-separator,
+.tool-stream-metadata-duration {
+  color: var(--dim);
+}
+.tool-stream-metadata-status {
+  color: var(--muted);
+}
+.tool-stream-status-failed,
+.tool-stream-metadata-failure {
+  color: var(--red);
+  font-weight: 700;
+}
+.tool-stream-status-in-progress {
+  color: var(--cyan);
+}
+.tool-stream-metadata-changes {
+  display: inline-flex;
+  gap: 4px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tool-stream-metadata-thoughts,
+.tool-stream-metadata-calls,
+.tool-stream-metadata-duration {
+  font-variant-numeric: tabular-nums;
+}
 .tool-stream-items {
-  border-top: 1px solid var(--line-soft);
-  padding: 2px 13px 4px;
+  padding: 2px 0 4px;
 }
 .tool-stream-direct-item {
-  padding-inline: 13px;
+  padding-inline: 0;
 }
 .tool-step-meta {
   color: var(--dim);

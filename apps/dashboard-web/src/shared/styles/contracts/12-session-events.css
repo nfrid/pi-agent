@@ -174,16 +174,6 @@ details.session-event {
   text-transform: lowercase;
 }
 
-.tool-stream-meta,
-.tool-stream-items {
-  background: color-mix(in srgb, var(--bg) 36%, transparent);
-}
-.tool-stream-meta {
-  padding: 7px 12px 9px 14px;
-}
-.tool-stream-items {
-  padding: 2px 13px 4px 14px;
-}
 .tool-step-dot {
   display: grid;
   width: 14px;

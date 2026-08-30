@@ -423,10 +423,107 @@ describe('tool row views and virtual transcript construction', () => {
       }),
     );
     expect(fourHtml).toContain('class="tool-stream-meta"');
-    expect(fourHtml).toContain('Show 1 earlier call');
+    expect(fourHtml).toContain('Show 1 earlier item');
     expect(fourHtml).toContain('4 calls');
     expect(fourHtml).not.toContain('activity-group');
     expect(fourHtml).not.toContain('needs input');
+  });
+
+  it('combines thinking with a following tool history and keeps the preamble normal', () => {
+    const threeItems = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Inspecting the workspace.' },
+            { type: 'thinking', thinking: 'Choose the safest path.' },
+          ],
+        },
+      },
+      { type: 'tool', tool: { toolCallId: 'history-1', name: 'read' } },
+      { type: 'tool', tool: { toolCallId: 'history-2', name: 'grep' } },
+    ]);
+    const threeHtml = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: threeItems,
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(threeHtml).toContain('Inspecting the workspace.');
+    expect(threeHtml).toContain('Choose the safest path.');
+    expect(threeHtml).not.toContain('transcript-thinking"');
+    expect(threeHtml).not.toContain('tool-stream-meta');
+
+    const fourItems = toTranscriptEntries([
+      ...threeItems.map((item) => item.raw),
+      { type: 'tool', tool: { toolCallId: 'history-3', name: 'find' } },
+    ]);
+    const fourHtml = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: fourItems,
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(fourHtml).toContain('Show 1 earlier item');
+    expect(fourHtml).toContain('1 thought');
+    expect(fourHtml).toContain('3 calls');
+    expect(fourHtml).not.toContain('Choose the safest path.');
+    expect(fourHtml).not.toContain('transcript-thinking"');
+    expect(buildVirtualTranscriptRows(fourItems)).toEqual([
+      {
+        kind: 'tool-stream',
+        key: fourItems[0]?.key,
+        start: 0,
+        end: 3,
+      },
+    ]);
+  });
+
+  it('renders structured kind, status, counts, changes, duration, and failure metadata', () => {
+    const html = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: toTranscriptEntries([
+          { type: 'tool', tool: { toolCallId: 'meta-1', name: 'read' } },
+          {
+            type: 'tool',
+            tool: {
+              toolCallId: 'meta-2',
+              name: 'edit',
+              arguments: {
+                path: 'src/app.ts',
+                edits: [{ oldText: 'old', newText: 'new\nextra' }],
+              },
+            },
+          },
+          {
+            type: 'tool',
+            tool: {
+              toolCallId: 'meta-3',
+              name: 'bash',
+              isError: true,
+              data: { durationMs: 2_500 },
+            },
+          },
+          { type: 'tool', tool: { toolCallId: 'meta-4', name: 'grep' } },
+        ]),
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(html).toContain('tool-stream-metadata-mutate');
+    expect(html).toContain('tool-stream-metadata-kind');
+    expect(html).toContain(
+      'tool-stream-metadata-status tool-stream-status-failed',
+    );
+    expect(html).toContain('tool-stream-metadata-thoughts');
+    expect(html).toContain('tool-stream-metadata-calls');
+    expect(html).toContain('tool-stream-metadata-changes');
+    expect(html).toContain('line-change-added');
+    expect(html).toContain('tool-stream-metadata-duration');
+    expect(html).toContain('tool-stream-metadata-failure');
   });
 
   it('aggregates flat stream metadata without a group kind or status', () => {
@@ -798,7 +895,7 @@ describe('tool row views and virtual transcript construction', () => {
     ]);
     expect(buildTranscriptToolStreams(items)).toMatchObject([
       { start: 1, end: 2 },
-      { start: 4, end: 4 },
+      { start: 3, end: 4 },
     ]);
   });
 
