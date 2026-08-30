@@ -38,13 +38,59 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   await expect(
     page.getByText('Inspecting the dashboard surfaces.', { exact: true }),
   ).toBeVisible();
-  const earlierThoughts = page.locator('.transcript-thinking > summary');
-  await expect(earlierThoughts).toContainText('Show 2 earlier thoughts');
-  const earlierCalls = page.getByRole('button', {
-    name: /Show 2 earlier calls/,
+  await expect(page.locator('.transcript-thinking')).toHaveCount(0);
+  const earlierHistory = page.getByRole('button', {
+    name: /Show 7 earlier items/,
   });
-  await expect(earlierCalls).toHaveAttribute('aria-expanded', 'false');
+  await expect(earlierHistory).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(3);
+  await expect(
+    page.locator('.tool-stream-items .transcript-thinking-blob'),
+  ).toHaveCount(0);
+  const metadata = page.locator('.tool-stream-metadata');
+  await expect(metadata).toContainText('Edited');
+  await expect(metadata).toContainText('complete');
+  await expect(metadata).toContainText('5 thoughts');
+  await expect(metadata).toContainText('5 calls');
+  const streamGeometry = await page
+    .locator('.transcript-tool-stream')
+    .evaluate((stream) => {
+      const meta = stream.querySelector<HTMLElement>('.tool-stream-meta');
+      const items = stream.querySelector<HTMLElement>('.tool-stream-items');
+      const icon = stream.querySelector<HTMLElement>(
+        '.transcript-disclosure-icon',
+      );
+      const firstDot = stream.querySelector<HTMLElement>('.tool-step-dot');
+      const kind = stream.querySelector<HTMLElement>(
+        '.tool-stream-metadata-kind',
+      );
+      const metadataNode = stream.querySelector<HTMLElement>(
+        '.tool-stream-metadata',
+      );
+      if (!meta || !items || !icon || !firstDot || !kind || !metadataNode)
+        throw new Error('tool stream presentation missing');
+      return {
+        metaPaddingLeft: getComputedStyle(meta).paddingLeft,
+        metaPaddingRight: getComputedStyle(meta).paddingRight,
+        itemsPaddingLeft: getComputedStyle(items).paddingLeft,
+        itemsPaddingRight: getComputedStyle(items).paddingRight,
+        iconCenter: icon.getBoundingClientRect().x + icon.offsetWidth / 2,
+        dotCenter:
+          firstDot.getBoundingClientRect().x + firstDot.offsetWidth / 2,
+        kindColor: getComputedStyle(kind).color,
+        metadataColor: getComputedStyle(metadataNode).color,
+      };
+    });
+  expect(streamGeometry).toMatchObject({
+    metaPaddingLeft: '0px',
+    metaPaddingRight: '0px',
+    itemsPaddingLeft: '0px',
+    itemsPaddingRight: '0px',
+  });
+  expect(
+    Math.abs(streamGeometry.iconCenter - streamGeometry.dotCenter),
+  ).toBeLessThan(1);
+  expect(streamGeometry.kindColor).not.toBe(streamGeometry.metadataColor);
   await expect(
     page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
   ).toBeVisible();
@@ -57,34 +103,14 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     caret: 'hide',
   });
 
-  await earlierThoughts.click();
-  await expect(page.locator('.transcript-thinking')).toHaveAttribute(
-    'open',
-    '',
-  );
-  expect(
-    await page.locator('.transcript-thinking').evaluate((thinking) => {
-      const summary = thinking.querySelector('summary');
-      const blobs = thinking.querySelector('.transcript-thinking-blobs');
-      if (!summary || !blobs) throw new Error('thinking disclosure missing');
-      return {
-        summaryPosition: getComputedStyle(summary).position,
-        blobsOverflowY: getComputedStyle(blobs).overflowY,
-        blobsMaxHeight: getComputedStyle(blobs).maxHeight,
-      };
-    }),
-  ).toEqual({
-    summaryPosition: 'sticky',
-    blobsOverflowY: 'visible',
-    blobsMaxHeight: 'none',
-  });
-  await earlierThoughts.click();
-
-  await earlierCalls.click();
+  await earlierHistory.click();
   await expect(
-    page.getByRole('button', { name: /Hide 2 earlier calls/ }),
+    page.getByRole('button', { name: /Hide 7 earlier items/ }),
   ).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(5);
+  await expect(
+    page.locator('.tool-stream-items .transcript-thinking-blob'),
+  ).toHaveCount(5);
   expect(
     await page
       .locator('.transcript-tool-stream-expanded')

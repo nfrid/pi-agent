@@ -79,7 +79,9 @@ export function TranscriptToolStream({
   const metadataTitle = [
     toolStreamKindLabel(kind),
     metadataStatusLabel(status),
-    `${thinking.length} thought${thinking.length === 1 ? '' : 's'}`,
+    thinking.length > 0
+      ? `${thinking.length} thought${thinking.length === 1 ? '' : 's'}`
+      : undefined,
     `${tools.length} call${tools.length === 1 ? '' : 's'}`,
     summary.lineChanges.added ? `+${summary.lineChanges.added}` : undefined,
     summary.lineChanges.changed ? `~${summary.lineChanges.changed}` : undefined,
@@ -98,6 +100,10 @@ export function TranscriptToolStream({
     captureScrollAnchor?.(streamKey);
     onToggle(!expanded);
   };
+  const historyTimestampOverride =
+    (first?.role === 'assistant'
+      ? transcriptItemTimestamp(first)
+      : undefined) ?? timestampOverride;
   const renderPreamble = () =>
     first && (first.text || first.imageCount) ? (
       <div key={first.key}>
@@ -133,7 +139,7 @@ export function TranscriptToolStream({
           <TranscriptEntry
             item={entry.item}
             cwd={cwd}
-            timestampOverride={timestampOverride}
+            timestampOverride={historyTimestampOverride}
           />
         </div>
       );
@@ -181,10 +187,14 @@ export function TranscriptToolStream({
           >
             {metadataStatusLabel(status)}
           </span>
-          <MetadataSeparator />
-          <span className="tool-stream-metadata-thoughts">
-            {thinking.length} thought{thinking.length === 1 ? '' : 's'}
-          </span>
+          {thinking.length > 0 ? (
+            <>
+              <MetadataSeparator />
+              <span className="tool-stream-metadata-thoughts">
+                {thinking.length} thought{thinking.length === 1 ? '' : 's'}
+              </span>
+            </>
+          ) : null}
           <MetadataSeparator />
           <span className="tool-stream-metadata-calls">
             {tools.length} call{tools.length === 1 ? '' : 's'}

@@ -1,6 +1,6 @@
 /* Transcript contract: ordinary messages and compact tool-call streams. */
 .transcript-tool-stream {
-  margin: 12px 0;
+  margin: 6px 0;
   border: 0;
   background: transparent;
 }
@@ -9,10 +9,9 @@
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 12px;
-  border-top: 1px solid var(--line-soft);
-  padding: 7px 0 8px;
+  padding: 4px 0;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.2;
@@ -22,14 +21,6 @@
   top: 0;
   z-index: 24;
   background: var(--bg-alt);
-}
-.transcript-tool-stream-expanded:has(
-    .tool-stream-items .tool-detail[open] .tool-inspector pre,
-    .tool-stream-items .tool-detail[open] .tool-inspector [class*="output"],
-    .tool-stream-items .tool-detail[open] .tool-inspector [class*="preview"]
-  )
-  > .tool-stream-meta {
-  position: static;
 }
 .tool-stream-toggle {
   display: inline-flex;
@@ -47,9 +38,9 @@
 }
 .transcript-disclosure-icon {
   display: grid;
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
   place-items: center;
   color: var(--cyan);
   line-height: 1;
@@ -115,11 +106,9 @@
 .tool-stream-metadata-duration {
   font-variant-numeric: tabular-nums;
 }
-.tool-stream-items {
-  padding: 2px 0 4px;
-}
+.tool-stream-items,
 .tool-stream-direct-item {
-  padding-inline: 0;
+  padding: 0;
 }
 .tool-step-meta {
   color: var(--dim);

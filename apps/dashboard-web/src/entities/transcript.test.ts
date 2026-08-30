@@ -518,7 +518,7 @@ describe('tool row views and virtual transcript construction', () => {
     expect(html).toContain(
       'tool-stream-metadata-status tool-stream-status-failed',
     );
-    expect(html).toContain('tool-stream-metadata-thoughts');
+    expect(html).not.toContain('tool-stream-metadata-thoughts');
     expect(html).toContain('tool-stream-metadata-calls');
     expect(html).toContain('tool-stream-metadata-changes');
     expect(html).toContain('line-change-added');
