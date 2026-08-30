@@ -119,11 +119,12 @@ test('failed thread preserves the diagnostic state @desktop', async ({
   await installVisualStateScenario(page, buildFailedScenario());
 
   await expect(page.locator('.session-status')).toContainText('failed');
-  const failedActivity = page.getByRole('region', { name: 'Tool calls' });
-  await expect(failedActivity).toContainText('bun test');
-  await expect(failedActivity.locator('.tool-stream-metadata')).toContainText(
-    '1 failed',
-  );
+  const failedTool = page
+    .locator('.tool-detail.step-failed')
+    .filter({ hasText: 'bun test' })
+    .first();
+  await expect(failedTool).toBeVisible();
+  await expect(failedTool.getByText('bun test', { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot('failed-thread-desktop.png', {
     animations: 'disabled',
     caret: 'hide',

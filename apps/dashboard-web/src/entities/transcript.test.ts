@@ -392,13 +392,27 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
-  it('summarizes a flat tool stream without status or kind language', () => {
-    const html = renderToStaticMarkup(
+  it('renders up to three calls directly and summarizes four or more', () => {
+    const threeItems = toTranscriptEntries([
+      { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
+      { type: 'tool', tool: { toolCallId: 'call-2', name: 'grep' } },
+      { type: 'tool', tool: { toolCallId: 'call-3', name: 'edit' } },
+    ]);
+    const threeHtml = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: threeItems,
+        expanded: false,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(threeHtml).toContain('tool-detail');
+    expect(threeHtml).not.toContain('tool-stream-meta');
+    expect(threeHtml).not.toContain('tool-stream-toggle');
+
+    const fourHtml = renderToStaticMarkup(
       createElement(TranscriptToolStream, {
         items: toTranscriptEntries([
-          { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
-          { type: 'tool', tool: { toolCallId: 'call-2', name: 'grep' } },
-          { type: 'tool', tool: { toolCallId: 'call-3', name: 'edit' } },
+          ...threeItems.map((item) => item.raw),
           {
             type: 'tool',
             tool: { toolCallId: 'call-4', name: 'bash', isError: true },
@@ -408,10 +422,11 @@ describe('activity row views and virtual transcript construction', () => {
         onToggle: () => undefined,
       }),
     );
-    expect(html).toContain('Show 1 earlier call');
-    expect(html).toContain('4 calls');
-    expect(html).not.toContain('activity-group');
-    expect(html).not.toContain('needs input');
+    expect(fourHtml).toContain('class="tool-stream-meta"');
+    expect(fourHtml).toContain('Show 1 earlier call');
+    expect(fourHtml).toContain('4 calls');
+    expect(fourHtml).not.toContain('activity-group');
+    expect(fourHtml).not.toContain('needs input');
   });
 
   it('aggregates flat stream metadata without a group kind or status', () => {

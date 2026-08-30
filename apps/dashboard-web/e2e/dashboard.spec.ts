@@ -3827,16 +3827,13 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(jumpLatest).toHaveCount(0);
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   const failedActivity = page
-    .locator('.transcript-tool-stream')
+    .locator('.tool-detail.step-failed')
     .filter({ hasText: 'Run the expected failing command' })
     .first();
   await expect(failedActivity).toBeVisible();
-  await expect(failedActivity.locator('.tool-stream-metadata')).toContainText(
-    '1 failed',
-  );
   const failedActivityGroup = failedActivity;
   const failedToolSummary = failedActivity.locator(
-    '.tool-detail > summary.tool-step',
+    ':scope > summary.tool-step',
   );
   await failedToolSummary.click();
   const describedAction = failedActivity.locator('.tool-name-described');
@@ -3887,18 +3884,15 @@ test('dense mobile session keeps conversation and activity readable', async ({
     whiteSpace: 'nowrap',
   });
   const failedExpandedDot = failedActivityGroup.locator(
-    '.tool-detail.step-failed .tool-step-dot',
+    ':scope > summary.tool-step .tool-step-dot',
   );
   await expect(failedExpandedDot).toHaveText('!');
   await failedToolSummary.click();
   const activity = page
-    .locator('.transcript-tool-stream')
+    .locator('.tool-detail')
     .filter({ hasText: 'src/App.tsx' })
     .first();
   await expect(activity).toBeVisible();
-  await expect(activity.locator('.tool-stream-metadata')).toContainText(
-    '1 call',
-  );
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Attach images' }),
@@ -4071,7 +4065,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     element.scrollTop = element.scrollHeight;
   });
   await expect(activity).toBeVisible();
-  const expandedAction = activity.locator('.tool-detail > summary.tool-step');
+  const expandedAction = activity.locator(':scope > summary.tool-step');
   await expect(
     expandedAction.locator('.tool-name').getByText('Reading'),
   ).toBeVisible();
@@ -4104,7 +4098,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(thinkingLayout.timestampBackgroundImage).toBe('none');
   const timestampRights = await page
     .locator(
-      '.message-bubble-accessories .transcript-time:visible, .transcript-tool-stream .tool-step-time:visible',
+      '.message-bubble-accessories .transcript-time:visible, .tool-detail .tool-step-time:visible',
     )
     .evaluateAll((timestamps) =>
       timestamps.map((timestamp) => timestamp.getBoundingClientRect().right),
@@ -4162,9 +4156,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
       .filter({ hasText: 'Preparing live tool.' }),
   ).toHaveCount(1);
   await expect(
-    page
-      .getByRole('region', { name: 'Tool calls' })
-      .filter({ hasText: 'src/live.ts' }),
+    page.locator('.tool-detail').filter({ hasText: 'src/live.ts' }).first(),
   ).toBeVisible();
   const emitMessage = async (type: string, timestamp: number, text: string) =>
     page.evaluate(
@@ -5406,12 +5398,10 @@ test('assistant preambles render as ordinary Markdown messages @desktop', async 
   await expect(
     message.getByRole('button', { name: 'Copy assistant message' }),
   ).toBeVisible();
-  await expect(page.locator('.transcript-tool-stream')).toHaveCount(1);
+  await expect(page.locator('.transcript-tool-stream')).toHaveCount(0);
+  await expect(page.locator('.tool-stream-meta')).toHaveCount(0);
   await expect(page.locator('.tool-stream-toggle')).toHaveCount(0);
-  await expect(page.locator('.transcript-tool-stream')).not.toHaveCSS(
-    'overflow-y',
-    'auto',
-  );
+  await expect(page.locator('.tool-detail')).toHaveCount(1);
 });
 
 test('assistant Markdown keeps block-first semantics in a normal message @desktop', async ({
@@ -5535,16 +5525,17 @@ test('virtual transcript keeps flat tool streams inside simple contracts', async
   expect(composerFocus.rect.height).toBeGreaterThan(0);
 
   await expect(page.locator('.transcript-virtualized')).toHaveCount(1);
-  await expect(page.locator('.transcript-tool-stream')).toHaveCount(4);
+  await expect(page.locator('.transcript-tool-stream')).toHaveCount(0);
+  await expect(page.locator('.tool-stream-meta')).toHaveCount(0);
   await expect(page.locator('.tool-stream-toggle')).toHaveCount(0);
-  const streamStyles = await page
-    .locator('.transcript-tool-stream')
+  const rowStyles = await page
+    .locator('.transcript-virtual-row')
     .first()
     .evaluate((element) => {
       const style = getComputedStyle(element);
       return { maxHeight: style.maxHeight, overflowY: style.overflowY };
     });
-  expect(streamStyles).toEqual({ maxHeight: 'none', overflowY: 'visible' });
+  expect(rowStyles).toEqual({ maxHeight: 'none', overflowY: 'visible' });
   await mocks.close();
 });
 
@@ -5553,17 +5544,13 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
     entries: phase6EditEntries(historyCount),
   });
   await page.goto('/sessions/s1');
-  const activity = page
-    .locator('.transcript-tool-stream')
+  const tool = page
+    .locator('.tool-detail')
     .filter({ hasText: 'Editing' })
     .first();
-  await expect(activity).toBeVisible();
-  const tool = activity.locator('.tool-detail').filter({ hasText: 'Editing' });
   await expect(tool).toBeVisible();
-  const streamMeta = activity.locator('.tool-stream-meta');
-  await expect(streamMeta).toBeVisible();
-  await expect(streamMeta).toHaveCSS('position', 'static');
-  await expect(activity).not.toHaveCSS('overflow-y', 'auto');
+  await expect(page.locator('.tool-stream-meta')).toHaveCount(0);
+  await expect(tool).not.toHaveCSS('overflow-y', 'auto');
 
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   expect(await transcriptGap(page)).toBeLessThan(3);
@@ -5753,10 +5740,15 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(dockMarker).toHaveAttribute('aria-label', 'Earlier history 1');
   await expect(dockMarker).not.toHaveAttribute('title', 'Earlier history 1');
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
-  const activity = page.getByRole('region', {
-    name: /Inspecting history/,
-  });
-  await expect(activity).toBeVisible();
+  const assistant = page
+    .locator('.message-assistant')
+    .filter({ hasText: 'Inspecting history' })
+    .first();
+  await expect(assistant).toBeVisible();
+  const activity = page
+    .locator('.tool-detail')
+    .filter({ hasText: 'Reading' })
+    .first();
   await expect(activity.getByText('Reading', { exact: true })).toBeVisible();
   await expect(
     activity.getByText('src/App.tsx', { exact: true }),
@@ -5769,13 +5761,12 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
       .locator('.transcript-thinking-blob')
       .getByText('Considering the workspace'),
   ).toBeVisible();
-  const tool = activity.locator('.tool-detail');
-  const toolSummary = tool.locator(':scope > summary.tool-step');
+  const toolSummary = activity.locator(':scope > summary.tool-step');
   await expect(toolSummary.getByText('Reading', { exact: true })).toBeVisible();
   await toolSummary.click();
-  await expect(tool).toHaveAttribute('open', '');
+  await expect(activity).toHaveAttribute('open', '');
   await toolSummary.click();
-  await expect(tool).not.toHaveAttribute('open', '');
+  await expect(activity).not.toHaveAttribute('open', '');
   expect(
     mocks.commands.filter(
       (command) => command.actionId === 'activity-groups.set',

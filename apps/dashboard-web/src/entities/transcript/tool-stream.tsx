@@ -46,6 +46,25 @@ export function TranscriptToolStream({
     captureScrollAnchor?.(streamKey);
     onToggle(!expanded);
   };
+  const renderItems = (
+    visible: readonly TranscriptModelItem[],
+    includeItemKeys: boolean,
+  ) =>
+    visible.map((item) => (
+      <div
+        className={includeItemKeys ? 'tool-stream-direct-item' : undefined}
+        {...(includeItemKeys ? { 'data-transcript-key': item.key } : {})}
+        key={item.key}
+      >
+        <TranscriptEntry
+          item={item}
+          cwd={cwd}
+          timestampOverride={timestampOverride}
+        />
+      </div>
+    ));
+
+  if (tools.length <= 3) return <>{renderItems(items, true)}</>;
 
   return (
     <section
@@ -76,15 +95,7 @@ export function TranscriptToolStream({
         id={detailId}
         aria-describedby={`${detailId}-meta`}
       >
-        {visibleItems.map((item) => (
-          <div key={item.key}>
-            <TranscriptEntry
-              item={item}
-              cwd={cwd}
-              timestampOverride={timestampOverride}
-            />
-          </div>
-        ))}
+        {renderItems(visibleItems, false)}
       </div>
     </section>
   );

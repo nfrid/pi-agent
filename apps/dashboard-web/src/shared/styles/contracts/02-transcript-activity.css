@@ -5,15 +5,18 @@
   background: transparent;
 }
 .tool-stream-meta {
+  box-sizing: border-box;
   display: flex;
   min-width: 0;
+  min-height: 32px;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 12px;
   border-top: 1px solid var(--line-soft);
-  padding: 7px 13px 8px;
+  padding: 5px 13px;
   color: var(--muted);
   font-size: 11px;
+  line-height: 1.2;
 }
 .transcript-tool-stream-expanded > .tool-stream-meta {
   position: sticky;
@@ -23,6 +26,7 @@
 }
 .tool-stream-toggle {
   display: inline-flex;
+  min-height: 22px;
   align-items: center;
   gap: 5px;
   border: 0;
@@ -31,7 +35,16 @@
   color: var(--dim);
   font: inherit;
   font-size: 11px;
+  line-height: 1.2;
   cursor: pointer;
+}
+.tool-stream-toggle > span[aria-hidden="true"] {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  line-height: 1;
 }
 .tool-stream-toggle:hover {
   color: var(--fg);
@@ -46,12 +59,16 @@
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .tool-stream-items {
   border-top: 1px solid var(--line-soft);
   padding: 2px 13px 4px;
+}
+.tool-stream-direct-item {
+  padding-inline: 13px;
 }
 .tool-step-meta {
   color: var(--dim);
