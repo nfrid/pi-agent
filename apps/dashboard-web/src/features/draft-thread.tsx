@@ -1,11 +1,12 @@
 import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
+  composerCommandsQueryOptions,
   createThreadMutationOptions,
   dashboardHttpClient,
   retryThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
 import { errorMessage } from '../shared/lib/error-message';
@@ -152,6 +153,21 @@ export function DraftThreadView({
   const selectedLocation = fallbackDraft
     ? locationForDraft(fallbackDraft)
     : { kind: 'current' as const };
+  const composerCwd =
+    selectedLocation.kind === 'checkout'
+      ? snapshot.checkouts?.find(
+          (checkout) => checkout.id === selectedLocation.checkoutId,
+        )?.path
+      : selectedLocation.kind === 'current'
+        ? snapshot.checkouts?.find(
+            (checkout) =>
+              checkout.projectId === fallbackDraft?.projectId &&
+              checkout.kind === 'main',
+          )?.path
+        : project?.rootPath;
+  const composerCommands = useQuery(
+    composerCommandsQueryOptions(dashboardHttpClient, composerCwd ?? ''),
+  );
   const promotedThreadId = fallbackDraft?.promotedThreadId;
   const pendingRun = promotedThreadId
     ? latestRunForThread(snapshot.runs ?? [], promotedThreadId)
@@ -407,6 +423,8 @@ export function DraftThreadView({
             onPasteCapture={attachments.onPasteCapture}
             editorRef={editorRef}
             initialMarkdown={initialDraft}
+            commands={composerCommands.data?.commands}
+            cwd={composerCwd}
             onChange={updateText}
             placeholder="Message Pi…"
             readOnly={submitting}

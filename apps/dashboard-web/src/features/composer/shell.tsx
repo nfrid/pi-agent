@@ -94,6 +94,7 @@ export function ComposerShell({
   onPasteCapture,
   editorRef,
   commands,
+  cwd,
   onChange,
   placeholder,
   readOnly,
@@ -124,6 +125,7 @@ export function ComposerShell({
   onPasteCapture: ClipboardEventHandler<HTMLElement>;
   editorRef: RefObject<MDXEditorMethods | null>;
   commands?: readonly ComposerCommandOption[];
+  cwd?: string;
   onChange: (value: string) => void;
   placeholder: string;
   readOnly: boolean;
@@ -171,6 +173,7 @@ export function ComposerShell({
             ref={editorRef}
             {...(initialMarkdown === undefined ? {} : { initialMarkdown })}
             commands={commands}
+            cwd={cwd}
             onChange={onChange}
             placeholder={placeholder}
             readOnly={readOnly}

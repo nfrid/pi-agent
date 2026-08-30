@@ -33,6 +33,10 @@ import {
   shellRuntime,
 } from './application/dashboard-application.js';
 import type { DashboardImage } from './application/upload-service.js';
+import {
+  composerCommandCatalogue,
+  composerFileSuggestions,
+} from './composer-autocomplete.js';
 import type {
   DashboardDependencies,
   DashboardServerOptions,
@@ -224,6 +228,8 @@ export class DashboardServerImpl implements DashboardServer {
           this.revision,
           this.shellFeed.sequence,
         ),
+      composerCommands: composerCommandCatalogue,
+      composerFileSuggestions,
       shellSnapshot: () => {
         const snapshot = this.application.shellSnapshot(
           this.serverId,

@@ -96,28 +96,127 @@ function commandParts(
   return match ? { name: match[1], args: match[2] ?? '' } : undefined;
 }
 
+function skillBlock(command: CommandInfo, skill: string): string {
+  const raw = readFileSync(command.sourceInfo.path, 'utf8');
+  const body = stripFrontmatter(raw).trim();
+  const baseDir =
+    command.sourceInfo.baseDir ?? path.dirname(command.sourceInfo.path);
+  return `<skill name="${skill}" location="${command.sourceInfo.path}">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`;
+}
+
+function replaceSkillReferences(
+  text: string,
+  skills: ReadonlyMap<string, CommandInfo>,
+): { text: string; commands: CommandInfo[] } {
+  const selected: CommandInfo[] = [];
+  const seen = new Set<string>();
+  let fenced: '`' | '~' | undefined;
+  let inlineTicks = 0;
+  const rewritten = text
+    .split('\n')
+    .map((line) => {
+      const fence = line.match(/^\s*(`{3,}|~{3,})/u)?.[1];
+      if (fence) {
+        const marker = fence[0] as '`' | '~';
+        if (!fenced) fenced = marker;
+        else if (fenced === marker) fenced = undefined;
+        return line;
+      }
+      if (fenced) return line;
+      let result = '';
+      for (let index = 0; index < line.length; ) {
+        if (line[index] === '`') {
+          let end = index + 1;
+          while (line[end] === '`') end += 1;
+          const count = end - index;
+          if (inlineTicks === 0) inlineTicks = count;
+          else if (inlineTicks === count) inlineTicks = 0;
+          result += line.slice(index, end);
+          index = end;
+          continue;
+        }
+        if (
+          inlineTicks === 0 &&
+          line[index] === '$' &&
+          line[index - 1] !== '\\'
+        ) {
+          const candidate = line
+            .slice(index + 1)
+            .match(/^[a-z0-9]+(?:-[a-z0-9]+)*/u)?.[0];
+          const command = candidate ? skills.get(candidate) : undefined;
+          if (candidate && command) {
+            if (!seen.has(candidate)) {
+              seen.add(candidate);
+              selected.push(command);
+            }
+            result += candidate;
+            index += candidate.length + 1;
+            continue;
+          }
+        }
+        if (
+          inlineTicks === 0 &&
+          line[index] === '\\' &&
+          line[index + 1] === '$'
+        ) {
+          result += '$';
+          index += 2;
+          continue;
+        }
+        result += line[index];
+        index += 1;
+      }
+      return result;
+    })
+    .join('\n');
+  return { text: rewritten, commands: selected };
+}
+
+function expandInlineSkills(
+  text: string,
+  commands: readonly CommandInfo[],
+): string {
+  const skills = new Map(
+    commands.flatMap((command) =>
+      command.source === 'skill'
+        ? [[command.name.replace(/^skill:/u, ''), command] as const]
+        : [],
+    ),
+  );
+  const expanded = replaceSkillReferences(text, skills);
+  if (expanded.commands.length === 0) return expanded.text;
+  const blocks = expanded.commands.map((command) =>
+    skillBlock(command, command.name.replace(/^skill:/u, '')),
+  );
+  return `${blocks.join('\n\n')}\n\n${expanded.text}`;
+}
+
 export function expandDashboardInput(
   text: string,
   commands: readonly CommandInfo[],
 ): string {
   const invocation = commandParts(text);
-  if (!invocation) return text;
-  const command = commands.find((item) => item.name === invocation.name);
-  if (!command || command.source === 'extension') return text;
-  const raw = readFileSync(command.sourceInfo.path, 'utf8');
-  const body = stripFrontmatter(raw).trim();
-  if (command.source === 'skill') {
-    const baseDir =
-      command.sourceInfo.baseDir ?? path.dirname(command.sourceInfo.path);
-    const skill = invocation.name.startsWith('skill:')
-      ? invocation.name.slice(6)
-      : invocation.name;
-    const block = `<skill name="${skill}" location="${command.sourceInfo.path}">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`;
-    return invocation.args.trim()
-      ? `${block}\n\n${invocation.args.trim()}`
-      : block;
+  if (invocation) {
+    const command = commands.find((item) => item.name === invocation.name);
+    if (command && command.source !== 'extension') {
+      if (command.source === 'skill') {
+        const skill = invocation.name.startsWith('skill:')
+          ? invocation.name.slice(6)
+          : invocation.name;
+        const block = skillBlock(command, skill);
+        return invocation.args.trim()
+          ? `${block}\n\n${invocation.args.trim()}`
+          : block;
+      }
+      const raw = readFileSync(command.sourceInfo.path, 'utf8');
+      const body = stripFrontmatter(raw).trim();
+      return expandInlineSkills(
+        substituteArgs(body, parseArgs(invocation.args)),
+        commands,
+      );
+    }
   }
-  return substituteArgs(body, parseArgs(invocation.args));
+  return expandInlineSkills(text, commands);
 }
 
 export async function dispatchDashboardInput(

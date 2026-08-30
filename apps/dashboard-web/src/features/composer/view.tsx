@@ -2,6 +2,7 @@ import type { MDXEditorMethods } from '@mdxeditor/editor';
 import type { DashboardLiveStore } from '@pi-dashboard/client';
 import {
   commandMutationOptions,
+  composerCommandsQueryOptions,
   dashboardHttpClient,
   startRuntimeMutationOptions,
 } from '@pi-dashboard/client';
@@ -10,7 +11,7 @@ import type {
   RuntimeSnapshot,
   SessionIndexEntry,
 } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { errorMessage } from '../../shared/lib/error-message';
@@ -113,7 +114,15 @@ export function Composer({
   const resumeMutation = useMutation(
     startRuntimeMutationOptions(dashboardHttpClient),
   );
-  const composerCommands = runtime?.composerCommands;
+  const composerCwd = runtime?.cwd ?? checkout?.path;
+  const discoveredCommands = useQuery(
+    composerCommandsQueryOptions(
+      dashboardHttpClient,
+      runtime?.composerCommands ? '' : (composerCwd ?? ''),
+    ),
+  );
+  const composerCommands =
+    runtime?.composerCommands ?? discoveredCommands.data?.commands;
   const { queue, setQueue, addOptimistic, rejectOptimistic } =
     useComposerQueue(runtime);
   const settledBackground = hasSettledBackground(runtime);
@@ -370,6 +379,7 @@ export function Composer({
         onPasteCapture={onPasteCapture}
         editorRef={editorRef}
         initialMarkdown={initialDraft}
+        cwd={composerCwd}
         commands={
           runtime?.liveState === 'working' && !settledBackground
             ? composerCommands?.filter(

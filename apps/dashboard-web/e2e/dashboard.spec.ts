@@ -261,6 +261,25 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
+  await page.route('**/trpc/composerCommands', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: trpcData({
+        commands: [
+          {
+            name: 'review',
+            description: 'Review changes',
+            source: 'prompt',
+          },
+          {
+            name: 'skill:browser',
+            description: 'Automate a browser',
+            source: 'skill',
+          },
+        ],
+      }),
+    }),
+  );
   await page.route('**/api/projects/p/git-context', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -466,7 +485,16 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(page.getByRole('button', { name: 'Delete draft' })).toHaveCount(
     0,
   );
-  await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
+  const draftComposer = page.getByRole('textbox', { name: 'Message Pi' });
+  await expect(draftComposer).toBeVisible();
+  await draftComposer.fill('/rev');
+  await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
+  await draftComposer.press('Tab');
+  await expect(draftComposer).toContainText('/review');
+  expect(
+    await draftComposer.evaluate(() => window.getSelection()?.anchorOffset),
+  ).toBe('/review '.length);
+  await draftComposer.fill('');
   const locationControl = page.getByRole('button', {
     name: 'Checkout location',
   });
@@ -700,6 +728,81 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   await chooser.getByRole('option', { name: /Two/ }).click();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
+});
+
+test('draft composer completes slash commands before a runtime starts', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'pi-dashboard-drafts:v1',
+      JSON.stringify([
+        {
+          id: 'draft-autocomplete',
+          projectId: 'project-autocomplete',
+          createdAt: 1,
+          updatedAt: 1,
+          isolation: 'main',
+          location: { kind: 'current' },
+        },
+      ]),
+    );
+  });
+  await page.route('**/trpc/composerCommands', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: trpcData({
+        commands: [
+          {
+            name: 'review',
+            description: 'Review changes',
+            source: 'prompt',
+          },
+        ],
+      }),
+    }),
+  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-draft-autocomplete',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    projects: [
+      {
+        id: 'project-autocomplete',
+        title: 'Autocomplete project',
+        rootPath: '/tmp/autocomplete-project',
+        defaultIsolation: 'main',
+        maxParallelRuns: 1,
+        activeRunCount: 0,
+        status: 'active',
+        updatedAt: 1,
+      },
+    ],
+    checkouts: [
+      {
+        id: 'checkout-autocomplete',
+        projectId: 'project-autocomplete',
+        kind: 'main',
+        path: '/tmp/autocomplete-project',
+        status: 'clean',
+        updatedAt: 1,
+      },
+    ],
+    sessions: [],
+    unread: [],
+  });
+
+  await page.goto('/drafts/draft-autocomplete');
+  const editor = page.getByRole('textbox', { name: 'Message Pi' });
+  await expect(editor).toBeVisible();
+  await editor.fill('/rev');
+  await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
+  await editor.press('Tab');
+  await expect(editor).toContainText('/review');
+  expect(await editor.evaluate(() => window.getSelection()?.anchorOffset)).toBe(
+    '/review '.length,
+  );
 });
 
 test('promoted draft is replaced by its started thread in the sidebar @desktop', async ({
@@ -4369,6 +4472,23 @@ function phase6Snapshot(
           },
         ],
         thinkingLevels: ['off', 'low', 'medium', 'high'],
+        composerCommands: [
+          {
+            name: 'compact',
+            description: 'Compact the current session',
+            source: 'builtin',
+          },
+          {
+            name: 'review',
+            description: 'Review changes',
+            source: 'prompt',
+          },
+          {
+            name: 'skill:browser',
+            description: 'Automate a browser',
+            source: 'skill',
+          },
+        ],
         capabilities: phase6Capabilities(),
         ...(overrides.extensionSurfaces
           ? { extensionSurfaces: overrides.extensionSurfaces }
@@ -4897,25 +5017,16 @@ async function installPhase6Mocks(
       ),
     }),
   );
-  await page.route('**/api/workspaces/*/composer-commands', (route) =>
+  await page.route('**/trpc/composerFileSuggestions', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({
-        commands: [
+      body: trpcData({
+        suggestions: [
           {
-            name: 'compact',
-            description: 'Compact the current session',
-            source: 'builtin',
-          },
-          {
-            name: 'review',
-            description: 'Review changes',
-            source: 'prompt',
-          },
-          {
-            name: 'skill:browser',
-            description: 'Automate a browser',
-            source: 'skill',
+            value: 'src/file.js',
+            label: 'file.js',
+            detail: 'src/file.js',
+            directory: false,
           },
         ],
       }),
@@ -6225,7 +6336,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     .toBe(true);
   await workingComposerInput.fill('/compact');
   await expect(
-    page.getByRole('listbox', { name: 'Available commands' }),
+    page.getByRole('listbox', { name: 'Autocomplete suggestions' }),
   ).toHaveCount(0);
   await workingComposerInput.fill('');
   await deliveryMode.click();
@@ -6260,15 +6371,31 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
       (element) => getComputedStyle(element).fontSize,
     ),
   ).toBe('14px');
-  await composerInput.fill('/skill:');
+  await composerInput.fill('$bro');
+  const skillOption = page.getByRole('option', { name: /\$browser/ });
+  await expect(skillOption).toBeVisible();
+  expect(await skillOption.locator('mark').allTextContents()).toEqual([
+    'b',
+    'r',
+    'o',
+  ]);
+  await composerInput.press('Tab');
+  await expect(composerInput).toContainText('$browser');
   await expect(
-    page.getByRole('option', { name: /\/skill:browser/ }),
+    page.getByRole('listbox', { name: 'Autocomplete suggestions' }),
+  ).toHaveCount(0);
+
+  await composerInput.fill('foo @src/fi bar');
+  for (let index = 0; index < 4; index += 1)
+    await composerInput.press('ArrowLeft');
+  await expect(
+    page.getByRole('option', { name: /@src\/file\.js/ }),
   ).toBeVisible();
   await composerInput.press('Tab');
-  await expect(composerInput).toContainText('/skill:browser');
-  await expect(
-    page.getByRole('listbox', { name: 'Available commands' }),
-  ).toHaveCount(0);
+  await expect(composerInput).toContainText('foo @src/file.js bar');
+  expect(
+    await composerInput.evaluate(() => window.getSelection()?.anchorOffset),
+  ).toBe('foo @src/file.js'.length);
   await composerInput.fill('');
   const initialComposerHeight = await composerInput.evaluate(
     (element) => element.getBoundingClientRect().height,

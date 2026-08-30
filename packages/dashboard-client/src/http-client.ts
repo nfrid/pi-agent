@@ -5,6 +5,8 @@ import {
   type CancelCommand,
   type Checkout,
   type CommandReceipt,
+  type ComposerCommandCatalogue,
+  type ComposerFileSuggestions,
   DASHBOARD_PROTOCOL_VERSION,
   type DashboardSettings,
   type DelegateHistoryResponse,
@@ -41,6 +43,8 @@ import {
   type ThreadCreateCommand,
   tryParseAuthoritativeSessionSnapshot,
   tryParseBrowserSnapshot,
+  tryParseComposerCommandCatalogue,
+  tryParseComposerFileSuggestions,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
   tryParseGitContext,
@@ -532,6 +536,53 @@ export class DashboardHttpClient {
         value,
       );
     return response.snapshot;
+  }
+
+  async composerCommands(
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<ComposerCommandCatalogue> {
+    const client = await this.getTrpcClient();
+    let value: unknown;
+    try {
+      value = await client.composerCommands.query(
+        { cwd },
+        signal ? { signal } : {},
+      );
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const response = tryParseComposerCommandCatalogue(value);
+    if (!response)
+      throw malformedOutput(
+        'Dashboard returned invalid composer commands.',
+        value,
+      );
+    return response;
+  }
+
+  async composerFileSuggestions(
+    cwd: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<ComposerFileSuggestions> {
+    const client = await this.getTrpcClient();
+    let value: unknown;
+    try {
+      value = await client.composerFileSuggestions.query(
+        { cwd, query },
+        signal ? { signal } : {},
+      );
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const response = tryParseComposerFileSuggestions(value);
+    if (!response)
+      throw malformedOutput(
+        'Dashboard returned invalid composer file suggestions.',
+        value,
+      );
+    return response;
   }
 
   async session(

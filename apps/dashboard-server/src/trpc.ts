@@ -2,6 +2,12 @@ import {
   type AuthoritativeSessionSnapshot,
   type BridgeCommand,
   type BrowserSnapshot,
+  type ComposerCommandCatalogue,
+  ComposerCommandCatalogueSchema,
+  ComposerFileSuggestionRequestSchema,
+  type ComposerFileSuggestions,
+  ComposerFileSuggestionsSchema,
+  ComposerResourceRequestSchema,
   DASHBOARD_PROTOCOL_VERSION,
   type ProtocolInfo,
   ProtocolInfoSchema,
@@ -48,6 +54,13 @@ export interface DashboardTrpcContext {
   readonly snapshot: () => BrowserSnapshot;
   /** Authoritative shell query builder. */
   readonly shellSnapshot: () => unknown;
+  readonly composerCommands?: (
+    cwd: string,
+  ) => Promise<ComposerCommandCatalogue>;
+  readonly composerFileSuggestions?: (
+    cwd: string,
+    query: string,
+  ) => Promise<ComposerFileSuggestions>;
   readonly sessionSnapshot?: (
     sessionId: string,
     before?: string,
@@ -261,6 +274,60 @@ const dashboardRouter = t.router({
         shell: ctx.shellFeed.metrics(),
         sessions: ctx.sessionFeeds.metrics(),
       });
+    }),
+  composerCommands: dashboardProcedure
+    .input((value: unknown) =>
+      parseSchema(
+        ComposerResourceRequestSchema,
+        value,
+        'composer resource request',
+      ),
+    )
+    .output((value: unknown) =>
+      parseSchema(
+        ComposerCommandCatalogueSchema,
+        value,
+        'composer command catalogue',
+      ),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!ctx.composerCommands)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Composer resources are unavailable.',
+        });
+      try {
+        return await ctx.composerCommands(input.cwd);
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  composerFileSuggestions: dashboardProcedure
+    .input((value: unknown) =>
+      parseSchema(
+        ComposerFileSuggestionRequestSchema,
+        value,
+        'composer file suggestion request',
+      ),
+    )
+    .output((value: unknown) =>
+      parseSchema(
+        ComposerFileSuggestionsSchema,
+        value,
+        'composer file suggestions',
+      ),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!ctx.composerFileSuggestions)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Composer file suggestions are unavailable.',
+        });
+      try {
+        return await ctx.composerFileSuggestions(input.cwd, input.query);
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
     }),
   shellSnapshot: dashboardProcedure
     .input((value: unknown) =>

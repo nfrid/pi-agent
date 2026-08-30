@@ -45,8 +45,10 @@ const {
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutateAsync }),
+  useQuery: () => ({ data: { commands: [] } }),
 }));
 vi.mock('@pi-dashboard/client', () => ({
+  composerCommandsQueryOptions: vi.fn(() => ({})),
   createThreadMutationOptions: vi.fn(() => ({})),
   retryThreadMutationOptions: vi.fn(() => ({})),
   dashboardHttpClient: { createThreadWithImages, retryThreadWithImages },

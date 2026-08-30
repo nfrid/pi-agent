@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   type ComposerCommandOption,
   commandSourceLabel,
-  composerCommandQuery,
   composerCommandSuggestions,
+  composerCompletionToken,
+  composerFileSuggestionOptions,
   fuzzyCommandScore,
 } from './composer-autocomplete';
 
@@ -31,42 +32,83 @@ const commands: ComposerCommandOption[] = [
   },
 ];
 
-describe('composer slash autocomplete', () => {
-  it('opens only for a leading command token', () => {
-    expect(composerCommandQuery('/')).toBe('');
-    expect(composerCommandQuery('/ski')).toBe('ski');
-    expect(composerCommandQuery('please /ski')).toBeUndefined();
-    expect(composerCommandQuery('/skill:playwright-cli now')).toBeUndefined();
-    expect(composerCommandQuery('//nested')).toBeUndefined();
+function token(text: string, cursor = text.length) {
+  return composerCompletionToken(text, cursor);
+}
+
+describe('composer autocomplete', () => {
+  it('recognizes leading slash commands and caret-local file and skill tokens', () => {
+    expect(token('/ski')).toMatchObject({
+      kind: 'command',
+      prefix: '/ski',
+      query: 'ski',
+      start: 0,
+      end: 4,
+    });
+    expect(token('please /ski')).toBeUndefined();
+    expect(token('/skill:playwright-cli now')).toBeUndefined();
+    expect(token('foo @src/uti bar', 12)).toMatchObject({
+      kind: 'file',
+      prefix: '@src/uti',
+      query: 'src/uti',
+      start: 4,
+      end: 12,
+    });
+    expect(token('use $play and $other', 9)).toMatchObject({
+      kind: 'skill',
+      prefix: '$play',
+      query: 'play',
+      start: 4,
+      end: 9,
+    });
   });
 
-  it('ranks prefix and fuzzy matches while keeping results bounded', () => {
-    expect(composerCommandSuggestions(commands, '/RE')).toEqual([
-      commands[2],
-      commands[1],
-      commands[3],
+  it('ranks commands separately from skills and records highlighted matches', () => {
+    const slash = composerCommandSuggestions(commands, token('/RE'));
+    expect(slash.map((suggestion) => suggestion.label)).toEqual([
+      '/reload',
+      '/review',
     ]);
-    expect(composerCommandSuggestions(commands, '/skill:p')).toEqual([
-      commands[0],
-    ]);
-    expect(composerCommandSuggestions(commands, '/fee')).toEqual([commands[3]]);
+    expect(slash[0]?.matches).toEqual([1, 2]);
+    expect(
+      composerCommandSuggestions(commands, token('$play')).map(
+        (suggestion) => suggestion.label,
+      ),
+    ).toEqual(['$playwright-cli']);
+    expect(
+      composerCommandSuggestions(commands, token('$fee')).map(
+        (suggestion) => suggestion.label,
+      ),
+    ).toEqual(['$harness-feedback']);
     expect(fuzzyCommandScore('skill:harness-feedback', 'fee')).toBeDefined();
     expect(fuzzyCommandScore('skill:harness-feedback', 'xyz')).toBeUndefined();
-    expect(composerCommandSuggestions(commands, 'review')).toEqual([]);
+  });
+
+  it('keeps explicit file spelling in completion values', () => {
     expect(
-      composerCommandSuggestions(
-        Array.from({ length: 20 }, (_, index) => ({
-          name: `command-${String(index).padStart(2, '0')}`,
-          source: 'builtin' as const,
-        })),
-        '/',
-      ),
-    ).toHaveLength(8);
+      composerFileSuggestionOptions(
+        [
+          {
+            value: '../shared/file.ts',
+            label: 'file.ts',
+            detail: '../shared/file.ts',
+            directory: false,
+          },
+          {
+            value: '.ignoredDir/nested/',
+            label: 'nested/',
+            directory: true,
+          },
+        ],
+        token('foo @../shared/fi bar', 17),
+      ).map((suggestion) => suggestion.value),
+    ).toEqual(['@../shared/file.ts', '@.ignoredDir/nested/']);
   });
 
   it('uses concise source labels', () => {
-    expect(commandSourceLabel('builtin')).toBe('Command');
-    expect(commandSourceLabel('prompt')).toBe('Prompt');
-    expect(commandSourceLabel('skill')).toBe('Skill');
+    expect(commandSourceLabel('builtin', 'command')).toBe('Command');
+    expect(commandSourceLabel('prompt', 'command')).toBe('Prompt');
+    expect(commandSourceLabel('skill', 'skill')).toBe('Skill');
+    expect(commandSourceLabel(undefined, 'file')).toBe('File');
   });
 });

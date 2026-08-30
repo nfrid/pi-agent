@@ -1,39 +1,37 @@
-/* Command completion is local UI; the kebab-case classes remain as optional
-   semantic hooks while these module selectors own the popup presentation. */
 .autocomplete {
   position: absolute;
-  bottom: calc(100% + 10px);
-  left: 50%;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
   z-index: 30;
   display: grid;
-  width: min(760px, calc(100vw - 20px));
-  max-height: min(360px, 48vh);
+  max-height: min(320px, 45vh);
   overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--bg-alt) 96%, transparent);
-  box-shadow: 0 14px 36px rgb(0 0 0 / 38%);
-  padding: 4px;
-  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, var(--fg) 18%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-alt) 98%, transparent);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 32%);
+  padding: 5px;
 }
 
 .autocomplete button {
   display: grid;
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.5fr);
+  grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.4fr);
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   width: 100%;
-  border: 0;
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
-  padding: 7px 9px;
+  padding: 8px 10px;
   color: var(--fg);
   text-align: left;
 }
 
 .autocomplete button:hover,
 .autocomplete button:global(.selected) {
-  background: color-mix(in srgb, var(--cyan) 13%, var(--bg-alt));
+  border-color: color-mix(in srgb, var(--cyan) 30%, transparent);
+  background: color-mix(in srgb, var(--cyan) 11%, var(--bg-alt));
 }
 
 .command,
@@ -44,7 +42,7 @@
 .command {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: 8px;
 }
 
 .command strong,
@@ -56,8 +54,17 @@
 }
 
 .command strong {
-  color: var(--cyan);
+  color: var(--fg);
+  font-family: var(--font-mono);
   font-size: 12px;
+  font-weight: 600;
+}
+
+.command mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--cyan) 24%, transparent);
+  color: var(--cyan);
+  font-weight: 750;
 }
 
 .command code {
@@ -75,11 +82,12 @@
 
 .detail small {
   flex: 0 0 auto;
-  border: var(--border-soft);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   border-radius: 999px;
-  padding: 1px 5px;
+  padding: 1px 6px;
   color: var(--dim);
   font-size: 8px;
+  font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -87,8 +95,8 @@
 @media (max-width: 600px) {
   .autocomplete button {
     grid-template-columns: minmax(0, 1fr);
-    gap: 3px;
-    padding: 8px 9px;
+    gap: 4px;
+    padding: 9px;
   }
 
   .detail span {

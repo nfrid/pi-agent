@@ -61,6 +61,8 @@ export const dashboardQueryKeys = {
   project: (id: string) => ['dashboard', 'project', id] as const,
   gitContext: (id: string) => ['dashboard', 'git-context', id] as const,
   checkout: (id: string) => ['dashboard', 'checkout', id] as const,
+  composerCommands: (cwd: string) =>
+    ['dashboard', 'composer-commands', cwd] as const,
   thread: (id: string) => ['dashboard', 'thread', id] as const,
   run: (id: string) => ['dashboard', 'run', id] as const,
 };
@@ -140,6 +142,19 @@ export function snapshotQueryOptions(
     },
     staleTime: Number.POSITIVE_INFINITY,
     retry: networkRetry,
+  });
+}
+
+export function composerCommandsQueryOptions(
+  client: DashboardHttpClient,
+  cwd: string,
+) {
+  return queryOptions({
+    queryKey: dashboardQueryKeys.composerCommands(cwd),
+    queryFn: ({ signal }) => client.composerCommands(cwd, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+    enabled: Boolean(cwd),
   });
 }
 

@@ -7,10 +7,21 @@ import {
   type MDXEditorMethods,
   markdownShortcutPlugin,
   quotePlugin,
+  realmPlugin,
+  rootEditor$,
   tablePlugin,
   thematicBreakPlugin,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
+import { dashboardHttpClient } from '@pi-dashboard/client';
+import type { ComposerFileSuggestion } from '@pi-dashboard/protocol';
+import {
+  $getNodeByKey,
+  $getSelection,
+  $isRangeSelection,
+  $isTextNode,
+  type LexicalEditor,
+} from 'lexical';
 import {
   type ForwardedRef,
   forwardRef,
@@ -24,22 +35,27 @@ import {
 import {
   ComposerAutocomplete,
   type ComposerCommandOption,
+  type ComposerCompletionToken,
+  type ComposerSuggestion,
   composerCommandSuggestions,
+  composerCompletionToken,
+  composerFileSuggestionOptions,
 } from './composer-autocomplete';
 
-const COMPOSER_MARKDOWN_PLUGINS = [
-  headingsPlugin(),
-  listsPlugin(),
-  quotePlugin(),
-  thematicBreakPlugin(),
-  linkPlugin(),
-  tablePlugin(),
-  codeBlockPlugin({ defaultCodeBlockLanguage: '' }),
-  markdownShortcutPlugin(),
-];
+const editorBridgePlugin = realmPlugin<{
+  onEditor: (editor: LexicalEditor) => void;
+}>({
+  postInit(realm, params) {
+    const editor = realm.getValue(rootEditor$);
+    if (editor && params) params.onEditor(editor);
+  },
+});
+
+type CompletionAnchor = ComposerCompletionToken & { nodeKey: string };
 
 type MarkdownComposerEditorProps = {
   commands?: readonly ComposerCommandOption[];
+  cwd?: string;
   initialMarkdown?: string;
   onChange: (markdown: string) => void;
   placeholder: string;
@@ -54,26 +70,62 @@ function assignEditorRef(
   else if (ref) ref.current = value;
 }
 
+function completionAnchor(editor: LexicalEditor): CompletionAnchor | undefined {
+  return editor.getEditorState().read(() => {
+    const selection = $getSelection();
+    if (
+      !$isRangeSelection(selection) ||
+      !selection.isCollapsed() ||
+      selection.anchor.type !== 'text'
+    )
+      return undefined;
+    const node = selection.anchor.getNode();
+    if (!$isTextNode(node)) return undefined;
+    const token = composerCompletionToken(
+      node.getTextContent(),
+      selection.anchor.offset,
+    );
+    return token ? { ...token, nodeKey: node.getKey() } : undefined;
+  });
+}
+
+function anchorKey(anchor: CompletionAnchor | undefined): string | undefined {
+  return anchor
+    ? `${anchor.nodeKey}:${anchor.start}:${anchor.end}:${anchor.prefix}`
+    : undefined;
+}
+
 const MarkdownComposerEditor = forwardRef<
   MDXEditorMethods,
   MarkdownComposerEditorProps
 >(function MarkdownComposerEditor(
-  { commands = [], initialMarkdown = '', onChange, placeholder, readOnly },
+  { commands = [], cwd, initialMarkdown = '', onChange, placeholder, readOnly },
   forwardedRef,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<MDXEditorMethods | null>(null);
+  const lexicalEditorRef = useRef<LexicalEditor | null>(null);
+  const listenerCleanupRef = useRef<() => void>(() => undefined);
+  const anchorRef = useRef<CompletionAnchor | undefined>(undefined);
   const listId = useId();
-  const [markdown, setMarkdown] = useState(initialMarkdown);
+  const [anchor, setAnchor] = useState<CompletionAnchor>();
+  const [files, setFiles] = useState<readonly ComposerFileSuggestion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [dismissedMarkdown, setDismissedMarkdown] = useState<string>();
-  const suggestions = useMemo(
-    () =>
-      dismissedMarkdown === markdown
-        ? []
-        : composerCommandSuggestions(commands, markdown),
-    [commands, dismissedMarkdown, markdown],
+  const [dismissedKey, setDismissedKey] = useState<string>();
+  const commandSuggestions = useMemo(
+    () => composerCommandSuggestions(commands, anchor),
+    [anchor, commands],
   );
+  const fileSuggestions = useMemo(
+    () => composerFileSuggestionOptions(files, anchor),
+    [anchor, files],
+  );
+  const suggestions =
+    dismissedKey === anchorKey(anchor)
+      ? []
+      : anchor?.kind === 'file'
+        ? fileSuggestions
+        : commandSuggestions;
   const boundedIndex = suggestions.length
     ? Math.min(selectedIndex, suggestions.length - 1)
     : 0;
@@ -84,27 +136,83 @@ const MarkdownComposerEditor = forwardRef<
     },
     [forwardedRef],
   );
-  const updateMarkdown = useCallback(
-    (next: string) => {
-      setMarkdown(next);
+  const connectLexicalEditor = useCallback((editor: LexicalEditor) => {
+    listenerCleanupRef.current();
+    lexicalEditorRef.current = editor;
+    const publishAnchor = () => {
+      const next = completionAnchor(editor);
+      if (anchorKey(anchorRef.current) === anchorKey(next)) return;
+      anchorRef.current = next;
+      setAnchor(next);
       setSelectedIndex(0);
-      setDismissedMarkdown(undefined);
-      onChange(next);
-    },
-    [onChange],
+      setDismissedKey(undefined);
+    };
+    publishAnchor();
+    listenerCleanupRef.current = editor.registerUpdateListener(publishAnchor);
+  }, []);
+  const bridge = useMemo(
+    () => editorBridgePlugin({ onEditor: connectLexicalEditor }),
+    [connectLexicalEditor],
   );
-  const selectCommand = useCallback(
-    (command: ComposerCommandOption) => {
-      const next = `/${command.name} `;
-      editorRef.current?.setMarkdown(next);
-      updateMarkdown(next);
-      requestAnimationFrame(() => {
-        hostRef.current
-          ?.querySelector<HTMLElement>('[contenteditable="true"]')
-          ?.focus();
+  const plugins = useMemo(
+    () => [
+      headingsPlugin(),
+      listsPlugin(),
+      quotePlugin(),
+      thematicBreakPlugin(),
+      linkPlugin(),
+      tablePlugin(),
+      codeBlockPlugin({ defaultCodeBlockLanguage: '' }),
+      markdownShortcutPlugin(),
+      bridge,
+    ],
+    [bridge],
+  );
+
+  useEffect(() => () => listenerCleanupRef.current(), []);
+
+  useEffect(() => {
+    if (!cwd || anchor?.kind !== 'file') {
+      setFiles([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void dashboardHttpClient
+        .composerFileSuggestions(cwd, anchor.query, controller.signal)
+        .then((result) => setFiles(result.suggestions))
+        .catch(() => {
+          if (!controller.signal.aborted) setFiles([]);
+        });
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [anchor?.kind, anchor?.query, cwd]);
+
+  const selectSuggestion = useCallback(
+    (suggestion: ComposerSuggestion) => {
+      const editor = lexicalEditorRef.current;
+      if (!editor || !anchor) return;
+      editor.update(() => {
+        const node = $getNodeByKey(anchor.nodeKey);
+        if (!$isTextNode(node)) return;
+        node.select(anchor.start, anchor.end);
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection)) return;
+        const replacement =
+          suggestion.kind === 'command'
+            ? `${suggestion.value} `
+            : suggestion.value;
+        selection.insertText(replacement);
       });
+      setDismissedKey(
+        `${anchor.nodeKey}:${anchor.start}:${anchor.start + suggestion.value.length}:${suggestion.value}`,
+      );
+      requestAnimationFrame(() => editor.focus());
     },
-    [updateMarkdown],
+    [anchor],
   );
 
   useEffect(() => {
@@ -172,13 +280,13 @@ const MarkdownComposerEditor = forwardRef<
         ) {
           event.preventDefault();
           event.stopPropagation();
-          selectCommand(suggestions[boundedIndex]);
+          selectSuggestion(suggestions[boundedIndex]);
           return;
         }
         if (event.key === 'Escape') {
           event.preventDefault();
           event.stopPropagation();
-          setDismissedMarkdown(markdown);
+          setDismissedKey(anchorKey(anchor));
         }
       }}
     >
@@ -188,19 +296,18 @@ const MarkdownComposerEditor = forwardRef<
         contentEditableClassName="composer-rich-editor"
         markdown={initialMarkdown}
         onChange={(next: string, initialMarkdownNormalize: boolean) => {
-          if (!initialMarkdownNormalize) updateMarkdown(next);
+          if (!initialMarkdownNormalize) onChange(next);
         }}
         placeholder={placeholder}
         readOnly={readOnly}
-        plugins={COMPOSER_MARKDOWN_PLUGINS}
+        plugins={plugins}
       />
       <ComposerAutocomplete
         id={listId}
-        commands={dismissedMarkdown === markdown ? [] : commands}
-        markdown={markdown}
+        suggestions={suggestions}
         selectedIndex={boundedIndex}
         onSelectedIndexChange={setSelectedIndex}
-        onSelect={selectCommand}
+        onSelect={selectSuggestion}
       />
     </div>
   );

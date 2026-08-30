@@ -6,6 +6,8 @@ import {
   CancelCommandSchema,
   CheckoutActionCommandSchema,
   CheckoutReviewCommandSchema,
+  type ComposerCommandCatalogue,
+  type ComposerFileSuggestions,
   type DashboardSettings,
   DashboardSettingsSchema,
   type DelegateHistoryResponse,
@@ -116,6 +118,11 @@ export interface DashboardRouteContext {
   origins(): readonly string[];
   snapshot(): BrowserSnapshot;
   shellSnapshot?(): unknown;
+  composerCommands?(cwd: string): Promise<ComposerCommandCatalogue>;
+  composerFileSuggestions?(
+    cwd: string,
+    query: string,
+  ): Promise<ComposerFileSuggestions>;
   sessionSnapshot?(
     id: string,
     before?: string,
@@ -357,6 +364,8 @@ export const dashboardRoutes: FastifyPluginAsync<{
   registerDashboardTrpc(app, {
     serverId: context.serverId,
     snapshot: context.snapshot,
+    composerCommands: context.composerCommands,
+    composerFileSuggestions: context.composerFileSuggestions,
     shellSnapshot:
       context.shellSnapshot ??
       (() => {

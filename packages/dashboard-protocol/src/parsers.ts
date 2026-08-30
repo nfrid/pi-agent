@@ -26,6 +26,8 @@ import {
   BrowserSnapshotSchema,
   type ComposerCommandCatalogue,
   ComposerCommandCatalogueSchema,
+  type ComposerFileSuggestions,
+  ComposerFileSuggestionsSchema,
   type DashboardEventEnvelope,
   DashboardEventEnvelopeSchema,
   type DashboardSettings,
@@ -992,6 +994,20 @@ export function tryParseComposerCommandCatalogue(
   value: unknown,
 ): ComposerCommandCatalogue | undefined {
   return tryParseSchema(ComposerCommandCatalogueSchema, value);
+}
+export function parseComposerFileSuggestions(
+  value: unknown,
+): ComposerFileSuggestions {
+  return parseSchema(
+    ComposerFileSuggestionsSchema,
+    value,
+    'composer file suggestions',
+  );
+}
+export function tryParseComposerFileSuggestions(
+  value: unknown,
+): ComposerFileSuggestions | undefined {
+  return tryParseSchema(ComposerFileSuggestionsSchema, value);
 }
 
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {

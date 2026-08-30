@@ -257,6 +257,58 @@ describe('dashboard input dispatch', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('expands ordered inline skill references and ignores escaped or code references', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-skills-'));
+    const foo = path.join(directory, 'foo.md');
+    const bar = path.join(directory, 'bar.md');
+    await writeFile(foo, '---\nname: foo\n---\nFoo instructions.\n');
+    await writeFile(bar, '---\nname: bar\n---\nBar instructions.\n');
+    const sourceInfo = (file: string) => ({
+      path: file,
+      source: 'local' as const,
+      scope: 'user' as const,
+      origin: 'top-level' as const,
+      baseDir: directory,
+    });
+    const expanded = expandDashboardInput(
+      'use $foo and $bar with $foo again; keep \\$foo, `$bar`, and $unknown\n```\n$bar\n```',
+      [
+        { name: 'skill:foo', source: 'skill', sourceInfo: sourceInfo(foo) },
+        { name: 'skill:bar', source: 'skill', sourceInfo: sourceInfo(bar) },
+      ],
+    );
+    expect(expanded).toBe(
+      `<skill name="foo" location="${foo}">\nReferences are relative to ${directory}.\n\nFoo instructions.\n</skill>\n\n` +
+        `<skill name="bar" location="${bar}">\nReferences are relative to ${directory}.\n\nBar instructions.\n</skill>\n\n` +
+        'use foo and bar with foo again; keep $foo, `$bar`, and $unknown\n```\n$bar\n```',
+    );
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('expands inline skills after prompt-template substitution', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-prompt-skill-'));
+    const prompt = path.join(directory, 'review.md');
+    const skill = path.join(directory, 'foo.md');
+    await writeFile(prompt, 'Review $ARGUMENTS');
+    await writeFile(skill, '---\nname: foo\n---\nFoo instructions.\n');
+    const sourceInfo = (file: string) => ({
+      path: file,
+      source: 'local' as const,
+      scope: 'user' as const,
+      origin: 'top-level' as const,
+      baseDir: directory,
+    });
+    expect(
+      expandDashboardInput('/review use $foo', [
+        { name: 'review', source: 'prompt', sourceInfo: sourceInfo(prompt) },
+        { name: 'skill:foo', source: 'skill', sourceInfo: sourceInfo(skill) },
+      ]),
+    ).toBe(
+      `<skill name="foo" location="${skill}">\nReferences are relative to ${directory}.\n\nFoo instructions.\n</skill>\n\nReview use foo`,
+    );
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('dispatches bridge-native commands and rejects unavailable extension commands', async () => {
     const compact = vi.fn();
     const setSessionName = vi.fn();

@@ -24,6 +24,8 @@ import {
   MAX_COMPOSER_COMMAND_DESCRIPTION,
   MAX_COMPOSER_COMMAND_NAME,
   MAX_COMPOSER_COMMANDS,
+  MAX_COMPOSER_FILE_QUERY,
+  MAX_COMPOSER_FILE_SUGGESTIONS,
   MAX_ID,
   MAX_MODEL_DISPLAY_ALIAS,
   MAX_MODEL_DISPLAY_PREFERENCE_KEY,
@@ -394,6 +396,50 @@ export const ComposerCommandCatalogueSchema = Type.Object(
 );
 export type ComposerCommandCatalogue = Static<
   typeof ComposerCommandCatalogueSchema
+>;
+
+export const ComposerResourceRequestSchema = Type.Object(
+  { cwd: Type.String({ minLength: 1, maxLength: MAX_PATH }) },
+  { additionalProperties: false },
+);
+export type ComposerResourceRequest = Static<
+  typeof ComposerResourceRequestSchema
+>;
+
+export const ComposerFileSuggestionSchema = Type.Object(
+  {
+    value: Type.String({ minLength: 1, maxLength: MAX_PATH }),
+    label: Type.String({ minLength: 1, maxLength: MAX_PATH }),
+    detail: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
+    directory: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type ComposerFileSuggestion = Static<
+  typeof ComposerFileSuggestionSchema
+>;
+export const ComposerFileSuggestionRequestSchema = Type.Object(
+  {
+    cwd: Type.String({ minLength: 1, maxLength: MAX_PATH }),
+    query: Type.String({ maxLength: MAX_COMPOSER_FILE_QUERY }),
+  },
+  { additionalProperties: false },
+);
+export type ComposerFileSuggestionRequest = Static<
+  typeof ComposerFileSuggestionRequestSchema
+>;
+export const ComposerFileSuggestionsSchema = Type.Object(
+  {
+    suggestions: Type.Readonly(
+      Type.Array(ComposerFileSuggestionSchema, {
+        maxItems: MAX_COMPOSER_FILE_SUGGESTIONS,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ComposerFileSuggestions = Static<
+  typeof ComposerFileSuggestionsSchema
 >;
 /** Runtime composer-command catalogue response. */
 export const ComposerCommandsResponseSchema = ComposerCommandCatalogueSchema;
