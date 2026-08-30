@@ -28,6 +28,10 @@
   text-align: left;
 }
 
+.autocomplete button.file {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .autocomplete button:hover,
 .autocomplete button:global(.selected) {
   border-color: color-mix(in srgb, var(--cyan) 30%, transparent);

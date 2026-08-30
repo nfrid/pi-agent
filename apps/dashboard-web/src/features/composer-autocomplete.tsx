@@ -170,7 +170,6 @@ export function composerFileSuggestionOptions(
       kind: 'file',
       value: `@${file.value}`,
       label: `@${file.value}`,
-      detail: file.detail,
       directory: file.directory,
       matches: (match?.matches ?? []).map((index) => index + 1),
     };
@@ -228,7 +227,12 @@ export function ComposerAutocomplete({
     >
       {suggestions.map((suggestion, index) => (
         <button
-          className={index === boundedIndex ? 'selected' : undefined}
+          className={[
+            index === boundedIndex ? 'selected' : undefined,
+            suggestion.kind === 'file' ? styles.file : undefined,
+          ]
+            .filter(Boolean)
+            .join(' ')}
           id={`${id}-option-${index}`}
           key={`${suggestion.kind}:${suggestion.value}`}
           type="button"
@@ -242,12 +246,14 @@ export function ComposerAutocomplete({
             <HighlightedLabel suggestion={suggestion} />
             {suggestion.detail && <code>{suggestion.detail}</code>}
           </span>
-          <span className={`composer-autocomplete-detail ${styles.detail}`}>
-            <small>
-              {commandSourceLabel(suggestion.source, suggestion.kind)}
-            </small>
-            {suggestion.description && <span>{suggestion.description}</span>}
-          </span>
+          {suggestion.kind !== 'file' && (
+            <span className={`composer-autocomplete-detail ${styles.detail}`}>
+              <small>
+                {commandSourceLabel(suggestion.source, suggestion.kind)}
+              </small>
+              {suggestion.description && <span>{suggestion.description}</span>}
+            </span>
+          )}
         </button>
       ))}
     </div>

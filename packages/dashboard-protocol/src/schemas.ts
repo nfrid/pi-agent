@@ -410,7 +410,6 @@ export const ComposerFileSuggestionSchema = Type.Object(
   {
     value: Type.String({ minLength: 1, maxLength: MAX_PATH }),
     label: Type.String({ minLength: 1, maxLength: MAX_PATH }),
-    detail: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
     directory: Type.Boolean(),
   },
   { additionalProperties: false },

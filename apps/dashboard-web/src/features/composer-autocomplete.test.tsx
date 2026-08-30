@@ -91,7 +91,6 @@ describe('composer autocomplete', () => {
           {
             value: '../shared/file.ts',
             label: 'file.ts',
-            detail: '../shared/file.ts',
             directory: false,
           },
           {

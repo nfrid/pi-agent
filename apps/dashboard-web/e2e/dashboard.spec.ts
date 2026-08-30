@@ -5025,7 +5025,6 @@ async function installPhase6Mocks(
           {
             value: 'src/file.js',
             label: 'file.js',
-            detail: 'src/file.js',
             directory: false,
           },
         ],
@@ -6388,9 +6387,12 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await composerInput.fill('foo @src/fi bar');
   for (let index = 0; index < 4; index += 1)
     await composerInput.press('ArrowLeft');
-  await expect(
-    page.getByRole('option', { name: /@src\/file\.js/ }),
-  ).toBeVisible();
+  const fileOption = page.getByRole('option', { name: /@src\/file\.js/ });
+  await expect(fileOption).toBeVisible();
+  await expect(fileOption.locator('.composer-autocomplete-detail')).toHaveCount(
+    0,
+  );
+  await expect(fileOption).not.toContainText('FILE');
   await composerInput.press('Tab');
   await expect(composerInput).toContainText('foo @src/file.js bar');
   expect(

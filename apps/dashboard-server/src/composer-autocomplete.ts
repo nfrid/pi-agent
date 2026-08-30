@@ -99,7 +99,6 @@ function scopedSuggestion(
   return {
     value: joined,
     label: `${name}${directory ? '/' : ''}`,
-    detail: joined,
     directory,
   };
 }
@@ -254,7 +253,6 @@ export async function composerFileSuggestions(
       return {
         value,
         label: `${path.basename(value.replace(/\/$/u, ''))}${entry.directory ? '/' : ''}`,
-        detail: value,
         directory: entry.directory,
       };
     });

@@ -69,7 +69,6 @@ describe('composer autocomplete service', () => {
         {
           value: '.ignoredDir/hidden.ts',
           label: 'hidden.ts',
-          detail: '.ignoredDir/hidden.ts',
           directory: false,
         },
       ],
@@ -79,7 +78,6 @@ describe('composer autocomplete service', () => {
         {
           value: '../sibling.ts',
           label: 'sibling.ts',
-          detail: '../sibling.ts',
           directory: false,
         },
       ],
