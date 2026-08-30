@@ -15,7 +15,7 @@ test('empty home is ready for a new thread @desktop', async ({ page }) => {
   await installVisualStateScenario(page, buildEmptyHomeScenario());
 
   await expect(
-    page.getByRole('heading', { name: 'No thread selected' }),
+    page.getByRole('heading', { name: 'Pick a thread to continue' }),
   ).toBeVisible();
   await expect(
     page.locator('.empty-workspace-actions').getByRole('button', {

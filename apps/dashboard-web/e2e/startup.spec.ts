@@ -44,7 +44,7 @@ test('blocks an incompatible browser shell before auth or routing', async ({
     page.getByRole('textbox', { name: 'Dashboard token' }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole('heading', { name: 'No thread selected' }),
+    page.getByRole('heading', { name: 'Pick a thread to continue' }),
   ).toHaveCount(0);
   expect(shellSnapshotRequests).toBe(0);
 });

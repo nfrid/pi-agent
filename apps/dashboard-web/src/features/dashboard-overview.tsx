@@ -38,25 +38,12 @@ export function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
         className={`dashboard-empty-workspace ${styles.dashboardEmptyWorkspace}`}
         aria-label="Agent workspace"
       >
-        <div className={`home-heading ${styles.homeHeading}`}>
-          <div>
-            <p className="eyebrow">Pi projects</p>
-            <h1>No thread selected</h1>
-            <p className="muted">
-              Choose an agent thread from the project nav to resume its
-              transcript.
-            </p>
-          </div>
-        </div>
         <div className={`empty-workspace-state ${styles.emptyWorkspaceState}`}>
           <span className="empty-mark" aria-hidden="true">
             ›_
           </span>
-          <strong>Ready for the next task</strong>
-          <p>
-            Start a new agent, or choose an existing thread from the project nav
-            to open its transcript.
-          </p>
+          <h1>Pick a thread to continue</h1>
+          <p>Select an existing thread or create a new one to get started.</p>
           <div
             className={`empty-workspace-actions ${styles.emptyWorkspaceActions}`}
           >

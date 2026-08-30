@@ -180,11 +180,13 @@ pending.
 
 The TanStack Router tree exposes:
 
-- `/` — dashboard overview;
+- `/` — thread browser and empty workspace;
 - `/sessions/:id` — persisted and live transcript;
-- `/workspaces/:id` — workspace details;
+- `/projects` and `/projects/:id` — registered project catalogue and details;
+- `/projects/:id/new` — project-scoped thread launch;
+- `/drafts/:id` — local draft thread;
 - `/runtimes/:id` — runtime details and controls;
-- `/new` — managed runtime launch.
+- `/new` — compatibility redirect into project-scoped launch.
 
 The UI supports launch/restart/stop, prompt/steer/follow-up input, image
 attachments, abort, model and thinking selection, and session rename.

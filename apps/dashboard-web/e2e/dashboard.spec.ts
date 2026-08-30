@@ -362,7 +362,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   });
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'No thread selected' }),
+    page.getByRole('heading', { name: 'Pick a thread to continue' }),
   ).toBeVisible();
   await expect(
     page.getByText(
@@ -450,13 +450,19 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(
+    page.getByRole('combobox', {
+      name: 'Search commands, threads, and projects',
+    }),
+  ).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(
     page.getByRole('button', { name: 'Open command palette' }),
   ).toBeFocused();
   await page.keyboard.press('Control+k');
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toBeVisible();
-  await page.keyboard.press('Control+k');
+  await page.keyboard.press('Meta+k');
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toHaveCount(0);
@@ -878,7 +884,7 @@ test('promoted draft is replaced by its started thread in the sidebar @desktop',
   });
   await expect(nav.locator('.agent-thread-row')).toHaveCount(1);
   await expect(
-    nav.getByRole('button', { name: /Started thread dormant/ }),
+    nav.getByRole('button', { name: /Started thread ready/ }),
   ).toBeVisible();
   await expect(nav.getByText('Promoted draft')).toHaveCount(0);
 });
@@ -999,10 +1005,10 @@ test('desktop project scope filters threads and starts project threads @desktop'
     name: 'Agents and threads',
   });
   await expect(
-    nav.getByRole('button', { name: /One thread dormant/ }),
+    nav.getByRole('button', { name: /One thread ready/ }),
   ).toBeVisible();
   await expect(
-    nav.getByRole('button', { name: /Two thread dormant/ }),
+    nav.getByRole('button', { name: /Two thread ready/ }),
   ).toBeVisible();
   const activeThread = nav.locator('[data-row-density="card"]').first();
   await expect(activeThread).toContainText(/One|Two/);
@@ -1072,10 +1078,10 @@ test('desktop project scope filters threads and starts project threads @desktop'
     .getByRole('combobox', { name: 'Project scope' })
     .selectOption('two');
   await expect(
-    nav.getByRole('button', { name: /One thread dormant/ }),
+    nav.getByRole('button', { name: /One thread ready/ }),
   ).toHaveCount(0);
   await expect(
-    nav.getByRole('button', { name: /Two thread dormant/ }),
+    nav.getByRole('button', { name: /Two thread ready/ }),
   ).toBeVisible();
   await nav.getByRole('button', { name: /New thread/ }).click();
   await expect(projectChooser).toBeVisible();
@@ -1589,7 +1595,7 @@ test('durable lifecycle controls require an exact persisted run mapping @desktop
     .getByRole('menuitem', { name: 'Settle' })
     .click();
   await expect(
-    nav.getByRole('region', { name: 'Settled threads' }),
+    nav.getByRole('region', { name: 'Completed threads' }),
   ).toBeVisible();
   await expect(durableRow.locator('[data-row-density="slim"]')).toHaveCount(1);
   await expect(durableRow.locator('.agent-thread-time')).toHaveAttribute(
@@ -2012,6 +2018,12 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
       },
     ],
     sessions: [
+      {
+        id: 'runtime-session',
+        cwd: '/workspace/dashboard',
+        title: 'Dashboard agent',
+        updatedAt: 100,
+      },
       ...Array.from({ length: 30 }, (_, index) => ({
         id: `decoy-session-${index}`,
         cwd: '/workspace/dashboard',
@@ -2031,8 +2043,11 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
     unread: [],
   } as never);
 
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Open command palette' }).click();
+  await page.goto('/sessions/runtime-session');
+  await expect(
+    page.getByRole('heading', { name: 'Rename session: Dashboard agent' }),
+  ).toBeVisible();
+  await page.keyboard.press('Meta+k');
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   const search = palette.getByRole('combobox', {
     name: 'Search commands, threads, and projects',
@@ -2049,19 +2064,20 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   );
   await search.press('End');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Dashboard history 18',
+    'Projects',
   );
   await search.press('ArrowDown');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Dashboard history 18',
+    'Projects',
   );
   await search.press('Home');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
     'New thread',
   );
   await search.press('PageDown');
-  await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Dashboard history 27',
+  await expect(palette.getByRole('option', { selected: true })).toHaveAttribute(
+    'data-thread-lifecycle',
+    /active|settled|archived/u,
   );
   await search.press('PageUp');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
@@ -2082,6 +2098,7 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   await expect(palette).toBeVisible();
   await search.press('Escape');
   await expect(palette).toHaveCount(0);
+  await page.goto('/');
   await page.getByRole('button', { name: 'Open command palette' }).click();
   await expect(search).toBeFocused();
   await search.fill('reconect');
@@ -2093,7 +2110,7 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   await expect(fuzzyResult).toContainText(
     'Dashboard project / feature/palette',
   );
-  await expect(fuzzyResult).toContainText('dormant');
+  await expect(fuzzyResult).toContainText('ready');
   await expect(fuzzyResult.locator('.palette-thread-created')).toHaveAttribute(
     'datetime',
     '1970-01-01T00:00:00.001Z',
@@ -2621,10 +2638,10 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     name: 'Agents and threads',
   });
   await expect(
-    agentNav.getByRole('button', { name: 'Loaded shell idle' }),
+    agentNav.getByRole('button', { name: 'Loaded shell ready' }),
   ).toBeVisible();
   await expect(
-    agentNav.getByRole('button', { name: 'Dormant thread dormant' }),
+    agentNav.getByRole('button', { name: 'Dormant thread ready' }),
   ).toBeVisible();
   const loadedRow = agentNav
     .locator('.agent-thread-row')
@@ -2692,7 +2709,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page
     .getByRole('complementary', { name: 'Agents and threads' })
-    .getByRole('button', { name: 'Dormant thread dormant' })
+    .getByRole('button', { name: 'Dormant thread ready' })
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-dormant$/u);
   const dormantComposer = page.locator('form.composer');
@@ -2747,7 +2764,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page
     .getByRole('complementary', { name: 'Agents and threads' })
-    .getByRole('button', { name: 'Loaded shell idle' })
+    .getByRole('button', { name: 'Loaded shell ready' })
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-loading$/u);
   await expect(page.getByLabel('Message Pi')).toContainText(
@@ -2890,7 +2907,7 @@ test('delayed command completion does not scroll a destination session', async (
     name: 'Agents and threads',
   });
   await agentNav
-    .getByRole('button', { name: /Destination session dormant/ })
+    .getByRole('button', { name: /Destination session ready/ })
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-destination$/u);
   await expect(page.getByText('Destination latest')).toBeVisible();
@@ -3110,7 +3127,7 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
   });
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'No thread selected' }),
+    page.getByRole('heading', { name: 'Pick a thread to continue' }),
   ).toBeVisible();
   await expect.poll(() => usageRequests).toBeGreaterThan(0);
   expect(usageRequests).toBe(1);
@@ -3247,7 +3264,7 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
   await expect(page.getByText('ROLLED BACK')).toHaveCount(0);
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'No thread selected' }),
+    page.getByRole('heading', { name: 'Pick a thread to continue' }),
   ).toBeVisible();
 });
 

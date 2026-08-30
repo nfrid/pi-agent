@@ -81,6 +81,7 @@ export {
 } from './agent-thread-nav/model';
 
 const EXPANDED_ARCHIVED_KEY = 'pi-dashboard-expanded-archived-v1';
+const MAX_VISIBLE_COMPLETED_THREADS = 8;
 
 const BULK_ACTION_LABELS: Record<BulkThreadAction, string> = {
   archive: 'Archive',
@@ -456,6 +457,7 @@ export function AgentThreadNav({
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
     Boolean(readExpandedArchived().all),
   );
+  const [completedExpanded, setCompletedExpanded] = useState(false);
   const [activeResultId, setActiveResultId] = useState<string>();
   const [selectedThreadIds, setSelectedThreadIds] = useState<Set<string>>(
     () => new Set(),
@@ -550,6 +552,12 @@ export function AgentThreadNav({
       ),
     [activeLimit, currentDraftId, currentSessionId, filtered, query],
   );
+  const displayedCompletedRows =
+    completedExpanded || query.trim()
+      ? sections.settled
+      : sections.settled.slice(0, MAX_VISIBLE_COMPLETED_THREADS);
+  const hiddenCompletedCount =
+    sections.settled.length - displayedCompletedRows.length;
   const visibleRows = useMemo(
     () => [
       ...sections.pinned,
@@ -1017,12 +1025,25 @@ export function AgentThreadNav({
           {sections.active.map((row) => renderThreadRow(row, 'card'))}
         </section>
         {sections.settled.length > 0 && (
-          <section aria-label="Settled threads">
+          <section aria-label="Completed threads">
             <h3 className={styles.shelfHeading}>
-              <span>Settled</span>
+              <span>Completed</span>
               <small>{sections.settled.length}</small>
             </h3>
-            {sections.settled.map((row) => renderThreadRow(row, 'slim'))}
+            {displayedCompletedRows.map((row) => renderThreadRow(row, 'slim'))}
+            {(hiddenCompletedCount > 0 || completedExpanded) &&
+              !query.trim() && (
+                <button
+                  type="button"
+                  className={styles.more}
+                  aria-expanded={completedExpanded}
+                  onClick={() => setCompletedExpanded((current) => !current)}
+                >
+                  {completedExpanded
+                    ? 'Show fewer completed threads'
+                    : `Show all ${sections.settled.length} completed threads`}
+                </button>
+              )}
           </section>
         )}
         {sections.archived.length > 0 && (
