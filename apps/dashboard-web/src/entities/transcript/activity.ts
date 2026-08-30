@@ -1,4 +1,5 @@
 import {
+  type ActivityKind,
   type ActivityLineChanges,
   activityToolDurationMs,
   activityToolLineChanges,
@@ -25,6 +26,37 @@ export type ToolStreamMetadata = {
   durationMs: number;
   failureCount: number;
 };
+
+export type ToolStreamStatus = 'complete' | 'in-progress' | 'failed';
+
+export function toolStreamStatus(
+  tools: readonly ActivityStepTool[],
+): ToolStreamStatus {
+  if (tools.some(isFailedActivityTool)) return 'failed';
+  if (
+    tools.some((tool) =>
+      ['pending', 'running', 'preparing'].includes(tool.status ?? ''),
+    )
+  )
+    return 'in-progress';
+  return 'complete';
+}
+
+export function toolStreamDurationLabel(milliseconds: number): string {
+  return formatCommandDuration(milliseconds);
+}
+
+export function toolStreamKindLabel(kind: ActivityKind): string {
+  return kind === 'inspect'
+    ? 'Inspected'
+    : kind === 'mutate'
+      ? 'Edited'
+      : kind === 'validate'
+        ? 'Validated'
+        : kind === 'execute'
+          ? 'Ran'
+          : 'Mixed work';
+}
 
 export type ActivityStepParts = {
   label: string;

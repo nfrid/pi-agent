@@ -346,6 +346,24 @@ export function AssistantMessageCopyButton({ text }: { text: string }) {
   );
 }
 
+export function ThinkingBlob({
+  content,
+  timestamp,
+}: {
+  content: string;
+  timestamp?: number | string;
+}) {
+  return (
+    <div className="transcript-thinking-blob">
+      <DashboardTime
+        className="transcript-time thinking-time"
+        timestamp={timestamp}
+      />
+      <Markdown>{content}</Markdown>
+    </div>
+  );
+}
+
 function ThinkingBlobs({
   thinking,
   timestamp,
@@ -361,16 +379,11 @@ function ThinkingBlobs({
     const occurrence = (occurrences.get(content) ?? 0) + 1;
     occurrences.set(content, occurrence);
     return (
-      <div
-        className="transcript-thinking-blob"
+      <ThinkingBlob
+        content={content}
         key={`${content}-${occurrence}`}
-      >
-        <DashboardTime
-          className="transcript-time thinking-time"
-          timestamp={timestamp}
-        />
-        <Markdown>{content}</Markdown>
-      </div>
+        timestamp={timestamp}
+      />
     );
   });
   if (!hasHiddenHistory)
@@ -632,10 +645,12 @@ function TranscriptEntry({
   item,
   cwd,
   timestampOverride,
+  showThinking = true,
 }: {
   item: TranscriptModelItem;
   cwd?: string;
   timestampOverride?: number | string;
+  showThinking?: boolean;
 }) {
   const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
@@ -660,7 +675,7 @@ function TranscriptEntry({
       );
     return (
       <div className="transcript-message-entry">
-        {item.role === 'assistant' && item.thinking?.length ? (
+        {showThinking && item.role === 'assistant' && item.thinking?.length ? (
           <ThinkingBlobs thinking={item.thinking} timestamp={timestamp} />
         ) : null}
         {item.text || item.imageCount ? (

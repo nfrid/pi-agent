@@ -6,9 +6,12 @@ export type TranscriptToolStreamRange = {
   end: number;
 };
 
-/** Return contiguous ranges whose items are canonical tool calls. */
+/** Return contiguous tool ranges, including an immediately preceding thought owner. */
 export function buildTranscriptToolStreams(
-  items: readonly Pick<TranscriptModelItem, 'key' | 'tool'>[],
+  items: readonly Pick<
+    TranscriptModelItem,
+    'key' | 'tool' | 'role' | 'thinking'
+  >[],
 ): TranscriptToolStreamRange[] {
   const result: TranscriptToolStreamRange[] = [];
   let index = 0;
@@ -17,8 +20,13 @@ export function buildTranscriptToolStreams(
       index += 1;
       continue;
     }
-    const start = index;
+    const toolStart = index;
     while (index + 1 < items.length && items[index + 1]?.tool) index += 1;
+    const hasAssociatedThinking =
+      toolStart > 0 &&
+      items[toolStart - 1]?.role === 'assistant' &&
+      Boolean(items[toolStart - 1]?.thinking?.length);
+    const start = hasAssociatedThinking ? toolStart - 1 : toolStart;
     const key = items[start]?.key ?? `tool-stream-${start}`;
     result.push({ key, start, end: index });
     index += 1;
@@ -32,7 +40,10 @@ export type VirtualTranscriptRow =
 
 /** Build the same flat rows used by the regular and virtual transcript views. */
 export function buildVirtualTranscriptRows(
-  items: readonly Pick<TranscriptModelItem, 'key' | 'tool'>[],
+  items: readonly Pick<
+    TranscriptModelItem,
+    'key' | 'tool' | 'role' | 'thinking'
+  >[],
 ): VirtualTranscriptRow[] {
   const streams = buildTranscriptToolStreams(items);
   const streamByStart = new Map(
