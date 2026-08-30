@@ -16,7 +16,6 @@ import {
   activityGroupPresentation,
   activityGroupSummary,
   activityStepParts,
-  activityStepTimestamps,
   buildTranscriptGroupCoverage,
   buildTranscriptLandmarks,
   buildVirtualTranscriptRows,
@@ -186,29 +185,10 @@ describe('activity row views and virtual transcript construction', () => {
     ]);
   });
 
-  it('uses agent labels and associates tool steps with their turn timestamp', () => {
+  it('uses agent labels', () => {
     expect(transcriptRoleLabel('assistant')).toBe('agent');
     expect(transcriptRoleLabel('user')).toBe('user');
     expect(transcriptRoleLabel('assistant', 'steer')).toBe('steer');
-
-    const items = toTranscriptEntries([
-      {
-        type: 'message',
-        message: {
-          role: 'assistant',
-          timestamp: '2026-08-09T12:34:00.000Z',
-          content: [
-            { type: 'thinking', thinking: 'Checking the timestamp.' },
-            { type: 'toolCall', id: 'call-1', name: 'read' },
-            { type: 'toolCall', id: 'call-2', name: 'bash' },
-          ],
-        },
-      },
-    ]);
-    expect(activityStepTimestamps(items)).toEqual([
-      '2026-08-09T12:34:00.000Z',
-      '2026-08-09T12:34:00.000Z',
-    ]);
   });
 
   it('separates tool names from their high-signal arguments', () => {

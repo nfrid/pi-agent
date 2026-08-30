@@ -176,26 +176,12 @@ details.session-event {
 
 .activity-group {
   --activity-status-color: var(--cyan);
-  overflow: hidden;
-  border-color: color-mix(in srgb, var(--line) 78%, transparent);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--bg-alt) 82%, var(--bg));
-  box-shadow: none;
 }
 .activity-group.activity-settled {
   --activity-status-color: var(--muted);
 }
 .activity-group.activity-ended-error {
   --activity-status-color: var(--red);
-  background: color-mix(in srgb, var(--red) 6%, var(--bg-alt));
-}
-.activity-group:is(
-  .activity-settled,
-  .activity-pending,
-  .activity-ended-error
-) {
-  border-left: 1px solid
-    color-mix(in srgb, var(--activity-status-color) 72%, transparent);
 }
 .activity-group .activity-icon {
   color: var(--activity-status-color);
@@ -203,10 +189,6 @@ details.session-event {
 .activity-group-header {
   min-height: 42px;
   padding: 9px 13px 9px 14px;
-  transition: background 140ms ease;
-}
-.activity-group-header:hover {
-  background: color-mix(in srgb, var(--purple) 7%, var(--bg-alt));
 }
 .activity-summary,
 .activity-detail {
@@ -218,16 +200,6 @@ details.session-event {
 }
 .activity-detail {
   padding: 2px 13px 4px 14px;
-}
-.activity-steps {
-  gap: 2px;
-}
-.activity-summary .activity-steps li {
-  min-height: 20px;
-  grid-template-columns: 14px minmax(0, max-content) minmax(0, 1fr) auto;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
 }
 .activity-step-dot {
   display: grid;

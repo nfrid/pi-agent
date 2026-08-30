@@ -59,15 +59,6 @@ export function activityGroupItemTimestamps(
   });
 }
 
-export function activityStepTimestamps(
-  items: readonly TranscriptModelItem[],
-): Array<number | string | undefined> {
-  const timestamps = activityGroupItemTimestamps(items);
-  return items.flatMap((item, index) =>
-    item.entry.kind === 'tool' ? [timestamps[index]] : [],
-  );
-}
-
 export function transcriptRoleLabel(
   role: 'user' | 'assistant',
   deliveryMode?: TranscriptModelItem['deliveryMode'],

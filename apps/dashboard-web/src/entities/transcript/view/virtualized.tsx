@@ -14,7 +14,6 @@ import {
 } from 'react';
 import type { TranscriptModelItem } from '../../../transcript';
 import type { TranscriptGroup } from '../activity';
-import { invokeActivityExpansion } from '../activity-expansion';
 import { TranscriptActivityGroup } from '../activity-group';
 import { TranscriptEntry } from '../entries';
 import {
@@ -199,7 +198,6 @@ export function VirtualizedTranscript({
             nextExpanded ? next.add(groupKey) : next.delete(groupKey);
             return next;
           });
-          invokeActivityExpansion(runtime, nextExpanded);
         }}
       />
     );

@@ -50,16 +50,14 @@ describe('TranscriptActivityGroup', () => {
     expect(collapsed).toContain(
       'data-transcript-key="group-assistant-activity"',
     );
-    expect(collapsed).toContain('aria-expanded="false"');
-    expect(collapsed).toContain('aria-controls="activity-detail-0"');
-    expect(collapsed).toContain('aria-labelledby="activity-label-0"');
-    expect(collapsed).toContain('aria-describedby="activity-status-0"');
+    expect(collapsed).not.toContain('class="activity-summary-toggle"');
     expect(collapsed).toContain('class="activity-summary"');
     expect(collapsed).toContain(
       'class="activity-metadata activity-metadata-inspect"',
     );
     expect(collapsed).toContain('class="activity-metadata-kind">Inspected');
-    expect(collapsed).not.toContain('class="activity-detail"');
+    expect(collapsed).toContain('class="activity-detail"');
+    expect(collapsed).toContain('workspace contents');
     expect(collapsed).toContain('class="activity-group-preamble"');
     expect(collapsed).toContain('aria-label="Copy assistant message"');
     expect(collapsed).toContain('<strong>Inspecting the workspace</strong>');
@@ -68,9 +66,10 @@ describe('TranscriptActivityGroup', () => {
     expect(collapsed).not.toContain('class="activity-lead"');
 
     const expanded = render(true);
-    expect(expanded).toContain('aria-expanded="true"');
-    expect(expanded).toContain('class="activity-detail"');
-    expect(expanded).not.toContain('class="activity-summary"');
+    expect(expanded).toContain(
+      'class="activity-detail activity-detail-expanded"',
+    );
+    expect(expanded).toContain('class="activity-summary"');
     expect(expanded).toContain('workspace contents');
     expect(expanded).not.toContain('activity-lead');
     expect(
@@ -79,6 +78,76 @@ describe('TranscriptActivityGroup', () => {
     expect(expanded.match(/aria-label="Copy assistant message"/g)).toHaveLength(
       1,
     );
+  });
+
+  it('reveals older calls without replacing the real tool entries', () => {
+    const names = ['tool-1', 'tool-2', 'tool-3', 'tool-4', 'tool-5'];
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-many-tools',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Reviewing five calls.' },
+            ...names.map((name, index) => ({
+              type: 'toolCall',
+              id: `call-${index + 1}`,
+              name,
+            })),
+          ],
+        },
+      },
+      ...names.map((name, index) => ({
+        type: 'tool',
+        tool: {
+          toolCallId: `call-${index + 1}`,
+          name,
+          status: 'complete',
+          result: `result-${index + 1}`,
+        },
+      })),
+    ]);
+    const [group] = projectActivityGroups(items.map(({ entry }) => entry));
+    expect(group).toBeDefined();
+    if (!group) throw new Error('expected an activity group');
+    const render = (expanded: boolean) =>
+      renderToStaticMarkup(
+        <TranscriptActivityGroup
+          group={group}
+          groupKey="assistant-many-tools"
+          items={items.slice(group.start, group.end + 1)}
+          expanded={expanded}
+          onToggle={() => {}}
+        />,
+      );
+
+    const collapsed = render(false);
+    expect(collapsed).toContain('aria-expanded="false"');
+    expect(collapsed).toContain('aria-controls="activity-detail-0"');
+    expect(collapsed).toContain('aria-labelledby="activity-label-0"');
+    expect(collapsed).toContain('aria-describedby="activity-status-0"');
+    expect(collapsed).toContain('Show 2 earlier calls');
+    expect(
+      collapsed.match(/<details class="transcript-entry tool-detail/g),
+    ).toHaveLength(3);
+    expect(collapsed).not.toContain('Running tool-1');
+    expect(collapsed).toContain('Running tool-3');
+    expect(collapsed).toContain('result-5');
+
+    const expanded = render(true);
+    expect(expanded).toContain('aria-expanded="true"');
+    expect(expanded).toContain('Hide 2 earlier calls');
+    expect(expanded).toContain(
+      'class="activity-detail activity-detail-expanded"',
+    );
+    expect(
+      expanded.match(/<details class="transcript-entry tool-detail/g),
+    ).toHaveLength(5);
+    expect(expanded.indexOf('Running tool-1')).toBeLessThan(
+      expanded.indexOf('Running tool-5'),
+    );
+    expect(expanded).toContain('result-1');
   });
 
   it('shows compaction state as the final dim metadata item', () => {

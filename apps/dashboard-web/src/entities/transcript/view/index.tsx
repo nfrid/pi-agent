@@ -15,7 +15,6 @@ import {
   type TranscriptModelItem,
   toTranscriptEntries,
 } from '../../../transcript';
-import { invokeActivityExpansion } from '../activity-expansion';
 import { TranscriptActivityGroup } from '../activity-group';
 import { TranscriptEntry } from '../entries';
 import {
@@ -240,7 +239,6 @@ export function Transcript({
                   nextExpanded ? next.add(groupKey) : next.delete(groupKey);
                   return next;
                 });
-                invokeActivityExpansion(runtime, nextExpanded);
               }}
             />
           );

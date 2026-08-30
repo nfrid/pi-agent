@@ -17,10 +17,7 @@ export {
   shouldApplySessionMetadata,
   shouldShowJumpToLatest,
 } from './app-helpers';
-export {
-  buildTranscriptLandmarks,
-  shouldShowActivityLead,
-} from './entities/transcript';
+export { buildTranscriptLandmarks } from './entities/transcript';
 export {
   AgentThreadNav,
   activeThreadDetails,
