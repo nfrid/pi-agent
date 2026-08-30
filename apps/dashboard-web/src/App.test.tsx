@@ -363,10 +363,10 @@ describe('command palette', () => {
       items.find((item) => item.id === 'session:active-thread-recent'),
     ).toMatchObject({
       description: 'Dashboard project / feature/recent',
-      meta: 'dormant',
+      meta: 'ready',
       thread: {
         lifecycle: 'active',
-        status: 'dormant',
+        status: 'ready',
         project: 'Dashboard project',
         checkout: 'feature/recent',
         checkoutKind: 'worktree',
@@ -417,6 +417,59 @@ describe('command palette', () => {
         (entry) => entry.item.group === 'Actions',
       ),
     ).toBe(true);
+  });
+
+  it('shows only current-thread actions until searching or using actions-only mode', () => {
+    const runtime = (runtimeId: string, sessionId: string) => ({
+      runtimeId,
+      ownership: 'external',
+      pid: 1,
+      cwd: `/workspace/${runtimeId}`,
+      liveState: 'working',
+      online: true,
+      session: { id: sessionId, title: runtimeId, entries: [] },
+      capabilities: {
+        version: 1,
+        capabilities: [],
+        manifests: [
+          {
+            id: `manifest-${runtimeId}`,
+            version: '1',
+            actions: [
+              { id: 'runtime.abort', title: 'Abort run' },
+              { id: 'activity-groups.set', title: 'Set activity groups' },
+            ],
+            renderers: [],
+          },
+        ],
+      },
+    });
+    const items = paletteItems(
+      {
+        runtimes: [
+          runtime('current-runtime', 'current-session'),
+          runtime('other-runtime', 'other-session'),
+        ],
+        sessions: [],
+      } as never,
+      undefined,
+      [],
+      'current-session',
+    );
+
+    expect(
+      searchPaletteItems(items, '').flatMap((result) =>
+        result.item.kind === 'action' ? [result.item.runtime.runtimeId] : [],
+      ),
+    ).toEqual(['current-runtime']);
+    expect(
+      searchPaletteItems(items, '>').flatMap((result) =>
+        result.item.kind === 'action' ? [result.item.runtime.runtimeId] : [],
+      ),
+    ).toEqual(['current-runtime', 'other-runtime']);
+    expect(items.some((item) => item.id.includes('activity-groups.set'))).toBe(
+      false,
+    );
   });
 
   it('disambiguates identical actions by their runtime target', () => {

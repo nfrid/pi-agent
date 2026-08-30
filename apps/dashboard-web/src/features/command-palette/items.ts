@@ -58,6 +58,7 @@ interface PaletteItemBase {
     updatedAt: number;
     createdAt: number;
   };
+  contextual?: boolean;
 }
 
 export type PaletteItem =
@@ -92,15 +93,17 @@ function snapshotActions(snapshot: BrowserSnapshot) {
       ? []
       : (runtime.capabilities?.manifests ?? []).flatMap((manifest) =>
           manifest.actions
-            .filter((action) =>
-              isActionAvailable(
-                action,
-                runtime.capabilities as RuntimeCapabilitySnapshot | undefined,
-                {
-                  online: runtime.online !== false,
-                  liveState: runtime.liveState,
-                },
-              ),
+            .filter(
+              (action) =>
+                action.id !== 'activity-groups.set' &&
+                isActionAvailable(
+                  action,
+                  runtime.capabilities as RuntimeCapabilitySnapshot | undefined,
+                  {
+                    online: runtime.online !== false,
+                    liveState: runtime.liveState,
+                  },
+                ),
             )
             .map((action) => ({ runtime, action })),
         ),
@@ -111,6 +114,7 @@ export function paletteItems(
   snapshot: BrowserSnapshot,
   durableThreads?: readonly Thread[],
   directLinks: readonly SessionThreadLink[] = [],
+  currentSessionId?: string,
 ): PaletteItem[] {
   const primary: PaletteItem[] = [
     {
@@ -157,6 +161,7 @@ export function paletteItems(
       runtime,
       action,
       needsInput: actionNeedsInput(action),
+      contextual: runtime.session.id === currentSessionId,
     }),
   );
   const threadsById = new Map(
@@ -322,6 +327,7 @@ export function searchPaletteItems(
     let visibleThreads = 0;
     return candidates.flatMap((item) => {
       if (item.group === 'Projects') return [];
+      if (!actionsOnly && item.kind === 'action' && !item.contextual) return [];
       if (item.group === 'Threads') {
         visibleThreads += 1;
         if (visibleThreads > RECENT_PALETTE_THREADS) return [];

@@ -65,7 +65,7 @@ export function hasSettledBackground(
 export function dashboardStatus(
   runtime: RuntimeSnapshot | undefined,
 ): DashboardStatusPresentation {
-  if (!runtime) return { status: 'dormant', label: 'dormant' };
+  if (!runtime) return { status: 'dormant', label: 'ready' };
   if (runtime.online === false) return { status: 'offline', label: 'offline' };
 
   const pause = pauseStatus(runtime);
@@ -78,8 +78,8 @@ export function dashboardStatus(
   )
     return {
       status: 'waiting',
-      label: count === 1 ? 'waiting' : `waiting (${count})`,
+      label: count === 1 ? 'needs input' : `needs input · ${count}`,
     };
-  if (runtime.liveState === 'idle') return { status: 'idle', label: 'idle' };
+  if (runtime.liveState === 'idle') return { status: 'idle', label: 'ready' };
   return { status: runtime.liveState, label: runtime.liveState };
 }

@@ -520,7 +520,9 @@ export function statusGlyph(status: AgentThreadRow['status']): string {
 }
 
 export function statusLabel(row: AgentThreadRow): string {
-  return row.statusLabel ?? row.status;
+  if (row.statusLabel) return row.statusLabel;
+  if (row.status === 'dormant' || row.status === 'idle') return 'ready';
+  return row.status;
 }
 
 export function shortPath(path: string): string {

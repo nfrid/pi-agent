@@ -5,6 +5,7 @@ import {
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
+import { useRouterState } from '@tanstack/react-router';
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -26,10 +27,16 @@ import {
   searchPaletteItems,
 } from './items';
 
-const GROUP_ORDER: readonly PaletteGroup[] = [
+const SEARCH_GROUP_ORDER: readonly PaletteGroup[] = [
   'Actions',
   'Navigation',
   'Threads',
+  'Projects',
+];
+const DEFAULT_GROUP_ORDER: readonly PaletteGroup[] = [
+  'Actions',
+  'Threads',
+  'Navigation',
   'Projects',
 ];
 const PAGE_STEP = 6;
@@ -125,8 +132,12 @@ export function HighlightedPaletteText({
   return content;
 }
 
-function groupedResults(results: readonly PaletteSearchResult[]) {
-  return GROUP_ORDER.flatMap((group) => {
+function groupedResults(
+  results: readonly PaletteSearchResult[],
+  query: string,
+) {
+  const order = query.trim() ? SEARCH_GROUP_ORDER : DEFAULT_GROUP_ORDER;
+  return order.flatMap((group) => {
     const items = results.filter((result) => result.item.group === group);
     return items.length ? [{ group, items }] : [];
   });
@@ -151,6 +162,10 @@ function creationDate(timestamp: number): string | undefined {
 export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
   const go = useDashboardNavigate();
   const surfaces = useDashboardSurfaces();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const currentSessionId = pathname.match(/^\/sessions\/([^/]+)$/u)?.[1];
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
@@ -169,14 +184,20 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
     ? sessionThreadLinksQuery.data
     : [];
   const items = useMemo(
-    () => paletteItems(snapshot, durableThreads, directLinks),
-    [directLinks, durableThreads, snapshot],
+    () =>
+      paletteItems(
+        snapshot,
+        durableThreads,
+        directLinks,
+        currentSessionId ? decodeURIComponent(currentSessionId) : undefined,
+      ),
+    [currentSessionId, directLinks, durableThreads, snapshot],
   );
   const results = useMemo(
     () => searchPaletteItems(items, query),
     [items, query],
   );
-  const groups = groupedResults(results);
+  const groups = groupedResults(results, query);
   const orderedResults = groups.flatMap((group) => group.items);
   const enabledResults = orderedResults.filter(isEnabled);
   const resolvedActiveId = enabledResults.some(
