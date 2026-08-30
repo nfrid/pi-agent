@@ -100,7 +100,6 @@ function ActivitySummary({
   expanded,
   compacting = false,
   detailId,
-  labelId,
   statusId,
   onToggle,
 }: {
@@ -109,7 +108,6 @@ function ActivitySummary({
   expanded: boolean;
   compacting?: boolean;
   detailId: string;
-  labelId: string;
   statusId: string;
   onToggle: (expanded: boolean) => void;
 }) {
@@ -136,7 +134,7 @@ function ActivitySummary({
           className="activity-summary-toggle"
           aria-expanded={expanded}
           aria-controls={detailId}
-          aria-labelledby={labelId}
+          aria-label={`${expanded ? 'Hide' : 'Show'} ${summary.earlierToolCount} earlier call${summary.earlierToolCount === 1 ? '' : 's'} · ${metadataTitle}`}
           aria-describedby={statusId}
           onClick={() => onToggle(!expanded)}
         >

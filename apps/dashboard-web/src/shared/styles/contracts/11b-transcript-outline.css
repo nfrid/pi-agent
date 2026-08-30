@@ -196,13 +196,23 @@
     width: 44px;
     height: 48px;
     place-items: center;
+    border: 0;
+    background: transparent;
+    color: var(--dim);
+    cursor: pointer;
+    padding-right: 26px;
+    transform: translateY(-50%);
+  }
+  .agent-nav-handle::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 18px;
     border: var(--border-soft);
     border-left: 0;
     border-radius: 0 7px 7px 0;
     background: color-mix(in srgb, var(--bg-alt) 92%, transparent);
-    color: var(--dim);
-    cursor: pointer;
-    transform: translateY(-50%);
+    content: "";
+    pointer-events: none;
   }
   .session-context-slot {
     height: 34px;

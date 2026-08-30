@@ -134,16 +134,13 @@ export function useSessionScroll({
     const element = scrollElementRef.current;
     if (!element) return;
     let touchY: number | undefined;
-    let previousScrollTop = element.scrollTop;
     const update = () => {
-      const upward = element.scrollTop < previousScrollTop - 1;
-      previousScrollTop = element.scrollTop;
       const distance = distanceFromScrollEnd(
         element.scrollHeight,
         element.scrollTop,
         element.clientHeight,
       );
-      modeRef.current = nextFollowMode(modeRef.current, distance, upward);
+      modeRef.current = nextFollowMode(modeRef.current, distance, false);
       if (modeRef.current === 'following') setAwayFromLatest(false);
       else
         setAwayFromLatest(
@@ -239,6 +236,10 @@ export function useSessionScroll({
     observer?.observe(page);
     observer?.observe(controlLayer);
     observer?.observe(scrollElement);
+    const transcriptContent = scrollElement.querySelector(
+      '.transcript-virtualizer',
+    );
+    if (transcriptContent) observer?.observe(transcriptContent);
     window.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('scroll', onViewportScroll);

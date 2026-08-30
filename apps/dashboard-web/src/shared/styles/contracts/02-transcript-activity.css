@@ -86,6 +86,9 @@
   color: var(--cyan);
   font-weight: 700;
 }
+.activity-group-header > .activity-icon {
+  margin-inline-end: 0.2em;
+}
 .activity-settled .activity-icon {
   color: var(--muted);
 }

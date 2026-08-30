@@ -55,7 +55,7 @@ export function TranscriptActivityGroup({
     [items],
   );
   const visibleIndexes = expanded
-    ? items.map((_, index) => index)
+    ? toolIndexes
     : summary.recentTools.length > 0
       ? toolIndexes.slice(-summary.recentTools.length)
       : [];
@@ -97,13 +97,22 @@ export function TranscriptActivityGroup({
           </strong>
         )}
       </header>
+      {lead && (lead.imageCount || lead.thinking?.length) ? (
+        <div className="activity-preamble-supplemental">
+          <TranscriptEntry
+            item={lead}
+            cwd={runtime?.cwd}
+            timestampOverride={timestamps[0]}
+            suppressAssistantText={Boolean(preamble)}
+          />
+        </div>
+      ) : null}
       <ActivitySummary
         group={group}
         items={items}
         expanded={expanded}
         compacting={compacting}
         detailId={detailId}
-        labelId={labelId}
         statusId={statusId}
         onToggle={toggle}
       />
@@ -111,6 +120,7 @@ export function TranscriptActivityGroup({
         className={`activity-detail${expanded ? ' activity-detail-expanded' : ''}`}
         id={detailId}
         aria-labelledby={labelId}
+        aria-describedby={statusId}
         tabIndex={expanded ? 0 : undefined}
       >
         {visibleIndexes.map((itemIndex) => {

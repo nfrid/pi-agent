@@ -38,7 +38,11 @@ test('working transcript shows activity, tasks, and delegates @desktop', async (
   await expect(
     page.getByText('Inspecting the dashboard surfaces.', { exact: true }),
   ).toBeVisible();
-  await expect(page.locator('.activity-group')).toBeVisible();
+  const earlierCalls = page.getByRole('button', {
+    name: /Show 2 earlier calls/,
+  });
+  await expect(earlierCalls).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.activity-detail .tool-detail')).toHaveCount(3);
   await expect(
     page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
   ).toBeVisible();
@@ -47,6 +51,46 @@ test('working transcript shows activity, tasks, and delegates @desktop', async (
   ).toBeVisible();
   await expect(page.getByText('Review worker', { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot('working-transcript-desktop.png', {
+    animations: 'disabled',
+    caret: 'hide',
+  });
+
+  await earlierCalls.click();
+  await expect(
+    page.getByRole('button', { name: /Hide 2 earlier calls/ }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.activity-detail .tool-detail')).toHaveCount(5);
+  await expect(page).toHaveScreenshot(
+    'working-transcript-expanded-desktop.png',
+    {
+      animations: 'disabled',
+      caret: 'hide',
+    },
+  );
+});
+
+test('working transcript keeps run status compact on Pixel', async ({
+  page,
+}) => {
+  await page.setViewportSize(VISUAL_PIXEL_VIEWPORT);
+  await installVisualStateScenario(page, buildWorkingScenario());
+
+  const runStatus = page.getByRole('button', { name: /Run status/ });
+  await expect(runStatus).toHaveAttribute('aria-expanded', 'false');
+  await expect(
+    page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
+  ).not.toBeVisible();
+  await expect(page).toHaveScreenshot('working-transcript-pixel.png', {
+    animations: 'disabled',
+    caret: 'hide',
+  });
+
+  await runStatus.click();
+  await expect(runStatus).toHaveAttribute('aria-expanded', 'true');
+  await expect(
+    page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot('working-run-status-expanded-pixel.png', {
     animations: 'disabled',
     caret: 'hide',
   });
@@ -75,11 +119,14 @@ test('failed thread preserves the diagnostic state @desktop', async ({
   await installVisualStateScenario(page, buildFailedScenario());
 
   await expect(page.locator('.session-status')).toContainText('failed');
-  const failedActivity = page.getByRole('button', {
+  const failedActivity = page.getByRole('region', {
     name: 'Running the release check.',
   });
   await expect(failedActivity).toHaveAccessibleDescription(/error/);
-  await expect(page.getByText(/ended after an error/)).toBeVisible();
+  await expect(failedActivity).toContainText('bun test');
+  await expect(page.locator('.activity-metadata-failure')).toHaveText(
+    '1 failed',
+  );
   await expect(page).toHaveScreenshot('failed-thread-desktop.png', {
     animations: 'disabled',
     caret: 'hide',

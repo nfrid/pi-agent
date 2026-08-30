@@ -244,6 +244,24 @@ const workingEntries: readonly unknown[] = [
           name: 'grep',
           arguments: { pattern: 'visual state', path: 'apps/dashboard-web' },
         },
+        {
+          type: 'toolCall',
+          id: 'working-style-read',
+          name: 'read',
+          arguments: { path: 'apps/dashboard-web/src/styles.css' },
+        },
+        {
+          type: 'toolCall',
+          id: 'working-edit',
+          name: 'edit',
+          arguments: { path: 'apps/dashboard-web/src/App.tsx', edits: [{}] },
+        },
+        {
+          type: 'toolCall',
+          id: 'working-test',
+          name: 'bash',
+          arguments: { command: 'bun test' },
+        },
       ],
     },
   },
@@ -264,6 +282,36 @@ const workingEntries: readonly unknown[] = [
       role: 'toolResult',
       toolCallId: 'working-search',
       content: [{ type: 'text', text: 'visual-state-fixtures.ts' }],
+      isError: false,
+    },
+  },
+  {
+    type: 'message',
+    id: 'working-style-read-result',
+    message: {
+      role: 'toolResult',
+      toolCallId: 'working-style-read',
+      content: [{ type: 'text', text: 'Dashboard style imports' }],
+      isError: false,
+    },
+  },
+  {
+    type: 'message',
+    id: 'working-edit-result',
+    message: {
+      role: 'toolResult',
+      toolCallId: 'working-edit',
+      content: [{ type: 'text', text: 'Updated App.tsx' }],
+      isError: false,
+    },
+  },
+  {
+    type: 'message',
+    id: 'working-test-result',
+    message: {
+      role: 'toolResult',
+      toolCallId: 'working-test',
+      content: [{ type: 'text', text: 'All tests passed' }],
       isError: false,
     },
   },
@@ -461,6 +509,7 @@ export async function installVisualStateScenario(
   page: Page,
   visualScenario: VisualStateScenario,
 ): Promise<void> {
+  await page.clock.setFixedTime(VISUAL_TIMESTAMP + 90 * 60_000);
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );

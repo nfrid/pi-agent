@@ -997,7 +997,7 @@ export function AgentThreadNav({
         </div>
       )}
       <div className={styles.list}>
-        {!visibleRows.length && (
+        {!visibleRows.length && (query.trim() || projectScope !== 'all') && (
           <p className={styles.empty}>No matching threads.</p>
         )}
         {sections.pinned.length > 0 && (

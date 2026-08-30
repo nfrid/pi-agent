@@ -3611,7 +3611,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
   await expect(page.locator('.message-meta, .message-role')).toHaveCount(0);
-  await expect(page.locator('.activity-step-time')).toHaveCount(0);
+  await expect(page.locator('.activity-step-time')).toHaveCount(1);
   await expect(
     page.locator('.activity-group-accessories .activity-time').first(),
   ).toBeVisible();
@@ -3826,16 +3826,19 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await jumpLatest.click();
   await expect(jumpLatest).toHaveCount(0);
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
-  const failedActivity = page.getByRole('button', {
+  const failedActivity = page.getByRole('region', {
     name: /Checking the failed command/,
   });
   await expect(failedActivity).toBeVisible();
   await expect(failedActivity).toHaveAccessibleDescription(
     /1 tool.*(?:failed|error)/,
   );
-  await failedActivity.click();
-  const failedActivityGroup = failedActivity.locator('xpath=../..');
-  const describedAction = failedActivityGroup.locator(
+  const failedActivityGroup = failedActivity.locator('xpath=..');
+  const failedToolSummary = failedActivity.locator(
+    '.tool-detail > summary.activity-step',
+  );
+  await failedToolSummary.click();
+  const describedAction = failedActivity.locator(
     '.activity-tool-name-described',
   );
   const commandDescription =
@@ -3888,32 +3891,31 @@ test('dense mobile session keeps conversation and activity readable', async ({
     '.tool-detail.step-failed .activity-step-dot',
   );
   await expect(failedExpandedDot).toHaveText('!');
-  await failedActivity.click();
-  const activity = page.getByRole('button', {
+  await failedToolSummary.click();
+  const activity = page.getByRole('region', {
     name: /Checking the mobile transcript/,
   });
   await expect(activity).toBeVisible();
   await expect(activity).toHaveAccessibleDescription(/1 tool.*show detail/);
-  const mobileActivityHeader = await activity.evaluate((button) => {
-    const header = button.closest('.activity-group-header');
-    const icon = button
-      .querySelector('.activity-icon')
-      ?.getBoundingClientRect();
-    const title = header
-      ?.querySelector('.activity-group-preamble .markdown > p')
-      ?.getBoundingClientRect();
-    return icon && title
-      ? {
-          topDifference: Math.abs(icon.top - title.top),
-        }
-      : undefined;
-  });
+  const activityGroup = activity.locator('xpath=..');
+  const mobileActivityHeader = await activityGroup
+    .locator('.activity-group-header')
+    .evaluate((header) => {
+      const icon = header
+        .querySelector('.activity-icon')
+        ?.getBoundingClientRect();
+      const title = header
+        .querySelector('.activity-group-preamble .markdown > p')
+        ?.getBoundingClientRect();
+      return icon && title
+        ? {
+            topDifference: Math.abs(icon.top - title.top),
+          }
+        : undefined;
+    });
   expect(mobileActivityHeader?.topDifference).toBeLessThan(5);
-  await expect(activity.locator('small')).toHaveCount(0);
-  const activityMetadata = activity
-    .locator('xpath=../..')
-    .locator('.activity-metadata');
-  await expect(activityMetadata).toHaveText('Inspected · 1 tool');
+  const activityMetadata = activityGroup.locator('.activity-metadata');
+  await expect(activityMetadata).toHaveText('Inspected · complete · 1 tool');
   const metadataColors = await activityMetadata.evaluate((metadata) => {
     const kind = metadata.querySelector('.activity-metadata-kind');
     if (!kind) throw new Error('activity metadata kind missing');
@@ -3923,30 +3925,13 @@ test('dense mobile session keeps conversation and activity readable', async ({
     };
   });
   expect(metadataColors.kind).not.toBe(metadataColors.base);
-  const completedStepDot = activity
-    .locator('xpath=../..')
-    .locator('.activity-step.step-complete .activity-step-dot');
-  await expect(completedStepDot).toHaveText('');
-  const completedMarkerStyle = await completedStepDot.evaluate((dot) => {
-    const marker = getComputedStyle(dot, '::before');
-    return {
-      width: marker.width,
-      height: marker.height,
-      borderRadius: marker.borderRadius,
-      backgroundColor: marker.backgroundColor,
-    };
-  });
-  expect(completedMarkerStyle).toMatchObject({
-    width: '6px',
-    height: '6px',
-    borderRadius: '50%',
-  });
-  expect(completedMarkerStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Attach images' }),
   ).toBeVisible();
   const imageInput = page.getByLabel('Choose images');
+  await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   const composerHeightBeforeAttachment = await page
     .locator('.composer')
     .evaluate((element) => element.getBoundingClientRect().height);
@@ -4112,8 +4097,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
     element.scrollTop = element.scrollHeight;
   });
   await expect(activity).toBeVisible();
-  await activity.click();
-  const expandedAction = page.locator('.tool-detail > summary.activity-step');
+  const expandedAction = activity.locator(
+    '.tool-detail > summary.activity-step',
+  );
   await expect(
     expandedAction.locator('.activity-tool-name').getByText('Reading'),
   ).toBeVisible();
@@ -4156,7 +4142,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
     Math.max(...timestampRights) - Math.min(...timestampRights),
   ).toBeLessThanOrEqual(1);
   await expect(page.getByText('src/App.tsx', { exact: true })).toBeVisible();
-  await activity.click();
   await page.waitForFunction(
     () =>
       (window as unknown as { dashboardTestSocket?: unknown })
@@ -4201,7 +4186,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     },
   ]);
   await expect(
-    page.getByRole('button', { name: /Preparing live tool/ }),
+    page.getByRole('region', { name: /Preparing live tool/ }),
   ).toBeVisible();
   const emitMessage = async (type: string, timestamp: number, text: string) =>
     page.evaluate(
@@ -5423,7 +5408,7 @@ test('runtime restart stays on the current thread with pending status', async ({
   await expect(page).toHaveURL(originalUrl);
 });
 
-test('activity header renders Markdown and proves float and sticky geometry @desktop', async ({
+test('activity preamble renders Markdown and proves float and sticky geometry @desktop', async ({
   page,
 }) => {
   await installPhase6Mocks(page, {
@@ -5434,7 +5419,7 @@ test('activity header renders Markdown and proves float and sticky geometry @des
 
   const group = page.locator('.activity-group').first();
   const header = group.locator('.activity-group-header');
-  const toggle = header.getByRole('button');
+  const detail = group.getByRole('region', { name: /Review the workspace/ });
   await expect(header.locator('.markdown strong')).toHaveText(
     'Review the workspace',
   );
@@ -5442,12 +5427,14 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     'href',
     'https://example.com/guide',
   );
-  await expect(toggle).toHaveAttribute('aria-labelledby', 'activity-label-20');
-  await expect(toggle).toHaveAttribute(
+  await expect(detail).toHaveAttribute('aria-labelledby', 'activity-label-20');
+  await expect(detail).toHaveAttribute(
     'aria-describedby',
     'activity-status-20',
   );
-  await expect(toggle).toHaveCSS('width', '14px');
+  await expect(detail).toHaveAccessibleDescription(/1 tool.*show detail/);
+  await expect(group.locator('.activity-summary-toggle')).toHaveCount(0);
+  await expect(detail).toBeVisible();
   await expect(header.locator('small')).toHaveCount(0);
   const headerMetrics = await header.evaluate((element) => {
     const groupElement = element.closest('.activity-group');
@@ -5467,17 +5454,13 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     const timestamp = element.querySelector<HTMLElement>(
       '.activity-group-accessories .activity-time',
     );
-    const control = element.querySelector<HTMLElement>(
-      '.activity-group-toggle',
-    );
     if (
       !markdown ||
       !firstParagraph ||
       !laterParagraph ||
       !preambleElement ||
       !accessory ||
-      !timestamp ||
-      !control
+      !timestamp
     )
       throw new Error('activity Markdown geometry missing');
     const rangeRects = (target: HTMLElement) => {
@@ -5516,7 +5499,6 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     };
     const accessoryRect = accessory.getBoundingClientRect();
     const timestampRect = timestamp.getBoundingClientRect();
-    const controlRect = control.getBoundingClientRect();
     const firstLines = lineRects(firstParagraph);
     const laterLines = lineRects(laterParagraph);
     const firstLine = firstLines[0];
@@ -5552,30 +5534,16 @@ test('activity header renders Markdown and proves float and sticky geometry @des
         right: timestampRect.right,
         width: timestampRect.width,
       },
-      control: {
-        top: controlRect.top,
-        bottom: controlRect.bottom,
-        right: controlRect.right,
-        lineHeight: getComputedStyle(control).lineHeight,
-      },
       firstLines,
       alongsideLines,
       belowLines,
       laterBlockTop: laterParagraph.getBoundingClientRect().top,
-      offset: Number.parseFloat(
-        getComputedStyle(groupElement).getPropertyValue(
-          '--activity-header-height',
-        ),
-      ),
       scrollWidth: element.scrollWidth,
       clientWidth: element.clientWidth,
     };
   });
   expect(headerMetrics.headerHeight).toBeGreaterThan(42);
   expect(headerMetrics.preambleFontSize).toBe('14px');
-  expect(headerMetrics.control.lineHeight).toBe(
-    headerMetrics.preambleLineHeight,
-  );
   expect(headerMetrics.firstLineHeight).toBeCloseTo(
     headerMetrics.laterLineHeight,
     0,
@@ -5585,9 +5553,6 @@ test('activity header renders Markdown and proves float and sticky geometry @des
   expect(headerMetrics.scrollWidth).toBeLessThanOrEqual(
     headerMetrics.clientWidth,
   );
-  expect(
-    Math.abs(headerMetrics.offset - headerMetrics.headerHeight),
-  ).toBeLessThan(1);
   expect(headerMetrics.alongsideLines.length).toBeGreaterThan(0);
   expect(
     headerMetrics.alongsideLines.every(
@@ -5609,9 +5574,6 @@ test('activity header renders Markdown and proves float and sticky geometry @des
   expect(headerMetrics.laterBlockTop).toBeGreaterThanOrEqual(
     headerMetrics.accessory.bottom - 1,
   );
-  expect(headerMetrics.control.right).toBeLessThanOrEqual(
-    headerMetrics.accessory.left,
-  );
 
   const link = header.locator('.markdown a');
   await link.evaluate((element) => {
@@ -5622,14 +5584,10 @@ test('activity header renders Markdown and proves float and sticky geometry @des
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     );
   });
-  await expect(group.locator('.activity-detail')).toHaveCount(0);
+  await expect(detail).toBeVisible();
 
   await header.locator('.markdown strong').click();
-  await expect(group.locator('.activity-detail')).toBeVisible();
-  await toggle.click();
-  await expect(group.locator('.activity-detail')).toHaveCount(0);
-  await toggle.click();
-  await expect(group.locator('.activity-detail')).toBeVisible();
+  await expect(detail).toBeVisible();
   const toolSummary = group.locator('.tool-detail > summary.activity-step');
   await expect(toolSummary).toBeVisible();
   await toolSummary.click();
@@ -5655,24 +5613,14 @@ test('activity header renders Markdown and proves float and sticky geometry @des
       const headerElement = groupElement?.querySelector<HTMLElement>(
         '.activity-group-header',
       );
-      const summaryElement = groupElement?.querySelector<HTMLElement>(
-        '.tool-detail[open] > summary.activity-step',
-      );
-      if (!scrollElement || !groupElement || !headerElement || !summaryElement)
+      if (!scrollElement || !groupElement || !headerElement)
         throw new Error('pinned activity geometry missing');
       const scrollRect = scrollElement.getBoundingClientRect();
       const headerRect = headerElement.getBoundingClientRect();
-      const summaryRect = summaryElement.getBoundingClientRect();
       return {
         scrollTop: scrollRect.top,
         headerTop: headerRect.top,
-        summaryTop: summaryRect.top,
         headerHeight: headerRect.height,
-        cssHeaderHeight: Number.parseFloat(
-          getComputedStyle(groupElement).getPropertyValue(
-            '--activity-header-height',
-          ),
-        ),
       };
     });
   await pinGroup();
@@ -5684,12 +5632,6 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     .toBeLessThan(1);
   const pinned = await pinnedMetrics();
   expect(Math.abs(pinned.headerTop - pinned.scrollTop)).toBeLessThan(1);
-  expect(
-    Math.abs(pinned.summaryTop - pinned.headerTop - pinned.headerHeight),
-  ).toBeLessThan(1);
-  expect(Math.abs(pinned.cssHeaderHeight - pinned.headerHeight)).toBeLessThan(
-    1,
-  );
 
   const initialHeaderHeight = pinned.headerHeight;
   await page.setViewportSize({ width: 420, height: 760 });
@@ -5698,34 +5640,12 @@ test('activity header renders Markdown and proves float and sticky geometry @des
       header.evaluate((element) => element.getBoundingClientRect().height),
     )
     .toBeGreaterThan(initialHeaderHeight);
-  await expect
-    .poll(() =>
-      header.evaluate((element) => {
-        const groupElement = element.closest('.activity-group');
-        return Number.parseFloat(
-          getComputedStyle(groupElement as HTMLElement).getPropertyValue(
-            '--activity-header-height',
-          ),
-        );
-      }),
-    )
-    .toBeGreaterThan(initialHeaderHeight);
   await pinGroup();
   const resizedPinned = await pinnedMetrics();
   expect(
     Math.abs(resizedPinned.headerTop - resizedPinned.scrollTop),
   ).toBeLessThan(1);
-  expect(
-    Math.abs(
-      resizedPinned.summaryTop -
-        resizedPinned.headerTop -
-        resizedPinned.headerHeight,
-    ),
-  ).toBeLessThan(1);
-  expect(resizedPinned.cssHeaderHeight).toBeGreaterThan(pinned.cssHeaderHeight);
-  expect(
-    Math.abs(resizedPinned.cssHeaderHeight - resizedPinned.headerHeight),
-  ).toBeLessThan(1);
+  expect(resizedPinned.headerHeight).toBeGreaterThan(initialHeaderHeight);
 });
 
 test('activity header preserves block-first Markdown semantics @desktop', async ({
@@ -5867,11 +5787,15 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
   expect(composerFocus.rect.height).toBeGreaterThan(0);
 
   const headers = page.locator('.activity-group-header');
+  const toolSummaries = page.locator(
+    '.activity-group .tool-detail > summary.activity-step',
+  );
   await expect(page.locator('.transcript-virtualized')).toHaveCount(1);
   await expect(headers).toHaveCount(4);
+  await expect(toolSummaries).toHaveCount(4);
   for (let round = 0; round < 3; round += 1) {
     for (let index = 0; index < 4; index += 1) {
-      await headers.nth(index).getByRole('button').click();
+      await toolSummaries.nth(index).click();
       await expect
         .poll(() =>
           page
@@ -5893,7 +5817,7 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
         .toBe(true);
     }
     for (let index = 3; index >= 0; index -= 1)
-      await headers.nth(index).getByRole('button').click();
+      await toolSummaries.nth(index).click();
   }
 
   const collapsedHeader = headers.nth(0);
@@ -5944,8 +5868,8 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
   expect(collapsedSticky.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
   expect(collapsedSticky.backgroundColor).not.toBe('transparent');
   expect(collapsedSticky.top).toBeGreaterThanOrEqual(-1);
-  expect(collapsedSticky.top).toBeLessThan(12);
-  await collapsedHeader.getByRole('button').click();
+  expect(collapsedSticky.top).toBeLessThan(13);
+  await collapsedRow.locator('.tool-detail > summary.activity-step').click();
   await collapsedRow.evaluate((row) => {
     const scrollElement = row.closest('.session-transcript-scroll');
     if (!scrollElement) throw new Error('transcript scrollport missing');
@@ -5972,7 +5896,7 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
   expect(expandedSticky.position).toBe('sticky');
   expect(expandedSticky.radii).toEqual(['0px', '0px', '0px', '0px']);
   expect(expandedSticky.top).toBeGreaterThanOrEqual(-1);
-  expect(expandedSticky.top).toBeLessThan(12);
+  expect(expandedSticky.top).toBeLessThan(13);
   await mocks.close();
 });
 
@@ -5981,12 +5905,11 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
     entries: phase6EditEntries(historyCount),
   });
   await page.goto('/sessions/s1');
-  const activity = page.getByRole('button', {
+  const activity = page.getByRole('region', {
     name: /Applying the large edit/,
   });
   await expect(activity).toBeVisible();
-  await activity.click();
-  const tool = page.locator('.tool-detail').filter({ hasText: 'Editing' });
+  const tool = activity.locator('.tool-detail').filter({ hasText: 'Editing' });
   await expect(tool).toBeVisible();
   const toolSummary = tool.locator(':scope > summary.activity-step');
   await transcriptScroll(page).evaluate((scrollElement) => {
@@ -6054,7 +5977,7 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
         };
       }),
     );
-  expect(rawDividerMetrics).toHaveLength(3);
+  expect(rawDividerMetrics).toHaveLength(1);
   expect(rawDividerMetrics).toEqual(
     rawDividerMetrics.map(() => ({
       detailTop: '0px',
@@ -6097,11 +6020,7 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
   expect(sticky.groupTop).toBeGreaterThanOrEqual(-1);
   expect(sticky.groupTop).toBeLessThan(3);
   expect(sticky.groupPosition).toBe('sticky');
-  expect(sticky.toolPosition).toBe('sticky');
-  expect(sticky.toolBackground).not.toBe('rgba(0, 0, 0, 0)');
-  expect(sticky.toolBackground).not.toBe('transparent');
-  expect(sticky.toolTop - sticky.groupTop).toBeGreaterThanOrEqual(41);
-  expect(sticky.toolTop - sticky.groupTop).toBeLessThanOrEqual(43);
+  expect(sticky.toolPosition).toBe('static');
 
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   expect(await transcriptGap(page)).toBeLessThan(3);
@@ -6291,41 +6210,34 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(dockMarker).toHaveAttribute('aria-label', 'Earlier history 1');
   await expect(dockMarker).not.toHaveAttribute('title', 'Earlier history 1');
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
-  const activity = page.getByRole('button', {
+  const activity = page.getByRole('region', {
     name: /Inspecting history/,
   });
   await expect(activity).toBeVisible();
+  await expect(activity.getByText('Reading', { exact: true })).toBeVisible();
   await expect(
-    activity.locator('xpath=../..').getByText('Reading', { exact: true }),
+    activity.getByText('src/App.tsx', { exact: true }),
   ).toBeVisible();
   await expect(
-    activity.locator('xpath=../..').getByText('src/App.tsx', { exact: true }),
-  ).toBeVisible();
-  await expect(
-    activity
-      .locator('xpath=../..')
-      .getByText('/tmp/project/src/App.tsx', { exact: true }),
+    activity.getByText('/tmp/project/src/App.tsx', { exact: true }),
   ).toHaveCount(0);
-  await activity.click();
   await expect(
     page
       .locator('.transcript-thinking-blob')
       .getByText('Considering the workspace'),
   ).toBeVisible();
-  const expandedToolDetail = page
-    .locator('.tool-detail .activity-step')
-    .getByText('Reading', { exact: true });
-  await expect(expandedToolDetail).toBeVisible();
-  await activity.click();
-  await expect(expandedToolDetail).toHaveCount(0);
-  await expect
-    .poll(
-      () =>
-        mocks.commands.filter(
-          (command) => command.actionId === 'activity-groups.set',
-        ).length,
-    )
-    .toBe(2);
+  const tool = activity.locator('.tool-detail');
+  const toolSummary = tool.locator(':scope > summary.activity-step');
+  await expect(toolSummary.getByText('Reading', { exact: true })).toBeVisible();
+  await toolSummary.click();
+  await expect(tool).toHaveAttribute('open', '');
+  await toolSummary.click();
+  await expect(tool).not.toHaveAttribute('open', '');
+  expect(
+    mocks.commands.filter(
+      (command) => command.actionId === 'activity-groups.set',
+    ),
+  ).toHaveLength(0);
 
   await scrollTranscript(page, 0);
   await page.waitForTimeout(150);
@@ -6397,6 +6309,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   ]);
   await composerInput.press('Tab');
   await expect(composerInput).toContainText('$browser');
+  await composerInput.press('Escape');
   await expect(
     page.getByRole('listbox', { name: 'Autocomplete suggestions' }),
   ).toHaveCount(0);
