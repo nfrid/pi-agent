@@ -388,7 +388,10 @@ function ThinkingBlobs({
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >
       <summary>
-        <span>
+        <span className="thinking-disclosure-label">
+          <span className="transcript-disclosure-icon" aria-hidden="true">
+            {expanded ? '⌃' : '⌄'}
+          </span>
           {expanded ? 'Hide' : 'Show'} {earlierCount} earlier thought
           {earlierCount === 1 ? '' : 's'}
         </span>

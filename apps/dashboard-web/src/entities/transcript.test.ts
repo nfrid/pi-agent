@@ -26,7 +26,7 @@ import { SkillInvocationView, TranscriptEntry } from './transcript/entries';
 import { TranscriptToolStream } from './transcript/tool-stream';
 import { LivePauseEvent } from './transcript/view';
 
-describe('activity row views and virtual transcript construction', () => {
+describe('tool row views and virtual transcript construction', () => {
   it('projects skill protocol envelopes as compact invocation data', () => {
     expect(
       parseSkillInvocation(
@@ -680,7 +680,7 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
-  it('projects uncompleted assistant tool calls as pending activity', () => {
+  it('projects uncompleted assistant tool calls as pending tools', () => {
     const [item] = toTranscriptEntries([
       {
         type: 'message',

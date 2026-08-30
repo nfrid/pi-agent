@@ -82,7 +82,9 @@ export function TranscriptToolStream({
             aria-label={`${expanded ? 'Hide' : 'Show'} ${earlierLabel} · ${metadata}`}
             onClick={toggle}
           >
-            <span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+            <span className="transcript-disclosure-icon" aria-hidden="true">
+              {expanded ? '⌃' : '⌄'}
+            </span>
             {expanded ? 'Hide' : 'Show'} {earlierLabel}
           </button>
         ) : null}

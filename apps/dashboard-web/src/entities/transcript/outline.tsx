@@ -19,8 +19,7 @@ function landmarkType(
   if (typeLabel) return typeLabel;
   if (kind === 'user')
     return deliveryMode === 'steer' ? 'Steering message' : 'User message';
-  if (kind === 'assistant') return 'Agent update';
-  return 'Agent activity';
+  return 'Agent update';
 }
 
 function landmarkTime(

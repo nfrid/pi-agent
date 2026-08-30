@@ -38,12 +38,13 @@
   line-height: 1.2;
   cursor: pointer;
 }
-.tool-stream-toggle > span[aria-hidden="true"] {
+.transcript-disclosure-icon {
   display: grid;
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
   place-items: center;
+  color: var(--cyan);
   line-height: 1;
 }
 .tool-stream-toggle:hover {

@@ -28,22 +28,32 @@
   margin: 6px 0;
 }
 .transcript-thinking > summary {
+  box-sizing: border-box;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  min-height: 32px;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 13px;
   color: var(--muted);
   cursor: pointer;
   font-size: 10px;
+  line-height: 1.2;
+}
+.thinking-disclosure-label {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 5px;
 }
 .transcript-thinking > summary small {
   color: var(--dim);
+  line-height: 1.2;
 }
 .transcript-thinking[open] > summary {
   position: sticky;
   top: 0;
   z-index: 20;
   background: var(--bg-alt);
-  padding: 5px 0;
 }
 .transcript-thinking-blobs {
   display: grid;

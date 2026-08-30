@@ -231,6 +231,10 @@ const workingEntries: readonly unknown[] = [
       timestamp: VISUAL_TIMESTAMP - 20_000,
       content: [
         { type: 'thinking', thinking: 'Checking the project surfaces.' },
+        { type: 'thinking', thinking: 'Reviewing the transcript hierarchy.' },
+        { type: 'thinking', thinking: 'Comparing the mobile layout.' },
+        { type: 'thinking', thinking: 'Checking the disclosure behavior.' },
+        { type: 'thinking', thinking: 'Preparing the visual review.' },
         { type: 'text', text: 'Inspecting the dashboard surfaces.' },
         {
           type: 'toolCall',

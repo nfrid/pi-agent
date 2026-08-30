@@ -38,6 +38,8 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   await expect(
     page.getByText('Inspecting the dashboard surfaces.', { exact: true }),
   ).toBeVisible();
+  const earlierThoughts = page.locator('.transcript-thinking > summary');
+  await expect(earlierThoughts).toContainText('Show 2 earlier thoughts');
   const earlierCalls = page.getByRole('button', {
     name: /Show 2 earlier calls/,
   });
@@ -55,11 +57,52 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     caret: 'hide',
   });
 
+  await earlierThoughts.click();
+  await expect(page.locator('.transcript-thinking')).toHaveAttribute(
+    'open',
+    '',
+  );
+  expect(
+    await page.locator('.transcript-thinking').evaluate((thinking) => {
+      const summary = thinking.querySelector('summary');
+      const blobs = thinking.querySelector('.transcript-thinking-blobs');
+      if (!summary || !blobs) throw new Error('thinking disclosure missing');
+      return {
+        summaryPosition: getComputedStyle(summary).position,
+        blobsOverflowY: getComputedStyle(blobs).overflowY,
+        blobsMaxHeight: getComputedStyle(blobs).maxHeight,
+      };
+    }),
+  ).toEqual({
+    summaryPosition: 'sticky',
+    blobsOverflowY: 'visible',
+    blobsMaxHeight: 'none',
+  });
+  await earlierThoughts.click();
+
   await earlierCalls.click();
   await expect(
     page.getByRole('button', { name: /Hide 2 earlier calls/ }),
   ).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(5);
+  expect(
+    await page
+      .locator('.transcript-tool-stream-expanded')
+      .evaluate((stream) => {
+        const metadata = stream.querySelector('.tool-stream-meta');
+        const items = stream.querySelector('.tool-stream-items');
+        if (!metadata || !items) throw new Error('tool disclosure missing');
+        return {
+          metadataPosition: getComputedStyle(metadata).position,
+          itemsOverflowY: getComputedStyle(items).overflowY,
+          itemsMaxHeight: getComputedStyle(items).maxHeight,
+        };
+      }),
+  ).toEqual({
+    metadataPosition: 'sticky',
+    itemsOverflowY: 'visible',
+    itemsMaxHeight: 'none',
+  });
   await expect(page).toHaveScreenshot(
     'working-transcript-expanded-desktop.png',
     {
@@ -124,7 +167,9 @@ test('failed thread preserves the diagnostic state @desktop', async ({
     .filter({ hasText: 'bun test' })
     .first();
   await expect(failedTool).toBeVisible();
-  await expect(failedTool.getByText('bun test', { exact: true })).toBeVisible();
+  await expect(
+    failedTool.locator(':scope > summary .tool-argument-text'),
+  ).toHaveText('bun test');
   await expect(page).toHaveScreenshot('failed-thread-desktop.png', {
     animations: 'disabled',
     caret: 'hide',
