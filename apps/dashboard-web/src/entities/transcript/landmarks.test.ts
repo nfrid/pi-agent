@@ -14,7 +14,7 @@ function landmarks(
   return Array.from({ length: count }, (_, index) => ({
     key: `landmark-${index}`,
     label: `landmark ${index}`,
-    kind: userIndexes.has(index) ? 'user' : 'activity',
+    kind: userIndexes.has(index) ? 'user' : 'assistant',
     itemIndex: index,
   }));
 }
@@ -45,7 +45,7 @@ describe('transcript landmark sampling', () => {
     });
   });
 
-  it('retains every user landmark before sampling activity landmarks', () => {
+  it('retains every user landmark before sampling assistant landmarks', () => {
     const input = landmarks(300, [2, 100, 297]);
     const sampled = sampleTranscriptLandmarks(input, 8);
 

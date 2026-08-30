@@ -480,8 +480,8 @@ function toolRaw(item: TranscriptRenderToolItem) {
 }
 
 /**
- * Adapt the canonical domain render projection to activity-model entries.
- * Content text and narration remain presentation concerns; identities,
+ * Adapt the canonical domain render projection to the shared transcript entry
+ * shape. Content text and narration remain presentation concerns; identities,
  * pairing, outcomes, and streaming/preparing flags come from the domain.
  */
 export function toTranscriptEntries(
@@ -705,9 +705,9 @@ export function toTranscriptEntries(
       ...(item.preparing ? { preparing: true } : {}),
     });
   }
-  // Grouping boundaries are owned by activity-model for both persisted raw
-  // entries and the domain projection. Keep all presentation fields above,
-  // but replace the boundary payload with the canonical raw mapping.
+  // Reuse the shared adapter for canonical entry kinds and tool semantics while
+  // keeping all presentation fields above. Dashboard row segmentation is
+  // intentionally handled from the resulting model items, not this adapter.
   const mapped = result.map((item) => ({
     ...item,
     entry: activityEntryFromRaw(item.raw),

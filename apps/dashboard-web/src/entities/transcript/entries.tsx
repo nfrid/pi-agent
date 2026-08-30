@@ -4,8 +4,11 @@ import { DashboardTime } from '../../features/timestamp';
 import { copyText, Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
 import type { TranscriptModelItem } from '../../transcript';
-import { activityStepParts, commandStepMeta } from './activity';
-import { ActivityStepContent } from './activity-summary';
+import {
+  type ActivityStepParts,
+  activityStepParts,
+  commandStepMeta,
+} from './activity';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
 
@@ -350,26 +353,118 @@ function ThinkingBlobs({
   thinking: readonly string[];
   timestamp?: number | string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasHiddenHistory = thinking.length > 3;
+  const visibleThinking = expanded ? thinking : thinking.slice(-3);
   const occurrences = new Map<string, number>();
+  const blobs = visibleThinking.map((content) => {
+    const occurrence = (occurrences.get(content) ?? 0) + 1;
+    occurrences.set(content, occurrence);
+    return (
+      <div
+        className="transcript-thinking-blob"
+        key={`${content}-${occurrence}`}
+      >
+        <DashboardTime
+          className="transcript-time thinking-time"
+          timestamp={timestamp}
+        />
+        <Markdown>{content}</Markdown>
+      </div>
+    );
+  });
+  if (!hasHiddenHistory)
+    return (
+      <aside className="transcript-thinking-blobs" aria-label="Thinking">
+        {blobs}
+      </aside>
+    );
+  const earlierCount = thinking.length - 3;
   return (
-    <aside className="transcript-thinking-blobs" aria-label="Thinking">
-      {thinking.map((content) => {
-        const occurrence = (occurrences.get(content) ?? 0) + 1;
-        occurrences.set(content, occurrence);
-        return (
-          <div
-            className="transcript-thinking-blob"
-            key={`${content}-${occurrence}`}
-          >
-            <DashboardTime
-              className="transcript-time thinking-time"
-              timestamp={timestamp}
-            />
-            <Markdown>{content}</Markdown>
-          </div>
-        );
-      })}
-    </aside>
+    <details
+      className="transcript-thinking"
+      open={expanded}
+      aria-label="Thinking"
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>
+        <span>
+          {expanded ? 'Hide' : 'Show'} {earlierCount} earlier thought
+          {earlierCount === 1 ? '' : 's'}
+        </span>
+        <small>{thinking.length} thoughts</small>
+      </summary>
+      <div className="transcript-thinking-blobs">{blobs}</div>
+    </details>
+  );
+}
+
+function ActivityStepContent({
+  action,
+  timestamp,
+  showTimestamp = true,
+  meta,
+}: {
+  action: ActivityStepParts;
+  timestamp?: number | string;
+  showTimestamp?: boolean;
+  meta?: string;
+}) {
+  const changes = action.lineChanges;
+  const hasChanges = Boolean(
+    changes && (changes.added || changes.changed || changes.removed),
+  );
+  const changesLabel = changes
+    ? [
+        changes.added ? `${changes.added} lines added` : undefined,
+        changes.changed ? `${changes.changed} lines changed` : undefined,
+        changes.removed ? `${changes.removed} lines removed` : undefined,
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : undefined;
+  return (
+    <>
+      <span className="tool-step-dot" aria-hidden="true">
+        {action.state === 'failed'
+          ? '!'
+          : action.state === 'pending'
+            ? '…'
+            : null}
+      </span>
+      <span
+        className={`tool-name${action.described ? ' tool-name-described' : ''}`}
+      >
+        {action.action}
+      </span>
+      {(action.argument || hasChanges) && (
+        <span className="tool-argument">
+          {action.argument ? (
+            <span className="tool-argument-text">{action.argument}</span>
+          ) : null}
+          {hasChanges ? (
+            <span className="line-changes" title={changesLabel}>
+              {changes?.added ? (
+                <span className="line-change-added">+{changes.added}</span>
+              ) : null}
+              {changes?.changed ? (
+                <span className="line-change-changed">~{changes.changed}</span>
+              ) : null}
+              {changes?.removed ? (
+                <span className="line-change-removed">-{changes.removed}</span>
+              ) : null}
+            </span>
+          ) : null}
+        </span>
+      )}
+      {meta ? <span className="tool-step-meta">{meta}</span> : null}
+      {showTimestamp ? (
+        <DashboardTime
+          className="transcript-time tool-step-time"
+          timestamp={timestamp}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -505,7 +600,7 @@ export function SkillInvocationView({
     <div className="skill-invocation">
       <details>
         <summary>
-          <span className="activity-icon" aria-hidden="true">
+          <span className="skill-icon" aria-hidden="true">
             ✦
           </span>
           <strong>Skill · {invocation.name}</strong>
@@ -534,13 +629,10 @@ function TranscriptEntry({
   item,
   cwd,
   timestampOverride,
-  suppressAssistantText = false,
 }: {
   item: TranscriptModelItem;
   cwd?: string;
   timestampOverride?: number | string;
-  /** The activity header owns the preamble; retain all supplemental content. */
-  suppressAssistantText?: boolean;
 }) {
   const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
@@ -551,13 +643,6 @@ function TranscriptEntry({
         {item.customMessage}
       </div>
     );
-  if (
-    item.role &&
-    suppressAssistantText &&
-    !item.imageCount &&
-    !item.thinking?.length
-  )
-    return null;
   if (item.role && (item.text || item.imageCount || item.thinking?.length)) {
     const skill =
       item.role === 'user' && item.text
@@ -575,7 +660,7 @@ function TranscriptEntry({
         {item.role === 'assistant' && item.thinking?.length ? (
           <ThinkingBlobs thinking={item.thinking} timestamp={timestamp} />
         ) : null}
-        {(item.text && !suppressAssistantText) || item.imageCount ? (
+        {item.text || item.imageCount ? (
           <article
             className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
           >
@@ -610,9 +695,7 @@ function TranscriptEntry({
                 </span>
               )
             ) : null}
-            {item.text && !suppressAssistantText ? (
-              <Markdown>{item.text}</Markdown>
-            ) : null}
+            {item.text ? <Markdown>{item.text}</Markdown> : null}
           </article>
         ) : null}
       </div>
@@ -641,7 +724,7 @@ function TranscriptEntry({
       <details
         className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
       >
-        <summary className="activity-step">
+        <summary className="tool-step">
           <ActivityStepContent
             action={action}
             meta={meta}

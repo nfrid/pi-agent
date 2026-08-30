@@ -13,22 +13,21 @@ import {
   useState,
 } from 'react';
 import type { TranscriptModelItem } from '../../../transcript';
-import type { TranscriptGroup } from '../activity';
-import { TranscriptActivityGroup } from '../activity-group';
 import { TranscriptEntry } from '../entries';
 import {
   buildTranscriptLandmarks,
   mergeTranscriptLandmarks,
   type TranscriptLandmark,
+  transcriptItemTimestamp,
 } from '../landmarks';
 import { TranscriptOutline } from '../outline';
+import { TranscriptToolStream } from '../tool-stream';
 import { buildVirtualTranscriptRows } from '../virtual-rows';
 import { useVirtualTranscriptScrollRestoration } from '../virtual-scroll';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
 
 export function VirtualizedTranscript({
   items,
-  groups,
   open,
   setOpen,
   runtime,
@@ -43,7 +42,6 @@ export function VirtualizedTranscript({
   scrollElementRef,
 }: {
   items: readonly TranscriptModelItem[];
-  groups: readonly TranscriptGroup[];
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
@@ -60,17 +58,14 @@ export function VirtualizedTranscript({
   onPendingJumpHandled?: () => void;
   scrollElementRef: RefObject<HTMLDivElement | null>;
 }) {
-  const rows = useMemo(
-    () => buildVirtualTranscriptRows(items, groups),
-    [groups, items],
-  );
+  const rows = useMemo(() => buildVirtualTranscriptRows(items), [items]);
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
   const [localPendingJumpKey, setLocalPendingJumpKey] = useState<string>();
   const requestedJumpKey = pendingJumpKey ?? localPendingJumpKey;
   const virtualizer = useVirtualizer({
     count: rows.length,
-    estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
+    estimateSize: (index) => (rows[index]?.kind === 'tool-stream' ? 132 : 96),
     overscan: 8,
     getScrollElement: () => scrollElementRef?.current ?? null,
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
@@ -106,8 +101,8 @@ export function VirtualizedTranscript({
     return () => window.cancelAnimationFrame(frame);
   }, [open, rows.length, virtualizer]);
   const loadedLandmarks = useMemo(
-    () => buildTranscriptLandmarks(items, groups),
-    [groups, items],
+    () => buildTranscriptLandmarks(items),
+    [items],
   );
   const landmarks = useMemo<TranscriptLandmark[]>(
     () => mergeTranscriptLandmarks(loadedLandmarks, outline),
@@ -117,13 +112,8 @@ export function VirtualizedTranscript({
     const result = new Map<string, number>();
     rows.forEach((row, index) => {
       result.set(row.key, index);
-      if (row.kind === 'group') {
-        result.set(row.key.replace(/^group-/, ''), index);
-        for (
-          let itemIndex = row.group.start;
-          itemIndex <= row.group.end;
-          itemIndex += 1
-        ) {
+      if (row.kind === 'tool-stream') {
+        for (let itemIndex = row.start; itemIndex <= row.end; itemIndex += 1) {
           const item = items[itemIndex];
           if (item) result.set(item.key, index);
         }
@@ -175,33 +165,25 @@ export function VirtualizedTranscript({
   const captureScrollAnchor =
     useVirtualTranscriptScrollRestoration(scrollElementRef);
 
-  const renderGroup = (group: TranscriptGroup) => {
-    const groupKey = items[group.start]?.key ?? `group-${group.start}`;
-    const groupItems = items.slice(group.start, group.end + 1);
-    return (
-      <TranscriptActivityGroup
-        group={group}
-        groupKey={groupKey}
-        items={groupItems}
-        runtime={runtime}
-        expanded={open.has(groupKey)}
-        compacting={
-          runtime?.online !== false &&
-          runtime?.liveState === 'compacting' &&
-          group.id === groups.at(-1)?.id
-        }
-        captureScrollAnchor={captureScrollAnchor}
-        onToggle={(nextExpanded) => {
-          affectedRowKeyRef.current = `group-${groupKey}`;
-          setOpen((current) => {
-            const next = new Set(current);
-            nextExpanded ? next.add(groupKey) : next.delete(groupKey);
-            return next;
-          });
-        }}
-      />
-    );
-  };
+  const renderToolStream = (start: number, end: number, streamKey: string) => (
+    <TranscriptToolStream
+      items={items.slice(start, end + 1)}
+      cwd={runtime?.cwd}
+      expanded={open.has(streamKey)}
+      timestampOverride={
+        start > 0 ? transcriptItemTimestamp(items[start - 1]) : undefined
+      }
+      captureScrollAnchor={captureScrollAnchor}
+      onToggle={(nextExpanded) => {
+        affectedRowKeyRef.current = streamKey;
+        setOpen((current) => {
+          const next = new Set(current);
+          nextExpanded ? next.add(streamKey) : next.delete(streamKey);
+          return next;
+        });
+      }}
+    />
+  );
 
   return (
     <div className="transcript transcript-virtualized">
@@ -234,8 +216,8 @@ export function VirtualizedTranscript({
                 width: '100%',
               }}
             >
-              {row.kind === 'group' ? (
-                renderGroup(row.group)
+              {row.kind === 'tool-stream' ? (
+                renderToolStream(row.start, row.end, row.key)
               ) : (
                 <div data-transcript-key={items[row.index]?.key}>
                   <TranscriptEntry item={items[row.index]} cwd={runtime?.cwd} />

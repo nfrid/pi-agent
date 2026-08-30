@@ -1,66 +1,56 @@
 import type { TranscriptModelItem } from '../../transcript';
-import type { TranscriptGroup } from './activity';
 
-export function buildTranscriptGroupCoverage(
-  itemCount: number,
-  groups: readonly TranscriptGroup[],
-): {
-  groupByStart: Map<number, TranscriptGroup>;
-  groupCoverage: Uint8Array;
-} {
-  const groupByStart = new Map<number, TranscriptGroup>();
-  const groupCoverage = new Uint8Array(itemCount);
-  let groupIndex = 0;
-  for (let index = 0; index < itemCount; index += 1) {
-    while (groupIndex < groups.length) {
-      const candidate = groups[groupIndex];
-      if (!candidate || candidate.end >= index) break;
-      groupIndex += 1;
+export type TranscriptToolStreamRange = {
+  key: string;
+  start: number;
+  end: number;
+};
+
+/** Return contiguous ranges whose items are canonical tool calls. */
+export function buildTranscriptToolStreams(
+  items: readonly Pick<TranscriptModelItem, 'key' | 'tool'>[],
+): TranscriptToolStreamRange[] {
+  const result: TranscriptToolStreamRange[] = [];
+  let index = 0;
+  while (index < items.length) {
+    if (!items[index]?.tool) {
+      index += 1;
+      continue;
     }
-    const group = groups[groupIndex];
-    if (!group) continue;
-    groupByStart.set(group.start, group);
-    if (group.start <= index && index <= group.end) groupCoverage[index] = 1;
+    const start = index;
+    while (index + 1 < items.length && items[index + 1]?.tool) index += 1;
+    const key = items[start]?.key ?? `tool-stream-${start}`;
+    result.push({ key, start, end: index });
+    index += 1;
   }
-  // A group can start beyond the last item only for malformed external input;
-  // retain the start map without letting it affect the coverage scan.
-  for (const group of groups)
-    if (!groupByStart.has(group.start)) groupByStart.set(group.start, group);
-  return { groupByStart, groupCoverage };
+  return result;
 }
 
 export type VirtualTranscriptRow =
   | { kind: 'entry'; key: string; index: number }
-  | { kind: 'group'; key: string; group: TranscriptGroup };
+  | { kind: 'tool-stream'; key: string; start: number; end: number };
 
-export type VirtualTranscriptRowBuildStats = { groupReads: number };
-
-/**
- * Collapse covered transcript entries into group rows with a single sorted group
- * pointer. Callers must provide valid, sorted, disjoint ranges (the direct
- * output of groupTranscript); under that assumption this is O(items + groups),
- * not a groups.some scan for every item.
- */
+/** Build the same flat rows used by the regular and virtual transcript views. */
 export function buildVirtualTranscriptRows(
-  items: readonly Pick<TranscriptModelItem, 'key'>[],
-  groups: readonly TranscriptGroup[],
-  stats?: VirtualTranscriptRowBuildStats,
+  items: readonly Pick<TranscriptModelItem, 'key' | 'tool'>[],
 ): VirtualTranscriptRow[] {
+  const streams = buildTranscriptToolStreams(items);
+  const streamByStart = new Map(
+    streams.map((stream) => [stream.start, stream]),
+  );
+  const streamIndexes = new Uint8Array(items.length);
+  for (const stream of streams)
+    for (let index = stream.start; index <= stream.end; index += 1)
+      streamIndexes[index] = 1;
+
   const result: VirtualTranscriptRow[] = [];
-  let groupIndex = 0;
   for (let index = 0; index < items.length; index += 1) {
-    while (groupIndex < groups.length) {
-      if (stats) stats.groupReads += 1;
-      const candidate = groups[groupIndex];
-      if (!candidate || candidate.end >= index) break;
-      groupIndex += 1;
+    const stream = streamByStart.get(index);
+    if (stream) {
+      result.push({ kind: 'tool-stream', ...stream });
+      continue;
     }
-    const group = groups[groupIndex];
-    if (stats) stats.groupReads += 1;
-    if (group?.start === index) {
-      const groupKey = items[group.start]?.key ?? `group-${group.start}`;
-      result.push({ kind: 'group', key: `group-${groupKey}`, group });
-    } else if (!group || index <= group.start || index > group.end) {
+    if (!streamIndexes[index]) {
       result.push({
         kind: 'entry',
         key: items[index]?.key ?? `entry-${index}`,

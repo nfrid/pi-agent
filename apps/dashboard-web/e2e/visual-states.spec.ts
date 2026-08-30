@@ -28,7 +28,7 @@ test('empty home is ready for a new thread @desktop', async ({ page }) => {
   });
 });
 
-test('working transcript shows activity, tasks, and delegates @desktop', async ({
+test('working transcript shows flat tools, tasks, and delegates @desktop', async ({
   page,
 }) => {
   await page.setViewportSize(VISUAL_DESKTOP_VIEWPORT);
@@ -42,7 +42,7 @@ test('working transcript shows activity, tasks, and delegates @desktop', async (
     name: /Show 2 earlier calls/,
   });
   await expect(earlierCalls).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('.activity-detail .tool-detail')).toHaveCount(3);
+  await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(3);
   await expect(
     page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
   ).toBeVisible();
@@ -59,7 +59,7 @@ test('working transcript shows activity, tasks, and delegates @desktop', async (
   await expect(
     page.getByRole('button', { name: /Hide 2 earlier calls/ }),
   ).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.locator('.activity-detail .tool-detail')).toHaveCount(5);
+  await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(5);
   await expect(page).toHaveScreenshot(
     'working-transcript-expanded-desktop.png',
     {
@@ -119,12 +119,9 @@ test('failed thread preserves the diagnostic state @desktop', async ({
   await installVisualStateScenario(page, buildFailedScenario());
 
   await expect(page.locator('.session-status')).toContainText('failed');
-  const failedActivity = page.getByRole('region', {
-    name: 'Running the release check.',
-  });
-  await expect(failedActivity).toHaveAccessibleDescription(/error/);
+  const failedActivity = page.getByRole('region', { name: 'Tool calls' });
   await expect(failedActivity).toContainText('bun test');
-  await expect(page.locator('.activity-metadata-failure')).toHaveText(
+  await expect(failedActivity.locator('.tool-stream-metadata')).toContainText(
     '1 failed',
   );
   await expect(page).toHaveScreenshot('failed-thread-desktop.png', {

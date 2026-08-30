@@ -1,36 +1,36 @@
 import {
-  type ActivityGroupFacts,
-  activityGroupFacts,
-  type projectActivityGroups,
+  type ActivityLineChanges,
+  activityToolDurationMs,
+  activityToolLineChanges,
   stringArg,
   TOOL_ACTION_LABEL_MAX,
+  type ToolDescriptor,
   toolActionSummary,
   toolBaseName,
   toolPath,
   toolRole,
 } from '@pi-dashboard/activity-model';
 
-export type TranscriptGroup = ReturnType<typeof projectActivityGroups>[number];
+export type ActivityStepTool = ToolDescriptor;
 
-export type ActivityGroupSummary = {
+export type ToolStreamSummary = {
   recentTools: readonly string[];
   earlierToolCount: number;
   toolCount: number;
   failureCount: number;
 };
 
-type ActivityGroupSummaryInput = Pick<TranscriptGroup, 'tools' | 'toolCount'>;
-
-type ActivityStepTool = TranscriptGroup['tools'][number] & {
-  isError?: boolean;
-  status?: string;
+export type ToolStreamMetadata = {
+  lineChanges: ActivityLineChanges;
+  durationMs: number;
+  failureCount: number;
 };
 
 export type ActivityStepParts = {
   label: string;
   action: string;
   argument?: string;
-  lineChanges?: ActivityGroupFacts['lineChanges'];
+  lineChanges?: ActivityLineChanges;
   role: 'edit' | 'read' | 'search' | 'command' | 'other';
   described?: boolean;
   state: 'complete' | 'pending' | 'failed';
@@ -169,7 +169,7 @@ export function activityStepParts(
   let action: string;
   let described: boolean | undefined;
   let argument: string | undefined;
-  let lineChanges: ActivityGroupFacts['lineChanges'] | undefined;
+  let lineChanges: ActivityLineChanges | undefined;
   if (name === 'bash' || name === 'shell' || name === 'exec') {
     const description = stringArg(tool.args, 'description');
     if (description) {
@@ -284,9 +284,8 @@ export function activityStepParts(
     }
   } else if (path) {
     const edits = arrayArg(tool.args, 'edits');
-    const changes = activityGroupFacts([tool]).lineChanges;
-    lineChanges =
-      changes.added || changes.changed || changes.removed ? changes : undefined;
+    const changes = activityToolLineChanges(tool);
+    lineChanges = changes;
     action =
       name === 'read'
         ? 'Reading'
@@ -340,92 +339,49 @@ function isFailedActivityTool(tool: unknown): boolean {
   );
 }
 
-/**
- * Keep the collapsed row bounded and honest: names and outcomes come from the
- * shared activity projection, while opaque tool arguments stay in expanded
- * details rather than being guessed at here. Failure totals are derived from
- * existing tool outcomes so the version-1 contribution contract stays stable.
- */
-export function activityGroupSummary(
-  group: ActivityGroupSummaryInput,
-): ActivityGroupSummary {
-  const recentTools = group.tools.slice(-3).map((tool) => tool.name);
-  const failureCount = group.tools.filter(isFailedActivityTool).length;
+export function toolStreamSummary(
+  tools: readonly ActivityStepTool[],
+): ToolStreamSummary {
+  const recentTools = tools.slice(-3).map((tool) => tool.name);
+  const failureCount = tools.filter(isFailedActivityTool).length;
   return {
     recentTools,
-    earlierToolCount: Math.max(0, group.tools.length - recentTools.length),
-    toolCount: group.toolCount,
+    earlierToolCount: Math.max(0, tools.length - recentTools.length),
+    toolCount: tools.length,
     failureCount,
   };
 }
 
-export type ActivityGroupMetadataModel = {
-  kindLabel: string;
-  toolLabel: string;
-  lineChanges: ActivityGroupFacts['lineChanges'];
-  duration?: string;
-  failure?: string;
-};
-
-export function activityGroupMetadataModel(
-  group: Pick<TranscriptGroup, 'kind' | 'tools' | 'toolCount'>,
-  summary: Pick<ActivityGroupSummary, 'failureCount'>,
-): ActivityGroupMetadataModel {
-  const facts = activityGroupFacts(group.tools);
+export function toolStreamMetadata(
+  tools: readonly ActivityStepTool[],
+): ToolStreamMetadata {
+  const lineChanges: ActivityLineChanges = {
+    added: 0,
+    changed: 0,
+    removed: 0,
+  };
+  let durationMs = 0;
+  for (const tool of tools) {
+    const changes = activityToolLineChanges(tool);
+    if (changes) {
+      lineChanges.added += changes.added;
+      lineChanges.changed += changes.changed;
+      lineChanges.removed += changes.removed;
+    }
+    durationMs += activityToolDurationMs(tool) ?? 0;
+  }
   return {
-    kindLabel:
-      group.kind === 'mutate'
-        ? 'Edited'
-        : group.kind === 'inspect'
-          ? 'Inspected'
-          : group.kind === 'validate'
-            ? 'Validated'
-            : group.kind === 'execute'
-              ? 'Ran'
-              : 'Mixed work',
-    toolLabel: `${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}`,
-    lineChanges: facts.lineChanges,
-    ...(facts.commandDurationMs > 0
-      ? { duration: formatCommandDuration(facts.commandDurationMs) }
-      : {}),
-    ...(summary.failureCount > 0
-      ? { failure: `${summary.failureCount} failed` }
-      : {}),
+    lineChanges,
+    durationMs,
+    failureCount: tools.filter(isFailedActivityTool).length,
   };
 }
 
-export function activityGroupMetadata(
-  summary: Pick<ActivityGroupSummary, 'toolCount' | 'failureCount'>,
-): string;
-export function activityGroupMetadata(
-  group: Pick<TranscriptGroup, 'kind' | 'status' | 'tools' | 'toolCount'>,
-  summary: Pick<ActivityGroupSummary, 'failureCount'>,
-): string;
-export function activityGroupMetadata(
-  groupOrSummary:
-    | Pick<TranscriptGroup, 'kind' | 'status' | 'tools' | 'toolCount'>
-    | Pick<ActivityGroupSummary, 'toolCount' | 'failureCount'>,
-  providedSummary?: Pick<ActivityGroupSummary, 'failureCount'>,
+export function toolStreamMetadataLabel(
+  tools: readonly ActivityStepTool[],
 ): string {
-  if (providedSummary === undefined) {
-    const summary = groupOrSummary as Pick<
-      ActivityGroupSummary,
-      'toolCount' | 'failureCount'
-    >;
-    const parts = [
-      `${summary.toolCount} tool call${summary.toolCount === 1 ? '' : 's'}`,
-    ];
-    if (summary.failureCount > 0)
-      parts.push(
-        `${summary.failureCount} failed attempt${summary.failureCount === 1 ? '' : 's'}`,
-      );
-    return parts.join(' · ');
-  }
-  const group = groupOrSummary as Pick<
-    TranscriptGroup,
-    'kind' | 'status' | 'tools' | 'toolCount'
-  >;
-  const metadata = activityGroupMetadataModel(group, providedSummary);
+  const summary = toolStreamSummary(tools);
+  const metadata = toolStreamMetadata(tools);
   const changes = [
     metadata.lineChanges.added ? `+${metadata.lineChanges.added}` : undefined,
     metadata.lineChanges.changed
@@ -435,51 +391,14 @@ export function activityGroupMetadata(
       ? `-${metadata.lineChanges.removed}`
       : undefined,
   ].filter(Boolean);
-  const parts = [
-    metadata.kindLabel,
-    metadata.toolLabel,
+  return [
+    `${summary.toolCount} call${summary.toolCount === 1 ? '' : 's'}`,
     changes.length ? changes.join(' ') : undefined,
-    metadata.duration,
-    metadata.failure,
-  ];
-  return parts.filter(Boolean).join(' · ');
-}
-
-export function activityGroupPresentation(
-  group: Pick<TranscriptGroup, 'status' | 'toolCount'>,
-  expanded: boolean,
-): {
-  className: 'activity-settled' | 'activity-pending' | 'activity-ended-error';
-  icon: '•' | '…' | '!';
-  label: string;
-  status: TranscriptGroup['status'];
-} {
-  const detail = expanded ? 'hide detail' : 'show detail';
-  if (group.status === 'ended-error')
-    return {
-      className: 'activity-ended-error',
-      icon: '!',
-      label: `ended after an error · ${detail}`,
-      status: group.status,
-    };
-  if (group.status === 'preparing')
-    return {
-      className: 'activity-pending',
-      icon: '…',
-      label: 'preparing tool call',
-      status: group.status,
-    };
-  if (group.status === 'live')
-    return {
-      className: 'activity-pending',
-      icon: '…',
-      label: `in progress · ${detail}`,
-      status: group.status,
-    };
-  return {
-    className: 'activity-settled',
-    icon: '•',
-    label: detail,
-    status: group.status,
-  };
+    metadata.durationMs > 0
+      ? formatCommandDuration(metadata.durationMs)
+      : undefined,
+    metadata.failureCount > 0 ? `${metadata.failureCount} failed` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }

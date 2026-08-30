@@ -1,5 +1,4 @@
 import {
-  activityGroupsRenderer,
   delegateStatusRenderer,
   isTypeBoxSchema,
   type PauseStatusViewModel,
@@ -63,37 +62,6 @@ export function genericUnknownRenderer(
 }
 
 const explicitRenderers: readonly DashboardRenderer[] = [
-  {
-    descriptor: activityGroupsRenderer,
-    render: (input) => {
-      const value = input as {
-        title?: unknown;
-        status?: unknown;
-        toolCount?: unknown;
-      };
-      const status =
-        typeof value.status === 'string' ? value.status : 'unknown';
-      const statusClass =
-        status === 'ended-error'
-          ? 'activity-ended-error'
-          : status === 'live' || status === 'preparing'
-            ? 'activity-pending'
-            : 'activity-settled';
-      const icon =
-        status === 'ended-error' ? '!' : status === 'settled' ? '•' : '…';
-      return (
-        <div className={`activity-renderer-chip ${statusClass}`}>
-          <span className="activity-icon" aria-hidden="true">
-            {icon}
-          </span>
-          <strong>
-            {typeof value.title === 'string' ? value.title : 'Activity group'}
-          </strong>
-          <small>{String(value.toolCount ?? 0)} tools</small>
-        </div>
-      );
-    },
-  },
   // Live extension renderers are explicit trusted imports. Their IDs are
   // matched exactly and their descriptors validate input before adapters run.
   {

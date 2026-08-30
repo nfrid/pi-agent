@@ -1,4 +1,3 @@
-import { projectActivityGroups } from '@pi-dashboard/activity-model';
 import type { TranscriptProjection } from '@pi-dashboard/domain';
 import type {
   RuntimeSnapshot,
@@ -15,15 +14,16 @@ import {
   type TranscriptModelItem,
   toTranscriptEntries,
 } from '../../../transcript';
-import { TranscriptActivityGroup } from '../activity-group';
 import { TranscriptEntry } from '../entries';
 import {
   buildTranscriptLandmarks,
   mergeTranscriptLandmarks,
   type TranscriptLandmark,
+  transcriptItemTimestamp,
 } from '../landmarks';
 import { TranscriptOutline } from '../outline';
-import { buildTranscriptGroupCoverage } from '../virtual-rows';
+import { TranscriptToolStream } from '../tool-stream';
+import { buildTranscriptToolStreams } from '../virtual-rows';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
 import { VirtualizedTranscript } from './virtualized';
 
@@ -81,22 +81,18 @@ export function Transcript({
         : toTranscriptEntries(input, { leadingContinuation }),
     [input, leadingContinuation, modelItems],
   );
-  const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
-  const groups = useMemo(
-    () =>
-      projectActivityGroups(modelEntries, {
-        // Historical groups stay complete; only the transcript tail inherits
-        // activity from the runtime when a live tool status is not available.
-        liveTail:
-          runtime?.online !== false &&
-          (runtime?.liveState === 'working' ||
-            runtime?.liveState === 'compacting' ||
-            runtime?.liveState === 'waiting' ||
-            runtime?.liveState === 'aborting' ||
-            runtime?.liveState === 'stopping'),
-      }),
-    [modelEntries, runtime],
+  const toolStreams = useMemo(() => buildTranscriptToolStreams(items), [items]);
+  const streamByStart = useMemo(
+    () => new Map(toolStreams.map((stream) => [stream.start, stream])),
+    [toolStreams],
   );
+  const streamCoverage = useMemo(() => {
+    const coverage = new Uint8Array(items.length);
+    for (const stream of toolStreams)
+      for (let index = stream.start + 1; index <= stream.end; index += 1)
+        coverage[index] = 1;
+    return coverage;
+  }, [items.length, toolStreams]);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [pendingJumpKey, setPendingJumpKey] = useState<string>();
   const isVirtualizedTranscript =
@@ -137,8 +133,8 @@ export function Transcript({
     onPrependAnchorRestored?.(prependAnchor.revision);
   }, [onPrependAnchorRestored, prependAnchor, transcriptScrollElementRef]);
   const loadedLandmarks = useMemo(
-    () => buildTranscriptLandmarks(items, groups),
-    [groups, items],
+    () => buildTranscriptLandmarks(items),
+    [items],
   );
   const landmarks = useMemo<TranscriptLandmark[]>(
     () => mergeTranscriptLandmarks(loadedLandmarks, outline),
@@ -183,15 +179,10 @@ export function Transcript({
     }
     setPendingJumpKey(landmark.key);
   };
-  const { groupByStart, groupCoverage } = useMemo(
-    () => buildTranscriptGroupCoverage(items.length, groups),
-    [groups, items.length],
-  );
   if (isVirtualizedTranscript && transcriptScrollElementRef)
     return (
       <VirtualizedTranscript
         items={items}
-        groups={groups}
         outline={outline}
         onJumpToLandmark={onJumpToLandmark}
         open={open}
@@ -216,34 +207,31 @@ export function Transcript({
         scrollElementRef={transcriptScrollElementRef}
       />
       {items.map((item, index) => {
-        const group = groupByStart.get(index);
-        if (group) {
-          const groupKey = items[group.start]?.key ?? 'unknown-group';
-          const groupItems = items.slice(group.start, group.end + 1);
+        const stream = streamByStart.get(index);
+        if (stream) {
+          const streamKey = stream.key;
           return (
-            <TranscriptActivityGroup
-              key={`group-${groupKey}`}
-              group={group}
-              groupKey={groupKey}
-              items={groupItems}
-              runtime={runtime}
-              expanded={open.has(groupKey)}
-              compacting={
-                runtime?.online !== false &&
-                runtime?.liveState === 'compacting' &&
-                group.id === groups.at(-1)?.id
+            <TranscriptToolStream
+              key={streamKey}
+              items={items.slice(stream.start, stream.end + 1)}
+              cwd={runtime?.cwd}
+              expanded={open.has(streamKey)}
+              timestampOverride={
+                stream.start > 0
+                  ? transcriptItemTimestamp(items[stream.start - 1])
+                  : undefined
               }
               onToggle={(nextExpanded) => {
                 setOpen((current) => {
                   const next = new Set(current);
-                  nextExpanded ? next.add(groupKey) : next.delete(groupKey);
+                  nextExpanded ? next.add(streamKey) : next.delete(streamKey);
                   return next;
                 });
               }}
             />
           );
         }
-        if (groupCoverage[index]) return null;
+        if (streamCoverage[index]) return null;
         return (
           <div data-transcript-key={item.key} key={item.key}>
             <TranscriptEntry item={item} cwd={runtime?.cwd} />
