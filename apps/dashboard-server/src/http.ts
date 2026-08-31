@@ -44,6 +44,7 @@ import type {
 import { readGitContext } from './git-context.js';
 import { BridgeListener } from './http/bridge-listener.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
+import { readProjectIcon } from './project-icon.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
@@ -251,6 +252,10 @@ export class DashboardServerImpl implements DashboardServer {
           imageIndex,
           messageTimestamp,
         ),
+      projectIcon: async (projectId) => {
+        const project = this.metadata.orchestration.getProject(projectId);
+        return project ? readProjectIcon(project.rootPath) : undefined;
+      },
       shellFeed: this.shellFeed,
       sessionFeeds: this.sessionFeeds,
       shellSnapshotAt: (sequence) => {

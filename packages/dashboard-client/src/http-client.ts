@@ -667,6 +667,28 @@ export class DashboardHttpClient {
     return response.blob();
   }
 
+  async projectIcon(projectId: string, signal?: AbortSignal): Promise<Blob> {
+    const { baseUrl } = await this.ensureEndpoint();
+    const headers = new Headers();
+    const token = this.tokenStore.get();
+    if (token) headers.set('x-dashboard-token', token);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/icon`,
+        { headers, ...(signal ? { signal } : {}) },
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    if (!response.ok)
+      throw new DashboardHttpError(
+        response.status,
+        'Project icon is unavailable.',
+      );
+    return response.blob();
+  }
+
   async delegateHistory(
     id: string,
     signal?: AbortSignal,

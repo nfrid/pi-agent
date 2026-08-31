@@ -30,6 +30,27 @@
   min-width: 0;
 }
 
+.cardIdentity,
+.projectHeading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.cardIdentity > span:last-child {
+  flex: 1;
+}
+
+.projectHeading h1,
+.projectHeading p {
+  margin-top: 0;
+}
+
+.projectHeading p {
+  margin-bottom: 0;
+}
+
 .unassigned {
   display: flex;
   align-items: center;

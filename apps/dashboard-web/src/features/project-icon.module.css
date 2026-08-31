@@ -1,0 +1,38 @@
+.icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--purple) 11%, var(--bg-alt));
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.icon[data-size="small"] {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.icon[data-size="medium"] {
+  width: 36px;
+  height: 36px;
+  font-size: 13px;
+}
+
+.icon[data-size="large"] {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  font-size: 17px;
+}
+
+.icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}

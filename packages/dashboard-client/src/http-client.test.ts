@@ -92,6 +92,28 @@ describe('DashboardHttpClient session images', () => {
   });
 });
 
+describe('DashboardHttpClient project icons', () => {
+  it('requests an authenticated icon blob for the encoded project id', async () => {
+    const fetch = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(new Blob(['icon']), { status: 200 }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await client.projectIcon('project/1');
+
+    const headers = fetch.mock.calls[0]?.[1]?.headers as Headers;
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/projects/project%2F1/icon',
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+    expect(headers.get('x-dashboard-token')).toBe('test-token');
+  });
+});
+
 describe('DashboardHttpClient settings requests', () => {
   it('validates authenticated reads and atomic model updates', async () => {
     const settings = {

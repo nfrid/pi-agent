@@ -50,9 +50,10 @@
 }
 
 .results button {
-  display: grid;
+  display: flex;
   width: 100%;
-  gap: 3px;
+  align-items: center;
+  gap: 9px;
   border: 0;
   border-bottom: 1px solid var(--line-soft);
   background: transparent;
@@ -69,6 +70,13 @@
 
 .results button.active {
   box-shadow: inset 2px 0 var(--purple);
+}
+
+.projectCopy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
 }
 
 .results strong {

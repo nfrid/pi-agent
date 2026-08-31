@@ -13,6 +13,7 @@ import {
 } from '../routes/navigation';
 import { useDashboardSurfaces } from './dashboard-surface-context';
 import styles from './new-thread-project-chooser.module.css';
+import { ProjectIcon } from './project-icon';
 
 export function NewThreadProjectChooser({
   snapshot,
@@ -155,8 +156,15 @@ export function NewThreadProjectChooser({
               role="option"
               tabIndex={-1}
             >
-              <strong>{project.title}</strong>
-              <small>{project.rootPath}</small>
+              <ProjectIcon
+                projectId={project.id}
+                title={project.title}
+                size="small"
+              />
+              <span className={styles.projectCopy}>
+                <strong>{project.title}</strong>
+                <small>{project.rootPath}</small>
+              </span>
             </button>
           );
         })}

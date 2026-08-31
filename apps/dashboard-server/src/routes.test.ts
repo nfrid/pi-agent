@@ -303,6 +303,34 @@ describe('Fastify dashboard route plugin', () => {
     expect(full.rawPayload).toEqual(original);
   });
 
+  it('serves authenticated project icons without caching', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.projectIcon = vi.fn(async () => ({
+      data: Buffer.from('<svg>project</svg>'),
+      mediaType: 'image/svg+xml',
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/projects/project-1/icon',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('image/svg+xml');
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.body).toBe('<svg>project</svg>');
+    expect(routeContext.projectIcon).toHaveBeenCalledWith('project-1');
+  });
+
   it('serves one selected delegate run detail with branch query pins', async () => {
     const app = Fastify();
     apps.push(app);

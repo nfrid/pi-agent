@@ -10,6 +10,7 @@ import { Back, useDashboardNavigate } from '../routes/navigation';
 import { errorMessage } from '../shared/lib/error-message';
 import { RuntimeCard } from './dashboard-overview';
 import styles from './project-catalogue.module.css';
+import { ProjectIcon } from './project-icon';
 import { SessionRow } from './session-row';
 
 export interface ProjectCounts {
@@ -54,9 +55,12 @@ function ProjectCard({
       className="workspace-card"
       onClick={() => go(`/projects/${encodeURIComponent(project.id)}`)}
     >
-      <span className="workspace-card-main">
-        <strong>{project.title}</strong>
-        <small className="path">{project.rootPath}</small>
+      <span className={styles.cardIdentity}>
+        <ProjectIcon projectId={project.id} title={project.title} />
+        <span className="workspace-card-main">
+          <strong>{project.title}</strong>
+          <small className="path">{project.rootPath}</small>
+        </span>
       </span>
       <span className={`workspace-state ${project.status}`}>
         <i aria-hidden="true">●</i> {project.status}
@@ -215,9 +219,18 @@ export function ProjectView({
     <section className={styles.page}>
       <Back />
       <div className="section-heading page-heading">
-        <div>
-          <h1>{project?.title ?? 'Unknown project'}</h1>
-          {project && <p className="muted path">{project.rootPath}</p>}
+        <div className={styles.projectHeading}>
+          {project && (
+            <ProjectIcon
+              projectId={project.id}
+              title={project.title}
+              size="large"
+            />
+          )}
+          <div>
+            <h1>{project?.title ?? 'Unknown project'}</h1>
+            {project && <p className="muted path">{project.rootPath}</p>}
+          </div>
         </div>
         {project && (
           <div className={styles.projectActions}>

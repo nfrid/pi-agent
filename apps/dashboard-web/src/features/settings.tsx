@@ -27,6 +27,7 @@ import {
   type RuntimeModelOption,
 } from './model-option';
 import { PushButton } from './notifications';
+import { ProjectIcon } from './project-icon';
 import styles from './settings.module.css';
 
 export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -386,6 +387,11 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
             </form>
           ) : (
             <div className={styles.projectRow} key={project.id}>
+              <ProjectIcon
+                projectId={project.id}
+                title={project.title}
+                size="small"
+              />
               <span>
                 <strong>{project.title}</strong>
                 <small>{project.rootPath}</small>

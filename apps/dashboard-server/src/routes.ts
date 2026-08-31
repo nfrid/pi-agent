@@ -155,6 +155,9 @@ export interface DashboardRouteContext {
     imageIndex: number,
     messageTimestamp?: number | string,
   ): Promise<{ data: Buffer; mediaType: string }>;
+  projectIcon?(
+    projectId: string,
+  ): Promise<{ data: Buffer; mediaType: string } | undefined>;
   readDelegateHistoryRun(
     id: string,
     runId: string,
@@ -614,6 +617,20 @@ export const dashboardRoutes: FastifyPluginAsync<{
       } catch {
         return reply.code(404).send({ error: 'Session image not found.' });
       }
+    },
+  );
+  app.get<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/icon',
+    async (request, reply) => {
+      const icon = await requireOperation(context.projectIcon)(
+        request.params.projectId,
+      );
+      if (!icon)
+        return reply.code(404).send({ error: 'Project icon not found.' });
+      return reply
+        .header('x-content-type-options', 'nosniff')
+        .type(icon.mediaType)
+        .send(icon.data);
     },
   );
   app.post<{ Params: { projectId: string } }>(
