@@ -1,4 +1,5 @@
 import { dashboardHttpClient } from '@pi-dashboard/client';
+import type { SessionBranchPoint } from '@pi-dashboard/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { copyText, Markdown } from '../../Markdown';
@@ -655,11 +656,15 @@ function TranscriptEntry({
   cwd,
   timestampOverride,
   showThinking = true,
+  branchPoint,
+  onOpenBranchPaths,
 }: {
   item: TranscriptModelItem;
   cwd?: string;
   timestampOverride?: number | string;
   showThinking?: boolean;
+  branchPoint?: SessionBranchPoint;
+  onOpenBranchPaths?: (point: SessionBranchPoint) => void;
 }) {
   const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
@@ -689,7 +694,7 @@ function TranscriptEntry({
         ) : null}
         {item.text || item.imageCount ? (
           <article
-            className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
+            className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}${item.role === 'user' && branchPoint && branchPoint.paths.length > 1 ? ' message-has-branches' : ''}`}
           >
             {item.role === 'assistant' && item.text ? (
               <span className="message-bubble-accessories">
@@ -723,6 +728,22 @@ function TranscriptEntry({
               )
             ) : null}
             {item.text ? <Markdown>{item.text}</Markdown> : null}
+            {item.role === 'user' &&
+            branchPoint &&
+            branchPoint.paths.length > 1 ? (
+              <button
+                type="button"
+                className="transcript-branch-indicator"
+                aria-label={`Show ${branchPoint.paths.length} paths from this message`}
+                aria-haspopup="dialog"
+                title={`Show ${branchPoint.paths.length} paths from this message`}
+                data-branch-count={branchPoint.paths.length}
+                onClick={() => onOpenBranchPaths?.(branchPoint)}
+              >
+                <span aria-hidden="true">⑂</span> {branchPoint.paths.length}{' '}
+                paths
+              </button>
+            ) : null}
           </article>
         ) : null}
       </div>

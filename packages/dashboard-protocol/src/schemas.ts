@@ -31,6 +31,9 @@ import {
   MAX_MODEL_DISPLAY_PREFERENCE_KEY,
   MAX_MODEL_DISPLAY_PREFERENCES,
   MAX_PATH,
+  MAX_SESSION_BRANCH_LABEL,
+  MAX_SESSION_BRANCH_PATHS,
+  MAX_SESSION_BRANCH_POINTS,
   MAX_SESSION_INDEX_DELTA_ITEMS,
   MAX_SHELL_INDEX_ITEMS,
   MAX_TEXT,
@@ -1632,6 +1635,51 @@ export const SessionHistorySchema = Type.Object(
 );
 export type SessionHistory = Static<typeof SessionHistorySchema>;
 
+/** One immediate user path below a branch point. No transcript payload is copied. */
+export const SessionBranchPathSchema = Type.Object(
+  {
+    /** Outer JSONL entry identity used for ancestry and lifecycle operations. */
+    id: IdentifierSchema,
+    /** Nested transcript/outline identity, usually message.messageId. */
+    messageId: IdentifierSchema,
+    label: Type.String({ minLength: 1, maxLength: MAX_SESSION_BRANCH_LABEL }),
+    lastActivityAt: Type.Optional(
+      Type.Union([Type.String({ maxLength: 128 }), FiniteNumberSchema]),
+    ),
+    current: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type SessionBranchPath = Static<typeof SessionBranchPathSchema>;
+
+/** Immediate user paths below one loaded user turn. `id` is the anchor entry. */
+export const SessionBranchPointSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    paths: Type.Readonly(
+      Type.Array(SessionBranchPathSchema, {
+        maxItems: MAX_SESSION_BRANCH_PATHS,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type SessionBranchPoint = Static<typeof SessionBranchPointSchema>;
+
+/** Bounded, read-only branch metadata; transcript payloads remain paginated. */
+export const SessionBranchTopologySchema = Type.Object(
+  {
+    activeLeafId: Type.Optional(IdentifierSchema),
+    points: Type.Readonly(
+      Type.Array(SessionBranchPointSchema, {
+        maxItems: MAX_SESSION_BRANCH_POINTS,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type SessionBranchTopology = Static<typeof SessionBranchTopologySchema>;
+
 /** Lightweight, indexed transcript landmarks. Payloads never cross this boundary. */
 export const SessionOutlineLandmarkSchema = Type.Object(
   {
@@ -1663,6 +1711,8 @@ export const SessionApiResponseSchema = Type.Object(
         Type.Array(SessionOutlineLandmarkSchema, { maxItems: 4096 }),
       ),
     ),
+    /** Read-only immediate branch paths; transcript payloads are not duplicated. */
+    branchTopology: Type.Optional(SessionBranchTopologySchema),
     /** Bounded history range and opaque cursor for explicit older-page loads. */
     history: Type.Optional(SessionHistorySchema),
     /** False when a new active session is not indexed and its runtime branch could not be serialized completely. */
@@ -1735,6 +1785,8 @@ export const AuthoritativeSessionSnapshotSchema = Type.Object(
         Type.Array(SessionOutlineLandmarkSchema, { maxItems: 4096 }),
       ),
     ),
+    /** Read-only immediate branch paths; transcript payloads are not duplicated. */
+    branchTopology: Type.Optional(SessionBranchTopologySchema),
     history: Type.Optional(SessionHistorySchema),
     entriesComplete: Type.Boolean(),
     serverId: IdentifierSchema,

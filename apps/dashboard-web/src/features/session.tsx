@@ -247,6 +247,7 @@ export function SessionView({
             onBeforeScroll={handleBeforeTranscriptNavigation}
             scrollElementRef={embedded ? undefined : transcriptScrollRef}
             outline={data.outline}
+            branchTopology={data.branchTopology}
             onJumpToLandmark={(landmark) =>
               landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
                 ? loadThroughOrdinal(landmark.ordinal)

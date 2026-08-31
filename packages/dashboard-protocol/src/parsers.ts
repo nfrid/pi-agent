@@ -8,6 +8,7 @@ import { Value } from 'typebox/value';
 import {
   MAX_ID,
   MAX_PATH,
+  MAX_SESSION_BRANCH_PATHS_TOTAL,
   MAX_SHELL_SNAPSHOT_BYTES,
   SESSION_NAME_MAX_LENGTH,
 } from './limits.js';
@@ -272,6 +273,7 @@ export function parseAuthoritativeSessionSnapshot(
   );
   if (response.runtimeSeq !== undefined && response.runtimeEpoch === undefined)
     throw new Error('Session runtime sequence has no epoch.');
+  assertSessionBranchTopologyBound(response.branchTopology);
   const bytes = new TextEncoder().encode(JSON.stringify(response)).byteLength;
   if (bytes > 2 * 1024 * 1024)
     throw new Error('Authoritative session snapshot is too large.');
@@ -1010,8 +1012,49 @@ export function tryParseComposerFileSuggestions(
   return tryParseSchema(ComposerFileSuggestionsSchema, value);
 }
 
+function assertSessionBranchTopologyBound(
+  topology: SessionApiResponse['branchTopology'],
+): void {
+  if (!topology) return;
+  const totalPaths = topology.points.reduce(
+    (total, point) => total + point.paths.length,
+    0,
+  );
+  if (totalPaths > MAX_SESSION_BRANCH_PATHS_TOTAL)
+    throw new Error('Session branch topology has too many paths.');
+  const pathIds = new Set<string>();
+  const messageIds = new Set<string>();
+  for (const point of topology.points) {
+    let currentPaths = 0;
+    for (const path of point.paths) {
+      if (pathIds.has(path.id))
+        throw new Error('Session branch topology has duplicate path IDs.');
+      if (messageIds.has(path.messageId))
+        throw new Error('Session branch topology has duplicate message IDs.');
+      pathIds.add(path.id);
+      messageIds.add(path.messageId);
+      if (!path.current) continue;
+      currentPaths += 1;
+      if (topology.activeLeafId === undefined)
+        throw new Error(
+          'Session branch topology marks a path current without an active leaf.',
+        );
+    }
+    if (currentPaths > 1)
+      throw new Error(
+        'Session branch topology marks multiple current paths at one point.',
+      );
+  }
+}
+
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {
-  return parseSchema(SessionApiResponseSchema, value, 'session API response');
+  const response = parseSchema(
+    SessionApiResponseSchema,
+    value,
+    'session API response',
+  );
+  assertSessionBranchTopologyBound(response.branchTopology);
+  return response;
 }
 
 export function parseSessionThreadLinks(value: unknown): SessionThreadLinks {
@@ -1078,5 +1121,9 @@ export const tryParseDelegateHistoryDetailResponse =
 export function tryParseSessionApiResponse(
   value: unknown,
 ): SessionApiResponse | undefined {
-  return tryParseSchema(SessionApiResponseSchema, value);
+  try {
+    return parseSessionApiResponse(value);
+  } catch {
+    return undefined;
+  }
 }

@@ -754,6 +754,138 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(snapshot.completeThroughCursor).toBe(false);
   });
 
+  it('uses the live runtime leaf for the persisted branch and topology', async () => {
+    const f = await fixture('live-branch-session', [
+      {
+        type: 'session',
+        id: 'live-branch-session',
+        cwd: '/tmp/snapshot',
+      },
+      {
+        type: 'message',
+        id: 'branch-root',
+        parentId: null,
+        message: { role: 'user', content: 'Choose' },
+      },
+      {
+        type: 'message',
+        id: 'path-a',
+        parentId: 'branch-root',
+        message: { role: 'user', content: 'A' },
+      },
+      {
+        type: 'message',
+        id: 'path-b',
+        parentId: 'branch-root',
+        message: { role: 'user', content: 'B' },
+      },
+    ]);
+    f.register(
+      runtime(f.file, {
+        liveState: 'idle',
+        session: {
+          id: 'live-branch-session',
+          file: f.file,
+          cwd: '/tmp/snapshot',
+          entries: [],
+          entriesComplete: false,
+          leafId: 'path-a',
+        } as unknown as RuntimeSnapshot['session'],
+      }),
+    );
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-live-branch',
+      'live-branch-session',
+    );
+    expect(
+      snapshot.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(['live-branch-session', 'branch-root', 'path-a']);
+    expect(snapshot.branchTopology).toMatchObject({
+      activeLeafId: 'path-a',
+      points: [
+        {
+          id: 'branch-root',
+          paths: [
+            expect.objectContaining({
+              id: 'path-a',
+              messageId: 'path-a',
+              current: true,
+            }),
+            expect.objectContaining({
+              id: 'path-b',
+              messageId: 'path-b',
+              current: false,
+            }),
+          ],
+        },
+      ],
+    });
+  });
+
+  it('keeps runtime-only branch fallback provenance for an unpersisted leaf', async () => {
+    const f = await fixture('runtime-fallback-session', [
+      {
+        type: 'session',
+        id: 'runtime-fallback-session',
+        cwd: '/tmp/snapshot',
+      },
+      {
+        type: 'message',
+        id: 'branch-root',
+        message: { role: 'user', content: 'Choose' },
+      },
+      {
+        type: 'message',
+        id: 'persisted-path',
+        parentId: 'branch-root',
+        message: { role: 'user', content: 'Persisted' },
+      },
+    ]);
+    const live = runtime(f.file, {
+      runtimeId: 'runtime-fallback',
+      session: {
+        id: 'runtime-fallback-session',
+        file: f.file,
+        cwd: '/tmp/snapshot',
+        entries: [
+          {
+            type: 'session',
+            id: 'runtime-fallback-session',
+            cwd: '/tmp/snapshot',
+          },
+          {
+            type: 'message',
+            id: 'branch-root',
+            message: { role: 'user', content: 'Choose' },
+          },
+          {
+            type: 'message',
+            id: 'runtime-only-path',
+            parentId: 'branch-root',
+            message: { role: 'user', content: 'Runtime only' },
+          },
+        ],
+        entriesComplete: false,
+        leafId: 'runtime-only-path',
+      } as unknown as RuntimeSnapshot['session'],
+    });
+    f.register(live);
+
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-runtime-fallback',
+      'runtime-fallback-session',
+    );
+    expect(
+      snapshot.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(['runtime-fallback-session', 'branch-root', 'runtime-only-path']);
+    expect(snapshot.metadata.activeRuntimeId).toBe('runtime-fallback');
+    expect(snapshot.entriesComplete).toBe(false);
+    expect(snapshot.branchTopology).toEqual({
+      activeLeafId: 'runtime-only-path',
+      points: [],
+    });
+  });
+
   it('does not overclaim compact runtime fallback, and keeps before pagination separate', async () => {
     const f = await fixture();
     const compact = runtime(f.file);

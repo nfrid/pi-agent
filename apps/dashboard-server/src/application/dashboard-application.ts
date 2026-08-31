@@ -37,7 +37,10 @@ import type { PushSender } from '../push.js';
 import type { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
 import type { RuntimeManager } from '../runtime-manager.js';
 import type { RegistryChange, RuntimeRegistry } from '../runtime-registry.js';
-import type { SessionIndex } from '../session-index.js';
+import {
+  deriveSessionBranchTopology,
+  type SessionIndex,
+} from '../session-index.js';
 import type { UsageProvider } from '../usage.js';
 import { NotificationService } from './notification-service.js';
 import type { OrchestrationService } from './orchestration-service.js';
@@ -1386,10 +1389,12 @@ export class DashboardApplication {
       const complete =
         runtime.session.entriesComplete === true &&
         entries.length === runtime.session.entries.length;
+      const activeLeafId = runtimeLeafId(runtime);
       return {
         metadata: runtimeMetadata(runtime, indexed),
         entries: [...entries],
         entriesComplete: complete,
+        branchTopology: deriveSessionBranchTopology(entries, activeLeafId),
         // A runtime-only page has no opaque file cursor. Do not advertise a
         // pageable older range that cannot be requested safely.
         history: {
@@ -1406,20 +1411,23 @@ export class DashboardApplication {
       const indexed = this.sessionIndex.get(sessionId);
       let result: SessionRead;
       try {
-        if (!indexed && capture.runtime)
+        if (!indexed && capture.runtime) {
           result = boundedRuntimeRead(capture.runtime, indexed);
-        else
+        } else {
+          const liveLeafId =
+            before === undefined ? runtimeLeafId(capture.runtime) : undefined;
           result = await this.sessionIndex.readEntries(
             sessionId,
             before,
-            before === undefined && !runtimeIsWorking(capture.runtime)
-              ? runtimeLeafId(capture.runtime)
-              : undefined,
+            liveLeafId,
             {
               resolveLatestLeaf:
-                before === undefined && runtimeIsWorking(capture.runtime),
+                before === undefined &&
+                runtimeIsWorking(capture.runtime) &&
+                liveLeafId === undefined,
             },
           );
+        }
       } catch (error) {
         if (!capture.runtime || before !== undefined) throw error;
         result = boundedRuntimeRead(capture.runtime, indexed);
@@ -1490,6 +1498,10 @@ export class DashboardApplication {
         ...baseMetadata,
         ...this.sessionAssociation(baseMetadata, resolvedCapture.runtime),
       };
+      // `result` retains the read's provenance: indexed topology for a
+      // persisted branch, or runtime-only topology when the live leaf is not
+      // persisted yet. Do not replace it with a second indexed lookup.
+      const branchTopology = result.branchTopology;
       const completeThroughCursor =
         before === undefined &&
         result.entriesComplete &&
@@ -1501,6 +1513,7 @@ export class DashboardApplication {
         ...(result.outline === undefined
           ? {}
           : { outline: [...result.outline] }),
+        ...(branchTopology === undefined ? {} : { branchTopology }),
         ...(result.history ? { history: result.history } : {}),
         entriesComplete: result.entriesComplete,
         serverId,

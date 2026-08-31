@@ -1,6 +1,8 @@
 import type { TranscriptProjection } from '@pi-dashboard/domain';
 import type {
   RuntimeSnapshot,
+  SessionBranchPoint,
+  SessionBranchTopology,
   SessionOutlineLandmark,
 } from '@pi-dashboard/protocol';
 import {
@@ -15,6 +17,7 @@ import {
   type TranscriptModelItem,
   toTranscriptEntries,
 } from '../../../transcript';
+import { indexBranchPointsByMessageId } from '../branching';
 import { TranscriptEntry } from '../entries';
 import {
   buildTranscriptLandmarks,
@@ -34,6 +37,7 @@ export function Transcript({
   modelItems,
   runtime,
   outline,
+  branchTopology,
   onJumpToLandmark,
   tailScrollRequest,
   outlineOpen,
@@ -53,6 +57,7 @@ export function Transcript({
   modelItems?: readonly TranscriptModelItem[];
   runtime?: RuntimeSnapshot;
   outline?: readonly SessionOutlineLandmark[];
+  branchTopology?: SessionBranchTopology;
   onJumpToLandmark?: (
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
@@ -142,6 +147,19 @@ export function Transcript({
     () => mergeTranscriptLandmarks(loadedLandmarks, outline),
     [loadedLandmarks, outline],
   );
+  const branchPointsByMessageId = useMemo(
+    () => indexBranchPointsByMessageId(branchTopology),
+    [branchTopology],
+  );
+  const [branchPointId, setBranchPointId] = useState<string>();
+  const openBranchPaths = (point: SessionBranchPoint) => {
+    setBranchPointId(point.id);
+    onOutlineOpenChange?.(true);
+  };
+  const handleOutlineOpenChange = (open: boolean) => {
+    if (!open) setBranchPointId(undefined);
+    onOutlineOpenChange?.(open);
+  };
   useLayoutEffect(() => {
     // Re-run after a pending ordinal load commits its rendered items.
     void loadedLandmarks;
@@ -186,13 +204,17 @@ export function Transcript({
       <VirtualizedTranscript
         items={items}
         outline={outline}
+        branchTopology={branchTopology}
+        branchPointId={branchPointId}
+        onOpenBranchPaths={openBranchPaths}
+        onBranchPointChange={setBranchPointId}
         onJumpToLandmark={onJumpToLandmark}
         open={open}
         setOpen={setOpen}
         runtime={runtime}
         tailScrollRequest={tailScrollRequest}
         outlineOpen={outlineOpen}
-        onOutlineOpenChange={onOutlineOpenChange}
+        onOutlineOpenChange={handleOutlineOpenChange}
         onBeforeScroll={onBeforeScroll}
         pendingJumpKey={pendingJumpKey}
         onPendingJumpHandled={() => setPendingJumpKey(undefined)}
@@ -205,8 +227,12 @@ export function Transcript({
     <div className="transcript">
       <TranscriptOutline
         landmarks={landmarks}
+        branchTopology={branchTopology}
+        branchPointId={branchPointId}
+        onOpenBranchPaths={openBranchPaths}
+        onBranchPointChange={setBranchPointId}
         open={outlineOpen}
-        onOpenChange={onOutlineOpenChange}
+        onOpenChange={handleOutlineOpenChange}
         onJump={jumpToLandmark}
         scrollElementRef={transcriptScrollElementRef}
       />
@@ -240,7 +266,16 @@ export function Transcript({
         if (streamCoverage[index]) return null;
         return (
           <div data-transcript-key={item.key} key={item.key}>
-            <TranscriptEntry item={item} cwd={runtime?.cwd} />
+            <TranscriptEntry
+              item={item}
+              cwd={runtime?.cwd}
+              branchPoint={
+                item.role === 'user'
+                  ? branchPointsByMessageId.get(item.key)
+                  : undefined
+              }
+              onOpenBranchPaths={openBranchPaths}
+            />
           </div>
         );
       })}

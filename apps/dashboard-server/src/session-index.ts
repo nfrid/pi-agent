@@ -12,7 +12,13 @@ import {
 import {
   deriveSessionTitle,
   isRecord,
+  MAX_SESSION_BRANCH_PATHS,
+  MAX_SESSION_BRANCH_PATHS_TOTAL,
+  MAX_SESSION_BRANCH_POINTS,
   redactImageData,
+  type SessionBranchPath,
+  type SessionBranchPoint,
+  type SessionBranchTopology,
   type SessionIndexEntry,
   type SessionOutlineLandmark,
   validateSessionName,
@@ -96,6 +102,8 @@ export interface SessionEntriesResult {
   history: SessionHistoryPage;
   /** Complete lightweight transcript outline; payloads remain paginated. */
   outline?: readonly SessionOutlineLandmark[];
+  /** Bounded immediate user paths; transcript payloads are not duplicated. */
+  branchTopology?: SessionBranchTopology;
 }
 
 export interface SessionReadOptions {
@@ -231,6 +239,28 @@ function compactOutlineText(value: unknown, limit = 220): string | undefined {
   return compactOutlineText(value.text ?? value.content, limit);
 }
 
+function outlineIdentityId(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const message = isRecord(value.message) ? value.message : value;
+  const candidateId =
+    typeof message.messageId === 'string'
+      ? message.messageId
+      : typeof message.id === 'string'
+        ? message.id
+        : typeof value.id === 'string'
+          ? value.id
+          : undefined;
+  return candidateId !== undefined &&
+    candidateId.length > 0 &&
+    candidateId.length <= 256 &&
+    ![...candidateId].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+    ? candidateId
+    : undefined;
+}
+
 function outlineFields(
   value: unknown,
   activity: TranscriptEntry,
@@ -245,24 +275,7 @@ function outlineFields(
     typeof timestamp === 'number' || typeof timestamp === 'string'
       ? { timestamp }
       : {};
-  const candidateId =
-    typeof message.messageId === 'string'
-      ? message.messageId
-      : typeof message.id === 'string'
-        ? message.id
-        : typeof value.id === 'string'
-          ? value.id
-          : undefined;
-  const outlineId =
-    candidateId !== undefined &&
-    candidateId.length > 0 &&
-    candidateId.length <= 256 &&
-    ![...candidateId].some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127;
-    })
-      ? candidateId
-      : undefined;
+  const outlineId = outlineIdentityId(value);
   const identityField = outlineId === undefined ? {} : { outlineId };
   if (message.role === 'user') {
     return {
@@ -327,6 +340,225 @@ function buildSessionOutline(
   return landmarks
     .sort((left, right) => left.ordinal - right.ordinal)
     .slice(0, MAX_SESSION_OUTLINE);
+}
+
+type BranchDescriptor = Pick<
+  SessionLineDescriptor,
+  | 'ordinal'
+  | 'id'
+  | 'parentId'
+  | 'outlineId'
+  | 'outlineKind'
+  | 'outlineLabel'
+  | 'timestamp'
+>;
+type IdentifiedBranchDescriptor = BranchDescriptor & { id: string };
+
+function timestampNumber(
+  value: number | string | undefined,
+): number | undefined {
+  if (typeof value === 'number')
+    return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function branchTopologyFromDescriptors(
+  descriptors: readonly BranchDescriptor[],
+  activeLeafId?: string,
+): SessionBranchTopology {
+  const byId = new Map<string, IdentifiedBranchDescriptor>();
+  const children = new Map<string, IdentifiedBranchDescriptor[]>();
+  for (const descriptor of descriptors) {
+    if (!descriptor.id || byId.has(descriptor.id)) continue;
+    byId.set(descriptor.id, descriptor as IdentifiedBranchDescriptor);
+  }
+  for (const descriptor of byId.values()) {
+    if (
+      typeof descriptor.parentId !== 'string' ||
+      !byId.has(descriptor.parentId)
+    )
+      continue;
+    const siblings = children.get(descriptor.parentId) ?? [];
+    siblings.push(descriptor);
+    children.set(descriptor.parentId, siblings);
+  }
+
+  // Each user is assigned to its nearest user ancestor once. This collapses
+  // model/tool/summary entries without walking every anchor's subtree.
+  const nearestUserAncestor = new Map<string, string | undefined>();
+  const findNearestUserAncestor = (
+    startId: string | undefined,
+  ): string | undefined => {
+    if (startId === undefined) return undefined;
+    if (nearestUserAncestor.has(startId))
+      return nearestUserAncestor.get(startId);
+    const trail: string[] = [];
+    const seen = new Set<string>();
+    let currentId: string | undefined = startId;
+    let ancestor: string | undefined;
+    while (currentId && !seen.has(currentId)) {
+      const cached = nearestUserAncestor.get(currentId);
+      if (nearestUserAncestor.has(currentId)) {
+        ancestor = cached;
+        break;
+      }
+      seen.add(currentId);
+      trail.push(currentId);
+      const current = byId.get(currentId);
+      if (!current) break;
+      if (current.outlineKind === 'user') {
+        ancestor = current.id;
+        break;
+      }
+      currentId =
+        typeof current.parentId === 'string' ? current.parentId : undefined;
+    }
+    for (const id of trail) nearestUserAncestor.set(id, ancestor);
+    return ancestor;
+  };
+  const usersByAnchor = new Map<string, IdentifiedBranchDescriptor[]>();
+  for (const candidate of byId.values()) {
+    if (candidate.outlineKind !== 'user') continue;
+    const anchorId = findNearestUserAncestor(
+      typeof candidate.parentId === 'string' ? candidate.parentId : undefined,
+    );
+    const anchor = anchorId ? byId.get(anchorId) : undefined;
+    if (!anchor || anchor.ordinal >= candidate.ordinal) continue;
+    const members = usersByAnchor.get(anchor.id) ?? [];
+    members.push(candidate);
+    usersByAnchor.set(anchor.id, members);
+  }
+
+  // Compute each node's latest activity once, so path metadata remains
+  // useful without a user-by-entry subtree walk.
+  const latestActivityById = new Map<
+    string,
+    { value: number | string; sort: number }
+  >();
+  const visitState = new Map<string, 1 | 2>();
+  for (const root of byId.values()) {
+    if (visitState.has(root.id)) continue;
+    const stack: Array<{
+      node: IdentifiedBranchDescriptor;
+      expanded: boolean;
+    }> = [{ node: root, expanded: false }];
+    const visiting = new Set<string>();
+    while (stack.length > 0) {
+      const frame = stack.pop();
+      if (!frame) continue;
+      const { node } = frame;
+      if (frame.expanded) {
+        let latest = timestampNumber(node.timestamp);
+        let latestValue =
+          latest === undefined
+            ? undefined
+            : (node.timestamp as number | string);
+        for (const child of children.get(node.id) ?? []) {
+          const childLatest = latestActivityById.get(child.id);
+          if (
+            childLatest &&
+            (latest === undefined || childLatest.sort >= latest)
+          ) {
+            latest = childLatest.sort;
+            latestValue = childLatest.value;
+          }
+        }
+        if (latest !== undefined && latestValue !== undefined)
+          latestActivityById.set(node.id, { value: latestValue, sort: latest });
+        visitState.set(node.id, 2);
+        visiting.delete(node.id);
+        continue;
+      }
+      if (visitState.has(node.id) || visiting.has(node.id)) continue;
+      visiting.add(node.id);
+      visitState.set(node.id, 1);
+      stack.push({ node, expanded: true });
+      for (const child of children.get(node.id) ?? []) {
+        if (!visitState.has(child.id))
+          stack.push({ node: child, expanded: false });
+      }
+    }
+  }
+
+  const active = new Set<string>();
+  if (activeLeafId !== undefined) {
+    const seen = new Set<string>();
+    let current = byId.get(activeLeafId);
+    while (current && !seen.has(current.id)) {
+      active.add(current.id);
+      seen.add(current.id);
+      current =
+        typeof current.parentId === 'string'
+          ? byId.get(current.parentId)
+          : undefined;
+    }
+  }
+
+  const points: SessionBranchPoint[] = [];
+  let totalPaths = 0;
+  for (const [anchorId, members] of usersByAnchor) {
+    if (members.length < 2 || totalPaths >= MAX_SESSION_BRANCH_PATHS_TOTAL)
+      continue;
+    const remaining = MAX_SESSION_BRANCH_PATHS_TOTAL - totalPaths;
+    const selected = members.slice(
+      0,
+      Math.min(MAX_SESSION_BRANCH_PATHS, remaining),
+    );
+    if (selected.length < 2) continue;
+    const paths: SessionBranchPath[] = selected.map((candidate) => {
+      const latest = latestActivityById.get(candidate.id);
+      return {
+        id: candidate.id,
+        messageId: candidate.outlineId ?? candidate.id,
+        label: candidate.outlineLabel ?? 'User turn',
+        ...(latest === undefined ? {} : { lastActivityAt: latest.value }),
+        current: activeLeafId !== undefined && active.has(candidate.id),
+      };
+    });
+    totalPaths += paths.length;
+    points.push({ id: anchorId, paths });
+    if (points.length >= MAX_SESSION_BRANCH_POINTS) break;
+  }
+  return {
+    ...(activeLeafId === undefined ? {} : { activeLeafId }),
+    points,
+  };
+}
+
+/** Derive only bounded branch metadata from a persisted or runtime entry list. */
+export function deriveSessionBranchTopology(
+  entries: readonly unknown[],
+  activeLeafId?: string,
+): SessionBranchTopology {
+  const descriptors: BranchDescriptor[] = [];
+  entries.forEach((value, ordinal) => {
+    if (!isRecord(value)) return;
+    const id = typeof value.id === 'string' ? value.id : undefined;
+    if (!id) return;
+    const message = isRecord(value.message) ? value.message : undefined;
+    const timestamp = message?.timestamp ?? value.timestamp;
+    const outlineId = outlineIdentityId(value);
+    descriptors.push({
+      ordinal,
+      id,
+      ...(outlineId === undefined ? {} : { outlineId }),
+      ...(Object.hasOwn(value, 'parentId') ? { parentId: value.parentId } : {}),
+      ...(message?.role === 'user' ? { outlineKind: 'user' as const } : {}),
+      ...(message?.role === 'user'
+        ? {
+            outlineLabel: compactOutlineText(message.content) ?? 'User turn',
+          }
+        : {}),
+      ...(typeof timestamp === 'number' || typeof timestamp === 'string'
+        ? { timestamp }
+        : {}),
+    });
+  });
+  return branchTopologyFromDescriptors(descriptors, activeLeafId);
 }
 
 function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
@@ -706,6 +938,12 @@ export class SessionIndex {
       branch.leafId === undefined && requestedLeaf === undefined
         ? index.outline
         : buildSessionOutline(descriptors, groups);
+    // Resolving the latest leaf preserves transcript selection only; it is
+    // not proof that this append-only file's latest entry is the active path.
+    const branchTopology = branchTopologyFromDescriptors(
+      index.descriptors,
+      requestedLeaf,
+    );
     let end = descriptors.length;
     if (cursor) {
       const boundary = descriptors[cursor.selectedOrdinal];
@@ -780,6 +1018,7 @@ export class SessionIndex {
       entries,
       entriesComplete: before === undefined && selection.start === 0,
       outline,
+      branchTopology,
       history: {
         version: 1,
         start: selection.start,
@@ -985,7 +1224,14 @@ export class SessionIndex {
           entriesTruncated: _entriesTruncated,
           ...response
         } = result;
-        return { ...response, outline: indexed.historyIndex.outline };
+        return {
+          ...response,
+          outline: indexed.historyIndex.outline,
+          branchTopology: branchTopologyFromDescriptors(
+            indexed.historyIndex.descriptors,
+            requestedLeafId,
+          ),
+        };
       };
       if (!resolveLatestLeaf)
         return publicBranchResult(
@@ -1132,6 +1378,9 @@ export class SessionIndex {
       entries: page.map((item) => item.entry),
       entriesComplete,
       outline: indexed.historyIndex.outline,
+      branchTopology: branchTopologyFromDescriptors(
+        indexed.historyIndex.descriptors,
+      ),
       history: {
         version: 1,
         start,

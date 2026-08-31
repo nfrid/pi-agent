@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  deriveSessionBranchTopology,
   HISTORY_OVERSCAN_BYTES,
   HISTORY_OVERSCAN_ENTRIES,
   HISTORY_PAGE_BYTES,
@@ -187,6 +188,145 @@ describe('session index', () => {
     await expect(
       index.readEntries('branched-id', undefined, 'missing-leaf'),
     ).rejects.toThrow('Invalid session branch');
+  });
+
+  it('derives immediate user paths and only marks an explicitly active path', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-topology-'),
+    );
+    const file = path.join(root, 'topology.jsonl');
+    const entries = [
+      { type: 'session', id: 'topology-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'root-prompt',
+        parentId: null,
+        message: { role: 'user', content: 'Choose a direction', timestamp: 1 },
+      },
+      {
+        type: 'model_change',
+        id: 'model-a',
+        parentId: 'root-prompt',
+        provider: 'test',
+        modelId: 'a',
+      },
+      {
+        type: 'branch_summary',
+        id: 'summary-a',
+        parentId: 'model-a',
+        summary: 'prior context',
+      },
+      {
+        type: 'message',
+        id: 'path-a-entry',
+        parentId: 'summary-a',
+        message: {
+          role: 'user',
+          messageId: 'path-a',
+          content: 'Try A',
+          timestamp: 10,
+        },
+      },
+      {
+        type: 'model_change',
+        id: 'model-b',
+        parentId: 'root-prompt',
+        provider: 'test',
+        modelId: 'b',
+      },
+      {
+        type: 'branch_summary',
+        id: 'summary-b',
+        parentId: 'model-b',
+        summary: 'prior context',
+      },
+      {
+        type: 'message',
+        id: 'path-b-entry',
+        parentId: 'summary-b',
+        message: {
+          role: 'user',
+          messageId: 'path-b',
+          content: 'Try B',
+          timestamp: 20,
+        },
+      },
+      {
+        type: 'thinking_level_change',
+        id: 'thinking-c',
+        parentId: 'root-prompt',
+        thinkingLevel: 'high',
+      },
+      {
+        type: 'message',
+        id: 'path-c-entry',
+        parentId: 'thinking-c',
+        message: {
+          role: 'user',
+          messageId: 'path-c',
+          content: 'Try C',
+          timestamp: 30,
+        },
+      },
+      {
+        type: 'message',
+        id: 'later-c-entry',
+        parentId: 'path-c-entry',
+        message: {
+          role: 'assistant',
+          messageId: 'later-c',
+          content: 'C answer',
+          timestamp: 31,
+        },
+      },
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const page = await index.readEntries('topology-id');
+    expect(page.branchTopology).toEqual({
+      points: [
+        {
+          id: 'root-prompt',
+          paths: [
+            expect.objectContaining({
+              id: 'path-a-entry',
+              messageId: 'path-a',
+              label: 'Try A',
+            }),
+            expect.objectContaining({
+              id: 'path-b-entry',
+              messageId: 'path-b',
+              label: 'Try B',
+            }),
+            expect.objectContaining({
+              id: 'path-c-entry',
+              messageId: 'path-c',
+              label: 'Try C',
+              current: false,
+            }),
+          ],
+        },
+      ],
+    });
+    expect(page.branchTopology?.points[0]?.paths).toHaveLength(3);
+    expect(page.branchTopology).not.toHaveProperty('activeLeafId');
+    expect(
+      deriveSessionBranchTopology(entries, 'path-b-entry').points[0]?.paths,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'path-b-entry',
+          messageId: 'path-b',
+          current: true,
+        }),
+      ]),
+    );
+    expect(JSON.stringify(page.branchTopology)).not.toContain('prior context');
   });
 
   it('returns a complete lightweight outline without transcript payloads', async () => {

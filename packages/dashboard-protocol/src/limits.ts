@@ -12,6 +12,13 @@ export const SESSION_NAME_MAX_LENGTH = 512;
 export const MAX_SHELL_INDEX_ITEMS = 4_096;
 /** Keep delta payloads below the complete replacement representation. */
 export const MAX_SESSION_INDEX_DELTA_ITEMS = MAX_SHELL_INDEX_ITEMS / 4;
+/** Bounded read-only branch topology carried alongside a session snapshot. */
+export const MAX_SESSION_BRANCH_POINTS = 4_096;
+export const MAX_SESSION_BRANCH_PATHS = 256;
+/** Aggregate branch-path cap keeps topology below snapshot transport budgets. */
+export const MAX_SESSION_BRANCH_PATHS_TOTAL = 1_024;
+/** Maximum compact prompt label retained for one branch path. */
+export const MAX_SESSION_BRANCH_LABEL = 240;
 /** Maximum entries in one composer slash-command catalogue. */
 export const MAX_COMPOSER_COMMANDS = 256;
 export const MAX_COMPOSER_COMMAND_NAME = 128;

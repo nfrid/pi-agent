@@ -55,6 +55,7 @@ import {
   ShellSnapshotRequestSchema,
   serializeFrame,
   tryParseNormalizedToolPayload,
+  tryParseSessionApiResponse,
   validateBridgeCommand,
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
@@ -542,6 +543,29 @@ describe('dashboard protocol', () => {
         lastKnownContextTokens: 1234,
       },
       entries: [],
+      branchTopology: {
+        activeLeafId: 'turn-b',
+        points: [
+          {
+            id: 'turn-root',
+            paths: [
+              {
+                id: 'turn-a-entry',
+                messageId: 'turn-a',
+                label: 'Try A',
+                lastActivityAt: 123,
+                current: false,
+              },
+              {
+                id: 'turn-b-entry',
+                messageId: 'turn-b',
+                label: 'Try B',
+                current: true,
+              },
+            ],
+          },
+        ],
+      },
       history: {
         version: 1,
         start: 10,
@@ -564,6 +588,149 @@ describe('dashboard protocol', () => {
         history: { ...response.history, extra: true },
       }),
     ).toThrow();
+    expect(() =>
+      parseSessionApiResponse({
+        ...response,
+        branchTopology: {
+          ...response.branchTopology,
+          points: Array.from({ length: 4_097 }, (_, index) => ({
+            id: `point-${index}`,
+            paths: [],
+          })),
+        },
+      }),
+    ).toThrow();
+    const aggregateOverflow = {
+      ...response,
+      branchTopology: {
+        activeLeafId: 'turn-b',
+        points: Array.from({ length: 1_025 }, (_, index) => ({
+          id: `point-${index}`,
+          paths: [
+            {
+              id: `path-entry-${index}`,
+              messageId: `path-${index}`,
+              label: 'path',
+              current: false,
+            },
+          ],
+        })),
+      },
+    };
+    expect(() => parseSessionApiResponse(aggregateOverflow)).toThrow();
+    expect(tryParseSessionApiResponse(aggregateOverflow)).toBeUndefined();
+    const duplicatePathIds = {
+      ...response,
+      branchTopology: {
+        points: [
+          {
+            id: 'turn-root',
+            paths: [
+              {
+                id: 'same-entry',
+                messageId: 'message-a',
+                label: 'A',
+                current: false,
+              },
+              {
+                id: 'same-entry',
+                messageId: 'message-b',
+                label: 'B',
+                current: false,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    expect(() => parseSessionApiResponse(duplicatePathIds)).toThrow(
+      'duplicate path IDs',
+    );
+    expect(tryParseSessionApiResponse(duplicatePathIds)).toBeUndefined();
+    const duplicateMessageIds = {
+      ...response,
+      branchTopology: {
+        points: [
+          {
+            id: 'turn-root',
+            paths: [
+              {
+                id: 'entry-a',
+                messageId: 'same-message',
+                label: 'A',
+                current: false,
+              },
+              {
+                id: 'entry-b',
+                messageId: 'same-message',
+                label: 'B',
+                current: false,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    expect(() => parseSessionApiResponse(duplicateMessageIds)).toThrow(
+      'duplicate message IDs',
+    );
+    expect(tryParseSessionApiResponse(duplicateMessageIds)).toBeUndefined();
+
+    const point = response.branchTopology.points[0];
+    const currentWithoutLeaf = {
+      ...response,
+      branchTopology: {
+        points: [
+          {
+            ...point,
+            paths: point.paths.map((path, index) => ({
+              ...path,
+              current: index === 0,
+            })),
+          },
+        ],
+      },
+    };
+    expect(() => parseSessionApiResponse(currentWithoutLeaf)).toThrow(
+      'without an active leaf',
+    );
+    expect(tryParseSessionApiResponse(currentWithoutLeaf)).toBeUndefined();
+
+    const multipleCurrentPaths = {
+      ...response,
+      branchTopology: {
+        activeLeafId: 'turn-b',
+        points: [
+          {
+            ...point,
+            paths: point.paths.map((path) => ({ ...path, current: true })),
+          },
+        ],
+      },
+    };
+    expect(() => parseSessionApiResponse(multipleCurrentPaths)).toThrow(
+      'multiple current paths',
+    );
+    expect(tryParseSessionApiResponse(multipleCurrentPaths)).toBeUndefined();
+
+    const unrepresentedActiveLeaf = {
+      ...response,
+      branchTopology: {
+        activeLeafId: 'unrepresented-leaf',
+        points: [
+          {
+            ...point,
+            paths: point.paths.map((path) => ({ ...path, current: false })),
+          },
+        ],
+      },
+    };
+    expect(parseSessionApiResponse(unrepresentedActiveLeaf)).toEqual(
+      unrepresentedActiveLeaf,
+    );
+    expect(tryParseSessionApiResponse(unrepresentedActiveLeaf)).toEqual(
+      unrepresentedActiveLeaf,
+    );
   });
 
   it('keeps shell transcript-free and validates bounded authoritative sessions', () => {
