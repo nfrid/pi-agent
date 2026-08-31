@@ -130,9 +130,26 @@ async function openSession(
       body: JSON.stringify({ usage: usageValue }),
     }),
   );
-  await page.route('**/api/projects/*/icon', (route) =>
-    route.fulfill({ status: route.request().method() === 'GET' ? 404 : 204 }),
-  );
+  let customIcon = false;
+  await page.route('**/api/projects/*/icon', (route) => {
+    const method = route.request().method();
+    if (method === 'PUT') {
+      customIcon = true;
+      return route.fulfill({ status: 204 });
+    }
+    if (method === 'DELETE') {
+      customIcon = false;
+      return route.fulfill({ status: 204 });
+    }
+    return customIcon
+      ? route.fulfill({
+          status: 200,
+          contentType: 'image/svg+xml',
+          headers: { 'x-project-icon-source': 'custom' },
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>',
+        })
+      : route.fulfill({ status: 404 });
+  });
   await page.route('**/api/sessions/session-usage/delegate-history', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -151,6 +168,7 @@ async function openSession(
           ownership: 'external',
           pid: 1,
           cwd: '/tmp/usage',
+          projectId: 'project-usage',
           liveState: 'working',
           online: true,
           session: {
@@ -177,6 +195,7 @@ async function openSession(
           id: 'session-usage',
           file: '',
           cwd: '/tmp/usage',
+          projectId: 'project-usage',
           title: 'Usage session',
           updatedAt: Date.now(),
         },
@@ -466,11 +485,16 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
     settingsDrawer.getByRole('button', { name: /push/iu }),
   ).toBeVisible();
   await expect(settingsDrawer.getByText('Usage project')).toBeVisible();
-  await expect(settingsDrawer.getByText('Choose icon')).toBeVisible();
+  await expect(
+    settingsDrawer.getByText('Choose icon', { exact: true }),
+  ).toHaveCount(0);
   await expect(
     settingsDrawer.getByRole('button', { name: 'Automatic' }),
-  ).toBeVisible();
-  const projectIcon = settingsDrawer.locator('[data-size="small"]');
+  ).toHaveCount(0);
+  const iconButton = settingsDrawer.getByRole('button', {
+    name: 'Choose icon for Usage project',
+  });
+  const projectIcon = iconButton.locator('[data-size="small"]');
   await expect(projectIcon).toHaveCSS('width', '26px');
   await expect(projectIcon).toHaveCSS('height', '26px');
   await expect
@@ -480,14 +504,54 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
       ),
     )
     .toBe(true);
+  const threadProject = page.locator('[data-row-content="project"]').first();
+  await expect(threadProject.locator('[data-size="tiny"]')).toHaveCSS(
+    'width',
+    '14px',
+  );
+  await expect(threadProject).toContainText('Usage project');
 
+  await iconButton.click();
+  const iconMenu = settingsDrawer.getByRole('dialog', {
+    name: 'Icons for Usage project',
+  });
+  await expect(iconMenu.getByRole('button')).toHaveCount(16);
+  await page.keyboard.press('Escape');
+  await expect(iconMenu).toHaveCount(0);
+  await iconButton.click();
+  await expect(iconMenu.getByRole('button')).toHaveCount(16);
+  const stockUpload = page.waitForRequest(
+    (request) =>
+      request.method() === 'PUT' &&
+      request.url().endsWith('/api/projects/project-usage/icon'),
+  );
+  await iconMenu.getByRole('button', { name: 'Use Star icon' }).click();
+  await stockUpload;
+  const resetButton = settingsDrawer.getByRole('button', {
+    name: 'Use automatic icon for Usage project',
+  });
+  await expect(resetButton).toBeAttached();
+  await expect(resetButton).toHaveCSS('opacity', '0');
+  await iconButton.hover();
+  await expect(resetButton).toHaveCSS('opacity', '1');
+
+  let reset = page.waitForRequest(
+    (request) =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/api/projects/project-usage/icon'),
+  );
+  await resetButton.click();
+  await reset;
+  await expect(resetButton).toHaveCount(0);
+
+  await iconButton.click();
   const uploaded = page.waitForRequest(
     (request) =>
       request.method() === 'PUT' &&
       request.url().endsWith('/api/projects/project-usage/icon'),
   );
   const chooser = page.waitForEvent('filechooser');
-  await settingsDrawer.getByText('Choose icon').click();
+  await iconMenu.getByText('Upload image').click();
   await (await chooser).setFiles({
     name: 'project.svg',
     mimeType: 'image/svg+xml',
@@ -496,12 +560,12 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
     ),
   });
   await uploaded;
-
-  const reset = page.waitForRequest(
+  await expect(resetButton).toBeAttached();
+  reset = page.waitForRequest(
     (request) =>
       request.method() === 'DELETE' &&
       request.url().endsWith('/api/projects/project-usage/icon'),
   );
-  await settingsDrawer.getByRole('button', { name: 'Automatic' }).click();
+  await resetButton.click();
   await reset;
 });

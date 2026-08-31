@@ -155,9 +155,14 @@ export interface DashboardRouteContext {
     imageIndex: number,
     messageTimestamp?: number | string,
   ): Promise<{ data: Buffer; mediaType: string }>;
-  projectIcon?(
-    projectId: string,
-  ): Promise<{ data: Buffer; mediaType: string } | undefined>;
+  projectIcon?(projectId: string): Promise<
+    | {
+        data: Buffer;
+        mediaType: string;
+        source: 'custom' | 'automatic';
+      }
+    | undefined
+  >;
   setProjectIcon?(projectId: string, data: Buffer): Promise<void>;
   resetProjectIcon?(projectId: string): Promise<void>;
   readDelegateHistoryRun(
@@ -643,6 +648,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
         return reply.code(404).send({ error: 'Project icon not found.' });
       return reply
         .header('x-content-type-options', 'nosniff')
+        .header('x-project-icon-source', icon.source)
         .type(icon.mediaType)
         .send(icon.data);
     },

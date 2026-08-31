@@ -61,6 +61,7 @@ import {
   useModelDisplayPreferences,
 } from './model-display-preferences';
 import { draftModelSelection } from './model-option';
+import { ProjectIcon } from './project-icon';
 import {
   AgentThreadActionMenu,
   DurableThreadActions,
@@ -317,6 +318,13 @@ function AgentThreadLink({
     >
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
         <span className={styles.threadWorkspace} data-row-content="project">
+          {row.projectId && (
+            <ProjectIcon
+              projectId={row.projectId}
+              title={row.projectName}
+              size="tiny"
+            />
+          )}
           <span className={styles.threadWorkspaceName}>{row.projectName}</span>
           {density === 'slim' && (
             <span className={styles.threadWorkspaceCheckout}>

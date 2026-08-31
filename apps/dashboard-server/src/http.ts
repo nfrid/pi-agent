@@ -260,10 +260,12 @@ export class DashboardServerImpl implements DashboardServer {
       projectIcon: async (projectId) => {
         const project = this.metadata.orchestration.getProject(projectId);
         if (!project) return undefined;
-        return (
-          (await readProjectIconOverride(this.stateDir, projectId)) ??
-          readProjectIcon(project.rootPath)
-        );
+        const custom = await readProjectIconOverride(this.stateDir, projectId);
+        if (custom) return { ...custom, source: 'custom' as const };
+        const automatic = await readProjectIcon(project.rootPath);
+        return automatic
+          ? { ...automatic, source: 'automatic' as const }
+          : undefined;
       },
       setProjectIcon: async (projectId, data) => {
         if (!this.metadata.orchestration.getProject(projectId))

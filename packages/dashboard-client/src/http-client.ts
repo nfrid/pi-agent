@@ -75,6 +75,11 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+export interface ProjectIconAsset {
+  blob: Blob;
+  source: 'custom' | 'automatic';
+}
+
 /** Internal ordering metadata assigned when a latest-session request starts. */
 export const SESSION_REQUEST_ORDER = '__dashboardRequestOrder' as const;
 export type ClientAuthoritativeSessionSnapshot =
@@ -667,7 +672,10 @@ export class DashboardHttpClient {
     return response.blob();
   }
 
-  async projectIcon(projectId: string, signal?: AbortSignal): Promise<Blob> {
+  async projectIcon(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<ProjectIconAsset> {
     const { baseUrl } = await this.ensureEndpoint();
     const headers = new Headers();
     const token = this.tokenStore.get();
@@ -686,7 +694,13 @@ export class DashboardHttpClient {
         response.status,
         'Project icon is unavailable.',
       );
-    return response.blob();
+    return {
+      blob: await response.blob(),
+      source:
+        response.headers.get('x-project-icon-source') === 'custom'
+          ? 'custom'
+          : 'automatic',
+    };
   }
 
   async setProjectIcon(projectId: string, file: File): Promise<void> {

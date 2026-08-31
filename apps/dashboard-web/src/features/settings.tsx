@@ -14,7 +14,7 @@ import {
   type ModelDisplayPreference,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { MAX_IMAGE_SIZE } from '../shared/image-attachments';
 import { errorMessage } from '../shared/lib/error-message';
 import {
@@ -285,6 +285,32 @@ function modelOptionsFromSnapshot(
   ];
 }
 
+const STOCK_PROJECT_ICONS = [
+  { id: 'star', label: 'Star', glyph: '★', color: '#6d5bd0' },
+  { id: 'circle', label: 'Circle', glyph: '●', color: '#3978d4' },
+  { id: 'diamond', label: 'Diamond', glyph: '◆', color: '#148a8a' },
+  { id: 'triangle', label: 'Triangle', glyph: '▲', color: '#3c8c55' },
+  { id: 'spark', label: 'Spark', glyph: '✦', color: '#b88116' },
+  { id: 'bolt', label: 'Bolt', glyph: '⚡', color: '#ca6b21' },
+  { id: 'cloud', label: 'Cloud', glyph: '☁', color: '#58758f' },
+  { id: 'sun', label: 'Sun', glyph: '☀', color: '#b98b10' },
+  { id: 'moon', label: 'Moon', glyph: '☾', color: '#5361a7' },
+  { id: 'check', label: 'Check', glyph: '✓', color: '#2c8a63' },
+  { id: 'plus', label: 'Plus', glyph: '+', color: '#8b5a9f' },
+  { id: 'heart', label: 'Heart', glyph: '♥', color: '#bd4f67' },
+  { id: 'square', label: 'Square', glyph: '■', color: '#626b78' },
+  { id: 'hexagon', label: 'Hexagon', glyph: '⬡', color: '#257d99' },
+  { id: 'command', label: 'Command', glyph: '⌘', color: '#765b46' },
+  { id: 'coffee', label: 'Coffee', glyph: '☕', color: '#7c6045' },
+] as const;
+
+type StockProjectIcon = (typeof STOCK_PROJECT_ICONS)[number];
+
+function stockProjectIconFile(icon: StockProjectIcon): File {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="52" fill="${icon.color}"/><text x="128" y="132" fill="white" font-family="Arial,sans-serif" font-size="132" font-weight="700" text-anchor="middle" dominant-baseline="central">${icon.glyph}</text></svg>`;
+  return new File([svg], `${icon.id}.svg`, { type: 'image/svg+xml' });
+}
+
 function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
   const projects = (snapshot.projects ?? []).filter(
     (project) => project.status === 'active',
@@ -293,6 +319,10 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
   const [error, setError] = useState<string>();
   const [renamingId, setRenamingId] = useState<string>();
   const [iconPendingId, setIconPendingId] = useState<string>();
+  const [iconPickerId, setIconPickerId] = useState<string>();
+  const [customIconIds, setCustomIconIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [title, setTitle] = useState('');
   const createMutation = useMutation(
     createProjectMutationOptions(dashboardHttpClient),
@@ -300,6 +330,30 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
   const renameMutation = useMutation(
     renameProjectMutationOptions(dashboardHttpClient),
   );
+
+  useEffect(() => {
+    if (!iconPickerId || typeof document === 'undefined') return;
+    const closeOutside = (event: PointerEvent) => {
+      const editor =
+        event.target instanceof Element
+          ? event.target.closest('[data-project-icon-editor]')
+          : null;
+      if (editor?.getAttribute('data-project-icon-editor') !== iconPickerId)
+        setIconPickerId(undefined);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setIconPickerId(undefined);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape, true);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape, true);
+    };
+  }, [iconPickerId]);
 
   const addProject = async (event: FormEvent) => {
     event.preventDefault();
@@ -321,34 +375,48 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
     }
   };
 
+  const recordCustomIcon = (projectId: string, custom: boolean) => {
+    setCustomIconIds((current) => {
+      if (current.has(projectId) === custom) return current;
+      const next = new Set(current);
+      if (custom) next.add(projectId);
+      else next.delete(projectId);
+      return next;
+    });
+  };
+
   const setIcon = async (
     projectId: string,
     file: File,
-    input: HTMLInputElement,
+    input?: HTMLInputElement,
   ) => {
     if (file.size > MAX_IMAGE_SIZE) {
       setError('Project icons must be 5 MB or smaller.');
-      input.value = '';
+      if (input) input.value = '';
       return;
     }
     setError(undefined);
+    setIconPickerId(undefined);
     setIconPendingId(projectId);
     try {
       await dashboardHttpClient.setProjectIcon(projectId, file);
+      recordCustomIcon(projectId, true);
       refreshProjectIcon(projectId);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
-      input.value = '';
+      if (input) input.value = '';
       setIconPendingId(undefined);
     }
   };
 
   const resetIcon = async (projectId: string) => {
     setError(undefined);
+    setIconPickerId(undefined);
     setIconPendingId(projectId);
     try {
       await dashboardHttpClient.resetProjectIcon(projectId);
+      recordCustomIcon(projectId, false);
       refreshProjectIcon(projectId);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -426,45 +494,104 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
           ) : (
             <div className={styles.projectRow} key={project.id}>
               <span className={styles.projectIdentity}>
-                <ProjectIcon
-                  projectId={project.id}
-                  title={project.title}
-                  size="small"
-                />
+                <span
+                  className={styles.iconEditor}
+                  data-project-icon-editor={project.id}
+                  data-pending={
+                    iconPendingId === project.id ? 'true' : undefined
+                  }
+                >
+                  <button
+                    type="button"
+                    className={styles.iconSelect}
+                    aria-label={`Choose icon for ${project.title}`}
+                    aria-expanded={iconPickerId === project.id}
+                    disabled={iconPendingId !== undefined}
+                    title="Choose a project icon"
+                    onClick={() =>
+                      setIconPickerId((current) =>
+                        current === project.id ? undefined : project.id,
+                      )
+                    }
+                  >
+                    <ProjectIcon
+                      projectId={project.id}
+                      title={project.title}
+                      size="small"
+                      onCustomChange={(custom) =>
+                        recordCustomIcon(project.id, custom)
+                      }
+                    />
+                  </button>
+                  {iconPickerId === project.id && (
+                    <div
+                      className={styles.iconMenu}
+                      role="dialog"
+                      aria-label={`Icons for ${project.title}`}
+                    >
+                      <div className={styles.stockIcons}>
+                        {STOCK_PROJECT_ICONS.map((icon) => (
+                          <button
+                            type="button"
+                            key={icon.id}
+                            aria-label={`Use ${icon.label} icon`}
+                            title={icon.label}
+                            onClick={() =>
+                              void setIcon(
+                                project.id,
+                                stockProjectIconFile(icon),
+                              )
+                            }
+                          >
+                            <span style={{ backgroundColor: icon.color }}>
+                              {icon.glyph}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      <label className={styles.uploadIcon}>
+                        Upload image
+                        <input
+                          type="file"
+                          accept="image/*,.ico,.svg"
+                          disabled={iconPendingId !== undefined}
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            if (file)
+                              void setIcon(
+                                project.id,
+                                file,
+                                event.currentTarget,
+                              );
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
+                  {customIconIds.has(project.id) && (
+                    <button
+                      type="button"
+                      className={styles.iconReset}
+                      aria-label={`Use automatic icon for ${project.title}`}
+                      disabled={iconPendingId !== undefined}
+                      title="Use automatic icon"
+                      onClick={() => void resetIcon(project.id)}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
                 <span className={styles.projectCopy}>
                   <strong>{project.title}</strong>
                   <small>{project.rootPath}</small>
                 </span>
               </span>
-              <label
-                className={styles.iconPicker}
-                aria-disabled={iconPendingId !== undefined}
-              >
-                {iconPendingId === project.id ? 'Saving…' : 'Choose icon'}
-                <input
-                  type="file"
-                  accept="image/*,.ico,.svg"
-                  disabled={iconPendingId !== undefined}
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    if (file)
-                      void setIcon(project.id, file, event.currentTarget);
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={iconPendingId !== undefined}
-                onClick={() => void resetIcon(project.id)}
-              >
-                Automatic
-              </button>
               <button
                 type="button"
                 className="secondary-button"
                 disabled={iconPendingId !== undefined}
                 onClick={() => {
+                  setIconPickerId(undefined);
                   setTitle(project.title);
                   setRenamingId(project.id);
                 }}

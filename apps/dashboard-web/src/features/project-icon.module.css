@@ -11,6 +11,13 @@
   line-height: 1;
 }
 
+.icon[data-size="tiny"] {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  font-size: 7px;
+}
+
 .icon[data-size="small"] {
   width: 26px;
   height: 26px;

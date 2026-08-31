@@ -310,6 +310,7 @@ describe('Fastify dashboard route plugin', () => {
     routeContext.projectIcon = vi.fn(async () => ({
       data: Buffer.from('<svg>project</svg>'),
       mediaType: 'image/svg+xml',
+      source: 'custom' as const,
     }));
     await app.register(dashboardRoutes, { context: routeContext });
     await app.ready();
@@ -327,6 +328,7 @@ describe('Fastify dashboard route plugin', () => {
     expect(response.headers['content-type']).toContain('image/svg+xml');
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['x-project-icon-source']).toBe('custom');
     expect(response.body).toBe('<svg>project</svg>');
     expect(routeContext.projectIcon).toHaveBeenCalledWith('project-1');
   });

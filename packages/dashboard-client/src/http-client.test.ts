@@ -96,15 +96,19 @@ describe('DashboardHttpClient project icons', () => {
   it('requests an authenticated icon blob for the encoded project id', async () => {
     const fetch = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(new Blob(['icon']), { status: 200 }),
+        new Response(new Blob(['icon']), {
+          status: 200,
+          headers: { 'x-project-icon-source': 'custom' },
+        }),
     );
     const client = new DashboardHttpClient({
       fetch,
       tokenStore: tokenStore(),
     });
 
-    await client.projectIcon('project/1');
+    const result = await client.projectIcon('project/1');
 
+    expect(result.source).toBe('custom');
     const headers = fetch.mock.calls[0]?.[1]?.headers as Headers;
     expect(fetch).toHaveBeenCalledWith(
       '/api/projects/project%2F1/icon',
