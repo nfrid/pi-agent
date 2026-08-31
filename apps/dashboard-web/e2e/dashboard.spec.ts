@@ -17,6 +17,21 @@ async function transcriptGap(page: Page) {
   );
 }
 
+async function virtualTranscriptOverlap(page: Page) {
+  return page.locator('.transcript-virtualizer').evaluate((element) => {
+    const rows = Array.from(
+      element.querySelectorAll<HTMLElement>(':scope > [data-index]'),
+    )
+      .map((row) => row.getBoundingClientRect())
+      .sort((left, right) => left.top - right.top);
+    return rows.reduce(
+      (overlap, row, index) =>
+        Math.max(overlap, (rows[index - 1]?.bottom ?? row.top) - row.top),
+      0,
+    );
+  });
+}
+
 async function scrollTranscript(page: Page, top: number) {
   await transcriptScroll(page).evaluate((element, nextTop) => {
     if (nextTop < element.scrollTop)
@@ -5148,6 +5163,80 @@ async function installPhase6Mocks(
       ),
   };
 }
+
+test('keeps virtual row measurements after appending a user message @desktop', async ({
+  page,
+}) => {
+  const entries = [
+    ...Array.from({ length: 84 }, (_, index) => ({
+      type: 'message',
+      message: { role: 'user', content: `Earlier history ${index + 1}` },
+    })),
+    ...Array.from({ length: 12 }, (_, index) => [
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: `Activity ${index + 1}` },
+            {
+              type: 'toolCall',
+              id: `append-read-${index}`,
+              name: 'read',
+              arguments: { path: `/tmp/project/file-${index}.ts` },
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: `append-read-${index}`,
+          content: `result ${index + 1}`,
+          isError: false,
+        },
+      },
+    ]).flat(),
+  ];
+  const mocks = await installPhase6Mocks(page, {
+    entries,
+    snapshot: phase6Snapshot({ liveState: 'idle' }),
+  });
+
+  await page.goto('/sessions/s1');
+  await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
+  await expect(page.getByText('Activity 12', { exact: true })).toBeVisible();
+  await expect
+    .poll(() => virtualTranscriptOverlap(page))
+    .toBeLessThanOrEqual(1);
+  await expect.poll(mocks.streamCount).toBeGreaterThan(1);
+
+  const composer = page.getByLabel('Message Pi');
+  await composer.fill('New user message');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await transcriptScroll(page).evaluate((element) => {
+    element.scrollTop = Math.max(0, element.scrollTop - 1);
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await mocks.emit({
+    type: 'session-snapshot',
+    entries: [
+      ...entries,
+      {
+        type: 'message',
+        message: { role: 'user', content: 'New user message' },
+      },
+    ],
+  });
+
+  await expect(
+    page.getByText('New user message', { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() => virtualTranscriptOverlap(page))
+    .toBeLessThanOrEqual(1);
+});
 
 test('shows structured delegate content while the delegate is running @desktop', async ({
   page,

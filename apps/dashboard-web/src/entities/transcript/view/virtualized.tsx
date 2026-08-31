@@ -86,14 +86,9 @@ export function VirtualizedTranscript({
   useLayoutEffect(() => {
     void open;
     void rows.length;
-    void previewStartCount;
-    void previewEndCount;
     const rowKey = affectedRowKeyRef.current;
     affectedRowKeyRef.current = undefined;
-    if (!rowKey) {
-      virtualizer.measure();
-      return;
-    }
+    if (!rowKey) return;
     const row = Array.from(
       virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
         [],
@@ -108,7 +103,12 @@ export function VirtualizedTranscript({
       if (settledRow) virtualizer.measureElement(settledRow);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open, previewEndCount, previewStartCount, rows.length, virtualizer]);
+  }, [open, rows.length, virtualizer]);
+  useLayoutEffect(() => {
+    void previewStartCount;
+    void previewEndCount;
+    virtualizer.measure();
+  }, [previewEndCount, previewStartCount, virtualizer]);
   const loadedLandmarks = useMemo(
     () => buildTranscriptLandmarks(items),
     [items],
