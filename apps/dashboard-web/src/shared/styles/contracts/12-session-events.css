@@ -231,6 +231,7 @@ details.session-event {
 }
 .tool-step-time {
   font-variant-numeric: tabular-nums;
+  margin-left: 4px;
 }
 .tool-step.step-failed .tool-step-dot,
 .tool-detail.step-failed .tool-step-dot {
