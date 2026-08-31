@@ -163,6 +163,7 @@ export function SurfaceStack({
       }}
     >
       <div
+        data-surface-portal-root=""
         aria-hidden={exiting || undefined}
         inert={exiting || undefined}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {

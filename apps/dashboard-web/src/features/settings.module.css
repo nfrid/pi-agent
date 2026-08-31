@@ -291,6 +291,7 @@
   color: var(--fg);
   opacity: 1;
   pointer-events: auto;
+  transition: none;
   visibility: visible;
 }
 .libraryPicker.libraryPicker.libraryPicker :global(input) {

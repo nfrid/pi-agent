@@ -314,24 +314,8 @@ function libraryProjectIconFile(svg: string): File {
 }
 
 function LibraryIconPicker({ onSelect }: { onSelect: (svg: string) => void }) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    let frame = 0;
-    const openOnce = () => {
-      const trigger = rootRef.current?.querySelector<HTMLElement>(
-        '[role="button"][aria-expanded="false"]',
-      );
-      if (trigger) {
-        trigger.click();
-        return;
-      }
-      frame = requestAnimationFrame(openOnce);
-    };
-    openOnce();
-    return () => cancelAnimationFrame(frame);
-  }, []);
   return (
-    <div className={styles.libraryPicker} ref={rootRef}>
+    <div className={styles.libraryPicker}>
       <Suspense fallback={<p className={styles.iconPickerLoading}>Loading…</p>}>
         <IconPicker
           value={null}
@@ -768,7 +752,10 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
                           </div>
                         )}
                       </div>,
-                      document.body,
+                      iconPickerAnchorRef.current?.closest<HTMLElement>(
+                        '[data-surface-portal-root]',
+                      ) ?? document.body,
+                      project.id,
                     )}
                   {customIconIds.has(project.id) && (
                     <button

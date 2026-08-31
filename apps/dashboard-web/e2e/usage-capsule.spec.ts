@@ -562,16 +562,24 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await expect(
     iconMenu.getByRole('textbox', { name: 'Search icons' }),
   ).toBeVisible();
-  expect(
-    await iconMenu.evaluate((menu) => menu.parentElement === document.body),
-  ).toBe(true);
+  await expect(iconMenu.locator('xpath=..')).toHaveAttribute(
+    'data-surface-portal-root',
+    '',
+  );
   await expect(iconMenu).toHaveCSS('position', 'fixed');
   await page.keyboard.press('Escape');
   await expect(iconMenu).toHaveCount(0);
 
   await iconButton.click();
   const iconSearch = iconMenu.getByRole('textbox', { name: 'Search icons' });
-  await iconSearch.fill('star');
+  await expect(iconMenu.locator('[aria-expanded]')).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await iconSearch.click();
+  await expect(iconSearch).toBeFocused();
+  await iconSearch.pressSequentially('star', { delay: 80 });
+  await expect(iconSearch).toBeFocused();
   await expect(iconSearch).toHaveValue('star');
   const libraryUpload = page.waitForRequest(
     (request) =>
