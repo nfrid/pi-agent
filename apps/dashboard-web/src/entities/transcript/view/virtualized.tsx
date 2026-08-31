@@ -40,6 +40,8 @@ export function VirtualizedTranscript({
   pendingJumpKey,
   onPendingJumpHandled,
   scrollElementRef,
+  previewStartCount,
+  previewEndCount,
 }: {
   items: readonly TranscriptModelItem[];
   open: ReadonlySet<string>;
@@ -57,6 +59,8 @@ export function VirtualizedTranscript({
   pendingJumpKey?: string;
   onPendingJumpHandled?: () => void;
   scrollElementRef: RefObject<HTMLDivElement | null>;
+  previewStartCount: number;
+  previewEndCount: number;
 }) {
   const rows = useMemo(() => buildVirtualTranscriptRows(items), [items]);
   const virtualizerRef = useRef<HTMLDivElement>(null);
@@ -82,9 +86,14 @@ export function VirtualizedTranscript({
   useLayoutEffect(() => {
     void open;
     void rows.length;
+    void previewStartCount;
+    void previewEndCount;
     const rowKey = affectedRowKeyRef.current;
     affectedRowKeyRef.current = undefined;
-    if (!rowKey) return;
+    if (!rowKey) {
+      virtualizer.measure();
+      return;
+    }
     const row = Array.from(
       virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
         [],
@@ -99,7 +108,7 @@ export function VirtualizedTranscript({
       if (settledRow) virtualizer.measureElement(settledRow);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open, rows.length, virtualizer]);
+  }, [open, previewEndCount, previewStartCount, rows.length, virtualizer]);
   const loadedLandmarks = useMemo(
     () => buildTranscriptLandmarks(items),
     [items],
@@ -174,6 +183,8 @@ export function VirtualizedTranscript({
         start > 0 ? transcriptItemTimestamp(items[start - 1]) : undefined
       }
       captureScrollAnchor={captureScrollAnchor}
+      previewStartCount={previewStartCount}
+      previewEndCount={previewEndCount}
       onToggle={(nextExpanded) => {
         affectedRowKeyRef.current = streamKey;
         setOpen((current) => {

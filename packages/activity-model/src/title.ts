@@ -15,7 +15,12 @@
  */
 
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import { activityKind, type ToolDescriptor, toolBaseName } from './grouping.js';
+import {
+  type ActivityPhase,
+  activityPhases,
+  type ToolDescriptor,
+  toolBaseName,
+} from './grouping.js';
 
 /** Bolded thinking headers, the dominant form. */
 const BOLD_HEADER = /^\s*\*{2}(.+?)\*{2}\s*$/;
@@ -114,17 +119,29 @@ export function describeTools(
   subject: string | undefined,
   completed: boolean,
 ): string {
-  const kind = activityKind(tools);
-  const verbs: Record<typeof kind, [string, string]> = {
+  const phases = activityPhases(tools);
+  const phase = phases.length === 1 ? phases[0] : undefined;
+  const verbs: Record<ActivityPhase, [string, string]> = {
     inspect: ['Exploring', 'Explored'],
     mutate: ['Editing', 'Edited'],
     validate: ['Checking', 'Checked'],
     execute: ['Running commands', 'Ran commands'],
-    mixed: ['Working', 'Worked'],
+    coordinate: ['Coordinating', 'Coordinated'],
+    other: ['Working', 'Worked'],
   };
-  const verb = verbs[kind][completed ? 1 : 0];
+  const verb = phase
+    ? verbs[phase][completed ? 1 : 0]
+    : completed
+      ? 'Worked'
+      : 'Working';
   if (subject) return `${verb} ${subject}`;
-  if (kind === 'execute' || kind === 'mixed') return verb;
+  if (
+    !phase ||
+    phase === 'execute' ||
+    phase === 'coordinate' ||
+    phase === 'other'
+  )
+    return verb;
   const names = [...new Set(tools.map((tool) => toolBaseName(tool.name)))];
   return names.length === 1 && names[0]
     ? `${verb} with ${names[0]}`

@@ -1,6 +1,6 @@
 import {
-  type ActivityKind,
   type ActivityLineChanges,
+  type ActivityPhase,
   activityToolDurationMs,
   activityToolLineChanges,
   stringArg,
@@ -31,16 +31,18 @@ export function toolStreamDurationLabel(milliseconds: number): string {
   return formatCommandDuration(milliseconds);
 }
 
-export function toolStreamKindLabel(kind: ActivityKind): string {
-  return kind === 'inspect'
+export function toolStreamPhaseLabel(phase: ActivityPhase): string {
+  return phase === 'inspect'
     ? 'Inspected'
-    : kind === 'mutate'
+    : phase === 'mutate'
       ? 'Edited'
-      : kind === 'validate'
+      : phase === 'validate'
         ? 'Validated'
-        : kind === 'execute'
+        : phase === 'execute'
           ? 'Ran'
-          : 'Mixed work';
+          : phase === 'coordinate'
+            ? 'Coordinated'
+            : 'Worked';
 }
 
 export type ActivityStepParts = {

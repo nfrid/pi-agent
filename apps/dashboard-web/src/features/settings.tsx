@@ -18,6 +18,12 @@ import { type FormEvent, useRef, useState } from 'react';
 import { MAX_IMAGE_SIZE } from '../shared/image-attachments';
 import { errorMessage } from '../shared/lib/error-message';
 import {
+  setTranscriptPreviewPreference,
+  TRANSCRIPT_PREVIEW_MAX,
+  TRANSCRIPT_PREVIEW_MIN,
+  useTranscriptPreviewPreference,
+} from '../shared/lib/transcript-display';
+import {
   modelDisplayPreferenceKey,
   normalizeModelDisplayPreference,
   useModelDisplayPreferences,
@@ -44,8 +50,54 @@ export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
           <PushButton />
         </div>
       </section>
+      <TranscriptDisplayPreferences />
       <ModelDisplayPreferencesEditor snapshot={snapshot} />
       <ProjectAdministration snapshot={snapshot} />
+    </section>
+  );
+}
+
+function TranscriptDisplayPreferences() {
+  const preference = useTranscriptPreviewPreference();
+  const setCount = (key: 'start' | 'end', value: number) =>
+    setTranscriptPreviewPreference({ ...preference, [key]: value });
+  return (
+    <section
+      className={styles.section}
+      aria-labelledby="settings-transcript-heading"
+    >
+      <h3 id="settings-transcript-heading">Transcript</h3>
+      <p className={styles.hint}>
+        Choose how many steps collapsed activity shows from each end.
+      </p>
+      <div className={styles.numberControls}>
+        <label>
+          <span>Steps from start</span>
+          <input
+            type="number"
+            aria-label="Steps shown from start"
+            min={TRANSCRIPT_PREVIEW_MIN}
+            max={TRANSCRIPT_PREVIEW_MAX}
+            value={preference.start}
+            onChange={(event) =>
+              setCount('start', event.currentTarget.valueAsNumber)
+            }
+          />
+        </label>
+        <label>
+          <span>Steps from end</span>
+          <input
+            type="number"
+            aria-label="Steps shown from end"
+            min={TRANSCRIPT_PREVIEW_MIN}
+            max={TRANSCRIPT_PREVIEW_MAX}
+            value={preference.end}
+            onChange={(event) =>
+              setCount('end', event.currentTarget.valueAsNumber)
+            }
+          />
+        </label>
+      </div>
     </section>
   );
 }

@@ -38,6 +38,11 @@ describe('settings drawer', () => {
     expect(markup).not.toContain('Read all');
     expect(markup).not.toContain('Notifications');
     expect(markup).not.toContain('Browser alerts');
+    expect(markup).toContain('Transcript');
+    expect(markup).toContain('Steps shown from start');
+    expect(markup).toContain('Steps shown from end');
+    expect(markup).toContain('value="1"');
+    expect(markup).toContain('value="3"');
     expect(markup).toContain('Model display');
     expect(markup).toContain('<details');
     expect(markup).not.toContain('<details open=""');

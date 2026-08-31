@@ -1,10 +1,10 @@
-import { activityKind } from '@pi-dashboard/activity-model';
+import { activityPhases } from '@pi-dashboard/activity-model';
 import { useId } from 'react';
 import type { TranscriptModelItem } from '../../transcript';
 import {
   toolStreamDurationLabel,
-  toolStreamKindLabel,
   toolStreamMetadata,
+  toolStreamPhaseLabel,
 } from './activity';
 import { TranscriptDisclosureIcon } from './disclosure-icon';
 import { ThinkingBlob, TranscriptEntry } from './entries';
@@ -52,6 +52,8 @@ export function TranscriptToolStream({
   onToggle,
   captureScrollAnchor,
   timestampOverride,
+  previewStartCount = 1,
+  previewEndCount = 3,
 }: {
   items: readonly TranscriptModelItem[];
   cwd?: string;
@@ -59,6 +61,8 @@ export function TranscriptToolStream({
   onToggle: (expanded: boolean) => void;
   captureScrollAnchor?: (key: string) => void;
   timestampOverride?: number | string;
+  previewStartCount?: number;
+  previewEndCount?: number;
 }) {
   const first = items[0];
   const streamKey = first?.key ?? 'tool-stream';
@@ -103,22 +107,34 @@ export function TranscriptToolStream({
   const thinkingCount = history.filter(
     (entry) => entry.kind === 'thought',
   ).length;
-  const collapsedHistory = history
-    .filter(
-      (entry) =>
-        entry.kind !== 'event' ||
-        (entry.item.event?.kind !== 'todo' &&
-          entry.item.event?.kind !== 'settings' &&
-          entry.item.event?.kind !== 'custom-message'),
-    )
-    .slice(-3);
+  const previewableHistory = history.filter(
+    (entry) =>
+      entry.kind !== 'event' ||
+      (entry.item.event?.kind !== 'todo' &&
+        entry.item.event?.kind !== 'settings' &&
+        entry.item.event?.kind !== 'custom-message'),
+  );
+  const leadingHistory = previewableHistory.slice(0, previewStartCount);
+  const leadingKeys = new Set(leadingHistory.map((entry) => entry.key));
+  const trailingHistory = (
+    previewEndCount > 0 ? previewableHistory.slice(-previewEndCount) : []
+  ).filter((entry) => !leadingKeys.has(entry.key));
+  const collapsedHistory = [...leadingHistory, ...trailingHistory];
   const hiddenHistoryCount = history.length - collapsedHistory.length;
   const summary = toolStreamMetadata(tools);
-  const kind = activityKind(tools);
-  const kindLabel = tools.length > 0 ? toolStreamKindLabel(kind) : 'Thinking';
-  const metadataKind = tools.length > 0 ? kind : 'thinking';
+  const phases = activityPhases(tools);
+  const phaseOccurrences = new Map<string, number>();
+  const renderedPhases = phases.map((phase) => {
+    const occurrence = (phaseOccurrences.get(phase) ?? 0) + 1;
+    phaseOccurrences.set(phase, occurrence);
+    return { phase, key: `${phase}:${occurrence}` };
+  });
+  const phaseLabel =
+    tools.length > 0
+      ? phases.map(toolStreamPhaseLabel).join(' → ')
+      : 'Thinking';
   const metadataTitle = [
-    kindLabel,
+    phaseLabel,
     thinkingCount > 0
       ? `${thinkingCount} thought${thinkingCount === 1 ? '' : 's'}`
       : undefined,
@@ -136,8 +152,7 @@ export function TranscriptToolStream({
     .filter(Boolean)
     .join(' · ');
   const detailId = useId();
-  const visibleHistory = expanded ? history : collapsedHistory;
-  const earlierLabel = `${hiddenHistoryCount} earlier item${hiddenHistoryCount === 1 ? '' : 's'}`;
+  const hiddenLabel = `${hiddenHistoryCount} hidden step${hiddenHistoryCount === 1 ? '' : 's'}`;
   const toggle = () => {
     captureScrollAnchor?.(streamKey);
     onToggle(!expanded);
@@ -203,17 +218,38 @@ export function TranscriptToolStream({
           className="tool-stream-toggle"
           aria-expanded={expanded}
           aria-controls={detailId}
-          aria-label={`${expanded ? 'Hide' : 'Show'} ${earlierLabel} · ${metadataTitle}`}
+          aria-label={`${expanded ? 'Collapse' : 'Show all'} activity · ${hiddenLabel} · ${metadataTitle}`}
           onClick={toggle}
         >
           <TranscriptDisclosureIcon expanded={expanded} />
-          {expanded ? 'Hide' : 'Show'} {earlierLabel}
+          {expanded ? 'Collapse activity' : 'Show all activity'}
         </button>
-        <small
-          className={`tool-stream-metadata tool-stream-metadata-${metadataKind}`}
-          title={metadataTitle}
-        >
-          <span className="tool-stream-metadata-kind">{kindLabel}</span>
+        <small className="tool-stream-metadata" title={metadataTitle}>
+          {tools.length > 0 ? (
+            <span className="tool-stream-metadata-phases">
+              {renderedPhases.map(({ phase, key }, index) => (
+                <span key={key}>
+                  {index > 0 ? (
+                    <span
+                      className="tool-stream-phase-separator"
+                      aria-hidden="true"
+                    >
+                      {' → '}
+                    </span>
+                  ) : null}
+                  <span
+                    className={`tool-stream-phase tool-stream-phase-${phase}`}
+                  >
+                    {toolStreamPhaseLabel(phase)}
+                  </span>
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="tool-stream-phase tool-stream-phase-thinking">
+              Thinking
+            </span>
+          )}
           {thinkingCount > 0 ? (
             <>
               <MetadataSeparator />
@@ -277,7 +313,24 @@ export function TranscriptToolStream({
         id={detailId}
         aria-describedby={`${detailId}-meta`}
       >
-        {renderHistory(visibleHistory, false)}
+        {expanded ? (
+          renderHistory(history, false)
+        ) : (
+          <>
+            {renderHistory(leadingHistory, false)}
+            <button
+              type="button"
+              className="tool-stream-omission"
+              aria-label={`Show ${hiddenLabel}`}
+              onClick={toggle}
+            >
+              <span aria-hidden="true">···</span>
+              Show {hiddenLabel}
+              <span aria-hidden="true">···</span>
+            </button>
+            {renderHistory(trailingHistory, false)}
+          </>
+        )}
       </div>
     </section>
   );

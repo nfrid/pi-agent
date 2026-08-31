@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useTranscriptPreviewPreference } from '../../../shared/lib/transcript-display';
 import {
   type TranscriptModelItem,
   toTranscriptEntries,
@@ -82,6 +83,7 @@ export function Transcript({
     [input, leadingContinuation, modelItems],
   );
   const toolStreams = useMemo(() => buildTranscriptToolStreams(items), [items]);
+  const transcriptPreview = useTranscriptPreviewPreference();
   const streamByStart = useMemo(
     () => new Map(toolStreams.map((stream) => [stream.start, stream])),
     [toolStreams],
@@ -195,6 +197,8 @@ export function Transcript({
         pendingJumpKey={pendingJumpKey}
         onPendingJumpHandled={() => setPendingJumpKey(undefined)}
         scrollElementRef={transcriptScrollElementRef}
+        previewStartCount={transcriptPreview.start}
+        previewEndCount={transcriptPreview.end}
       />
     );
   return (
@@ -221,6 +225,8 @@ export function Transcript({
                   ? transcriptItemTimestamp(items[stream.start - 1])
                   : undefined
               }
+              previewStartCount={transcriptPreview.start}
+              previewEndCount={transcriptPreview.end}
               onToggle={(nextExpanded) => {
                 setOpen((current) => {
                   const next = new Set(current);

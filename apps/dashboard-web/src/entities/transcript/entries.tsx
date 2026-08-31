@@ -407,8 +407,10 @@ function ThinkingBlobs({
           {expanded ? 'Hide' : 'Show'} {earlierCount} earlier item
           {earlierCount === 1 ? '' : 's'}
         </span>
-        <small className="tool-stream-metadata tool-stream-metadata-thinking">
-          <span className="tool-stream-metadata-kind">Thinking</span>
+        <small className="tool-stream-metadata">
+          <span className="tool-stream-phase tool-stream-phase-thinking">
+            Thinking
+          </span>
           <span className="tool-stream-metadata-separator" aria-hidden="true">
             {' · '}
           </span>

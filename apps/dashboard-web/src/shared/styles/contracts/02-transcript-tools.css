@@ -71,23 +71,27 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tool-stream-metadata-kind {
+.tool-stream-metadata-phases {
   font-weight: 650;
 }
-.tool-stream-metadata-inspect .tool-stream-metadata-kind {
+.tool-stream-phase-inspect {
   color: var(--cyan);
 }
-.tool-stream-metadata-mutate .tool-stream-metadata-kind {
+.tool-stream-phase-mutate {
   color: var(--orange);
 }
-.tool-stream-metadata-validate .tool-stream-metadata-kind {
+.tool-stream-phase-validate {
   color: var(--green);
 }
-.tool-stream-metadata-execute .tool-stream-metadata-kind,
-.tool-stream-metadata-thinking .tool-stream-metadata-kind {
+.tool-stream-phase-execute,
+.tool-stream-phase-thinking {
   color: var(--purple);
 }
-.tool-stream-metadata-mixed .tool-stream-metadata-kind {
+.tool-stream-phase-coordinate {
+  color: var(--pink);
+}
+.tool-stream-phase-other,
+.tool-stream-phase-separator {
   color: var(--fg);
 }
 .tool-stream-metadata-separator,
@@ -121,6 +125,36 @@
 .tool-stream-items,
 .tool-stream-direct-item {
   padding: 0;
+}
+.tool-stream-omission {
+  display: flex;
+  width: 100%;
+  min-height: 22px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+}
+.tool-stream-omission::before,
+.tool-stream-omission::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line-soft);
+  content: "";
+}
+.tool-stream-omission:hover {
+  color: var(--fg);
+}
+.tool-stream-omission:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
 }
 .tool-step-meta {
   color: var(--dim);
