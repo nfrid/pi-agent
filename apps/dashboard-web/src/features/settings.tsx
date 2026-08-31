@@ -7,14 +7,25 @@ import {
   settingsQueryOptions,
   updateModelDisplayPreferenceMutationOptions,
 } from '@pi-dashboard/client';
+import '@arkn/react-icon-picker/dist/style.css';
 import {
   type BrowserSnapshot,
+  type ComposerFileSuggestion,
   type DashboardSettings,
   MAX_MODEL_DISPLAY_ALIAS,
   type ModelDisplayPreference,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { MAX_IMAGE_SIZE } from '../shared/image-attachments';
 import { errorMessage } from '../shared/lib/error-message';
 import {
@@ -285,30 +296,59 @@ function modelOptionsFromSnapshot(
   ];
 }
 
-const STOCK_PROJECT_ICONS = [
-  { id: 'star', label: 'Star', glyph: '★', color: '#6d5bd0' },
-  { id: 'circle', label: 'Circle', glyph: '●', color: '#3978d4' },
-  { id: 'diamond', label: 'Diamond', glyph: '◆', color: '#148a8a' },
-  { id: 'triangle', label: 'Triangle', glyph: '▲', color: '#3c8c55' },
-  { id: 'spark', label: 'Spark', glyph: '✦', color: '#b88116' },
-  { id: 'bolt', label: 'Bolt', glyph: '⚡', color: '#ca6b21' },
-  { id: 'cloud', label: 'Cloud', glyph: '☁', color: '#58758f' },
-  { id: 'sun', label: 'Sun', glyph: '☀', color: '#b98b10' },
-  { id: 'moon', label: 'Moon', glyph: '☾', color: '#5361a7' },
-  { id: 'check', label: 'Check', glyph: '✓', color: '#2c8a63' },
-  { id: 'plus', label: 'Plus', glyph: '+', color: '#8b5a9f' },
-  { id: 'heart', label: 'Heart', glyph: '♥', color: '#bd4f67' },
-  { id: 'square', label: 'Square', glyph: '■', color: '#626b78' },
-  { id: 'hexagon', label: 'Hexagon', glyph: '⬡', color: '#257d99' },
-  { id: 'command', label: 'Command', glyph: '⌘', color: '#765b46' },
-  { id: 'coffee', label: 'Coffee', glyph: '☕', color: '#7c6045' },
-] as const;
+const PROJECT_ICON_EXTENSIONS = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
+const IconPicker = lazy(async () => {
+  const module = await import('@arkn/react-icon-picker/dist/index.cjs');
+  return { default: module.IconPicker };
+});
 
-type StockProjectIcon = (typeof STOCK_PROJECT_ICONS)[number];
+function libraryProjectIconFile(svg: string): File {
+  const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const body = parsed.documentElement.innerHTML;
+  const sourceViewBox = parsed.documentElement.getAttribute('viewBox') ?? '';
+  const viewBox = /^-?[\d.]+(?:\s+-?[\d.]+){3}$/u.test(sourceViewBox)
+    ? sourceViewBox
+    : '0 0 24 24';
+  const wrapped = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="52" fill="#6d5bd0"/><svg x="32" y="32" width="192" height="192" viewBox="${viewBox}" color="white" fill="white">${body}</svg></svg>`;
+  return new File([wrapped], 'library-icon.svg', { type: 'image/svg+xml' });
+}
 
-function stockProjectIconFile(icon: StockProjectIcon): File {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="52" fill="${icon.color}"/><text x="128" y="132" fill="white" font-family="Arial,sans-serif" font-size="132" font-weight="700" text-anchor="middle" dominant-baseline="central">${icon.glyph}</text></svg>`;
-  return new File([svg], `${icon.id}.svg`, { type: 'image/svg+xml' });
+function LibraryIconPicker({ onSelect }: { onSelect: (svg: string) => void }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let frame = 0;
+    const openOnce = () => {
+      const trigger = rootRef.current?.querySelector<HTMLElement>(
+        '[role="button"][aria-expanded="false"]',
+      );
+      if (trigger) {
+        trigger.click();
+        return;
+      }
+      frame = requestAnimationFrame(openOnce);
+    };
+    openOnce();
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  return (
+    <div className={styles.libraryPicker} ref={rootRef}>
+      <Suspense fallback={<p className={styles.iconPickerLoading}>Loading…</p>}>
+        <IconPicker
+          value={null}
+          valueType="svg"
+          iconLibrary={['ph', 'tabler', 'material-symbols']}
+          theme="dark"
+          inputSize="small"
+          placeholder="Search icons"
+          searchPlaceholder="Search icons"
+          emptyText="No icons found"
+          onChange={(value) => {
+            if (typeof value === 'string') onSelect(value);
+          }}
+        />
+      </Suspense>
+    </div>
+  );
 }
 
 function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -320,10 +360,24 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
   const [renamingId, setRenamingId] = useState<string>();
   const [iconPendingId, setIconPendingId] = useState<string>();
   const [iconPickerId, setIconPickerId] = useState<string>();
+  const [iconPickerMode, setIconPickerMode] = useState<'icons' | 'files'>(
+    'icons',
+  );
+  const [iconMenuPosition, setIconMenuPosition] = useState({
+    top: 0,
+    left: 0,
+    maxHeight: 360,
+  });
+  const [fileQuery, setFileQuery] = useState('');
+  const [fileSuggestions, setFileSuggestions] = useState<
+    readonly ComposerFileSuggestion[]
+  >([]);
+  const [fileSuggestionsLoading, setFileSuggestionsLoading] = useState(false);
   const [customIconIds, setCustomIconIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [title, setTitle] = useState('');
+  const iconPickerAnchorRef = useRef<HTMLButtonElement | null>(null);
   const createMutation = useMutation(
     createProjectMutationOptions(dashboardHttpClient),
   );
@@ -331,15 +385,84 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
     renameProjectMutationOptions(dashboardHttpClient),
   );
 
+  useLayoutEffect(() => {
+    if (!iconPickerId || typeof window === 'undefined') return;
+    const updatePosition = () => {
+      const anchor = iconPickerAnchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const width = 260;
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const placeBelow = below >= 260 || below >= above;
+      const top = placeBelow
+        ? rect.bottom + 8
+        : Math.max(12, rect.top - Math.min(360, above) - 8);
+      setIconMenuPosition({
+        top,
+        left: Math.max(
+          12,
+          Math.min(rect.left - 6, window.innerWidth - width - 12),
+        ),
+        maxHeight: placeBelow
+          ? Math.max(80, window.innerHeight - top - 12)
+          : Math.max(80, rect.top - top - 8),
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [iconPickerId]);
+
+  useEffect(() => {
+    if (iconPickerMode !== 'files' || !iconPickerId) return;
+    const controller = new AbortController();
+    let active = true;
+    setFileSuggestionsLoading(true);
+    const timeout = window.setTimeout(() => {
+      void dashboardHttpClient
+        .projectIconFiles(iconPickerId, fileQuery, controller.signal)
+        .then((response) => {
+          if (!active) return;
+          setFileSuggestions(
+            response.suggestions.filter(
+              (suggestion) =>
+                suggestion.directory ||
+                PROJECT_ICON_EXTENSIONS.test(suggestion.value),
+            ),
+          );
+        })
+        .catch(() => {
+          if (active) setFileSuggestions([]);
+        })
+        .finally(() => {
+          if (active) setFileSuggestionsLoading(false);
+        });
+    }, 120);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [fileQuery, iconPickerId, iconPickerMode]);
+
   useEffect(() => {
     if (!iconPickerId || typeof document === 'undefined') return;
     const closeOutside = (event: PointerEvent) => {
-      const editor =
+      const owner =
         event.target instanceof Element
-          ? event.target.closest('[data-project-icon-editor]')
+          ? event.target.closest(
+              '[data-project-icon-editor], [data-project-icon-menu]',
+            )
           : null;
-      if (editor?.getAttribute('data-project-icon-editor') !== iconPickerId)
-        setIconPickerId(undefined);
+      const ownerId =
+        owner?.getAttribute('data-project-icon-editor') ??
+        owner?.getAttribute('data-project-icon-menu');
+      if (ownerId !== iconPickerId) setIconPickerId(undefined);
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -406,6 +529,21 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
       setError(errorMessage(cause));
     } finally {
       if (input) input.value = '';
+      setIconPendingId(undefined);
+    }
+  };
+
+  const setIconFromPath = async (projectId: string, relativePath: string) => {
+    setError(undefined);
+    setIconPickerId(undefined);
+    setIconPendingId(projectId);
+    try {
+      await dashboardHttpClient.setProjectIconFromPath(projectId, relativePath);
+      recordCustomIcon(projectId, true);
+      refreshProjectIcon(projectId);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
       setIconPendingId(undefined);
     }
   };
@@ -508,11 +646,17 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
                     aria-expanded={iconPickerId === project.id}
                     disabled={iconPendingId !== undefined}
                     title="Choose a project icon"
-                    onClick={() =>
-                      setIconPickerId((current) =>
-                        current === project.id ? undefined : project.id,
-                      )
-                    }
+                    onClick={(event) => {
+                      if (iconPickerId === project.id) {
+                        setIconPickerId(undefined);
+                        return;
+                      }
+                      iconPickerAnchorRef.current = event.currentTarget;
+                      setIconPickerMode('icons');
+                      setFileQuery('');
+                      setFileSuggestions([]);
+                      setIconPickerId(project.id);
+                    }}
                   >
                     <ProjectIcon
                       projectId={project.id}
@@ -523,51 +667,109 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
                       }
                     />
                   </button>
-                  {iconPickerId === project.id && (
-                    <div
-                      className={styles.iconMenu}
-                      role="dialog"
-                      aria-label={`Icons for ${project.title}`}
-                    >
-                      <div className={styles.stockIcons}>
-                        {STOCK_PROJECT_ICONS.map((icon) => (
-                          <button
-                            type="button"
-                            key={icon.id}
-                            aria-label={`Use ${icon.label} icon`}
-                            title={icon.label}
-                            onClick={() =>
-                              void setIcon(
-                                project.id,
-                                stockProjectIconFile(icon),
-                              )
-                            }
-                          >
-                            <span style={{ backgroundColor: icon.color }}>
-                              {icon.glyph}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                      <label className={styles.uploadIcon}>
-                        Upload image
-                        <input
-                          type="file"
-                          accept="image/*,.ico,.svg"
-                          disabled={iconPendingId !== undefined}
-                          onChange={(event) => {
-                            const file = event.currentTarget.files?.[0];
-                            if (file)
-                              void setIcon(
-                                project.id,
-                                file,
-                                event.currentTarget,
-                              );
-                          }}
-                        />
-                      </label>
-                    </div>
-                  )}
+                  {iconPickerId === project.id &&
+                    typeof document !== 'undefined' &&
+                    createPortal(
+                      <div
+                        className={styles.iconMenu}
+                        data-project-icon-menu={project.id}
+                        role="dialog"
+                        aria-label={`Icons for ${project.title}`}
+                        style={iconMenuPosition}
+                      >
+                        {iconPickerMode === 'icons' ? (
+                          <>
+                            <LibraryIconPicker
+                              onSelect={(svg) =>
+                                void setIcon(
+                                  project.id,
+                                  libraryProjectIconFile(svg),
+                                )
+                              }
+                            />
+                            <div className={styles.iconMenuActions}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFileQuery('./');
+                                  setFileSuggestions([]);
+                                  setIconPickerMode('files');
+                                }}
+                              >
+                                Choose project file
+                              </button>
+                              <label>
+                                Upload from device
+                                <input
+                                  type="file"
+                                  accept="image/*,.ico,.svg"
+                                  disabled={iconPendingId !== undefined}
+                                  onChange={(event) => {
+                                    const file = event.currentTarget.files?.[0];
+                                    if (file)
+                                      void setIcon(
+                                        project.id,
+                                        file,
+                                        event.currentTarget,
+                                      );
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          </>
+                        ) : (
+                          <div className={styles.projectFilePicker}>
+                            <div className={styles.projectFileHeader}>
+                              <button
+                                type="button"
+                                onClick={() => setIconPickerMode('icons')}
+                              >
+                                Back
+                              </button>
+                              <strong>Project files</strong>
+                            </div>
+                            <small className="path">{project.rootPath}</small>
+                            <input
+                              aria-label={`Search files in ${project.title}`}
+                              value={fileQuery}
+                              placeholder="Search image files"
+                              onChange={(event) =>
+                                setFileQuery(event.target.value.slice(0, 512))
+                              }
+                            />
+                            <div className={styles.projectFileResults}>
+                              {fileSuggestionsLoading && <p>Loading…</p>}
+                              {!fileSuggestionsLoading &&
+                                fileSuggestions.map((suggestion) => (
+                                  <button
+                                    type="button"
+                                    key={`${suggestion.directory ? 'd' : 'f'}:${suggestion.value}`}
+                                    onClick={() => {
+                                      if (suggestion.directory)
+                                        setFileQuery(suggestion.value);
+                                      else
+                                        void setIconFromPath(
+                                          project.id,
+                                          suggestion.value,
+                                        );
+                                    }}
+                                  >
+                                    <span>{suggestion.label}</span>
+                                    {suggestion.directory && (
+                                      <span aria-hidden="true">›</span>
+                                    )}
+                                  </button>
+                                ))}
+                              {!fileSuggestionsLoading &&
+                                fileSuggestions.length === 0 && (
+                                  <p>No image files found.</p>
+                                )}
+                            </div>
+                          </div>
+                        )}
+                      </div>,
+                      document.body,
+                    )}
                   {customIconIds.has(project.id) && (
                     <button
                       type="button"

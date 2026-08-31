@@ -1,12 +1,14 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   deleteProjectIconOverride,
+  projectIconFileSuggestions,
   readProjectIcon,
   readProjectIconOverride,
   writeProjectIconOverride,
+  writeProjectIconOverrideFromProjectFile,
 } from './project-icon.js';
 
 const roots: string[] = [];
@@ -49,6 +51,60 @@ describe('project icon overrides', () => {
     expect(
       await readProjectIconOverride(stateDir, 'project/1'),
     ).toBeUndefined();
+  });
+
+  it('sets an override from an image inside the project root', async () => {
+    const stateDir = await projectRoot();
+    const root = await projectRoot();
+    await fixture(
+      root,
+      'assets/project.svg',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>',
+    );
+
+    await writeProjectIconOverrideFromProjectFile(
+      stateDir,
+      'project-1',
+      root,
+      'assets/project.svg',
+    );
+
+    expect(await readProjectIconOverride(stateDir, 'project-1')).toMatchObject({
+      mediaType: 'image/png',
+    });
+    await expect(
+      writeProjectIconOverrideFromProjectFile(
+        stateDir,
+        'project-1',
+        root,
+        '../outside.svg',
+      ),
+    ).rejects.toThrow('inside the project');
+  });
+
+  it('only suggests image entries contained by the project root', async () => {
+    const root = await projectRoot();
+    const outside = await projectRoot();
+    await fixture(
+      root,
+      'project.svg',
+      '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    );
+    await fixture(root, 'notes.txt', 'not an icon');
+    await fixture(outside, 'secret.png', 'outside');
+    await symlink(outside, path.join(root, 'linked'));
+
+    await expect(projectIconFileSuggestions(root, './')).resolves.toEqual({
+      suggestions: [
+        { value: './project.svg', label: 'project.svg', directory: false },
+      ],
+    });
+    await expect(projectIconFileSuggestions(root, '../')).resolves.toEqual({
+      suggestions: [],
+    });
+    await expect(
+      projectIconFileSuggestions(root, './linked/'),
+    ).resolves.toEqual({ suggestions: [] });
   });
 
   it('rejects invalid uploaded files', async () => {

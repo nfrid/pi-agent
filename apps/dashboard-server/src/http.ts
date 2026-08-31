@@ -46,9 +46,11 @@ import { BridgeListener } from './http/bridge-listener.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import {
   deleteProjectIconOverride,
+  projectIconFileSuggestions,
   readProjectIcon,
   readProjectIconOverride,
   writeProjectIconOverride,
+  writeProjectIconOverrideFromProjectFile,
 } from './project-icon.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
@@ -271,6 +273,21 @@ export class DashboardServerImpl implements DashboardServer {
         if (!this.metadata.orchestration.getProject(projectId))
           throw new Error('Project not found.');
         await writeProjectIconOverride(this.stateDir, projectId, data);
+      },
+      projectIconFiles: async (projectId, query) => {
+        const project = this.metadata.orchestration.getProject(projectId);
+        if (!project) throw new Error('Project not found.');
+        return projectIconFileSuggestions(project.rootPath, query);
+      },
+      setProjectIconFromPath: async (projectId, relativePath) => {
+        const project = this.metadata.orchestration.getProject(projectId);
+        if (!project) throw new Error('Project not found.');
+        await writeProjectIconOverrideFromProjectFile(
+          this.stateDir,
+          projectId,
+          project.rootPath,
+          relativePath,
+        );
       },
       resetProjectIcon: async (projectId) => {
         if (!this.metadata.orchestration.getProject(projectId))

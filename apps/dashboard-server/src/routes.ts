@@ -164,6 +164,14 @@ export interface DashboardRouteContext {
     | undefined
   >;
   setProjectIcon?(projectId: string, data: Buffer): Promise<void>;
+  projectIconFiles?(
+    projectId: string,
+    query: string,
+  ): Promise<ComposerFileSuggestions>;
+  setProjectIconFromPath?(
+    projectId: string,
+    relativePath: string,
+  ): Promise<void>;
   resetProjectIcon?(projectId: string): Promise<void>;
   readDelegateHistoryRun(
     id: string,
@@ -638,6 +646,22 @@ export const dashboardRoutes: FastifyPluginAsync<{
       }
     },
   );
+  app.get<{
+    Params: { projectId: string };
+    Querystring: { query?: unknown };
+  }>('/api/projects/:projectId/icon/files', async (request, reply) => {
+    try {
+      const query =
+        typeof request.query.query === 'string' ? request.query.query : '';
+      if (query.length > 512) throw new Error('File search is too long.');
+      return await requireOperation(context.projectIconFiles)(
+        request.params.projectId,
+        query,
+      );
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
   app.get<{ Params: { projectId: string } }>(
     '/api/projects/:projectId/icon',
     async (request, reply) => {
@@ -660,6 +684,31 @@ export const dashboardRoutes: FastifyPluginAsync<{
         await requireOperation(context.setProjectIcon)(
           request.params.projectId,
           await projectIconPayload(request),
+        );
+        return reply.code(204).send();
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.put<{ Params: { projectId: string }; Body: unknown }>(
+    '/api/projects/:projectId/icon/project-file',
+    { schema: { body: anyBody } },
+    async (request, reply) => {
+      try {
+        const relativePath =
+          request.body &&
+          typeof request.body === 'object' &&
+          !Array.isArray(request.body) &&
+          'path' in request.body &&
+          typeof request.body.path === 'string'
+            ? request.body.path
+            : '';
+        if (!relativePath.trim() || relativePath.length > 4096)
+          throw new Error('Choose a project image file.');
+        await requireOperation(context.setProjectIconFromPath)(
+          request.params.projectId,
+          relativePath,
         );
         return reply.code(204).send();
       } catch (error) {

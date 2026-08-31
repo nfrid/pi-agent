@@ -13,6 +13,7 @@
     "test:e2e:visual": "playwright test e2e/visual-states.spec.ts"
   },
   "dependencies": {
+    "@arkn/react-icon-picker": "1.0.1",
     "@mdxeditor/editor": "4.2.0",
     "@pi-dashboard/activity-model": "workspace:*",
     "@pi-dashboard/client": "workspace:*",

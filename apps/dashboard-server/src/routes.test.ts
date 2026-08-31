@@ -338,6 +338,12 @@ describe('Fastify dashboard route plugin', () => {
     apps.push(app);
     const routeContext = context();
     routeContext.setProjectIcon = vi.fn(async () => undefined);
+    routeContext.projectIconFiles = vi.fn(async () => ({
+      suggestions: [
+        { value: './project.svg', label: 'project.svg', directory: false },
+      ],
+    }));
+    routeContext.setProjectIconFromPath = vi.fn(async () => undefined);
     routeContext.resetProjectIcon = vi.fn(async () => undefined);
     await app.register(dashboardRoutes, { context: routeContext });
     await app.ready();
@@ -365,6 +371,17 @@ describe('Fastify dashboard route plugin', () => {
       },
       payload: Buffer.from(await request.arrayBuffer()),
     });
+    const files = await app.inject({
+      method: 'GET',
+      url: '/api/projects/project-1/icon/files?query=.%2F',
+      headers,
+    });
+    const selected = await app.inject({
+      method: 'PUT',
+      url: '/api/projects/project-1/icon/project-file',
+      headers: { ...headers, 'content-type': 'application/json' },
+      payload: JSON.stringify({ path: 'assets/project.svg' }),
+    });
     const reset = await app.inject({
       method: 'DELETE',
       url: '/api/projects/project-1/icon',
@@ -375,6 +392,21 @@ describe('Fastify dashboard route plugin', () => {
     expect(routeContext.setProjectIcon).toHaveBeenCalledWith(
       'project-1',
       Buffer.from('custom-icon'),
+    );
+    expect(files.statusCode).toBe(200);
+    expect(files.json()).toEqual({
+      suggestions: [
+        { value: './project.svg', label: 'project.svg', directory: false },
+      ],
+    });
+    expect(routeContext.projectIconFiles).toHaveBeenCalledWith(
+      'project-1',
+      './',
+    );
+    expect(selected.statusCode).toBe(204);
+    expect(routeContext.setProjectIconFromPath).toHaveBeenCalledWith(
+      'project-1',
+      'assets/project.svg',
     );
     expect(reset.statusCode).toBe(204);
     expect(routeContext.resetProjectIcon).toHaveBeenCalledWith('project-1');

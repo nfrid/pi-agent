@@ -252,61 +252,159 @@
   cursor: default;
 }
 .iconMenu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 8px);
-  left: -6px;
+  position: fixed;
+  z-index: 1000;
   display: grid;
-  width: 210px;
+  width: 260px;
   gap: 8px;
+  overflow: auto;
   border: var(--border-soft);
   border-radius: 9px;
   background: var(--bg-alt);
   box-shadow: 0 12px 28px color-mix(in srgb, black 34%, transparent);
   padding: 9px;
 }
-.stockIcons {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+.libraryPicker {
+  min-width: 0;
+  color-scheme: dark;
 }
-.stockIcons button {
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  padding: 2px;
-  cursor: pointer;
-}
-.stockIcons button:hover,
-.stockIcons button:focus-visible {
-  background: color-mix(in srgb, var(--purple) 16%, transparent);
-  outline: none;
-}
-.stockIcons span {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 8px;
-  color: white;
-  font-size: 20px;
-  line-height: 1;
-}
-.uploadIcon {
-  border-top: 1px solid var(--line-soft);
-  color: var(--muted);
-  padding: 8px 4px 1px;
-  cursor: pointer;
+.iconPickerLoading {
+  margin: 0;
+  color: var(--dim);
+  padding: 24px 8px;
   font-size: 10px;
   text-align: center;
 }
-.uploadIcon:hover {
+.libraryPicker > :global(div) {
+  min-width: 0;
+  width: 100%;
+}
+.libraryPicker :global([role="button"][aria-expanded]) {
+  display: none;
+}
+.libraryPicker.libraryPicker.libraryPicker
+  :global([role="button"][aria-expanded] + div) {
+  position: static;
+  border: 0;
+  background: var(--bg-alt);
+  box-shadow: none;
+  color: var(--fg);
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+.libraryPicker.libraryPicker.libraryPicker :global(input) {
+  background: var(--bg);
   color: var(--fg);
 }
-.uploadIcon input {
+.libraryPicker :global(input::placeholder) {
+  color: var(--dim);
+}
+.libraryPicker :global(button) {
+  color: var(--fg);
+}
+.libraryPicker :global(button:hover),
+.libraryPicker :global(button:focus-visible) {
+  background: color-mix(in srgb, var(--purple) 13%, transparent);
+  outline: none;
+}
+.iconMenuActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+.iconMenuActions button,
+.iconMenuActions label,
+.projectFileHeader button {
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-align: center;
+}
+.iconMenuActions button:hover,
+.iconMenuActions label:hover,
+.projectFileHeader button:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.iconMenuActions input {
   display: none;
+}
+.projectFilePicker {
+  display: grid;
+  min-height: 0;
+  gap: 7px;
+}
+.projectFileHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.projectFileHeader strong {
+  font-size: 11px;
+}
+.projectFilePicker > small {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.projectFilePicker > input {
+  min-width: 0;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 7px;
+  font: inherit;
+  font-size: 11px;
+}
+.projectFileResults {
+  display: grid;
+  min-height: 80px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.projectFileResults button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--fg);
+  padding: 7px 5px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+}
+.projectFileResults button:hover,
+.projectFileResults button:focus-visible {
+  background: color-mix(in srgb, var(--purple) 13%, transparent);
+  outline: none;
+}
+.projectFileResults button span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.projectFileResults p {
+  margin: 0;
+  color: var(--dim);
+  padding: 16px 5px;
+  font-size: 10px;
+  text-align: center;
 }
 .iconReset {
   position: absolute;

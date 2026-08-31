@@ -119,8 +119,21 @@ describe('DashboardHttpClient project icons', () => {
 
   it('uploads and resets custom project icons', async () => {
     const fetch = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(null, { status: 204 }),
+      async (input: RequestInfo | URL, _init?: RequestInit) =>
+        String(input).includes('/icon/files')
+          ? new Response(
+              JSON.stringify({
+                suggestions: [
+                  {
+                    value: './project.svg',
+                    label: 'project.svg',
+                    directory: false,
+                  },
+                ],
+              }),
+              { status: 200 },
+            )
+          : new Response(null, { status: 204 }),
     );
     const client = new DashboardHttpClient({
       fetch,
@@ -129,6 +142,12 @@ describe('DashboardHttpClient project icons', () => {
     const file = new File(['icon'], 'icon.png', { type: 'image/png' });
 
     await client.setProjectIcon('project/1', file);
+    await expect(client.projectIconFiles('project/1', './')).resolves.toEqual({
+      suggestions: [
+        { value: './project.svg', label: 'project.svg', directory: false },
+      ],
+    });
+    await client.setProjectIconFromPath('project/1', 'assets/project.svg');
     await client.resetProjectIcon('project/1');
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -138,6 +157,19 @@ describe('DashboardHttpClient project icons', () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
+      '/api/projects/project%2F1/icon/files?query=.%2F',
+      expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      '/api/projects/project%2F1/icon/project-file',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ path: 'assets/project.svg' }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
       '/api/projects/project%2F1/icon',
       expect.objectContaining({ method: 'DELETE' }),
     );

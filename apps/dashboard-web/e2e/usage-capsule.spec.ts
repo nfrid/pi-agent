@@ -131,6 +131,49 @@ async function openSession(
     }),
   );
   let customIcon = false;
+  await page.route('https://api.iconify.design/**', (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/collection')
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ uncategorized: ['star', 'rocket'] }),
+      });
+    if (url.pathname === '/search')
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ icons: ['ph:star'] }),
+      });
+    const prefix = url.pathname.slice(1, -'.json'.length);
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        prefix,
+        width: 256,
+        height: 256,
+        icons: {
+          star: {
+            body: '<path d="M128 12 158 94h86l-69 51 26 86-73-50-73 50 26-86-69-51h86z"/>',
+          },
+          rocket: { body: '<path d="M48 208 208 48l-48 112z"/>' },
+        },
+      }),
+    });
+  });
+  await page.route('**/api/projects/*/icon/files?*', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        suggestions: [
+          { value: './assets/', label: 'assets', directory: true },
+          { value: './project.svg', label: 'project.svg', directory: false },
+        ],
+      }),
+    }),
+  );
+  await page.route('**/api/projects/*/icon/project-file', (route) => {
+    customIcon = true;
+    return route.fulfill({ status: 204 });
+  });
   await page.route('**/api/projects/*/icon', (route) => {
     const method = route.request().method();
     if (method === 'PUT') {
@@ -512,21 +555,31 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await expect(threadProject).toContainText('Usage project');
 
   await iconButton.click();
-  const iconMenu = settingsDrawer.getByRole('dialog', {
+  const iconMenu = page.getByRole('dialog', {
     name: 'Icons for Usage project',
   });
-  await expect(iconMenu.getByRole('button')).toHaveCount(16);
+  await expect(iconMenu).toBeVisible();
+  await expect(
+    iconMenu.getByRole('textbox', { name: 'Search icons' }),
+  ).toBeVisible();
+  expect(
+    await iconMenu.evaluate((menu) => menu.parentElement === document.body),
+  ).toBe(true);
+  await expect(iconMenu).toHaveCSS('position', 'fixed');
   await page.keyboard.press('Escape');
   await expect(iconMenu).toHaveCount(0);
+
   await iconButton.click();
-  await expect(iconMenu.getByRole('button')).toHaveCount(16);
-  const stockUpload = page.waitForRequest(
+  const iconSearch = iconMenu.getByRole('textbox', { name: 'Search icons' });
+  await iconSearch.fill('star');
+  await expect(iconSearch).toHaveValue('star');
+  const libraryUpload = page.waitForRequest(
     (request) =>
       request.method() === 'PUT' &&
       request.url().endsWith('/api/projects/project-usage/icon'),
   );
-  await iconMenu.getByRole('button', { name: 'Use Star icon' }).click();
-  await stockUpload;
+  await iconMenu.getByTitle('ph:star').click();
+  await libraryUpload;
   const resetButton = settingsDrawer.getByRole('button', {
     name: 'Use automatic icon for Usage project',
   });
@@ -545,13 +598,34 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await expect(resetButton).toHaveCount(0);
 
   await iconButton.click();
+  await iconMenu.getByRole('button', { name: 'Choose project file' }).click();
+  await expect(
+    iconMenu.getByRole('textbox', { name: 'Search files in Usage project' }),
+  ).toHaveValue('./');
+  const projectFileUpload = page.waitForRequest(
+    (request) =>
+      request.method() === 'PUT' &&
+      request.url().endsWith('/api/projects/project-usage/icon/project-file'),
+  );
+  await iconMenu.getByRole('button', { name: 'project.svg' }).click();
+  await projectFileUpload;
+  await expect(resetButton).toBeAttached();
+  reset = page.waitForRequest(
+    (request) =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/api/projects/project-usage/icon'),
+  );
+  await resetButton.click();
+  await reset;
+
+  await iconButton.click();
   const uploaded = page.waitForRequest(
     (request) =>
       request.method() === 'PUT' &&
       request.url().endsWith('/api/projects/project-usage/icon'),
   );
   const chooser = page.waitForEvent('filechooser');
-  await iconMenu.getByText('Upload image').click();
+  await iconMenu.getByText('Upload from device').click();
   await (await chooser).setFiles({
     name: 'project.svg',
     mimeType: 'image/svg+xml',

@@ -9,7 +9,9 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
+import type { ComposerFileSuggestions } from '@pi-dashboard/protocol';
 import sharp from 'sharp';
+import { composerFileSuggestions } from './composer-autocomplete.js';
 
 const MAX_ICON_BYTES = 5 * 1024 * 1024;
 const MAX_SOURCE_BYTES = 1024 * 1024;
@@ -129,6 +131,75 @@ export async function deleteProjectIconOverride(
   projectId: string,
 ): Promise<void> {
   await rm(overridePath(stateDir, projectId), { force: true });
+}
+
+export async function writeProjectIconOverrideFromProjectFile(
+  stateDir: string,
+  projectId: string,
+  rootPath: string,
+  relativePath: string,
+): Promise<void> {
+  let root: string;
+  try {
+    root = await realpath(rootPath);
+  } catch {
+    throw new Error('Project root is unavailable.');
+  }
+  const iconPath = await containedIcon(root, relativePath);
+  if (!iconPath) throw new Error('Choose an image inside the project.');
+  await writeProjectIconOverride(stateDir, projectId, await readFile(iconPath));
+}
+
+export async function projectIconFileSuggestions(
+  rootPath: string,
+  query: string,
+): Promise<ComposerFileSuggestions> {
+  let root: string;
+  try {
+    root = await realpath(rootPath);
+  } catch {
+    return { suggestions: [] };
+  }
+  const slash = query.lastIndexOf('/');
+  const displayBase = slash < 0 ? '' : query.slice(0, slash + 1);
+  if (
+    displayBase === '~' ||
+    displayBase.startsWith('~/') ||
+    path.isAbsolute(displayBase) ||
+    displayBase.split('/').includes('..')
+  )
+    return { suggestions: [] };
+  try {
+    const queryDirectory = await realpath(
+      path.resolve(root, displayBase || '.'),
+    );
+    if (!isWithinRoot(root, queryDirectory)) return { suggestions: [] };
+  } catch {
+    return { suggestions: [] };
+  }
+  const response = await composerFileSuggestions(root, query);
+  const suggestions = (
+    await Promise.all(
+      response.suggestions.map(async (suggestion) => {
+        const relativePath = suggestion.value.replace(/\/$/u, '');
+        if (!relativePath || path.isAbsolute(relativePath)) return undefined;
+        try {
+          const resolved = await realpath(path.resolve(root, relativePath));
+          if (!isWithinRoot(root, resolved)) return undefined;
+          const metadata = await stat(resolved);
+          if (suggestion.directory)
+            return metadata.isDirectory() ? suggestion : undefined;
+          return metadata.isFile() &&
+            MEDIA_TYPES[path.extname(resolved).toLowerCase()]
+            ? suggestion
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      }),
+    )
+  ).filter((suggestion) => suggestion !== undefined);
+  return { suggestions };
 }
 
 function iconHref(source: string): string | undefined {

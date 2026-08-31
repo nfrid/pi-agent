@@ -712,6 +712,37 @@ export class DashboardHttpClient {
     });
   }
 
+  async projectIconFiles(
+    projectId: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<ComposerFileSuggestions> {
+    const value = await this.request<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}/icon/files?${new URLSearchParams({ query })}`,
+      signal ? { signal } : {},
+    );
+    const response = tryParseComposerFileSuggestions(value);
+    if (!response)
+      throw malformedOutput(
+        'Dashboard returned invalid project icon files.',
+        value,
+      );
+    return response;
+  }
+
+  async setProjectIconFromPath(
+    projectId: string,
+    relativePath: string,
+  ): Promise<void> {
+    await this.request(
+      `/api/projects/${encodeURIComponent(projectId)}/icon/project-file`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ path: relativePath }),
+      },
+    );
+  }
+
   async resetProjectIcon(projectId: string): Promise<void> {
     await this.request(`/api/projects/${encodeURIComponent(projectId)}/icon`, {
       method: 'DELETE',
