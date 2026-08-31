@@ -1,6 +1,6 @@
 import {
   type ActivityGroup,
-  activityKind,
+  activityPhases,
   groupTranscript,
   type ToolDescriptor,
   type TranscriptEntry,
@@ -18,7 +18,7 @@ export interface ActivityGroupViewModel {
   readonly id: string;
   readonly start: number;
   readonly end: number;
-  readonly kind: ReturnType<typeof activityKind>;
+  readonly phases: ReturnType<typeof activityPhases>;
   readonly title: string;
   readonly status: ActivityGroupStatus;
   readonly expanded: boolean;
@@ -107,7 +107,7 @@ export function projectActivityGroups(
       id,
       start: group.start,
       end: group.end,
-      kind: activityKind(tools),
+      phases: activityPhases(tools),
       title: titleFor(entries, group, tools, status !== 'live'),
       status,
       expanded: options.expandedIds?.has(id) ?? false,

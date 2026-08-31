@@ -41,13 +41,19 @@ export const ActivityGroupsViewModelSchema = Type.Object(
     id: Type.String({ minLength: 1, maxLength: 256 }),
     start: Type.Integer({ minimum: 0 }),
     end: Type.Integer({ minimum: 0 }),
-    kind: Type.Union([
-      Type.Literal('inspect'),
-      Type.Literal('mutate'),
-      Type.Literal('validate'),
-      Type.Literal('execute'),
-      Type.Literal('mixed'),
-    ]),
+    phases: Type.Readonly(
+      Type.Array(
+        Type.Union([
+          Type.Literal('inspect'),
+          Type.Literal('mutate'),
+          Type.Literal('validate'),
+          Type.Literal('execute'),
+          Type.Literal('coordinate'),
+          Type.Literal('other'),
+        ]),
+        { maxItems: 128 },
+      ),
+    ),
     title: Type.String({ minLength: 1, maxLength: 1000 }),
     status: Type.Union([
       Type.Literal('live'),

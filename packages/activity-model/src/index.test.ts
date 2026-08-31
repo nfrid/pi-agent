@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activityEntryFromRaw,
   activityGroupFacts,
+  activityPhases,
   groupTranscript,
   headersOf,
   leadingContinuationSpan,
@@ -55,6 +56,25 @@ describe('tool action summaries', () => {
 });
 
 describe('shared activity model', () => {
+  it('preserves ordered tool phases and folds only adjacent repeats', () => {
+    expect(
+      activityPhases([
+        { name: 'read', args: {} },
+        { name: 'grep', args: {} },
+        { name: 'edit', args: {} },
+        { name: 'bash', args: { command: 'bun run typecheck:apps' } },
+        { name: 'read', args: {} },
+        { name: 'delegate', args: { action: 'start' } },
+      ]),
+    ).toEqual(['inspect', 'mutate', 'validate', 'inspect', 'coordinate']);
+    expect(
+      activityPhases([
+        { name: 'bash', args: { command: 'node server.js' } },
+        { name: 'custom', args: {} },
+      ]),
+    ).toEqual(['execute', 'other']);
+  });
+
   it('projects bounded work facts from complete tool arguments and outcomes', () => {
     expect(
       activityGroupFacts([
@@ -387,26 +407,46 @@ describe('shared activity model', () => {
       historical.map(({ start, end, title }) => ({ start, end, title })),
     ).toEqual(live.map(({ start, end, title }) => ({ start, end, title })));
     expect(
-      historical.map(({ status, expanded, kind, toolCount }) => ({
+      historical.map(({ status, expanded, phases, toolCount }) => ({
         status,
         expanded,
-        kind,
+        phases,
         toolCount,
       })),
     ).toEqual([
-      { status: 'settled', expanded: true, kind: 'inspect', toolCount: 2 },
-      { status: 'settled', expanded: false, kind: 'mutate', toolCount: 1 },
+      {
+        status: 'settled',
+        expanded: true,
+        phases: ['inspect'],
+        toolCount: 2,
+      },
+      {
+        status: 'settled',
+        expanded: false,
+        phases: ['mutate'],
+        toolCount: 1,
+      },
     ]);
     expect(
-      live.map(({ status, expanded, kind, toolCount }) => ({
+      live.map(({ status, expanded, phases, toolCount }) => ({
         status,
         expanded,
-        kind,
+        phases,
         toolCount,
       })),
     ).toEqual([
-      { status: 'settled', expanded: true, kind: 'inspect', toolCount: 2 },
-      { status: 'live', expanded: false, kind: 'mutate', toolCount: 1 },
+      {
+        status: 'settled',
+        expanded: true,
+        phases: ['inspect'],
+        toolCount: 2,
+      },
+      {
+        status: 'live',
+        expanded: false,
+        phases: ['mutate'],
+        toolCount: 1,
+      },
     ]);
   });
 

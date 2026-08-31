@@ -8,9 +8,9 @@ export {
   commandStepMeta,
   displayActivityPath,
   toolStreamDurationLabel,
-  toolStreamKindLabel,
   toolStreamMetadata,
   toolStreamMetadataLabel,
+  toolStreamPhaseLabel,
   toolStreamSummary,
 } from './activity';
 export { parseSkillInvocation } from './entries';

@@ -392,7 +392,7 @@ describe('tool row views and virtual transcript construction', () => {
     });
   });
 
-  it('renders up to three calls directly and summarizes four or more', () => {
+  it('renders the configured bookends and an exact omission control', () => {
     const threeItems = toTranscriptEntries([
       { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
       { type: 'tool', tool: { toolCallId: 'call-2', name: 'grep' } },
@@ -409,7 +409,7 @@ describe('tool row views and virtual transcript construction', () => {
     expect(threeHtml).not.toContain('tool-stream-meta');
     expect(threeHtml).not.toContain('tool-stream-toggle');
 
-    const fourHtml = renderToStaticMarkup(
+    const fiveHtml = renderToStaticMarkup(
       createElement(TranscriptToolStream, {
         items: toTranscriptEntries([
           ...threeItems.map((item) => item.raw),
@@ -417,16 +417,51 @@ describe('tool row views and virtual transcript construction', () => {
             type: 'tool',
             tool: { toolCallId: 'call-4', name: 'bash', isError: true },
           },
+          { type: 'tool', tool: { toolCallId: 'call-5', name: 'find' } },
         ]),
         expanded: false,
         onToggle: () => undefined,
       }),
     );
-    expect(fourHtml).toContain('class="tool-stream-meta"');
-    expect(fourHtml).toContain('Show 1 earlier item');
-    expect(fourHtml).toContain('4 calls');
-    expect(fourHtml).not.toContain('activity-group');
-    expect(fourHtml).not.toContain('needs input');
+    expect(fiveHtml).toContain('class="tool-stream-meta"');
+    expect(fiveHtml).toContain('Show all activity');
+    expect(fiveHtml).toContain('Show 1 hidden step');
+    expect(fiveHtml).toContain('5 calls');
+    expect(fiveHtml.match(/class="transcript-entry tool-detail/g)).toHaveLength(
+      4,
+    );
+    const customHtml = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: toTranscriptEntries([
+          ...threeItems.map((item) => item.raw),
+          { type: 'tool', tool: { toolCallId: 'call-4', name: 'bash' } },
+          { type: 'tool', tool: { toolCallId: 'call-5', name: 'find' } },
+        ]),
+        expanded: false,
+        previewStartCount: 2,
+        previewEndCount: 1,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(customHtml).toContain('Show 2 hidden steps');
+    expect(
+      customHtml.match(/class="transcript-entry tool-detail/g),
+    ).toHaveLength(3);
+    const omissionOnlyHtml = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: threeItems,
+        expanded: false,
+        previewStartCount: 0,
+        previewEndCount: 0,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(omissionOnlyHtml).toContain('Show 3 hidden steps');
+    expect(omissionOnlyHtml).not.toContain(
+      'class="transcript-entry tool-detail',
+    );
+    expect(fiveHtml).not.toContain('activity-group');
+    expect(fiveHtml).not.toContain('needs input');
   });
 
   it('combines thinking with a following tool history and keeps the preamble normal', () => {
@@ -456,28 +491,29 @@ describe('tool row views and virtual transcript construction', () => {
     expect(threeHtml).not.toContain('transcript-thinking"');
     expect(threeHtml).not.toContain('tool-stream-meta');
 
-    const fourItems = toTranscriptEntries([
+    const fiveItems = toTranscriptEntries([
       ...threeItems.map((item) => item.raw),
       { type: 'tool', tool: { toolCallId: 'history-3', name: 'find' } },
+      { type: 'tool', tool: { toolCallId: 'history-4', name: 'ls' } },
     ]);
-    const fourHtml = renderToStaticMarkup(
+    const fiveHtml = renderToStaticMarkup(
       createElement(TranscriptToolStream, {
-        items: fourItems,
+        items: fiveItems,
         expanded: false,
         onToggle: () => undefined,
       }),
     );
-    expect(fourHtml).toContain('Show 1 earlier item');
-    expect(fourHtml).toContain('1 thought');
-    expect(fourHtml).toContain('3 calls');
-    expect(fourHtml).not.toContain('Choose the safest path.');
-    expect(fourHtml).not.toContain('transcript-thinking"');
-    expect(buildVirtualTranscriptRows(fourItems)).toEqual([
+    expect(fiveHtml).toContain('Show 1 hidden step');
+    expect(fiveHtml).toContain('1 thought');
+    expect(fiveHtml).toContain('4 calls');
+    expect(fiveHtml).toContain('Choose the safest path.');
+    expect(fiveHtml).not.toContain('transcript-thinking"');
+    expect(buildVirtualTranscriptRows(fiveItems)).toEqual([
       {
         kind: 'tool-stream',
-        key: fourItems[0]?.key,
+        key: fiveItems[0]?.key,
         start: 0,
-        end: 3,
+        end: 4,
       },
     ]);
   });
@@ -522,7 +558,7 @@ describe('tool row views and virtual transcript construction', () => {
         onToggle: () => undefined,
       }),
     );
-    expect(html).toContain('Show 2 earlier items');
+    expect(html).toContain('Show 1 hidden step');
     expect(html).toContain('2 thoughts');
     expect(html).toContain('3 calls');
     expect(html).not.toContain('First checkpoint.');
@@ -551,7 +587,7 @@ describe('tool row views and virtual transcript construction', () => {
     ]);
   });
 
-  it('renders structured kind, status, counts, changes, duration, and failure metadata', () => {
+  it('renders ordered phases, counts, changes, duration, and failure metadata', () => {
     const html = renderToStaticMarkup(
       createElement(TranscriptToolStream, {
         items: toTranscriptEntries([
@@ -579,11 +615,17 @@ describe('tool row views and virtual transcript construction', () => {
           { type: 'tool', tool: { toolCallId: 'meta-4', name: 'grep' } },
         ]),
         expanded: false,
+        previewStartCount: 1,
+        previewEndCount: 2,
         onToggle: () => undefined,
       }),
     );
-    expect(html).toContain('tool-stream-metadata-mutate');
-    expect(html).toContain('tool-stream-metadata-kind');
+    expect(html).toContain('tool-stream-phase-inspect');
+    expect(html).toContain('tool-stream-phase-mutate');
+    expect(html).toContain('tool-stream-phase-execute');
+    expect(html).toContain('Inspected');
+    expect(html).toContain('Edited');
+    expect(html).toContain('Ran');
     expect(html).not.toContain('tool-stream-metadata-status');
     expect(html).not.toContain('tool-stream-status-failed');
     expect(html).not.toContain('tool-stream-metadata-thoughts');
@@ -689,7 +731,7 @@ describe('tool row views and virtual transcript construction', () => {
     expect(buildTranscriptToolStreams(items)).toMatchObject([
       { start: 0, end: 3 },
     ]);
-    expect(render(false)).toContain('Show 1 earlier item');
+    expect(render(false)).toContain('Show 1 hidden step');
     expect(render(false)).not.toContain('Tasks · T1 added');
     expect(render(true)).toContain('Tasks · T1 added');
   });
@@ -760,8 +802,8 @@ describe('tool row views and virtual transcript construction', () => {
     expect(buildTranscriptToolStreams(items)).toEqual([
       { key: items[0]?.key, start: 0, end: 0 },
     ]);
-    expect(html).toContain('Show 2 earlier items');
-    expect(html).toContain('tool-stream-metadata-thinking');
+    expect(html).toContain('Show 1 hidden step');
+    expect(html).toContain('tool-stream-phase-thinking');
     expect(html).toContain('Thinking');
     expect(html).toContain('5 thoughts');
     expect(html).not.toContain('tool-stream-metadata-calls');

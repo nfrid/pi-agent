@@ -40,14 +40,18 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   ).toBeVisible();
   await expect(page.locator('.transcript-thinking')).toHaveCount(0);
   await expect(page.locator('.transcript-tool-stream')).toHaveCount(1);
-  const earlierHistory = page.getByRole('button', {
-    name: /Show 9 earlier items/,
+  const activityDisclosure = page.getByRole('button', {
+    name: /Show all activity.*8 hidden steps/,
   });
-  await expect(earlierHistory).toHaveAttribute('aria-expanded', 'false');
+  const omission = page.getByRole('button', {
+    name: 'Show 8 hidden steps',
+  });
+  await expect(activityDisclosure).toHaveAttribute('aria-expanded', 'false');
+  await expect(omission).toBeVisible();
   await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(1);
   await expect(
     page.locator('.tool-stream-items .transcript-thinking-blob'),
-  ).toHaveCount(1);
+  ).toHaveCount(2);
   const metadata = page.locator('.tool-stream-metadata');
   await expect(metadata).toContainText('Edited');
   await expect(metadata).not.toContainText('complete');
@@ -64,9 +68,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
       );
       const iconSvg = icon?.querySelector<SVGElement>('svg');
       const firstDot = stream.querySelector<HTMLElement>('.tool-step-dot');
-      const kind = stream.querySelector<HTMLElement>(
-        '.tool-stream-metadata-kind',
-      );
+      const phase = stream.querySelector<HTMLElement>('.tool-stream-phase');
       const metadataNode = stream.querySelector<HTMLElement>(
         '.tool-stream-metadata',
       );
@@ -87,7 +89,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
         !icon ||
         !iconSvg ||
         !firstDot ||
-        !kind ||
+        !phase ||
         !metadataNode ||
         !thoughts ||
         !calls ||
@@ -109,7 +111,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
         iconSvgHeight: iconSvgRect.height,
         dotCenter:
           firstDot.getBoundingClientRect().x + firstDot.offsetWidth / 2,
-        kindColor: getComputedStyle(kind).color,
+        phaseColor: getComputedStyle(phase).color,
         metadataColor: getComputedStyle(metadataNode).color,
         thoughtsColor: getComputedStyle(thoughts).color,
         callsColor: getComputedStyle(calls).color,
@@ -132,7 +134,7 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   expect(
     Math.abs(streamGeometry.iconCenter - streamGeometry.dotCenter),
   ).toBeLessThan(1);
-  expect(streamGeometry.kindColor).not.toBe(streamGeometry.metadataColor);
+  expect(streamGeometry.phaseColor).not.toBe(streamGeometry.metadataColor);
   expect(streamGeometry.thoughtsColor).not.toBe(streamGeometry.metadataColor);
   expect(streamGeometry.callsColor).not.toBe(streamGeometry.metadataColor);
   expect(streamGeometry.thoughtsColor).not.toBe(streamGeometry.callsColor);
@@ -168,9 +170,9 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     caret: 'hide',
   });
 
-  await earlierHistory.click();
+  await omission.click();
   await expect(
-    page.getByRole('button', { name: /Hide 9 earlier items/ }),
+    page.getByRole('button', { name: /Collapse activity.*8 hidden steps/ }),
   ).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('.tool-stream-items .tool-detail')).toHaveCount(5);
   await expect(

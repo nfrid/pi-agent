@@ -8,13 +8,14 @@
  * both while a session streams and when it is replayed from disk.
  */
 
-/** The character of a stretch of work, derived from the tools it runs. */
-export type ActivityKind =
+/** One observable phase in a stretch of work, derived from a tool call. */
+export type ActivityPhase =
   | 'inspect'
   | 'mutate'
   | 'validate'
   | 'execute'
-  | 'mixed';
+  | 'coordinate'
+  | 'other';
 
 /** Just enough of a tool call to classify it. */
 export interface ToolDescriptor {
@@ -48,6 +49,16 @@ const MUTATION_TOOLS = new Set([
 
 const VALIDATION_COMMAND =
   /(^|[\s;&|])(npm (test|run)|pnpm (test|run)|yarn (test|run)|bun (test|run)|vitest|jest|pytest|cargo (test|check|clippy)|go test|tsc|biome|eslint|ruff|mypy)(\s|$)/;
+
+const COORDINATION_TOOLS = new Set([
+  'background',
+  'delegate',
+  'delegates',
+  'delegate_changes',
+  'delegate_jobs',
+  'tasks',
+  'todo',
+]);
 
 /**
  * Historical compatibility value. Grouping deliberately never consults it:
@@ -290,14 +301,26 @@ function isValidationCommand(tool: ToolDescriptor): boolean {
   return VALIDATION_COMMAND.test(command);
 }
 
-export function activityKind(tools: readonly ToolDescriptor[]): ActivityKind {
-  if (tools.length === 0) return 'mixed';
-  const names = tools.map((tool) => toolBaseName(tool.name));
-  if (names.some((name) => MUTATION_TOOLS.has(name))) return 'mutate';
-  if (tools.some(isValidationCommand)) return 'validate';
-  if (names.every((name) => INSPECTION_TOOLS.has(name))) return 'inspect';
-  if (names.every((name) => name === 'bash')) return 'execute';
-  return 'mixed';
+export function activityToolPhase(tool: ToolDescriptor): ActivityPhase {
+  const name = toolBaseName(tool.name);
+  if (MUTATION_TOOLS.has(name)) return 'mutate';
+  if (isValidationCommand(tool)) return 'validate';
+  if (INSPECTION_TOOLS.has(name)) return 'inspect';
+  if (COORDINATION_TOOLS.has(name)) return 'coordinate';
+  if (name === 'bash' || name === 'shell' || name === 'exec') return 'execute';
+  return 'other';
+}
+
+/** Preserve phase order while folding only adjacent calls with the same role. */
+export function activityPhases(
+  tools: readonly ToolDescriptor[],
+): readonly ActivityPhase[] {
+  const phases: ActivityPhase[] = [];
+  for (const tool of tools) {
+    const phase = activityToolPhase(tool);
+    if (phases.at(-1) !== phase) phases.push(phase);
+  }
+  return phases;
 }
 
 /**
