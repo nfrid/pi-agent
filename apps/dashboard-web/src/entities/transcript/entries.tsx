@@ -737,6 +737,7 @@ function TranscriptEntry({
                 aria-label={`Show ${branchPoint.paths.length} paths from this message`}
                 aria-haspopup="dialog"
                 title={`Show ${branchPoint.paths.length} paths from this message`}
+                data-branch-count={branchPoint.paths.length}
                 onClick={() => onOpenBranchPaths?.(branchPoint)}
               >
                 <span aria-hidden="true">⑂</span> {branchPoint.paths.length}{' '}

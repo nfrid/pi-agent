@@ -1025,6 +1025,7 @@ function assertSessionBranchTopologyBound(
   const pathIds = new Set<string>();
   const messageIds = new Set<string>();
   for (const point of topology.points) {
+    let currentPaths = 0;
     for (const path of point.paths) {
       if (pathIds.has(path.id))
         throw new Error('Session branch topology has duplicate path IDs.');
@@ -1032,7 +1033,17 @@ function assertSessionBranchTopologyBound(
         throw new Error('Session branch topology has duplicate message IDs.');
       pathIds.add(path.id);
       messageIds.add(path.messageId);
+      if (!path.current) continue;
+      currentPaths += 1;
+      if (topology.activeLeafId === undefined)
+        throw new Error(
+          'Session branch topology marks a path current without an active leaf.',
+        );
     }
+    if (currentPaths > 1)
+      throw new Error(
+        'Session branch topology marks multiple current paths at one point.',
+      );
   }
 }
 
@@ -1110,5 +1121,9 @@ export const tryParseDelegateHistoryDetailResponse =
 export function tryParseSessionApiResponse(
   value: unknown,
 ): SessionApiResponse | undefined {
-  return tryParseSchema(SessionApiResponseSchema, value);
+  try {
+    return parseSessionApiResponse(value);
+  } catch {
+    return undefined;
+  }
 }

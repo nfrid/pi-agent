@@ -83,9 +83,18 @@
 }
 .transcript-outline-branch-indicator {
   flex: 0 0 auto;
+  min-width: 28px;
+  min-height: 28px;
   margin-inline-start: 8px;
-  padding: 1px 4px;
+  padding: 3px 6px;
   cursor: pointer;
+}
+@media (max-width: 820px) {
+  .transcript-outline-branch-indicator {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 6px 8px;
+  }
 }
 .transcript-branch-path-list {
   display: grid;
