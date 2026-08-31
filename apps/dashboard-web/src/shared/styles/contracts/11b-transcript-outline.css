@@ -81,33 +81,6 @@
   font-size: 9px;
   white-space: nowrap;
 }
-.transcript-branch-indicator {
-  border: 1px solid color-mix(in srgb, var(--purple) 45%, var(--line));
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--purple) 10%, transparent);
-  color: var(--purple);
-  font-size: 9px;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-.message-bubble {
-  position: relative;
-}
-.message-bubble.message-has-branches {
-  padding-bottom: 30px;
-}
-.message-bubble .transcript-branch-indicator {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  padding: 2px 5px;
-  cursor: pointer;
-}
-.message-bubble .transcript-branch-indicator:hover,
-.message-bubble .transcript-branch-indicator:focus-visible {
-  background: color-mix(in srgb, var(--purple) 20%, transparent);
-  color: var(--fg);
-}
 .transcript-outline-branch-indicator {
   flex: 0 0 auto;
   margin-inline-start: 8px;

@@ -8,6 +8,7 @@ import { Value } from 'typebox/value';
 import {
   MAX_ID,
   MAX_PATH,
+  MAX_SESSION_BRANCH_PATHS_TOTAL,
   MAX_SHELL_SNAPSHOT_BYTES,
   SESSION_NAME_MAX_LENGTH,
 } from './limits.js';
@@ -272,6 +273,7 @@ export function parseAuthoritativeSessionSnapshot(
   );
   if (response.runtimeSeq !== undefined && response.runtimeEpoch === undefined)
     throw new Error('Session runtime sequence has no epoch.');
+  assertSessionBranchTopologyBound(response.branchTopology);
   const bytes = new TextEncoder().encode(JSON.stringify(response)).byteLength;
   if (bytes > 2 * 1024 * 1024)
     throw new Error('Authoritative session snapshot is too large.');
@@ -1010,8 +1012,36 @@ export function tryParseComposerFileSuggestions(
   return tryParseSchema(ComposerFileSuggestionsSchema, value);
 }
 
+function assertSessionBranchTopologyBound(
+  topology: SessionApiResponse['branchTopology'],
+): void {
+  if (!topology) return;
+  const totalPaths = topology.points.reduce(
+    (total, point) => total + point.paths.length,
+    0,
+  );
+  if (totalPaths > MAX_SESSION_BRANCH_PATHS_TOTAL)
+    throw new Error('Session branch topology has too many paths.');
+  for (const point of topology.points) {
+    const pathIds = new Set(point.paths.map((path) => path.id));
+    if (
+      point.memberIds.length !== point.paths.length ||
+      new Set(point.memberIds).size !== point.memberIds.length ||
+      pathIds.size !== point.paths.length ||
+      point.memberIds.some((memberId) => !pathIds.has(memberId))
+    )
+      throw new Error('Session branch topology members do not match paths.');
+  }
+}
+
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {
-  return parseSchema(SessionApiResponseSchema, value, 'session API response');
+  const response = parseSchema(
+    SessionApiResponseSchema,
+    value,
+    'session API response',
+  );
+  assertSessionBranchTopologyBound(response.branchTopology);
+  return response;
 }
 
 export function parseSessionThreadLinks(value: unknown): SessionThreadLinks {

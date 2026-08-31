@@ -10,6 +10,10 @@ import {
   formatDashboardTimestamp,
 } from '../../features/timestamp';
 import {
+  indexBranchPointsById,
+  indexBranchPointsByMemberId,
+} from './branching';
+import {
   sampleTranscriptLandmarks,
   sampleTranscriptMinimapLandmarks,
   type TranscriptLandmark,
@@ -63,8 +67,11 @@ export function TranscriptOutline({
   );
   const [activeKey, setActiveKey] = useState(minimapLandmarks[0]?.key);
   const branchPointsById = useMemo(
-    () =>
-      new Map((branchTopology?.points ?? []).map((point) => [point.id, point])),
+    () => indexBranchPointsById(branchTopology),
+    [branchTopology],
+  );
+  const branchPointsByMemberId = useMemo(
+    () => indexBranchPointsByMemberId(branchTopology),
     [branchTopology],
   );
   const selectedBranchPoint = branchPointId
@@ -140,7 +147,7 @@ export function TranscriptOutline({
     <div className="transcript-outline-list surface-scroll-region">
       {outlineLandmarks.length ? (
         outlineLandmarks.map((landmark) => {
-          const branchPoint = branchPointsById.get(landmark.key);
+          const branchPoint = branchPointsByMemberId.get(landmark.key);
           const hasBranches = Boolean(
             branchPoint && branchPoint.paths.length > 1,
           );
@@ -210,7 +217,7 @@ export function TranscriptOutline({
             id: `transcript-branch-${selectedBranchPoint.id}`,
             title: 'Immediate paths',
             eyebrow: 'Read-only branch paths',
-            headerSummary: 'Paths from this user message',
+            headerSummary: 'Sibling choices from this branch point',
             headerContent: (
               <SurfaceStats
                 className="work-header-stats"
@@ -234,12 +241,6 @@ export function TranscriptOutline({
                       ) : null}
                     </div>
                     <span>{path.label}</span>
-                    {path.laterTurnCount !== undefined ? (
-                      <small>
-                        {path.laterTurnCount} later turn
-                        {path.laterTurnCount === 1 ? '' : 's'}
-                      </small>
-                    ) : null}
                   </div>
                 ))}
               </div>

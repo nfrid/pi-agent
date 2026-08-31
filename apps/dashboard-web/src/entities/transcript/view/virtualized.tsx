@@ -15,6 +15,7 @@ import {
   useState,
 } from 'react';
 import type { TranscriptModelItem } from '../../../transcript';
+import { indexBranchPointsByMemberId } from '../branching';
 import { TranscriptEntry } from '../entries';
 import {
   buildTranscriptLandmarks,
@@ -127,9 +128,8 @@ export function VirtualizedTranscript({
     () => mergeTranscriptLandmarks(loadedLandmarks, outline),
     [loadedLandmarks, outline],
   );
-  const branchPointsById = useMemo(
-    () =>
-      new Map((branchTopology?.points ?? []).map((point) => [point.id, point])),
+  const branchPointsByMemberId = useMemo(
+    () => indexBranchPointsByMemberId(branchTopology),
     [branchTopology],
   );
   const rowIndexByKey = useMemo(() => {
@@ -255,7 +255,9 @@ export function VirtualizedTranscript({
                     cwd={runtime?.cwd}
                     branchPoint={
                       items[row.index]?.role === 'user'
-                        ? branchPointsById.get(items[row.index]?.key ?? '')
+                        ? branchPointsByMemberId.get(
+                            items[row.index]?.key ?? '',
+                          )
                         : undefined
                     }
                     onOpenBranchPaths={onOpenBranchPaths}

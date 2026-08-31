@@ -561,17 +561,16 @@ describe('dashboard snapshots', () => {
         points: [
           {
             id: 'root-user',
+            memberIds: ['path-a', 'path-b'],
             paths: [
               {
                 id: 'path-a',
                 label: 'Try A',
-                laterTurnCount: 0,
                 current: true,
               },
               {
                 id: 'path-b',
                 label: 'Try B',
-                laterTurnCount: 1,
                 current: false,
               },
             ],

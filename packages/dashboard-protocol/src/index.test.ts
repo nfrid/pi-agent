@@ -547,18 +547,17 @@ describe('dashboard protocol', () => {
         points: [
           {
             id: 'turn-root',
+            memberIds: ['turn-a', 'turn-b'],
             paths: [
               {
                 id: 'turn-a',
                 label: 'Try A',
-                laterTurnCount: 2,
                 lastActivityAt: 123,
                 current: false,
               },
               {
                 id: 'turn-b',
                 label: 'Try B',
-                laterTurnCount: 0,
                 current: true,
               },
             ],
@@ -594,7 +593,21 @@ describe('dashboard protocol', () => {
           ...response.branchTopology,
           points: Array.from({ length: 4_097 }, (_, index) => ({
             id: `point-${index}`,
+            memberIds: [],
             paths: [],
+          })),
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseSessionApiResponse({
+        ...response,
+        branchTopology: {
+          activeLeafId: 'turn-b',
+          points: Array.from({ length: 1_025 }, (_, index) => ({
+            id: `point-${index}`,
+            memberIds: [`path-${index}`],
+            paths: [{ id: `path-${index}`, label: 'path', current: false }],
           })),
         },
       }),

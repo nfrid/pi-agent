@@ -35,17 +35,18 @@ describe('transcript entries', () => {
 
   it('shows a path indicator only for user bubbles with multiple immediate paths', () => {
     const item: TranscriptModelItem = {
-      key: 'branched-user',
+      key: 'path-a',
       raw: {},
       entry: { kind: 'other' },
       role: 'user',
       text: 'Choose a direction',
     };
     const point: SessionBranchPoint = {
-      id: 'branched-user',
+      id: 'root-user',
+      memberIds: ['path-a', 'path-b'],
       paths: [
-        { id: 'path-a', label: 'Try A', laterTurnCount: 0, current: true },
-        { id: 'path-b', label: 'Try B', laterTurnCount: 1, current: false },
+        { id: 'path-a', label: 'Try A', current: true },
+        { id: 'path-b', label: 'Try B', current: false },
       ],
     };
     const branched = renderToStaticMarkup(

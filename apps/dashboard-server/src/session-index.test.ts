@@ -190,7 +190,7 @@ describe('session index', () => {
     ).rejects.toThrow('Invalid session branch');
   });
 
-  it('derives immediate user paths through intermediary entries and marks the active path', async () => {
+  it('derives immediate user paths and only marks an explicitly active path', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-topology-'),
     );
@@ -269,23 +269,24 @@ describe('session index', () => {
 
     const page = await index.readEntries('topology-id');
     expect(page.branchTopology).toEqual({
-      activeLeafId: 'later-c',
       points: [
         {
           id: 'root-prompt',
+          memberIds: ['path-a', 'path-b', 'path-c'],
           paths: [
             expect.objectContaining({ id: 'path-a', label: 'Try A' }),
             expect.objectContaining({ id: 'path-b', label: 'Try B' }),
             expect.objectContaining({
               id: 'path-c',
               label: 'Try C',
-              current: true,
+              current: false,
             }),
           ],
         },
       ],
     });
     expect(page.branchTopology?.points[0]?.paths).toHaveLength(3);
+    expect(page.branchTopology).not.toHaveProperty('activeLeafId');
     expect(
       deriveSessionBranchTopology(entries, 'path-b').points[0]?.paths,
     ).toEqual(

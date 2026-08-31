@@ -1640,12 +1640,6 @@ export const SessionBranchPathSchema = Type.Object(
   {
     id: IdentifierSchema,
     label: Type.String({ minLength: 1, maxLength: MAX_SESSION_BRANCH_LABEL }),
-    laterTurnCount: Type.Optional(
-      Type.Integer({
-        minimum: 0,
-        maximum: MAX_SESSION_BRANCH_POINTS,
-      }),
-    ),
     lastActivityAt: Type.Optional(
       Type.Union([Type.String({ maxLength: 128 }), FiniteNumberSchema]),
     ),
@@ -1655,10 +1649,14 @@ export const SessionBranchPathSchema = Type.Object(
 );
 export type SessionBranchPath = Static<typeof SessionBranchPathSchema>;
 
-/** Immediate user paths below one loaded user turn. */
+/** Immediate user paths below one loaded user turn. `id` is the anchor entry. */
 export const SessionBranchPointSchema = Type.Object(
   {
     id: IdentifierSchema,
+    /** Choice user-entry IDs, used to mark loaded transcript entries. */
+    memberIds: Type.Readonly(
+      Type.Array(IdentifierSchema, { maxItems: MAX_SESSION_BRANCH_PATHS }),
+    ),
     paths: Type.Readonly(
       Type.Array(SessionBranchPathSchema, {
         maxItems: MAX_SESSION_BRANCH_PATHS,

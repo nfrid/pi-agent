@@ -341,6 +341,7 @@ type BranchDescriptor = Pick<
   SessionLineDescriptor,
   'ordinal' | 'id' | 'parentId' | 'outlineKind' | 'outlineLabel' | 'timestamp'
 >;
+type IdentifiedBranchDescriptor = BranchDescriptor & { id: string };
 
 function timestampNumber(
   value: number | string | undefined,
@@ -357,13 +358,12 @@ function timestampNumber(
 function branchTopologyFromDescriptors(
   descriptors: readonly BranchDescriptor[],
   activeLeafId?: string,
-  includeLaterTurnCount = true,
 ): SessionBranchTopology {
-  const byId = new Map<string, BranchDescriptor>();
-  const children = new Map<string, BranchDescriptor[]>();
+  const byId = new Map<string, IdentifiedBranchDescriptor>();
+  const children = new Map<string, IdentifiedBranchDescriptor[]>();
   for (const descriptor of descriptors) {
     if (!descriptor.id || byId.has(descriptor.id)) continue;
-    byId.set(descriptor.id, descriptor);
+    byId.set(descriptor.id, descriptor as IdentifiedBranchDescriptor);
   }
   for (const descriptor of byId.values()) {
     if (
@@ -376,11 +376,110 @@ function branchTopologyFromDescriptors(
     children.set(descriptor.parentId, siblings);
   }
 
+  // Each user is assigned to its nearest user ancestor once. This collapses
+  // model/tool/summary entries without walking every anchor's subtree.
+  const nearestUserAncestor = new Map<string, string | undefined>();
+  const findNearestUserAncestor = (
+    startId: string | undefined,
+  ): string | undefined => {
+    if (startId === undefined) return undefined;
+    if (nearestUserAncestor.has(startId))
+      return nearestUserAncestor.get(startId);
+    const trail: string[] = [];
+    const seen = new Set<string>();
+    let currentId: string | undefined = startId;
+    let ancestor: string | undefined;
+    while (currentId && !seen.has(currentId)) {
+      const cached = nearestUserAncestor.get(currentId);
+      if (nearestUserAncestor.has(currentId)) {
+        ancestor = cached;
+        break;
+      }
+      seen.add(currentId);
+      trail.push(currentId);
+      const current = byId.get(currentId);
+      if (!current) break;
+      if (current.outlineKind === 'user') {
+        ancestor = current.id;
+        break;
+      }
+      currentId =
+        typeof current.parentId === 'string' ? current.parentId : undefined;
+    }
+    for (const id of trail) nearestUserAncestor.set(id, ancestor);
+    return ancestor;
+  };
+  const usersByAnchor = new Map<string, IdentifiedBranchDescriptor[]>();
+  for (const candidate of byId.values()) {
+    if (candidate.outlineKind !== 'user') continue;
+    const anchorId = findNearestUserAncestor(
+      typeof candidate.parentId === 'string' ? candidate.parentId : undefined,
+    );
+    const anchor = anchorId ? byId.get(anchorId) : undefined;
+    if (!anchor || anchor.ordinal >= candidate.ordinal) continue;
+    const members = usersByAnchor.get(anchor.id) ?? [];
+    members.push(candidate);
+    usersByAnchor.set(anchor.id, members);
+  }
+
+  // Compute each node's latest activity once, so path metadata remains
+  // useful without a user-by-entry subtree walk.
+  const latestActivityById = new Map<
+    string,
+    { value: number | string; sort: number }
+  >();
+  const visitState = new Map<string, 1 | 2>();
+  for (const root of byId.values()) {
+    if (visitState.has(root.id)) continue;
+    const stack: Array<{
+      node: IdentifiedBranchDescriptor;
+      expanded: boolean;
+    }> = [{ node: root, expanded: false }];
+    const visiting = new Set<string>();
+    while (stack.length > 0) {
+      const frame = stack.pop();
+      if (!frame) continue;
+      const { node } = frame;
+      if (frame.expanded) {
+        let latest = timestampNumber(node.timestamp);
+        let latestValue =
+          latest === undefined
+            ? undefined
+            : (node.timestamp as number | string);
+        for (const child of children.get(node.id) ?? []) {
+          const childLatest = latestActivityById.get(child.id);
+          if (
+            childLatest &&
+            (latest === undefined || childLatest.sort >= latest)
+          ) {
+            latest = childLatest.sort;
+            latestValue = childLatest.value;
+          }
+        }
+        if (latest !== undefined && latestValue !== undefined)
+          latestActivityById.set(node.id, { value: latestValue, sort: latest });
+        visitState.set(node.id, 2);
+        visiting.delete(node.id);
+        continue;
+      }
+      if (visitState.has(node.id) || visiting.has(node.id)) continue;
+      visiting.add(node.id);
+      visitState.set(node.id, 1);
+      stack.push({ node, expanded: true });
+      for (const child of children.get(node.id) ?? []) {
+        if (!visitState.has(child.id))
+          stack.push({ node: child, expanded: false });
+      }
+    }
+  }
+
   const active = new Set<string>();
-  if (activeLeafId && byId.has(activeLeafId)) {
-    let current: BranchDescriptor | undefined = byId.get(activeLeafId);
-    while (current?.id && !active.has(current.id)) {
+  if (activeLeafId !== undefined) {
+    const seen = new Set<string>();
+    let current = byId.get(activeLeafId);
+    while (current && !seen.has(current.id)) {
       active.add(current.id);
+      seen.add(current.id);
       current =
         typeof current.parentId === 'string'
           ? byId.get(current.parentId)
@@ -390,71 +489,35 @@ function branchTopologyFromDescriptors(
 
   const points: SessionBranchPoint[] = [];
   let totalPaths = 0;
-  for (const anchor of descriptors) {
-    if (anchor.outlineKind !== 'user' || !anchor.id) continue;
-    const paths = new Map<string, BranchDescriptor>();
-    const visitedImmediate = new Set<string>();
-    const queue = [...(children.get(anchor.id) ?? [])];
-    while (queue.length > 0 && paths.size < MAX_SESSION_BRANCH_PATHS) {
-      const candidate = queue.shift();
-      if (!candidate?.id || visitedImmediate.has(candidate.id)) continue;
-      visitedImmediate.add(candidate.id);
-      if (candidate.outlineKind === 'user') {
-        paths.set(candidate.id, candidate);
-        continue;
-      }
-      queue.push(...(children.get(candidate.id) ?? []));
-    }
-    if (paths.size < 2 || totalPaths >= MAX_SESSION_BRANCH_PATHS_TOTAL)
+  for (const [anchorId, members] of usersByAnchor) {
+    if (members.length < 2 || totalPaths >= MAX_SESSION_BRANCH_PATHS_TOTAL)
       continue;
-
-    const pathValues: SessionBranchPath[] = [];
-    for (const candidate of paths.values()) {
-      if (pathValues.length >= MAX_SESSION_BRANCH_PATHS_TOTAL - totalPaths)
-        break;
-      const subtree = [candidate];
-      const visitedSubtree = new Set<string>();
-      let laterTurnCount = 0;
-      let lastActivity: { value: number | string; sort: number } | undefined;
-      for (let cursor = 0; cursor < subtree.length; cursor += 1) {
-        const node = subtree[cursor];
-        if (!node?.id || visitedSubtree.has(node.id)) continue;
-        visitedSubtree.add(node.id);
-        if (node !== candidate && node.outlineKind === 'user')
-          laterTurnCount = Math.min(
-            MAX_SESSION_BRANCH_POINTS,
-            laterTurnCount + 1,
-          );
-        const sort = timestampNumber(node.timestamp);
-        if (
-          sort !== undefined &&
-          (lastActivity === undefined || sort >= lastActivity.sort)
-        )
-          lastActivity = { value: node.timestamp as number | string, sort };
-        if (node.id) subtree.push(...(children.get(node.id) ?? []));
-      }
-      pathValues.push({
-        id: candidate.id as string,
-        label: candidate.outlineLabel ?? 'User turn',
-        ...(includeLaterTurnCount ? { laterTurnCount } : {}),
-        ...(lastActivity === undefined
-          ? {}
-          : { lastActivityAt: lastActivity.value }),
-        current: active.has(candidate.id as string),
-      });
-    }
-    pathValues.sort(
-      (left, right) =>
-        (byId.get(left.id)?.ordinal ?? 0) - (byId.get(right.id)?.ordinal ?? 0),
+    const remaining = MAX_SESSION_BRANCH_PATHS_TOTAL - totalPaths;
+    const selected = members.slice(
+      0,
+      Math.min(MAX_SESSION_BRANCH_PATHS, remaining),
     );
-    if (pathValues.length < 2) continue;
-    totalPaths += pathValues.length;
-    points.push({ id: anchor.id, paths: pathValues });
+    if (selected.length < 2) continue;
+    const paths: SessionBranchPath[] = selected.map((candidate) => {
+      const latest = latestActivityById.get(candidate.id);
+      return {
+        id: candidate.id,
+        label: candidate.outlineLabel ?? 'User turn',
+        ...(latest === undefined ? {} : { lastActivityAt: latest.value }),
+        current: activeLeafId !== undefined && active.has(candidate.id),
+      };
+    });
+    totalPaths += paths.length;
+    points.push({
+      id: anchorId,
+      memberIds: paths.map((path) => path.id),
+      paths,
+    });
     if (points.length >= MAX_SESSION_BRANCH_POINTS) break;
   }
   return {
-    ...(activeLeafId ? { activeLeafId } : {}),
-    points: points.slice(0, MAX_SESSION_BRANCH_POINTS),
+    ...(activeLeafId === undefined ? {} : { activeLeafId }),
+    points,
   };
 }
 
@@ -462,7 +525,6 @@ function branchTopologyFromDescriptors(
 export function deriveSessionBranchTopology(
   entries: readonly unknown[],
   activeLeafId?: string,
-  includeLaterTurnCount = true,
 ): SessionBranchTopology {
   const descriptors: BranchDescriptor[] = [];
   entries.forEach((value, ordinal) => {
@@ -486,40 +548,7 @@ export function deriveSessionBranchTopology(
         : {}),
     });
   });
-  return branchTopologyFromDescriptors(
-    descriptors,
-    activeLeafId,
-    includeLaterTurnCount,
-  );
-}
-
-function overlayCurrentBranchPaths(
-  topology: SessionBranchTopology,
-  current: SessionBranchTopology,
-): SessionBranchTopology {
-  const currentByPoint = new Map(
-    current.points.map((point) => [
-      point.id,
-      new Set(
-        point.paths.filter((path) => path.current).map((path) => path.id),
-      ),
-    ]),
-  );
-  return {
-    ...topology,
-    points: topology.points.map((point) => {
-      const currentIds = currentByPoint.get(point.id);
-      return currentIds === undefined
-        ? point
-        : {
-            ...point,
-            paths: point.paths.map((path) => ({
-              ...path,
-              current: currentIds.has(path.id),
-            })),
-          };
-    }),
-  };
+  return branchTopologyFromDescriptors(descriptors, activeLeafId);
 }
 
 function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
@@ -696,25 +725,6 @@ export class SessionIndex {
   isAuxiliary(id: string): boolean {
     const entry = this.files.get(id);
     return entry ? this.isAuxiliaryFile(entry.file) : false;
-  }
-
-  /** Return compact topology for a known session without exposing its file. */
-  getBranchTopology(
-    id: string,
-    activeLeafId?: string,
-    activeEntries?: readonly unknown[],
-  ): SessionBranchTopology | undefined {
-    const indexed = this.files.get(id);
-    if (!indexed) return undefined;
-    const topology = branchTopologyFromDescriptors(
-      indexed.historyIndex.descriptors,
-      activeLeafId ?? indexed.historyIndex.latestEntryId,
-    );
-    if (!activeEntries) return topology;
-    return overlayCurrentBranchPaths(
-      topology,
-      deriveSessionBranchTopology(activeEntries, activeLeafId),
-    );
   }
 
   private async currentIndexedFile(id: string): Promise<IndexedFile> {
@@ -918,10 +928,11 @@ export class SessionIndex {
       branch.leafId === undefined && requestedLeaf === undefined
         ? index.outline
         : buildSessionOutline(descriptors, groups);
-    const activeLeafId = branch.leafId ?? requestedLeaf ?? index.latestEntryId;
+    // Resolving the latest leaf preserves transcript selection only; it is
+    // not proof that this append-only file's latest entry is the active path.
     const branchTopology = branchTopologyFromDescriptors(
       index.descriptors,
-      activeLeafId,
+      requestedLeaf,
     );
     let end = descriptors.length;
     if (cursor) {
@@ -1208,7 +1219,7 @@ export class SessionIndex {
           outline: indexed.historyIndex.outline,
           branchTopology: branchTopologyFromDescriptors(
             indexed.historyIndex.descriptors,
-            result.leafId ?? indexed.historyIndex.latestEntryId,
+            requestedLeafId,
           ),
         };
       };
@@ -1359,7 +1370,6 @@ export class SessionIndex {
       outline: indexed.historyIndex.outline,
       branchTopology: branchTopologyFromDescriptors(
         indexed.historyIndex.descriptors,
-        indexed.historyIndex.latestEntryId,
       ),
       history: {
         version: 1,

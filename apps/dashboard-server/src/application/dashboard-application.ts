@@ -1389,21 +1389,12 @@ export class DashboardApplication {
       const complete =
         runtime.session.entriesComplete === true &&
         entries.length === runtime.session.entries.length;
-      const activeLeafId = runtime
-        ? (runtimeLeafId(runtime) ??
-          (typeof entries.at(-1) === 'object' && entries.at(-1) !== null
-            ? ((entries.at(-1) as { id?: unknown }).id as string | undefined)
-            : undefined))
-        : undefined;
+      const activeLeafId = runtimeLeafId(runtime);
       return {
         metadata: runtimeMetadata(runtime, indexed),
         entries: [...entries],
         entriesComplete: complete,
-        branchTopology: deriveSessionBranchTopology(
-          entries,
-          activeLeafId,
-          complete,
-        ),
+        branchTopology: deriveSessionBranchTopology(entries, activeLeafId),
         // A runtime-only page has no opaque file cursor. Do not advertise a
         // pageable older range that cannot be requested safely.
         history: {
@@ -1507,18 +1498,10 @@ export class DashboardApplication {
         ...baseMetadata,
         ...this.sessionAssociation(baseMetadata, resolvedCapture.runtime),
       };
-      const liveLeafId =
-        before === undefined
-          ? runtimeLeafId(resolvedCapture.runtime)
-          : undefined;
-      const branchTopology =
-        liveLeafId === undefined
-          ? result.branchTopology
-          : (this.sessionIndex.getBranchTopology(
-              sessionId,
-              liveLeafId,
-              resolvedCapture.runtime?.session.entries.slice(-2048),
-            ) ?? result.branchTopology);
+      // `result` retains the read's provenance: indexed topology for a
+      // persisted branch, or runtime-only topology when the live leaf is not
+      // persisted yet. Do not replace it with a second indexed lookup.
+      const branchTopology = result.branchTopology;
       const completeThroughCursor =
         before === undefined &&
         result.entriesComplete &&
