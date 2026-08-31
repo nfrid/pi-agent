@@ -130,6 +130,9 @@ async function openSession(
       body: JSON.stringify({ usage: usageValue }),
     }),
   );
+  await page.route('**/api/projects/*/icon', (route) =>
+    route.fulfill({ status: route.request().method() === 'GET' ? 404 : 204 }),
+  );
   await page.route('**/api/sessions/session-usage/delegate-history', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -158,6 +161,17 @@ async function openSession(
         },
       ],
       workspaces: [],
+      projects: [
+        {
+          id: 'project-usage',
+          title: 'Usage project',
+          rootPath: '/tmp/usage',
+          status: 'active',
+          maxParallelRuns: 1,
+          activeRunCount: 0,
+          updatedAt: 1,
+        },
+      ],
       sessions: [
         {
           id: 'session-usage',
@@ -451,4 +465,43 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await expect(
     settingsDrawer.getByRole('button', { name: /push/iu }),
   ).toBeVisible();
+  await expect(settingsDrawer.getByText('Usage project')).toBeVisible();
+  await expect(settingsDrawer.getByText('Choose icon')).toBeVisible();
+  await expect(
+    settingsDrawer.getByRole('button', { name: 'Automatic' }),
+  ).toBeVisible();
+  const projectIcon = settingsDrawer.locator('[data-size="small"]');
+  await expect(projectIcon).toHaveCSS('width', '26px');
+  await expect(projectIcon).toHaveCSS('height', '26px');
+  await expect
+    .poll(() =>
+      settingsDrawer.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    )
+    .toBe(true);
+
+  const uploaded = page.waitForRequest(
+    (request) =>
+      request.method() === 'PUT' &&
+      request.url().endsWith('/api/projects/project-usage/icon'),
+  );
+  const chooser = page.waitForEvent('filechooser');
+  await settingsDrawer.getByText('Choose icon').click();
+  await (await chooser).setFiles({
+    name: 'project.svg',
+    mimeType: 'image/svg+xml',
+    buffer: Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>',
+    ),
+  });
+  await uploaded;
+
+  const reset = page.waitForRequest(
+    (request) =>
+      request.method() === 'DELETE' &&
+      request.url().endsWith('/api/projects/project-usage/icon'),
+  );
+  await settingsDrawer.getByRole('button', { name: 'Automatic' }).click();
+  await reset;
 });

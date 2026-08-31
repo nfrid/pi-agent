@@ -44,7 +44,12 @@ import type {
 import { readGitContext } from './git-context.js';
 import { BridgeListener } from './http/bridge-listener.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
-import { readProjectIcon } from './project-icon.js';
+import {
+  deleteProjectIconOverride,
+  readProjectIcon,
+  readProjectIconOverride,
+  writeProjectIconOverride,
+} from './project-icon.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
@@ -254,7 +259,21 @@ export class DashboardServerImpl implements DashboardServer {
         ),
       projectIcon: async (projectId) => {
         const project = this.metadata.orchestration.getProject(projectId);
-        return project ? readProjectIcon(project.rootPath) : undefined;
+        if (!project) return undefined;
+        return (
+          (await readProjectIconOverride(this.stateDir, projectId)) ??
+          readProjectIcon(project.rootPath)
+        );
+      },
+      setProjectIcon: async (projectId, data) => {
+        if (!this.metadata.orchestration.getProject(projectId))
+          throw new Error('Project not found.');
+        await writeProjectIconOverride(this.stateDir, projectId, data);
+      },
+      resetProjectIcon: async (projectId) => {
+        if (!this.metadata.orchestration.getProject(projectId))
+          throw new Error('Project not found.');
+        await deleteProjectIconOverride(this.stateDir, projectId);
       },
       shellFeed: this.shellFeed,
       sessionFeeds: this.sessionFeeds,

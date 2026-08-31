@@ -158,6 +158,8 @@ export interface DashboardRouteContext {
   projectIcon?(
     projectId: string,
   ): Promise<{ data: Buffer; mediaType: string } | undefined>;
+  setProjectIcon?(projectId: string, data: Buffer): Promise<void>;
+  resetProjectIcon?(projectId: string): Promise<void>;
   readDelegateHistoryRun(
     id: string,
     runId: string,
@@ -285,6 +287,18 @@ async function multipartPayload(
     images.push(Buffer.from(await part.arrayBuffer()));
   }
   return { body: parsed as Record<string, unknown>, images };
+}
+
+async function projectIconPayload(request: FastifyRequest): Promise<Buffer> {
+  const raw = request.body;
+  if (!Buffer.isBuffer(raw)) throw new Error('Invalid project icon upload.');
+  const form = await new Response(new Uint8Array(raw), {
+    headers: { 'content-type': request.headers['content-type'] ?? '' },
+  }).formData();
+  const icons = form.getAll('icon');
+  if (icons.length !== 1 || typeof icons[0] === 'string')
+    throw new Error('Choose one project icon.');
+  return Buffer.from(await icons[0].arrayBuffer());
 }
 
 async function commandPayload(
@@ -631,6 +645,33 @@ export const dashboardRoutes: FastifyPluginAsync<{
         .header('x-content-type-options', 'nosniff')
         .type(icon.mediaType)
         .send(icon.data);
+    },
+  );
+  app.put<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/icon',
+    async (request, reply) => {
+      try {
+        await requireOperation(context.setProjectIcon)(
+          request.params.projectId,
+          await projectIconPayload(request),
+        );
+        return reply.code(204).send();
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.delete<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/icon',
+    async (request, reply) => {
+      try {
+        await requireOperation(context.resetProjectIcon)(
+          request.params.projectId,
+        );
+        return reply.code(204).send();
+      } catch (error) {
+        return sendError(reply, error);
+      }
     },
   );
   app.post<{ Params: { projectId: string } }>(

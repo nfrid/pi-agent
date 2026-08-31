@@ -15,6 +15,7 @@ import {
 } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { MAX_IMAGE_SIZE } from '../shared/image-attachments';
 import { errorMessage } from '../shared/lib/error-message';
 import {
   modelDisplayPreferenceKey,
@@ -27,7 +28,7 @@ import {
   type RuntimeModelOption,
 } from './model-option';
 import { PushButton } from './notifications';
-import { ProjectIcon } from './project-icon';
+import { ProjectIcon, refreshProjectIcon } from './project-icon';
 import styles from './settings.module.css';
 
 export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -291,6 +292,7 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
   const [rootPath, setRootPath] = useState('');
   const [error, setError] = useState<string>();
   const [renamingId, setRenamingId] = useState<string>();
+  const [iconPendingId, setIconPendingId] = useState<string>();
   const [title, setTitle] = useState('');
   const createMutation = useMutation(
     createProjectMutationOptions(dashboardHttpClient),
@@ -316,6 +318,42 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
       setRootPath('');
     } catch (cause) {
       setError(errorMessage(cause));
+    }
+  };
+
+  const setIcon = async (
+    projectId: string,
+    file: File,
+    input: HTMLInputElement,
+  ) => {
+    if (file.size > MAX_IMAGE_SIZE) {
+      setError('Project icons must be 5 MB or smaller.');
+      input.value = '';
+      return;
+    }
+    setError(undefined);
+    setIconPendingId(projectId);
+    try {
+      await dashboardHttpClient.setProjectIcon(projectId, file);
+      refreshProjectIcon(projectId);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      input.value = '';
+      setIconPendingId(undefined);
+    }
+  };
+
+  const resetIcon = async (projectId: string) => {
+    setError(undefined);
+    setIconPendingId(projectId);
+    try {
+      await dashboardHttpClient.resetProjectIcon(projectId);
+      refreshProjectIcon(projectId);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setIconPendingId(undefined);
     }
   };
 
@@ -387,18 +425,45 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
             </form>
           ) : (
             <div className={styles.projectRow} key={project.id}>
-              <ProjectIcon
-                projectId={project.id}
-                title={project.title}
-                size="small"
-              />
-              <span>
-                <strong>{project.title}</strong>
-                <small>{project.rootPath}</small>
+              <span className={styles.projectIdentity}>
+                <ProjectIcon
+                  projectId={project.id}
+                  title={project.title}
+                  size="small"
+                />
+                <span className={styles.projectCopy}>
+                  <strong>{project.title}</strong>
+                  <small>{project.rootPath}</small>
+                </span>
               </span>
+              <label
+                className={styles.iconPicker}
+                aria-disabled={iconPendingId !== undefined}
+              >
+                {iconPendingId === project.id ? 'Saving…' : 'Choose icon'}
+                <input
+                  type="file"
+                  accept="image/*,.ico,.svg"
+                  disabled={iconPendingId !== undefined}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (file)
+                      void setIcon(project.id, file, event.currentTarget);
+                  }}
+                />
+              </label>
               <button
                 type="button"
                 className="secondary-button"
+                disabled={iconPendingId !== undefined}
+                onClick={() => void resetIcon(project.id)}
+              >
+                Automatic
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={iconPendingId !== undefined}
                 onClick={() => {
                   setTitle(project.title);
                   setRenamingId(project.id);

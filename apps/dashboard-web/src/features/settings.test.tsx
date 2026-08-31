@@ -47,6 +47,8 @@ describe('settings drawer', () => {
     expect(markup).toContain('Custom color for openai/gpt-5');
     expect(markup).toContain('Projects');
     expect(markup).toContain('Dashboard');
+    expect(markup).toContain('Choose icon');
+    expect(markup).toContain('Automatic');
     expect(markup).toContain('Rename');
     expect(markup).not.toContain('Remove');
   });

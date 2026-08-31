@@ -1,5 +1,15 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 
 const MAX_ICON_BYTES = 5 * 1024 * 1024;
 const MAX_SOURCE_BYTES = 1024 * 1024;
@@ -57,6 +67,68 @@ const ICON_HREF_RE = /\bhref\s*:\s*["']([^"'?]+)/i;
 export interface ProjectIcon {
   data: Buffer;
   mediaType: string;
+}
+
+function overridePath(stateDir: string, projectId: string): string {
+  const name = createHash('sha256').update(projectId).digest('hex');
+  return path.join(stateDir, 'project-icons', `${name}.png`);
+}
+
+export async function readProjectIconOverride(
+  stateDir: string,
+  projectId: string,
+): Promise<ProjectIcon | undefined> {
+  const iconPath = overridePath(stateDir, projectId);
+  try {
+    const metadata = await stat(iconPath);
+    if (!metadata.isFile() || metadata.size > MAX_ICON_BYTES) return undefined;
+    return { data: await readFile(iconPath), mediaType: 'image/png' };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeProjectIconOverride(
+  stateDir: string,
+  projectId: string,
+  input: Buffer,
+): Promise<void> {
+  if (input.length === 0 || input.length > MAX_ICON_BYTES)
+    throw new Error('Project icons must be 5 MB or smaller.');
+  let data: Buffer;
+  try {
+    data = await sharp(input, {
+      failOn: 'error',
+      limitInputPixels: 16_000_000,
+    })
+      .rotate()
+      .resize({
+        width: 256,
+        height: 256,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .png()
+      .toBuffer();
+  } catch {
+    throw new Error('Choose a valid image file.');
+  }
+  const iconPath = overridePath(stateDir, projectId);
+  const temporaryPath = `${iconPath}.${randomUUID()}.tmp`;
+  await mkdir(path.dirname(iconPath), { recursive: true });
+  try {
+    await writeFile(temporaryPath, data);
+    await rename(temporaryPath, iconPath);
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
+
+export async function deleteProjectIconOverride(
+  stateDir: string,
+  projectId: string,
+): Promise<void> {
+  await rm(overridePath(stateDir, projectId), { force: true });
 }
 
 function iconHref(source: string): string | undefined {

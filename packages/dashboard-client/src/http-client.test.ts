@@ -112,6 +112,32 @@ describe('DashboardHttpClient project icons', () => {
     );
     expect(headers.get('x-dashboard-token')).toBe('test-token');
   });
+
+  it('uploads and resets custom project icons', async () => {
+    const fetch = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(null, { status: 204 }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    const file = new File(['icon'], 'icon.png', { type: 'image/png' });
+
+    await client.setProjectIcon('project/1', file);
+    await client.resetProjectIcon('project/1');
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      '/api/projects/project%2F1/icon',
+      expect.objectContaining({ method: 'PUT', body: expect.any(FormData) }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      '/api/projects/project%2F1/icon',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
 });
 
 describe('DashboardHttpClient settings requests', () => {

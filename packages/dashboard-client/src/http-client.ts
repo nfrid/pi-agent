@@ -689,6 +689,21 @@ export class DashboardHttpClient {
     return response.blob();
   }
 
+  async setProjectIcon(projectId: string, file: File): Promise<void> {
+    const body = new FormData();
+    body.append('icon', file);
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/icon`, {
+      method: 'PUT',
+      body,
+    });
+  }
+
+  async resetProjectIcon(projectId: string): Promise<void> {
+    await this.request(`/api/projects/${encodeURIComponent(projectId)}/icon`, {
+      method: 'DELETE',
+    });
+  }
+
   async delegateHistory(
     id: string,
     signal?: AbortSignal,

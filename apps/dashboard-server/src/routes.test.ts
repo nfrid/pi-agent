@@ -331,6 +331,53 @@ describe('Fastify dashboard route plugin', () => {
     expect(routeContext.projectIcon).toHaveBeenCalledWith('project-1');
   });
 
+  it('uploads and resets a custom project icon', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.setProjectIcon = vi.fn(async () => undefined);
+    routeContext.resetProjectIcon = vi.fn(async () => undefined);
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const form = new FormData();
+    form.set(
+      'icon',
+      new Blob(['custom-icon'], { type: 'image/png' }),
+      'icon.png',
+    );
+    const request = new Request('http://dashboard.test', {
+      method: 'PUT',
+      body: form,
+    });
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+
+    const uploaded = await app.inject({
+      method: 'PUT',
+      url: '/api/projects/project-1/icon',
+      headers: {
+        ...headers,
+        'content-type': request.headers.get('content-type') as string,
+      },
+      payload: Buffer.from(await request.arrayBuffer()),
+    });
+    const reset = await app.inject({
+      method: 'DELETE',
+      url: '/api/projects/project-1/icon',
+      headers,
+    });
+
+    expect(uploaded.statusCode).toBe(204);
+    expect(routeContext.setProjectIcon).toHaveBeenCalledWith(
+      'project-1',
+      Buffer.from('custom-icon'),
+    );
+    expect(reset.statusCode).toBe(204);
+    expect(routeContext.resetProjectIcon).toHaveBeenCalledWith('project-1');
+  });
+
   it('serves one selected delegate run detail with branch query pins', async () => {
     const app = Fastify();
     apps.push(app);

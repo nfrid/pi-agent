@@ -2,7 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readProjectIcon } from './project-icon.js';
+import {
+  deleteProjectIconOverride,
+  readProjectIcon,
+  readProjectIconOverride,
+  writeProjectIconOverride,
+} from './project-icon.js';
 
 const roots: string[] = [];
 
@@ -26,6 +31,33 @@ afterEach(async () => {
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true })),
   );
+});
+
+describe('project icon overrides', () => {
+  it('stores uploaded icons as bounded PNG files and deletes them', async () => {
+    const stateDir = await projectRoot();
+    const source = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="red"/></svg>',
+    );
+
+    await writeProjectIconOverride(stateDir, 'project/1', source);
+    const stored = await readProjectIconOverride(stateDir, 'project/1');
+
+    expect(stored?.mediaType).toBe('image/png');
+    expect(stored?.data.subarray(1, 4).toString()).toBe('PNG');
+    await deleteProjectIconOverride(stateDir, 'project/1');
+    expect(
+      await readProjectIconOverride(stateDir, 'project/1'),
+    ).toBeUndefined();
+  });
+
+  it('rejects invalid uploaded files', async () => {
+    const stateDir = await projectRoot();
+
+    await expect(
+      writeProjectIconOverride(stateDir, 'project-1', Buffer.from('nope')),
+    ).rejects.toThrow('valid image');
+  });
 });
 
 describe('readProjectIcon', () => {
