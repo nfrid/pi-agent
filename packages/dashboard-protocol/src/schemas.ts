@@ -1638,7 +1638,10 @@ export type SessionHistory = Static<typeof SessionHistorySchema>;
 /** One immediate user path below a branch point. No transcript payload is copied. */
 export const SessionBranchPathSchema = Type.Object(
   {
+    /** Outer JSONL entry identity used for ancestry and lifecycle operations. */
     id: IdentifierSchema,
+    /** Nested transcript/outline identity, usually message.messageId. */
+    messageId: IdentifierSchema,
     label: Type.String({ minLength: 1, maxLength: MAX_SESSION_BRANCH_LABEL }),
     lastActivityAt: Type.Optional(
       Type.Union([Type.String({ maxLength: 128 }), FiniteNumberSchema]),
@@ -1653,10 +1656,6 @@ export type SessionBranchPath = Static<typeof SessionBranchPathSchema>;
 export const SessionBranchPointSchema = Type.Object(
   {
     id: IdentifierSchema,
-    /** Choice user-entry IDs, used to mark loaded transcript entries. */
-    memberIds: Type.Readonly(
-      Type.Array(IdentifierSchema, { maxItems: MAX_SESSION_BRANCH_PATHS }),
-    ),
     paths: Type.Readonly(
       Type.Array(SessionBranchPathSchema, {
         maxItems: MAX_SESSION_BRANCH_PATHS,

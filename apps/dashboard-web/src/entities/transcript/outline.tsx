@@ -11,7 +11,7 @@ import {
 } from '../../features/timestamp';
 import {
   indexBranchPointsById,
-  indexBranchPointsByMemberId,
+  indexBranchPointsByMessageId,
 } from './branching';
 import {
   sampleTranscriptLandmarks,
@@ -70,8 +70,8 @@ export function TranscriptOutline({
     () => indexBranchPointsById(branchTopology),
     [branchTopology],
   );
-  const branchPointsByMemberId = useMemo(
-    () => indexBranchPointsByMemberId(branchTopology),
+  const branchPointsByMessageId = useMemo(
+    () => indexBranchPointsByMessageId(branchTopology),
     [branchTopology],
   );
   const selectedBranchPoint = branchPointId
@@ -147,7 +147,7 @@ export function TranscriptOutline({
     <div className="transcript-outline-list surface-scroll-region">
       {outlineLandmarks.length ? (
         outlineLandmarks.map((landmark) => {
-          const branchPoint = branchPointsByMemberId.get(landmark.key);
+          const branchPoint = branchPointsByMessageId.get(landmark.key);
           const hasBranches = Boolean(
             branchPoint && branchPoint.paths.length > 1,
           );

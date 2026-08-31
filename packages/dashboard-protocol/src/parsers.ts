@@ -1022,15 +1022,17 @@ function assertSessionBranchTopologyBound(
   );
   if (totalPaths > MAX_SESSION_BRANCH_PATHS_TOTAL)
     throw new Error('Session branch topology has too many paths.');
+  const pathIds = new Set<string>();
+  const messageIds = new Set<string>();
   for (const point of topology.points) {
-    const pathIds = new Set(point.paths.map((path) => path.id));
-    if (
-      point.memberIds.length !== point.paths.length ||
-      new Set(point.memberIds).size !== point.memberIds.length ||
-      pathIds.size !== point.paths.length ||
-      point.memberIds.some((memberId) => !pathIds.has(memberId))
-    )
-      throw new Error('Session branch topology members do not match paths.');
+    for (const path of point.paths) {
+      if (pathIds.has(path.id))
+        throw new Error('Session branch topology has duplicate path IDs.');
+      if (messageIds.has(path.messageId))
+        throw new Error('Session branch topology has duplicate message IDs.');
+      pathIds.add(path.id);
+      messageIds.add(path.messageId);
+    }
   }
 }
 

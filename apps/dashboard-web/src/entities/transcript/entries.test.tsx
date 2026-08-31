@@ -42,11 +42,20 @@ describe('transcript entries', () => {
       text: 'Choose a direction',
     };
     const point: SessionBranchPoint = {
-      id: 'root-user',
-      memberIds: ['path-a', 'path-b'],
+      id: 'root-user-entry',
       paths: [
-        { id: 'path-a', label: 'Try A', current: true },
-        { id: 'path-b', label: 'Try B', current: false },
+        {
+          id: 'path-a-entry',
+          messageId: 'path-a',
+          label: 'Try A',
+          current: true,
+        },
+        {
+          id: 'path-b-entry',
+          messageId: 'path-b',
+          label: 'Try B',
+          current: false,
+        },
       ],
     };
     const branched = renderToStaticMarkup(

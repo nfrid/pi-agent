@@ -547,16 +547,17 @@ describe('dashboard protocol', () => {
         points: [
           {
             id: 'turn-root',
-            memberIds: ['turn-a', 'turn-b'],
             paths: [
               {
-                id: 'turn-a',
+                id: 'turn-a-entry',
+                messageId: 'turn-a',
                 label: 'Try A',
                 lastActivityAt: 123,
                 current: false,
               },
               {
-                id: 'turn-b',
+                id: 'turn-b-entry',
+                messageId: 'turn-b',
                 label: 'Try B',
                 current: true,
               },
@@ -593,7 +594,6 @@ describe('dashboard protocol', () => {
           ...response.branchTopology,
           points: Array.from({ length: 4_097 }, (_, index) => ({
             id: `point-${index}`,
-            memberIds: [],
             paths: [],
           })),
         },
@@ -606,12 +606,70 @@ describe('dashboard protocol', () => {
           activeLeafId: 'turn-b',
           points: Array.from({ length: 1_025 }, (_, index) => ({
             id: `point-${index}`,
-            memberIds: [`path-${index}`],
-            paths: [{ id: `path-${index}`, label: 'path', current: false }],
+            paths: [
+              {
+                id: `path-entry-${index}`,
+                messageId: `path-${index}`,
+                label: 'path',
+                current: false,
+              },
+            ],
           })),
         },
       }),
     ).toThrow();
+    expect(() =>
+      parseSessionApiResponse({
+        ...response,
+        branchTopology: {
+          points: [
+            {
+              id: 'turn-root',
+              paths: [
+                {
+                  id: 'same-entry',
+                  messageId: 'message-a',
+                  label: 'A',
+                  current: false,
+                },
+                {
+                  id: 'same-entry',
+                  messageId: 'message-b',
+                  label: 'B',
+                  current: false,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ).toThrow('duplicate path IDs');
+    expect(() =>
+      parseSessionApiResponse({
+        ...response,
+        branchTopology: {
+          points: [
+            {
+              id: 'turn-root',
+              paths: [
+                {
+                  id: 'entry-a',
+                  messageId: 'same-message',
+                  label: 'A',
+                  current: false,
+                },
+                {
+                  id: 'entry-b',
+                  messageId: 'same-message',
+                  label: 'B',
+                  current: false,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ).toThrow('duplicate message IDs');
   });
 
   it('keeps shell transcript-free and validates bounded authoritative sessions', () => {

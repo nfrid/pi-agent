@@ -239,6 +239,28 @@ function compactOutlineText(value: unknown, limit = 220): string | undefined {
   return compactOutlineText(value.text ?? value.content, limit);
 }
 
+function outlineIdentityId(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const message = isRecord(value.message) ? value.message : value;
+  const candidateId =
+    typeof message.messageId === 'string'
+      ? message.messageId
+      : typeof message.id === 'string'
+        ? message.id
+        : typeof value.id === 'string'
+          ? value.id
+          : undefined;
+  return candidateId !== undefined &&
+    candidateId.length > 0 &&
+    candidateId.length <= 256 &&
+    ![...candidateId].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+    ? candidateId
+    : undefined;
+}
+
 function outlineFields(
   value: unknown,
   activity: TranscriptEntry,
@@ -253,24 +275,7 @@ function outlineFields(
     typeof timestamp === 'number' || typeof timestamp === 'string'
       ? { timestamp }
       : {};
-  const candidateId =
-    typeof message.messageId === 'string'
-      ? message.messageId
-      : typeof message.id === 'string'
-        ? message.id
-        : typeof value.id === 'string'
-          ? value.id
-          : undefined;
-  const outlineId =
-    candidateId !== undefined &&
-    candidateId.length > 0 &&
-    candidateId.length <= 256 &&
-    ![...candidateId].some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127;
-    })
-      ? candidateId
-      : undefined;
+  const outlineId = outlineIdentityId(value);
   const identityField = outlineId === undefined ? {} : { outlineId };
   if (message.role === 'user') {
     return {
@@ -339,7 +344,13 @@ function buildSessionOutline(
 
 type BranchDescriptor = Pick<
   SessionLineDescriptor,
-  'ordinal' | 'id' | 'parentId' | 'outlineKind' | 'outlineLabel' | 'timestamp'
+  | 'ordinal'
+  | 'id'
+  | 'parentId'
+  | 'outlineId'
+  | 'outlineKind'
+  | 'outlineLabel'
+  | 'timestamp'
 >;
 type IdentifiedBranchDescriptor = BranchDescriptor & { id: string };
 
@@ -502,17 +513,14 @@ function branchTopologyFromDescriptors(
       const latest = latestActivityById.get(candidate.id);
       return {
         id: candidate.id,
+        messageId: candidate.outlineId ?? candidate.id,
         label: candidate.outlineLabel ?? 'User turn',
         ...(latest === undefined ? {} : { lastActivityAt: latest.value }),
         current: activeLeafId !== undefined && active.has(candidate.id),
       };
     });
     totalPaths += paths.length;
-    points.push({
-      id: anchorId,
-      memberIds: paths.map((path) => path.id),
-      paths,
-    });
+    points.push({ id: anchorId, paths });
     if (points.length >= MAX_SESSION_BRANCH_POINTS) break;
   }
   return {
@@ -533,9 +541,11 @@ export function deriveSessionBranchTopology(
     if (!id) return;
     const message = isRecord(value.message) ? value.message : undefined;
     const timestamp = message?.timestamp ?? value.timestamp;
+    const outlineId = outlineIdentityId(value);
     descriptors.push({
       ordinal,
       id,
+      ...(outlineId === undefined ? {} : { outlineId }),
       ...(Object.hasOwn(value, 'parentId') ? { parentId: value.parentId } : {}),
       ...(message?.role === 'user' ? { outlineKind: 'user' as const } : {}),
       ...(message?.role === 'user'

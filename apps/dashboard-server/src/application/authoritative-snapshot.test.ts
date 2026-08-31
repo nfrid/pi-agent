@@ -805,10 +805,17 @@ describe('authoritative application snapshot lifecycle', () => {
       points: [
         {
           id: 'branch-root',
-          memberIds: ['path-a', 'path-b'],
           paths: [
-            expect.objectContaining({ id: 'path-a', current: true }),
-            expect.objectContaining({ id: 'path-b', current: false }),
+            expect.objectContaining({
+              id: 'path-a',
+              messageId: 'path-a',
+              current: true,
+            }),
+            expect.objectContaining({
+              id: 'path-b',
+              messageId: 'path-b',
+              current: false,
+            }),
           ],
         },
       ],
