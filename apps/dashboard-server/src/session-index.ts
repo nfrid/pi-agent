@@ -12,7 +12,13 @@ import {
 import {
   deriveSessionTitle,
   isRecord,
+  MAX_SESSION_BRANCH_PATHS,
+  MAX_SESSION_BRANCH_PATHS_TOTAL,
+  MAX_SESSION_BRANCH_POINTS,
   redactImageData,
+  type SessionBranchPath,
+  type SessionBranchPoint,
+  type SessionBranchTopology,
   type SessionIndexEntry,
   type SessionOutlineLandmark,
   validateSessionName,
@@ -96,6 +102,8 @@ export interface SessionEntriesResult {
   history: SessionHistoryPage;
   /** Complete lightweight transcript outline; payloads remain paginated. */
   outline?: readonly SessionOutlineLandmark[];
+  /** Bounded immediate user paths; transcript payloads are not duplicated. */
+  branchTopology?: SessionBranchTopology;
 }
 
 export interface SessionReadOptions {
@@ -329,6 +337,191 @@ function buildSessionOutline(
     .slice(0, MAX_SESSION_OUTLINE);
 }
 
+type BranchDescriptor = Pick<
+  SessionLineDescriptor,
+  'ordinal' | 'id' | 'parentId' | 'outlineKind' | 'outlineLabel' | 'timestamp'
+>;
+
+function timestampNumber(
+  value: number | string | undefined,
+): number | undefined {
+  if (typeof value === 'number')
+    return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function branchTopologyFromDescriptors(
+  descriptors: readonly BranchDescriptor[],
+  activeLeafId?: string,
+  includeLaterTurnCount = true,
+): SessionBranchTopology {
+  const byId = new Map<string, BranchDescriptor>();
+  const children = new Map<string, BranchDescriptor[]>();
+  for (const descriptor of descriptors) {
+    if (!descriptor.id || byId.has(descriptor.id)) continue;
+    byId.set(descriptor.id, descriptor);
+  }
+  for (const descriptor of byId.values()) {
+    if (
+      typeof descriptor.parentId !== 'string' ||
+      !byId.has(descriptor.parentId)
+    )
+      continue;
+    const siblings = children.get(descriptor.parentId) ?? [];
+    siblings.push(descriptor);
+    children.set(descriptor.parentId, siblings);
+  }
+
+  const active = new Set<string>();
+  if (activeLeafId && byId.has(activeLeafId)) {
+    let current: BranchDescriptor | undefined = byId.get(activeLeafId);
+    while (current?.id && !active.has(current.id)) {
+      active.add(current.id);
+      current =
+        typeof current.parentId === 'string'
+          ? byId.get(current.parentId)
+          : undefined;
+    }
+  }
+
+  const points: SessionBranchPoint[] = [];
+  let totalPaths = 0;
+  for (const anchor of descriptors) {
+    if (anchor.outlineKind !== 'user' || !anchor.id) continue;
+    const paths = new Map<string, BranchDescriptor>();
+    const visitedImmediate = new Set<string>();
+    const queue = [...(children.get(anchor.id) ?? [])];
+    while (queue.length > 0 && paths.size < MAX_SESSION_BRANCH_PATHS) {
+      const candidate = queue.shift();
+      if (!candidate?.id || visitedImmediate.has(candidate.id)) continue;
+      visitedImmediate.add(candidate.id);
+      if (candidate.outlineKind === 'user') {
+        paths.set(candidate.id, candidate);
+        continue;
+      }
+      queue.push(...(children.get(candidate.id) ?? []));
+    }
+    if (paths.size < 2 || totalPaths >= MAX_SESSION_BRANCH_PATHS_TOTAL)
+      continue;
+
+    const pathValues: SessionBranchPath[] = [];
+    for (const candidate of paths.values()) {
+      if (pathValues.length >= MAX_SESSION_BRANCH_PATHS_TOTAL - totalPaths)
+        break;
+      const subtree = [candidate];
+      const visitedSubtree = new Set<string>();
+      let laterTurnCount = 0;
+      let lastActivity: { value: number | string; sort: number } | undefined;
+      for (let cursor = 0; cursor < subtree.length; cursor += 1) {
+        const node = subtree[cursor];
+        if (!node?.id || visitedSubtree.has(node.id)) continue;
+        visitedSubtree.add(node.id);
+        if (node !== candidate && node.outlineKind === 'user')
+          laterTurnCount = Math.min(
+            MAX_SESSION_BRANCH_POINTS,
+            laterTurnCount + 1,
+          );
+        const sort = timestampNumber(node.timestamp);
+        if (
+          sort !== undefined &&
+          (lastActivity === undefined || sort >= lastActivity.sort)
+        )
+          lastActivity = { value: node.timestamp as number | string, sort };
+        if (node.id) subtree.push(...(children.get(node.id) ?? []));
+      }
+      pathValues.push({
+        id: candidate.id as string,
+        label: candidate.outlineLabel ?? 'User turn',
+        ...(includeLaterTurnCount ? { laterTurnCount } : {}),
+        ...(lastActivity === undefined
+          ? {}
+          : { lastActivityAt: lastActivity.value }),
+        current: active.has(candidate.id as string),
+      });
+    }
+    pathValues.sort(
+      (left, right) =>
+        (byId.get(left.id)?.ordinal ?? 0) - (byId.get(right.id)?.ordinal ?? 0),
+    );
+    if (pathValues.length < 2) continue;
+    totalPaths += pathValues.length;
+    points.push({ id: anchor.id, paths: pathValues });
+    if (points.length >= MAX_SESSION_BRANCH_POINTS) break;
+  }
+  return {
+    ...(activeLeafId ? { activeLeafId } : {}),
+    points: points.slice(0, MAX_SESSION_BRANCH_POINTS),
+  };
+}
+
+/** Derive only bounded branch metadata from a persisted or runtime entry list. */
+export function deriveSessionBranchTopology(
+  entries: readonly unknown[],
+  activeLeafId?: string,
+  includeLaterTurnCount = true,
+): SessionBranchTopology {
+  const descriptors: BranchDescriptor[] = [];
+  entries.forEach((value, ordinal) => {
+    if (!isRecord(value)) return;
+    const id = typeof value.id === 'string' ? value.id : undefined;
+    if (!id) return;
+    const message = isRecord(value.message) ? value.message : undefined;
+    const timestamp = message?.timestamp ?? value.timestamp;
+    descriptors.push({
+      ordinal,
+      id,
+      ...(Object.hasOwn(value, 'parentId') ? { parentId: value.parentId } : {}),
+      ...(message?.role === 'user' ? { outlineKind: 'user' as const } : {}),
+      ...(message?.role === 'user'
+        ? {
+            outlineLabel: compactOutlineText(message.content) ?? 'User turn',
+          }
+        : {}),
+      ...(typeof timestamp === 'number' || typeof timestamp === 'string'
+        ? { timestamp }
+        : {}),
+    });
+  });
+  return branchTopologyFromDescriptors(
+    descriptors,
+    activeLeafId,
+    includeLaterTurnCount,
+  );
+}
+
+function overlayCurrentBranchPaths(
+  topology: SessionBranchTopology,
+  current: SessionBranchTopology,
+): SessionBranchTopology {
+  const currentByPoint = new Map(
+    current.points.map((point) => [
+      point.id,
+      new Set(
+        point.paths.filter((path) => path.current).map((path) => path.id),
+      ),
+    ]),
+  );
+  return {
+    ...topology,
+    points: topology.points.map((point) => {
+      const currentIds = currentByPoint.get(point.id);
+      return currentIds === undefined
+        ? point
+        : {
+            ...point,
+            paths: point.paths.map((path) => ({
+              ...path,
+              current: currentIds.has(path.id),
+            })),
+          };
+    }),
+  };
+}
+
 function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
   if (!isRecord(value)) return undefined;
   if (value.type === 'model_change') {
@@ -503,6 +696,25 @@ export class SessionIndex {
   isAuxiliary(id: string): boolean {
     const entry = this.files.get(id);
     return entry ? this.isAuxiliaryFile(entry.file) : false;
+  }
+
+  /** Return compact topology for a known session without exposing its file. */
+  getBranchTopology(
+    id: string,
+    activeLeafId?: string,
+    activeEntries?: readonly unknown[],
+  ): SessionBranchTopology | undefined {
+    const indexed = this.files.get(id);
+    if (!indexed) return undefined;
+    const topology = branchTopologyFromDescriptors(
+      indexed.historyIndex.descriptors,
+      activeLeafId ?? indexed.historyIndex.latestEntryId,
+    );
+    if (!activeEntries) return topology;
+    return overlayCurrentBranchPaths(
+      topology,
+      deriveSessionBranchTopology(activeEntries, activeLeafId),
+    );
   }
 
   private async currentIndexedFile(id: string): Promise<IndexedFile> {
@@ -706,6 +918,11 @@ export class SessionIndex {
       branch.leafId === undefined && requestedLeaf === undefined
         ? index.outline
         : buildSessionOutline(descriptors, groups);
+    const activeLeafId = branch.leafId ?? requestedLeaf ?? index.latestEntryId;
+    const branchTopology = branchTopologyFromDescriptors(
+      index.descriptors,
+      activeLeafId,
+    );
     let end = descriptors.length;
     if (cursor) {
       const boundary = descriptors[cursor.selectedOrdinal];
@@ -780,6 +997,7 @@ export class SessionIndex {
       entries,
       entriesComplete: before === undefined && selection.start === 0,
       outline,
+      branchTopology,
       history: {
         version: 1,
         start: selection.start,
@@ -985,7 +1203,14 @@ export class SessionIndex {
           entriesTruncated: _entriesTruncated,
           ...response
         } = result;
-        return { ...response, outline: indexed.historyIndex.outline };
+        return {
+          ...response,
+          outline: indexed.historyIndex.outline,
+          branchTopology: branchTopologyFromDescriptors(
+            indexed.historyIndex.descriptors,
+            result.leafId ?? indexed.historyIndex.latestEntryId,
+          ),
+        };
       };
       if (!resolveLatestLeaf)
         return publicBranchResult(
@@ -1132,6 +1357,10 @@ export class SessionIndex {
       entries: page.map((item) => item.entry),
       entriesComplete,
       outline: indexed.historyIndex.outline,
+      branchTopology: branchTopologyFromDescriptors(
+        indexed.historyIndex.descriptors,
+        indexed.historyIndex.latestEntryId,
+      ),
       history: {
         version: 1,
         start,

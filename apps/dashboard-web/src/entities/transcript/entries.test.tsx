@@ -1,3 +1,4 @@
+import type { SessionBranchPoint } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
@@ -30,6 +31,40 @@ describe('transcript entries', () => {
     expect(markup).toContain('This needs a guarded cleanup.');
     expect(markup).not.toContain('preparing-toolcall');
     expect(markup).not.toContain('preparing tool call');
+  });
+
+  it('shows a path indicator only for user bubbles with multiple immediate paths', () => {
+    const item: TranscriptModelItem = {
+      key: 'branched-user',
+      raw: {},
+      entry: { kind: 'other' },
+      role: 'user',
+      text: 'Choose a direction',
+    };
+    const point: SessionBranchPoint = {
+      id: 'branched-user',
+      paths: [
+        { id: 'path-a', label: 'Try A', laterTurnCount: 0, current: true },
+        { id: 'path-b', label: 'Try B', laterTurnCount: 1, current: false },
+      ],
+    };
+    const branched = renderToStaticMarkup(
+      <TranscriptEntry
+        item={item}
+        branchPoint={point}
+        onOpenBranchPaths={() => undefined}
+      />,
+    );
+    expect(branched).toContain('transcript-branch-indicator');
+    expect(branched).toContain('Show 2 paths from this message');
+    expect(
+      renderToStaticMarkup(
+        <TranscriptEntry
+          item={item}
+          branchPoint={{ ...point, paths: point.paths.slice(0, 1) }}
+        />,
+      ),
+    ).not.toContain('transcript-branch-indicator');
   });
 
   it('shows short thinking directly and collapses only longer thinking sequences', () => {

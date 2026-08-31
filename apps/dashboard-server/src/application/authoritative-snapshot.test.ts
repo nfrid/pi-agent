@@ -754,6 +754,66 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(snapshot.completeThroughCursor).toBe(false);
   });
 
+  it('uses the live runtime leaf for the persisted branch and topology', async () => {
+    const f = await fixture('live-branch-session', [
+      {
+        type: 'session',
+        id: 'live-branch-session',
+        cwd: '/tmp/snapshot',
+      },
+      {
+        type: 'message',
+        id: 'branch-root',
+        parentId: null,
+        message: { role: 'user', content: 'Choose' },
+      },
+      {
+        type: 'message',
+        id: 'path-a',
+        parentId: 'branch-root',
+        message: { role: 'user', content: 'A' },
+      },
+      {
+        type: 'message',
+        id: 'path-b',
+        parentId: 'branch-root',
+        message: { role: 'user', content: 'B' },
+      },
+    ]);
+    f.register(
+      runtime(f.file, {
+        liveState: 'idle',
+        session: {
+          id: 'live-branch-session',
+          file: f.file,
+          cwd: '/tmp/snapshot',
+          entries: [],
+          entriesComplete: false,
+          leafId: 'path-a',
+        } as unknown as RuntimeSnapshot['session'],
+      }),
+    );
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-live-branch',
+      'live-branch-session',
+    );
+    expect(
+      snapshot.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(['live-branch-session', 'branch-root', 'path-a']);
+    expect(snapshot.branchTopology).toMatchObject({
+      activeLeafId: 'path-a',
+      points: [
+        {
+          id: 'branch-root',
+          paths: [
+            expect.objectContaining({ id: 'path-a', current: true }),
+            expect.objectContaining({ id: 'path-b', current: false }),
+          ],
+        },
+      ],
+    });
+  });
+
   it('does not overclaim compact runtime fallback, and keeps before pagination separate', async () => {
     const f = await fixture();
     const compact = runtime(f.file);

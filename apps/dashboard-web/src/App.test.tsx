@@ -552,6 +552,37 @@ describe('dashboard snapshots', () => {
     });
   });
 
+  it('accepts bounded read-only branch topology without transcript payload copies', () => {
+    const response = asSessionResponse({
+      metadata: { id: 's1', file: '', cwd: '/tmp', updatedAt: 1 },
+      entries: [],
+      branchTopology: {
+        activeLeafId: 'path-a',
+        points: [
+          {
+            id: 'root-user',
+            paths: [
+              {
+                id: 'path-a',
+                label: 'Try A',
+                laterTurnCount: 0,
+                current: true,
+              },
+              {
+                id: 'path-b',
+                label: 'Try B',
+                laterTurnCount: 1,
+                current: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(response?.branchTopology?.points[0]?.paths).toHaveLength(2);
+    expect(response?.branchTopology?.activeLeafId).toBe('path-a');
+  });
+
   it('rejects malformed and legacy runtime snapshots', () => {
     expect(asBrowserSnapshot({ runtimeId: 'runtime-1' })).toBeUndefined();
     expect(

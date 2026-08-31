@@ -1,3 +1,7 @@
+import type {
+  SessionBranchPoint,
+  SessionBranchTopology,
+} from '@pi-dashboard/protocol';
 import type { RefObject } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SurfaceStack, SurfaceStats } from '../../features/surface-stack';
@@ -30,14 +34,22 @@ function landmarkTime(
 
 export function TranscriptOutline({
   landmarks,
+  branchTopology,
+  branchPointId,
   open = false,
   onOpenChange,
+  onOpenBranchPaths,
+  onBranchPointChange,
   onJump,
   scrollElementRef,
 }: {
   landmarks: readonly TranscriptLandmark[];
+  branchTopology?: SessionBranchTopology;
+  branchPointId?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onOpenBranchPaths?: (point: SessionBranchPoint) => void;
+  onBranchPointChange?: (pointId: string | undefined) => void;
   onJump: (landmark: TranscriptLandmark) => void;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
@@ -50,6 +62,14 @@ export function TranscriptOutline({
     [landmarks],
   );
   const [activeKey, setActiveKey] = useState(minimapLandmarks[0]?.key);
+  const branchPointsById = useMemo(
+    () =>
+      new Map((branchTopology?.points ?? []).map((point) => [point.id, point])),
+    [branchTopology],
+  );
+  const selectedBranchPoint = branchPointId
+    ? branchPointsById.get(branchPointId)
+    : undefined;
   const outlineLandmarksRef = useRef(outlineLandmarks);
   const minimapLandmarksRef = useRef(minimapLandmarks);
   outlineLandmarksRef.current = outlineLandmarks;
@@ -119,30 +139,115 @@ export function TranscriptOutline({
   const list = (
     <div className="transcript-outline-list surface-scroll-region">
       {outlineLandmarks.length ? (
-        outlineLandmarks.map((landmark) => (
-          <button
-            type="button"
-            className={`surface-row transcript-outline-item outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}${landmark.variant ? ` outline-${landmark.variant}` : ''}`}
-            key={landmark.key}
-            onClick={() => {
-              onJump(landmark);
-              onOpenChange?.(false);
-            }}
-            aria-label={landmark.label}
-          >
-            <DashboardTime
-              className="transcript-outline-time"
-              timestamp={landmark.timestamp}
-            />
-            <i aria-hidden="true" />
-            <span>{landmark.label}</span>
-          </button>
-        ))
+        outlineLandmarks.map((landmark) => {
+          const branchPoint = branchPointsById.get(landmark.key);
+          const hasBranches = Boolean(
+            branchPoint && branchPoint.paths.length > 1,
+          );
+          return (
+            <div
+              className={`surface-row transcript-outline-item outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}${landmark.variant ? ` outline-${landmark.variant}` : ''}`}
+              key={landmark.key}
+            >
+              <button
+                type="button"
+                className="transcript-outline-jump"
+                onClick={() => {
+                  onJump(landmark);
+                  onOpenChange?.(false);
+                }}
+                aria-label={`Jump to ${landmark.label}`}
+              >
+                <DashboardTime
+                  className="transcript-outline-time"
+                  timestamp={landmark.timestamp}
+                />
+                <i aria-hidden="true" />
+                <span>{landmark.label}</span>
+              </button>
+              {hasBranches ? (
+                <button
+                  type="button"
+                  className="transcript-branch-indicator transcript-outline-branch-indicator"
+                  aria-haspopup="dialog"
+                  aria-label={`Show ${branchPoint?.paths.length} immediate paths from ${landmark.label}`}
+                  title={`Show ${branchPoint?.paths.length} immediate paths`}
+                  data-branch-count={branchPoint?.paths.length}
+                  onClick={() =>
+                    onOpenBranchPaths?.(branchPoint as SessionBranchPoint)
+                  }
+                >
+                  <span aria-hidden="true">⑂</span> {branchPoint?.paths.length}
+                </button>
+              ) : null}
+            </div>
+          );
+        })
       ) : (
         <p className="muted">No transcript landmarks yet.</p>
       )}
     </div>
   );
+  const pages = [
+    {
+      id: 'transcript-outline',
+      title: 'Transcript outline',
+      eyebrow: 'Transcript outline',
+      hideTitle: true,
+      headerSummary: 'Navigate transcript landmarks',
+      headerContent: (
+        <SurfaceStats
+          className="work-header-stats"
+          showZero
+          stats={[{ label: 'landmarks', value: outlineLandmarks.length }]}
+        />
+      ),
+      children: <div className="work-surface-content">{list}</div>,
+    },
+    ...(selectedBranchPoint
+      ? [
+          {
+            id: `transcript-branch-${selectedBranchPoint.id}`,
+            title: 'Immediate paths',
+            eyebrow: 'Read-only branch paths',
+            headerSummary: 'Paths from this user message',
+            headerContent: (
+              <SurfaceStats
+                className="work-header-stats"
+                showZero
+                stats={[
+                  { label: 'paths', value: selectedBranchPoint.paths.length },
+                ]}
+              />
+            ),
+            children: (
+              <div className="work-surface-content transcript-branch-path-list">
+                {selectedBranchPoint.paths.map((path) => (
+                  <div className="transcript-branch-path" key={path.id}>
+                    <div className="transcript-branch-path-heading">
+                      <strong>{path.current ? 'Current path' : 'Path'}</strong>
+                      {path.lastActivityAt !== undefined ? (
+                        <DashboardTime
+                          className="transcript-time"
+                          timestamp={path.lastActivityAt}
+                        />
+                      ) : null}
+                    </div>
+                    <span>{path.label}</span>
+                    {path.laterTurnCount !== undefined ? (
+                      <small>
+                        {path.laterTurnCount} later turn
+                        {path.laterTurnCount === 1 ? '' : 's'}
+                      </small>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ),
+          },
+        ]
+      : []),
+  ];
   return (
     <>
       <aside className="transcript-minimap" aria-label="Transcript outline">
@@ -169,25 +274,13 @@ export function TranscriptOutline({
       <SurfaceStack
         isOpen={open}
         kind="work"
-        pages={[
-          {
-            id: 'transcript-outline',
-            title: 'Transcript outline',
-            eyebrow: 'Transcript outline',
-            hideTitle: true,
-            headerSummary: 'Navigate transcript landmarks',
-            headerContent: (
-              <SurfaceStats
-                className="work-header-stats"
-                showZero
-                stats={[{ label: 'landmarks', value: outlineLandmarks.length }]}
-              />
-            ),
-            children: <div className="work-surface-content">{list}</div>,
-          },
-        ]}
+        pages={pages}
         className="surface-drawer work-surface-drawer outline-sheet"
         onDepthChange={(depth) => {
+          if (depth < 2 && selectedBranchPoint) {
+            onBranchPointChange?.(undefined);
+            return;
+          }
           if (depth < 1) onOpenChange?.(false);
         }}
         onClose={() => onOpenChange?.(false)}

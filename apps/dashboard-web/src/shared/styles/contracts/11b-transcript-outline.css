@@ -3,7 +3,8 @@
   min-height: 0;
 }
 .transcript-outline-item {
-  display: block;
+  display: flex;
+  align-items: center;
   min-width: 0;
   border-right: 0;
   border-left: 0;
@@ -24,9 +25,25 @@
   content: "";
 }
 .transcript-outline-item:hover,
-.transcript-outline-item:focus-visible {
+.transcript-outline-item:focus-within {
   background: color-mix(in srgb, var(--purple) 10%, transparent);
   color: var(--fg);
+}
+.transcript-outline-jump {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.transcript-outline-jump:focus-visible,
+.transcript-outline-branch-indicator:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: -2px;
 }
 .transcript-outline-item i {
   display: inline-block;
@@ -63,6 +80,64 @@
   color: var(--dim);
   font-size: 9px;
   white-space: nowrap;
+}
+.transcript-branch-indicator {
+  border: 1px solid color-mix(in srgb, var(--purple) 45%, var(--line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--purple) 10%, transparent);
+  color: var(--purple);
+  font-size: 9px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.message-bubble {
+  position: relative;
+}
+.message-bubble.message-has-branches {
+  padding-bottom: 30px;
+}
+.message-bubble .transcript-branch-indicator {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+.message-bubble .transcript-branch-indicator:hover,
+.message-bubble .transcript-branch-indicator:focus-visible {
+  background: color-mix(in srgb, var(--purple) 20%, transparent);
+  color: var(--fg);
+}
+.transcript-outline-branch-indicator {
+  flex: 0 0 auto;
+  margin-inline-start: 8px;
+  padding: 1px 4px;
+  cursor: pointer;
+}
+.transcript-branch-path-list {
+  display: grid;
+  gap: 1px;
+}
+.transcript-branch-path {
+  display: grid;
+  gap: 5px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 12px 18px;
+  color: var(--muted);
+}
+.transcript-branch-path:last-child {
+  border-bottom: 0;
+}
+.transcript-branch-path-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg);
+}
+.transcript-branch-path small {
+  color: var(--dim);
+  font-size: 9px;
 }
 .outline-sheet .surface-drawer-body {
   flex: 0 1 auto;

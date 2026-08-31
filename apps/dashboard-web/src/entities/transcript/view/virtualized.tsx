@@ -1,5 +1,7 @@
 import type {
   RuntimeSnapshot,
+  SessionBranchPoint,
+  SessionBranchTopology,
   SessionOutlineLandmark,
 } from '@pi-dashboard/protocol';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -32,6 +34,10 @@ export function VirtualizedTranscript({
   setOpen,
   runtime,
   outline,
+  branchTopology,
+  branchPointId,
+  onOpenBranchPaths,
+  onBranchPointChange,
   onJumpToLandmark,
   tailScrollRequest,
   outlineOpen,
@@ -48,6 +54,10 @@ export function VirtualizedTranscript({
   setOpen: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
   outline?: readonly SessionOutlineLandmark[];
+  branchTopology?: SessionBranchTopology;
+  branchPointId?: string;
+  onOpenBranchPaths?: (point: SessionBranchPoint) => void;
+  onBranchPointChange?: (pointId: string | undefined) => void;
   onJumpToLandmark?: (
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
@@ -116,6 +126,11 @@ export function VirtualizedTranscript({
   const landmarks = useMemo<TranscriptLandmark[]>(
     () => mergeTranscriptLandmarks(loadedLandmarks, outline),
     [loadedLandmarks, outline],
+  );
+  const branchPointsById = useMemo(
+    () =>
+      new Map((branchTopology?.points ?? []).map((point) => [point.id, point])),
+    [branchTopology],
   );
   const rowIndexByKey = useMemo(() => {
     const result = new Map<string, number>();
@@ -200,6 +215,10 @@ export function VirtualizedTranscript({
     <div className="transcript transcript-virtualized">
       <TranscriptOutline
         landmarks={landmarks}
+        branchTopology={branchTopology}
+        branchPointId={branchPointId}
+        onOpenBranchPaths={onOpenBranchPaths}
+        onBranchPointChange={onBranchPointChange}
         open={outlineOpen}
         onOpenChange={onOutlineOpenChange}
         onJump={jumpToLandmark}
@@ -231,7 +250,16 @@ export function VirtualizedTranscript({
                 renderToolStream(row.start, row.end, row.key)
               ) : (
                 <div data-transcript-key={items[row.index]?.key}>
-                  <TranscriptEntry item={items[row.index]} cwd={runtime?.cwd} />
+                  <TranscriptEntry
+                    item={items[row.index]}
+                    cwd={runtime?.cwd}
+                    branchPoint={
+                      items[row.index]?.role === 'user'
+                        ? branchPointsById.get(items[row.index]?.key ?? '')
+                        : undefined
+                    }
+                    onOpenBranchPaths={onOpenBranchPaths}
+                  />
                 </div>
               )}
             </div>
