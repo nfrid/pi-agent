@@ -104,24 +104,6 @@ async function containedIcon(
   return containedFile(root, relativePath);
 }
 
-async function configuredIcon(root: string): Promise<string | undefined> {
-  const configPath = await containedFile(root, 't3.json');
-  if (!configPath) return undefined;
-  try {
-    const metadata = await stat(configPath);
-    if (metadata.size > MAX_SOURCE_BYTES) return undefined;
-    const value = JSON.parse(await readFile(configPath, 'utf8')) as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-      return undefined;
-    const iconPath = (value as { iconPath?: unknown }).iconPath;
-    return typeof iconPath === 'string'
-      ? containedIcon(root, iconPath.trim())
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function sourceIcon(root: string): Promise<string | undefined> {
   for (const relativePath of ICON_SOURCE_FILES) {
     const sourcePath = await containedFile(root, relativePath);
@@ -150,13 +132,10 @@ export async function readProjectIcon(
   } catch {
     return undefined;
   }
-  const configured = await configuredIcon(root);
-  let iconPath = configured;
-  if (!iconPath) {
-    for (const candidate of ICON_CANDIDATES) {
-      iconPath = await containedIcon(root, candidate);
-      if (iconPath) break;
-    }
+  let iconPath: string | undefined;
+  for (const candidate of ICON_CANDIDATES) {
+    iconPath = await containedIcon(root, candidate);
+    if (iconPath) break;
   }
   iconPath ??= await sourceIcon(root);
   if (!iconPath) return undefined;
