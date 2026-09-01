@@ -2,7 +2,7 @@ import { isRecord } from './utils.js';
 
 export { SESSION_NAME_MAX_LENGTH } from './limits.js';
 
-export const SESSION_TITLE_MAX_LENGTH = 96;
+export const SESSION_TITLE_MAX_LENGTH = 192;
 
 const SKILL_ENVELOPE_RE =
   /<skill name="([^"\r\n]+)" location="[^"\r\n]+">\r?\n[\s\S]*?\r?\n<\/skill>/gu;
