@@ -90,9 +90,12 @@
 .tool-stream-phase-coordinate {
   color: var(--pink);
 }
-.tool-stream-phase-other,
-.tool-stream-phase-separator {
+.tool-stream-phase-other {
   color: var(--fg);
+}
+.tool-stream-phase-separator,
+.tool-stream-phase-overflow {
+  color: var(--dim);
 }
 .tool-stream-metadata-separator,
 .tool-stream-metadata-duration {

@@ -123,15 +123,12 @@ export function TranscriptToolStream({
   const hiddenHistoryCount = history.length - collapsedHistory.length;
   const summary = toolStreamMetadata(tools);
   const phases = activityPhases(tools);
-  const phaseOccurrences = new Map<string, number>();
-  const renderedPhases = phases.map((phase) => {
-    const occurrence = (phaseOccurrences.get(phase) ?? 0) + 1;
-    phaseOccurrences.set(phase, occurrence);
-    return { phase, key: `${phase}:${occurrence}` };
-  });
+  const phaseMix = [...new Set(phases)];
+  const displayedPhases = phaseMix.slice(0, 3);
+  const hiddenPhaseCount = phaseMix.length - displayedPhases.length;
   const phaseLabel =
     tools.length > 0
-      ? phases.map(toolStreamPhaseLabel).join(' → ')
+      ? phaseMix.map(toolStreamPhaseLabel).join(' · ')
       : 'Thinking';
   const metadataTitle = [
     phaseLabel,
@@ -227,14 +224,14 @@ export function TranscriptToolStream({
         <small className="tool-stream-metadata" title={metadataTitle}>
           {tools.length > 0 ? (
             <span className="tool-stream-metadata-phases">
-              {renderedPhases.map(({ phase, key }, index) => (
-                <span key={key}>
+              {displayedPhases.map((phase, index) => (
+                <span key={phase}>
                   {index > 0 ? (
                     <span
                       className="tool-stream-phase-separator"
                       aria-hidden="true"
                     >
-                      {' → '}
+                      {' · '}
                     </span>
                   ) : null}
                   <span
@@ -244,6 +241,19 @@ export function TranscriptToolStream({
                   </span>
                 </span>
               ))}
+              {hiddenPhaseCount > 0 ? (
+                <>
+                  <span
+                    className="tool-stream-phase-separator"
+                    aria-hidden="true"
+                  >
+                    {' · '}
+                  </span>
+                  <span className="tool-stream-phase-overflow">
+                    +{hiddenPhaseCount} type{hiddenPhaseCount === 1 ? '' : 's'}
+                  </span>
+                </>
+              ) : null}
             </span>
           ) : (
             <span className="tool-stream-phase tool-stream-phase-thinking">

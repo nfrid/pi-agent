@@ -587,7 +587,7 @@ describe('tool row views and virtual transcript construction', () => {
     ]);
   });
 
-  it('renders ordered phases, counts, changes, duration, and failure metadata', () => {
+  it('renders a deduplicated and capped phase mix with stream metadata', () => {
     const html = renderToStaticMarkup(
       createElement(TranscriptToolStream, {
         items: toTranscriptEntries([
@@ -613,6 +613,10 @@ describe('tool row views and virtual transcript construction', () => {
             },
           },
           { type: 'tool', tool: { toolCallId: 'meta-4', name: 'grep' } },
+          {
+            type: 'tool',
+            tool: { toolCallId: 'meta-5', name: 'delegate' },
+          },
         ]),
         expanded: false,
         previewStartCount: 1,
@@ -626,6 +630,11 @@ describe('tool row views and virtual transcript construction', () => {
     expect(html).toContain('Inspected');
     expect(html).toContain('Edited');
     expect(html).toContain('Ran');
+    expect(html).toContain('+1 type');
+    expect(html.match(/tool-stream-phase-inspect/g)).toHaveLength(1);
+    expect(html).not.toContain(' → ');
+    expect(html).not.toContain('tool-stream-phase-coordinate');
+    expect(html).toContain('Coordinated');
     expect(html).not.toContain('tool-stream-metadata-status');
     expect(html).not.toContain('tool-stream-status-failed');
     expect(html).not.toContain('tool-stream-metadata-thoughts');
