@@ -587,7 +587,7 @@ describe('tool row views and virtual transcript construction', () => {
     ]);
   });
 
-  it('renders a deduplicated and capped phase mix with stream metadata', () => {
+  it('renders every unique phase once with stream metadata', () => {
     const html = renderToStaticMarkup(
       createElement(TranscriptToolStream, {
         items: toTranscriptEntries([
@@ -630,10 +630,9 @@ describe('tool row views and virtual transcript construction', () => {
     expect(html).toContain('Inspected');
     expect(html).toContain('Edited');
     expect(html).toContain('Ran');
-    expect(html).toContain('+1 type');
     expect(html.match(/tool-stream-phase-inspect/g)).toHaveLength(1);
     expect(html).not.toContain(' → ');
-    expect(html).not.toContain('tool-stream-phase-coordinate');
+    expect(html).toContain('tool-stream-phase-coordinate');
     expect(html).toContain('Coordinated');
     expect(html).not.toContain('tool-stream-metadata-status');
     expect(html).not.toContain('tool-stream-status-failed');

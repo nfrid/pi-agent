@@ -93,8 +93,7 @@
 .tool-stream-phase-other {
   color: var(--fg);
 }
-.tool-stream-phase-separator,
-.tool-stream-phase-overflow {
+.tool-stream-phase-separator {
   color: var(--dim);
 }
 .tool-stream-metadata-separator,

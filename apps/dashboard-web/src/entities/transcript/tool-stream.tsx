@@ -124,8 +124,6 @@ export function TranscriptToolStream({
   const summary = toolStreamMetadata(tools);
   const phases = activityPhases(tools);
   const phaseMix = [...new Set(phases)];
-  const displayedPhases = phaseMix.slice(0, 3);
-  const hiddenPhaseCount = phaseMix.length - displayedPhases.length;
   const phaseLabel =
     tools.length > 0
       ? phaseMix.map(toolStreamPhaseLabel).join(' · ')
@@ -224,7 +222,7 @@ export function TranscriptToolStream({
         <small className="tool-stream-metadata" title={metadataTitle}>
           {tools.length > 0 ? (
             <span className="tool-stream-metadata-phases">
-              {displayedPhases.map((phase, index) => (
+              {phaseMix.map((phase, index) => (
                 <span key={phase}>
                   {index > 0 ? (
                     <span
@@ -241,19 +239,6 @@ export function TranscriptToolStream({
                   </span>
                 </span>
               ))}
-              {hiddenPhaseCount > 0 ? (
-                <>
-                  <span
-                    className="tool-stream-phase-separator"
-                    aria-hidden="true"
-                  >
-                    {' · '}
-                  </span>
-                  <span className="tool-stream-phase-overflow">
-                    +{hiddenPhaseCount} type{hiddenPhaseCount === 1 ? '' : 's'}
-                  </span>
-                </>
-              ) : null}
             </span>
           ) : (
             <span className="tool-stream-phase tool-stream-phase-thinking">
