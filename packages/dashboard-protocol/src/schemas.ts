@@ -40,6 +40,7 @@ import {
   MAX_TOOL_ARGUMENT_CHARS,
   MAX_TOOL_ARGUMENT_DELTA,
   MAX_TOOL_ARGUMENT_PREVIEW,
+  SESSION_TITLE_MAX_LENGTH,
 } from './limits.js';
 import {
   type CheckoutSummary,
@@ -467,7 +468,9 @@ const SessionSnapshotProperties = {
   /** Explicit Pi session_info name, when one exists. */
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   /** Deterministic fallback derived from the first user message. */
-  title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
+  title: Type.Optional(
+    Type.String({ minLength: 1, maxLength: SESSION_TITLE_MAX_LENGTH }),
+  ),
   cwd: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
   leafId: Type.Optional(IdentifierSchema),
   /** True only when entries is a bounded, successful serialization of the active branch. */
@@ -489,7 +492,9 @@ export const SessionSnapshotPatchSchema = Type.Object(
     id: Type.Optional(IdentifierSchema),
     file: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
+    title: Type.Optional(
+      Type.String({ minLength: 1, maxLength: SESSION_TITLE_MAX_LENGTH }),
+    ),
     cwd: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
     leafId: Type.Optional(IdentifierSchema),
     entriesComplete: Type.Optional(Type.Boolean()),
@@ -1381,7 +1386,9 @@ export const SessionIndexEntrySchema = Type.Object(
     projectId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
     checkoutId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
+    title: Type.Optional(
+      Type.String({ minLength: 1, maxLength: SESSION_TITLE_MAX_LENGTH }),
+    ),
     /** Compact resume hints derived from the latest indexed leaf ancestry. */
     lastKnownModel: Type.Optional(
       Type.Object(
@@ -1629,7 +1636,9 @@ export const SessionProjectionSchema = Type.Object(
     id: IdentifierSchema,
     file: Type.Optional(Type.String({ maxLength: MAX_PATH })),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
+    title: Type.Optional(
+      Type.String({ minLength: 1, maxLength: SESSION_TITLE_MAX_LENGTH }),
+    ),
     cwd: Type.Optional(Type.String({ maxLength: MAX_PATH })),
     leafId: Type.Optional(IdentifierSchema),
     entries: Type.Array(UnknownSchema),

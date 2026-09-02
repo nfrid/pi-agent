@@ -194,7 +194,7 @@ describe('authoritative application snapshot lifecycle', () => {
     });
   });
 
-  it('clamps legacy live runtime titles to the shell schema limit', async () => {
+  it('accepts 192-character live runtime titles in shell metadata', async () => {
     const value = await fixture('title-session', [
       { type: 'session', id: 'title-session', cwd: '/tmp/snapshot' },
     ]);
@@ -213,7 +213,7 @@ describe('authoritative application snapshot lifecycle', () => {
 
     const title = value.app.sessionMetadata()[0]?.title;
     expect(title).toBeDefined();
-    expect([...(title ?? '')]).toHaveLength(96);
+    expect([...(title ?? '')]).toHaveLength(192);
   });
 
   it('prefers a persisted run association for a dormant managed session', async () => {

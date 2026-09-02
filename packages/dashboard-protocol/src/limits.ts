@@ -12,6 +12,7 @@ export const MAX_MODEL_DISPLAY_ALIAS = 80;
 /** Aggregate cap for the authoritative lightweight shell query response. */
 export const MAX_SHELL_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 export const SESSION_NAME_MAX_LENGTH = 512;
+export const SESSION_TITLE_MAX_LENGTH = 192;
 /** Maximum entries representable in one authoritative shell index. */
 export const MAX_SHELL_INDEX_ITEMS = 4_096;
 /** Keep delta payloads below the complete replacement representation. */

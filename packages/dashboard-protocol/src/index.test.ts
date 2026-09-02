@@ -1053,7 +1053,7 @@ describe('dashboard protocol', () => {
           message: { role: 'user', content: 'x'.repeat(200) },
         },
       ]),
-    ).toHaveLength(96);
+    ).toHaveLength(192);
   });
 
   it('accepts compacting as a runtime live state', () => {
