@@ -593,6 +593,8 @@ describe('DashboardLiveStore', () => {
           {
             toolCallId: 'tool-live',
             name: 'search',
+            argumentPreview: '{"query":"dash',
+            argumentChars: 14,
             status: 'running',
           },
         ],
@@ -615,6 +617,8 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items['tool-live']).toMatchObject({
       kind: 'tool',
       status: 'running',
+      argumentPreview: '{"query":"dash',
+      argumentChars: 14,
     });
   });
 

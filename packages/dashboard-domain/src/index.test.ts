@@ -49,6 +49,68 @@ function envelope(
 }
 
 describe('dashboard domain reducers', () => {
+  it('upgrades provisional raw tool progress in place and clears it on execution', () => {
+    let state = createTranscriptProjection('s');
+    state = applyTranscriptEvent(
+      state,
+      envelope(1, 1, {
+        type: 'tool.started',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          phase: 'started',
+          status: 'pending',
+          argumentPreview: '{"path":"a\\n',
+          argumentChars: 12,
+          argumentLines: 1,
+        },
+      }),
+    ).state;
+    state = applyTranscriptEvent(
+      state,
+      envelope(2, 2, {
+        type: 'tool.updated',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          phase: 'updated',
+          status: 'pending',
+          argumentDelta: '"content":"x"}',
+          argumentPreview: '{"path":"a\\n"content":"x"}',
+          argumentChars: 27,
+          argumentLines: 1,
+        },
+      }),
+    ).state;
+    expect(state.order).toEqual(['call-1']);
+    expect(state.items['call-1']).toMatchObject({
+      kind: 'tool',
+      argumentDelta: '"content":"x"}',
+      argumentChars: 27,
+    });
+    state = applyTranscriptEvent(
+      state,
+      envelope(3, 3, {
+        type: 'tool.started',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          phase: 'started',
+          status: 'running',
+          arguments: { path: 'a', content: 'x' },
+        },
+      }),
+    ).state;
+    expect(state.items['call-1']).toMatchObject({
+      arguments: { path: 'a', content: 'x' },
+      status: 'running',
+    });
+    expect(state.items['call-1']).not.toHaveProperty('argumentPreview');
+    expect(state.items['call-1']).not.toHaveProperty('argumentDelta');
+  });
   it('converts persisted messages, embedded tools, and tool results through the hydrate identities', () => {
     const entries = [
       {

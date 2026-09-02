@@ -238,6 +238,24 @@ export default defineExtension('remote-control', (pi) => {
     });
   });
   onCurrentTransportEvent('message_update', (event, ctx) => {
+    const assistantEvent = eventRecord(
+      directValue(eventRecord(event), 'assistantMessageEvent'),
+    );
+    if (
+      assistantEvent.type === 'toolcall_start' ||
+      assistantEvent.type === 'toolcall_delta' ||
+      assistantEvent.type === 'toolcall_end'
+    ) {
+      for (const tool of runtime.eventNormalizer.normalizeToolCall(
+        assistantEvent,
+      ))
+        runtime.client.sendEvent({
+          type: tool.phase === 'started' ? 'tool.started' : 'tool.updated',
+          sessionId: ctx.sessionManager.getSessionId(),
+          tool,
+        });
+      return;
+    }
     if (!shouldForwardLiveMessage(event)) return;
     runtime.client.sendEvent({
       type: 'message.updated',

@@ -695,6 +695,38 @@ describe('remote event normalization', () => {
     ).toBe('Visible');
   });
 
+  it('normalizes provisional tool-call chunks without cumulative deltas', () => {
+    const normalizer = new LiveEventNormalizer('runtime-tool-progress');
+    const partial = {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', id: 'call-1', name: 'write', arguments: {} },
+      ],
+    };
+    expect(
+      normalizer.normalizeToolCall({
+        type: 'toolcall_start',
+        contentIndex: 0,
+        partial,
+      }),
+    ).toMatchObject([
+      { toolCallId: 'call-1', name: 'write', phase: 'started' },
+    ]);
+    const delta = 'x'.repeat(4_100);
+    const chunks = normalizer.normalizeToolCall({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta,
+      partial,
+    });
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]?.argumentDelta).toHaveLength(4_096);
+    expect(chunks[1]?.argumentDelta).toHaveLength(4);
+    expect(chunks[1]?.argumentChars).toBe(4_100);
+    expect(chunks[1]?.argumentLines).toBe(1);
+    expect(chunks[1]?.argumentPreview).toHaveLength(4_100);
+  });
+
   it('uses text_start and text_end block boundaries', () => {
     const normalizer = new LiveEventNormalizer('runtime-text-blocks');
     normalizer.normalizeMessage('started', {

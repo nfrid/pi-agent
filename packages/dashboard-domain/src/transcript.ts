@@ -40,6 +40,10 @@ export interface TranscriptToolItem {
   toolCallId: string;
   name: string;
   arguments?: unknown;
+  argumentDelta?: string;
+  argumentPreview?: string;
+  argumentChars?: number;
+  argumentLines?: number;
   result?: unknown;
   isError?: boolean;
   /** Comparable chronology inherited from the owning assistant message. */
@@ -104,6 +108,10 @@ export interface TranscriptRenderToolItem {
   toolCallId: string;
   name: string;
   arguments?: unknown;
+  argumentDelta?: string;
+  argumentPreview?: string;
+  argumentChars?: number;
+  argumentLines?: number;
   result?: unknown;
   isError?: boolean;
   /** Comparable chronology inherited from the owning assistant message. */
@@ -680,6 +688,34 @@ function mergeTool(
         ? {}
         : { arguments: previousTool.arguments }
       : { arguments: payload.arguments }),
+    ...(payload.arguments !== undefined
+      ? {}
+      : payload.argumentDelta === undefined
+        ? previousTool?.argumentDelta === undefined
+          ? {}
+          : { argumentDelta: previousTool.argumentDelta }
+        : { argumentDelta: payload.argumentDelta }),
+    ...(payload.arguments !== undefined
+      ? {}
+      : payload.argumentPreview === undefined
+        ? previousTool?.argumentPreview === undefined
+          ? {}
+          : { argumentPreview: previousTool.argumentPreview }
+        : { argumentPreview: payload.argumentPreview }),
+    ...(payload.arguments !== undefined
+      ? {}
+      : payload.argumentChars === undefined
+        ? previousTool?.argumentChars === undefined
+          ? {}
+          : { argumentChars: previousTool.argumentChars }
+        : { argumentChars: payload.argumentChars }),
+    ...(payload.arguments !== undefined
+      ? {}
+      : payload.argumentLines === undefined
+        ? previousTool?.argumentLines === undefined
+          ? {}
+          : { argumentLines: previousTool.argumentLines }
+        : { argumentLines: payload.argumentLines }),
     ...(payload.result === undefined
       ? previousTool?.result === undefined
         ? {}
@@ -1138,6 +1174,26 @@ export function hydrateTranscript(
                 arguments:
                   tool.arguments === undefined ? tool.args : tool.arguments,
               }),
+          ...(tool.arguments !== undefined || tool.args !== undefined
+            ? {}
+            : typeof tool.argumentDelta === 'string'
+              ? { argumentDelta: tool.argumentDelta }
+              : {}),
+          ...(tool.arguments !== undefined || tool.args !== undefined
+            ? {}
+            : typeof tool.argumentPreview === 'string'
+              ? { argumentPreview: tool.argumentPreview }
+              : {}),
+          ...(tool.arguments !== undefined || tool.args !== undefined
+            ? {}
+            : typeof tool.argumentChars === 'number'
+              ? { argumentChars: tool.argumentChars }
+              : {}),
+          ...(tool.arguments !== undefined || tool.args !== undefined
+            ? {}
+            : typeof tool.argumentLines === 'number'
+              ? { argumentLines: tool.argumentLines }
+              : {}),
           ...(tool.result === undefined ? {} : { result: tool.result }),
           status: persistedToolStatus(tool),
           ...(typeof tool.isError === 'boolean'
@@ -1439,6 +1495,26 @@ export function projectTranscriptForRender(
                 arguments:
                   part.arguments === undefined ? part.args : part.arguments,
               }),
+          ...(part.arguments !== undefined || part.args !== undefined
+            ? {}
+            : typeof part.argumentDelta === 'string'
+              ? { argumentDelta: part.argumentDelta }
+              : {}),
+          ...(part.arguments !== undefined || part.args !== undefined
+            ? {}
+            : typeof part.argumentPreview === 'string'
+              ? { argumentPreview: part.argumentPreview }
+              : {}),
+          ...(part.arguments !== undefined || part.args !== undefined
+            ? {}
+            : typeof part.argumentChars === 'number'
+              ? { argumentChars: part.argumentChars }
+              : {}),
+          ...(part.arguments !== undefined || part.args !== undefined
+            ? {}
+            : typeof part.argumentLines === 'number'
+              ? { argumentLines: part.argumentLines }
+              : {}),
           ...(part.result === undefined ? {} : { result: part.result }),
           ...(typeof part.isError === 'boolean'
             ? { isError: part.isError }
@@ -1457,6 +1533,18 @@ export function projectTranscriptForRender(
       toolCallId: item.toolCallId,
       name: item.name,
       ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
+      ...(item.arguments !== undefined || item.argumentDelta === undefined
+        ? {}
+        : { argumentDelta: item.argumentDelta }),
+      ...(item.arguments !== undefined || item.argumentPreview === undefined
+        ? {}
+        : { argumentPreview: item.argumentPreview }),
+      ...(item.arguments !== undefined || item.argumentChars === undefined
+        ? {}
+        : { argumentChars: item.argumentChars }),
+      ...(item.arguments !== undefined || item.argumentLines === undefined
+        ? {}
+        : { argumentLines: item.argumentLines }),
       ...(item.result === undefined ? {} : { result: item.result }),
       ...(item.isError === undefined ? {} : { isError: item.isError }),
       ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),

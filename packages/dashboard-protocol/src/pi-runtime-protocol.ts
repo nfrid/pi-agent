@@ -1,6 +1,11 @@
 /** Contracts spoken by a Pi runtime bridge. */
 
-export { MAX_ID } from './limits.js';
+export {
+  MAX_ID,
+  MAX_TOOL_ARGUMENT_CHARS,
+  MAX_TOOL_ARGUMENT_DELTA,
+  MAX_TOOL_ARGUMENT_PREVIEW,
+} from './limits.js';
 export {
   isBridgeEvent,
   parseBridgeCommand,

@@ -16,6 +16,9 @@ function toolDescriptor(item: TranscriptModelItem) {
   return {
     name: tool.name,
     args: tool.arguments,
+    argumentPreview: tool.argumentPreview,
+    argumentChars: tool.argumentChars,
+    argumentLines: tool.argumentLines,
     status: tool.status,
     isError: tool.isError,
     result: tool.result,

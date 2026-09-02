@@ -1,6 +1,10 @@
 export const MAX_ID = 256;
 export const MAX_PATH = 4096;
 export const MAX_TEXT = 100_000;
+/** Bounds for provisional tool-call argument tracing. */
+export const MAX_TOOL_ARGUMENT_DELTA = 4_096;
+export const MAX_TOOL_ARGUMENT_PREVIEW = 12_000;
+export const MAX_TOOL_ARGUMENT_CHARS = 10_000_000;
 /** Bounds for server-persisted model display preferences. */
 export const MAX_MODEL_DISPLAY_PREFERENCE_KEY = 512;
 export const MAX_MODEL_DISPLAY_PREFERENCES = 512;
