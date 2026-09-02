@@ -56,7 +56,9 @@ describe('dashboard security boundary', () => {
   });
 
   it('preserves Unicode names without turning them into command strings', () => {
-    expect(sanitizeDisplayName('Сетап по финансам')).toBe('Сетап по финансам');
+    expect(sanitizeDisplayName('Переезд завершён за 15 000 ₽')).toBe(
+      'Переезд завершён за 15 000 ₽',
+    );
     expect(sanitizeDisplayName('x; rm -rf /')).not.toContain(';');
     expect(sanitizeDisplayName('')).toBe('pi-agent');
   });
