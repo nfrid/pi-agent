@@ -88,11 +88,34 @@ describe('dashboard domain reducers', () => {
     expect(state.items['call-1']).toMatchObject({
       kind: 'tool',
       argumentDelta: '"content":"x"}',
+      argumentPreview: '{"path":"a\\n"content":"x"}',
       argumentChars: 27,
     });
+    for (const [index, chunk] of Array.from({ length: 4 }, () =>
+      'y'.repeat(4_096),
+    ).entries())
+      state = applyTranscriptEvent(
+        state,
+        envelope(3 + index, 4 + index, {
+          type: 'tool.updated',
+          sessionId: 's',
+          tool: {
+            toolCallId: 'call-1',
+            name: 'write',
+            phase: 'updated',
+            status: 'pending',
+            argumentDelta: chunk,
+            argumentChars: 27 + (index + 1) * 4_096,
+            argumentLines: 1,
+          },
+        }),
+      ).state;
+    expect(
+      (state.items['call-1'] as { argumentPreview?: string }).argumentPreview,
+    ).toHaveLength(12_000);
     state = applyTranscriptEvent(
       state,
-      envelope(3, 3, {
+      envelope(7, 8, {
         type: 'tool.started',
         sessionId: 's',
         tool: {
@@ -110,6 +133,8 @@ describe('dashboard domain reducers', () => {
     });
     expect(state.items['call-1']).not.toHaveProperty('argumentPreview');
     expect(state.items['call-1']).not.toHaveProperty('argumentDelta');
+    expect(state.items['call-1']).not.toHaveProperty('argumentChars');
+    expect(state.items['call-1']).not.toHaveProperty('argumentLines');
   });
   it('converts persisted messages, embedded tools, and tool results through the hydrate identities', () => {
     const entries = [

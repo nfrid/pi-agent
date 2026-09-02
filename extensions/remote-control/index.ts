@@ -27,6 +27,7 @@ export type { BridgeClientOptions } from './bridge-client';
 export {
   BRIDGE_COMMAND_QUEUE_LIMIT,
   BridgeClient,
+  isDroppableBridgeEvent,
 } from './bridge-client';
 export {
   dispatchDashboardInput,

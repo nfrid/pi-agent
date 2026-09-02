@@ -98,7 +98,9 @@ function transcriptOnlyShellEvent(event: BridgeEvent): boolean {
   }
 }
 
-function sessionEventCoalesceKey(event: BridgeEvent): string | undefined {
+export function sessionEventCoalesceKey(
+  event: BridgeEvent,
+): string | undefined {
   if (event.type === 'delegate.transcript.updated')
     return `delegate:${event.runId}`;
   if (event.type === 'message.updated' || event.type === 'message.finished') {
@@ -109,6 +111,13 @@ function sessionEventCoalesceKey(event: BridgeEvent): string | undefined {
   }
   if (event.type === 'tool.updated' || event.type === 'tool.finished') {
     const tool = event.tool;
+    if (
+      event.type === 'tool.updated' &&
+      typeof tool === 'object' &&
+      tool !== null &&
+      typeof (tool as { argumentDelta?: unknown }).argumentDelta === 'string'
+    )
+      return undefined;
     return typeof tool === 'object' && tool !== null
       ? `tool:${String((tool as { toolCallId?: unknown }).toolCallId ?? '')}`
       : undefined;

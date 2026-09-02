@@ -1,8 +1,9 @@
-import type {
-  BridgeEvent,
-  DashboardEventEnvelope,
-  NormalizedMessagePayload,
-  NormalizedToolPayload,
+import {
+  type BridgeEvent,
+  type DashboardEventEnvelope,
+  MAX_TOOL_ARGUMENT_PREVIEW,
+  type NormalizedMessagePayload,
+  type NormalizedToolPayload,
 } from '@pi-dashboard/protocol';
 import { applyTransportOrdering } from './transport.js';
 import {
@@ -679,6 +680,15 @@ function mergeTool(
   const owner = findToolOwner(projection, items, payload);
   const timestamp =
     payload.timestamp ?? previousTool?.timestamp ?? owner?.item.timestamp;
+  const argumentPreview =
+    payload.arguments !== undefined
+      ? undefined
+      : payload.argumentDelta !== undefined
+        ? `${previousTool?.argumentPreview ?? ''}${payload.argumentDelta}`.slice(
+            0,
+            MAX_TOOL_ARGUMENT_PREVIEW,
+          )
+        : (payload.argumentPreview ?? previousTool?.argumentPreview);
   const item: TranscriptToolItem = {
     kind: 'tool',
     toolCallId: payload.toolCallId,
@@ -695,13 +705,7 @@ function mergeTool(
           ? {}
           : { argumentDelta: previousTool.argumentDelta }
         : { argumentDelta: payload.argumentDelta }),
-    ...(payload.arguments !== undefined
-      ? {}
-      : payload.argumentPreview === undefined
-        ? previousTool?.argumentPreview === undefined
-          ? {}
-          : { argumentPreview: previousTool.argumentPreview }
-        : { argumentPreview: payload.argumentPreview }),
+    ...(argumentPreview === undefined ? {} : { argumentPreview }),
     ...(payload.arguments !== undefined
       ? {}
       : payload.argumentChars === undefined

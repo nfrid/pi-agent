@@ -690,9 +690,6 @@ function itemTool(
     toolCallId: item.toolCallId,
     name: item.name,
     ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
-    ...(item.arguments !== undefined || item.argumentDelta === undefined
-      ? {}
-      : { argumentDelta: item.argumentDelta }),
     ...(item.arguments !== undefined || item.argumentPreview === undefined
       ? {}
       : { argumentPreview: item.argumentPreview }),

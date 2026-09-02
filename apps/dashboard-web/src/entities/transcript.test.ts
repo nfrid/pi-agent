@@ -51,7 +51,7 @@ describe('tool row views and virtual transcript construction', () => {
       }),
     );
     expect(markup).toContain('{&quot;path&quot;:&quot;a&quot;,');
-    expect(markup).toContain('1 lines received');
+    expect(markup).toContain('1 line received');
   });
   it('projects skill protocol envelopes as compact invocation data', () => {
     expect(

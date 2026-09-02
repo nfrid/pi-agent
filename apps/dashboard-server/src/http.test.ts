@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDashboardServer } from './http.js';
+import { createDashboardServer, sessionEventCoalesceKey } from './http.js';
 import type { ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
 import { RuntimeRegistry } from './runtime-registry.js';
@@ -24,6 +24,27 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('does not replay-coalesce raw tool argument deltas', () => {
+    expect(
+      sessionEventCoalesceKey({
+        type: 'tool.updated',
+        sessionId: 'session-1',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          argumentDelta: '{',
+          status: 'pending',
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      sessionEventCoalesceKey({
+        type: 'tool.updated',
+        sessionId: 'session-1',
+        tool: { toolCallId: 'call-1', name: 'write', status: 'running' },
+      }),
+    ).toBe('tool:call-1');
+  });
   it('publishes durable links and synchronizes regenerated titles to dormant sessions', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-session-links-'));
     const sessionDir = path.join(root, 'sessions');

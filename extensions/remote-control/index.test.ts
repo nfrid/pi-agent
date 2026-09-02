@@ -37,6 +37,7 @@ import {
   emitCompactionStarted,
   expandDashboardInput,
   flushQueueDrafts,
+  isDroppableBridgeEvent,
   LiveEventNormalizer,
   modelCatalogSnapshot,
   QueueDraftStore,
@@ -74,6 +75,34 @@ function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('remote-control session lifecycle', () => {
+  it('keeps raw argument delta updates non-droppable', () => {
+    expect(
+      isDroppableBridgeEvent({
+        type: 'tool.updated',
+        sessionId: 'session-test',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          argumentDelta: '{',
+          status: 'pending',
+          phase: 'updated',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isDroppableBridgeEvent({
+        type: 'tool.updated',
+        sessionId: 'session-test',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          argumentPreview: '{',
+          status: 'pending',
+          phase: 'updated',
+        },
+      }),
+    ).toBe(true);
+  });
   it('publishes compaction progress and the saved completion entry', () => {
     const events: unknown[] = [];
     const runtime = {
@@ -712,19 +741,116 @@ describe('remote event normalization', () => {
     ).toMatchObject([
       { toolCallId: 'call-1', name: 'write', phase: 'started' },
     ]);
-    const delta = 'x'.repeat(4_100);
+    expect(
+      normalizer.normalizeToolCall({
+        type: 'toolcall_delta',
+        contentIndex: 0,
+        delta: 'x',
+        partial,
+      }),
+    ).toEqual([]);
+    expect(
+      normalizer.normalizeToolCall({
+        type: 'toolcall_delta',
+        contentIndex: 0,
+        delta: 'y',
+        partial,
+      }),
+    ).toEqual([]);
     const chunks = normalizer.normalizeToolCall({
       type: 'toolcall_delta',
       contentIndex: 0,
-      delta,
+      delta: 'z'.repeat(4_094),
       partial,
     });
-    expect(chunks).toHaveLength(2);
+    expect(chunks).toHaveLength(1);
     expect(chunks[0]?.argumentDelta).toHaveLength(4_096);
-    expect(chunks[1]?.argumentDelta).toHaveLength(4);
-    expect(chunks[1]?.argumentChars).toBe(4_100);
-    expect(chunks[1]?.argumentLines).toBe(1);
-    expect(chunks[1]?.argumentPreview).toHaveLength(4_100);
+    expect(chunks[0]?.argumentChars).toBe(4_096);
+    expect(chunks[0]).not.toHaveProperty('argumentPreview');
+    const tail = normalizer.normalizeToolCall({
+      type: 'toolcall_end',
+      contentIndex: 0,
+      partial,
+    });
+    expect(tail).toEqual([]);
+    const tailNormalizer = new LiveEventNormalizer('runtime-tool-tail');
+    tailNormalizer.normalizeToolCall({
+      type: 'toolcall_start',
+      contentIndex: 0,
+      partial,
+    });
+    tailNormalizer.normalizeToolCall({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta: 'tail',
+      partial,
+    });
+    expect(
+      tailNormalizer.normalizeToolCall({
+        type: 'toolcall_end',
+        contentIndex: 0,
+        partial,
+      }),
+    ).toMatchObject([
+      { argumentDelta: 'tail', argumentChars: 4, argumentLines: 1 },
+    ]);
+  });
+
+  it('counts escaped newlines across chunks without counting literal backslashes', () => {
+    const normalizer = new LiveEventNormalizer('runtime-tool-lines');
+    const partial = {
+      content: [{ type: 'toolCall', id: 'call-lines', name: 'write' }],
+    };
+    normalizer.normalizeToolCall({
+      type: 'toolcall_start',
+      contentIndex: 0,
+      partial,
+    });
+    normalizer.normalizeToolCall({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta: '{"content":"a\\',
+      partial,
+    });
+    normalizer.normalizeToolCall({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta: 'n"}',
+      partial,
+    });
+    expect(
+      normalizer.normalizeToolCall({
+        type: 'toolcall_end',
+        contentIndex: 0,
+        partial,
+      }),
+    ).toMatchObject([{ argumentLines: 2 }]);
+
+    const literal = new LiveEventNormalizer('runtime-tool-literal-slash');
+    literal.normalizeToolCall({
+      type: 'toolcall_start',
+      contentIndex: 0,
+      partial,
+    });
+    literal.normalizeToolCall({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta: '{"content":"a\\\\',
+      partial,
+    });
+    literal.normalizeToolCall({
+      type: 'toolcall_delta',
+      contentIndex: 0,
+      delta: 'n"}',
+      partial,
+    });
+    expect(
+      literal.normalizeToolCall({
+        type: 'toolcall_end',
+        contentIndex: 0,
+        partial,
+      }),
+    ).toMatchObject([{ argumentLines: 1 }]);
   });
 
   it('uses text_start and text_end block boundaries', () => {

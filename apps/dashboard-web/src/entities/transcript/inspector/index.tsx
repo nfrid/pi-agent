@@ -32,7 +32,7 @@ function ToolInspector({
       : undefined;
   const argumentProgress =
     typeof record.argumentLines === 'number'
-      ? `${record.argumentLines} lines received`
+      ? `${record.argumentLines} line${record.argumentLines === 1 ? '' : 's'} received`
       : typeof record.argumentChars === 'number'
         ? `${record.argumentChars} characters received`
         : undefined;

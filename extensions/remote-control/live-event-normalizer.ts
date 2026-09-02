@@ -5,7 +5,6 @@ import {
   MAX_FRAME_BYTES,
   MAX_TOOL_ARGUMENT_CHARS,
   MAX_TOOL_ARGUMENT_DELTA,
-  MAX_TOOL_ARGUMENT_PREVIEW,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
@@ -268,9 +267,10 @@ export class LiveEventNormalizer {
     {
       toolCallId: string;
       name: string;
-      preview: string;
+      pendingDelta: string;
       chars: number;
       lines: number;
+      escapePending: boolean;
     }
   >();
 
@@ -443,57 +443,72 @@ export class LiveEventNormalizer {
     const state = previous ?? {
       toolCallId,
       name,
-      preview: '',
+      pendingDelta: '',
       chars: 0,
       lines: 0,
+      escapePending: false,
     };
     state.toolCallId = toolCallId;
     state.name = name;
     const lineTracked = /(?:^|[.:/])(write|edit)$/iu.test(name);
     const rawDelta = directValue(event, 'delta');
     const delta = typeof rawDelta === 'string' ? rawDelta : '';
-    const chunks: string[] = [];
-    for (
-      let offset = 0;
-      offset < delta.length;
-      offset += MAX_TOOL_ARGUMENT_DELTA
-    )
-      chunks.push(delta.slice(offset, offset + MAX_TOOL_ARGUMENT_DELTA));
-    if (chunks.length === 0) chunks.push('');
-    const phase = event.type === 'toolcall_start' ? 'started' : 'updated';
+    if (delta.length > 0) {
+      state.pendingDelta += delta;
+      state.chars = Math.min(
+        MAX_TOOL_ARGUMENT_CHARS,
+        state.chars + delta.length,
+      );
+      if (lineTracked)
+        for (const character of delta) {
+          if (state.escapePending) {
+            if (character === 'n')
+              state.lines = Math.min(MAX_TOOL_ARGUMENT_CHARS, state.lines + 1);
+            state.escapePending = false;
+          } else if (character === '\\') state.escapePending = true;
+        }
+      this.partialToolCalls.set(contentIndex, state);
+    }
+    const shouldFlush =
+      event.type === 'toolcall_end' ||
+      state.pendingDelta.length >= MAX_TOOL_ARGUMENT_DELTA;
     const payloads: NormalizedToolPayload[] = [];
-    for (const chunk of chunks) {
-      if (chunk.length > 0) {
-        state.preview = `${state.preview}${chunk}`.slice(
-          0,
-          MAX_TOOL_ARGUMENT_PREVIEW,
-        );
-        if (lineTracked)
-          state.lines = Math.min(
-            MAX_TOOL_ARGUMENT_CHARS,
-            state.lines === 0
-              ? 1 + (chunk.match(/\n/gu)?.length ?? 0)
-              : state.lines + (chunk.match(/\n/gu)?.length ?? 0),
-          );
-        state.chars = Math.min(
-          MAX_TOOL_ARGUMENT_CHARS,
-          state.chars + chunk.length,
-        );
+    if (shouldFlush) {
+      while (state.pendingDelta.length >= MAX_TOOL_ARGUMENT_DELTA) {
+        const chunk = state.pendingDelta.slice(0, MAX_TOOL_ARGUMENT_DELTA);
+        state.pendingDelta = state.pendingDelta.slice(MAX_TOOL_ARGUMENT_DELTA);
+        payloads.push({
+          toolCallId,
+          name,
+          phase: 'updated',
+          argumentDelta: chunk,
+          ...(state.chars > 0 ? { argumentChars: state.chars } : {}),
+          ...(lineTracked && state.chars > 0
+            ? { argumentLines: state.lines + 1 }
+            : {}),
+          status: 'pending',
+        });
       }
-      payloads.push({
-        toolCallId,
-        name,
-        phase,
-        ...(chunk.length > 0 ? { argumentDelta: chunk } : {}),
-        ...(state.preview.length > 0 ? { argumentPreview: state.preview } : {}),
-        ...(state.chars > 0 ? { argumentChars: state.chars } : {}),
-        ...(state.lines > 0 ? { argumentLines: state.lines } : {}),
-        status: 'pending',
-      });
+      if (event.type === 'toolcall_end' && state.pendingDelta.length > 0) {
+        payloads.push({
+          toolCallId,
+          name,
+          phase: 'updated',
+          argumentDelta: state.pendingDelta,
+          ...(state.chars > 0 ? { argumentChars: state.chars } : {}),
+          ...(lineTracked && state.chars > 0
+            ? { argumentLines: state.lines + 1 }
+            : {}),
+          status: 'pending',
+        });
+        state.pendingDelta = '';
+      }
     }
     if (event.type === 'toolcall_end')
       this.partialToolCalls.delete(contentIndex);
     else this.partialToolCalls.set(contentIndex, state);
+    if (event.type === 'toolcall_start')
+      return [{ toolCallId, name, phase: 'started', status: 'pending' }];
     return payloads;
   }
 
