@@ -194,6 +194,28 @@ describe('authoritative application snapshot lifecycle', () => {
     });
   });
 
+  it('clamps legacy live runtime titles to the shell schema limit', async () => {
+    const value = await fixture('title-session', [
+      { type: 'session', id: 'title-session', cwd: '/tmp/snapshot' },
+    ]);
+    value.register({
+      runtimeId: 'runtime-title-session',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp/snapshot',
+      liveState: 'idle',
+      session: {
+        id: 'title-session',
+        entries: [],
+        title: 'x'.repeat(192),
+      },
+    });
+
+    const title = value.app.sessionMetadata()[0]?.title;
+    expect(title).toBeDefined();
+    expect([...(title ?? '')]).toHaveLength(96);
+  });
+
   it('prefers a persisted run association for a dormant managed session', async () => {
     const value = await fixture(
       'managed-session',

@@ -17,6 +17,7 @@ import {
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
   type NotificationEvent,
+  normalizeSessionTitle,
   PROTOCOL_VERSION,
   type ProjectSummary,
   type RunSummary,
@@ -906,15 +907,17 @@ export class DashboardApplication {
       runtime,
       persistedAssociation,
     );
+    const runtimeTitle =
+      runtime?.session.title === undefined
+        ? undefined
+        : normalizeSessionTitle(runtime.session.title);
     return {
       ...session,
       ...association,
       ...(runtime?.session.name !== undefined
         ? { name: runtime.session.name }
         : {}),
-      ...(runtime?.session.title !== undefined
-        ? { title: runtime.session.title }
-        : {}),
+      ...(runtimeTitle === undefined ? {} : { title: runtimeTitle }),
       activeRuntimeId: runtime?.runtimeId,
     };
   }
