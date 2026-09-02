@@ -59,10 +59,23 @@ export function emitCompactionStarted(
   emitState(runtime, ctx, 'compacting');
 }
 
+type CompactionReason = 'manual' | 'threshold' | 'overflow';
+
+export function emitCompactionSettled(
+  runtime: import('./runtime').RemoteControlRuntime,
+  ctx: ExtensionContext,
+  reason: CompactionReason,
+): void {
+  // Pi still reports non-idle while extension handlers are unwinding. Manual
+  // compaction returns to the prompt; automatic compaction stays in its run.
+  emitState(runtime, ctx, reason === 'manual' ? 'idle' : 'working');
+}
+
 export function emitCompactionCompleted(
   runtime: import('./runtime').RemoteControlRuntime,
   ctx: ExtensionContext,
   entry: unknown,
+  reason: CompactionReason,
 ): void {
   if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({
@@ -70,25 +83,7 @@ export function emitCompactionCompleted(
     sessionId: ctx.sessionManager.getSessionId(),
     entry,
   });
-}
-
-export function emitCompactionEnded(
-  runtime: import('./runtime').RemoteControlRuntime,
-  ctx: ExtensionContext,
-  event: unknown,
-): void {
-  const result = eventRecord(directValue(eventRecord(event), 'result'));
-  const estimatedTokensAfter = directValue(result, 'estimatedTokensAfter');
-  emitState(
-    runtime,
-    ctx,
-    undefined,
-    typeof estimatedTokensAfter === 'number' &&
-      Number.isFinite(estimatedTokensAfter) &&
-      estimatedTokensAfter >= 0
-      ? estimatedTokensAfter
-      : undefined,
-  );
+  emitCompactionSettled(runtime, ctx, reason);
 }
 
 export function shutdownRemoteControlRuntime(
@@ -200,15 +195,26 @@ export default defineExtension('remote-control', (pi) => {
   });
   pi.on('session_before_compact', async (event, ctx) => {
     emitCompactionStarted(runtime, ctx);
-    event.signal.addEventListener('abort', () => emitState(runtime, ctx), {
-      once: true,
-    });
-    const result = await compactWithDashboardCancellation(event, ctx);
-    if (result.cancel) emitState(runtime, ctx);
-    return result;
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      emitCompactionSettled(runtime, ctx, event.reason);
+    };
+    event.signal.addEventListener('abort', settle, { once: true });
+    try {
+      const result = await compactWithDashboardCancellation(event, ctx);
+      if (result.cancel) settle();
+      return result;
+    } catch (error) {
+      settle();
+      throw error;
+    }
   });
+  // AgentSession emits compaction_end only to SDK subscribers; pi.on receives
+  // the supported extension lifecycle through session_compact instead.
   pi.on('session_compact', (event, ctx) => {
-    emitCompactionCompleted(runtime, ctx, event.compactionEntry);
+    emitCompactionCompleted(runtime, ctx, event.compactionEntry, event.reason);
   });
   pi.on('before_agent_start', (_event, ctx) => {
     if (!runtime.isCurrent(ctx)) return;
@@ -301,9 +307,6 @@ export default defineExtension('remote-control', (pi) => {
   );
   onCurrentTransportEvent('queue_update', (_event, ctx) =>
     emitState(runtime, ctx),
-  );
-  onCurrentTransportEvent('compaction_end', (event, ctx) =>
-    emitCompactionEnded(runtime, ctx, event),
   );
   pi.on('session_shutdown', (event, ctx) => {
     shutdownRemoteControlRuntime(runtime, event, ctx, stopSteeringUpdates);
