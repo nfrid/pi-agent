@@ -41,7 +41,6 @@ export interface TranscriptToolItem {
   toolCallId: string;
   name: string;
   arguments?: unknown;
-  argumentDelta?: string;
   argumentPreview?: string;
   argumentChars?: number;
   argumentLines?: number;
@@ -109,7 +108,6 @@ export interface TranscriptRenderToolItem {
   toolCallId: string;
   name: string;
   arguments?: unknown;
-  argumentDelta?: string;
   argumentPreview?: string;
   argumentChars?: number;
   argumentLines?: number;
@@ -698,13 +696,6 @@ function mergeTool(
         ? {}
         : { arguments: previousTool.arguments }
       : { arguments: payload.arguments }),
-    ...(payload.arguments !== undefined
-      ? {}
-      : payload.argumentDelta === undefined
-        ? previousTool?.argumentDelta === undefined
-          ? {}
-          : { argumentDelta: previousTool.argumentDelta }
-        : { argumentDelta: payload.argumentDelta }),
     ...(argumentPreview === undefined ? {} : { argumentPreview }),
     ...(payload.arguments !== undefined
       ? {}
@@ -1180,11 +1171,6 @@ export function hydrateTranscript(
               }),
           ...(tool.arguments !== undefined || tool.args !== undefined
             ? {}
-            : typeof tool.argumentDelta === 'string'
-              ? { argumentDelta: tool.argumentDelta }
-              : {}),
-          ...(tool.arguments !== undefined || tool.args !== undefined
-            ? {}
             : typeof tool.argumentPreview === 'string'
               ? { argumentPreview: tool.argumentPreview }
               : {}),
@@ -1501,11 +1487,6 @@ export function projectTranscriptForRender(
               }),
           ...(part.arguments !== undefined || part.args !== undefined
             ? {}
-            : typeof part.argumentDelta === 'string'
-              ? { argumentDelta: part.argumentDelta }
-              : {}),
-          ...(part.arguments !== undefined || part.args !== undefined
-            ? {}
             : typeof part.argumentPreview === 'string'
               ? { argumentPreview: part.argumentPreview }
               : {}),
@@ -1537,9 +1518,6 @@ export function projectTranscriptForRender(
       toolCallId: item.toolCallId,
       name: item.name,
       ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
-      ...(item.arguments !== undefined || item.argumentDelta === undefined
-        ? {}
-        : { argumentDelta: item.argumentDelta }),
       ...(item.arguments !== undefined || item.argumentPreview === undefined
         ? {}
         : { argumentPreview: item.argumentPreview }),

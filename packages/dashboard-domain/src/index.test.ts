@@ -87,10 +87,10 @@ describe('dashboard domain reducers', () => {
     expect(state.order).toEqual(['call-1']);
     expect(state.items['call-1']).toMatchObject({
       kind: 'tool',
-      argumentDelta: '"content":"x"}',
       argumentPreview: '{"path":"a\\n"content":"x"}',
       argumentChars: 27,
     });
+    expect(state.items['call-1']).not.toHaveProperty('argumentDelta');
     for (const [index, chunk] of Array.from({ length: 4 }, () =>
       'y'.repeat(4_096),
     ).entries())

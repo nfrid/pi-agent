@@ -736,7 +736,8 @@ describe('remote event normalization', () => {
       normalizer.normalizeToolCall({
         type: 'toolcall_start',
         contentIndex: 0,
-        partial,
+        id: 'call-1',
+        toolName: 'write',
       }),
     ).toMatchObject([
       { toolCallId: 'call-1', name: 'write', phase: 'started' },

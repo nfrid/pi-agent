@@ -427,6 +427,7 @@ export class LiveEventNormalizer {
         : this.partialToolCalls.get(contentIndex);
     const toolCallId =
       directString(event, 'toolCallId') ??
+      directString(event, 'id') ??
       directString(finalTool, 'toolCallId') ??
       directString(finalTool, 'id') ??
       directString(partialTool ?? {}, 'toolCallId') ??

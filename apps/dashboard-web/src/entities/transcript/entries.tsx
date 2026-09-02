@@ -760,7 +760,7 @@ function TranscriptEntry({
       },
       cwd,
     );
-    const meta = commandStepMeta({
+    const executionMeta = commandStepMeta({
       name: tool.name,
       args: tool.arguments,
       status: tool.status,
@@ -768,6 +768,13 @@ function TranscriptEntry({
       result: tool.result,
       data: tool.data,
     });
+    const argumentProgressMeta =
+      tool.arguments === undefined && typeof tool.argumentLines === 'number'
+        ? `${formatCompactCount(tool.argumentLines)} line${tool.argumentLines === 1 ? '' : 's'} received`
+        : tool.arguments === undefined && typeof tool.argumentChars === 'number'
+          ? `${formatCompactCount(tool.argumentChars)} chars received`
+          : undefined;
+    const meta = executionMeta ?? argumentProgressMeta;
     return (
       <details
         className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
