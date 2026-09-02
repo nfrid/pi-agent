@@ -37,6 +37,9 @@ import {
   MAX_SESSION_INDEX_DELTA_ITEMS,
   MAX_SHELL_INDEX_ITEMS,
   MAX_TEXT,
+  MAX_TOOL_ARGUMENT_CHARS,
+  MAX_TOOL_ARGUMENT_DELTA,
+  MAX_TOOL_ARGUMENT_PREVIEW,
 } from './limits.js';
 import {
   type CheckoutSummary,
@@ -674,6 +677,20 @@ export const NormalizedToolPayloadSchema = Type.Object(
     toolCallId: IdentifierSchema,
     name: Type.String({ minLength: 1, maxLength: 512 }),
     arguments: Type.Optional(UnknownSchema),
+    /** One raw JSON argument chunk; never a cumulative replacement. */
+    argumentDelta: Type.Optional(
+      Type.String({ maxLength: MAX_TOOL_ARGUMENT_DELTA }),
+    ),
+    /** Bounded cumulative raw JSON preview for provisional calls. */
+    argumentPreview: Type.Optional(
+      Type.String({ maxLength: MAX_TOOL_ARGUMENT_PREVIEW }),
+    ),
+    argumentChars: Type.Optional(
+      Type.Integer({ minimum: 0, maximum: MAX_TOOL_ARGUMENT_CHARS }),
+    ),
+    argumentLines: Type.Optional(
+      Type.Integer({ minimum: 0, maximum: MAX_TOOL_ARGUMENT_CHARS }),
+    ),
     result: Type.Optional(UnknownSchema),
     isError: Type.Optional(Type.Boolean()),
     /** Chronology inherited from the owning assistant message when needed. */

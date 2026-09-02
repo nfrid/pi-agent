@@ -3,6 +3,8 @@ import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import {
   type BridgeEvent,
   MAX_FRAME_BYTES,
+  MAX_TOOL_ARGUMENT_CHARS,
+  MAX_TOOL_ARGUMENT_DELTA,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
@@ -260,12 +262,24 @@ export class LiveEventNormalizer {
       }
     | undefined;
   private readonly activeToolNames = new Map<string, string>();
+  private readonly partialToolCalls = new Map<
+    number,
+    {
+      toolCallId: string;
+      name: string;
+      pendingDelta: string;
+      chars: number;
+      lines: number;
+      escapePending: boolean;
+    }
+  >();
 
   constructor(private readonly runtimeEpoch: string = randomUUID()) {}
 
   reset(): void {
     this.activeMessage = undefined;
     this.activeToolNames.clear();
+    this.partialToolCalls.clear();
   }
 
   normalizeMessage(
@@ -292,6 +306,7 @@ export class LiveEventNormalizer {
 
     let messageId: string;
     if (phase === 'started') {
+      this.partialToolCalls.clear();
       messageId = identityKey
         ? identityKey
         : `${this.runtimeEpoch}:${++this.identitySequence}`;
@@ -383,8 +398,118 @@ export class LiveEventNormalizer {
         : {}),
       ...(safeData === undefined ? {} : { data: safeData }),
     };
-    if (phase === 'finished') this.activeMessage = undefined;
+    if (phase === 'finished') {
+      this.activeMessage = undefined;
+      this.partialToolCalls.clear();
+    }
     return payload;
+  }
+
+  /** Normalize one native tool-call stream event without exposing cumulative args. */
+  normalizeToolCall(value: unknown): NormalizedToolPayload[] {
+    const event = eventRecord(value);
+    const contentIndexValue = directValue(event, 'contentIndex');
+    const contentIndex =
+      typeof contentIndexValue === 'number' &&
+      Number.isInteger(contentIndexValue)
+        ? contentIndexValue
+        : undefined;
+    const partial = eventRecord(directValue(event, 'partial'));
+    const partialContent = directValue(partial, 'content');
+    const partialTool =
+      contentIndex === undefined
+        ? undefined
+        : eventRecord(textBlockAt(partialContent, contentIndex));
+    const finalTool = eventRecord(directValue(event, 'toolCall'));
+    const previous =
+      contentIndex === undefined
+        ? undefined
+        : this.partialToolCalls.get(contentIndex);
+    const toolCallId =
+      directString(event, 'toolCallId') ??
+      directString(finalTool, 'toolCallId') ??
+      directString(finalTool, 'id') ??
+      directString(partialTool ?? {}, 'toolCallId') ??
+      directString(partialTool ?? {}, 'id') ??
+      previous?.toolCallId;
+    const name =
+      directString(event, 'toolName') ??
+      directString(finalTool, 'toolName') ??
+      directString(finalTool, 'name') ??
+      directString(partialTool ?? {}, 'toolName') ??
+      directString(partialTool ?? {}, 'name') ??
+      previous?.name;
+    if (!toolCallId || !name || contentIndex === undefined) return [];
+    const state = previous ?? {
+      toolCallId,
+      name,
+      pendingDelta: '',
+      chars: 0,
+      lines: 0,
+      escapePending: false,
+    };
+    state.toolCallId = toolCallId;
+    state.name = name;
+    const lineTracked = /(?:^|[.:/])(write|edit)$/iu.test(name);
+    const rawDelta = directValue(event, 'delta');
+    const delta = typeof rawDelta === 'string' ? rawDelta : '';
+    if (delta.length > 0) {
+      state.pendingDelta += delta;
+      state.chars = Math.min(
+        MAX_TOOL_ARGUMENT_CHARS,
+        state.chars + delta.length,
+      );
+      if (lineTracked)
+        for (const character of delta) {
+          if (state.escapePending) {
+            if (character === 'n')
+              state.lines = Math.min(MAX_TOOL_ARGUMENT_CHARS, state.lines + 1);
+            state.escapePending = false;
+          } else if (character === '\\') state.escapePending = true;
+        }
+      this.partialToolCalls.set(contentIndex, state);
+    }
+    const shouldFlush =
+      event.type === 'toolcall_end' ||
+      state.pendingDelta.length >= MAX_TOOL_ARGUMENT_DELTA;
+    const payloads: NormalizedToolPayload[] = [];
+    if (shouldFlush) {
+      while (state.pendingDelta.length >= MAX_TOOL_ARGUMENT_DELTA) {
+        const chunk = state.pendingDelta.slice(0, MAX_TOOL_ARGUMENT_DELTA);
+        state.pendingDelta = state.pendingDelta.slice(MAX_TOOL_ARGUMENT_DELTA);
+        payloads.push({
+          toolCallId,
+          name,
+          phase: 'updated',
+          argumentDelta: chunk,
+          ...(state.chars > 0 ? { argumentChars: state.chars } : {}),
+          ...(lineTracked && state.chars > 0
+            ? { argumentLines: state.lines + 1 }
+            : {}),
+          status: 'pending',
+        });
+      }
+      if (event.type === 'toolcall_end' && state.pendingDelta.length > 0) {
+        payloads.push({
+          toolCallId,
+          name,
+          phase: 'updated',
+          argumentDelta: state.pendingDelta,
+          ...(state.chars > 0 ? { argumentChars: state.chars } : {}),
+          ...(lineTracked && state.chars > 0
+            ? { argumentLines: state.lines + 1 }
+            : {}),
+          status: 'pending',
+        });
+        state.pendingDelta = '';
+      }
+    }
+    if (event.type === 'toolcall_end')
+      this.partialToolCalls.delete(contentIndex);
+    else this.partialToolCalls.set(contentIndex, state);
+    if (event.type === 'toolcall_start')
+      return [{ toolCallId, name, phase: 'started', status: 'pending' }];
+    return payloads;
   }
 
   normalizeTool(

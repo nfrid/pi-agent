@@ -26,6 +26,16 @@ function ToolInspector({
       : selectedKind;
   const status = record.status ?? (record.isError ? 'error' : 'pending');
   const argumentsValue = record.arguments ?? record.args;
+  const argumentPreview =
+    typeof record.argumentPreview === 'string'
+      ? record.argumentPreview
+      : undefined;
+  const argumentProgress =
+    typeof record.argumentLines === 'number'
+      ? `${record.argumentLines} line${record.argumentLines === 1 ? '' : 's'} received`
+      : typeof record.argumentChars === 'number'
+        ? `${record.argumentChars} characters received`
+        : undefined;
   return (
     <div className="tool-inspector">
       <dl className="tool-inspector-status">
@@ -44,6 +54,14 @@ function ToolInspector({
           sourceTruncated={sourceTruncated(record, 'arguments')}
         />
       )}
+      {argumentsValue === undefined && argumentPreview !== undefined ? (
+        <PayloadSection
+          title={
+            argumentProgress ? `Arguments (${argumentProgress})` : 'Arguments'
+          }
+          value={argumentPreview}
+        />
+      ) : null}
       {!specializedKind && record.result !== undefined && (
         <PayloadSection
           title="Result"
@@ -71,6 +89,15 @@ function toolInspectorRecord(
     toolCallId: tool.toolCallId,
     name: tool.name,
     ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }),
+    ...(tool.arguments !== undefined || tool.argumentPreview === undefined
+      ? {}
+      : { argumentPreview: tool.argumentPreview }),
+    ...(tool.arguments !== undefined || tool.argumentChars === undefined
+      ? {}
+      : { argumentChars: tool.argumentChars }),
+    ...(tool.arguments !== undefined || tool.argumentLines === undefined
+      ? {}
+      : { argumentLines: tool.argumentLines }),
     ...(tool.result === undefined ? {} : { result: tool.result }),
     ...(tool.isError === undefined ? {} : { isError: tool.isError }),
     status: tool.status,

@@ -49,6 +49,93 @@ function envelope(
 }
 
 describe('dashboard domain reducers', () => {
+  it('upgrades provisional raw tool progress in place and clears it on execution', () => {
+    let state = createTranscriptProjection('s');
+    state = applyTranscriptEvent(
+      state,
+      envelope(1, 1, {
+        type: 'tool.started',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          phase: 'started',
+          status: 'pending',
+          argumentPreview: '{"path":"a\\n',
+          argumentChars: 12,
+          argumentLines: 1,
+        },
+      }),
+    ).state;
+    state = applyTranscriptEvent(
+      state,
+      envelope(2, 2, {
+        type: 'tool.updated',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          phase: 'updated',
+          status: 'pending',
+          argumentDelta: '"content":"x"}',
+          argumentPreview: '{"path":"a\\n"content":"x"}',
+          argumentChars: 27,
+          argumentLines: 1,
+        },
+      }),
+    ).state;
+    expect(state.order).toEqual(['call-1']);
+    expect(state.items['call-1']).toMatchObject({
+      kind: 'tool',
+      argumentDelta: '"content":"x"}',
+      argumentPreview: '{"path":"a\\n"content":"x"}',
+      argumentChars: 27,
+    });
+    for (const [index, chunk] of Array.from({ length: 4 }, () =>
+      'y'.repeat(4_096),
+    ).entries())
+      state = applyTranscriptEvent(
+        state,
+        envelope(3 + index, 4 + index, {
+          type: 'tool.updated',
+          sessionId: 's',
+          tool: {
+            toolCallId: 'call-1',
+            name: 'write',
+            phase: 'updated',
+            status: 'pending',
+            argumentDelta: chunk,
+            argumentChars: 27 + (index + 1) * 4_096,
+            argumentLines: 1,
+          },
+        }),
+      ).state;
+    expect(
+      (state.items['call-1'] as { argumentPreview?: string }).argumentPreview,
+    ).toHaveLength(12_000);
+    state = applyTranscriptEvent(
+      state,
+      envelope(7, 8, {
+        type: 'tool.started',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'write',
+          phase: 'started',
+          status: 'running',
+          arguments: { path: 'a', content: 'x' },
+        },
+      }),
+    ).state;
+    expect(state.items['call-1']).toMatchObject({
+      arguments: { path: 'a', content: 'x' },
+      status: 'running',
+    });
+    expect(state.items['call-1']).not.toHaveProperty('argumentPreview');
+    expect(state.items['call-1']).not.toHaveProperty('argumentDelta');
+    expect(state.items['call-1']).not.toHaveProperty('argumentChars');
+    expect(state.items['call-1']).not.toHaveProperty('argumentLines');
+  });
   it('converts persisted messages, embedded tools, and tool results through the hydrate identities', () => {
     const entries = [
       {

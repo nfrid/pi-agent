@@ -27,6 +27,32 @@ import { TranscriptToolStream } from './transcript/tool-stream';
 import { LivePauseEvent } from './transcript/view';
 
 describe('tool row views and virtual transcript construction', () => {
+  it('renders increasing provisional argument progress without parsed args', () => {
+    const item = {
+      key: 'call-1',
+      entry: { kind: 'tool', toolCallId: 'call-1', name: 'write' },
+      raw: {},
+      tool: {
+        kind: 'tool',
+        key: 'call-1',
+        toolCallId: 'call-1',
+        name: 'write',
+        argumentPreview: '{"path":"a",',
+        argumentChars: 12,
+        argumentLines: 1,
+        status: 'pending',
+      },
+    } as never;
+    const markup = renderToStaticMarkup(
+      createElement(TranscriptToolStream, {
+        items: [item],
+        expanded: true,
+        onToggle: () => undefined,
+      }),
+    );
+    expect(markup).toContain('{&quot;path&quot;:&quot;a&quot;,');
+    expect(markup).toContain('1 line received');
+  });
   it('projects skill protocol envelopes as compact invocation data', () => {
     expect(
       parseSkillInvocation(

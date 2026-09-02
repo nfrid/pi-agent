@@ -32,6 +32,7 @@ import {
   parseLiveDiagnosticsResponse,
   parseModelDisplayPreferenceImport,
   parseNormalizedMessagePayload,
+  parseNormalizedToolPayload,
   parsePinThreadCommand,
   parseProtocolInfo,
   parseRegenerateThreadTitleCommand,
@@ -62,6 +63,28 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('bounds provisional tool argument chunks and previews', () => {
+    expect(() =>
+      parseNormalizedToolPayload({
+        toolCallId: 'call-1',
+        name: 'write',
+        argumentDelta: 'x'.repeat(4_097),
+        phase: 'updated',
+      }),
+    ).toThrow();
+    expect(
+      parseNormalizedToolPayload({
+        toolCallId: 'call-1',
+        name: 'write',
+        argumentDelta: 'x'.repeat(4_096),
+        argumentPreview: 'x'.repeat(12_000),
+        argumentChars: 12_000,
+        argumentLines: 2,
+        status: 'pending',
+        phase: 'updated',
+      }),
+    ).toMatchObject({ argumentChars: 12_000, argumentLines: 2 });
+  });
   it('validates server-persisted model display settings strictly', () => {
     const settings = {
       modelDisplayPreferences: {

@@ -199,6 +199,21 @@ export interface BridgeClientOptions {
 }
 
 /** Reconnecting JSONL client. It never queues browser commands while offline. */
+export function isDroppableBridgeEvent(event: BridgeEvent): boolean {
+  const toolArgumentDelta =
+    event.type === 'tool.updated' &&
+    typeof event.tool === 'object' &&
+    event.tool !== null &&
+    typeof (event.tool as { argumentDelta?: unknown }).argumentDelta ===
+      'string';
+  return (
+    event.type === 'message.updated' ||
+    (event.type === 'tool.updated' && !toolArgumentDelta) ||
+    (event.type === 'delegate.transcript.updated' &&
+      event.entry.status === 'running')
+  );
+}
+
 export class BridgeClient {
   private socket: net.Socket | undefined;
   private stopped = false;
@@ -422,11 +437,7 @@ export class BridgeClient {
       // frame, and a serialization failure must not tear down the bridge.
       return false;
     }
-    const droppable =
-      wireEvent.type === 'message.updated' ||
-      wireEvent.type === 'tool.updated' ||
-      (wireEvent.type === 'delegate.transcript.updated' &&
-        wireEvent.entry.status === 'running');
+    const droppable = isDroppableBridgeEvent(wireEvent);
     return this.enqueueOutbound(socket, data, droppable);
   }
 

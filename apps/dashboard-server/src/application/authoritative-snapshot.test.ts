@@ -358,7 +358,8 @@ describe('authoritative application snapshot lifecycle', () => {
         tool: {
           toolCallId: 'tool-1',
           name: 'read',
-          arguments: { path: 'x' },
+          argumentDelta: '{"path":"x"',
+          argumentChars: 11,
           status: 'running',
           phase: 'updated',
         },
@@ -373,8 +374,15 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(snapshot.active.messages).toMatchObject([
       { messageId: 'assistant-1', content: 'partial' },
     ]);
+    expect(snapshot.active.tools[0]).not.toHaveProperty('argumentDelta');
     expect(snapshot.active.tools).toMatchObject([
-      { toolCallId: 'tool-1', status: 'running', timestamp: 100 },
+      {
+        toolCallId: 'tool-1',
+        status: 'running',
+        argumentPreview: '{"path":"x"',
+        argumentChars: 11,
+        timestamp: 100,
+      },
     ]);
     expect(snapshot.active.delegates[0]?.capabilities).toEqual(['web']);
     expect(snapshot.active.delegates[0]?.details).toMatchObject({
