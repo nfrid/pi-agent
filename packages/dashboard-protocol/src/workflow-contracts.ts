@@ -65,7 +65,7 @@ const DelegateWorkflowStateSchema = Type.Union([
 ]);
 const DelegateWorkflowInputSchema = Type.Object(
   {
-    node: WorkflowLogicalIdSchema,
+    node: Type.Union([WorkflowLogicalIdSchema, WorkflowAttemptReferenceSchema]),
     identity: WorkflowAttemptReferenceSchema,
     include: Type.Optional(
       Type.Readonly(

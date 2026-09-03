@@ -225,7 +225,7 @@ describe('dashboard protocol', () => {
       waitingFor: ['gate@1'],
       inputs: [
         {
-          node: 'gate',
+          node: 'gate@1',
           identity: 'gate@1',
           include: ['report'],
           label: 'gate report',
