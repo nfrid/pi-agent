@@ -8,6 +8,7 @@ import type {
   WakeSnapshot,
 } from './wake-coordinator';
 import { WAKE_MAX_SUBSCRIPTIONS } from './wake-coordinator';
+import { shouldKeepWakeRestoreRecord } from './wake-restore-policy';
 
 /** Custom entry type for append-only wake metadata. */
 export const WAKE_ENTRY_TYPE = 'delegate-wake:v1';
@@ -256,26 +257,6 @@ function activeWakeCount(wakes: Iterable<WakeSnapshot>): number {
   return count;
 }
 
-function progress(state: string): number {
-  if (state === 'pending') return 0;
-  if (state === 'ready') return 1;
-  if (state === 'queued') return 2;
-  return 3;
-}
-
-/** Match the coordinator's stale-state protection while folding journal records. */
-function keepPriorWake(live: WakeSnapshot, incoming: WakeSnapshot): boolean {
-  if (live.revision >= incoming.revision) return true;
-  const liveProgress = progress(live.state);
-  const incomingProgress = progress(incoming.state);
-  if (liveProgress > incomingProgress) return true;
-  if (liveProgress === incomingProgress && live.state !== incoming.state)
-    return true;
-  if (isTerminal(live.state) && live.state !== incoming.state) return true;
-  if (live.state === 'queued' && incoming.state !== 'queued') return true;
-  return false;
-}
-
 interface FoldedWakeHistory {
   readonly states: readonly WakeCoordinatorSnapshot[];
   readonly latest?: WakeCoordinatorSnapshot;
@@ -318,12 +299,16 @@ function wakeHistory(ctx: SessionBranch): FoldedWakeHistory | undefined {
       ledger.clear();
       for (const wake of state.wakes) {
         const old = prior.get(wake.id);
-        ledger.set(wake.id, old && keepPriorWake(old, wake) ? old : wake);
+        ledger.set(
+          wake.id,
+          old && shouldKeepWakeRestoreRecord(old, wake) ? old : wake,
+        );
       }
     } else {
       for (const wake of state.wakes) {
         const old = ledger.get(wake.id);
-        if (!old || !keepPriorWake(old, wake)) ledger.set(wake.id, wake);
+        if (!old || !shouldKeepWakeRestoreRecord(old, wake))
+          ledger.set(wake.id, wake);
       }
     }
     if (activeWakeCount(ledger.values()) > WAKE_MAX_SUBSCRIPTIONS)

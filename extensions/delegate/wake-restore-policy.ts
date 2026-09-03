@@ -366,8 +366,8 @@ function wakeStateProgress(state: WakeState): number {
 }
 
 export function shouldKeepWakeRestoreRecord(
-  live: WakeRecord,
-  incoming: WakeRecord,
+  live: Pick<WakeRecord, 'revision' | 'state'>,
+  incoming: Pick<WakeRecord, 'revision' | 'state'>,
 ): boolean {
   if (live.revision >= incoming.revision) return true;
   const liveProgress = wakeStateProgress(live.state);
@@ -377,7 +377,13 @@ export function shouldKeepWakeRestoreRecord(
     return true;
   // Terminal states are one-shot and may not be rewritten by a stale branch.
   if (isWakeTerminal(live.state) && live.state !== incoming.state) return true;
-  if (live.state === 'queued' && incoming.state !== 'queued') return true;
+  if (
+    live.state === 'queued' &&
+    incoming.state !== 'queued' &&
+    incoming.state !== 'entered' &&
+    incoming.state !== 'cancelled'
+  )
+    return true;
   return false;
 }
 

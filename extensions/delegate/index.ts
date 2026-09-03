@@ -305,17 +305,18 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       .map((attempt) => attempt.identity)
       .sort();
     if (ready.length === 0) return;
-    const id = `eager-${createHash('sha256')
-      .update(ready.join('\n'))
-      .digest('hex')
-      .slice(0, 24)}`;
-    if (coordinator.get(id)) return;
-    coordinator.register({
-      id,
-      condition:
-        ready.length === 1 ? { node: ready[0] as string } : { all: ready },
-      payload: ['handoff', 'metadata'],
-    });
+    for (const identity of ready) {
+      const id = `eager-${createHash('sha256')
+        .update(identity)
+        .digest('hex')
+        .slice(0, 24)}`;
+      if (coordinator.get(id)) continue;
+      coordinator.register({
+        id,
+        condition: { node: identity },
+        payload: ['handoff', 'metadata'],
+      });
+    }
   }
 
   function reconcileEagerDelivery(): void {

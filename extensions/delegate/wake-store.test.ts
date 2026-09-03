@@ -89,6 +89,123 @@ describe('wake store', () => {
     await workflow.dispose();
   });
 
+  test('folds queued then entered revisions from persisted deltas during restore', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const attempt = workflow.schedule({
+      logicalId: 'entered-delta',
+      mode: 'single',
+      tasks: ['entered-delta'],
+      execute: async () => ({ runs: [outputRun()], handoff: 'entered' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require(attempt.identity).settledAt).toBeDefined(),
+    );
+
+    const entries: unknown[] = [];
+    let acknowledgement!: {
+      deliveryKey: string;
+      dispatchGeneration: number;
+      dispatchAttempt: number;
+    };
+    const source = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        acknowledgement = dispatch.acknowledgement;
+      },
+    });
+    attachWakeStore(source, {
+      appendEntry(type: string, data: unknown) {
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+    source.register({
+      id: 'entered-delta-wake',
+      condition: { node: attempt.identity },
+    });
+    const queuedRevision = source.require('entered-delta-wake').revision;
+    expect(
+      source.markEntered('entered-delta-wake', acknowledgement).state,
+    ).toBe('entered');
+    const entered = source.require('entered-delta-wake');
+    expect(entered.revision).toBe(queuedRevision + 1);
+
+    const persistedStates = entries.map(
+      (entry) =>
+        (
+          entry as {
+            data: {
+              state: { wakes: Array<{ revision: number; state: string }> };
+            };
+          }
+        ).data.state.wakes[0],
+    );
+    expect(persistedStates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ revision: queuedRevision, state: 'queued' }),
+        expect.objectContaining({
+          revision: entered.revision,
+          state: 'entered',
+        }),
+      ]),
+    );
+    expect(latestWakeState(branch(entries))?.wakes[0]).toMatchObject({
+      revision: entered.revision,
+      state: 'entered',
+    });
+
+    const restored = new WakeCoordinator({ workflow });
+    restoreWakeState(restored, branch(entries));
+    expect(restored.require('entered-delta-wake')).toMatchObject({
+      state: 'entered',
+    });
+    await workflow.dispose();
+  });
+
+  test('folds queued then cancelled revisions from persisted deltas during restore', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const attempt = workflow.schedule({
+      logicalId: 'cancelled-delta',
+      mode: 'single',
+      tasks: ['cancelled-delta'],
+      execute: async () => ({ runs: [outputRun()], handoff: 'cancelled' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require(attempt.identity).settledAt).toBeDefined(),
+    );
+
+    const entries: unknown[] = [];
+    const source = new WakeCoordinator({
+      workflow,
+      dispatch: () => {
+        // Keep the wake queued until cancellation is persisted.
+      },
+    });
+    attachWakeStore(source, {
+      appendEntry(type: string, data: unknown) {
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+    source.register({
+      id: 'cancelled-delta-wake',
+      condition: { node: attempt.identity },
+    });
+    const queuedRevision = source.require('cancelled-delta-wake').revision;
+    expect(source.cancel('cancelled-delta-wake').state).toBe('cancelled');
+    const cancelled = source.require('cancelled-delta-wake');
+    expect(cancelled.revision).toBe(queuedRevision + 1);
+    expect(latestWakeState(branch(entries))?.wakes[0]).toMatchObject({
+      revision: cancelled.revision,
+      state: 'cancelled',
+    });
+
+    const restored = new WakeCoordinator({ workflow });
+    restoreWakeState(restored, branch(entries));
+    expect(restored.require('cancelled-delta-wake')).toMatchObject({
+      state: 'cancelled',
+    });
+    await workflow.dispose();
+  });
+
   test('attach appends state transitions without replacing old entries', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const entries: unknown[] = [];

@@ -5,6 +5,7 @@ import {
   normalizeWakeCondition,
   normalizeWakePayload,
   parseWakeRestoreSnapshot,
+  shouldKeepWakeRestoreRecord,
   type WakeRestorePolicyOptions,
   type WakeRestoreRecord,
 } from './wake-restore-policy';
@@ -146,6 +147,39 @@ describe('wake restore policy', () => {
     expect(
       mergeWakeRestoreRecords(live, new Map([['second', second]]), 1),
     ).toBeUndefined();
+  });
+
+  test('accepts valid newer queued terminal records without allowing regressions', () => {
+    expect(
+      shouldKeepWakeRestoreRecord(
+        { state: 'queued', revision: 4 },
+        { state: 'entered', revision: 5 },
+      ),
+    ).toBe(false);
+    expect(
+      shouldKeepWakeRestoreRecord(
+        { state: 'queued', revision: 4 },
+        { state: 'cancelled', revision: 5 },
+      ),
+    ).toBe(false);
+    expect(
+      shouldKeepWakeRestoreRecord(
+        { state: 'queued', revision: 4 },
+        { state: 'pending', revision: 5 },
+      ),
+    ).toBe(true);
+    expect(
+      shouldKeepWakeRestoreRecord(
+        { state: 'entered', revision: 4 },
+        { state: 'cancelled', revision: 5 },
+      ),
+    ).toBe(true);
+    expect(
+      shouldKeepWakeRestoreRecord(
+        { state: 'queued', revision: 5 },
+        { state: 'entered', revision: 4 },
+      ),
+    ).toBe(true);
   });
 
   test('detects missing and workflow-orphaned restore sources', () => {

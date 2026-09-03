@@ -1690,9 +1690,9 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
-  test('coalesces completions ready in one burst into one eager delivery', async () => {
+  test('queues each completion independently after one eager burst debounce', async () => {
     const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
-      await createAsyncHarness('eager-coalescing-parent');
+      await createAsyncHarness('eager-independent-parent');
     for (const [id, task] of [
       ['eager-first', 'eager first task'],
       ['eager-second', 'eager second task'],
@@ -1713,12 +1713,16 @@ describe('async delegate extension', () => {
 
     finish('eager first task');
     finish('eager second task');
-    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
-    const delivery = JSON.stringify(sendMessage.mock.calls[0]?.[0]);
-    expect(delivery).toContain('eager-first@1');
-    expect(delivery).toContain('eager-second@1');
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    expect(sendMessage).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    const deliveries = sendMessage.mock.calls.map((call) =>
+      JSON.stringify(call[0]),
+    );
+    expect(
+      deliveries.some((delivery) => delivery.includes('eager-first@1')),
+    ).toBe(true);
+    expect(
+      deliveries.some((delivery) => delivery.includes('eager-second@1')),
+    ).toBe(true);
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
