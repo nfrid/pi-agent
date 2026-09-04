@@ -1,5 +1,12 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -20,11 +27,14 @@ import {
 } from './control';
 import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
 import { setDelegateLifecycle } from './lifecycle';
+import { buildChildArgs } from './runner';
 import * as sessionModule from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
 import { createRun, type DelegatedRun } from './types';
 import * as worktreeModule from './worktree';
+
+const actualPrepareDelegateTask = taskLifecycle.prepareDelegateTask;
 
 const cacheFileMock = vi.hoisted(() => ({ next: 0 }));
 vi.mock('../shared/cache-files', () => ({
@@ -187,6 +197,7 @@ async function createAsyncHarness(
     }>;
     leafId?: string;
   },
+  cwd = '/tmp/project',
 ) {
   vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
     ...config,
@@ -247,7 +258,7 @@ async function createAsyncHarness(
     },
   } as unknown as ExtensionAPI;
   const ctx = {
-    cwd: '/tmp/project',
+    cwd,
     hasUI: false,
     mode: 'print',
     isIdle: () => false,
@@ -289,6 +300,97 @@ async function createAsyncHarness(
 }
 
 describe('async delegate extension', () => {
+  test('carries a model-facing relative skill through writable preparation and child argv', async () => {
+    const repository = path.join(testRoot, 'repository');
+    const requestedCwd = path.join(repository, 'nested');
+    const skill = path.join(requestedCwd, 'skills', 'review.md');
+    mkdirSync(path.dirname(skill), { recursive: true });
+    writeFileSync(skill, '# Review skill\n');
+    execFileSync('git', ['-C', repository, 'init', '-q']);
+    execFileSync('git', [
+      '-C',
+      repository,
+      'config',
+      'user.email',
+      'test@example.invalid',
+    ]);
+    execFileSync('git', [
+      '-C',
+      repository,
+      'config',
+      'user.name',
+      'Delegate test',
+    ]);
+    execFileSync('git', ['-C', repository, 'add', '.']);
+    execFileSync('git', ['-C', repository, 'commit', '-qm', 'skill']);
+    vi.stubEnv('PI_CODING_AGENT_DIR', path.join(testRoot, 'agent'));
+    vi.stubEnv('PI_DELEGATE_STATE_DIR', path.join(testRoot, 'agent', 'state'));
+
+    const { ctx, handlers, tools } = await createAsyncHarness(
+      'parent',
+      undefined,
+      requestedCwd,
+    );
+    let launched: PreparedDelegateTask | undefined;
+    let childArgs: string[] | undefined;
+    vi.mocked(taskLifecycle.prepareDelegateTask).mockImplementation(
+      (plan, preflight, parentSessionId, signal) =>
+        actualPrepareDelegateTask(plan, preflight, parentSessionId, signal),
+    );
+    vi.mocked(taskLifecycle.runPreparedDelegateTask).mockImplementation(
+      async (item) => {
+        launched = item;
+        childArgs = buildChildArgs(
+          {
+            task: item.plan.task,
+            routing: item.plan.routing,
+            allowWrites: item.allowWrites,
+            capabilities: item.capabilities,
+            skills: item.skills,
+            worktree: item.worktree,
+            contextNote: item.plan.contextNote,
+            handoffText: item.plan.handoffText,
+            scope: item.scope,
+            resuming: Boolean(item.plan.resumed),
+          },
+          item.session.filePath,
+        );
+        return successfulRun();
+      },
+    );
+
+    await tools.get('delegate')?.execute(
+      'skill-call',
+      {
+        id: 'skill-write',
+        task: 'Use the review skill',
+        route: 'quick',
+        cwd: '.',
+        skills: ['skills/review.md'],
+        write: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    await vi.waitFor(() => expect(launched).toBeDefined());
+    if (!launched || !childArgs) throw new Error('Delegate did not launch.');
+
+    expect(launched.plan.requestedCwd).toBe(requestedCwd);
+    expect(launched.plan.skills).toEqual([skill]);
+    expect(launched.skills).toEqual([skill]);
+    expect(
+      sessionModule.resolveDelegateSession(launched.session.token)?.skills,
+    ).toEqual([skill]);
+    const skillFlag = childArgs.indexOf('--skill');
+    expect(childArgs.slice(skillFlag, skillFlag + 2)).toEqual([
+      '--skill',
+      skill,
+    ]);
+    expect(childArgs[childArgs.indexOf('--tools') + 1]).toContain('write');
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
   test('state-gates broker tools until their state is actionable', async () => {
     const { ctx, finish, handlers, sendMessage, tools, activeTools } =
       await createAsyncHarness();
