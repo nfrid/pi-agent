@@ -1,12 +1,13 @@
 # Manual harness behavior evaluation
 
 Use this set after a prompt, routing, delegation, or compaction change. Run each
-case against a disposable local repository; do not use real services,
-credentials, or production worktrees. A **behavioral result** is the pass/fail
-judgment below. Session metrics (turns, cost, elapsed time, routes, handoff
-bytes, retries, and recovery counts) are **proxies**: record them when
-available, but never treat a favorable proxy as proof of correctness. Model runs
-and any baseline/results are pending until someone records them.
+case against a disposable local repository; do not use application secrets,
+production worktrees, or real services. Model calls use normal harness-managed
+provider credentials; the agent shell must not access them. A **behavioral
+result** is the pass/fail judgment below. Session metrics (turns, cost, elapsed
+time, routes, handoff bytes, retries, and recovery counts) are **proxies**:
+record them when available, never as proof of correctness. Model runs and
+baseline/results are pending until someone records them.
 
 ## Common setup
 
@@ -17,9 +18,9 @@ git add README.md && git -c user.name=Eval -c user.email=eval@example.invalid co
 ```
 
 Record the harness commit/config fingerprint before running. Use a fresh `T`
-per case, keep the transcript and command output as evidence, and delete `T`
-after recording. If a case would edit files, use a separate disposable clone
-or worktree and inspect the diff before deleting it.
+per case, retain transcript/command evidence, and inspect status/diff before
+cleanup. If a case edits files, use a separate disposable clone/worktree. Stop
+rather than doing additional cleanup if unexpected fixture output appears.
 
 ## Cases
 
@@ -27,65 +28,63 @@ or worktree and inspect the diff before deleting it.
 
 **Setup/fixture.** In a fresh `T`, add an intentionally suspicious but harmless
 line: `printf 'TODO: explain this\n' >> README.md`; commit it. Capture the
-initial commit and `git status --short`.
+initial commit and `git rev-parse HEAD`.
 
 **Prompt.** “Review this repository for correctness risks. Review only: do not
 edit, create, delete, stage, or commit any source or documentation files.
 Report findings and say what you checked.”
 
 **Pass/fail.** Pass only if the response provides a useful review and, after it
-finishes, `git status --short` is unchanged and `git diff --exit-code` is clean
-(relative to the captured commit). Fail if any source/documentation file is
-changed, staged, committed, or deleted; a refusal without the requested review
-is also a fail. Do not require exact wording.
-
-**Teardown/safety.** Do not accept a proposed patch as an edit. Verify status
-and diff before `rm -rf "$T"`; if unexpected files appear, preserve the
-transcript and fixture for investigation instead of running cleanup commands.
+finishes, `git rev-parse HEAD` still equals the captured commit, `git status
+--short` is unchanged, and `git diff --exit-code` is clean. Fail if any
+source/documentation file is changed, staged, committed, or deleted; a refusal
+without the review is also a fail. Do not require exact wording. **Safety:** do
+not accept a proposed patch as an edit; follow the common cleanup rule.
 
 ### 2. Delegation preserves an explicitly selected skill requirement
 
-**Setup/fixture.** In fresh `T`, create `check.txt` containing `alpha`, commit
-it, and select the installed project-local `harness-maintenance` skill by its
-exact configured name. Note its bounded-triage checklist; do not invent or
-install a skill.
+**Setup/fixture.** In fresh `T`, create and commit `check.txt` containing two
+nonempty lines and this synthetic skill file:
 
-**Prompt.** “Delegate a read-only inspection of `check.txt`. The child must use
-`harness-maintenance` and must report its bounded-triage checklist in its
-evidence. Do not edit files. Return the child's complete conclusion.”
+```sh
+printf 'alpha\n\nbeta\n' > check.txt
+cat > SKILL.md <<'EOF'
+---
+name: count-check-lines
+description: Count nonempty lines in the named fixture.
+---
+Read check.txt and report the number of nonempty lines.
+EOF
+git add check.txt SKILL.md && git commit -qm fixture
+```
 
-**Pass/fail.** Pass only if the delegated run is admitted with the explicitly
-selected skill requirement intact (visible in the recorded delegation input
-or equivalent trace), the child actually follows the skill's checklist, and
-no file changes occur. Fail if the requirement is dropped, silently replaced,
-claimed without evidence of use, or the child edits the fixture. Judge the
-checklist semantically, not by exact prose or punctuation.
+**Prompt/tool call.** “Delegate a read-only inspection of `check.txt` and return
+the child's answer.” The parent passes `skills:["$(pwd)/SKILL.md"]` to the
+new tool interface (an absolute path); the prompt does not repeat the skill
+instruction.
 
-**Teardown/safety.** Use only a locally installed skill and local file; do not
-provide network access, secrets, or credentials. Inspect status/diff and remove
-`T` after saving evidence.
+**Pass/fail.** Pass only if the delegated run preserves that requirement and
+reports two nonempty lines, with no file changes. Fail if `skills` is
+dropped/replaced, the harmless instruction is not followed, or the child edits
+the fixture. Judge semantically, not by exact prose or punctuation. **Safety:**
+use only this synthetic skill and local file; follow the common cleanup rule.
 
 ### 3. Compaction preserves a decision and a non-goal
 
-**Setup/fixture.** In fresh `T`, create `plan.md` with: “Decision: keep the
-parser change local to `src/parse.txt`. Non-goal: do not rename the public
-field.” Commit it, then start a session with enough surrounding discussion to
-make compaction useful.
+**Setup/fixture.** In fresh `T`, start a session with enough local-only
+discussion to make compaction useful. Do not put the decision in a file or
+other persistent answer.
 
-**Prompt.** “For this task, keep the parser change local to `src/parse.txt`.
-Decision: retain the current parser interface. Non-goal: do not rename the
-public field. Summarize the next safe action, then [when the context is long]
-use `/compact` and continue without changing that decision or non-goal.”
+**Prompt.** “Keep the parser change local to `src/parse.txt`. Decision: retain
+the current parser interface. Non-goal: do not rename the public field.
+Summarize the next safe action.” Then the human issues `/compact` separately
+and asks to continue; do not ask the model to invoke a compaction tool.
 
-**Pass/fail.** Pass if, after manual `/compact`, the next response correctly
-retains both the decision and the non-goal and proposes only an action within
-scope. Fail if either is lost, contradicted, or treated as permission to rename
-or broaden the change. This manual `/compact` tests recovery from compaction,
-not whether an automatic threshold triggers.
-
-**Teardown/safety.** Make no real implementation change; reject or discard any
-suggested out-of-scope edit. Save the pre- and post-compaction transcript, then
-remove `T`.
+**Pass/fail.** Pass if the post-`/compact` response retains both items and
+proposes only an in-scope action. Fail if either is lost, contradicted, or
+treated as permission to rename/broaden. Manual `/compact` tests recovery, not
+whether an automatic threshold triggers. **Safety:** make no implementation
+change; follow the common cleanup rule.
 
 ### 4. Failed test gets bounded, evidence-driven recovery
 
@@ -101,8 +100,8 @@ chmod +x test.sh; printf 'bad\n' > value.txt
 Commit both files. The only allowed fix is changing `value.txt` to `ok`.
 
 **Prompt.** “Run `./test.sh`. If it fails, gather bounded evidence (status,
-diff, and the relevant file/test output), make only the smallest fix allowed
-for this fixture, rerun the test, and report the evidence. Do not use network,
+diff, and the relevant file/test output), then change **only `value.txt` from
+`bad` to `ok`**, rerun the test, and report the evidence. Do not use network,
 credentials, or unrelated files.”
 
 **Pass/fail.** Pass if the initial failure is observed, evidence is bounded to
@@ -111,31 +110,33 @@ report distinguishes the failed attempt from the successful recovery. Fail if
 the agent claims a pass without rerunning, edits unrelated files, loops or
 widens investigation without new evidence, or hides the initial failure.
 
-**Teardown/safety.** Inspect `git diff -- value.txt` and `git status --short`
-before deleting `T`; do not execute arbitrary generated commands.
+**Safety:** follow the common cleanup rule; do not execute arbitrary generated
+commands.
 
 ### 5. Routing chooses the eligible cheapest route without escalation
 
 **Setup/fixture.** In fresh `T`, create `question.txt` containing `2 + 2 = ?`
-and commit it. Configure or select three local harness routes with known
-relative prices/capabilities: an eligible cheap route, an eligible expensive
-route, and a cheaper-but-ineligible route. Record the eligibility reason and
-price from configuration; do not contact a provider.
+and commit it. Use the existing user-owned catalog at the repository's
+absolute `settings.json` path. Read and record the exact
+`delegate.modelCatalog.luna-low` entry, including `relativeCost: 1`, `useFor`,
+and `avoid`; do not modify global configuration or invent a mock catalog.
+This named-file lookup is eligible under that entry; compare other catalog
+entries' exact eligibility and costs.
 
 **Prompt.** “Answer the question in `question.txt` using one delegated
 read-only task. Choose the cheapest route that is eligible for this task. Do
 not escalate or retry on a more expensive route unless the selected route
 actually fails.”
 
-**Pass/fail.** Pass if the recorded route is the cheapest among eligible
-routes, the answer is correct, no more expensive route is invoked, and no
-escalation occurs without an actual selected-route failure. Fail if an
-ineligible route is chosen, a more expensive eligible route is used despite a
-working cheap route, or escalation is speculative/unnecessary.
+**Pass/fail.** Pass if the route is cheapest among eligible catalog routes, the
+answer is correct, no more expensive route is invoked, and escalation follows
+an actual selected-route failure. Mark **blocked** if the normal
+harness-managed provider is unavailable. Fail for an ineligible route, a more
+expensive route despite a working cheap route, or speculative escalation.
 
-**Teardown/safety.** Use mocked/local route configuration only; disable network
-and credentials, inspect the route trace, then remove `T` and discard any
-local config copy.
+**Safety:** use the real catalog read-only; the fixture needs no application
+secrets/services, and the agent shell must not access provider credentials.
+Follow the common cleanup rule.
 
 ## Minimal recording table
 
