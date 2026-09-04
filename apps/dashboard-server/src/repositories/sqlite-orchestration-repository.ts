@@ -517,6 +517,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.checkoutId === undefined
         ? {}
         : { checkoutId: input.checkoutId }),
+      ...(input.externalRef === undefined
+        ? {}
+        : { externalRef: input.externalRef }),
       ...(input.archivedAt === undefined
         ? {}
         : { archivedAt: input.archivedAt }),
@@ -527,14 +530,15 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,status,archived_at,pinned_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,external_ref,status,archived_at,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
         thread.projectId,
         thread.title,
         thread.checkoutId ?? null,
+        thread.externalRef ?? null,
         thread.status,
         thread.archivedAt ?? null,
         thread.pinnedAt ?? null,
@@ -634,6 +638,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(optionalString(row, 'checkout_id') === undefined
         ? {}
         : { checkoutId: optionalString(row, 'checkout_id') }),
+      ...(optionalString(row, 'external_ref') === undefined
+        ? {}
+        : { externalRef: optionalString(row, 'external_ref') }),
       status: stringValue(row, 'status') as Thread['status'],
       ...(row.settled_at == null ? {} : { settledAt: Number(row.settled_at) }),
       ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
@@ -1169,10 +1176,41 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     idempotencyKey: string,
     input: CreateThreadWithRunInput,
   ): { thread: Thread; run: Run; receipt: CommandReceipt } {
+    return this.createThreadWithRunForCommand(
+      idempotencyKey,
+      'thread.create',
+      undefined,
+      input,
+    );
+  }
+
+  createExternalThreadWithRun(
+    externalRef: string,
+    commandFingerprint: string,
+    input: CreateThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt } {
+    return this.createThreadWithRunForCommand(
+      externalRef,
+      'external.thread.create',
+      commandFingerprint,
+      input,
+    );
+  }
+
+  private createThreadWithRunForCommand(
+    idempotencyKey: string,
+    commandType: string,
+    commandFingerprint: string | undefined,
+    input: CreateThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt } {
     return this.withTransaction(() => {
       const existing = this.getCommandReceipt(idempotencyKey);
       if (existing) {
-        if (existing.commandType !== 'thread.create')
+        if (
+          existing.commandType !== commandType ||
+          (commandFingerprint !== undefined &&
+            existing.commandFingerprint !== commandFingerprint)
+        )
           throw idempotencyConflict(idempotencyKey, existing.commandType);
         const result = existing.result as { thread: Thread; run: Run };
         return { ...result, receipt: existing };
@@ -1187,9 +1225,10 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       });
       const receipt: CommandReceipt = {
         idempotencyKey,
-        commandType: 'thread.create',
+        commandType,
         resourceType: 'thread',
         resourceId: thread.id,
+        ...(commandFingerprint === undefined ? {} : { commandFingerprint }),
         result: { thread, run },
         createdAt: Date.now(),
       };
@@ -1379,12 +1418,43 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     idempotencyKey: string,
     input: CreateIsolatedThreadWithRunInput,
   ): { thread: Thread; run: Run; receipt: CommandReceipt } {
+    return this.createIsolatedThreadWithRunForCommand(
+      idempotencyKey,
+      'thread.create',
+      undefined,
+      input,
+    );
+  }
+
+  createExternalIsolatedThreadWithRun(
+    externalRef: string,
+    commandFingerprint: string,
+    input: CreateIsolatedThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt } {
+    return this.createIsolatedThreadWithRunForCommand(
+      externalRef,
+      'external.thread.create',
+      commandFingerprint,
+      input,
+    );
+  }
+
+  private createIsolatedThreadWithRunForCommand(
+    idempotencyKey: string,
+    commandType: string,
+    commandFingerprint: string | undefined,
+    input: CreateIsolatedThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt } {
     return this.withTransaction(() => {
       // Check the receipt before allocating the checkout. This is the
       // durable idempotency boundary across connections and processes.
       const existing = this.getCommandReceipt(idempotencyKey);
       if (existing) {
-        if (existing.commandType !== 'thread.create')
+        if (
+          existing.commandType !== commandType ||
+          (commandFingerprint !== undefined &&
+            existing.commandFingerprint !== commandFingerprint)
+        )
           throw idempotencyConflict(idempotencyKey, existing.commandType);
         const result = existing.result as { thread: Thread; run: Run };
         return { ...result, receipt: existing };
@@ -1406,9 +1476,10 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       });
       const receipt: CommandReceipt = {
         idempotencyKey,
-        commandType: 'thread.create',
+        commandType,
         resourceType: 'thread',
         resourceId: thread.id,
+        ...(commandFingerprint === undefined ? {} : { commandFingerprint }),
         result: { thread, run },
         createdAt: Date.now(),
       };
@@ -1627,6 +1698,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.checkoutId === undefined
         ? {}
         : { checkoutId: input.checkoutId }),
+      ...(input.externalRef === undefined
+        ? {}
+        : { externalRef: input.externalRef }),
       ...(input.archivedAt === undefined
         ? {}
         : { archivedAt: input.archivedAt }),
@@ -1637,14 +1711,15 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,status,archived_at,pinned_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,external_ref,status,archived_at,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
         thread.projectId,
         thread.title,
         thread.checkoutId ?? null,
+        thread.externalRef ?? null,
         thread.status,
         thread.archivedAt ?? null,
         thread.pinnedAt ?? null,
@@ -2044,6 +2119,9 @@ function threadFromRow(row: Record<string, unknown>): Thread {
     ...(optionalString(row, 'checkout_id') === undefined
       ? {}
       : { checkoutId: optionalString(row, 'checkout_id') }),
+    ...(optionalString(row, 'external_ref') === undefined
+      ? {}
+      : { externalRef: optionalString(row, 'external_ref') }),
     status: stringValue(row, 'status') as Thread['status'],
     ...(row.archived_at == null ? {} : { archivedAt: Number(row.archived_at) }),
     ...(optionalString(row, 'pre_archive_status') === undefined

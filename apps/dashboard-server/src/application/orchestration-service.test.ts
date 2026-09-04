@@ -569,6 +569,74 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('uses an external title without generation and replays its fingerprinted command', async () => {
+    const generate = vi.fn(async () => 'Generated title');
+    const fixture = await isolatedServiceFixture({
+      generateThreadTitle: generate,
+    });
+    try {
+      await fixture.service.start();
+      const command = {
+        externalRef: 'external:build-1',
+        title: '  Authoritative   title  ',
+        prompt: 'Run the external build.',
+        isolation: 'main' as const,
+      };
+      const first = await fixture.service.createExternalThread(
+        fixture.projectId,
+        command,
+      );
+      const replay = await fixture.service.createExternalThread(
+        fixture.projectId,
+        { ...command, title: 'Authoritative title' },
+      );
+      expect(replay).toEqual(first);
+      expect(generate).not.toHaveBeenCalled();
+      await waitFor(() => fixture.launches.length === 1);
+      expect(fixture.launches[0]).toMatchObject({
+        name: 'Authoritative title',
+        mode: 'write',
+      });
+      expect(fixture.launches[0]).not.toHaveProperty('tools');
+      expect(fixture.launches[0]).not.toHaveProperty('noTools');
+      const conflicts = [
+        ['prompt', { prompt: 'Changed prompt.' }],
+        [
+          'model',
+          { model: { provider: 'test-provider', model: 'test-model' } },
+        ],
+        ['projectId', {}, `${fixture.projectId}-other`],
+        ['checkoutId', { checkoutId: 'checkout-other' }],
+        ['isolation', { isolation: 'worktree' as const }],
+        ['base', { base: 'head' as const }],
+        ['baseRef', { baseRef: 'main' }],
+      ] as const;
+      for (const [_field, change, changedProjectId] of conflicts)
+        await expect(
+          fixture.service.createExternalThread(
+            changedProjectId ?? fixture.projectId,
+            { ...command, ...change },
+          ),
+        ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+      const result = first as { thread: { id: string }; run: { id: string } };
+      expect(
+        fixture.metadata.orchestration.getThread(result.thread.id),
+      ).toMatchObject({
+        id: result.thread.id,
+        externalRef: command.externalRef,
+        title: 'Authoritative title',
+      });
+      expect(
+        fixture.metadata.orchestration.getCommandReceipt(command.externalRef),
+      ).toMatchObject({
+        commandType: 'external.thread.create',
+        commandFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('uses the submitted title when dashboard title generation fails', async () => {
     const fixture = await isolatedServiceFixture({
       generateThreadTitle: async () => {

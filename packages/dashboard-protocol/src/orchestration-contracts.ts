@@ -234,6 +234,7 @@ export const ThreadSchema = Type.Object(
     projectId: IdentifierSchema,
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
+    externalRef: Type.Optional(IdentifierSchema),
     status: ThreadStatusSchema,
     /** Independent visibility state; execution status is never replaced by archive. */
     archivedAt: Type.Optional(TimestampSchema),
@@ -253,6 +254,7 @@ export const ThreadSummarySchema = Type.Object(
     projectId: IdentifierSchema,
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
+    externalRef: Type.Optional(IdentifierSchema),
     status: ThreadStatusSchema,
     settledAt: Type.Optional(TimestampSchema),
     pinnedAt: Type.Optional(TimestampSchema),

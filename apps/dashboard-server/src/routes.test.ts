@@ -82,6 +82,43 @@ function context(): DashboardRouteContext {
 }
 
 describe('Fastify dashboard route plugin', () => {
+  it('creates an external thread with originless Bearer and rejects originless x token', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.createExternalThread = vi.fn(async (_projectId, command) => ({
+      thread: {
+        id: 'thread-1',
+        externalRef: (command as { externalRef: string }).externalRef,
+      },
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const payload = {
+      externalRef: 'external:1',
+      title: 'External title',
+      prompt: 'External prompt',
+    };
+    const bearer = await app.inject({
+      method: 'POST',
+      url: '/api/external/v1/projects/project-1/threads',
+      headers: { authorization: 'Bearer route-token' },
+      payload,
+    });
+    expect(bearer.statusCode).toBe(202);
+    expect(routeContext.createExternalThread).toHaveBeenCalledWith(
+      'project-1',
+      payload,
+    );
+    const legacy = await app.inject({
+      method: 'POST',
+      url: '/api/external/v1/projects/project-1/threads',
+      headers: { 'x-dashboard-token': 'route-token' },
+      payload,
+    });
+    expect(legacy.statusCode).toBe(403);
+  });
+
   it('returns the exact persisted session/thread projection', async () => {
     const app = Fastify();
     apps.push(app);

@@ -147,13 +147,26 @@ export async function adoptSession(
   return result;
 }
 
+function requireExternalFingerprint(command: CreateThreadCommand): string {
+  if (
+    command.externalRef === undefined ||
+    command.commandFingerprint === undefined
+  )
+    throw new Error('External thread creation requires a command fingerprint.');
+  return command.commandFingerprint;
+}
+
 export async function createThread(
   host: OrchestrationHost,
   projectId: string,
   command: CreateThreadCommand,
 ): Promise<unknown> {
-  const prior = host.receipt(command.commandId, 'thread.create');
+  const external = command.externalRef !== undefined;
+  const commandType = external ? 'external.thread.create' : 'thread.create';
+  const prior = host.receipt(command.commandId, commandType);
   if (prior) {
+    if (external && prior.commandFingerprint !== command.commandFingerprint)
+      throw idempotencyConflict(command.commandId, 'different-payload');
     await command.releaseImages?.();
     const result = prior.result as { thread: Thread; run: Run };
     return { ...result, receipt: prior };
@@ -163,16 +176,20 @@ export async function createThread(
   const titleCwd = command.checkoutId
     ? host.requireCheckout(command.checkoutId).path
     : (host.mainCheckout(project.id)?.path ?? project.rootPath);
-  const generatedTitle = host.generateThreadTitle
-    ? await host
-        .generateThreadTitle(command.prompt, titleCwd)
-        .catch(() => undefined)
-    : undefined;
+  const generatedTitle =
+    external || !host.generateThreadTitle
+      ? undefined
+      : await host
+          .generateThreadTitle(command.prompt, titleCwd)
+          .catch(() => undefined);
   const runId = `run-${randomUUID()}`;
   const thread = {
     id: `thread-${randomUUID()}`,
     projectId,
     title: generatedTitle ?? command.title,
+    ...(command.externalRef === undefined
+      ? {}
+      : { externalRef: command.externalRef }),
   };
   const run = {
     id: runId,
@@ -229,7 +246,13 @@ export async function createThread(
       thread: { ...thread, checkoutId: checkout.id },
       run,
     };
-    result = host.repository.createThreadWithRun(command.commandId, input);
+    result = external
+      ? host.repository.createExternalThreadWithRun(
+          command.commandId,
+          requireExternalFingerprint(command),
+          input,
+        )
+      : host.repository.createThreadWithRun(command.commandId, input);
   } else {
     // Resolve a selected ref before the durable receipt is written. The
     // resulting commit in baseSha makes restart/retry independent of branch
@@ -242,17 +265,24 @@ export async function createThread(
           : undefined;
     // The repository allocates this preparing checkout only after it has
     // checked the durable receipt, inside the same transaction as all rows.
-    result = host.repository.createIsolatedThreadWithRun(command.commandId, {
+    const input = {
       checkout: {
         id: `checkout-${randomUUID()}`,
-        kind: 'worktree',
+        kind: 'worktree' as const,
         path: path.join(project.rootPath, '.worktrees', `.pending-${runId}`),
-        status: 'preparing',
+        status: 'preparing' as const,
         ...(baseSha ? { baseSha } : {}),
       },
       thread,
       run,
-    });
+    };
+    result = external
+      ? host.repository.createExternalIsolatedThreadWithRun(
+          command.commandId,
+          requireExternalFingerprint(command),
+          input,
+        )
+      : host.repository.createIsolatedThreadWithRun(command.commandId, input);
   }
   if (command.images?.length && command.releaseImages)
     host.holdInitialImages(

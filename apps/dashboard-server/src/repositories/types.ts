@@ -110,6 +110,7 @@ export interface CreateThreadInput {
   projectId: string;
   title: string;
   checkoutId?: string;
+  externalRef?: string;
   pinnedAt?: number;
   archivedAt?: number;
   status?: Thread['status'];
@@ -297,6 +298,16 @@ export interface OrchestrationRepository extends ProjectAssociationRepository {
   createThreadWithRun(
     idempotencyKey: string,
     input: CreateThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt };
+  createExternalThreadWithRun(
+    externalRef: string,
+    commandFingerprint: string,
+    input: CreateThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt };
+  createExternalIsolatedThreadWithRun(
+    externalRef: string,
+    commandFingerprint: string,
+    input: CreateIsolatedThreadWithRunInput,
   ): { thread: Thread; run: Run; receipt: CommandReceipt };
   adoptSessionWithThreadAndRun(
     idempotencyKey: string,

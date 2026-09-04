@@ -210,10 +210,16 @@ remains required even when a proxy supplies identity headers.
 
 Every API request except health requires a bearer or `x-dashboard-token`
 credential. Requests that include an `Origin` must match the exact allow-list,
-and state-changing requests must include an allow-listed origin. WebSocket
+and state-changing requests must include an allow-listed origin, except the
+Bearer-authenticated external create route documented below. WebSocket
 upgrades require the same origin and authenticate with the first bounded
 message, never a URL token. The PWA asks for the token on first use and stores it
-in browser local storage; it does not embed the token in its build.
+in browser local storage; it does not embed the token in its build. Machine
+clients may use `POST /api/external/v1/projects/:projectId/threads` with
+`Authorization: Bearer`; this route accepts originless requests and requires
+`externalRef`, `title`, and a nonblank `prompt`. The reference is persisted and
+idempotent for the command payload; reuse with different input returns a
+conflict.
 
 Workspace and session launch requests use IDs from trusted indexes, never raw
 paths or flags. Uploads are bounded, server-owned temporary files and are removed

@@ -33,20 +33,29 @@ export function authorizeRequest(input: {
   origin?: string;
   authorization?: string;
   tokenHeader?: string;
+  /** Only the external machine route may bypass Origin with Bearer auth. */
+  allowOriginlessBearer?: boolean;
   expectedToken: string;
   allowedOrigins: readonly string[];
 }): { ok: true } | { ok: false; status: number; error: string } {
   if (input.origin && !allowedOrigin(input.origin, input.allowedOrigins))
     return { ok: false, status: 403, error: 'Origin is not allowed.' };
-  // Browsers omit Origin on same-origin GET and HEAD requests. State-changing
-  // requests must still carry an allow-listed Origin as the CSRF boundary.
-  if (isStateChangingMethod(input.method) && !input.origin)
-    return { ok: false, status: 403, error: 'Origin is required.' };
-  const token =
-    input.tokenHeader ??
-    (input.authorization?.startsWith('Bearer ')
-      ? input.authorization.slice(7)
-      : undefined);
+  const bearer = input.authorization?.startsWith('Bearer ')
+    ? input.authorization.slice(7)
+    : undefined;
+  // Browsers omit Origin on same-origin GET and HEAD requests. Only the
+  // external machine route may use originless Bearer authentication.
+  if (isStateChangingMethod(input.method) && !input.origin) {
+    if (!input.allowOriginlessBearer || bearer === undefined)
+      return { ok: false, status: 403, error: 'Origin is required.' };
+    if (input.tokenHeader !== undefined)
+      return {
+        ok: false,
+        status: 403,
+        error: 'Bearer authentication required.',
+      };
+  }
+  const token = input.tokenHeader ?? bearer;
   if (!safeTokenEqual(token, input.expectedToken))
     return { ok: false, status: 401, error: 'Authentication required.' };
   return { ok: true };

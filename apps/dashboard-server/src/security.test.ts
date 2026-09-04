@@ -55,6 +55,46 @@ describe('dashboard security boundary', () => {
     ).toMatchObject({ status: 401 });
   });
 
+  it('allows originless Bearer only when explicitly enabled for the external route', () => {
+    expect(
+      authorizeRequest({
+        method: 'POST',
+        authorization: 'Bearer secret',
+        allowOriginlessBearer: true,
+        expectedToken: 'secret',
+        allowedOrigins: ['https://dashboard.example'],
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      authorizeRequest({
+        method: 'POST',
+        tokenHeader: 'secret',
+        allowOriginlessBearer: true,
+        expectedToken: 'secret',
+        allowedOrigins: ['https://dashboard.example'],
+      }),
+    ).toMatchObject({ status: 403 });
+    expect(
+      authorizeRequest({
+        method: 'POST',
+        authorization: 'Bearer wrong',
+        allowOriginlessBearer: true,
+        expectedToken: 'secret',
+        allowedOrigins: ['https://dashboard.example'],
+      }),
+    ).toMatchObject({ status: 401 });
+    expect(
+      authorizeRequest({
+        method: 'POST',
+        authorization: 'Bearer ',
+        tokenHeader: 'secret',
+        allowOriginlessBearer: true,
+        expectedToken: 'secret',
+        allowedOrigins: ['https://dashboard.example'],
+      }),
+    ).toMatchObject({ status: 403 });
+  });
+
   it('preserves Unicode names without turning them into command strings', () => {
     expect(sanitizeDisplayName('Переезд завершён за 15 000 ₽')).toBe(
       'Переезд завершён за 15 000 ₽',

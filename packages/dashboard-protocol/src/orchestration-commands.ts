@@ -97,6 +97,46 @@ export const ThreadCreateCommandSchema = Type.Object(
 );
 export type ThreadCreateCommand = Static<typeof ThreadCreateCommandSchema>;
 
+/** Machine-facing create request; unlike browser create, title is authoritative. */
+export const ExternalThreadCreateCommandSchema = Type.Object(
+  {
+    externalRef: Type.String({
+      minLength: 1,
+      maxLength: MAX_ID,
+      pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+    }),
+    title: Type.String({
+      minLength: 1,
+      maxLength: 512,
+      pattern: '.*\\S.*',
+    }),
+    prompt: Type.String({
+      minLength: 1,
+      maxLength: MAX_TEXT,
+      pattern: '.*\\S.*',
+    }),
+    checkoutId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_ID })),
+    isolation: Type.Optional(
+      Type.Union([Type.Literal('worktree'), Type.Literal('main')]),
+    ),
+    base: Type.Optional(
+      Type.Union([Type.Literal('work'), Type.Literal('head')]),
+    ),
+    baseRef: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 512,
+        pattern: '^[^\\u0000-\\u001F\\u007F]+$',
+      }),
+    ),
+    model: Type.Optional(ModelSelectionSchema),
+  },
+  { additionalProperties: false },
+);
+export type ExternalThreadCreateCommand = Static<
+  typeof ExternalThreadCreateCommandSchema
+>;
+
 export const RetryCommandSchema = Type.Object(
   {
     commandId: CommandIdSchema,

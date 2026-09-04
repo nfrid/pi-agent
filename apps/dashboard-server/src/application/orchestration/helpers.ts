@@ -69,6 +69,9 @@ export interface CreateThreadCommand {
   commandId: string;
   title: string;
   prompt: string;
+  /** Internal marker used only by the machine-facing create route. */
+  externalRef?: string;
+  commandFingerprint?: string;
   checkoutId?: string;
   isolation?: 'worktree' | 'main';
   base?: 'work' | 'head';

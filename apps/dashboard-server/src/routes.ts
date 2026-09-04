@@ -23,6 +23,7 @@ import {
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   ProjectRenameCommandSchema,
+  parseExternalThreadCreateCommand,
   parseRetryCommand,
   parseThreadCreateCommand,
   RegenerateThreadTitleCommandSchema,
@@ -204,6 +205,7 @@ export interface DashboardRouteContext {
     command: unknown,
     images: readonly Buffer[],
   ): Promise<unknown>;
+  createExternalThread?(projectId: string, command: unknown): Promise<unknown>;
   gitContext?(projectId: string): Promise<unknown>;
   adoptSession?(
     projectId: string,
@@ -350,10 +352,15 @@ function installCorsAndAuth(
       return reply.code(204).send();
     }
     if (request.url.split('?', 1)[0] === '/api/health') return;
+    const externalCreate =
+      request.url
+        .split('?', 1)[0]
+        .match(/^\/api\/external\/v1\/projects\/[^/]+\/threads$/) !== null;
     const auth = authorizeRequest({
       method: request.method,
       origin,
       authorization: request.headers.authorization,
+      allowOriginlessBearer: externalCreate,
       tokenHeader: request.headers['x-dashboard-token'] as string | undefined,
       expectedToken: context.token,
       allowedOrigins: context.origins(),
@@ -724,6 +731,25 @@ export const dashboardRoutes: FastifyPluginAsync<{
           request.params.projectId,
         );
         return reply.code(204).send();
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { projectId: string } }>(
+    '/api/external/v1/projects/:projectId/threads',
+    { schema: { body: anyBody } },
+    async (request, reply) => {
+      try {
+        const command = parseExternalThreadCreateCommand(request.body);
+        return reply
+          .code(202)
+          .send(
+            await requireOperation(context.createExternalThread)(
+              request.params.projectId,
+              command,
+            ),
+          );
       } catch (error) {
         return sendError(reply, error);
       }

@@ -708,6 +708,61 @@ describe('SqliteOrchestrationRepository', () => {
     ).toThrow('belongs to run.create');
   });
 
+  it('persists external references and fingerprinted replay across reopen', async () => {
+    const value = await fixture();
+    const fingerprint = 'a'.repeat(64);
+    const input = {
+      thread: {
+        id: 'external-thread',
+        projectId: value.project.id,
+        title: 'External title',
+        checkoutId: value.checkout.id,
+        externalRef: 'external:opaque-1',
+      },
+      run: { id: 'external-run', initialPrompt: 'External prompt' },
+    };
+    const first = value.repository.createExternalThreadWithRun(
+      'external:opaque-1',
+      fingerprint,
+      input,
+    );
+    expect(
+      value.repository.createExternalThreadWithRun(
+        'external:opaque-1',
+        fingerprint,
+        input,
+      ),
+    ).toEqual(first);
+    expect(value.repository.threadSummaries()).toContainEqual(
+      expect.objectContaining({ externalRef: 'external:opaque-1' }),
+    );
+    let conflict: unknown;
+    try {
+      value.repository.createExternalThreadWithRun(
+        'external:opaque-1',
+        'b'.repeat(64),
+        input,
+      );
+    } catch (error) {
+      conflict = error;
+    }
+    expect(conflict).toMatchObject({ code: 'idempotency-conflict' });
+    value.db.close();
+    const reopened = new DatabaseSync(value.file);
+    try {
+      runMigrations(reopened);
+      const repository = new SqliteOrchestrationRepository(reopened);
+      expect(repository.getThread('external-thread')).toMatchObject({
+        externalRef: 'external:opaque-1',
+      });
+      expect(repository.listThreads(value.project.id)).toContainEqual(
+        expect.objectContaining({ externalRef: 'external:opaque-1' }),
+      );
+    } finally {
+      reopened.close();
+    }
+  });
+
   it('adopts sessions transactionally with prompt receipts and exact replay', async () => {
     const value = await fixture();
     const input = (

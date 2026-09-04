@@ -457,6 +457,14 @@ export class DashboardServerImpl implements DashboardServer {
           }),
         );
       },
+      createExternalThread: (projectId, command) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.createExternalThread(
+          projectId,
+          command as Parameters<typeof service.createExternalThread>[1],
+        );
+      },
       gitContext: async (projectId) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');

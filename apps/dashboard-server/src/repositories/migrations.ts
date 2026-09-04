@@ -853,6 +853,18 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 19,
+    name: 'external-thread-reference',
+    up(db) {
+      const existing = columns(db, 'thread');
+      if (!existing.has('external_ref'))
+        db.exec('ALTER TABLE thread ADD COLUMN external_ref TEXT');
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS thread_external_ref_unique ON thread(external_ref) WHERE external_ref IS NOT NULL',
+      );
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

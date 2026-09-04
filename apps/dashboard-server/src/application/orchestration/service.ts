@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
@@ -5,6 +6,7 @@ import type {
   BridgeImageAttachment,
   Checkout,
   CommandReceipt,
+  ExternalThreadCreateCommand,
   Project,
   ProjectRenameCommand,
   Run,
@@ -12,6 +14,7 @@ import type {
   SessionIndexEntry,
   Thread,
 } from '@pi-dashboard/protocol';
+import { normalizeSessionTitle } from '@pi-dashboard/protocol';
 import {
   createWorktreeCreator,
   createWorktreeFinisher,
@@ -62,6 +65,18 @@ import {
   unpinThread as unpinThreadLifecycle,
   unsettleThread as unsettleThreadLifecycle,
 } from './threads.js';
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
 
 /**
  * Durable project/thread/run application boundary and its deliberately small
@@ -212,6 +227,36 @@ export class OrchestrationService implements OrchestrationHost {
     command: CreateThreadCommand,
   ): Promise<unknown> {
     return createThreadLifecycle(this, projectId, command);
+  }
+
+  async createExternalThread(
+    projectId: string,
+    command: ExternalThreadCreateCommand,
+  ): Promise<unknown> {
+    const title = normalizeSessionTitle(command.title);
+    if (title === undefined) throw new Error('External thread title is empty.');
+    const normalizedCommand = { ...command, title };
+    const fingerprint = createHash('sha256')
+      .update(
+        stableJson({
+          projectId,
+          externalRef: normalizedCommand.externalRef,
+          title: normalizedCommand.title,
+          prompt: normalizedCommand.prompt,
+          checkoutId: normalizedCommand.checkoutId,
+          isolation: normalizedCommand.isolation,
+          base: normalizedCommand.base,
+          baseRef: normalizedCommand.baseRef,
+          model: normalizedCommand.model,
+        }),
+      )
+      .digest('hex');
+    return createThreadLifecycle(this, projectId, {
+      ...normalizedCommand,
+      commandId: normalizedCommand.externalRef,
+      externalRef: normalizedCommand.externalRef,
+      commandFingerprint: fingerprint,
+    });
   }
 
   async retry(

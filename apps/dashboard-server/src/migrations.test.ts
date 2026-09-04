@@ -111,7 +111,7 @@ describe('migration metadata', () => {
           .prepare('SELECT version FROM schema_migrations ORDER BY version')
           .all()
           .at(-1),
-      ).toEqual({ version: 18 });
+      ).toEqual({ version: 19 });
     } finally {
       db.close();
     }
@@ -119,7 +119,7 @@ describe('migration metadata', () => {
 
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ]);
   });
 

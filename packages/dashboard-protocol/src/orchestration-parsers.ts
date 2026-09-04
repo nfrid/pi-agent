@@ -7,6 +7,8 @@ import {
   CheckoutActionCommandSchema,
   type CheckoutReviewCommand,
   CheckoutReviewCommandSchema,
+  type ExternalThreadCreateCommand,
+  ExternalThreadCreateCommandSchema,
   type PinThreadCommand,
   PinThreadCommandSchema,
   type ProjectAdoptCommand,
@@ -125,6 +127,18 @@ export const tryParseThreadCreateCommand = (
   value: unknown,
 ): ThreadCreateCommand | undefined =>
   tryParseSchema(ThreadCreateCommandSchema, value);
+export const parseExternalThreadCreateCommand = (
+  value: unknown,
+): ExternalThreadCreateCommand =>
+  parseSchema(
+    ExternalThreadCreateCommandSchema,
+    value,
+    'external thread create command',
+  );
+export const tryParseExternalThreadCreateCommand = (
+  value: unknown,
+): ExternalThreadCreateCommand | undefined =>
+  tryParseSchema(ExternalThreadCreateCommandSchema, value);
 export const parseRetryCommand = (value: unknown): RetryCommand =>
   parseSchema(RetryCommandSchema, value, 'retry command');
 export const tryParseRetryCommand = (
