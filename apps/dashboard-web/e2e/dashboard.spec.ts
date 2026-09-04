@@ -324,15 +324,16 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         online: false,
         lastSeenAt: 20,
         model: {
-          provider: 'test',
+          provider: 'openai-codex',
           model: 'careful',
           thinking: 'high',
+          serviceTier: 'ultrafast',
           supportsImages: true,
         },
         modelCatalog: [
-          { provider: 'test', model: 'fast', name: 'Fast' },
+          { provider: 'openai-codex', model: 'fast', name: 'Fast' },
           {
-            provider: 'test',
+            provider: 'openai-codex',
             model: 'careful',
             name: 'Careful',
             supportsImages: true,
@@ -353,9 +354,10 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         rootPath:
           '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
         defaultModel: {
-          provider: 'test',
+          provider: 'openai-codex',
           model: 'careful',
           thinking: 'high',
+          serviceTier: 'fast',
         },
         status: 'active',
       },
@@ -401,6 +403,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   const mobileThreadRow = agentNav.locator('.agent-thread-row').first();
   await expect(mobileThreadRow).toContainText('Demo');
   await expect(mobileThreadRow).toContainText('offline');
+  await expect(
+    mobileThreadRow.getByRole('img', { name: 'Ultrafast' }),
+  ).toBeVisible();
   await expect(mobileThreadRow).not.toContainText('/Users/example');
   await expect(
     agentNav.getByRole('button', { name: /New thread/ }),
@@ -597,13 +602,21 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   const agentSheet = page.getByRole('dialog', {
     name: 'Agent and thinking',
   });
-  await agentSheet.getByRole('button', { name: 'Fast' }).click();
+  const speed = agentSheet.getByRole('group', { name: 'Codex speed' });
+  await expect(speed).toBeVisible();
+  await expect(speed.locator('.service-tier-icon')).toHaveCount(2);
+  await speed.locator('button[data-service-tier="fast"]').click();
+  await agentSheet
+    .locator('.draft-picker-option')
+    .filter({ hasText: 'Fast' })
+    .click();
   await expect(agentSheet).toBeVisible();
   await agentSheet.getByRole('button', { name: 'medium' }).click();
   await expect(agentSheet).toBeVisible();
   await page.getByRole('button', { name: 'Close Agent and thinking' }).click();
   await expect(agentSheet).toHaveCount(0);
   await expect(agentControl).toContainText('Fast· medium');
+  await expect(agentControl.getByRole('img', { name: 'Fast' })).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -615,7 +628,12 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     )
     .toEqual({
       location: { kind: 'current' },
-      model: { provider: 'test', model: 'fast', thinking: 'medium' },
+      model: {
+        provider: 'openai-codex',
+        model: 'fast',
+        thinking: 'medium',
+        serviceTier: 'fast',
+      },
     });
   const emptyState = page.getByText('New conversation');
   const transcript = page.getByRole('region', { name: 'Transcript' });

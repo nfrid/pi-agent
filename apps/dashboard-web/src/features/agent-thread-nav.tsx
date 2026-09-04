@@ -70,6 +70,7 @@ import {
   type RuntimeLifecycleThreadProps,
   refreshDurableThreadMetadata,
 } from './runtime-actions';
+import { ServiceTierIcon } from './service-tier-icon';
 import { AgentNavDrawerShell } from './surface-stack';
 import { DashboardTime } from './timestamp';
 import { UsageCapsule } from './usage-indicator';
@@ -132,6 +133,7 @@ export type ThreadMetadataPresentation = {
     id: string;
     alias: string;
     color: string;
+    serviceTier?: 'fast' | 'ultrafast';
   };
   effort: {
     full: string;
@@ -184,6 +186,12 @@ export function activeThreadDetails(
   const selectedModel = row.draft
     ? draftSelection
     : (row.runtime?.model ?? indexed.model);
+  const serviceTier =
+    selectedModel?.provider === 'openai-codex'
+      ? row.draft
+        ? draftSelection?.serviceTier
+        : (row.runtime?.model?.serviceTier ?? indexed.serviceTier)
+      : undefined;
   const catalogModel = selectedModel
     ? runtimes
         .flatMap((runtime) => runtime.modelCatalog ?? [])
@@ -206,6 +214,7 @@ export function activeThreadDetails(
         id: `${selectedModel.provider}/${selectedModel.model}`,
         alias: preference.alias ?? catalogModel?.name ?? selectedModel.model,
         color: preference.color ?? DEFAULT_MODEL_COLOR,
+        ...(serviceTier ? { serviceTier } : {}),
       }
     : undefined;
   const fullEffort = row.draft
@@ -380,6 +389,9 @@ function AgentThreadLink({
             data-row-content="details"
             title={[
               `Model: ${details.model?.id ?? 'unknown'}`,
+              ...(details.model?.serviceTier
+                ? [`Speed: ${details.model.serviceTier}`]
+                : []),
               `Effort: ${details.effort.full}`,
               `Branch: ${details.branch}`,
               ...(details.checkoutPath
@@ -399,6 +411,9 @@ function AgentThreadLink({
             >
               {details.model?.alias ?? '? model'}
             </span>
+            {details.model?.serviceTier && (
+              <ServiceTierIcon tier={details.model.serviceTier} />
+            )}
             <span
               className={styles.threadEffort}
               data-effort={details.effort.full}

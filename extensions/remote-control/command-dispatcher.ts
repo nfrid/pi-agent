@@ -10,6 +10,7 @@ import {
   type RuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';
 import type { BridgeCommand } from '@pi-dashboard/protocol/pi-runtime-protocol';
+import { setCodexServiceTier } from '../shared/codex-service-tier';
 import type { CapabilityActionHost } from '../shared/runtime/capability-action-host';
 import {
   aggregateRuntimeCapabilities,
@@ -136,6 +137,10 @@ export async function dispatchDashboardCommand(
       if (!model) throw new Error('Requested model is not available.');
       if (!(await pi.setModel(model)))
         throw new Error('Model authentication is unavailable.');
+      if (model.provider !== 'openai-codex')
+        setCodexServiceTier(pi, ctx, undefined);
+      else if (command.serviceTier !== undefined)
+        setCodexServiceTier(pi, ctx, command.serviceTier ?? undefined);
       return { accepted: true };
     }
     case 'setThinking':

@@ -566,6 +566,21 @@
 .draft-agent-model {
   color: var(--cyan);
 }
+.service-tier-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--orange);
+  line-height: 1;
+}
+.service-tier-icon svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+.service-tier-icon[data-service-tier="ultrafast"] svg {
+  width: 18px;
+}
 .draft-agent-thinking {
   flex: none;
   margin-left: 3px;
@@ -758,6 +773,9 @@
   padding: 4px 8px 10px;
 }
 .draft-picker-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: transparent;
@@ -792,6 +810,10 @@
 .draft-picker-chip[data-thinking="xhigh"],
 .draft-picker-chip[data-thinking="max"] {
   color: var(--pink);
+}
+.draft-service-tier[data-service-tier="fast"],
+.draft-service-tier[data-service-tier="ultrafast"] {
+  color: var(--orange);
 }
 .draft-picker-chip[aria-disabled="true"] {
   cursor: not-allowed;

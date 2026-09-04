@@ -216,12 +216,20 @@ export function draftModelSelection(
         modelOptionValue(runtime.model.provider, runtime.model.model),
       ),
   )?.model;
-  if (current)
+  if (current) {
+    const configured = selected ?? configuredDefault;
+    const serviceTier =
+      configured?.provider === current.provider &&
+      configured.model === current.model
+        ? configured.serviceTier
+        : undefined;
     return {
       provider: current.provider,
       model: current.model,
       ...(current.thinking ? { thinking: current.thinking } : {}),
+      ...(serviceTier ? { serviceTier } : {}),
     };
+  }
   if (selected) return selected;
   if (configuredDefault) return configuredDefault;
   const first = models[0];

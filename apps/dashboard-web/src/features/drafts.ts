@@ -40,7 +40,10 @@ function validModel(value: unknown): value is ModelSelection {
     (model.thinking === undefined ||
       (typeof model.thinking === 'string' &&
         model.thinking.length > 0 &&
-        model.thinking.length <= 64))
+        model.thinking.length <= 64)) &&
+    (model.serviceTier === undefined ||
+      model.serviceTier === 'fast' ||
+      model.serviceTier === 'ultrafast')
   );
 }
 

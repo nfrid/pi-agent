@@ -855,8 +855,9 @@ describe('workspace-first agent navigation', () => {
       },
     ] as never;
     const indexed = {
-      lastKnownModel: { provider: 'indexed', model: 'old' },
+      lastKnownModel: { provider: 'openai-codex', model: 'old' },
       lastKnownThinking: 'medium',
+      lastKnownServiceTier: 'fast',
       lastKnownContextTokens: 42,
     };
     expect(
@@ -864,7 +865,12 @@ describe('workspace-first agent navigation', () => {
         {
           status: 'idle',
           runtime: {
-            model: { provider: 'runtime', model: 'current', thinking: 'high' },
+            model: {
+              provider: 'openai-codex',
+              model: 'current',
+              thinking: 'high',
+              serviceTier: 'ultrafast',
+            },
             checkoutId: 'checkout-1',
             queueDrafts: [{ clientId: 'q1' }, { clientId: 'q2' }],
           },
@@ -879,15 +885,16 @@ describe('workspace-first agent navigation', () => {
             path: '/repo/.worktrees/thread-metadata',
           },
         ] as never,
-        { 'runtime/current': { alias: 'Current', color: '#ff79c6' } },
+        { 'openai-codex/current': { alias: 'Current', color: '#ff79c6' } },
       ),
     ).toMatchObject({
       branch: 'feature/thread-metadata',
       checkoutKind: 'worktree',
       model: {
-        id: 'runtime/current',
+        id: 'openai-codex/current',
         alias: 'Current',
         color: '#ff79c6',
+        serviceTier: 'ultrafast',
       },
       effort: { full: 'high', compact: 'h', color: 'orange' },
       queue: 2,
@@ -901,7 +908,11 @@ describe('workspace-first agent navigation', () => {
     ).toMatchObject({
       branch: 'main',
       checkoutKind: 'main',
-      model: { id: 'indexed/old', alias: 'old' },
+      model: {
+        id: 'openai-codex/old',
+        alias: 'old',
+        serviceTier: 'fast',
+      },
       effort: { full: 'medium', compact: 'm', color: 'cyan' },
     });
     expect(

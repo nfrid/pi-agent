@@ -9,16 +9,45 @@ const IdentifierSchema = Type.String({
 const PathSchema = Type.String({ minLength: 1, maxLength: MAX_PATH });
 const TimestampSchema = Type.Number();
 
+export const CodexServiceTierSchema = Type.Union([
+  Type.Literal('fast'),
+  Type.Literal('ultrafast'),
+]);
+export type CodexServiceTier = Static<typeof CodexServiceTierSchema>;
+
+const ModelSchemaProperties = {
+  model: Type.String({ minLength: 1, maxLength: 300 }),
+  thinking: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+};
+
+export type ModelSelection = {
+  provider: string;
+  model: string;
+  thinking?: string;
+  serviceTier?: CodexServiceTier;
+};
+
 /** Bounded provider/model identity used by durable runs and project defaults. */
-export const ModelSelectionSchema = Type.Object(
-  {
-    provider: Type.String({ minLength: 1, maxLength: 200 }),
-    model: Type.String({ minLength: 1, maxLength: 300 }),
-    thinking: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-  },
-  { additionalProperties: false },
+export const ModelSelectionSchema = Type.Unsafe<ModelSelection>(
+  Type.Union([
+    Type.Object(
+      {
+        provider: Type.Literal('openai-codex'),
+        ...ModelSchemaProperties,
+        serviceTier: Type.Optional(CodexServiceTierSchema),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        provider: Type.String({ minLength: 1, maxLength: 200 }),
+        ...ModelSchemaProperties,
+        serviceTier: Type.Optional(Type.Never()),
+      },
+      { additionalProperties: false },
+    ),
+  ]),
 );
-export type ModelSelection = Static<typeof ModelSelectionSchema>;
 
 export const ProjectStatusSchema = Type.Union([
   Type.Literal('active'),
@@ -387,6 +416,7 @@ export interface RuntimeStartInput {
     readonly provider: string;
     readonly model: string;
     readonly thinking?: string;
+    readonly serviceTier?: CodexServiceTier;
   };
 }
 

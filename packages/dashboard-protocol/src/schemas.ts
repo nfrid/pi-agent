@@ -45,6 +45,9 @@ import {
 import {
   type CheckoutSummary,
   CheckoutSummarySchema,
+  type CodexServiceTier,
+  CodexServiceTierSchema,
+  ModelSelectionSchema,
   type ProjectSummary,
   ProjectSummarySchema,
   type RunSummary,
@@ -58,6 +61,7 @@ export * from './delegate-history-contracts.js';
 export type {
   Checkout,
   CheckoutSummary,
+  CodexServiceTier,
   CommandReceipt,
   ModelSelection,
   Project,
@@ -72,6 +76,7 @@ export type {
 export {
   CheckoutSchema,
   CheckoutSummarySchema,
+  CodexServiceTierSchema,
   CommandReceiptSchema,
   ModelSelectionSchema,
   ProjectSchema,
@@ -537,6 +542,39 @@ export const QueueDraftSchema = Type.Object(
 );
 export type QueueDraft = Static<typeof QueueDraftSchema>;
 
+type RuntimeModel = {
+  provider: string;
+  model: string;
+  thinking?: string;
+  serviceTier?: CodexServiceTier;
+  supportsImages?: boolean;
+};
+const RuntimeModelProperties = {
+  model: Type.String({ minLength: 1, maxLength: 300 }),
+  thinking: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  supportsImages: Type.Optional(Type.Boolean()),
+};
+const RuntimeModelSchema = Type.Unsafe<RuntimeModel>(
+  Type.Union([
+    Type.Object(
+      {
+        provider: Type.Literal('openai-codex'),
+        ...RuntimeModelProperties,
+        serviceTier: Type.Optional(CodexServiceTierSchema),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        provider: Type.String({ minLength: 1, maxLength: 200 }),
+        ...RuntimeModelProperties,
+        serviceTier: Type.Optional(Type.Never()),
+      },
+      { additionalProperties: false },
+    ),
+  ]),
+);
+
 const RuntimeSnapshotProperties = {
   runtimeId: IdentifierSchema,
   ownership: RuntimeOwnershipSchema,
@@ -548,17 +586,7 @@ const RuntimeSnapshotProperties = {
   checkoutId: Type.Optional(Type.Union([IdentifierSchema, Type.Null()])),
   liveState: RuntimeLiveStateSchema,
   session: SessionSnapshotSchema,
-  model: Type.Optional(
-    Type.Object(
-      {
-        provider: Type.String({ minLength: 1, maxLength: 200 }),
-        model: Type.String({ minLength: 1, maxLength: 300 }),
-        thinking: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-        supportsImages: Type.Optional(Type.Boolean()),
-      },
-      { additionalProperties: false },
-    ),
-  ),
+  model: Type.Optional(RuntimeModelSchema),
   /** Bounded catalogue from the installed Pi model registry; credentials never cross the bridge. */
   modelCatalog: Type.Optional(
     Type.Readonly(Type.Array(RuntimeModelOptionSchema, { maxItems: 256 })),
@@ -1208,14 +1236,39 @@ const SimpleCommandSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-const SetModelCommandSchema = Type.Object(
-  {
-    ...BridgeCommandBaseProperties,
-    type: Type.Literal('setModel'),
-    provider: Type.String({ minLength: 1, maxLength: 200 }),
-    model: Type.String({ minLength: 1, maxLength: 300 }),
-  },
-  { additionalProperties: false },
+const SetModelCommandProperties = {
+  ...BridgeCommandBaseProperties,
+  type: Type.Literal('setModel'),
+  model: Type.String({ minLength: 1, maxLength: 300 }),
+};
+type SetModelCommand = {
+  id: string;
+  type: 'setModel';
+  provider: string;
+  model: string;
+  serviceTier?: CodexServiceTier | null;
+};
+const SetModelCommandSchema = Type.Unsafe<SetModelCommand>(
+  Type.Union([
+    Type.Object(
+      {
+        ...SetModelCommandProperties,
+        provider: Type.Literal('openai-codex'),
+        serviceTier: Type.Optional(
+          Type.Union([CodexServiceTierSchema, Type.Null()]),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        ...SetModelCommandProperties,
+        provider: Type.String({ minLength: 1, maxLength: 200 }),
+        serviceTier: Type.Optional(Type.Never()),
+      },
+      { additionalProperties: false },
+    ),
+  ]),
 );
 const SetThinkingCommandSchema = Type.Object(
   {
@@ -1402,6 +1455,7 @@ export const SessionIndexEntrySchema = Type.Object(
     lastKnownThinking: Type.Optional(
       Type.String({ minLength: 1, maxLength: 64 }),
     ),
+    lastKnownServiceTier: Type.Optional(CodexServiceTierSchema),
     lastKnownContextTokens: Type.Optional(Type.Number({ minimum: 0 })),
     /** Session header timestamp, used for stable chronological ordering. */
     startedAt: Type.Optional(FiniteNumberSchema),
@@ -2097,16 +2151,7 @@ export const StartRuntimeRequestSchema = Type.Object(
     ),
     sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
-    model: Type.Optional(
-      Type.Object(
-        {
-          provider: Type.String({ minLength: 1, maxLength: 200 }),
-          model: Type.String({ minLength: 1, maxLength: 300 }),
-          thinking: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-        },
-        { additionalProperties: false },
-      ),
-    ),
+    model: Type.Optional(ModelSelectionSchema),
     initialPrompt: Type.Optional(
       Type.String({ minLength: 1, maxLength: 100_000 }),
     ),

@@ -2,7 +2,7 @@ import {
   commandMutationOptions,
   dashboardHttpClient,
 } from '@pi-dashboard/client';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type { CodexServiceTier, RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { errorMessage } from '../../shared/lib/error-message';
@@ -35,7 +35,31 @@ export function RuntimeAgentControl({
       setModel({
         ...next,
         ...(model?.thinking ? { thinking: model.thinking } : {}),
+        ...(next.provider === 'openai-codex' && model?.serviceTier
+          ? { serviceTier: model.serviceTier }
+          : {}),
       });
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  };
+  const setRuntimeServiceTier = async (
+    serviceTier: CodexServiceTier | undefined,
+  ) => {
+    if (model?.provider !== 'openai-codex') return;
+    setError(undefined);
+    try {
+      await command.mutateAsync({
+        runtimeId: runtime.runtimeId,
+        command: {
+          type: 'setModel',
+          provider: model.provider,
+          model: model.model,
+          serviceTier: serviceTier ?? null,
+        },
+      });
+      const { serviceTier: _current, ...selection } = model;
+      setModel({ ...selection, ...(serviceTier ? { serviceTier } : {}) });
     } catch (cause) {
       setError(errorMessage(cause));
     }
@@ -63,6 +87,7 @@ export function RuntimeAgentControl({
       error={error}
       onModelChange={(next) => void setRuntimeModel(next)}
       onThinkingChange={(thinking) => void setRuntimeThinking(thinking)}
+      onServiceTierChange={(tier) => void setRuntimeServiceTier(tier)}
     />
   );
 }

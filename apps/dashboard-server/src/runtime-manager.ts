@@ -431,6 +431,9 @@ export class RuntimeManager {
               ...(snapshot.model.thinking
                 ? { thinking: snapshot.model.thinking }
                 : {}),
+              ...(snapshot.model.serviceTier
+                ? { serviceTier: snapshot.model.serviceTier }
+                : {}),
             },
           }
         : {}),

@@ -136,6 +136,9 @@ export function Composer({
   const [resumeThinking, setResumeThinking] = useState(
     dormantMetadata.thinking,
   );
+  const [resumeServiceTier, setResumeServiceTier] = useState(
+    dormantMetadata.serviceTier,
+  );
   const runtimeOptions = draftRuntimeOptions(runtimes);
   const configuredModels = runtimeOptions.models;
   const resumeModels =
@@ -194,7 +197,13 @@ export function Composer({
     }
     setResumeModel((current) => current ?? dormantMetadata.model);
     setResumeThinking((current) => current ?? dormantMetadata.thinking);
-  }, [dormantMetadata.model, dormantMetadata.thinking, runtime]);
+    setResumeServiceTier((current) => current ?? dormantMetadata.serviceTier);
+  }, [
+    dormantMetadata.model,
+    dormantMetadata.serviceTier,
+    dormantMetadata.thinking,
+    runtime,
+  ]);
   useEffect(() => {
     if (runtime && attachments.length === 0)
       dormantImageAttemptRef.current = false;
@@ -222,6 +231,7 @@ export function Composer({
               provider: resumeModel.provider,
               model: resumeModel.model,
               ...(resumeThinking ? { thinking: resumeThinking } : {}),
+              ...(resumeServiceTier ? { serviceTier: resumeServiceTier } : {}),
             }
           : undefined,
       );
@@ -463,14 +473,22 @@ export function Composer({
                       provider: resumeModel.provider,
                       model: resumeModel.model,
                       ...(resumeThinking ? { thinking: resumeThinking } : {}),
+                      ...(resumeServiceTier
+                        ? { serviceTier: resumeServiceTier }
+                        : {}),
                     }
                   : undefined
               }
               models={resumeModels}
               levels={thinkingLevels}
               disabled={submissionDisabled || busy}
-              onModelChange={setResumeModel}
+              onModelChange={(next) => {
+                setResumeModel(next);
+                if (next.provider !== 'openai-codex')
+                  setResumeServiceTier(undefined);
+              }}
               onThinkingChange={setResumeThinking}
+              onServiceTierChange={setResumeServiceTier}
             />
           )
         }

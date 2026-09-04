@@ -300,6 +300,40 @@ describe('draft agent picker', () => {
     renderer.unmount();
   });
 
+  it('offers normal, fast, and ultrafast for Codex models', () => {
+    installKeyboard();
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(
+        <DraftAgentPicker
+          draftId="draft-1"
+          model={{ provider: 'openai-codex', model: 'gpt' }}
+          runtimes={[]}
+          disabled={false}
+        />,
+      );
+    });
+    act(() => buttonWithLabel(renderer, 'gpt')?.props.onPress());
+    const speedChips = renderer.root
+      .findAllByType(Button)
+      .filter((node) => node.props.className?.includes('draft-service-tier'));
+    expect(speedChips.map((chip) => chip.props['data-service-tier'])).toEqual([
+      'normal',
+      'fast',
+      'ultrafast',
+    ]);
+    expect(
+      renderer.root.findAllByProps({ className: 'service-tier-icon' }),
+    ).toHaveLength(2);
+    act(() => buttonWithLabel(renderer, 'Fast')?.props.onPress());
+    expect(setDraftModel).toHaveBeenLastCalledWith('draft-1', {
+      provider: 'openai-codex',
+      model: 'gpt',
+      serviceTier: 'fast',
+    });
+    renderer.unmount();
+  });
+
   it('keeps the selected model available without a runtime catalogue', () => {
     installKeyboard();
     let renderer!: ReturnType<typeof create>;

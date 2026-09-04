@@ -525,9 +525,16 @@ describe('session index', () => {
           thinkingLevel: 'high',
         },
         {
+          type: 'custom',
+          id: 'service-tier',
+          parentId: 'old-thinking',
+          customType: 'codex-service-tier',
+          data: { tier: 'fast' },
+        },
+        {
           type: 'message',
           id: 'old-answer',
-          parentId: 'old-thinking',
+          parentId: 'service-tier',
           message: {
             role: 'assistant',
             provider: 'old-provider',
@@ -548,7 +555,7 @@ describe('session index', () => {
           parentId: 'old-answer',
           message: {
             role: 'assistant',
-            provider: 'latest-provider',
+            provider: 'openai-codex',
             model: 'latest-model',
             usage: { totalTokens: 3456 },
           },
@@ -560,8 +567,9 @@ describe('session index', () => {
     const index = new SessionIndex(root);
     await index.rebuild();
     expect(index.get('resume-id')).toMatchObject({
-      lastKnownModel: { provider: 'latest-provider', model: 'latest-model' },
+      lastKnownModel: { provider: 'openai-codex', model: 'latest-model' },
       lastKnownThinking: 'high',
+      lastKnownServiceTier: 'fast',
       lastKnownContextTokens: 3456,
     });
   });
@@ -578,6 +586,7 @@ describe('session index', () => {
     await index.rebuild();
     expect(index.get('empty-id')).not.toHaveProperty('lastKnownModel');
     expect(index.get('empty-id')).not.toHaveProperty('lastKnownThinking');
+    expect(index.get('empty-id')).not.toHaveProperty('lastKnownServiceTier');
     expect(index.get('empty-id')).not.toHaveProperty('lastKnownContextTokens');
   });
 

@@ -10,6 +10,7 @@ import {
   type TranscriptEntry,
 } from '@pi-dashboard/activity-model';
 import {
+  type CodexServiceTier,
   deriveSessionTitle,
   isRecord,
   MAX_SESSION_BRANCH_PATHS,
@@ -53,6 +54,7 @@ interface SessionLineDescriptor {
   readonly resume?: {
     readonly model?: { readonly provider: string; readonly model: string };
     readonly thinking?: string;
+    readonly serviceTier?: CodexServiceTier | null;
     readonly contextTokens?: number;
   };
   readonly activity: TranscriptEntry;
@@ -575,6 +577,16 @@ function resumeFromRawEntry(value: unknown): SessionLineDescriptor['resume'] {
       ? { thinking: value.thinkingLevel }
       : undefined;
   }
+  if (
+    value.type === 'custom' &&
+    value.customType === 'codex-service-tier' &&
+    isRecord(value.data)
+  ) {
+    const tier = value.data.tier;
+    return tier === 'fast' || tier === 'ultrafast'
+      ? { serviceTier: tier }
+      : { serviceTier: null };
+  }
   if (value.type !== 'message' || !isRecord(value.message)) return undefined;
   if (value.message.role !== 'assistant') return undefined;
   const provider = value.message.provider;
@@ -640,20 +652,31 @@ function resumeMetadataFromDescriptors(
   leafId: string | undefined,
 ): Pick<
   SessionIndexEntry,
-  'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
+  | 'lastKnownModel'
+  | 'lastKnownThinking'
+  | 'lastKnownServiceTier'
+  | 'lastKnownContextTokens'
 > {
   if (!leafId) return {};
   try {
     const descriptors = branchPageDescriptors(index, leafId).descriptors;
     const result: Pick<
       SessionIndexEntry,
-      'lastKnownModel' | 'lastKnownThinking' | 'lastKnownContextTokens'
+      | 'lastKnownModel'
+      | 'lastKnownThinking'
+      | 'lastKnownServiceTier'
+      | 'lastKnownContextTokens'
     > = {};
     for (const descriptor of descriptors) {
       if (descriptor.resume?.model)
         result.lastKnownModel = descriptor.resume.model;
       if (descriptor.resume?.thinking)
         result.lastKnownThinking = descriptor.resume.thinking;
+      if (descriptor.resume && 'serviceTier' in descriptor.resume) {
+        if (descriptor.resume.serviceTier)
+          result.lastKnownServiceTier = descriptor.resume.serviceTier;
+        else delete result.lastKnownServiceTier;
+      }
       if (descriptor.resume?.contextTokens !== undefined)
         result.lastKnownContextTokens = descriptor.resume.contextTokens;
     }

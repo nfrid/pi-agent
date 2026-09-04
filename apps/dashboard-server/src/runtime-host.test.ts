@@ -88,6 +88,12 @@ describe('runtime host', () => {
       cwd: root,
       name: `Сетап; touch ${injected}`,
       mode: 'read' as const,
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-test',
+        thinking: 'high',
+        serviceTier: 'fast' as const,
+      },
       socketPath: path.join(root, 'bridge.sock'),
       launchToken: 'launch',
       identityToken: 'identity',
@@ -108,6 +114,14 @@ describe('runtime host', () => {
         'read,grep,find,ls',
         '--name',
         `Сетап; touch ${injected}`,
+        '--provider',
+        'openai-codex',
+        '--model',
+        'gpt-test',
+        '--thinking',
+        'high',
+        '--service-tier',
+        'fast',
       ]);
       await expect(readFile(injected, 'utf8')).rejects.toMatchObject({
         code: 'ENOENT',
@@ -128,7 +142,14 @@ describe('runtime host', () => {
       await client.stop('runtime-1');
       expect((await client.inspect('runtime-1'))?.status).toBe('stopped');
 
-      await client.start({ ...input, runtimeId: 'runtime-same-cwd' });
+      await client.start({
+        ...input,
+        runtimeId: 'runtime-same-cwd',
+        model: { ...input.model, serviceTier: undefined },
+      });
+      expect((await client.inspect('runtime-same-cwd'))?.args).toContain(
+        'normal',
+      );
       await client.stop('runtime-same-cwd');
 
       const otherCwd = path.join(root, 'other-cwd');

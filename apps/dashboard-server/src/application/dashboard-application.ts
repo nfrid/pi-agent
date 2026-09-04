@@ -97,6 +97,7 @@ const SESSION_METADATA_FIELDS = [
   'title',
   'lastKnownModel',
   'lastKnownThinking',
+  'lastKnownServiceTier',
   'lastKnownContextTokens',
   'startedAt',
   'updatedAt',

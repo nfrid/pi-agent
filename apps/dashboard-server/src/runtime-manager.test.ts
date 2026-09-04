@@ -421,6 +421,12 @@ describe('managed runtime launch safety', () => {
       ...runtime('session-project-restored'),
       runtimeId,
       cwd: checkoutRoot,
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-test',
+        thinking: 'high',
+        serviceTier: 'ultrafast',
+      },
     };
     const start = vi.fn(async ({ runtimeId: nextId }: { runtimeId: string }) =>
       binding(nextId),
@@ -445,6 +451,12 @@ describe('managed runtime launch safety', () => {
     expect(start.mock.calls[0]?.[0]).toMatchObject({
       cwd: await realpath(checkoutRoot),
       mode: 'read',
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-test',
+        thinking: 'high',
+        serviceTier: 'ultrafast',
+      },
     });
     expect(start.mock.calls[0]?.[0]).not.toHaveProperty('workspace');
     metadata.close();

@@ -16,6 +16,7 @@ import type {
   RuntimeSnapshot,
   SessionSnapshot,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
+import { codexServiceTier } from '../shared/codex-service-tier';
 import {
   aggregateRuntimeCapabilities,
   contributionManifests,
@@ -55,10 +56,13 @@ export function sessionSnapshot(ctx: ExtensionContext): SessionSnapshot {
 export function modelSnapshot(ctx: ExtensionContext): RuntimeSnapshot['model'] {
   const model = ctx.model;
   if (!model) return undefined;
+  const serviceTier =
+    model.provider === 'openai-codex' ? codexServiceTier(ctx) : undefined;
   return {
     provider: model.provider,
     model: model.id,
     thinking: ctx.thinkingLevel,
+    ...(serviceTier ? { serviceTier } : {}),
     supportsImages: model.input.includes('image'),
   };
 }

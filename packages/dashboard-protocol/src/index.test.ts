@@ -1370,6 +1370,21 @@ describe('dashboard protocol', () => {
       ],
       thinkingLevels: ['off', 'high'],
     });
+    expect(() =>
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-invalid-tier',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-invalid-tier', entries: [] },
+        model: {
+          provider: 'anthropic',
+          model: 'claude',
+          serviceTier: 'fast',
+        },
+      }),
+    ).toThrow();
   });
 
   it('requires persisted project and checkout launch identity', () => {
@@ -1395,9 +1410,16 @@ describe('dashboard protocol', () => {
         projectId: 'p',
         checkoutId: 'c',
         mode: 'read',
-        model: { provider: 'p', model: 'm' },
-      }).mode,
-    ).toBe('read');
+        model: {
+          provider: 'openai-codex',
+          model: 'gpt',
+          serviceTier: 'ultrafast',
+        },
+      }),
+    ).toMatchObject({
+      mode: 'read',
+      model: { serviceTier: 'ultrafast' },
+    });
     expect(() =>
       validateStartRuntimeRequest({
         projectId: 'p',
@@ -1405,5 +1427,25 @@ describe('dashboard protocol', () => {
         initialPrompt: 'x'.repeat(100_001),
       }),
     ).toThrow('initial prompt');
+    expect(() =>
+      validateStartRuntimeRequest({
+        projectId: 'p',
+        checkoutId: 'c',
+        model: {
+          provider: 'anthropic',
+          model: 'claude',
+          serviceTier: 'fast',
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      validateBridgeCommand({
+        id: 'model-invalid-tier',
+        type: 'setModel',
+        provider: 'anthropic',
+        model: 'claude',
+        serviceTier: 'fast',
+      }),
+    ).toThrow();
   });
 });

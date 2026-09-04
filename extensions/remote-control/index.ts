@@ -2,6 +2,10 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import {
+  CODEX_SERVICE_TIER_CHANGED,
+  type CodexServiceTier,
+} from '../shared/codex-service-tier';
 import { defineExtension } from '../shared/runtime/extension';
 import { compactWithDashboardCancellation } from './compaction-shim';
 import { clearSettledBackground } from './live';
@@ -90,9 +94,9 @@ export function shutdownRemoteControlRuntime(
   runtime: import('./runtime').RemoteControlRuntime,
   event: { reason: string },
   ctx: ExtensionContext,
-  stopSteeringUpdates: () => void,
+  stopRuntimeUpdates: () => void,
 ): void {
-  stopSteeringUpdates();
+  stopRuntimeUpdates();
   const announcesTermination =
     event.reason === 'quit' || event.reason === 'reload';
   const isSessionReplacement = ['new', 'resume', 'fork'].includes(event.reason);
@@ -155,6 +159,21 @@ export default defineExtension('remote-control', (pi) => {
       });
     },
   );
+  const stopServiceTierUpdates = pi.events.on(
+    CODEX_SERVICE_TIER_CHANGED,
+    (value) => {
+      const update = value as {
+        tier?: CodexServiceTier;
+        ctx?: ExtensionContext;
+      };
+      if (update.ctx && runtime.isCurrent(update.ctx))
+        emitState(runtime, update.ctx);
+    },
+  );
+  const stopRuntimeUpdates = () => {
+    stopSteeringUpdates();
+    stopServiceTierUpdates();
+  };
   const onCurrentTransportEvent = (
     event: string,
     handler: (value: unknown, ctx: ExtensionContext) => void,
@@ -309,6 +328,6 @@ export default defineExtension('remote-control', (pi) => {
     emitState(runtime, ctx),
   );
   pi.on('session_shutdown', (event, ctx) => {
-    shutdownRemoteControlRuntime(runtime, event, ctx, stopSteeringUpdates);
+    shutdownRemoteControlRuntime(runtime, event, ctx, stopRuntimeUpdates);
   });
 });

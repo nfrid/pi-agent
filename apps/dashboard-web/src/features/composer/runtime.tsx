@@ -1,5 +1,6 @@
 import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type {
+  CodexServiceTier,
   RuntimeSnapshot,
   SessionIndexEntry,
   StartRuntimeRequest,
@@ -89,6 +90,7 @@ export function runtimeSupportsImages(runtime: RuntimeSnapshot): boolean {
 export type DormantResumeMetadata = {
   model?: RuntimeModelOption;
   thinking?: string;
+  serviceTier?: CodexServiceTier;
   contextTokens?: number;
 };
 
@@ -139,6 +141,9 @@ export function dormantResumeMetadata(
   return {
     ...(model ? { model } : {}),
     ...(thinking ? { thinking } : {}),
+    ...(model?.provider === 'openai-codex' && session?.lastKnownServiceTier
+      ? { serviceTier: session.lastKnownServiceTier }
+      : {}),
     ...(session?.lastKnownContextTokens === undefined
       ? {}
       : { contextTokens: session.lastKnownContextTokens }),

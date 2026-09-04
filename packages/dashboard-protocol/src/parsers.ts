@@ -832,11 +832,21 @@ export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
       !safeIdentifier(input.model.thinking, 64)
     )
       throw new Error('Invalid thinking level.');
-    result.model = {
-      provider: input.model.provider,
-      model: input.model.model,
-      ...(input.model.thinking ? { thinking: input.model.thinking } : {}),
-    };
+    result.model =
+      input.model.provider === 'openai-codex'
+        ? {
+            provider: input.model.provider,
+            model: input.model.model,
+            ...(input.model.thinking ? { thinking: input.model.thinking } : {}),
+            ...(input.model.serviceTier
+              ? { serviceTier: input.model.serviceTier }
+              : {}),
+          }
+        : {
+            provider: input.model.provider,
+            model: input.model.model,
+            ...(input.model.thinking ? { thinking: input.model.thinking } : {}),
+          };
   }
   return result;
 }

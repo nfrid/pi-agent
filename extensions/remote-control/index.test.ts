@@ -387,6 +387,51 @@ describe('dashboard input dispatch', () => {
     });
   });
 
+  it('updates the Codex service tier with the existing model command', async () => {
+    const appendEntry = vi.fn();
+    const emit = vi.fn();
+    const model = { provider: 'openai-codex', id: 'gpt' };
+    const pi = {
+      setModel: vi.fn(async () => true),
+      appendEntry,
+      events: { emit },
+    } as unknown as ExtensionAPI;
+    const context = {
+      model,
+      modelRegistry: { find: () => model },
+      sessionManager: {},
+    } as unknown as ExtensionContext;
+
+    await dispatchDashboardCommand(pi, context, {
+      id: 'model-fast',
+      type: 'setModel',
+      provider: 'openai-codex',
+      model: 'gpt',
+      serviceTier: 'fast',
+    });
+    expect(appendEntry).toHaveBeenLastCalledWith('codex-service-tier', {
+      tier: 'fast',
+    });
+    await dispatchDashboardCommand(pi, context, {
+      id: 'model-preserve',
+      type: 'setModel',
+      provider: 'openai-codex',
+      model: 'gpt',
+    });
+    expect(appendEntry).toHaveBeenCalledTimes(1);
+    await dispatchDashboardCommand(pi, context, {
+      id: 'model-normal',
+      type: 'setModel',
+      provider: 'openai-codex',
+      model: 'gpt',
+      serviceTier: null,
+    });
+    expect(appendEntry).toHaveBeenLastCalledWith('codex-service-tier', {
+      tier: null,
+    });
+    expect(emit).toHaveBeenCalledTimes(2);
+  });
+
   it('dispatches pause and continue immediately even in steering mode', async () => {
     const listeners = new Map<string, Set<(value: unknown) => void>>();
     const pi = {

@@ -4,6 +4,7 @@ import {
 } from '@pi-dashboard/client';
 import type {
   CheckoutSummary,
+  CodexServiceTier,
   ModelSelection,
   RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
@@ -21,6 +22,7 @@ import {
   modelOptionValue,
   type RuntimeModelOption,
 } from '../model-option';
+import { ServiceTierIcon } from '../service-tier-icon';
 
 function modelName(
   model: ModelSelection | undefined,
@@ -449,6 +451,7 @@ export function AgentPicker({
   error,
   onModelChange,
   onThinkingChange,
+  onServiceTierChange,
 }: {
   model: ModelSelection | undefined;
   models: readonly RuntimeModelOption[];
@@ -458,6 +461,7 @@ export function AgentPicker({
   error?: string;
   onModelChange: (model: { provider: string; model: string }) => void;
   onThinkingChange: (level: string) => void;
+  onServiceTierChange: (tier: CodexServiceTier | undefined) => void;
 }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -492,6 +496,7 @@ export function AgentPicker({
         >
           {modelName(model, models, preferences)}
         </span>
+        {model?.serviceTier && <ServiceTierIcon tier={model.serviceTier} />}
         {model?.thinking && (
           <span className="draft-agent-thinking">· {model.thinking}</span>
         )}
@@ -521,6 +526,36 @@ export function AgentPicker({
               />
             );
           })}
+          {model?.provider === 'openai-codex' && (
+            <>
+              <div className="draft-picker-section">Speed</div>
+              <fieldset className="draft-picker-chips">
+                <legend className="sr-only">Codex speed</legend>
+                {(
+                  [
+                    { label: 'Normal', tier: undefined },
+                    { label: 'Fast', tier: 'fast' },
+                    { label: 'Ultrafast', tier: 'ultrafast' },
+                  ] as const
+                ).map((option) => (
+                  <Button
+                    key={option.label}
+                    type="button"
+                    className={`draft-picker-chip draft-service-tier${model.serviceTier === option.tier ? ' selected' : ''}`}
+                    data-service-tier={option.tier ?? 'normal'}
+                    isDisabled={pending}
+                    aria-pressed={model.serviceTier === option.tier}
+                    onPress={() => onServiceTierChange(option.tier)}
+                  >
+                    {option.tier && (
+                      <ServiceTierIcon tier={option.tier} decorative />
+                    )}
+                    {option.label}
+                  </Button>
+                ))}
+              </fieldset>
+            </>
+          )}
           {levels.length > 0 && (
             <>
               <div className="draft-picker-section">Thinking</div>
@@ -591,10 +626,21 @@ export function DraftAgentPicker({
         setDraftModel(draftId, {
           ...next,
           ...(model?.thinking ? { thinking: model.thinking } : {}),
+          ...(next.provider === 'openai-codex' && model?.serviceTier
+            ? { serviceTier: model.serviceTier }
+            : {}),
         })
       }
       onThinkingChange={(thinking) => {
         if (model) setDraftModel(draftId, { ...model, thinking });
+      }}
+      onServiceTierChange={(serviceTier) => {
+        if (!model) return;
+        const { serviceTier: _current, ...selection } = model;
+        setDraftModel(draftId, {
+          ...selection,
+          ...(serviceTier ? { serviceTier } : {}),
+        });
       }}
     />
   );
