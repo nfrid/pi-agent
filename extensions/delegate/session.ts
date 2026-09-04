@@ -13,6 +13,7 @@ import {
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { atomicWriteFileSync, atomicWriteJsonSync } from '../shared/fs/atomic';
+import { validDelegateSkills } from './cwd';
 import { createOpaqueId, deriveCompatibilityLineageId } from './identity';
 import type {
   DelegateChildCapability,
@@ -42,6 +43,8 @@ export interface DelegateSession {
   allowWrites?: boolean;
   /** Optional child tool bundles inherited by continuations. */
   capabilities?: DelegateChildCapability[];
+  /** Explicit skill files/directories inherited by continuations. */
+  skills?: string[];
   /** The original workspace mode; continuations reuse its checkout. */
   isolation: DelegateIsolation;
   /** Advisory paths the parent named; replayed so continuations keep them. */
@@ -64,6 +67,7 @@ interface DelegateSessionMetadata {
   worktreeId?: string;
   allowWrites?: boolean;
   capabilities?: DelegateChildCapability[];
+  skills?: string[];
   isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
@@ -168,6 +172,7 @@ export function createDelegateSession(options: {
   worktreeId?: string;
   allowWrites?: boolean;
   capabilities?: DelegateChildCapability[];
+  skills?: string[];
   isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
@@ -212,6 +217,7 @@ export function createDelegateSession(options: {
       ...(options.capabilities?.length
         ? { capabilities: [...options.capabilities] }
         : {}),
+      ...(options.skills?.length ? { skills: [...options.skills] } : {}),
       isolation:
         options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
       ...(options.scope?.length ? { scope: options.scope } : {}),
@@ -242,6 +248,7 @@ export function createDelegateSession(options: {
     ...(options.capabilities?.length
       ? { capabilities: [...options.capabilities] }
       : {}),
+    ...(options.skills?.length ? { skills: [...options.skills] } : {}),
     isolation:
       options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
     ...(options.scope?.length ? { scope: options.scope } : {}),
@@ -261,7 +268,8 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
     if (
       metadata.token !== token ||
       typeof metadata.cwd !== 'string' ||
-      !metadata.cwd
+      !metadata.cwd ||
+      (metadata.skills !== undefined && !validDelegateSkills(metadata.skills))
     )
       return null;
     return {
@@ -289,6 +297,9 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       metadata.capabilities.every((capability) => capability === 'web')
         ? { capabilities: [...new Set(metadata.capabilities)] }
         : {}),
+      ...(metadata.skills === undefined
+        ? {}
+        : { skills: [...metadata.skills] }),
       // Sessions from before isolation persistence used a worktree exactly
       // when they carried a worktree id.
       isolation:

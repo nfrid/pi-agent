@@ -400,6 +400,7 @@ export function restoreHostedDelegateAttempt(
       allowWrites: session.allowWrites === true,
       writeRequested: session.allowWrites === true,
       capabilities: session.capabilities ? [...session.capabilities] : [],
+      skills: session.skills ? [...session.skills] : [],
       isolation: session.isolation,
       worktree,
       continuation: session.token,

@@ -1,6 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { type DelegateConfig, resolveDelegateRoute } from './config';
-import { resolveDelegateCwd } from './cwd';
+import { resolveDelegateCwd, resolveDelegateSkills } from './cwd';
 import {
   assertDistinctContinuationTokens,
   invalidParams,
@@ -29,6 +29,7 @@ interface TaskInput {
   continuation?: string;
   allowWrites?: boolean;
   capabilities?: DelegateChildCapability[];
+  skills?: string[];
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
@@ -47,6 +48,7 @@ interface SharedDefaults {
   scope?: string[];
   allowWrites?: boolean;
   capabilities?: DelegateChildCapability[];
+  skills?: string[];
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
@@ -61,6 +63,7 @@ interface DerivedTask {
   context: DelegateTaskPlan['context'];
   requestedCwd: string;
   scope?: string[];
+  skills?: string[];
   writeRequestExplicit: boolean;
   writeRequested: boolean;
   isolationExplicit: boolean;
@@ -94,6 +97,7 @@ export function assertContinuationFields(
     context?: unknown;
     scope?: unknown;
     capabilities?: unknown;
+    skills?: unknown;
     from?: unknown;
     worktreePath?: unknown;
   },
@@ -104,6 +108,7 @@ export function assertContinuationFields(
     (fields.cwd !== undefined ||
       fields.context !== undefined ||
       fields.capabilities !== undefined ||
+      fields.skills !== undefined ||
       fields.from !== undefined ||
       fields.worktreePath !== undefined)
   )
@@ -125,6 +130,7 @@ function normalizeInputs(params: DelegateParams): {
       scope: params.scope,
       allowWrites: params.allowWrites,
       capabilities: params.capabilities,
+      skills: params.skills,
       isolation: params.isolation,
       from: params.from,
       refresh: params.refresh,
@@ -158,6 +164,7 @@ function normalizeInputs(params: DelegateParams): {
         continuation: params.continuation,
         allowWrites: params.allowWrites,
         capabilities: params.capabilities,
+        skills: params.skills,
         isolation: params.isolation,
         from: params.from,
         refresh: params.refresh,
@@ -206,8 +213,8 @@ export function buildDelegatePlans(
       input.continuation,
       input,
       parallel
-        ? 'A continuation task cannot replace cwd, context, capabilities, or base.'
-        : 'A continuation reuses its original cwd, context, capabilities, and base; scope may be replaced for this run.',
+        ? 'A continuation task cannot replace cwd, context, capabilities, or base. Skills are immutable too.'
+        : 'A continuation reuses its original cwd, context, capabilities, and base; scope may be replaced for this run. Skills are also immutable.',
     );
     const resumed = input.continuation
       ? resolveDelegateSession(input.continuation)
@@ -243,12 +250,13 @@ export function buildDelegatePlans(
     (shared.cwd !== undefined ||
       shared.context !== undefined ||
       shared.capabilities !== undefined ||
+      shared.skills !== undefined ||
       shared.from !== undefined ||
       shared.refresh !== undefined ||
       shared.worktreePath !== undefined)
   )
     invalidParams(
-      'Parallel continuations reuse their original cwd, history, capabilities, and base; do not provide top-level replacements.',
+      'Parallel continuations reuse their original cwd, history, capabilities, and base; do not provide top-level replacements. Skills are immutable too.',
     );
 
   namedTasks = namedTasks.map((task) => {
@@ -286,6 +294,16 @@ export function buildDelegatePlans(
     // latest scope persisted on the child session.
     scope: task.input.scope ?? shared.scope ?? task.resumed?.scope,
     worktreePath: task.input.worktreePath ?? shared.worktreePath,
+  }));
+
+  namedTasks = namedTasks.map((task) => ({
+    ...task,
+    skills: task.resumed
+      ? (task.resumed.skills ?? [])
+      : resolveDelegateSkills(
+          task.input.skills ?? shared.skills,
+          task.requestedCwd,
+        ),
   }));
 
   namedTasks = namedTasks.map((task) => {
@@ -395,6 +413,7 @@ export function buildDelegatePlans(
         shared.capabilities ??
         task.resumed?.capabilities ??
         [],
+      skills: task.skills,
       base: task.input.from ?? shared.from,
       refresh: task.input.refresh ?? shared.refresh,
       worktreePath: task.worktreePath,
