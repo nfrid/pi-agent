@@ -47,6 +47,8 @@ export type DelegateRunContext = {
   launchSessionId?: string;
   /** Branch identity retained for workflow ownership and branch composition. */
   launchBranchId?: string;
+  /** Parent Codex speed captured before asynchronous delegate preparation. */
+  serviceTier?: import('../shared/codex-service-tier').CodexServiceTier;
   isLaunchBranchActive?: () => boolean;
   config: DelegateConfig;
   signal?: AbortSignal;
@@ -301,6 +303,7 @@ async function runPreparedWithLifecycle(
       detachSignal: hooks.detachSignal,
       hosted: hooks.hosted,
       ownerSessionId: launchSessionId,
+      serviceTier: runCtx.serviceTier,
       control: hooks.control,
       onUpdate: hooks.onUpdate,
       onRunUpdate: hooks.onRunUpdate,

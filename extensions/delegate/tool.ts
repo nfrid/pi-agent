@@ -3,6 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
+import { codexServiceTier } from '../shared/codex-service-tier';
 import { loadGuidelines } from '../shared/instructions';
 import {
   type DelegateConfig,
@@ -345,6 +346,7 @@ export function registerDelegateTool(
         getSnapshot,
         launchSessionId,
         launchBranchId,
+        serviceTier: codexServiceTier(ctx),
         isLaunchBranchActive: () =>
           launchBranchId !== undefined &&
           backgroundRuntime?.getBranchId?.() === launchBranchId,

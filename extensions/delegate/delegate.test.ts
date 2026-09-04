@@ -1083,10 +1083,15 @@ describe('delegate', () => {
     }
   });
 
-  test('passes the effective explicit model and thinking to child Pi', () => {
+  test.each([
+    ['fast', 'fast'],
+    ['ultrafast', 'ultrafast'],
+    [undefined, 'normal'],
+  ] as const)('passes the effective model, thinking, and %s service tier to child Pi', (serviceTier, expectedTier) => {
     const args = buildChildArgs(
       {
         task: 'inspect',
+        serviceTier,
         routing: {
           route: 'exact-low',
           provider: 'openai-codex',
@@ -1098,7 +1103,10 @@ describe('delegate', () => {
       '/tmp/child.jsonl',
     );
     expect(
-      args.slice(args.indexOf('--provider'), args.indexOf('--thinking') + 2),
+      args.slice(
+        args.indexOf('--provider'),
+        args.indexOf('--service-tier') + 2,
+      ),
     ).toEqual([
       '--provider',
       'openai-codex',
@@ -1106,7 +1114,33 @@ describe('delegate', () => {
       'exact-model',
       '--thinking',
       'low',
+      '--service-tier',
+      expectedTier,
     ]);
+    expect(args).toContain(
+      path.resolve(__dirname, '../codex-service-tier/index.ts'),
+    );
+  });
+
+  test('does not load a Codex service tier into non-Codex children', () => {
+    const args = buildChildArgs(
+      {
+        task: 'inspect',
+        serviceTier: 'fast',
+        routing: {
+          route: 'other-low',
+          provider: 'anthropic',
+          model: 'other-model',
+          thinking: 'low',
+          relativeCost: 2,
+        },
+      },
+      '/tmp/child.jsonl',
+    );
+    expect(args).not.toContain('--service-tier');
+    expect(args).not.toContain(
+      path.resolve(__dirname, '../codex-service-tier/index.ts'),
+    );
   });
 
   test('gives writable tasks editing tools and names their branch in the prompt', () => {

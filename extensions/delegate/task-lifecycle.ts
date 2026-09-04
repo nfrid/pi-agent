@@ -420,6 +420,7 @@ export async function runPreparedDelegateTask(
     | 'signal'
     | 'ownerSessionId'
     | 'processJobId'
+    | 'serviceTier'
     | 'onUpdate'
     | 'onRunUpdate'
     | 'mode'
@@ -458,6 +459,7 @@ export async function runPreparedDelegateTask(
     scope: prepared.scope,
     refreshSource: prepared.plan.refresh,
     routing: prepared.plan.routing,
+    serviceTier: options.serviceTier,
     writeRequested: prepared.plan.writeRequested,
     allowWrites: prepared.allowWrites,
     capabilities: prepared.capabilities ?? prepared.session.capabilities ?? [],

@@ -61,6 +61,10 @@ const MID_RUN_COMPACTION_EXTENSION = path.resolve(
   __dirname,
   '../mid-run-compaction/index.ts',
 );
+const CODEX_SERVICE_TIER_EXTENSION = path.resolve(
+  __dirname,
+  '../codex-service-tier/index.ts',
+);
 const WEB_EXTENSION = path.resolve(__dirname, '../web/index.ts');
 const TOOL_ARGUMENT_VALIDATION_EXTENSION = path.resolve(
   __dirname,
@@ -121,6 +125,7 @@ export interface RunDelegateOptions {
   /** Parent session that owns this delegate control channel. */
   ownerSessionId?: string;
   routing?: DelegateRouteState;
+  serviceTier?: import('../shared/codex-service-tier').CodexServiceTier;
   allowWrites?: boolean;
   writeRequested?: boolean;
   capabilities?: import('./types').DelegateChildCapability[];
@@ -160,6 +165,7 @@ export function buildChildArgs(
     RunDelegateOptions,
     | 'task'
     | 'routing'
+    | 'serviceTier'
     | 'allowWrites'
     | 'capabilities'
     | 'worktree'
@@ -189,6 +195,9 @@ export function buildChildArgs(
     ...(webEnabled ? ['--extension', WEB_EXTENSION] : []),
     '--extension',
     MID_RUN_COMPACTION_EXTENSION,
+    ...(options.routing?.provider === 'openai-codex'
+      ? ['--extension', CODEX_SERVICE_TIER_EXTENSION]
+      : []),
     '--extension',
     TOOL_ARGUMENT_VALIDATION_EXTENSION,
     '--no-skills',
@@ -202,6 +211,8 @@ export function buildChildArgs(
     args.push('--provider', options.routing.provider);
     args.push('--model', options.routing.model);
     args.push('--thinking', options.routing.thinking);
+    if (options.routing.provider === 'openai-codex')
+      args.push('--service-tier', options.serviceTier ?? 'normal');
   }
   args.push(
     buildDelegatePrompt(options.task, {
