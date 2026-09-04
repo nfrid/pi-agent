@@ -166,9 +166,11 @@ describe('canonical prompt composition', () => {
     const previousDelegateChild = process.env.PI_DELEGATE_CHILD;
     process.env.PI_DELEGATE_CHILD = '1';
     try {
-      expect(buildSystemPrompt(options(), 'json')).toContain(
-        'When you begin a distinct phase of work, write a short active preamble',
-      );
+      for (const guideline of loadGuidelines(
+        'extensions/activity-groups/instructions.md',
+      )) {
+        expect(buildSystemPrompt(options(), 'json')).toContain(guideline);
+      }
     } finally {
       if (previousDelegateChild === undefined)
         delete process.env.PI_DELEGATE_CHILD;
@@ -246,7 +248,7 @@ describe('canonical prompt composition', () => {
     expect(prompt.match(/Treat scope spillover as a defect/g)).toHaveLength(1);
   });
 
-  it('includes bilingual active micro-plan guidance only in transcript-rendering modes', () => {
+  it('includes activity guidance only in transcript-rendering modes', () => {
     const previousDelegateChild = process.env.PI_DELEGATE_CHILD;
     delete process.env.PI_DELEGATE_CHILD;
     let tuiPrompt: string;
@@ -264,39 +266,14 @@ describe('canonical prompt composition', () => {
       else process.env.PI_DELEGATE_CHILD = previousDelegateChild;
     }
 
-    for (const prompt of [tuiPrompt, rpcPrompt, defaultPrompt]) {
-      expect(prompt).toContain(
-        'short active preamble: an account of current intent that groups the upcoming work into a micro-plan—not merely a title',
-      );
-      expect(prompt).toContain(
-        'In English, normally open with subjectless `-ing`; in Russian, use a natural first-person present form without `Я`',
-      );
-      expect(prompt).toContain(
-        'not a standalone Russian деепричастие such as `Проверяя` as the lead',
-      );
-      expect(prompt).toContain(
-        'Add a concise purpose, reason, dependency, or nearest likely/conditional next step when useful',
-      );
-      expect(prompt).toContain(
-        'including future/perfective forms for genuinely upcoming actions',
-      );
-      expect(prompt).toContain(
-        'Use semantic concision, not a hard word or character cap: one compact sentence is usual, and two are acceptable when useful.',
-      );
-      expect(prompt).toContain(
-        'Put it before the calls that do the work, in the same message.',
-      );
-      expect(prompt).toContain('Label direction changes rather than steps');
-      expect(prompt).toContain(
-        'Keep it specific to the concrete work and scope rather than generic self-narration',
-      );
-      expect(prompt).toContain(
-        'do not turn it into a completed-work recap, speculative full roadmap, generic narration, or individual tool-call narration',
-      );
-      expect(prompt).not.toContain('natural ongoing-action form');
+    for (const guideline of loadGuidelines(
+      'extensions/activity-groups/instructions.md',
+    )) {
+      for (const prompt of [tuiPrompt, rpcPrompt, defaultPrompt]) {
+        expect(prompt).toContain(guideline);
+      }
+      expect(headlessPrompt).not.toContain(guideline);
     }
-    expect(headlessPrompt).not.toContain('short active preamble');
-    expect(headlessPrompt).not.toContain('natural ongoing-action form');
   });
 
   it('fails clearly when a required instruction file is missing', () => {

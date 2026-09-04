@@ -42,10 +42,11 @@ answering or implementing:
    working directory.
 2. Resolve `examples/...` paths under the Examples directory, not the current
    working directory.
-3. Read Pi Markdown files completely. If a file is truncated by the read tool,
-   continue with `offset` until complete.
-4. Follow relevant `.md` cross-references before implementing or giving detailed
-   guidance.
+3. Read the sections relevant to the task, including their API contracts and
+   caveats. Search headings first in long references; read the whole file only
+   when the task depends on its full contents.
+4. Follow cross-references when needed to resolve a dependency or uncertainty,
+   not merely because they are linked.
 5. For extension/example implementation tasks, inspect the matching examples
    under the Examples directory.
 6. Prefer code changes under `extensions/` in this repo unless the user requests
