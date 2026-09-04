@@ -25,9 +25,11 @@ The normal model-facing fields are:
 
 - exactly one of `id` or `continue`;
 - required `task`;
-- optional `route`, `inputs`, `base`, `scope`, `write`, `cwd`, and `web`.
+- optional `route`, `inputs`, `base`, `scope`, `write`, `cwd`, `web`, and `skills`.
 
 Fresh delegates default to fresh context. `write: true` gives file-editing tools and automatically selects an isolated Git worktree. `web: true` enables the web tool bundle. `scope` is advisory, not a filesystem boundary. Fresh relative cwd values resolve from the parent cwd; continuations retain their original cwd.
+
+Pass `skills: [".agents/skills/pi-docs/SKILL.md"]` when a child needs a specific workflow. Up to 16 explicit skill files or directories can be selected. Paths resolve against the fresh requested cwd before worktree isolation; `~` uses the effective home directory. Children do not discover the parent's normal skill catalog. Selection loads the skill catalog entry, so the delegated task should make its intended use clear. Skill files remain at their resolved source paths, not copied or version-pinned in the child worktree.
 
 A continuation resumes the same child session and retained workspace:
 
@@ -38,7 +40,7 @@ A continuation resumes the same child session and retained workspace:
 }
 ```
 
-Continuations inherit route, cwd, write access, isolation, web access, and latest scope. The parent does not repeat `write: true`. A supplied route may replace the inherited route with another exact configured route; a supplied scope replaces the latest advisory scope.
+Continuations inherit route, cwd, write access, isolation, web access, selected skill paths, and latest scope. Do not supply `skills` on a continuation; the original selection cannot be replaced. The parent does not repeat `write: true`. A supplied route may replace the inherited route with another exact configured route; a supplied scope replaces the latest advisory scope.
 
 ## Knowledge and code flow
 

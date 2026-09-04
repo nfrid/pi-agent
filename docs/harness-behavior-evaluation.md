@@ -149,3 +149,14 @@ One row per case is sufficient; attach transcript/command evidence separately.
 Do not fill pending cells with invented baselines or results. If execution is
 impossible, mark **blocked**, state the missing local capability, and retain no
 secrets in the evidence.
+
+## Recorded smoke check
+
+On 2026-09-05, commit `2fb6db57` with delegate config fingerprint
+`9e5ee875f120` passed a real child-launch smoke check using `gpt-5.6-luna`,
+`low` thinking. The child read an explicitly selected synthetic skill,
+reported two nonempty fixture lines, and successfully called bash with a
+`description`. The fixture remained unchanged; no tool errors occurred.
+Elapsed time was 16.8 seconds. The check used `buildChildArgs` and the actual
+Pi CLI, not the parent `delegate` scheduling API. This verifies child loading
+and bash parity, not the complete five-case evaluation, which remains pending.

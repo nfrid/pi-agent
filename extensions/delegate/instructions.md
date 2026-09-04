@@ -1,6 +1,7 @@
 - Delegate useful, independently describable work when briefing, verification, and integration cost less than doing it directly.
 - Give every fresh delegate a meaningful kebab-case `id`; avoid placeholders such as `task-1`, `worker-a`, or `subagent-b`.
 - Fresh work defaults to fresh context. A fresh call normally needs only `id`, `task`, and an exact configured `route`.
+- Pass explicit `skills` file or directory paths when the child needs a relevant workflow; normal skill discovery is disabled. Resolve relative paths from the fresh requested cwd. Continuations inherit the selection; do not repeat or replace it.
 - Use `inputs` to wait for prior delegates and give the child their compact handoffs plus durable full-report paths.
 - Use `base` when a fresh child needs another delegate's exact resulting code state. `base` also supplies that delegate as an input.
 - Use `continue` for the same child session and retained workspace. Continuations inherit route, cwd, write access, workspace, web access, and latest scope; provide `scope` only to replace it.
