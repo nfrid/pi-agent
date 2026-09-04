@@ -1,9 +1,21 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type TSchema, Type } from 'typebox';
 import { describe, expect, test, vi } from 'vitest';
+import { createBashDescriptionToolDefinition } from '../bash-description';
 import extension, { strictToolArgumentError } from './index';
 
 describe('strictToolArgumentError', () => {
+  test('accepts the registered bash description arguments', () => {
+    const definition = createBashDescriptionToolDefinition();
+    expect(
+      strictToolArgumentError(
+        'bash',
+        { command: 'printf ok', description: 'Print a short result' },
+        definition.parameters,
+      ),
+    ).toBeUndefined();
+  });
+
   test('rejects undeclared root arguments with an actionable error', () => {
     const schema = Type.Object({
       command: Type.String(),

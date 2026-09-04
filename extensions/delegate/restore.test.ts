@@ -74,13 +74,18 @@ function result(
   return { runs: [run], handoff: `Outcome: ${state}` };
 }
 
-function session(worktreeId?: string, capabilities?: ['web']) {
+function session(
+  worktreeId?: string,
+  capabilities?: ['web'],
+  skills?: string[],
+) {
   return createDelegateSession({
     cwd: '/tmp/restored-delegate',
     name: 'Persisted delegate',
     parentSessionId: PARENT,
     ...(worktreeId ? { worktreeId, isolation: 'worktree' as const } : {}),
     ...(capabilities ? { capabilities } : {}),
+    ...(skills ? { skills } : {}),
   });
 }
 
@@ -479,6 +484,39 @@ describe('restored delegate adapter', () => {
       state: 'error',
       capabilities: ['web'],
     });
+    await cleanup();
+  });
+
+  test('passes exact persisted absolute skills to a hosted restore observer', async () => {
+    const skills = [
+      '/tmp/restored-delegate/skills/review.md',
+      '/tmp/restored-delegate/skills/testing',
+    ];
+    const child = session(undefined, undefined, skills);
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    coordinator.restoreMetadata(metadata(child.token));
+    const capturedSkills: string[][] = [];
+    const runDelegate = vi.fn(async (options: { skills?: string[] }) => {
+      capturedSkills.push(options.skills ?? []);
+      return finishedRun('restore');
+    });
+
+    restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: { runDelegate: runDelegate as never },
+    });
+    await vi.waitFor(() => expect(capturedSkills).toHaveLength(1));
+    expect(capturedSkills[0]).toEqual(skills);
     await cleanup();
   });
 
