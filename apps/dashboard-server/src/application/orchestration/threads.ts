@@ -160,8 +160,13 @@ export async function createThread(
   }
   const project = host.requireProject(projectId);
   if (project.status !== 'active') throw new Error('Project is archived.');
+  const titleCwd = command.checkoutId
+    ? host.requireCheckout(command.checkoutId).path
+    : (host.mainCheckout(project.id)?.path ?? project.rootPath);
   const generatedTitle = host.generateThreadTitle
-    ? await host.generateThreadTitle(command.prompt).catch(() => undefined)
+    ? await host
+        .generateThreadTitle(command.prompt, titleCwd)
+        .catch(() => undefined)
     : undefined;
   const runId = `run-${randomUUID()}`;
   const thread = {

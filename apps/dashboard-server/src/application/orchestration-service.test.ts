@@ -435,7 +435,10 @@ async function isolatedServiceFixture(
     defaultBaseBranch?: string;
     beforeWorktreePreparation?: () => Promise<void>;
     beforeWorktreeFinish?: () => Promise<void>;
-    generateThreadTitle?: (prompt: string) => Promise<string | undefined>;
+    generateThreadTitle?: (
+      prompt: string,
+      cwd: string,
+    ) => Promise<string | undefined>;
     generateThreadTitleFromHistory?: (
       entries: readonly unknown[],
     ) => Promise<string | undefined>;
@@ -528,8 +531,8 @@ describe('OrchestrationService', () => {
   it('persists the generated title before worktree preparation and seeds the runtime name', async () => {
     const events: string[] = [];
     const fixture = await isolatedServiceFixture({
-      generateThreadTitle: async (prompt) => {
-        events.push(`title:${prompt}`);
+      generateThreadTitle: async (prompt, cwd) => {
+        events.push(`title:${prompt}:${cwd}`);
         return 'Generated dashboard title';
       },
       beforeWorktreePreparation: async () => {
@@ -546,7 +549,10 @@ describe('OrchestrationService', () => {
 
       expect(created.thread.title).toBe('Generated dashboard title');
       await waitFor(() => fixture.launches.length === 1);
-      expect(events).toEqual(['title:Add cheap automatic titles.', 'worktree']);
+      expect(events).toEqual([
+        `title:Add cheap automatic titles.:${await realpath(fixture.root)}`,
+        'worktree',
+      ]);
       expect(fixture.launches[0]).toMatchObject({
         name: 'Generated dashboard title',
       });

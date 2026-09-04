@@ -514,7 +514,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(draftComposer).toContainText('/review');
   expect(
     await draftComposer.evaluate(() => window.getSelection()?.anchorOffset),
-  ).toBe('/review '.length);
+  ).toBe('/review'.length);
   await draftComposer.fill('');
   const locationControl = page.getByRole('button', {
     name: 'Checkout location',
@@ -783,6 +783,23 @@ test('draft composer completes slash commands before a runtime starts', async ({
       }),
     }),
   );
+  let submittedPrompt: string | undefined;
+  await page.route(
+    '**/api/projects/project-autocomplete/threads',
+    async (route) => {
+      submittedPrompt = (route.request().postDataJSON() as { prompt: string })
+        .prompt;
+      await route.fulfill({
+        contentType: 'application/json',
+        status: 202,
+        body: JSON.stringify({
+          thread: { id: 'thread-autocomplete' },
+          run: { id: 'run-autocomplete' },
+          receipt: { idempotencyKey: 'draft-promote-draft-autocomplete' },
+        }),
+      });
+    },
+  );
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-draft-autocomplete',
     revision: 1,
@@ -822,8 +839,10 @@ test('draft composer completes slash commands before a runtime starts', async ({
   await editor.press('Tab');
   await expect(editor).toContainText('/review');
   expect(await editor.evaluate(() => window.getSelection()?.anchorOffset)).toBe(
-    '/review '.length,
+    '/review'.length,
   );
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect.poll(() => submittedPrompt).toBe('/review');
 });
 
 test('promoted draft is replaced by its started thread in the sidebar @desktop', async ({

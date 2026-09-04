@@ -201,11 +201,7 @@ const MarkdownComposerEditor = forwardRef<
         node.select(anchor.start, anchor.end);
         const selection = $getSelection();
         if (!$isRangeSelection(selection)) return;
-        const replacement =
-          suggestion.kind === 'command'
-            ? `${suggestion.value} `
-            : suggestion.value;
-        selection.insertText(replacement);
+        selection.insertText(suggestion.value);
       });
       setDismissedKey(
         `${anchor.nodeKey}:${anchor.start}:${anchor.start + suggestion.value.length}:${suggestion.value}`,

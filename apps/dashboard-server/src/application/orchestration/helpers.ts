@@ -29,7 +29,10 @@ export interface OrchestrationServiceOptions {
   /** Test seam for deterministically racing goodbye with worktree settlement. */
   beforeWorktreeFinish?: () => Promise<void>;
   /** Generate the authoritative title before thread/worktree creation. */
-  generateThreadTitle?: (prompt: string) => Promise<string | undefined>;
+  generateThreadTitle?: (
+    prompt: string,
+    cwd: string,
+  ) => Promise<string | undefined>;
   /** Regenerate a durable title from a bounded, host-provided transcript. */
   generateThreadTitleFromHistory?: (
     entries: readonly unknown[],
@@ -121,6 +124,7 @@ export interface OrchestrationHost {
   readonly beforeWorktreeFinish?: () => Promise<void>;
   readonly generateThreadTitle?: (
     prompt: string,
+    cwd: string,
   ) => Promise<string | undefined>;
   readonly generateThreadTitleFromHistory?: (
     entries: readonly unknown[],

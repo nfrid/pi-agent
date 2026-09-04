@@ -4,6 +4,7 @@ import path from 'node:path';
 import { DashboardApplication } from './application/dashboard-application.js';
 import { OrchestrationService } from './application/orchestration-service.js';
 import { SessionUsageService } from './application/session-usage-service.js';
+import { expandComposerTitleInput } from './composer-autocomplete.js';
 import {
   ChangeRelay,
   type DashboardConfiguration,
@@ -183,6 +184,8 @@ function dependencies(
     metadata.orchestration,
   );
   const sessionTitleGenerator = createDashboardSessionTitleGenerator();
+  const generateSessionTitle =
+    options.generateSessionTitle ?? sessionTitleGenerator.generate;
   const orchestrationService = new OrchestrationService({
     repository: metadata.orchestration,
     manager,
@@ -190,8 +193,8 @@ function dependencies(
     getSession: (id) => sessions.get(id),
     readSession: (id) => sessions.readEntries(id),
     readSessionTitleHistory: (id) => readLiteSessionTitleHistory(sessions, id),
-    generateThreadTitle:
-      options.generateSessionTitle ?? sessionTitleGenerator.generate,
+    generateThreadTitle: async (prompt, cwd) =>
+      generateSessionTitle(await expandComposerTitleInput(cwd, prompt)),
     generateThreadTitleFromHistory:
       options.regenerateSessionTitle ?? sessionTitleGenerator.regenerate,
     renameLinkedSession: async (sessionId, name, commandId) => {

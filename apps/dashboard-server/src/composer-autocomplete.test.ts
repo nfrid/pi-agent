@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   composerCommandCatalogue,
   composerFileSuggestions,
+  expandComposerTitleInput,
 } from './composer-autocomplete.js';
 
 const roots: string[] = [];
@@ -48,6 +49,37 @@ describe('composer autocomplete service', () => {
     expect(result.commands).toContainEqual(
       expect.objectContaining({ name: 'skill:demo', source: 'skill' }),
     );
+  });
+
+  it('expands completed prompt and skill commands for automatic titles', async () => {
+    const cwd = await temporaryDirectory();
+    await mkdir(path.join(cwd, '.pi', 'prompts'), { recursive: true });
+    await writeFile(
+      path.join(cwd, '.pi', 'prompts', 'review.md'),
+      `Review $1 with \${2:-care}.`,
+    );
+    await mkdir(path.join(cwd, '.agents', 'skills', 'demo'), {
+      recursive: true,
+    });
+    const skillFile = path.join(cwd, '.agents', 'skills', 'demo', 'SKILL.md');
+    await writeFile(
+      skillFile,
+      '---\nname: demo\ndescription: Demonstrate title expansion\n---\nDo the demo.',
+    );
+
+    await expect(
+      expandComposerTitleInput(cwd, '/review "src/app.ts" '),
+    ).resolves.toBe('Review src/app.ts with care.');
+    const skillBlock = `<skill name="demo" location="${skillFile}">\nReferences are relative to ${path.join(cwd, '.agents', 'skills', 'demo')}.\n\nDo the demo.\n</skill>`;
+    await expect(expandComposerTitleInput(cwd, '/skill:demo ')).resolves.toBe(
+      skillBlock,
+    );
+    await expect(
+      expandComposerTitleInput(cwd, 'Use $demo but keep `$demo`.'),
+    ).resolves.toBe(`${skillBlock}\n\nUse demo but keep \`$demo\`.`);
+    await expect(
+      expandComposerTitleInput(cwd, '/unknown with $demo'),
+    ).resolves.toBe(`${skillBlock}\n\n/unknown with demo`);
   });
 
   it('respects ignores for fuzzy search but enters ignored and parent paths explicitly', async () => {
