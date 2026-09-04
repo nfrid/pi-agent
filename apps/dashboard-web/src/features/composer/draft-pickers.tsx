@@ -561,19 +561,21 @@ export function AgentPicker({
               <div className="draft-picker-section">Thinking</div>
               <fieldset className="draft-picker-chips">
                 <legend className="sr-only">Thinking level</legend>
-                {levels.map((level) => (
-                  <Button
-                    key={level}
-                    type="button"
-                    className={`draft-picker-chip${model?.thinking === level ? ' selected' : ''}`}
-                    data-thinking={level}
-                    isDisabled={!model || pending}
-                    aria-pressed={model?.thinking === level}
-                    onPress={() => onThinkingChange(level)}
-                  >
-                    {level}
-                  </Button>
-                ))}
+                {levels
+                  .filter((l) => l !== 'minimal')
+                  .map((level) => (
+                    <Button
+                      key={level}
+                      type="button"
+                      className={`draft-picker-chip${model?.thinking === level ? ' selected' : ''}`}
+                      data-thinking={level}
+                      isDisabled={!model || pending}
+                      aria-pressed={model?.thinking === level}
+                      onPress={() => onThinkingChange(level)}
+                    >
+                      {level}
+                    </Button>
+                  ))}
               </fieldset>
             </>
           )}

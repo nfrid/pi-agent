@@ -576,6 +576,7 @@
 .service-tier-icon svg {
   width: 7.2px;
   height: 8px;
+  transform: translateY(1px);
   fill: currentColor;
 }
 .service-tier-icon[data-service-tier="ultrafast"] svg {
