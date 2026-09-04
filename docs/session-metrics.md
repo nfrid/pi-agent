@@ -29,7 +29,7 @@ Other ratios are `cacheHitRatio`, `delegateHandoffBytesPerTask`, `delegateTrunca
 
 Output omits paths, prompts, tool arguments/results, task text, handoff bodies, and compaction summaries. Short session hashes are local correlation IDs, not anonymity guarantees. Provider usage is reported as recorded; elapsed time is the active-ancestry wall-clock span.
 
-Metrics describe observed cost and reporting, not correctness. Compare cohorts only when task shapes are comparable.
+Metrics describe observed cost and reporting, not correctness. Compare cohorts only when task shapes are comparable. Use the [manual behavior cases](harness-behavior-evaluation.md) to check agent behavior separately.
 
 ## Task outcome episodes
 

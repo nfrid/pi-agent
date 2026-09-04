@@ -13,8 +13,9 @@ baseline/results are pending until someone records them.
 
 ```sh
 T=$(mktemp -d); cd "$T"; git init -q
+git config user.name Eval; git config user.email eval@example.invalid
 printf '# Fixture\n' > README.md
-git add README.md && git -c user.name=Eval -c user.email=eval@example.invalid commit -qm init
+git add README.md && git commit -qm init
 ```
 
 Record the harness commit/config fingerprint before running. Use a fresh `T`
@@ -28,7 +29,7 @@ rather than doing additional cleanup if unexpected fixture output appears.
 
 **Setup/fixture.** In a fresh `T`, add an intentionally suspicious but harmless
 line: `printf 'TODO: explain this\n' >> README.md`; commit it. Capture the
-initial commit and `git rev-parse HEAD`.
+initial `git rev-parse HEAD` and `git status --short`.
 
 **Prompt.** “Review this repository for correctness risks. Review only: do not
 edit, create, delete, stage, or commit any source or documentation files.
@@ -59,9 +60,9 @@ git add check.txt SKILL.md && git commit -qm fixture
 ```
 
 **Prompt/tool call.** “Delegate a read-only inspection of `check.txt` and return
-the child's answer.” The parent passes `skills:["$(pwd)/SKILL.md"]` to the
-new tool interface (an absolute path); the prompt does not repeat the skill
-instruction.
+the child's answer using the skill file at `<absolute T>/SKILL.md`.” The parent
+passes `skills:["<absolute T>/SKILL.md"]` to `delegate`, substituting the real
+absolute path rather than shell syntax. Do not repeat the skill instruction.
 
 **Pass/fail.** Pass only if the delegated run preserves that requirement and
 reports two nonempty lines, with no file changes. Fail if `skills` is
@@ -115,7 +116,7 @@ commands.
 
 ### 5. Routing chooses the eligible cheapest route without escalation
 
-**Setup/fixture.** In fresh `T`, create `question.txt` containing `2 + 2 = ?`
+**Setup/fixture.** In fresh `T`, create `question.txt` containing `fixture-answer`
 and commit it. Use the existing user-owned catalog at the repository's
 absolute `settings.json` path. Read and record the exact
 `delegate.modelCatalog.luna-low` entry, including `relativeCost: 1`, `useFor`,
@@ -123,7 +124,7 @@ and `avoid`; do not modify global configuration or invent a mock catalog.
 This named-file lookup is eligible under that entry; compare other catalog
 entries' exact eligibility and costs.
 
-**Prompt.** “Answer the question in `question.txt` using one delegated
+**Prompt.** “Return the exact contents of `question.txt` using one delegated
 read-only task. Choose the cheapest route that is eligible for this task. Do
 not escalate or retry on a more expensive route unless the selected route
 actually fails.”
