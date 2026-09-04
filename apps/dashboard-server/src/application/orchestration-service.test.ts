@@ -582,6 +582,12 @@ describe('OrchestrationService', () => {
         prompt: 'Run the external build.',
         isolation: 'main' as const,
       };
+      fixture.metadata.orchestration.recordCommandReceipt({
+        idempotencyKey: command.externalRef,
+        commandType: 'thread.create',
+        result: { legacy: true },
+        createdAt: 1,
+      });
       const first = await fixture.service.createExternalThread(
         fixture.projectId,
         command,
@@ -628,9 +634,19 @@ describe('OrchestrationService', () => {
       });
       expect(
         fixture.metadata.orchestration.getCommandReceipt(command.externalRef),
+      ).toMatchObject({ commandType: 'thread.create' });
+      expect(
+        fixture.metadata.db
+          .prepare(
+            "SELECT idempotency_key, command_type, command_fingerprint FROM command_receipt WHERE command_type='external.thread.create'",
+          )
+          .get(),
       ).toMatchObject({
-        commandType: 'external.thread.create',
-        commandFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+        idempotency_key: expect.stringMatching(
+          /^external-thread:[0-9a-f]{64}$/,
+        ),
+        command_type: 'external.thread.create',
+        command_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
     } finally {
       await fixture.close();

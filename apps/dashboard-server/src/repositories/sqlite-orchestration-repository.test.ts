@@ -752,6 +752,20 @@ describe('SqliteOrchestrationRepository', () => {
     try {
       runMigrations(reopened);
       const repository = new SqliteOrchestrationRepository(reopened);
+      expect(
+        repository.createExternalThreadWithRun(
+          'external:opaque-1',
+          fingerprint,
+          input,
+        ),
+      ).toEqual(first);
+      expect(() =>
+        repository.createExternalThreadWithRun(
+          'external:opaque-1',
+          'c'.repeat(64),
+          input,
+        ),
+      ).toThrowError(expect.objectContaining({ code: 'idempotency-conflict' }));
       expect(repository.getThread('external-thread')).toMatchObject({
         externalRef: 'external:opaque-1',
       });

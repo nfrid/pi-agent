@@ -78,6 +78,11 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function externalThreadCommandId(externalRef: string): string {
+  const digest = createHash('sha256').update(externalRef, 'utf8').digest('hex');
+  return `external-thread:${digest}`;
+}
+
 /**
  * Durable project/thread/run application boundary and its deliberately small
  * worker. Lifecycle rules live in sibling modules; this class owns shared state
@@ -253,7 +258,7 @@ export class OrchestrationService implements OrchestrationHost {
       .digest('hex');
     return createThreadLifecycle(this, projectId, {
       ...normalizedCommand,
-      commandId: normalizedCommand.externalRef,
+      commandId: externalThreadCommandId(normalizedCommand.externalRef),
       externalRef: normalizedCommand.externalRef,
       commandFingerprint: fingerprint,
     });
