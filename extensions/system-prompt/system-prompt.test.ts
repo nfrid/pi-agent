@@ -7,8 +7,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import {
+import systemPromptExtension, {
   aggregateAssistantUsage,
   buildSystemPrompt,
   estimateSize,
@@ -326,6 +327,36 @@ describe('canonical prompt composition', () => {
 });
 
 describe('outer meta-repository skill discovery', () => {
+  it('does not contribute ambient meta skills to delegate children', () => {
+    const meta = temporaryDirectory();
+    const repo = join(meta, 'product');
+    const skills = join(meta, '.agents', 'skills');
+    mkdirSync(skills, { recursive: true });
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    writeFileSync(join(meta, '.agents', 'meta-root'), '');
+    const handlers = new Map<string, (event: { cwd: string }) => unknown>();
+    systemPromptExtension({
+      on: (name: string, handler: (event: { cwd: string }) => unknown) => {
+        handlers.set(name, handler);
+      },
+      registerCommand: () => {},
+    } as unknown as ExtensionAPI);
+    const discover = handlers.get('resources_discover');
+    expect(discover).toBeDefined();
+    const previous = process.env.PI_DELEGATE_CHILD;
+    try {
+      delete process.env.PI_DELEGATE_CHILD;
+      expect(discover?.({ cwd: repo })).toEqual({
+        skillPaths: [realpathSync(skills)],
+      });
+      process.env.PI_DELEGATE_CHILD = '1';
+      expect(discover?.({ cwd: repo })).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_DELEGATE_CHILD;
+      else process.env.PI_DELEGATE_CHILD = previous;
+    }
+  });
+
   it('loads a marked meta-root only from above the nearest Git root', () => {
     const meta = temporaryDirectory();
     const nestedRepo = join(meta, 'product');

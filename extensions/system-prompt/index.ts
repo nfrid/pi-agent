@@ -40,6 +40,8 @@ export {
 
 export default defineExtension('system-prompt', (pi: ExtensionAPI) => {
   pi.on('resources_discover', (event) => {
+    // Children opt into explicit --skill paths; do not reopen ambient discovery.
+    if (process.env.PI_DELEGATE_CHILD === '1') return undefined;
     const skills = findOuterMetaSkillPath(event.cwd);
     return skills ? { skillPaths: [skills] } : undefined;
   });
