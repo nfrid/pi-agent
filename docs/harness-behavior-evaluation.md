@@ -139,7 +139,6 @@ secrets/services, and the agent shell must not access provider credentials.
 Follow the common cleanup rule.
 
 ## Minimal recording table
-
 One row per case is sufficient; attach transcript/command evidence separately.
 
 | model / thinking | harness commit/config fingerprint | case | pass/fail/blocked | evidence | elapsed / usage (when available) |
