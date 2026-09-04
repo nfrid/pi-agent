@@ -917,31 +917,6 @@ describe('workspace-first agent navigation', () => {
     });
     expect(
       activeThreadDetails(
-        {
-          status: 'idle',
-          runtime: {
-            model: { provider: 'openai-codex', model: 'current' },
-          },
-          durableThread: {
-            threadId: 'thread-current',
-            hasActiveRun: true,
-            model: {
-              provider: 'openai-codex',
-              model: 'current',
-              serviceTier: 'fast',
-            },
-          },
-        } as never,
-        runtimes,
-      ),
-    ).toMatchObject({
-      model: {
-        id: 'openai-codex/current',
-        serviceTier: 'fast',
-      },
-    });
-    expect(
-      activeThreadDetails(
         { status: 'dormant', cwd: '/repo', session: {} } as never,
         runtimes,
       ),

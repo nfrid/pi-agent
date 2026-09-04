@@ -1133,7 +1133,6 @@ describe('OrchestrationService', () => {
         ),
       ).toEqual([
         {
-          id: `run-model:${fixture.runId}`,
           type: 'setModel',
           provider: 'openai-codex',
           model: 'gpt-test',

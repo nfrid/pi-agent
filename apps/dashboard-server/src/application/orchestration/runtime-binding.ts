@@ -129,22 +129,15 @@ export async function bindAndDeliverPrompt(
     runId,
     status: 'starting',
   });
-  const modelReceiptId = `run-model:${run.id}`;
-  if (
-    run.model?.provider === 'openai-codex' &&
-    !host.repository.getCommandReceipt(modelReceiptId)
-  ) {
-    await host.registry.sendCommand(runtimeId, {
-      id: modelReceiptId,
-      type: 'setModel',
-      provider: run.model.provider,
-      model: run.model.model,
-      serviceTier: run.model.serviceTier ?? null,
-    });
-    host.saveReceipt(modelReceiptId, 'run.model', { runId: run.id });
-  }
   const promptReceiptId = host.promptReceiptId(run.id);
   if (!host.repository.getCommandReceipt(promptReceiptId)) {
+    if (run.model?.provider === 'openai-codex')
+      await host.registry.sendCommand(runtimeId, {
+        type: 'setModel',
+        provider: run.model.provider,
+        model: run.model.model,
+        serviceTier: run.model.serviceTier ?? null,
+      });
     const images = host.initialImages(run.id);
     if (run.error === 'Initial images pending delivery.' && !images)
       throw new Error(

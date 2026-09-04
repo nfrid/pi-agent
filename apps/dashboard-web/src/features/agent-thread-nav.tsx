@@ -185,14 +185,12 @@ export function activeThreadDetails(
     : undefined;
   const selectedModel = row.draft
     ? draftSelection
-    : (row.runtime?.model ?? indexed.model ?? row.durableThread?.model);
+    : (row.runtime?.model ?? indexed.model);
   const serviceTier =
     selectedModel?.provider === 'openai-codex'
       ? row.draft
         ? draftSelection?.serviceTier
-        : (row.runtime?.model?.serviceTier ??
-          indexed.serviceTier ??
-          row.durableThread?.model?.serviceTier)
+        : (row.runtime?.model?.serviceTier ?? indexed.serviceTier)
       : undefined;
   const catalogModel = selectedModel
     ? runtimes
