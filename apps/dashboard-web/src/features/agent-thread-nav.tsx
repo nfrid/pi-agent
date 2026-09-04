@@ -185,12 +185,14 @@ export function activeThreadDetails(
     : undefined;
   const selectedModel = row.draft
     ? draftSelection
-    : (row.runtime?.model ?? indexed.model);
+    : (row.runtime?.model ?? indexed.model ?? row.durableThread?.model);
   const serviceTier =
     selectedModel?.provider === 'openai-codex'
       ? row.draft
         ? draftSelection?.serviceTier
-        : (row.runtime?.model?.serviceTier ?? indexed.serviceTier)
+        : (row.runtime?.model?.serviceTier ??
+          indexed.serviceTier ??
+          row.durableThread?.model?.serviceTier)
       : undefined;
   const catalogModel = selectedModel
     ? runtimes
@@ -411,15 +413,15 @@ function AgentThreadLink({
             >
               {details.model?.alias ?? '? model'}
             </span>
-            {details.model?.serviceTier && (
-              <ServiceTierIcon tier={details.model.serviceTier} />
-            )}
             <span
               className={styles.threadEffort}
               data-effort={details.effort.full}
             >
               {details.effort.compact}
             </span>
+            {details.model?.serviceTier && (
+              <ServiceTierIcon tier={details.model.serviceTier} />
+            )}
             {details.queue !== undefined && (
               <>
                 <span className={styles.threadSeparator} aria-hidden="true">

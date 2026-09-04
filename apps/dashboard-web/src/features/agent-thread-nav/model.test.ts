@@ -449,6 +449,36 @@ describe('agent thread view model', () => {
     ).toBeUndefined();
   });
 
+  it('retains the durable run model for immediate card metadata fallback', () => {
+    const snapshot = {
+      runs: [
+        {
+          piSessionId: 'session-1',
+          threadId: 'thread-1',
+          status: 'running',
+          model: {
+            provider: 'openai-codex',
+            model: 'gpt-test',
+            serviceTier: 'fast',
+          },
+        },
+      ],
+    } as never;
+
+    expect(
+      durableThreadForSession(snapshot, 'session-1', [
+        { id: 'thread-1' },
+      ]),
+    ).toMatchObject({
+      threadId: 'thread-1',
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-test',
+        serviceTier: 'fast',
+      },
+    });
+  });
+
   it('prefers live snapshot lifecycle metadata over a stale finite-query fallback', () => {
     const snapshot = {
       runtimes: [

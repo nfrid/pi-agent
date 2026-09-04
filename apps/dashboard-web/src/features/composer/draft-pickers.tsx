@@ -496,10 +496,10 @@ export function AgentPicker({
         >
           {modelName(model, models, preferences)}
         </span>
-        {model?.serviceTier && <ServiceTierIcon tier={model.serviceTier} />}
         {model?.thinking && (
           <span className="draft-agent-thinking">· {model.thinking}</span>
         )}
+        {model?.serviceTier && <ServiceTierIcon tier={model.serviceTier} />}
       </Button>
       {open && (
         <PickerSurface label="Agent and thinking" title="Agent" onClose={close}>

@@ -1,6 +1,7 @@
 import { ACTIVE_RUN_STATUSES } from '@pi-dashboard/domain';
 import type {
   BrowserSnapshot,
+  ModelSelection,
   RuntimeSnapshot,
   SessionIndexEntry,
   SessionThreadLink,
@@ -17,6 +18,7 @@ export type DurableThreadMetadata = {
   archivedAt?: number;
   settledAt?: number;
   pinnedAt?: number;
+  model?: ModelSelection;
   hasActiveRun: boolean;
 };
 
@@ -139,6 +141,10 @@ export function durableThreadForSession(
   if (directThreadIds.size > 1) return undefined;
   const directLink = direct[0];
   if (directLink) {
+    const directRun = runs.find(
+      (run) =>
+        run.threadId === directLink.threadId && run.piSessionId === sessionId,
+    );
     // Direct links are authoritative, but an old run projection that names a
     // different thread is a conflict, never a reason to guess.
     if ([...runThreadIds].some((threadId) => threadId !== directLink.threadId))
@@ -160,6 +166,7 @@ export function durableThreadForSession(
       ...(directLink.settledAt === undefined
         ? {}
         : { settledAt: directLink.settledAt }),
+      ...(directRun?.model ? { model: directRun.model } : {}),
       hasActiveRun:
         directLink.activeRunId !== undefined ||
         runs.some(
@@ -177,6 +184,10 @@ export function durableThreadForSession(
   const threadId = [...runThreadIds][0];
   const thread = threads.find((candidate) => candidate.id === threadId);
   if (!thread) return undefined;
+  const run = runs.find(
+    (candidate) =>
+      candidate.threadId === threadId && candidate.piSessionId === sessionId,
+  );
   return {
     threadId,
     ...(thread.checkoutId ? { checkoutId: thread.checkoutId } : {}),
@@ -185,6 +196,7 @@ export function durableThreadForSession(
       : { archivedAt: thread.archivedAt }),
     ...(thread.pinnedAt === undefined ? {} : { pinnedAt: thread.pinnedAt }),
     ...(thread.settledAt === undefined ? {} : { settledAt: thread.settledAt }),
+    ...(run?.model ? { model: run.model } : {}),
     hasActiveRun:
       runs.some(
         (run) =>

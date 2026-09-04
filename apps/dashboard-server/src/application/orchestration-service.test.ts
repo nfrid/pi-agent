@@ -12,6 +12,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type { ModelSelection } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { MetadataStore } from '../metadata.js';
 import { OrchestrationService } from './orchestration-service.js';
@@ -39,7 +40,7 @@ function _workspace(root: string) {
   };
 }
 
-async function orchestrationFixture() {
+async function orchestrationFixture(options: { model?: ModelSelection } = {}) {
   const root = await mkdtemp(
     path.join(os.tmpdir(), 'pi-orchestration-matrix-'),
   );
@@ -102,6 +103,7 @@ async function orchestrationFixture() {
     title: 'Matrix run',
     prompt: 'Matrix prompt',
     isolation: 'main',
+    ...(options.model ? { model: options.model } : {}),
   })) as { run: { id: string } };
   return {
     root,
@@ -1103,6 +1105,46 @@ describe('OrchestrationService', () => {
       await expect(reconcile(fixture.service)).resolves.toBeUndefined();
       expect(fixture.manager.stopRecovered).toHaveBeenCalledOnce();
       expect(repository.getRun(fixture.runId)?.status).toBe('interrupted');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('establishes a Codex service tier before delivering the initial prompt', async () => {
+    const fixture = await orchestrationFixture({
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-test',
+        serviceTier: 'fast',
+      },
+    });
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-codex');
+      await fixture.service.handleRegistryChange({
+        kind: 'registered',
+        snapshot: runtimeHello('runtime-codex'),
+      } as never);
+      expect(
+        fixture.registry.sendCommand.mock.calls.map(
+          (call) => (call as unknown[])[1],
+        ),
+      ).toEqual([
+        {
+          id: `run-model:${fixture.runId}`,
+          type: 'setModel',
+          provider: 'openai-codex',
+          model: 'gpt-test',
+          serviceTier: 'fast',
+        },
+        {
+          id: `run-prompt:${fixture.runId}`,
+          type: 'prompt',
+          text: 'Matrix prompt',
+        },
+      ]);
     } finally {
       await fixture.close();
     }
