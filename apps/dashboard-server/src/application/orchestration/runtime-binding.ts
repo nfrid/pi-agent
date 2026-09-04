@@ -129,6 +129,20 @@ export async function bindAndDeliverPrompt(
     runId,
     status: 'starting',
   });
+  const modelReceiptId = `run-model:${run.id}`;
+  if (
+    run.model?.provider === 'openai-codex' &&
+    !host.repository.getCommandReceipt(modelReceiptId)
+  ) {
+    await host.registry.sendCommand(runtimeId, {
+      id: modelReceiptId,
+      type: 'setModel',
+      provider: run.model.provider,
+      model: run.model.model,
+      serviceTier: run.model.serviceTier ?? null,
+    });
+    host.saveReceipt(modelReceiptId, 'run.model', { runId: run.id });
+  }
   const promptReceiptId = host.promptReceiptId(run.id);
   if (!host.repository.getCommandReceipt(promptReceiptId)) {
     const images = host.initialImages(run.id);
