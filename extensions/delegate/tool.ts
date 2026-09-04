@@ -42,7 +42,7 @@ import { parseWorkflowReference } from './workflow-model';
 import { captureWorkInProgress } from './worktree';
 
 const DELEGATE_TOOL_DESCRIPTION =
-  'Schedule one focused child agent asynchronously. Use a stable id or continue reference, inputs to wait for reports, base to start from an upstream code state, and write or web when needed.';
+  'Schedule one focused child agent asynchronously. Use a stable id or continue reference, inputs to wait for reports, base to start from an upstream code state, and write, web, or explicit skills when needed.';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -69,6 +69,15 @@ const WebSchema = Type.Boolean({
   description:
     'Enable web_search, fetch_content, and get_search_content for this delegate. Continuations inherit the original capability.',
 });
+
+const SkillsSchema = Type.Array(
+  Type.String({ minLength: 1, maxLength: 4096 }),
+  {
+    maxItems: 16,
+    description:
+      'Explicit skill file or directory paths to load; no skills are discovered by default. Paths resolve against cwd for fresh delegates. Continuations inherit the original selection and cannot replace it.',
+  },
+);
 
 const LogicalIdSchema = Type.String({
   minLength: 1,
@@ -108,6 +117,7 @@ type LegacyTaskInput = {
   continuation?: string;
   allowWrites?: boolean;
   capabilities?: Array<'web'>;
+  skills?: string[];
   isolation?: 'shared' | 'worktree';
   from?: 'wip' | 'head';
   refresh?: 'wip' | 'head';
@@ -126,6 +136,7 @@ type ModelDelegateParams = {
   write?: Static<typeof WriteSchema>;
   cwd?: Static<typeof CwdSchema>;
   web?: Static<typeof WebSchema>;
+  skills?: Static<typeof SkillsSchema>;
 } & ({ id: string; continue?: never } | { continue: string; id?: never });
 
 const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
@@ -145,6 +156,7 @@ const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
     write: Type.Optional(WriteSchema),
     cwd: Type.Optional(CwdSchema),
     web: Type.Optional(WebSchema),
+    skills: Type.Optional(SkillsSchema),
   },
   required: ['task'],
   additionalProperties: false,
@@ -217,6 +229,7 @@ function normalizeModelParams(rawParams: unknown): DelegateParams {
       : Array.isArray(raw.capabilities)
         ? { capabilities: raw.capabilities as 'web'[] }
         : {}),
+    ...(Array.isArray(raw.skills) ? { skills: raw.skills as string[] } : {}),
     // These fields are accepted only for direct legacy/runtime callers, never
     // by the registered model schema.
     ...(raw.context === 'branch' || raw.context === 'fresh'
@@ -397,7 +410,7 @@ export function registerDelegateTool(
           assertContinuationFields(
             continuationReference,
             params,
-            'A continuation reuses its original cwd, context, base, and capabilities; scope may be replaced for this run.',
+            'A continuation reuses its original cwd, context, capabilities, and base; scope may be replaced for this run. Skills are also immutable.',
           );
           activeWorkflow.require(continuationReference);
         }

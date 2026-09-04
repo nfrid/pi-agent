@@ -310,6 +310,7 @@ describe('delegate', () => {
         'write',
         'cwd',
         'web',
+        'skills',
       ].sort(),
     );
     for (const removed of [
@@ -334,6 +335,7 @@ describe('delegate', () => {
         base: 'prepare',
         write: true,
         web: true,
+        skills: ['skills/review'],
       }),
     ).toBe(true);
     expect(
@@ -696,6 +698,7 @@ describe('delegate', () => {
       name: 'Original agent',
       parentSessionId: 'parent-session',
       capabilities: ['web'],
+      skills: ['/tmp'],
       routing: {
         route: 'quick-high',
         provider: 'openai-codex',
@@ -732,6 +735,7 @@ describe('delegate', () => {
         lineageId: session.lineageId,
         parentSessionId: 'parent-session',
         capabilities: ['web'],
+        skills: ['/tmp'],
       });
       expect(header).toMatchObject({
         type: 'session',
@@ -889,8 +893,8 @@ describe('delegate', () => {
     const hostedExtensions = hosted.flatMap((arg, index) =>
       arg === '--extension' ? [hosted[index + 1]] : [],
     );
-    expect(foregroundExtensions).toHaveLength(4);
-    expect(hostedExtensions).toHaveLength(5);
+    expect(foregroundExtensions).toHaveLength(5);
+    expect(hostedExtensions).toHaveLength(6);
     expect(hostedExtensions[1]).toMatch(
       /extensions[\\/]remote-control[\\/]index\.ts$/,
     );
@@ -917,7 +921,10 @@ describe('delegate', () => {
     expect(extensionPaths[3]).toMatch(
       /extensions[\\/]tool-argument-validation[\\/]index\.ts$/,
     );
-    expect(extensionPaths).toHaveLength(4);
+    expect(extensionPaths[4]).toMatch(
+      /extensions[\\/]bash-description[\\/]index\.ts$/,
+    );
+    expect(extensionPaths).toHaveLength(5);
     expect(extensionPaths.every(existsSync)).toBe(true);
     // Read-only is an intent signal, not a sandbox: the child keeps an ordinary
     // shell so it can inspect the repository the way any agent would.
@@ -925,6 +932,18 @@ describe('delegate', () => {
     expect(tools).toBe('read,bash,grep,find,ls');
     expect(tools).not.toContain('write');
     expect(tools).not.toContain('edit');
+  });
+
+  test('keeps skill discovery disabled and forwards only explicit paths', () => {
+    const args = buildChildArgs(
+      { task: 'review', skills: ['/tmp/one', '/tmp/two'] },
+      '/tmp/child.jsonl',
+    );
+    expect(args).toContain('--no-skills');
+    expect(args).toEqual(
+      expect.arrayContaining(['--skill', '/tmp/one', '--skill', '/tmp/two']),
+    );
+    expect(args.filter((arg) => arg === '--skill')).toHaveLength(2);
   });
 
   test('loads web tools only when the parent grants the web capability', () => {

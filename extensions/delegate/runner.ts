@@ -70,6 +70,10 @@ const TOOL_ARGUMENT_VALIDATION_EXTENSION = path.resolve(
   __dirname,
   '../tool-argument-validation/index.ts',
 );
+const BASH_DESCRIPTION_EXTENSION = path.resolve(
+  __dirname,
+  '../bash-description/index.ts',
+);
 
 export { mapWithConcurrency } from './concurrency';
 
@@ -129,6 +133,7 @@ export interface RunDelegateOptions {
   allowWrites?: boolean;
   writeRequested?: boolean;
   capabilities?: import('./types').DelegateChildCapability[];
+  skills?: string[];
   isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
   contextNote?: string;
@@ -168,6 +173,7 @@ export function buildChildArgs(
     | 'serviceTier'
     | 'allowWrites'
     | 'capabilities'
+    | 'skills'
     | 'worktree'
     | 'contextNote'
     | 'handoffText'
@@ -200,6 +206,8 @@ export function buildChildArgs(
       : []),
     '--extension',
     TOOL_ARGUMENT_VALIDATION_EXTENSION,
+    '--extension',
+    BASH_DESCRIPTION_EXTENSION,
     '--no-skills',
     '--no-prompt-templates',
     '--no-themes',
@@ -207,6 +215,7 @@ export function buildChildArgs(
     tools,
   ];
   args.push('--session', sessionPath);
+  for (const skill of options.skills ?? []) args.push('--skill', skill);
   if (options.routing) {
     args.push('--provider', options.routing.provider);
     args.push('--model', options.routing.model);

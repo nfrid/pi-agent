@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { resolveDelegateSkills } from './cwd';
 import { createOpaqueId } from './identity';
 import { persistSessionRoute, removeSessionSafely } from './routing-warnings';
 import { type RunDelegateOptions, runDelegate } from './runner';
@@ -42,6 +43,7 @@ export interface DelegateTaskPlan {
   contextNote?: string;
   scope?: string[];
   capabilities?: DelegateChildCapability[];
+  skills?: string[];
   base?: WorktreeBase;
   /** Exact immutable commit/ref supplied by a symbolic branch input. */
   baseRef?: string;
@@ -73,6 +75,7 @@ export interface ContinuationPreflight {
   cwd: string;
   scope?: string[];
   capabilities?: DelegateChildCapability[];
+  skills?: string[];
   allowWrites: boolean;
   isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
@@ -98,6 +101,10 @@ export function preflightDelegateContinuation(
     cwd: plan.requestedCwd,
     scope: plan.scope,
     capabilities: [...(plan.capabilities ?? plan.resumed?.capabilities ?? [])],
+    skills: resolveDelegateSkills(
+      plan.skills ?? plan.resumed?.skills,
+      plan.requestedCwd,
+    ),
     allowWrites: plan.writeRequested,
     isolation: plan.isolation,
     warnings: [...plan.warnings],
@@ -310,6 +317,7 @@ export async function prepareDelegateTask(
         worktreeId: state.worktree?.record.id,
         allowWrites: state.allowWrites,
         capabilities: state.capabilities,
+        skills: state.skills,
         isolation: state.isolation,
         scope: state.scope,
         routing: plan.routing,
@@ -463,6 +471,7 @@ export async function runPreparedDelegateTask(
     writeRequested: prepared.plan.writeRequested,
     allowWrites: prepared.allowWrites,
     capabilities: prepared.capabilities ?? prepared.session.capabilities ?? [],
+    skills: prepared.skills ?? prepared.session.skills ?? [],
     isolation: prepared.isolation,
     worktree: prepared.worktree,
     timeoutMs: options.timeoutMs,

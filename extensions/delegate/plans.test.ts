@@ -1,8 +1,12 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { resolveDelegateCwd } from './cwd';
+import {
+  MAX_DELEGATE_SKILLS,
+  resolveDelegateCwd,
+  resolveDelegateSkills,
+} from './cwd';
 import { assertContinuationFields, buildDelegatePlans } from './plans';
 import {
   createDelegateSession,
@@ -43,6 +47,52 @@ describe('delegate cwd resolution', () => {
     ['/absolute/child', '/absolute/child'],
   ])('resolves %j against the parent session', (requested, expected) => {
     expect(resolveDelegateCwd(requested, '/parent/project')).toBe(expected);
+  });
+
+  test('resolves explicit skills relative to the requested cwd and expands home', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-skills-'));
+    const skill = path.join(root, 'skills', 'review');
+    const home = path.join(root, 'home');
+    writeFileSync(path.join(root, 'skill.md'), 'review');
+    mkdirSync(skill, { recursive: true });
+    mkdirSync(path.join(home, 'skills', 'review'), { recursive: true });
+    vi.stubEnv('HOME', home);
+    try {
+      expect(
+        resolveDelegateSkills(['skill.md', '~/skills/review'], root),
+      ).toEqual([
+        path.join(root, 'skill.md'),
+        path.join(home, 'skills', 'review'),
+      ]);
+      expect(
+        buildDelegatePlans(
+          {
+            name: 'Skill review',
+            task: 'review',
+            cwd: root,
+            skills: ['skill.md'],
+            route: 'quick',
+          },
+          ctx,
+          config,
+          () => null,
+        ).tasks[0]?.plan.skills,
+      ).toEqual([path.join(root, 'skill.md')]);
+      expect(() => resolveDelegateSkills(['missing'], root)).toThrow(
+        `Delegate skill path does not exist: ${path.join(root, 'missing')}`,
+      );
+      expect(() => resolveDelegateSkills(['   '], root)).toThrow(
+        'skill paths must be non-empty',
+      );
+      expect(() =>
+        resolveDelegateSkills(
+          Array(MAX_DELEGATE_SKILLS + 1).fill('skill.md'),
+          root,
+        ),
+      ).toThrow(`at most ${MAX_DELEGATE_SKILLS}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('expands home paths using the effective HOME', () => {
@@ -89,6 +139,7 @@ describe('delegate cwd resolution', () => {
       name: 'continued',
       scope: ['old-area'],
       capabilities: ['web'],
+      skills: ['/tmp'],
       routing: {
         route: 'quick',
         provider: 'test',
@@ -110,6 +161,7 @@ describe('delegate cwd resolution', () => {
       );
       expect(built.tasks[0]?.plan.requestedCwd).toBe('../persisted-relative');
       expect(built.tasks[0]?.plan.capabilities).toEqual(['web']);
+      expect(built.tasks[0]?.plan.skills).toEqual(['/tmp']);
       const replaced = buildDelegatePlans(
         {
           task: 'narrow continuation',
@@ -139,6 +191,19 @@ describe('delegate cwd resolution', () => {
         () => '{}',
       );
       expect(inherited.tasks[0]?.plan.scope).toEqual(['new-area']);
+      expect(() =>
+        buildDelegatePlans(
+          {
+            task: 'replace skills',
+            continuation: session.token,
+            route: 'quick',
+            skills: ['/tmp'],
+          },
+          ctx,
+          config,
+          () => '{}',
+        ),
+      ).toThrow('Skills are also immutable.');
     } finally {
       removeDelegateSession(session);
       rmSync(agentDir, { recursive: true, force: true });
@@ -167,6 +232,13 @@ describe('delegate continuation parameter preflight', () => {
         'capabilities are immutable',
       ),
     ).toThrow('capabilities are immutable');
+    expect(() =>
+      assertContinuationFields(
+        'lineage',
+        { skills: ['/tmp'] },
+        'skills are immutable',
+      ),
+    ).toThrow('skills are immutable');
     expect(() =>
       assertContinuationFields(
         'lineage',
