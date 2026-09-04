@@ -574,12 +574,12 @@
   line-height: 1;
 }
 .service-tier-icon svg {
-  width: 8px;
+  width: 7.2px;
   height: 8px;
   fill: currentColor;
 }
 .service-tier-icon[data-service-tier="ultrafast"] svg {
-  width: 14px;
+  width: 14.4px;
 }
 .draft-agent-thinking {
   flex: none;

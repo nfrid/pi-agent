@@ -677,6 +677,9 @@ button.shelfHeading:focus-visible {
   flex: none;
   font-weight: 650;
 }
+.threadEffort + :global(.service-tier-icon) {
+  margin-left: -3px;
+}
 .threadQueue {
   flex: none;
 }

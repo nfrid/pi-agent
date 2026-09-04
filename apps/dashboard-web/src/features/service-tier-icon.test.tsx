@@ -7,6 +7,12 @@ describe('service tier icon', () => {
     expect(renderToStaticMarkup(<ServiceTierIcon tier="fast" />)).toContain(
       'aria-label="Fast"',
     );
+    expect(renderToStaticMarkup(<ServiceTierIcon tier="fast" />)).toContain(
+      'viewBox="3 2 18 20"',
+    );
+    expect(
+      renderToStaticMarkup(<ServiceTierIcon tier="ultrafast" />),
+    ).toContain('viewBox="3 2 36 20"');
     expect(
       renderToStaticMarkup(<ServiceTierIcon tier="fast" />).match(/<path/g),
     ).toHaveLength(1);

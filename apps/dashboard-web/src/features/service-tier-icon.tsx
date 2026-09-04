@@ -18,7 +18,7 @@ export function ServiceTierIcon({
       aria-label={label}
       title={decorative ? undefined : label}
     >
-      <svg viewBox={bolts === 1 ? '0 0 24 24' : '0 0 42 24'} aria-hidden="true">
+      <svg viewBox={bolts === 1 ? '3 2 18 20' : '3 2 36 20'} aria-hidden="true">
         <path d="M13 2 3 14h9l-1 8 10-12h-9z" />
         {bolts === 2 && <path d="M31 2 21 14h9l-1 8 10-12h-9z" />}
       </svg>
