@@ -457,15 +457,13 @@ function AgentThreadLink({
         </span>
         <span className={styles.threadTitleRow}>
           <strong>{row.title}</strong>
-          {shortcutHint !== undefined && (
-            <kbd
-              className={styles.threadShortcutHint}
-              data-shortcut-hint={shortcutHint}
-              data-shortcut-visible={shortcutHintsVisible ? 'true' : 'false'}
-            >
-              {shortcutHint}
-            </kbd>
-          )}
+          <kbd
+            className={styles.threadShortcutHint}
+            data-shortcut-hint={shortcutHint}
+            data-shortcut-visible={shortcutHintsVisible ? 'true' : 'false'}
+          >
+            {shortcutHint}
+          </kbd>
         </span>
       </span>
     </button>
