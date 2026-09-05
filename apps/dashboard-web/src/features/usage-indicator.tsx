@@ -11,6 +11,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardSurfaces } from './dashboard-surface-context';
+import { useModifierShortcut } from './modifier-shortcuts';
 import { UsageSparkline } from './usage-analytics';
 import styles from './usage-indicator.module.css';
 
@@ -305,6 +306,11 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
     : undefined;
   const windows = activeLimit ? limitWindows(activeLimit) : [];
   const surfaces = useDashboardSurfaces();
+  const usageHint = useModifierShortcut(
+    'u',
+    () => surfaces?.open({ type: 'usage-analytics' }),
+    Boolean(activeLimit && urgent),
+  );
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const capsuleRef = useRef<HTMLDivElement>(null);
@@ -351,6 +357,7 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
         aria-label={`Usage: ${limits.length > 1 ? `${activeLimit.name}, ` : ''}${windows.map((window) => `${window.label} ${Math.round(window.usedPercent)}%`).join(', ')}`}
         onClick={() => setOpen((value) => !value)}
       >
+        {usageHint && <kbd className={styles.modifierHint}>⌥U</kbd>}
         <span className={styles.windows} aria-hidden="true">
           {windows.map((window) => (
             <span

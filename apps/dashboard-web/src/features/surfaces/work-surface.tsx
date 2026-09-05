@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { useModifierShortcut } from '../modifier-shortcuts';
 import { type SurfacePage, SurfaceStack } from '../surface-stack';
 
 function focusAfterSurfaceHides(launcher: HTMLButtonElement | null) {
@@ -31,6 +32,7 @@ export function WorkSurface({
   drawerSummary,
   pages = [],
   onPageDepthChange,
+  shortcutKey,
   children,
 }: {
   title: string;
@@ -47,11 +49,23 @@ export function WorkSurface({
   drawerSummary?: ReactNode;
   pages?: readonly SurfacePage[];
   onPageDepthChange?: (depth: number) => void;
+  shortcutKey?: string;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [visible, setVisible] = useState(visibleCount > 0);
   const launcherRef = useRef<HTMLButtonElement>(null);
+  const toggleOpen = () => {
+    if (open) {
+      setOpen(false);
+      onPageDepthChange?.(0);
+    } else setOpen(true);
+  };
+  const shortcutHint = useModifierShortcut(
+    shortcutKey ?? '',
+    toggleOpen,
+    visible && shortcutKey !== undefined,
+  );
   useEffect(() => {
     if (visibleCount > 0) {
       setVisible(true);
@@ -99,12 +113,7 @@ export function WorkSurface({
           className="surface-launcher"
           aria-haspopup="dialog"
           aria-expanded={open}
-          onPress={() => {
-            if (open) {
-              setOpen(false);
-              onPageDepthChange?.(0);
-            } else setOpen(true);
-          }}
+          onPress={toggleOpen}
         >
           <span className="surface-title">
             <span className="surface-title-line">
@@ -113,6 +122,9 @@ export function WorkSurface({
             </span>
             {typeof summary === 'string' ? <strong>{summary}</strong> : summary}
             {summaryDetail}
+            {shortcutHint && (
+              <kbd className="surface-modifier-hint">⌥{shortcutKey}</kbd>
+            )}
           </span>
           <span className="surface-chevron" aria-hidden="true">
             ›

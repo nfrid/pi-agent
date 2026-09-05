@@ -52,6 +52,7 @@
   }
 }
 .newThread {
+  position: relative;
   display: inline-flex;
   align-items: center;
   margin-left: auto;
@@ -553,7 +554,7 @@ button.shelfHeading:focus-visible {
 .threadMetadataRow {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 5px;
   overflow: hidden;
@@ -577,6 +578,41 @@ button.shelfHeading:focus-visible {
   font-weight: 750;
   line-height: 1;
   pointer-events: none;
+  animation: modifier-hint-in 120ms ease-out;
+}
+.modifierHint {
+  position: absolute;
+  z-index: 2;
+  top: 1px;
+  right: 2px;
+  display: grid;
+  min-width: 2.5ch;
+  height: 16px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  padding: 0 3px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  animation: modifier-hint-in 120ms ease-out;
+}
+@keyframes modifier-hint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .threadShortcutHint,
+  .modifierHint {
+    animation: none;
+  }
 }
 .threadCopy strong,
 .threadCopy small {
@@ -628,8 +664,8 @@ button.shelfHeading:focus-visible {
 }
 .threadWorkspaceCheckout {
   display: inline-flex;
-  min-width: 4ch;
-  flex: 1 1 5ch;
+  min-width: 3ch;
+  flex: 0 1 12ch;
   align-items: baseline;
   gap: 3px;
   overflow: hidden;
@@ -676,8 +712,8 @@ button.shelfHeading:focus-visible {
 }
 .threadDetails {
   display: flex;
-  width: 100%;
-  min-width: 0;
+  width: auto;
+  min-width: max-content;
   align-items: center;
   gap: 3px;
   overflow: hidden;
@@ -707,7 +743,7 @@ button.shelfHeading:focus-visible {
 .threadModel {
   min-width: 4ch;
   max-width: 10ch;
-  flex: 1 1 6ch;
+  flex: 0 1 10ch;
 }
 .threadEffort {
   flex: none;
@@ -744,7 +780,6 @@ button.shelfHeading:focus-visible {
   min-width: 0;
   max-width: 8ch;
   flex: 0 1 8ch;
-  margin-left: auto;
   overflow: hidden;
   color: var(--dim);
   text-overflow: ellipsis;
@@ -799,6 +834,7 @@ button.shelfHeading:focus-visible {
   flex: 1 1 auto;
 }
 .settingsButton {
+  position: relative;
   display: inline-grid;
   width: 32px;
   margin-left: auto;

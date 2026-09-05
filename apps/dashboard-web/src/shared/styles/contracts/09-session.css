@@ -264,6 +264,7 @@
     background 150ms ease;
 }
 .surface-launcher {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -367,4 +368,23 @@
 }
 .surface-launcher .surface-chevron {
   color: var(--purple);
+}
+.surface-modifier-hint {
+  position: absolute;
+  top: 4px;
+  right: 26px;
+  border: 1px solid var(--purple);
+  border-radius: 3px;
+  background: var(--bg-alt);
+  color: var(--purple);
+  padding: 1px 3px;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  animation: modifier-hint-in 120ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .surface-modifier-hint {
+    animation: none;
+  }
 }
