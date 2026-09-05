@@ -1089,14 +1089,12 @@ test('desktop project scope filters threads and starts project threads @desktop'
   await expect(projectDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(projectDialog).toHaveCount(0);
-  await page.reload();
   await expect(nav).toBeVisible();
   await page.keyboard.press('Meta+Alt+S');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsDialog).toHaveCount(0);
-  await page.reload();
   await expect(nav).toBeVisible();
   await page.keyboard.press('Meta+Alt+U');
   const usageDialog = page.getByRole('dialog', { name: 'Usage analytics' });

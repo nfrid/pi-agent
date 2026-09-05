@@ -122,7 +122,9 @@ export function useModifierShortcut(
   const registrationRef = useRef<ShortcutRegistration | undefined>(undefined);
   const actionRef = useRef(action);
   const enabledRef = useRef(enabled);
-  const blocked = Boolean(surfaces?.stack.length) || hasOpenDialog();
+  // DOM-backed work dialogs are checked at dispatch time: reading them during
+  // render would retain the closing dialog's pre-commit state.
+  const blocked = Boolean(surfaces?.stack.length);
   const blockedRef = useRef(blocked);
   actionRef.current = action;
   enabledRef.current = enabled;

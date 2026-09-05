@@ -167,7 +167,6 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   await expect(tasksDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(tasksDialog).toHaveCount(0);
-  await page.reload();
   await expect(page.getByRole('button', { name: /Delegates/ })).toBeVisible();
   await page.keyboard.press('Meta+Alt+D');
   const delegatesDialog = page.getByRole('dialog', { name: 'Delegates' });
