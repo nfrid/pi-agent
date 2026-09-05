@@ -1,5 +1,5 @@
 import { act, create } from 'react-test-renderer';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useModifierShortcut } from './modifier-shortcuts';
 
 let dialogOpen = false;
@@ -34,7 +34,11 @@ function Probe({
   action: () => void;
   enabled?: boolean;
 }) {
-  const held = useModifierShortcut('n', action, enabled);
+  const held = useModifierShortcut(
+    { code: 'KeyN', alt: true },
+    action,
+    enabled,
+  );
   return <span>{held ? 'held' : 'released'}</span>;
 }
 
@@ -43,6 +47,7 @@ describe('modifier shortcuts', () => {
     dialogOpen = false;
     delete (globalThis as { window?: unknown }).window;
     delete (globalThis as { document?: unknown }).document;
+    vi.useRealTimers();
   });
 
   function installDom() {
@@ -50,7 +55,8 @@ describe('modifier shortcuts', () => {
     (globalThis as { document?: unknown }).document = fakeDocument;
   }
 
-  it('uses event.code, shows immediately, ignores composing/repeat, and resets on blur', () => {
+  it('uses event.code, delays hints, ignores composing/repeat, and resets on blur', () => {
+    vi.useFakeTimers();
     installDom();
     let calls = 0;
     const action = () => calls++;
@@ -66,6 +72,14 @@ describe('modifier shortcuts', () => {
           repeat: false,
         }),
       );
+    });
+    expect(renderer.toJSON()).toEqual({
+      type: 'span',
+      props: {},
+      children: ['released'],
+    });
+    act(() => {
+      vi.advanceTimersByTime(80);
     });
     expect(renderer.toJSON()).toEqual({
       type: 'span',
@@ -124,10 +138,14 @@ describe('modifier shortcuts', () => {
     act(() => {
       renderer = create(<Probe action={() => calls++} />);
     });
+    vi.useFakeTimers();
     act(() => {
       fakeWindow.dispatchEvent(
         keyboard('keydown', { key: 'Meta', code: 'MetaLeft' }),
       );
+    });
+    act(() => {
+      vi.advanceTimersByTime(80);
     });
     act(() => renderer.update(<Probe action={() => calls++} />));
     expect(renderer.toJSON()).toEqual({
@@ -146,6 +164,63 @@ describe('modifier shortcuts', () => {
       );
     });
     expect(calls).toBe(1);
+    act(() => renderer.unmount());
+  });
+
+  it('matches the explicit alt flag and leaves former plain bindings inactive', () => {
+    installDom();
+    let plainCalls = 0;
+    let altCalls = 0;
+    function BindingProbe({
+      alt,
+      action,
+    }: {
+      alt: boolean;
+      action: () => void;
+    }) {
+      useModifierShortcut({ code: 'KeyT', alt }, action, true);
+      return null;
+    }
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(
+        <>
+          <BindingProbe alt={false} action={() => plainCalls++} />
+          <BindingProbe alt action={() => altCalls++} />
+        </>,
+      );
+    });
+    act(() => {
+      fakeWindow.dispatchEvent(
+        keyboard('keydown', {
+          key: 't',
+          code: 'KeyT',
+          metaKey: true,
+          altKey: false,
+          repeat: false,
+        }),
+      );
+      fakeWindow.dispatchEvent(
+        keyboard('keydown', {
+          key: 't',
+          code: 'KeyT',
+          metaKey: true,
+          altKey: true,
+          repeat: false,
+        }),
+      );
+      fakeWindow.dispatchEvent(
+        keyboard('keydown', {
+          key: 't',
+          code: 'KeyT',
+          metaKey: false,
+          altKey: true,
+          repeat: false,
+        }),
+      );
+    });
+    expect(plainCalls).toBe(1);
+    expect(altCalls).toBe(1);
     act(() => renderer.unmount());
   });
 

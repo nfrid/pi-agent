@@ -26,29 +26,24 @@
 }
 .modifierHint {
   position: absolute;
-  top: 3px;
+  top: -13px;
   right: 3px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  background: var(--bg-alt);
-  color: var(--purple);
-  padding: 1px 3px;
+  color: var(--dim);
+  padding: 0;
   font: inherit;
   font-size: 9px;
+  font-weight: 650;
   line-height: 1;
-  animation: modifier-hint-in 120ms ease-out;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
 }
-@keyframes modifier-hint-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+.modifierHint[data-shortcut-visible="true"] {
+  opacity: 1;
 }
 @media (prefers-reduced-motion: reduce) {
   .modifierHint {
-    animation: none;
+    transition: none;
   }
 }
 .windows {

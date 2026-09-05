@@ -1084,20 +1084,28 @@ test('desktop project scope filters threads and starts project threads @desktop'
     name: 'Agents and threads',
   });
   await nav.click({ position: { x: 5, y: 5 } });
-  await page.keyboard.press('Meta+Alt+n');
   const projectDialog = page.getByRole('dialog', { name: 'Choose a project' });
+  await page.keyboard.press('Meta+Alt+n');
+  await expect(projectDialog).toHaveCount(0);
+  await page.keyboard.press('Alt+t');
+  await expect(projectDialog).toHaveCount(0);
+  await page.keyboard.press('Meta+t');
   await expect(projectDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(projectDialog).toHaveCount(0);
   await expect(nav).toBeVisible();
-  await page.keyboard.press('Meta+Alt+S');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
+  await page.keyboard.press('Meta+Alt+s');
+  await expect(settingsDialog).toHaveCount(0);
+  await page.keyboard.press('Meta+.');
   await expect(settingsDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsDialog).toHaveCount(0);
   await expect(nav).toBeVisible();
-  await page.keyboard.press('Meta+Alt+U');
   const usageDialog = page.getByRole('dialog', { name: 'Usage analytics' });
+  await page.keyboard.press('Alt+u');
+  await expect(usageDialog).toHaveCount(0);
+  await page.keyboard.press('Meta+Alt+u');
   await expect(usageDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(usageDialog).toHaveCount(0);
@@ -1119,12 +1127,40 @@ test('desktop project scope filters threads and starts project threads @desktop'
     fullPage: true,
   });
   await page.keyboard.down('Meta');
+  await page.waitForTimeout(100);
+  await expect(
+    nav.getByRole('button', { name: /New thread/ }).locator('kbd'),
+  ).toHaveText('T');
+  await expect(
+    nav.getByRole('button', { name: 'Open settings' }).locator('kbd'),
+  ).toHaveText('.');
+  await expect(
+    nav.getByRole('button', { name: /Usage:/u }).locator('kbd'),
+  ).toHaveText('⌥U');
+  await page.screenshot({
+    path: testInfo.outputPath('navigation-refine-sidebar-hints.png'),
+    fullPage: true,
+  });
   await expect.poll(() => nav.locator('[data-shortcut-hint]').count()).toBe(2);
   expect(await nav.locator('[data-shortcut-hint]').allTextContents()).toEqual([
     '1',
     '2',
   ]);
+  expect(
+    await nav
+      .locator('[data-shortcut-hint]')
+      .evaluateAll((hints) =>
+        hints.every((hint) =>
+          String(hint.parentElement?.className).includes('threadTitleRow'),
+        ),
+      ),
+  ).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await expect(nav.locator('[data-shortcut-hint]')).toHaveCount(2);
+  await expect(nav.locator('[data-shortcut-hint]').first()).toHaveAttribute(
+    'data-shortcut-visible',
+    'false',
+  );
   await expect(nav.locator('[data-shortcut-hint]')).toHaveCount(0);
   await page.keyboard.up('Meta');
   await page.keyboard.down('Meta');

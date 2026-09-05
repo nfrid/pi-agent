@@ -73,7 +73,11 @@ import {
   useModelDisplayPreferences,
 } from './model-display-preferences';
 import { draftModelSelection } from './model-option';
-import { hasOpenDialog, useModifierShortcut } from './modifier-shortcuts';
+import {
+  hasOpenDialog,
+  shortcutLabel,
+  useModifierShortcut,
+} from './modifier-shortcuts';
 import { ProjectIcon } from './project-icon';
 import {
   AgentThreadActionMenu,
@@ -299,6 +303,7 @@ function AgentThreadLink({
   preferences,
   inheritedDefault,
   shortcutHint,
+  shortcutHintsVisible,
 }: {
   row: AgentThreadRow;
   selected: boolean;
@@ -315,6 +320,7 @@ function AgentThreadLink({
   preferences: ModelDisplayPreferences;
   inheritedDefault?: ModelSelection;
   shortcutHint?: number;
+  shortcutHintsVisible: boolean;
 }) {
   const timestamp =
     density === 'slim' &&
@@ -343,14 +349,6 @@ function AgentThreadLink({
       aria-label={`${row.title} ${lifecycleStatus ?? statusLabel(row)}${unread ? ' unread' : ''}${bulkSelected ? ' selected for bulk actions' : ''}`}
       onClick={onSelect}
     >
-      {shortcutHint !== undefined && (
-        <kbd
-          className={styles.threadShortcutHint}
-          data-shortcut-hint={shortcutHint}
-        >
-          {shortcutHint}
-        </kbd>
-      )}
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
         <span className={styles.threadMetadataRow}>
           <span className={styles.threadWorkspace} data-row-content="project">
@@ -457,7 +455,18 @@ function AgentThreadLink({
             </span>
           </span>
         </span>
-        <strong>{row.title}</strong>
+        <span className={styles.threadTitleRow}>
+          <strong>{row.title}</strong>
+          {shortcutHint !== undefined && (
+            <kbd
+              className={styles.threadShortcutHint}
+              data-shortcut-hint={shortcutHint}
+              data-shortcut-visible={shortcutHintsVisible ? 'true' : 'false'}
+            >
+              {shortcutHint}
+            </kbd>
+          )}
+        </span>
       </span>
     </button>
   );
@@ -516,6 +525,7 @@ export function AgentThreadNav({
   const selectionAnchorId = useRef<string | undefined>(undefined);
   const displayedNavigationRowsRef = useRef<readonly AgentThreadRow[]>([]);
   const shortcutTargetIdsRef = useRef<readonly string[]>([]);
+  const clearShortcutGestureRef = useRef<() => void>(() => undefined);
   const selectRef = useRef<(id: string) => void>(() => undefined);
   const surfacesRef = useRef(surfaces);
   const selectionDisabledRef = useRef(false);
@@ -770,13 +780,26 @@ export function AgentThreadNav({
   surfacesRef.current = surfaces;
   selectionDisabledRef.current = bulkPendingAction !== undefined;
   useEffect(() => {
-    const clearShortcutGesture = () => {
+    let revealTimer: number | undefined;
+    let exitTimer: number | undefined;
+    const clearShortcutGesture = (unmount = false) => {
       shortcutTargetIdsRef.current = [];
-      setShortcutTargetIds([]);
+      if (revealTimer !== undefined) window.clearTimeout(revealTimer);
+      if (exitTimer !== undefined) window.clearTimeout(exitTimer);
+      revealTimer = undefined;
+      exitTimer = undefined;
+      if (unmount) return;
       setShortcutHintsVisible(false);
+      exitTimer = window.setTimeout(() => setShortcutTargetIds([]), 140);
     };
+    clearShortcutGestureRef.current = clearShortcutGesture;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Meta' && !event.repeat) {
+      if (
+        (event.key === 'Meta' ||
+          event.code === 'MetaLeft' ||
+          event.code === 'MetaRight') &&
+        !event.repeat
+      ) {
         if (
           selectionDisabledRef.current ||
           surfacesRef.current?.stack.length ||
@@ -790,7 +813,14 @@ export function AgentThreadNav({
         );
         shortcutTargetIdsRef.current = targetIds;
         setShortcutTargetIds(targetIds);
-        if (targetIds.length) setShortcutHintsVisible(true);
+        setShortcutHintsVisible(false);
+        if (revealTimer !== undefined) window.clearTimeout(revealTimer);
+        if (exitTimer !== undefined) window.clearTimeout(exitTimer);
+        if (targetIds.length)
+          revealTimer = window.setTimeout(
+            () => setShortcutHintsVisible(true),
+            80,
+          );
         return;
       }
       if (
@@ -813,26 +843,31 @@ export function AgentThreadNav({
       selectRef.current(targetId);
     };
     const onKeyUp = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Meta') clearShortcutGesture();
+      if (
+        event.key === 'Meta' ||
+        event.code === 'MetaLeft' ||
+        event.code === 'MetaRight'
+      )
+        clearShortcutGesture();
     };
+    const onBlur = () => clearShortcutGesture();
+    const onVisibilityChange = () => clearShortcutGesture();
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp, true);
-    window.addEventListener('blur', clearShortcutGesture);
-    document.addEventListener('visibilitychange', clearShortcutGesture);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      clearShortcutGesture();
+      clearShortcutGesture(true);
+      clearShortcutGestureRef.current = () => undefined;
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp, true);
-      window.removeEventListener('blur', clearShortcutGesture);
-      document.removeEventListener('visibilitychange', clearShortcutGesture);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
   useEffect(() => {
-    if (surfaces?.stack.length || bulkPendingAction !== undefined) {
-      shortcutTargetIdsRef.current = [];
-      setShortcutTargetIds([]);
-      setShortcutHintsVisible(false);
-    }
+    if (surfaces?.stack.length || bulkPendingAction !== undefined)
+      clearShortcutGestureRef.current();
   }, [bulkPendingAction, surfaces?.stack.length]);
   const handleThreadClick = (
     row: AgentThreadRow,
@@ -930,22 +965,21 @@ export function AgentThreadNav({
     );
     if (mode === 'session') onOpenChange?.(false);
   };
+  const newThreadShortcut = { code: 'KeyT' } as const;
+  const settingsShortcut = { code: 'Period' } as const;
   const newThreadHint = useModifierShortcut(
-    'n',
+    newThreadShortcut,
     openNewThread,
     mode === 'home' || !isMobile || open,
   );
   const settingsHint = useModifierShortcut(
-    's',
+    settingsShortcut,
     openSettings,
     mode === 'home' || !isMobile || open,
   );
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
     const shortcutIndex = shortcutTargetIds.indexOf(row.id);
-    const shortcutHint =
-      shortcutHintsVisible && shortcutIndex >= 0
-        ? shortcutIndex + 1
-        : undefined;
+    const shortcutHint = shortcutIndex >= 0 ? shortcutIndex + 1 : undefined;
     const selected = row.draft
       ? row.id === currentDraftId
       : row.id === currentSessionId;
@@ -1018,6 +1052,7 @@ export function AgentThreadNav({
               : undefined
           }
           shortcutHint={shortcutHint}
+          shortcutHintsVisible={shortcutHintsVisible}
         />
         {row.draft && (
           <QuickDeleteDraftAction draftId={row.id} title={row.title} />
@@ -1193,7 +1228,12 @@ export function AgentThreadNav({
               onClick={openNewThread}
             >
               + new
-              {newThreadHint && <kbd className={styles.modifierHint}>⌥N</kbd>}
+              <kbd
+                className={styles.modifierHint}
+                data-shortcut-visible={newThreadHint ? 'true' : 'false'}
+              >
+                {shortcutLabel(newThreadShortcut)}
+              </kbd>
             </button>
           </h3>
           {sections.active.map((row) => renderThreadRow(row, 'card'))}
@@ -1270,7 +1310,12 @@ export function AgentThreadNav({
           onClick={openSettings}
         >
           <span aria-hidden="true">⚙</span>
-          {settingsHint && <kbd className={styles.modifierHint}>⌥S</kbd>}
+          <kbd
+            className={styles.modifierHint}
+            data-shortcut-visible={settingsHint ? 'true' : 'false'}
+          >
+            {shortcutLabel(settingsShortcut)}
+          </kbd>
         </button>
       </footer>
     </aside>
