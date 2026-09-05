@@ -11,7 +11,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardSurfaces } from './dashboard-surface-context';
-import { useModifierShortcut } from './modifier-shortcuts';
+import { shortcutLabel, useModifierShortcut } from './modifier-shortcuts';
 import { UsageSparkline } from './usage-analytics';
 import styles from './usage-indicator.module.css';
 
@@ -306,8 +306,9 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
     : undefined;
   const windows = activeLimit ? limitWindows(activeLimit) : [];
   const surfaces = useDashboardSurfaces();
+  const usageShortcut = { code: 'KeyU', alt: true } as const;
   const usageHint = useModifierShortcut(
-    'u',
+    usageShortcut,
     () => surfaces?.open({ type: 'usage-analytics' }),
     Boolean(activeLimit && urgent),
   );
@@ -357,7 +358,12 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
         aria-label={`Usage: ${limits.length > 1 ? `${activeLimit.name}, ` : ''}${windows.map((window) => `${window.label} ${Math.round(window.usedPercent)}%`).join(', ')}`}
         onClick={() => setOpen((value) => !value)}
       >
-        {usageHint && <kbd className={styles.modifierHint}>⌥U</kbd>}
+        <kbd
+          className={styles.modifierHint}
+          data-shortcut-visible={usageHint ? 'true' : 'false'}
+        >
+          {shortcutLabel(usageShortcut)}
+        </kbd>
         <span className={styles.windows} aria-hidden="true">
           {windows.map((window) => (
             <span

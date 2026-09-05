@@ -1,6 +1,10 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-import { useModifierShortcut } from '../modifier-shortcuts';
+import {
+  type ModifierShortcut,
+  shortcutLabel,
+  useModifierShortcut,
+} from '../modifier-shortcuts';
 import { type SurfacePage, SurfaceStack } from '../surface-stack';
 
 function focusAfterSurfaceHides(launcher: HTMLButtonElement | null) {
@@ -32,7 +36,7 @@ export function WorkSurface({
   drawerSummary,
   pages = [],
   onPageDepthChange,
-  shortcutKey,
+  shortcut,
   children,
 }: {
   title: string;
@@ -49,7 +53,7 @@ export function WorkSurface({
   drawerSummary?: ReactNode;
   pages?: readonly SurfacePage[];
   onPageDepthChange?: (depth: number) => void;
-  shortcutKey?: string;
+  shortcut?: ModifierShortcut;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -62,9 +66,9 @@ export function WorkSurface({
     } else setOpen(true);
   };
   const shortcutHint = useModifierShortcut(
-    shortcutKey ?? '',
+    shortcut ?? { code: '' },
     toggleOpen,
-    visible && shortcutKey !== undefined,
+    visible && shortcut !== undefined,
   );
   useEffect(() => {
     if (visibleCount > 0) {
@@ -122,8 +126,13 @@ export function WorkSurface({
             </span>
             {typeof summary === 'string' ? <strong>{summary}</strong> : summary}
             {summaryDetail}
-            {shortcutHint && (
-              <kbd className="surface-modifier-hint">⌥{shortcutKey}</kbd>
+            {shortcut && (
+              <kbd
+                className="surface-modifier-hint"
+                data-shortcut-visible={shortcutHint ? 'true' : 'false'}
+              >
+                {shortcutLabel(shortcut)}
+              </kbd>
             )}
           </span>
           <span className="surface-chevron" aria-hidden="true">

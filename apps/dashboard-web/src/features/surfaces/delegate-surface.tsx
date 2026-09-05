@@ -425,7 +425,7 @@ export function DelegateSurface({
           </span>
         </span>
       }
-      shortcutKey="d"
+      shortcut={{ code: 'KeyD' }}
       visibleCount={
         rows.length +
         wakeConditions.length +

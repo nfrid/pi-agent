@@ -92,7 +92,7 @@ export function TasksSurface({
         </span>
       }
       visibleCount={total}
-      shortcutKey="t"
+      shortcut={{ code: 'KeyT', alt: true }}
       paused={paused}
     >
       <div

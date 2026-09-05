@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardSurfaces } from './dashboard-surface-context';
 
+export type ModifierShortcut = {
+  code: string;
+  alt?: boolean;
+};
+
 type ShortcutRegistration = {
   id: number;
   code: string;
+  alt: boolean;
   action: () => void;
   enabled: boolean;
 };
@@ -30,10 +36,31 @@ function hasOpenDialog(): boolean {
 }
 
 function shortcutCode(key: string): string {
-  const normalized = key.toLocaleLowerCase();
-  return normalized.length === 1 && normalized >= 'a' && normalized <= 'z'
-    ? `Key${normalized.toUpperCase()}`
-    : normalized;
+  if (/^Key[a-z]$/u.test(key)) return `Key${key.slice(3).toUpperCase()}`;
+  if (key.length === 1 && key >= 'a' && key <= 'z')
+    return `Key${key.toUpperCase()}`;
+  if (key.toLocaleLowerCase() === 'period') return 'Period';
+  return key;
+}
+
+function shortcutBinding(shortcut: ModifierShortcut): {
+  code: string;
+  alt: boolean;
+} {
+  return {
+    code: shortcutCode(shortcut.code),
+    alt: shortcut.alt ?? false,
+  };
+}
+
+export function shortcutLabel(shortcut: ModifierShortcut): string {
+  const code = shortcutCode(shortcut.code);
+  const key = code.startsWith('Key')
+    ? code.slice(3)
+    : code === 'Period'
+      ? '.'
+      : code;
+  return `${shortcut.alt ? '⌥' : ''}${key}`;
 }
 
 function onKeyDown(event: globalThis.KeyboardEvent) {
@@ -53,7 +80,6 @@ function onKeyDown(event: globalThis.KeyboardEvent) {
     event.isComposing ||
     event.repeat ||
     !event.metaKey ||
-    !event.altKey ||
     event.ctrlKey ||
     event.shiftKey ||
     hasOpenDialog()
@@ -62,7 +88,9 @@ function onKeyDown(event: globalThis.KeyboardEvent) {
   const available = [...registrations.values()]
     .filter(
       (registration) =>
-        registration.enabled && registration.code === event.code,
+        registration.enabled &&
+        registration.code === event.code &&
+        registration.alt === event.altKey,
     )
     .sort((left, right) => right.id - left.id);
   const shortcut = available[0];
@@ -113,12 +141,13 @@ function startListening() {
 }
 
 export function useModifierShortcut(
-  key: string,
+  shortcut: ModifierShortcut,
   action: () => void,
   enabled: boolean,
 ): boolean {
   const surfaces = useDashboardSurfaces();
   const [held, setHeld] = useState(metaHeld);
+  const [hintVisible, setHintVisible] = useState(metaHeld);
   const registrationRef = useRef<ShortcutRegistration | undefined>(undefined);
   const actionRef = useRef(action);
   const enabledRef = useRef(enabled);
@@ -126,13 +155,15 @@ export function useModifierShortcut(
   // render would retain the closing dialog's pre-commit state.
   const blocked = Boolean(surfaces?.stack.length);
   const blockedRef = useRef(blocked);
+  const binding = shortcutBinding(shortcut);
   actionRef.current = action;
   enabledRef.current = enabled;
   blockedRef.current = blocked;
   if (registrationRef.current) {
     registrationRef.current.action = action;
     registrationRef.current.enabled = enabled && !blocked;
-    registrationRef.current.code = shortcutCode(key);
+    registrationRef.current.code = binding.code;
+    registrationRef.current.alt = binding.alt;
   }
   useEffect(() => {
     const listener = () => setHeld(metaHeld);
@@ -145,7 +176,8 @@ export function useModifierShortcut(
     const id = nextRegistrationId++;
     const registration: ShortcutRegistration = {
       id,
-      code: shortcutCode(key),
+      code: binding.code,
+      alt: binding.alt,
       action: actionRef.current,
       enabled: enabledRef.current && !blockedRef.current,
     };
@@ -157,8 +189,16 @@ export function useModifierShortcut(
       registrationRef.current = undefined;
       if (registrations.size === 0) stopListening();
     };
-  }, [key]);
-  return held && enabled && !blocked;
+  }, [binding.alt, binding.code]);
+  useEffect(() => {
+    if (!held || !enabled || blocked) {
+      setHintVisible(false);
+      return;
+    }
+    const timer = globalThis.setTimeout(() => setHintVisible(true), 80);
+    return () => globalThis.clearTimeout(timer);
+  }, [blocked, enabled, held]);
+  return hintVisible && enabled && !blocked;
 }
 
 export { hasOpenDialog, shortcutCode };
