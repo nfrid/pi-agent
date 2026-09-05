@@ -19,7 +19,7 @@
   },
   "delegate": {
     "provider": "openai-codex",
-    "routingGuidance": "Luna routes are for bounded background work, while Sol routes are for maintainer judgement rather than harder implementation. Escalate thinking only within a matching task shape.",
+    "routingGuidance": "Luna routes are for bounded work whose path and finish line are already sufficiently defined; increase Luna effort for more exploration or verification within that bounded shape. Astra low is for work that requires the delegate itself to discover the path, exercise substantial judgement, or determine what correct completion means. Prefer Luna whenever the task can be made reliably verifiable up front; do not treat Astra as the automatic next rung after Luna max.",
     "timeoutMs": 1800000,
     "modelCatalog": {
       "luna-low": {
@@ -60,23 +60,15 @@
         "thinking": "max",
         "relativeCost": 42,
         "useFor": "Difficult bounded background work expected to need unusually deep exploration or verification; select it directly when that depth is predictable.",
-        "avoid": "Short deadlines, interactive foreground work, tasks without a bounded finish line, or assuming more reasoning replaces Sol-style judgement."
+        "avoid": "Short deadlines, interactive foreground work, tasks without a bounded finish line, or assuming more reasoning replaces better route's judgement."
       },
-      "sol-medium": {
+      "astra-low": {
         "provider": "openai-codex",
-        "model": "gpt-5.6-sol",
-        "thinking": "medium",
+        "model": "gpt-6-astra",
+        "thinking": "low",
         "relativeCost": 75,
-        "useFor": "Judgement about the work rather than a generic strength escalation: decide whether a diff overclaims, whether complexity is earned, what completion should mean when criteria are unclear, or assess ambiguous or high-stakes security concerns. Strict maintainer-style review.",
-        "avoid": "Mechanical correctness sweeps, implementation against explicit acceptance criteria, or any task adequately served by a Luna route."
-      },
-      "sol-high": {
-        "provider": "openai-codex",
-        "model": "gpt-5.6-sol",
-        "thinking": "high",
-        "relativeCost": 105,
-        "useFor": "Cross-stage integration review spanning several commits where a missed defect is expensive and the failure could be anywhere. Reserve for when Sol medium has already looked and its result was not enough.",
-        "avoid": "Generic hard implementation, deadline routing, or any task with an explicit pass/fail criterion that a cheaper branch can verify."
+        "useFor": "Difficult work where the child must discover the path rather than merely execute a known one: ambiguous diagnosis, broad exploration across subsystems, architecture or design judgement, adversarial review, security reasoning, or implementation where important constraints and the correct finish line may emerge during the work.",
+        "avoid": "Bounded work with explicit acceptance criteria that a cheaper route can execute or verify reliably, or trivial mechanical work."
       }
     }
   }
