@@ -162,24 +162,14 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
     page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
   ).toBeVisible();
   await page.locator('[contenteditable="true"]').first().focus();
-  await page.locator('body').dispatchEvent('keydown', {
-    key: 'Dead',
-    code: 'KeyT',
-    metaKey: true,
-    altKey: true,
-  });
+  await page.keyboard.press('Meta+Alt+T');
   const tasksDialog = page.getByRole('dialog', { name: 'Tasks' });
   await expect(tasksDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(tasksDialog).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole('button', { name: /Delegates/ })).toBeVisible();
-  await page.locator('body').dispatchEvent('keydown', {
-    key: 'Dead',
-    code: 'KeyD',
-    metaKey: true,
-    altKey: true,
-  });
+  await page.keyboard.press('Meta+Alt+D');
   const delegatesDialog = page.getByRole('dialog', { name: 'Delegates' });
   await expect(delegatesDialog).toBeVisible();
   await page.keyboard.press('Escape');

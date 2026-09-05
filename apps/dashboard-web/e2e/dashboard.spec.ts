@@ -1083,36 +1083,22 @@ test('desktop project scope filters threads and starts project threads @desktop'
   const nav = page.getByRole('complementary', {
     name: 'Agents and threads',
   });
-  await page.locator('body').dispatchEvent('keydown', {
-    key: 'Dead',
-    code: 'KeyN',
-    metaKey: true,
-    altKey: true,
-  });
+  await nav.click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press('Meta+Alt+n');
   const projectDialog = page.getByRole('dialog', { name: 'Choose a project' });
   await expect(projectDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(projectDialog).toHaveCount(0);
   await page.reload();
   await expect(nav).toBeVisible();
-  await page.locator('body').dispatchEvent('keydown', {
-    key: 'Dead',
-    code: 'KeyS',
-    metaKey: true,
-    altKey: true,
-  });
+  await page.keyboard.press('Meta+Alt+S');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsDialog).toHaveCount(0);
   await page.reload();
   await expect(nav).toBeVisible();
-  await page.locator('body').dispatchEvent('keydown', {
-    key: 'Dead',
-    code: 'KeyU',
-    metaKey: true,
-    altKey: true,
-  });
+  await page.keyboard.press('Meta+Alt+U');
   const usageDialog = page.getByRole('dialog', { name: 'Usage analytics' });
   await expect(usageDialog).toBeVisible();
   await page.keyboard.press('Escape');
