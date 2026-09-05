@@ -34,9 +34,9 @@ const SEARCH_GROUP_ORDER: readonly PaletteGroup[] = [
   'Projects',
 ];
 const DEFAULT_GROUP_ORDER: readonly PaletteGroup[] = [
-  'Navigation',
   'Threads',
   'Actions',
+  'Navigation',
   'Projects',
 ];
 const PAGE_STEP = 6;
@@ -465,7 +465,7 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
         <span>↑↓ navigate</span>
         <span>Enter run</span>
         <span>Esc clear / close</span>
-        <span>⌘1–9 threads</span>
+        <span>Hold ⌘ for thread shortcuts</span>
         <span>&gt; actions only</span>
       </footer>
     </div>

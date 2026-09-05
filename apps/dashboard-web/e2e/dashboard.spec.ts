@@ -1024,7 +1024,7 @@ test('sidebar New thread handles one and zero project fallbacks @desktop', async
 
 test('desktop project scope filters threads and starts project threads @desktop', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route('**/api/threads*', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '[]' }),
@@ -1077,22 +1077,38 @@ test('desktop project scope filters threads and starts project threads @desktop'
     nav.getByRole('button', { name: /Two thread ready/ }),
   ).toBeVisible();
   const activeThread = nav.locator('[data-row-density="card"]').first();
-  await expect(activeThread.locator('.threadCopy > *')).toHaveCount(2);
+  await expect(activeThread.locator('.agent-thread-copy > *')).toHaveCount(2);
   await expect(activeThread).toContainText(/One|Two/);
-  await expect(activeThread).toContainText('Resumes on send');
+  await expect(activeThread).toContainText('main');
+  await expect(activeThread).toContainText('? model');
   await expect(activeThread).not.toContainText('/work/');
 
+  await page.screenshot({
+    path: testInfo.outputPath('navigation-refine-sidebar.png'),
+    fullPage: true,
+  });
   await page.keyboard.down('Meta');
   await expect.poll(() => nav.locator('[data-shortcut-hint]').count()).toBe(2);
   expect(await nav.locator('[data-shortcut-hint]').allTextContents()).toEqual([
     '1',
     '2',
   ]);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await expect(nav.locator('[data-shortcut-hint]')).toHaveCount(0);
+  await page.keyboard.up('Meta');
+  await page.keyboard.down('Meta');
+  await expect.poll(() => nav.locator('[data-shortcut-hint]').count()).toBe(2);
+  await nav
+    .getByRole('searchbox', { name: 'Search agents and threads' })
+    .fill('One');
   await page.keyboard.press('2');
   await expect(page).toHaveURL(/\/sessions\/two-session$/u);
   await page.keyboard.up('Meta');
   await page.goBack();
   await expect(nav.locator('[data-shortcut-hint]')).toHaveCount(0);
+  await nav
+    .getByRole('searchbox', { name: 'Search agents and threads' })
+    .fill('');
   await nav
     .getByRole('combobox', { name: 'Project scope' })
     .selectOption('one');
@@ -1114,7 +1130,9 @@ test('desktop project scope filters threads and starts project threads @desktop'
   ).toBeVisible();
   expect(
     await projectChooser.evaluate(
-      (element) => element.parentElement?.parentElement === document.body,
+      (element) =>
+        document.body.contains(element) &&
+        element.closest('[data-surface-portal-root]') !== null,
     ),
   ).toBe(true);
   const chooserGeometry = await projectChooser.evaluate((element) => {
@@ -2052,7 +2070,7 @@ test('session title supports reliable inline renaming', async ({ page }) => {
 
 test('command palette supports fuzzy keyboard search and surface handoff @desktop', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-palette-desktop',
@@ -2134,32 +2152,56 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   await expect(
     page.getByRole('heading', { name: 'Rename session: Dashboard agent' }),
   ).toBeVisible();
+  const composer = page.getByRole('textbox', {
+    name: 'Message Pi',
+    exact: true,
+  });
+  await composer.focus();
+  await page.keyboard.down('Meta');
+  await expect
+    .poll(() => page.locator('[data-shortcut-hint]').count())
+    .toBeGreaterThan(0);
+  await page.keyboard.press('1');
+  await expect(page).toHaveURL(/\/sessions\/session-1$/u);
+  await page.keyboard.up('Meta');
+  await page.goto('/sessions/runtime-session');
+  await expect(
+    page.getByRole('heading', { name: 'Rename session: Dashboard agent' }),
+  ).toBeVisible();
   await page.keyboard.press('Meta+k');
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   const search = palette.getByRole('combobox', {
     name: 'Search commands, threads, and projects',
   });
   await expect(search).toBeFocused();
+  await page.screenshot({
+    path: testInfo.outputPath('navigation-refine-palette.png'),
+    fullPage: true,
+  });
+  await page.keyboard.down('Meta');
+  await page.waitForTimeout(350);
+  await expect(page.locator('[data-shortcut-hint]')).toHaveCount(0);
+  await page.keyboard.up('Meta');
   await expect(palette.getByRole('button', { name: /Clear/ })).toHaveCount(0);
   await search.press('Control+j');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Dashboard agent',
+    'Dashboard history 29',
   );
   await search.press('Control+k');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Dashboard',
+    'Dashboard agent',
   );
   await search.press('End');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Abort run',
+    'Projects',
   );
   await search.press('ArrowDown');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Abort run',
+    'Projects',
   );
   await search.press('Home');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Dashboard',
+    'Dashboard agent',
   );
   await search.press('PageDown');
   await expect(palette.getByRole('option', { selected: true })).toHaveAttribute(
@@ -2168,7 +2210,7 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   );
   await search.press('PageUp');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Dashboard',
+    'Dashboard agent',
   );
   const paletteBox = await palette.boundingBox();
   expect(paletteBox).not.toBeNull();

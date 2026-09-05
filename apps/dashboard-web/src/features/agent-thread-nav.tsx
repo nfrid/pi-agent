@@ -438,9 +438,7 @@ function AgentThreadLink({
             )}
           </small>
           <span className={styles.threadMeta}>
-            {density === 'card' ? (
-              (lifecycleStatus ?? statusLabel(row))
-            ) : timestamp === undefined ? (
+            {density === 'card' ? null : timestamp === undefined ? (
               (lifecycleStatus ?? statusLabel(row))
             ) : (
               <DashboardTime
@@ -451,6 +449,7 @@ function AgentThreadLink({
             )}
             <span
               className={`agent-thread-glyph ${styles.threadGlyph}`}
+              title={lifecycleStatus ?? statusLabel(row)}
               aria-hidden="true"
             >
               {lifecycleStatus ? '◐' : statusGlyph(row.status)}
@@ -780,22 +779,9 @@ export function AgentThreadNav({
       setShortcutTargetIds([]);
       setShortcutHintsVisible(false);
     };
-    const isEditableTarget = (target: EventTarget | null) => {
-      if (!(target instanceof HTMLElement)) return false;
-      return (
-        target.isContentEditable ||
-        ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
-        target.getAttribute('role') === 'combobox'
-      );
-    };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Meta' && !event.repeat) {
-        if (
-          event.defaultPrevented ||
-          isEditableTarget(event.target) ||
-          selectionDisabledRef.current ||
-          surfacesRef.current?.stack.length
-        ) {
+        if (selectionDisabledRef.current || surfacesRef.current?.stack.length) {
           clearShortcutGesture();
           return;
         }
@@ -817,8 +803,6 @@ export function AgentThreadNav({
         event.ctrlKey ||
         event.altKey ||
         event.shiftKey ||
-        event.defaultPrevented ||
-        isEditableTarget(event.target) ||
         selectionDisabledRef.current ||
         surfacesRef.current?.stack.length
       )

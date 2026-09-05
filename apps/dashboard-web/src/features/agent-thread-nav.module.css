@@ -551,10 +551,11 @@ button.shelfHeading:focus-visible {
   gap: 5px;
 }
 .threadMetadataRow {
-  display: flex;
+  display: grid;
   min-width: 0;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   overflow: hidden;
 }
 .threadShortcutHint {
@@ -605,8 +606,8 @@ button.shelfHeading:focus-visible {
 }
 .threadWorkspace {
   display: flex;
+  width: 100%;
   min-width: 0;
-  flex: 0 1 42%;
   align-items: center;
   gap: 5px;
   overflow: visible;
@@ -627,9 +628,11 @@ button.shelfHeading:focus-visible {
 }
 .threadWorkspaceCheckout {
   display: inline-flex;
-  min-width: 0;
+  min-width: 4ch;
+  flex: 1 1 5ch;
   align-items: baseline;
   gap: 3px;
+  overflow: hidden;
   filter: saturate(0.5);
 }
 .threadWorkspaceSeparator {
@@ -640,7 +643,7 @@ button.shelfHeading:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
+  margin-left: 0;
   color: var(--muted);
   font-size: 10px;
   font-weight: 500;
@@ -673,8 +676,8 @@ button.shelfHeading:focus-visible {
 }
 .threadDetails {
   display: flex;
+  width: 100%;
   min-width: 0;
-  flex: 1 1 auto;
   align-items: center;
   gap: 3px;
   overflow: hidden;
@@ -688,8 +691,9 @@ button.shelfHeading:focus-visible {
   text-overflow: ellipsis;
 }
 .threadCheckout {
+  min-width: 3ch;
   font-weight: 500;
-  flex: 1;
+  flex: 1 1 auto;
 }
 .threadCheckout[data-checkout-kind="main"] {
   color: var(--green);
@@ -701,7 +705,9 @@ button.shelfHeading:focus-visible {
   color: var(--cyan);
 }
 .threadModel {
+  min-width: 4ch;
   max-width: 10ch;
+  flex: 1 1 6ch;
 }
 .threadEffort {
   flex: none;
@@ -735,9 +741,14 @@ button.shelfHeading:focus-visible {
   color: var(--pink);
 }
 .threadTime {
-  flex: none;
+  min-width: 0;
+  max-width: 8ch;
+  flex: 0 1 8ch;
   margin-left: auto;
+  overflow: hidden;
   color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .threadRow:is(:global(.status-idle), :global(.status-dormant)) .threadGlyph {
