@@ -1,3 +1,4 @@
+import { getAgentDir, SettingsManager } from '@earendil-works/pi-coding-agent';
 import {
   applyTranscriptEvent,
   createTranscriptProjection,
@@ -11,9 +12,11 @@ import {
   type BrowserSnapshot,
   type CheckoutSummary,
   type DelegateLiveRun,
+  type DraftDefaults,
   MAX_SHELL_INDEX_ITEMS,
   MAX_SHELL_SNAPSHOT_BYTES,
   MAX_TEXT,
+  type ModelSelection,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
   type NotificationEvent,
@@ -65,6 +68,27 @@ export type InternalSessionSnapshot = AuthoritativeSessionSnapshot;
 
 const ACTIVE_USAGE_FRESH_MS = 60_000;
 const IDLE_USAGE_FRESH_MS = 20 * 60_000;
+
+export function resolveDraftDefaultSelection({
+  projectDefault,
+  dashboardDefault,
+  recentThreadDefault,
+  piConfiguredDefault,
+}: {
+  projectDefault?: ModelSelection;
+  dashboardDefault?: ModelSelection;
+  recentThreadDefault?: ModelSelection;
+  piConfiguredDefault?: ModelSelection;
+}): DraftDefaults {
+  if (projectDefault) return { selection: projectDefault, source: 'project' };
+  if (dashboardDefault)
+    return { selection: dashboardDefault, source: 'dashboard' };
+  if (recentThreadDefault)
+    return { selection: recentThreadDefault, source: 'recent-thread' };
+  if (piConfiguredDefault)
+    return { selection: piConfiguredDefault, source: 'pi' };
+  return {};
+}
 
 export interface DashboardApplicationOptions {
   registry: RuntimeRegistry;
@@ -988,6 +1012,97 @@ export class DashboardApplication {
         : { upsert: [], remove: [sessionId] };
     if (previous && sameSessionMetadata(previous, current)) return undefined;
     return { upsert: [current], remove: [] };
+  }
+
+  /** Resolve all inherited draft defaults on the server. */
+  resolveDraftDefaults(projectId: string): DraftDefaults {
+    const project = this.orchestration.getProject(projectId);
+    if (!project) throw new Error(`Project ${projectId} does not exist.`);
+    if (project.defaultModel)
+      return resolveDraftDefaultSelection({
+        projectDefault: project.defaultModel,
+      });
+    const dashboardDefault = this.metadata.getDashboardSettings().defaultModel;
+    if (dashboardDefault)
+      return resolveDraftDefaultSelection({ dashboardDefault });
+
+    const runtimes = this.registry.snapshots();
+    const candidates = this.sessionMetadata()
+      .filter(
+        (session) =>
+          session.sessionKind !== 'delegate' &&
+          session.file.length > 0 &&
+          session.projectId === projectId,
+      )
+      .map((session) => {
+        const runtime = runtimes.find(
+          (candidate) =>
+            candidate.session.id === session.id && candidate.online !== false,
+        );
+        const leafId =
+          runtime &&
+          typeof (runtime.session as { leafId?: unknown }).leafId === 'string'
+            ? (runtime.session as { leafId: string }).leafId
+            : undefined;
+        const lastUserMessageAt = this.sessionIndex.lastUserMessageAt(
+          session.id,
+          leafId,
+        );
+        const resume = this.sessionIndex.resumeMetadata(session.id, leafId);
+        if (lastUserMessageAt === undefined || !resume.lastKnownModel)
+          return undefined;
+        const selection: ModelSelection = {
+          ...resume.lastKnownModel,
+          ...(resume.lastKnownThinking === undefined
+            ? {}
+            : { thinking: resume.lastKnownThinking }),
+          ...(resume.lastKnownModel.provider === 'openai-codex' &&
+          resume.lastKnownServiceTier !== undefined
+            ? { serviceTier: resume.lastKnownServiceTier }
+            : {}),
+        };
+        return { lastUserMessageAt, sessionId: session.id, selection };
+      })
+      .filter(
+        (
+          candidate,
+        ): candidate is {
+          lastUserMessageAt: number;
+          sessionId: string;
+          selection: ModelSelection;
+        } => candidate !== undefined,
+      )
+      .sort(
+        (left, right) =>
+          right.lastUserMessageAt - left.lastUserMessageAt ||
+          left.sessionId.localeCompare(right.sessionId),
+      );
+    const recent = candidates[0]?.selection;
+    let piConfigured: ModelSelection | undefined;
+    try {
+      const settings = SettingsManager.create(project.rootPath, getAgentDir(), {
+        projectTrusted: true,
+      });
+      const provider = settings.getDefaultProvider();
+      const model = settings.getDefaultModel();
+      if (provider && model) {
+        piConfigured = {
+          provider,
+          model,
+          ...(settings.getDefaultThinkingLevel() === undefined
+            ? {}
+            : { thinking: settings.getDefaultThinkingLevel() }),
+        };
+      }
+    } catch {
+      // A malformed or unavailable Pi settings file must not invent a choice.
+    }
+    return resolveDraftDefaultSelection({
+      projectDefault: project.defaultModel,
+      dashboardDefault,
+      recentThreadDefault: recent,
+      piConfiguredDefault: piConfigured,
+    });
   }
 
   /** Cheap change detector for shell catalogues that excludes session work. */

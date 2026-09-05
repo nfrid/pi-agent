@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { modelOptionValue } from './model-option';
 import { SettingsView } from './settings';
 
 const snapshot = {
@@ -56,6 +57,190 @@ describe('settings drawer', () => {
     expect(markup).not.toContain('Automatic');
     expect(markup).toContain('Rename');
     expect(markup).not.toContain('Remove');
+  });
+
+  it('disables a default row until its save settles', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(dashboardQueryKeys.settings(), {
+      modelDisplayPreferences: {},
+      defaultModel: { provider: 'openai', model: 'gpt-5' },
+    });
+    let resolveSave!: (value: unknown) => void;
+    const savePending = new Promise((resolve) => {
+      resolveSave = resolve;
+    });
+    const update = vi
+      .spyOn(dashboardHttpClient, 'updateDashboardDefaultModel')
+      .mockReturnValue(savePending as Promise<never>);
+    const controlSnapshot = {
+      ...snapshot,
+      runtimes: [
+        {
+          modelCatalog: [
+            { provider: 'openai', model: 'gpt-5' },
+            { provider: 'openai', model: 'gpt-4' },
+          ],
+        },
+      ],
+    } as unknown as BrowserSnapshot;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <QueryClientProvider client={queryClient}>
+          <SettingsView snapshot={controlSnapshot} />
+        </QueryClientProvider>,
+      );
+    });
+    const control = renderer.root.findAllByProps({
+      'aria-label': 'Dashboard model',
+    })[0];
+    if (!control) throw new Error('Missing dashboard default control.');
+    await act(async () => {
+      control.props.onChange({
+        currentTarget: { value: modelOptionValue('openai', 'gpt-4') },
+      });
+      await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    });
+    expect(control.props.disabled).toBe(true);
+    resolveSave({
+      modelDisplayPreferences: {},
+      defaultModel: { provider: 'openai', model: 'gpt-4' },
+    });
+    await act(async () => {
+      await savePending;
+    });
+    expect(control.props.disabled).toBe(false);
+    renderer.unmount();
+  });
+
+  it('rolls back a failed default save and reflects project reset', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(dashboardQueryKeys.settings(), {
+      modelDisplayPreferences: {},
+      defaultModel: { provider: 'openai', model: 'gpt-5' },
+    });
+    const updateGlobal = vi
+      .spyOn(dashboardHttpClient, 'updateDashboardDefaultModel')
+      .mockRejectedValue(new Error('save failed'));
+    const updateProject = vi
+      .spyOn(dashboardHttpClient, 'updateProjectDefaultModel')
+      .mockResolvedValue({
+        id: 'project-1',
+        title: 'Dashboard',
+        rootPath: '/tmp/dashboard',
+        createdAt: 1,
+        defaultModel: { provider: 'openai', model: 'gpt-5' },
+        defaultIsolation: 'main',
+        maxParallelRuns: 1,
+        status: 'active',
+        updatedAt: 1,
+      });
+    const controlSnapshot = {
+      ...snapshot,
+      runtimes: [
+        {
+          modelCatalog: [
+            { provider: 'openai', model: 'gpt-5' },
+            { provider: 'openai', model: 'gpt-4' },
+          ],
+        },
+      ],
+      projects: [
+        {
+          ...snapshot.projects?.[0],
+          title: 'Project settings',
+          defaultModel: { provider: 'openai', model: 'gpt-5' },
+        },
+      ],
+    } as unknown as BrowserSnapshot;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <QueryClientProvider client={queryClient}>
+          <SettingsView snapshot={controlSnapshot} />
+        </QueryClientProvider>,
+      );
+    });
+    const globalControl = renderer.root.findByProps({
+      'aria-label': 'Dashboard model',
+    });
+    await act(async () => {
+      globalControl.props.onChange({
+        currentTarget: { value: modelOptionValue('openai', 'gpt-4') },
+      });
+      await vi.waitFor(() => expect(updateGlobal).toHaveBeenCalledOnce());
+    });
+    await vi.waitFor(() =>
+      expect(globalControl.props.value).toBe(
+        modelOptionValue('openai', 'gpt-5'),
+      ),
+    );
+
+    const projectControl = renderer.root.findByProps({
+      'aria-label': 'Project settings model',
+    });
+    const resetButtons = renderer.root
+      .findAllByType('button')
+      .filter((candidate) => candidate.props.children === 'Reset to inherit');
+    const projectReset = resetButtons.at(-1);
+    expect(projectReset).toBeDefined();
+    await act(async () => {
+      projectReset?.props.onClick();
+      await vi.waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
+    });
+    await vi.waitFor(() => expect(projectControl.props.value).toBe(''));
+    renderer.unmount();
+  });
+
+  it('allows manual model entry when no runtime catalog is available', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(dashboardQueryKeys.settings(), {
+      modelDisplayPreferences: {},
+    });
+    const update = vi
+      .spyOn(dashboardHttpClient, 'updateDashboardDefaultModel')
+      .mockResolvedValue({ modelDisplayPreferences: {} });
+    const emptySnapshot = {
+      projects: [],
+      runtimes: [],
+    } as unknown as BrowserSnapshot;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <QueryClientProvider client={queryClient}>
+          <SettingsView snapshot={emptySnapshot} />
+        </QueryClientProvider>,
+      );
+    });
+    const provider = renderer.root.findByProps({
+      'aria-label': 'Dashboard provider',
+    });
+    const model = renderer.root.findByProps({
+      'aria-label': 'Dashboard model id',
+    });
+    await act(async () => {
+      provider.props.onChange({ currentTarget: { value: 'openai-codex' } });
+      model.props.onChange({ currentTarget: { value: 'gpt-5' } });
+    });
+    const useModel = renderer.root
+      .findAllByType('button')
+      .find((candidate) => candidate.props.children === 'Use model');
+    if (!useModel) throw new Error('Missing manual model button.');
+    await act(async () => {
+      useModel.props.onClick();
+      await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    });
+    expect(update).toHaveBeenCalledWith({
+      provider: 'openai-codex',
+      model: 'gpt-5',
+    });
+    renderer.unmount();
   });
 
   it('captures alias text before asynchronously cancelling stale queries', async () => {

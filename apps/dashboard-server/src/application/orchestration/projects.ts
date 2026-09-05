@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ProjectRenameCommand } from '@pi-dashboard/protocol';
+import type {
+  ProjectDefaultModelCommand,
+  ProjectRenameCommand,
+} from '@pi-dashboard/protocol';
 import {
   gitText,
   repositoryIdentity,
@@ -45,6 +48,26 @@ export function renameProject(
   const persisted = host.saveReceipt(
     command.commandId,
     'project.rename',
+    project,
+  );
+  host.changed();
+  return persisted;
+}
+
+export function updateProjectDefaultModel(
+  host: OrchestrationHost,
+  projectId: string,
+  command: ProjectDefaultModelCommand,
+): unknown {
+  const prior = host.receipt(command.commandId, 'project.default-model');
+  if (prior) return prior.result;
+  host.requireProject(projectId);
+  const project = host.repository.updateProject(projectId, {
+    defaultModel: command.defaultModel,
+  });
+  const persisted = host.saveReceipt(
+    command.commandId,
+    'project.default-model',
     project,
   );
   host.changed();

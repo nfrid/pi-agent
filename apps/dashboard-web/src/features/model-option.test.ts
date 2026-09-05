@@ -97,6 +97,35 @@ describe('model option values', () => {
     ).toEqual([]);
   });
 
+  it('uses only an explicit tuple or the inherited tuple for drafts', () => {
+    const explicit = {
+      provider: 'test',
+      model: 'draft',
+      serviceTier: 'fast' as const,
+    };
+    const inherited = {
+      provider: 'test',
+      model: 'inherited',
+      thinking: 'high',
+    };
+    expect(
+      draftModelSelection(
+        [
+          {
+            model: { provider: 'test', model: 'runtime', thinking: 'low' },
+          },
+        ] as never,
+        explicit,
+        inherited,
+      ),
+    ).toEqual(explicit);
+    expect(draftModelSelection([], undefined, inherited)).toEqual(inherited);
+    expect(
+      draftModelSelection([], { provider: 'test', model: 'draft' }, inherited),
+    ).toEqual({ provider: 'test', model: 'draft' });
+    expect(draftModelSelection([], undefined, undefined)).toBeUndefined();
+  });
+
   it('uses a validated remembered catalogue and levels for drafts', () => {
     installStorage();
     const runtimes = [
@@ -127,10 +156,7 @@ describe('model option values', () => {
       ],
       thinkingLevels: ['low', 'high'],
     });
-    expect(draftModelSelection([])).toEqual({
-      provider: 'test',
-      model: 'vision',
-    });
+    expect(draftModelSelection([])).toBeUndefined();
 
     storage.set(
       draftRuntimeOptionsStorageKey,

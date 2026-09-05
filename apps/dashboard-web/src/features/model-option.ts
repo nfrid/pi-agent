@@ -198,42 +198,13 @@ export function configuredModelOptions(
   return withCurrentModel(compatible ?? [], preferred);
 }
 
+/** Resolve a draft tuple without borrowing fields or runtime/catalogue state. */
 export function draftModelSelection(
-  runtimes: readonly RuntimeSnapshot[],
-  selected?: ModelSelection,
-  configuredDefault?: ModelSelection,
+  _runtimes: readonly RuntimeSnapshot[],
+  explicitDraft?: ModelSelection,
+  inheritedDefault?: ModelSelection,
 ): ModelSelection | undefined {
-  const models = draftRuntimeOptions(runtimes).models;
-  const available = new Set(
-    models.map((model) => modelOptionValue(model.provider, model.model)),
-  );
-  if (selected?.thinking) return selected;
-  if (configuredDefault?.thinking) return configuredDefault;
-  const current = runtimes.find(
-    (runtime) =>
-      runtime.model &&
-      available.has(
-        modelOptionValue(runtime.model.provider, runtime.model.model),
-      ),
-  )?.model;
-  if (current) {
-    const configured = selected ?? configuredDefault;
-    const serviceTier =
-      configured?.provider === current.provider &&
-      configured.model === current.model
-        ? configured.serviceTier
-        : undefined;
-    return {
-      provider: current.provider,
-      model: current.model,
-      ...(current.thinking ? { thinking: current.thinking } : {}),
-      ...(serviceTier ? { serviceTier } : {}),
-    };
-  }
-  if (selected) return selected;
-  if (configuredDefault) return configuredDefault;
-  const first = models[0];
-  return first ? { provider: first.provider, model: first.model } : undefined;
+  return explicitDraft ?? inheritedDefault;
 }
 
 export function modelOptionValue(provider: string, model: string): string {

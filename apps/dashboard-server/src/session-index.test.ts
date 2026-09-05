@@ -190,6 +190,46 @@ describe('session index', () => {
     ).rejects.toThrow('Invalid session branch');
   });
 
+  it('orders only timestamped user messages from the selected active branch', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-user-time-'),
+    );
+    const file = path.join(root, 'activity.jsonl');
+    const entries = [
+      { type: 'session', id: 'activity-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'user-a',
+        parentId: null,
+        message: { role: 'user', content: 'A', timestamp: 10 },
+      },
+      {
+        type: 'message',
+        id: 'assistant-a',
+        parentId: 'user-a',
+        message: { role: 'assistant', content: 'answer', timestamp: 100 },
+      },
+      {
+        type: 'message',
+        id: 'user-off-branch',
+        parentId: null,
+        message: { role: 'user', content: 'off branch', timestamp: 1_000 },
+      },
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    expect(index.get('activity-id')).toMatchObject({
+      lastUserMessageAt: 1_000,
+    });
+    expect(index.lastUserMessageAt('activity-id')).toBe(1_000);
+    expect(index.lastUserMessageAt('activity-id', 'assistant-a')).toBe(10);
+    expect(index.resumeMetadata('activity-id', 'assistant-a')).toEqual({});
+  });
+
   it('derives immediate user paths and only marks an explicitly active path', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-topology-'),

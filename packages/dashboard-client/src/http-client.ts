@@ -12,6 +12,7 @@ import {
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
+  type DraftDefaults,
   type GitContext,
   type ModelDisplayPreference,
   type ModelDisplayPreferences,
@@ -47,6 +48,7 @@ import {
   tryParseComposerFileSuggestions,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
+  tryParseDraftDefaults,
   tryParseGitContext,
   tryParseProject,
   tryParseProtocolInfo,
@@ -818,6 +820,23 @@ export class DashboardHttpClient {
     return parseSettingsResponse(value);
   }
 
+  async updateDashboardDefaultModel(
+    model: import('@pi-dashboard/protocol').ModelSelection,
+  ): Promise<DashboardSettings> {
+    const value = await this.request<unknown>('/api/settings/default-model', {
+      method: 'PUT',
+      body: JSON.stringify(model),
+    });
+    return parseSettingsResponse(value);
+  }
+
+  async resetDashboardDefaultModel(): Promise<DashboardSettings> {
+    const value = await this.request<unknown>('/api/settings/default-model', {
+      method: 'DELETE',
+    });
+    return parseSettingsResponse(value);
+  }
+
   async updateModelDisplayPreference(
     modelKey: string,
     preference: ModelDisplayPreference,
@@ -879,6 +898,37 @@ export class DashboardHttpClient {
       method: 'POST',
       body: JSON.stringify(command),
     });
+  }
+
+  async updateProjectDefaultModel(
+    projectId: string,
+    command: import('@pi-dashboard/protocol').ProjectDefaultModelCommand,
+  ): Promise<Project> {
+    const value = await this.request<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}`,
+      { method: 'PATCH', body: JSON.stringify(command) },
+    );
+    const project = tryParseProject(value);
+    if (!project)
+      throw malformedOutput('Invalid project default response.', value);
+    return project;
+  }
+
+  async draftDefaults(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<DraftDefaults> {
+    const value = await this.request<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}/draft-defaults`,
+      signal ? { signal } : {},
+    );
+    const defaults = tryParseDraftDefaults(value);
+    if (!defaults)
+      throw malformedOutput(
+        'Dashboard returned invalid draft defaults.',
+        value,
+      );
+    return defaults;
   }
 
   async renameProject(

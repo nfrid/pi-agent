@@ -56,6 +56,17 @@ export const ProjectRenameCommandSchema = Type.Object(
 );
 export type ProjectRenameCommand = Static<typeof ProjectRenameCommandSchema>;
 
+export const ProjectDefaultModelCommandSchema = Type.Object(
+  {
+    commandId: CommandIdSchema,
+    defaultModel: Type.Union([ModelSelectionSchema, Type.Null()]),
+  },
+  { additionalProperties: false },
+);
+export type ProjectDefaultModelCommand = Static<
+  typeof ProjectDefaultModelCommandSchema
+>;
+
 /** Adopt an existing unassigned Pi transcript without launching a runtime. */
 export const SessionAdoptCommandSchema = Type.Object(
   {

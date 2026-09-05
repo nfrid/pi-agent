@@ -4,6 +4,7 @@ import type {
   DashboardSettings,
   DelegateHistoryResponse,
   DelegateHistoryRunDetailResponse,
+  DraftDefaults,
   GitContext,
   ModelDisplayPreference,
   ModelDisplayPreferences,
@@ -53,6 +54,8 @@ export const dashboardQueryKeys = {
   runtime: (id: string) => ['dashboard', 'runtime', id] as const,
   notifications: () => ['dashboard', 'notifications'] as const,
   settings: () => ['dashboard', 'settings'] as const,
+  draftDefaults: (projectId: string) =>
+    ['dashboard', 'draft-defaults', projectId] as const,
   projects: () => ['dashboard', 'projects'] as const,
   checkouts: () => ['dashboard', 'checkouts'] as const,
   threads: () => ['dashboard', 'threads'] as const,
@@ -301,6 +304,20 @@ export function pushVapidPublicKeyQueryOptions(client: DashboardHttpClient) {
   });
 }
 
+export function draftDefaultsQueryOptions(
+  client: DashboardHttpClient,
+  projectId: string,
+) {
+  return queryOptions<DraftDefaults>({
+    queryKey: dashboardQueryKeys.draftDefaults(projectId),
+    queryFn: ({ signal }) => client.draftDefaults(projectId, signal),
+    staleTime: 0,
+    refetchInterval: 30_000,
+    retry: networkRetry,
+    enabled: Boolean(projectId),
+  });
+}
+
 export function settingsQueryOptions(client: DashboardHttpClient) {
   return queryOptions<DashboardSettings>({
     queryKey: dashboardQueryKeys.settings(),
@@ -309,6 +326,51 @@ export function settingsQueryOptions(client: DashboardHttpClient) {
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     retry: networkRetry,
+  });
+}
+
+export function updateDashboardDefaultModelMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<
+    DashboardSettings,
+    Error,
+    { model: import('@pi-dashboard/protocol').ModelSelection }
+  >({
+    mutationFn: ({ model }) => client.updateDashboardDefaultModel(model),
+    retry: false,
+    scope: { id: 'dashboard-default-model' },
+  });
+}
+
+export function resetDashboardDefaultModelMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<DashboardSettings, Error, void>({
+    mutationFn: () => client.resetDashboardDefaultModel(),
+    retry: false,
+    scope: { id: 'dashboard-default-model' },
+  });
+}
+
+export function updateProjectDefaultModelMutationOptions(
+  client: DashboardHttpClient,
+) {
+  return mutationOptions<
+    import('@pi-dashboard/protocol').Project,
+    Error,
+    {
+      projectId: string;
+      defaultModel: import('@pi-dashboard/protocol').ModelSelection | null;
+    }
+  >({
+    mutationFn: ({ projectId, defaultModel }) =>
+      client.updateProjectDefaultModel(projectId, {
+        commandId: mutationCommandId('dashboard-project-default'),
+        defaultModel,
+      }),
+    retry: false,
+    scope: { id: 'dashboard-project-default-model' },
   });
 }
 

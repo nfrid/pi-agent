@@ -53,6 +53,61 @@
   color: var(--dim);
   font-size: 10px;
 }
+.defaultModels {
+  display: grid;
+  gap: 4px;
+}
+.defaultModelRow {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) repeat(3, minmax(5rem, 1fr)) auto;
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 6px 0;
+}
+.defaultModelLabel {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.defaultModelRow select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 10px;
+}
+.defaultModelRow button {
+  white-space: nowrap;
+  padding: 4px 6px;
+  font-size: 10px;
+}
+.manualModel {
+  display: grid;
+  grid-column: 2 / span 3;
+  grid-template-columns: minmax(5rem, 1fr) minmax(5rem, 1fr) auto;
+  gap: 5px;
+}
+.manualModel input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 10px;
+}
 .modelPreferences {
   display: grid;
   gap: 4px;

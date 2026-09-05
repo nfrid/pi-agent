@@ -39,6 +39,8 @@ import {
   DelegateHistoryRunDetailResponseSchema,
   type DelegateTranscriptEntry,
   DelegateTranscriptEntrySchema,
+  type DraftDefaults,
+  DraftDefaultsSchema,
   type FeedCursor,
   FeedCursorSchema,
   type GitContext,
@@ -129,6 +131,13 @@ export const tryParseDashboardSettings = (
   value: unknown,
 ): DashboardSettings | undefined =>
   tryParseSchema(DashboardSettingsSchema, value);
+
+export function parseDraftDefaults(value: unknown): DraftDefaults {
+  return parseSchema(DraftDefaultsSchema, value, 'draft defaults');
+}
+export const tryParseDraftDefaults = (
+  value: unknown,
+): DraftDefaults | undefined => tryParseSchema(DraftDefaultsSchema, value);
 
 export function parseModelDisplayPreferenceImport(
   value: unknown,

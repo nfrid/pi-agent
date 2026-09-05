@@ -84,6 +84,10 @@ describe('SqliteOrchestrationRepository', () => {
         },
       }),
     );
+    value.repository.updateProject('project-default', { defaultModel: null });
+    expect(value.repository.getProject('project-default')).not.toHaveProperty(
+      'defaultModel',
+    );
   });
 
   it('creates sorted, idempotent no-run links without catalog bloat', async () => {

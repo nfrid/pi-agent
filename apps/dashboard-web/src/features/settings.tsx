@@ -3,9 +3,12 @@ import {
   dashboardHttpClient,
   dashboardQueryKeys,
   renameProjectMutationOptions,
+  resetDashboardDefaultModelMutationOptions,
   resetModelDisplayPreferenceMutationOptions,
   settingsQueryOptions,
+  updateDashboardDefaultModelMutationOptions,
   updateModelDisplayPreferenceMutationOptions,
+  updateProjectDefaultModelMutationOptions,
 } from '@pi-dashboard/client';
 import '@arkn/react-icon-picker/dist/style.css';
 import {
@@ -14,6 +17,7 @@ import {
   type DashboardSettings,
   MAX_MODEL_DISPLAY_ALIAS,
   type ModelDisplayPreference,
+  type ModelSelection,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -41,7 +45,9 @@ import {
 } from './model-display-preferences';
 import {
   configuredModelOptions,
+  draftRuntimeOptions,
   modelOptionValue,
+  parseModelOptionValue,
   type RuntimeModelOption,
 } from './model-option';
 import { PushButton } from './notifications';
@@ -62,6 +68,7 @@ export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
         </div>
       </section>
       <TranscriptDisplayPreferences />
+      <DraftDefaultSettings snapshot={snapshot} />
       <ModelDisplayPreferencesEditor snapshot={snapshot} />
       <ProjectAdministration snapshot={snapshot} />
     </section>
@@ -108,6 +115,328 @@ function TranscriptDisplayPreferences() {
             }
           />
         </label>
+      </div>
+    </section>
+  );
+}
+
+function DefaultModelControl({
+  label,
+  value,
+  models,
+  levels,
+  disabled,
+  onSave,
+  onReset,
+}: {
+  label: string;
+  value: ModelSelection | undefined;
+  models: readonly RuntimeModelOption[];
+  levels: readonly string[];
+  disabled: boolean;
+  onSave: (model: ModelSelection) => Promise<unknown>;
+  onReset: () => Promise<unknown>;
+}) {
+  const [selection, setSelection] = useState<ModelSelection | undefined>(value);
+  const [manualProvider, setManualProvider] = useState(value?.provider ?? '');
+  const [manualModel, setManualModel] = useState(value?.model ?? '');
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    setSelection(value);
+    setManualProvider(value?.provider ?? '');
+    setManualModel(value?.model ?? '');
+  }, [value]);
+  const valueKey = selection
+    ? modelOptionValue(selection.provider, selection.model)
+    : '';
+  const commit = (
+    next: ModelSelection | undefined,
+    save: () => Promise<unknown>,
+  ) => {
+    const previous = selection;
+    setSelection(next);
+    setPending(true);
+    void Promise.resolve()
+      .then(save)
+      .catch(() => setSelection(previous))
+      .finally(() => setPending(false));
+  };
+  const selectModel = (nextValue: string) => {
+    const next = parseModelOptionValue(nextValue);
+    if (!next) {
+      commit(undefined, onReset);
+      return;
+    }
+    setManualProvider(next.provider);
+    setManualModel(next.model);
+    const nextSelection: ModelSelection = {
+      ...next,
+      ...(selection?.thinking ? { thinking: selection.thinking } : {}),
+      ...(next.provider === 'openai-codex' && selection?.serviceTier
+        ? { serviceTier: selection.serviceTier }
+        : {}),
+    };
+    commit(nextSelection, () => onSave(nextSelection));
+  };
+  const saveThinking = (thinking: string) => {
+    if (!selection) return;
+    const next = { ...selection };
+    if (thinking) next.thinking = thinking;
+    else delete next.thinking;
+    commit(next, () => onSave(next));
+  };
+  const saveSpeed = (speed: string) => {
+    if (selection?.provider !== 'openai-codex') return;
+    const { serviceTier: _current, ...withoutSpeed } = selection;
+    const next =
+      speed === 'normal'
+        ? withoutSpeed
+        : { ...withoutSpeed, serviceTier: speed as 'fast' | 'ultrafast' };
+    commit(next, () => onSave(next));
+  };
+  return (
+    <div className={styles.defaultModelRow}>
+      <div className={styles.defaultModelLabel}>{label}</div>
+      <label>
+        <span className="sr-only">{label} model</span>
+        <select
+          aria-label={`${label} model`}
+          value={valueKey}
+          disabled={disabled || pending}
+          onChange={(event) => selectModel(event.currentTarget.value)}
+        >
+          <option value="">Inherit / none</option>
+          {selection &&
+            !models.some(
+              (model) =>
+                modelOptionValue(model.provider, model.model) === valueKey,
+            ) && (
+              <option value={valueKey}>
+                {selection.model} ({selection.provider})
+              </option>
+            )}
+          {models.map((model) => (
+            <option
+              key={modelOptionValue(model.provider, model.model)}
+              value={modelOptionValue(model.provider, model.model)}
+            >
+              {model.name ?? model.model} ({model.provider})
+            </option>
+          ))}
+        </select>
+      </label>
+      {models.length === 0 && (
+        <div className={styles.manualModel}>
+          <input
+            aria-label={`${label} provider`}
+            placeholder="Provider"
+            value={manualProvider}
+            disabled={disabled || pending}
+            onChange={(event) => setManualProvider(event.currentTarget.value)}
+          />
+          <input
+            aria-label={`${label} model id`}
+            placeholder="Model ID"
+            value={manualModel}
+            disabled={disabled || pending}
+            onChange={(event) => setManualModel(event.currentTarget.value)}
+          />
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={
+              disabled ||
+              pending ||
+              !manualProvider.trim() ||
+              !manualModel.trim()
+            }
+            onClick={() => {
+              const provider = manualProvider.trim();
+              const model = manualModel.trim();
+              const next: ModelSelection = {
+                provider,
+                model,
+                ...(selection?.thinking
+                  ? { thinking: selection.thinking }
+                  : {}),
+                ...(provider === 'openai-codex' && selection?.serviceTier
+                  ? { serviceTier: selection.serviceTier }
+                  : {}),
+              };
+              commit(next, () => onSave(next));
+            }}
+          >
+            Use model
+          </button>
+        </div>
+      )}
+      <label>
+        <span className="sr-only">{label} effort</span>
+        <select
+          aria-label={`${label} effort`}
+          value={selection?.thinking ?? ''}
+          disabled={disabled || pending || !selection}
+          onChange={(event) => saveThinking(event.currentTarget.value)}
+        >
+          <option value="">Pi default effort</option>
+          {levels.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span className="sr-only">{label} speed</span>
+        <select
+          aria-label={`${label} speed`}
+          value={selection?.serviceTier ?? 'normal'}
+          disabled={
+            disabled || pending || selection?.provider !== 'openai-codex'
+          }
+          onChange={(event) => saveSpeed(event.currentTarget.value)}
+        >
+          <option value="normal">Normal</option>
+          <option value="fast">Fast</option>
+          <option value="ultrafast">Ultrafast</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={disabled || pending || !selection}
+        onClick={() => commit(undefined, onReset)}
+      >
+        Reset to inherit
+      </button>
+    </div>
+  );
+}
+
+function DraftDefaultSettings({ snapshot }: { snapshot: BrowserSnapshot }) {
+  const settingsQuery = useQuery(settingsQueryOptions(dashboardHttpClient));
+  const queryClient = useQueryClient();
+  const updateGlobal = useMutation(
+    updateDashboardDefaultModelMutationOptions(dashboardHttpClient),
+  );
+  const resetGlobal = useMutation(
+    resetDashboardDefaultModelMutationOptions(dashboardHttpClient),
+  );
+  const updateProject = useMutation(
+    updateProjectDefaultModelMutationOptions(dashboardHttpClient),
+  );
+  const [projectValues, setProjectValues] = useState<
+    Record<string, ModelSelection | null>
+  >({});
+  const runtimeOptions = draftRuntimeOptions(snapshot.runtimes ?? []);
+  const models = [
+    ...runtimeOptions.models,
+    ...(settingsQuery.data?.defaultModel
+      ? [settingsQuery.data.defaultModel]
+      : []),
+    ...(snapshot.projects ?? []).flatMap((project) =>
+      project.defaultModel ? [project.defaultModel] : [],
+    ),
+  ];
+  const uniqueModels = [
+    ...new Map(
+      models.map((model) => [
+        modelOptionValue(model.provider, model.model),
+        model,
+      ]),
+    ).values(),
+  ];
+  const levels = [
+    ...new Set([
+      ...runtimeOptions.thinkingLevels,
+      ...(settingsQuery.data?.defaultModel?.thinking
+        ? [settingsQuery.data.defaultModel.thinking]
+        : []),
+      ...(snapshot.projects ?? []).flatMap((project) =>
+        project.defaultModel?.thinking ? [project.defaultModel.thinking] : [],
+      ),
+    ]),
+  ];
+  const refreshDraftDefaults = () =>
+    void queryClient.invalidateQueries({
+      queryKey: ['dashboard', 'draft-defaults'],
+    });
+  const saveGlobal = (model: ModelSelection) =>
+    updateGlobal.mutateAsync({ model }).then((saved) => {
+      queryClient.setQueryData(dashboardQueryKeys.settings(), saved);
+      refreshDraftDefaults();
+      return saved;
+    });
+  const resetGlobalDefault = () =>
+    resetGlobal.mutateAsync().then((saved) => {
+      queryClient.setQueryData(dashboardQueryKeys.settings(), saved);
+      refreshDraftDefaults();
+      return saved;
+    });
+  const saveProject = (projectId: string, model: ModelSelection) =>
+    updateProject
+      .mutateAsync({ projectId, defaultModel: model })
+      .then((saved) => {
+        setProjectValues((current) => ({ ...current, [projectId]: model }));
+        void queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.draftDefaults(projectId),
+        });
+        return saved;
+      });
+  const resetProject = (projectId: string) =>
+    updateProject
+      .mutateAsync({ projectId, defaultModel: null })
+      .then((saved) => {
+        setProjectValues((current) => ({ ...current, [projectId]: null }));
+        void queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.draftDefaults(projectId),
+        });
+        return saved;
+      });
+  const activeProjects = (snapshot.projects ?? []).filter(
+    (project) => project.status === 'active',
+  );
+  return (
+    <section
+      className={styles.section}
+      aria-labelledby="settings-draft-defaults-heading"
+    >
+      <h3 id="settings-draft-defaults-heading">Draft defaults</h3>
+      <p className={styles.hint}>
+        New drafts inherit project, dashboard, recent-thread, then Pi defaults.
+        Reset a row to leave it unconfigured.
+      </p>
+      {(updateGlobal.isError ||
+        resetGlobal.isError ||
+        updateProject.isError) && (
+        <small role="alert">Could not save draft defaults.</small>
+      )}
+      <div className={styles.defaultModels}>
+        <DefaultModelControl
+          label="Dashboard"
+          value={settingsQuery.data?.defaultModel}
+          models={uniqueModels}
+          levels={levels}
+          disabled={!settingsQuery.data}
+          onSave={saveGlobal}
+          onReset={resetGlobalDefault}
+        />
+        {activeProjects.map((project) => (
+          <DefaultModelControl
+            key={project.id}
+            label={project.title}
+            value={
+              Object.hasOwn(projectValues, project.id)
+                ? (projectValues[project.id] ?? undefined)
+                : project.defaultModel
+            }
+            models={uniqueModels}
+            levels={levels}
+            disabled={!settingsQuery.data}
+            onSave={(model) => saveProject(project.id, model)}
+            onReset={() => resetProject(project.id)}
+          />
+        ))}
       </div>
     </section>
   );

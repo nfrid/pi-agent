@@ -1,6 +1,18 @@
 import { act, create } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const draftDefaultState = vi.hoisted(() => ({
+  selection: undefined as
+    | {
+        provider: string;
+        model: string;
+        thinking?: string;
+        serviceTier?: 'fast' | 'ultrafast';
+      }
+    | undefined,
+  ready: true,
+}));
+
 const {
   mutateAsync,
   go,
@@ -38,17 +50,31 @@ const {
       | undefined,
     promotedThreadId: undefined as string | undefined,
     model: undefined as
-      | { provider: string; model: string; thinking?: string }
+      | {
+          provider: string;
+          model: string;
+          thinking?: string;
+          serviceTier?: 'fast' | 'ultrafast';
+        }
       | undefined,
   },
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutateAsync }),
-  useQuery: () => ({ data: { commands: [] } }),
+  useQuery: (options: { draftDefaultsQuery?: boolean }) =>
+    options.draftDefaultsQuery
+      ? {
+          data: draftDefaultState.selection
+            ? { selection: draftDefaultState.selection }
+            : {},
+          isSuccess: draftDefaultState.ready,
+        }
+      : { data: { commands: [] } },
 }));
 vi.mock('@pi-dashboard/client', () => ({
   composerCommandsQueryOptions: vi.fn(() => ({})),
+  draftDefaultsQueryOptions: vi.fn(() => ({ draftDefaultsQuery: true })),
   createThreadMutationOptions: vi.fn(() => ({})),
   retryThreadMutationOptions: vi.fn(() => ({})),
   dashboardHttpClient: { createThreadWithImages, retryThreadWithImages },
@@ -81,8 +107,16 @@ vi.mock('./composer/draft', () => ({
   }),
 }));
 vi.mock('./composer/shell', () => ({
-  ComposerShell: (props: { onSubmit: (event: unknown) => void }) => (
-    <form onSubmit={props.onSubmit} />
+  ComposerShell: (props: {
+    onSubmit: (event: unknown) => void;
+    sendDisabled?: boolean;
+    attachmentsEnabled?: boolean;
+  }) => (
+    <form
+      onSubmit={props.onSubmit}
+      data-send-disabled={props.sendDisabled ? 'true' : 'false'}
+      data-attachments-enabled={props.attachmentsEnabled ? 'true' : 'false'}
+    />
   ),
 }));
 vi.mock('./drafts', () => ({
@@ -119,6 +153,8 @@ afterEach(() => {
   draft.location = undefined;
   draft.promotedThreadId = undefined;
   draft.model = undefined;
+  draftDefaultState.selection = undefined;
+  draftDefaultState.ready = true;
 });
 
 function paragraphText(renderer: ReturnType<typeof create>): string[] {
@@ -227,7 +263,7 @@ describe('draft thread controls', () => {
     expect(paragraphText(renderer)).toContain('Scheduling thread…');
     renderer.unmount();
   });
-  it('prefers the configured project default and preserves its effort', () => {
+  it('uses the inherited tuple supplied by the server', () => {
     expect(
       draftModelSelection(
         [
@@ -245,7 +281,7 @@ describe('draft thread controls', () => {
     ).toEqual({ provider: 'test', model: 'default', thinking: 'high' });
   });
 
-  it('recovers an incomplete stored model from the active runtime selection', () => {
+  it('preserves an explicit draft tuple without runtime reconciliation', () => {
     const runtimes = [
       {
         model: { provider: 'test', model: 'sol', thinking: 'medium' },
@@ -257,7 +293,7 @@ describe('draft thread controls', () => {
     ] as never;
     expect(
       draftModelSelection(runtimes, { provider: 'test', model: 'spark' }),
-    ).toEqual({ provider: 'test', model: 'sol', thinking: 'medium' });
+    ).toEqual({ provider: 'test', model: 'spark' });
     expect(
       draftModelSelection(runtimes, {
         provider: 'test',
@@ -267,7 +303,7 @@ describe('draft thread controls', () => {
     ).toEqual({ provider: 'test', model: 'spark', thinking: 'low' });
   });
 
-  it('chooses a configured current model', () => {
+  it('returns no model without an explicit or inherited tuple', () => {
     const runtimes = [
       {
         model: { provider: 'test', model: 'fast', thinking: 'high' },
@@ -278,11 +314,7 @@ describe('draft thread controls', () => {
         thinkingLevels: ['off', 'low', 'high'],
       },
     ] as never;
-    expect(draftModelSelection(runtimes)).toEqual({
-      provider: 'test',
-      model: 'fast',
-      thinking: 'high',
-    });
+    expect(draftModelSelection(runtimes)).toBeUndefined();
   });
 
   it('shows startup in place and only transitions when the runtime appears', async () => {
@@ -385,6 +417,54 @@ describe('draft thread promotion', () => {
     renderer.unmount();
   });
 
+  it('disables send and images while inherited defaults are unresolved', async () => {
+    draftDefaultState.ready = false;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={snapshot} />,
+      );
+    });
+    const form = renderer.root.findByType('form');
+    expect(form.props['data-send-disabled']).toBe('true');
+    expect(form.props['data-attachments-enabled']).toBe('false');
+    renderer.unmount();
+  });
+
+  it('pins the displayed inherited tuple into thread creation', async () => {
+    draftDefaultState.selection = {
+      provider: 'openai-codex',
+      model: 'gpt-5',
+      thinking: 'high',
+      serviceTier: 'fast',
+    };
+    mutateAsync.mockResolvedValue({ thread: { id: 'thread-inherited' } });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={snapshot} />,
+      );
+    });
+    const form = renderer.root.findByType('form');
+    expect(form.props['data-send-disabled']).toBe('false');
+    await act(async () => {
+      await form.props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({
+          model: {
+            provider: 'openai-codex',
+            model: 'gpt-5',
+            thinking: 'high',
+            serviceTier: 'fast',
+          },
+        }),
+      }),
+    );
+    renderer.unmount();
+  });
+
   it('uses the project current checkout by default', async () => {
     draft.location = { kind: 'current' };
     mutateAsync.mockResolvedValue({ thread: { id: 'thread-1' } });
@@ -467,7 +547,8 @@ describe('draft thread promotion', () => {
     renderer.unmount();
   });
 
-  it('passes the selected model and effort into thread creation', async () => {
+  it('passes the explicit draft model and effort into thread creation', async () => {
+    draft.model = { provider: 'test', model: 'fast', thinking: 'high' };
     mutateAsync.mockResolvedValue({ thread: { id: 'thread-1' } });
     const modelSnapshot = {
       projects: [

@@ -220,8 +220,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return this.withTransaction(() => {
       const current = this.getProject(id);
       if (!current) throw new Error(`Project ${id} does not exist.`);
+      const {
+        defaultModel: currentDefaultModel,
+        ...currentWithoutDefaultModel
+      } = current;
       const project: Project = {
-        ...current,
+        ...currentWithoutDefaultModel,
         title: patch.title ?? current.title,
         rootPath: patch.rootPath ?? current.rootPath,
         ...(patch.repositoryIdentity === undefined
@@ -235,10 +239,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
             : { defaultBaseBranch: current.defaultBaseBranch }
           : { defaultBaseBranch: patch.defaultBaseBranch }),
         ...(patch.defaultModel === undefined
-          ? current.defaultModel === undefined
+          ? currentDefaultModel === undefined
             ? {}
-            : { defaultModel: current.defaultModel }
-          : { defaultModel: patch.defaultModel }),
+            : { defaultModel: currentDefaultModel }
+          : patch.defaultModel === null
+            ? {}
+            : { defaultModel: patch.defaultModel }),
         defaultIsolation: patch.defaultIsolation ?? current.defaultIsolation,
         maxParallelRuns: patch.maxParallelRuns ?? current.maxParallelRuns,
         status: current.status,

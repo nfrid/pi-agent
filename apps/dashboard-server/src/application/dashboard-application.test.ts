@@ -4,7 +4,10 @@ import type {
   SessionSnapshot,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
-import { projectPublicBridgeEvent } from './dashboard-application.js';
+import {
+  projectPublicBridgeEvent,
+  resolveDraftDefaultSelection,
+} from './dashboard-application.js';
 
 const session: SessionSnapshot = {
   id: 'session-public-1',
@@ -33,6 +36,45 @@ const runtime: RuntimeSnapshot = {
   liveState: 'idle',
   session,
 };
+
+describe('draft default precedence', () => {
+  it('uses one complete tuple from the highest configured layer', () => {
+    const project = {
+      provider: 'test',
+      model: 'project',
+    };
+    expect(
+      resolveDraftDefaultSelection({
+        projectDefault: project,
+        dashboardDefault: {
+          provider: 'test',
+          model: 'dashboard',
+          thinking: 'high',
+        },
+        recentThreadDefault: { provider: 'test', model: 'recent' },
+        piConfiguredDefault: { provider: 'test', model: 'pi' },
+      }),
+    ).toEqual({ selection: project, source: 'project' });
+    expect(
+      resolveDraftDefaultSelection({
+        dashboardDefault: { provider: 'test', model: 'dashboard' },
+        recentThreadDefault: {
+          provider: 'openai-codex',
+          model: 'recent',
+          thinking: 'low',
+          serviceTier: 'fast',
+        },
+      }),
+    ).toEqual({
+      selection: { provider: 'test', model: 'dashboard' },
+      source: 'dashboard',
+    });
+  });
+
+  it('does not invent a runtime or catalogue choice', () => {
+    expect(resolveDraftDefaultSelection({})).toEqual({});
+  });
+});
 
 describe('public runtime event projection', () => {
   it('strips eager delegate detail from public runtime surfaces', () => {

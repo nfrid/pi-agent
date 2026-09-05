@@ -235,6 +235,95 @@ describe('Fastify dashboard route plugin', () => {
     expect(invalid.statusCode).toBe(400);
   });
 
+  it('sets and resets the dashboard default model', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    let settings: DashboardSettings = { modelDisplayPreferences: {} };
+    routeContext.settings = () => settings;
+    routeContext.updateDashboardDefaultModel = vi.fn((model) => {
+      settings = { modelDisplayPreferences: {}, defaultModel: model as never };
+      return settings;
+    });
+    routeContext.resetDashboardDefaultModel = vi.fn(() => {
+      settings = { modelDisplayPreferences: {} };
+      return settings;
+    });
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const model = {
+      provider: 'openai-codex',
+      model: 'gpt-5.6',
+      thinking: 'high',
+      serviceTier: 'fast',
+    };
+    const updated = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/default-model',
+      headers,
+      payload: model,
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ defaultModel: model });
+    expect(routeContext.updateDashboardDefaultModel).toHaveBeenCalledWith(
+      model,
+    );
+    const reset = await app.inject({
+      method: 'DELETE',
+      url: '/api/settings/default-model',
+      headers,
+    });
+    expect(reset.statusCode).toBe(200);
+    expect(reset.json()).toEqual({ modelDisplayPreferences: {} });
+    expect(routeContext.resetDashboardDefaultModel).toHaveBeenCalledOnce();
+  });
+
+  it('serves inherited draft defaults and project default reset through the existing routes', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.draftDefaults = vi.fn(() => ({
+      selection: { provider: 'test', model: 'recent', thinking: 'low' },
+      source: 'recent-thread',
+    }));
+    routeContext.updateProjectDefaultModel = vi.fn(async (_id, command) => ({
+      id: 'project-1',
+      title: 'Project',
+      defaultModel: (command as { defaultModel: unknown }).defaultModel,
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const defaults = await app.inject({
+      method: 'GET',
+      url: '/api/projects/project-1/draft-defaults',
+      headers,
+    });
+    expect(defaults.statusCode).toBe(200);
+    expect(defaults.json()).toEqual({
+      selection: { provider: 'test', model: 'recent', thinking: 'low' },
+      source: 'recent-thread',
+    });
+    const reset = await app.inject({
+      method: 'PATCH',
+      url: '/api/projects/project-1',
+      headers,
+      payload: { commandId: 'project-default-reset', defaultModel: null },
+    });
+    expect(reset.statusCode).toBe(200);
+    expect(routeContext.updateProjectDefaultModel).toHaveBeenCalledWith(
+      'project-1',
+      { commandId: 'project-default-reset', defaultModel: null },
+    );
+  });
+
   it('rejects settings updates when persistence is unavailable', async () => {
     const app = Fastify();
     apps.push(app);

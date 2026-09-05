@@ -99,7 +99,7 @@ export function draftModelSupportsImages(
   model: RuntimeModelOption | undefined,
   runtimes: readonly RuntimeSnapshot[],
 ): boolean {
-  if (!model) return true;
+  if (!model) return false;
   const value = modelOptionValue(model.provider, model.model);
   const available = [
     ...(model ? [model] : []),
@@ -109,10 +109,12 @@ export function draftModelSupportsImages(
     ]),
     ...draftRuntimeOptions(runtimes).models,
   ];
-  return !available.some(
-    (option) =>
-      modelOptionValue(option.provider, option.model) === value &&
-      option.supportsImages === false,
+  const matching = available.filter(
+    (option) => modelOptionValue(option.provider, option.model) === value,
+  );
+  return (
+    matching.some((option) => option.supportsImages === true) &&
+    !matching.some((option) => option.supportsImages === false)
   );
 }
 

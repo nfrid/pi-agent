@@ -3,6 +3,7 @@ import {
   composerCommandsQueryOptions,
   createThreadMutationOptions,
   dashboardHttpClient,
+  draftDefaultsQueryOptions,
   retryThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
@@ -140,11 +141,20 @@ export function DraftThreadView({
   );
   const { initialDraft, text, updateText, clearDraft } =
     useComposerDraft(draftId);
+  const draftDefaults = useQuery(
+    draftDefaultsQueryOptions(
+      dashboardHttpClient,
+      fallbackDraft?.projectId ?? '',
+    ),
+  );
+  const inheritedModel = draftDefaults.data?.selection;
   const selectedModel = draftModelSelection(
     snapshot.runtimes,
     fallbackDraft?.model,
-    project?.defaultModel,
+    inheritedModel,
   );
+  const modelResolutionReady =
+    fallbackDraft?.model !== undefined || draftDefaults.isSuccess;
   const attachments = useImageAttachments({
     enabled: draftModelSupportsImages(selectedModel, snapshot.runtimes),
     busy: submitting,
@@ -249,11 +259,9 @@ export function DraftThreadView({
       const liveDraft =
         readDrafts().find((candidate) => candidate.id === draftId) ??
         fallbackDraft;
-      const submissionModel = draftModelSelection(
-        snapshot.runtimes,
-        liveDraft.model,
-        project.defaultModel,
-      );
+      // Pin the same inherited tuple shown by this render. This keeps launch
+      // and image capability checks aligned if settings change mid-submit.
+      const submissionModel = liveDraft.model ?? inheritedModel;
       const location = locationForDraft(liveDraft);
       if (
         !liveDraft.promotedThreadId &&
@@ -430,7 +438,9 @@ export function DraftThreadView({
             readOnly={submitting}
             submissionDisabled={submitting}
             sendDisabled={
-              submitting || (!text.trim() && !attachments.attachments.length)
+              submitting ||
+              !modelResolutionReady ||
+              (!text.trim() && !attachments.attachments.length)
             }
             sendAriaLabel="Send message"
             mode={

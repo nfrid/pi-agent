@@ -39,6 +39,7 @@ afterEach(async () => {
     await fixture.app.close();
     await rm(fixture.root, { recursive: true, force: true });
   }
+  vi.restoreAllMocks();
 });
 
 async function fixture(
@@ -166,6 +167,107 @@ function runtime(
 }
 
 describe('authoritative application snapshot lifecycle', () => {
+  it('resolves same-project recent defaults across offline and active branches', async () => {
+    const value = await fixture('resolver-session');
+    value.metadata.orchestration.createProject({
+      id: 'project-a',
+      title: 'Project A',
+      rootPath: '/tmp/project-a',
+    });
+    value.register({
+      runtimeId: 'runtime-online',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp/project-a',
+      liveState: 'idle',
+      online: true,
+      session: { id: 'online-older', leafId: 'active-leaf', entries: [] },
+    } as never);
+    vi.spyOn(value.app, 'sessionMetadata').mockReturnValue([
+      {
+        id: 'offline-recent',
+        file: '/sessions/offline-recent.jsonl',
+        cwd: '/tmp/project-a',
+        projectId: 'project-a',
+        updatedAt: 1,
+      },
+      {
+        id: 'online-older',
+        file: '/sessions/online-older.jsonl',
+        cwd: '/tmp/project-a',
+        projectId: 'project-a',
+        updatedAt: 1,
+      },
+      {
+        id: 'delegate-newest',
+        file: '/sessions/delegate-newest.jsonl',
+        cwd: '/tmp/project-a',
+        projectId: 'project-a',
+        sessionKind: 'delegate',
+        updatedAt: 1,
+      },
+      {
+        id: 'other-project',
+        file: '/sessions/other-project.jsonl',
+        cwd: '/tmp/other',
+        projectId: 'project-b',
+        updatedAt: 1,
+      },
+    ] as never);
+    const lastUserMessageAt = vi
+      .spyOn(value.sessions, 'lastUserMessageAt')
+      .mockImplementation((id, leafId) => {
+        if (id === 'offline-recent' && leafId === undefined) return 2_000;
+        if (id === 'online-older' && leafId === 'active-leaf') return 1_000;
+        if (id === 'delegate-newest') return 9_000;
+        if (id === 'other-project') return 10_000;
+        return undefined;
+      });
+    const resumeMetadata = vi
+      .spyOn(value.sessions, 'resumeMetadata')
+      .mockImplementation((id) => {
+        if (id === 'offline-recent')
+          return {
+            lastKnownModel: {
+              provider: 'openai-codex',
+              model: 'offline-model',
+            },
+            lastKnownThinking: 'high',
+            lastKnownServiceTier: 'ultrafast',
+          };
+        if (id === 'online-older')
+          return {
+            lastKnownModel: {
+              provider: 'openai-codex',
+              model: 'online-model',
+            },
+            lastKnownThinking: 'low',
+            lastKnownServiceTier: 'fast',
+          };
+        return {};
+      });
+
+    expect(value.app.resolveDraftDefaults('project-a')).toEqual({
+      selection: {
+        provider: 'openai-codex',
+        model: 'offline-model',
+        thinking: 'high',
+        serviceTier: 'ultrafast',
+      },
+      source: 'recent-thread',
+    });
+    expect(lastUserMessageAt).not.toHaveBeenCalledWith(
+      'delegate-newest',
+      expect.anything(),
+    );
+    expect(lastUserMessageAt).not.toHaveBeenCalledWith(
+      'other-project',
+      expect.anything(),
+    );
+    expect(resumeMetadata).toHaveBeenCalledWith('offline-recent', undefined);
+    expect(resumeMetadata).toHaveBeenCalledWith('online-older', 'active-leaf');
+  });
+
   it('projects indexed and live session project association', async () => {
     const value = await fixture(
       'project-session',
