@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDashboardSurfaces } from './dashboard-surface-context';
 
 type ShortcutRegistration = {
@@ -119,7 +119,19 @@ export function useModifierShortcut(
 ): boolean {
   const surfaces = useDashboardSurfaces();
   const [held, setHeld] = useState(metaHeld);
+  const registrationRef = useRef<ShortcutRegistration | undefined>(undefined);
+  const actionRef = useRef(action);
+  const enabledRef = useRef(enabled);
   const blocked = Boolean(surfaces?.stack.length) || hasOpenDialog();
+  const blockedRef = useRef(blocked);
+  actionRef.current = action;
+  enabledRef.current = enabled;
+  blockedRef.current = blocked;
+  if (registrationRef.current) {
+    registrationRef.current.action = action;
+    registrationRef.current.enabled = enabled && !blocked;
+    registrationRef.current.code = shortcutCode(key);
+  }
   useEffect(() => {
     const listener = () => setHeld(metaHeld);
     listeners.add(listener);
@@ -129,18 +141,21 @@ export function useModifierShortcut(
   }, []);
   useEffect(() => {
     const id = nextRegistrationId++;
-    registrations.set(id, {
+    const registration: ShortcutRegistration = {
       id,
       code: shortcutCode(key),
-      action,
-      enabled: enabled && !blocked,
-    });
+      action: actionRef.current,
+      enabled: enabledRef.current && !blockedRef.current,
+    };
+    registrationRef.current = registration;
+    registrations.set(id, registration);
     startListening();
     return () => {
       registrations.delete(id);
+      registrationRef.current = undefined;
       if (registrations.size === 0) stopListening();
     };
-  }, [action, blocked, enabled, key]);
+  }, [key]);
   return held && enabled && !blocked;
 }
 

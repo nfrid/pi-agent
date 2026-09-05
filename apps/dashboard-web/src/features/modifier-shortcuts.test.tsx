@@ -114,7 +114,39 @@ describe('modifier shortcuts', () => {
       props: {},
       children: ['released'],
     });
-    renderer.unmount();
+    act(() => renderer.unmount());
+  });
+
+  it('keeps a stable registration through inline-action hint rerenders', () => {
+    installDom();
+    let calls = 0;
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(<Probe action={() => calls++} />);
+    });
+    act(() => {
+      fakeWindow.dispatchEvent(
+        keyboard('keydown', { key: 'Meta', code: 'MetaLeft' }),
+      );
+    });
+    act(() => renderer.update(<Probe action={() => calls++} />));
+    expect(renderer.toJSON()).toEqual({
+      type: 'span',
+      props: {},
+      children: ['held'],
+    });
+    act(() => {
+      fakeWindow.dispatchEvent(
+        keyboard('keydown', {
+          key: 'Dead',
+          code: 'KeyN',
+          metaKey: true,
+          altKey: true,
+        }),
+      );
+    });
+    expect(calls).toBe(1);
+    act(() => renderer.unmount());
   });
 
   it('selects one scoped owner and falls back when it unmounts', () => {
@@ -163,7 +195,7 @@ describe('modifier shortcuts', () => {
       );
     });
     expect(first).toBe(1);
-    renderer.unmount();
+    act(() => renderer.unmount());
   });
 
   it('suppresses actions while a dialog is open', () => {
@@ -188,6 +220,6 @@ describe('modifier shortcuts', () => {
       );
     });
     expect(calls).toBe(0);
-    renderer.unmount();
+    act(() => renderer.unmount());
   });
 });

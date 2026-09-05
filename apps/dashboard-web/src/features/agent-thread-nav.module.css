@@ -60,7 +60,7 @@
   border-radius: 4px;
   background: color-mix(in srgb, var(--purple) 12%, transparent);
   color: var(--purple);
-  padding: 1px 5px;
+  padding: 1px 28px 1px 5px;
   cursor: pointer;
   font-size: 9px;
   font-weight: 650;
@@ -600,6 +600,10 @@ button.shelfHeading:focus-visible {
   font-weight: 700;
   line-height: 1;
   animation: modifier-hint-in 120ms ease-out;
+}
+.settingsButton .modifierHint {
+  top: -8px;
+  right: -5px;
 }
 @keyframes modifier-hint-in {
   from {

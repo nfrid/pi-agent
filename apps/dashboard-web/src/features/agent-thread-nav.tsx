@@ -73,7 +73,7 @@ import {
   useModelDisplayPreferences,
 } from './model-display-preferences';
 import { draftModelSelection } from './model-option';
-import { useModifierShortcut } from './modifier-shortcuts';
+import { hasOpenDialog, useModifierShortcut } from './modifier-shortcuts';
 import { ProjectIcon } from './project-icon';
 import {
   AgentThreadActionMenu,
@@ -777,7 +777,11 @@ export function AgentThreadNav({
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Meta' && !event.repeat) {
-        if (selectionDisabledRef.current || surfacesRef.current?.stack.length) {
+        if (
+          selectionDisabledRef.current ||
+          surfacesRef.current?.stack.length ||
+          hasOpenDialog()
+        ) {
           clearShortcutGesture();
           return;
         }
@@ -795,7 +799,8 @@ export function AgentThreadNav({
         event.altKey ||
         event.shiftKey ||
         selectionDisabledRef.current ||
-        surfacesRef.current?.stack.length
+        surfacesRef.current?.stack.length ||
+        hasOpenDialog()
       )
         return;
       const key = Number(event.key);
