@@ -369,11 +369,29 @@
 .surface-launcher .surface-chevron {
   color: var(--purple);
 }
+/* Shared keycap treatment; individual controls own placement only. */
+kbd[data-shortcut-visible] {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--bg-alt);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+}
 .surface-modifier-hint {
   position: absolute;
   z-index: 2;
-  top: 2px;
-  right: 28px;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
   color: var(--dim);
   padding: 0;
   font: inherit;

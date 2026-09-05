@@ -560,13 +560,19 @@ button.shelfHeading:focus-visible {
   overflow: hidden;
 }
 .threadTitleRow {
-  display: grid;
+  position: relative;
+  display: block;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px;
+}
+.threadTitleRow strong {
+  display: block;
+  width: 100%;
 }
 .threadShortcutHint {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   display: grid;
   width: 16px;
   height: 16px;
@@ -588,8 +594,9 @@ button.shelfHeading:focus-visible {
 .modifierHint {
   position: absolute;
   z-index: 2;
-  top: -13px;
-  right: 0;
+  top: 50%;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
   color: var(--dim);
   padding: 0;
   font: inherit;
@@ -601,8 +608,8 @@ button.shelfHeading:focus-visible {
   transition: opacity 140ms ease;
 }
 .settingsButton .modifierHint {
-  top: -13px;
-  right: 0;
+  right: 50%;
+  transform: translate(50%, -50%);
 }
 @media (prefers-reduced-motion: reduce) {
   .threadShortcutHint,
@@ -780,8 +787,7 @@ button.shelfHeading:focus-visible {
 }
 .threadTime {
   min-width: 0;
-  max-width: 8ch;
-  flex: 0 1 8ch;
+  flex: none;
   overflow: hidden;
   color: var(--dim);
   text-overflow: ellipsis;

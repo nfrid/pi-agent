@@ -1126,8 +1126,27 @@ test('desktop project scope filters threads and starts project threads @desktop'
     path: testInfo.outputPath('navigation-refine-sidebar.png'),
     fullPage: true,
   });
+  const titleWidth = await activeThread
+    .locator('strong')
+    .evaluate((title) => title.getBoundingClientRect().width);
   await page.keyboard.down('Meta');
-  await page.waitForTimeout(100);
+  await page.waitForTimeout(250);
+  expect(
+    await activeThread
+      .locator('strong')
+      .evaluate((title) => title.getBoundingClientRect().width),
+  ).toBe(titleWidth);
+  const titleRowWidth = await activeThread
+    .locator('strong')
+    .evaluate((title) => title.parentElement?.getBoundingClientRect().width);
+  expect(titleWidth).toBe(titleRowWidth);
+  for (const time of await activeThread.locator('.agent-thread-time').all()) {
+    expect(
+      await time.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+  }
   await expect(
     nav.getByRole('button', { name: /New thread/ }).locator('kbd'),
   ).toHaveText('T');
