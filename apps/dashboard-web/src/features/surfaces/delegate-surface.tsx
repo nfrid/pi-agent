@@ -425,6 +425,7 @@ export function DelegateSurface({
           </span>
         </span>
       }
+      shortcutKey="d"
       visibleCount={
         rows.length +
         wakeConditions.length +

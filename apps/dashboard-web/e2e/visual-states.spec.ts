@@ -161,6 +161,19 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   await expect(
     page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
   ).toBeVisible();
+  await page.locator('[contenteditable="true"]').first().focus();
+  await page.keyboard.press('Meta+Alt+T');
+  const tasksDialog = page.getByRole('dialog', { name: 'Tasks' });
+  await expect(tasksDialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(tasksDialog).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('button', { name: /Delegates/ })).toBeVisible();
+  await page.keyboard.press('Meta+Alt+D');
+  const delegatesDialog = page.getByRole('dialog', { name: 'Delegates' });
+  await expect(delegatesDialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(delegatesDialog).toHaveCount(0);
   await expect(
     page.getByRole('region', { name: 'Current tasks and delegates' }),
   ).toBeVisible();
@@ -250,6 +263,19 @@ test('waiting thread presents an actionable waiting state @desktop', async ({
   await expect(
     page.getByText('The checklist is ready for your review.', { exact: true }),
   ).toBeVisible();
+  const waitingGlyph = page
+    .getByRole('button', { name: /Waiting for approval waiting/ })
+    .locator('.agent-thread-glyph');
+  await expect(waitingGlyph).toBeVisible();
+  const waitingGeometry = await waitingGlyph.evaluate((glyph) => {
+    const row = glyph.closest('.agent-thread-row');
+    if (!row) throw new Error('waiting row missing');
+    const glyphBox = glyph.getBoundingClientRect();
+    const rowBox = row.getBoundingClientRect();
+    return { width: glyphBox.width, rightInset: rowBox.right - glyphBox.right };
+  });
+  expect(waitingGeometry.width).toBeGreaterThanOrEqual(10);
+  expect(waitingGeometry.rightInset).toBeGreaterThanOrEqual(0);
   await expect(page).toHaveScreenshot('waiting-thread-desktop.png', {
     animations: 'disabled',
     caret: 'hide',

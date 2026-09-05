@@ -28,9 +28,9 @@ import {
 } from './items';
 
 const SEARCH_GROUP_ORDER: readonly PaletteGroup[] = [
+  'Threads',
   'Actions',
   'Navigation',
-  'Threads',
   'Projects',
 ];
 const DEFAULT_GROUP_ORDER: readonly PaletteGroup[] = [

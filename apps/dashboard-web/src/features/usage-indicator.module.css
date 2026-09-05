@@ -3,6 +3,7 @@
   min-width: 0;
 }
 .trigger {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -22,6 +23,33 @@
   border-color: var(--purple);
   background: color-mix(in srgb, var(--purple) 10%, var(--bg-alt));
   color: var(--fg);
+}
+.modifierHint {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: var(--bg-alt);
+  color: var(--purple);
+  padding: 1px 3px;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  animation: modifier-hint-in 120ms ease-out;
+}
+@keyframes modifier-hint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modifierHint {
+    animation: none;
+  }
 }
 .windows {
   display: flex;

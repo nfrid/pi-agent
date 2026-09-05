@@ -73,6 +73,7 @@ import {
   useModelDisplayPreferences,
 } from './model-display-preferences';
 import { draftModelSelection } from './model-option';
+import { hasOpenDialog, useModifierShortcut } from './modifier-shortcuts';
 import { ProjectIcon } from './project-icon';
 import {
   AgentThreadActionMenu,
@@ -515,7 +516,6 @@ export function AgentThreadNav({
   const selectionAnchorId = useRef<string | undefined>(undefined);
   const displayedNavigationRowsRef = useRef<readonly AgentThreadRow[]>([]);
   const shortcutTargetIdsRef = useRef<readonly string[]>([]);
-  const shortcutTimerRef = useRef<number | undefined>(undefined);
   const selectRef = useRef<(id: string) => void>(() => undefined);
   const surfacesRef = useRef(surfaces);
   const selectionDisabledRef = useRef(false);
@@ -771,17 +771,17 @@ export function AgentThreadNav({
   selectionDisabledRef.current = bulkPendingAction !== undefined;
   useEffect(() => {
     const clearShortcutGesture = () => {
-      if (shortcutTimerRef.current !== undefined) {
-        window.clearTimeout(shortcutTimerRef.current);
-        shortcutTimerRef.current = undefined;
-      }
       shortcutTargetIdsRef.current = [];
       setShortcutTargetIds([]);
       setShortcutHintsVisible(false);
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Meta' && !event.repeat) {
-        if (selectionDisabledRef.current || surfacesRef.current?.stack.length) {
+        if (
+          selectionDisabledRef.current ||
+          surfacesRef.current?.stack.length ||
+          hasOpenDialog()
+        ) {
           clearShortcutGesture();
           return;
         }
@@ -790,12 +790,7 @@ export function AgentThreadNav({
         );
         shortcutTargetIdsRef.current = targetIds;
         setShortcutTargetIds(targetIds);
-        if (targetIds.length) {
-          shortcutTimerRef.current = window.setTimeout(() => {
-            shortcutTimerRef.current = undefined;
-            setShortcutHintsVisible(true);
-          }, 250);
-        }
+        if (targetIds.length) setShortcutHintsVisible(true);
         return;
       }
       if (
@@ -804,7 +799,8 @@ export function AgentThreadNav({
         event.altKey ||
         event.shiftKey ||
         selectionDisabledRef.current ||
-        surfacesRef.current?.stack.length
+        surfacesRef.current?.stack.length ||
+        hasOpenDialog()
       )
         return;
       const key = Number(event.key);
@@ -833,10 +829,6 @@ export function AgentThreadNav({
   }, []);
   useEffect(() => {
     if (surfaces?.stack.length || bulkPendingAction !== undefined) {
-      if (shortcutTimerRef.current !== undefined) {
-        window.clearTimeout(shortcutTimerRef.current);
-        shortcutTimerRef.current = undefined;
-      }
       shortcutTargetIdsRef.current = [];
       setShortcutTargetIds([]);
       setShortcutHintsVisible(false);
@@ -938,6 +930,16 @@ export function AgentThreadNav({
     );
     if (mode === 'session') onOpenChange?.(false);
   };
+  const newThreadHint = useModifierShortcut(
+    'n',
+    openNewThread,
+    mode === 'home' || !isMobile || open,
+  );
+  const settingsHint = useModifierShortcut(
+    's',
+    openSettings,
+    mode === 'home' || !isMobile || open,
+  );
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
     const shortcutIndex = shortcutTargetIds.indexOf(row.id);
     const shortcutHint =
@@ -1191,6 +1193,7 @@ export function AgentThreadNav({
               onClick={openNewThread}
             >
               + new
+              {newThreadHint && <kbd className={styles.modifierHint}>⌥N</kbd>}
             </button>
           </h3>
           {sections.active.map((row) => renderThreadRow(row, 'card'))}
@@ -1267,6 +1270,7 @@ export function AgentThreadNav({
           onClick={openSettings}
         >
           <span aria-hidden="true">⚙</span>
+          {settingsHint && <kbd className={styles.modifierHint}>⌥S</kbd>}
         </button>
       </footer>
     </aside>
