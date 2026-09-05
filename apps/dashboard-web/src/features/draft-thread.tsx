@@ -147,11 +147,14 @@ export function DraftThreadView({
       fallbackDraft?.projectId ?? '',
     ),
   );
+  const inheritedModel = draftDefaults.data?.selection;
   const selectedModel = draftModelSelection(
     snapshot.runtimes,
     fallbackDraft?.model,
-    draftDefaults.data?.selection,
+    inheritedModel,
   );
+  const modelResolutionReady =
+    fallbackDraft?.model !== undefined || draftDefaults.isSuccess;
   const attachments = useImageAttachments({
     enabled: draftModelSupportsImages(selectedModel, snapshot.runtimes),
     busy: submitting,
@@ -256,9 +259,9 @@ export function DraftThreadView({
       const liveDraft =
         readDrafts().find((candidate) => candidate.id === draftId) ??
         fallbackDraft;
-      // The server resolves inherited defaults at submission time. Sending
-      // only the persisted draft tuple avoids launching with stale settings.
-      const submissionModel = liveDraft.model;
+      // Pin the same inherited tuple shown by this render. This keeps launch
+      // and image capability checks aligned if settings change mid-submit.
+      const submissionModel = liveDraft.model ?? inheritedModel;
       const location = locationForDraft(liveDraft);
       if (
         !liveDraft.promotedThreadId &&
@@ -435,7 +438,9 @@ export function DraftThreadView({
             readOnly={submitting}
             submissionDisabled={submitting}
             sendDisabled={
-              submitting || (!text.trim() && !attachments.attachments.length)
+              submitting ||
+              !modelResolutionReady ||
+              (!text.trim() && !attachments.attachments.length)
             }
             sendAriaLabel="Send message"
             mode={

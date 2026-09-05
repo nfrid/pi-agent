@@ -1,6 +1,7 @@
 import {
   archiveThreadMutationOptions,
   dashboardHttpClient,
+  draftDefaultsQueryOptions,
   pinThreadMutationOptions,
   restoreThreadMutationOptions,
   sessionThreadLinksQueryOptions,
@@ -9,8 +10,17 @@ import {
   unpinThreadMutationOptions,
   unsettleThreadMutationOptions,
 } from '@pi-dashboard/client';
-import type { BrowserSnapshot, CheckoutSummary } from '@pi-dashboard/protocol';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type {
+  BrowserSnapshot,
+  CheckoutSummary,
+  ModelSelection,
+} from '@pi-dashboard/protocol';
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -178,10 +188,11 @@ export function activeThreadDetails(
   checkouts: readonly CheckoutSummary[] = [],
   preferences: ModelDisplayPreferences = {},
   time = row.updatedAt,
+  inheritedDefault?: ModelSelection,
 ): ThreadMetadataPresentation {
   const indexed = dormantResumeMetadata(row.session, runtimes);
   const draftSelection = row.draft
-    ? draftModelSelection(runtimes, row.draft.model)
+    ? draftModelSelection(runtimes, row.draft.model, inheritedDefault)
     : undefined;
   const selectedModel = row.draft
     ? draftSelection
@@ -283,6 +294,7 @@ function AgentThreadLink({
   runtimes,
   checkouts,
   preferences,
+  inheritedDefault,
 }: {
   row: AgentThreadRow;
   selected: boolean;
@@ -297,6 +309,7 @@ function AgentThreadLink({
   runtimes: BrowserSnapshot['runtimes'];
   checkouts: readonly CheckoutSummary[];
   preferences: ModelDisplayPreferences;
+  inheritedDefault?: ModelSelection;
 }) {
   const timestamp =
     density === 'slim' &&
@@ -310,6 +323,7 @@ function AgentThreadLink({
     checkouts,
     preferences,
     timestamp,
+    inheritedDefault,
   );
   const showDetails = density === 'card';
   return (
@@ -553,6 +567,29 @@ export function AgentThreadNav({
     () => agentThreadRows(snapshot, durableThreads, directLinks, drafts),
     [directLinks, drafts, durableThreads, snapshot],
   );
+  const draftProjectIds = useMemo(
+    () => [
+      ...new Set(
+        drafts
+          .filter((draft) => draft.model === undefined)
+          .map((draft) => draft.projectId),
+      ),
+    ],
+    [drafts],
+  );
+  const draftDefaultQueries = useQueries({
+    queries: draftProjectIds.map((projectId) =>
+      draftDefaultsQueryOptions(dashboardHttpClient, projectId),
+    ),
+  });
+  const draftDefaultsByProject = useMemo(() => {
+    const result = new Map<string, ModelSelection>();
+    for (const [index, projectId] of draftProjectIds.entries()) {
+      const selection = draftDefaultQueries[index]?.data?.selection;
+      if (selection) result.set(projectId, selection);
+    }
+    return result;
+  }, [draftDefaultQueries, draftProjectIds]);
   const scopedRows = useMemo(
     () =>
       projectScope === 'all'
@@ -868,6 +905,11 @@ export function AgentThreadNav({
           runtimes={snapshot.runtimes}
           checkouts={snapshot.checkouts ?? []}
           preferences={modelDisplayPreferences}
+          inheritedDefault={
+            row.draft
+              ? draftDefaultsByProject.get(row.draft.projectId)
+              : undefined
+          }
         />
         {row.draft && (
           <QuickDeleteDraftAction draftId={row.id} title={row.title} />

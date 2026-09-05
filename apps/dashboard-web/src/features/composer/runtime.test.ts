@@ -95,9 +95,19 @@ describe('composer runtime model', () => {
     });
   });
 
-  it('enables draft images for unknown capability but not explicit false', () => {
+  it('enables draft images only for known capable models', () => {
+    expect(draftModelSupportsImages(undefined, [])).toBe(false);
     expect(
       draftModelSupportsImages({ provider: 'test', model: 'unknown' }, []),
+    ).toBe(false);
+    expect(
+      draftModelSupportsImages({ provider: 'test', model: 'vision' }, [
+        {
+          modelCatalog: [
+            { provider: 'test', model: 'vision', supportsImages: true },
+          ],
+        } as never,
+      ]),
     ).toBe(true);
     expect(
       draftModelSupportsImages({ provider: 'test', model: 'text' }, [
@@ -127,7 +137,7 @@ describe('composer runtime model', () => {
           ],
         } as never,
       ]),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('builds resume requests and checks image capability explicitly', () => {

@@ -134,23 +134,41 @@ function DefaultModelControl({
   models: readonly RuntimeModelOption[];
   levels: readonly string[];
   disabled: boolean;
-  onSave: (model: ModelSelection) => void;
-  onReset: () => void;
+  onSave: (model: ModelSelection) => Promise<unknown>;
+  onReset: () => Promise<unknown>;
 }) {
   const [selection, setSelection] = useState<ModelSelection | undefined>(value);
+  const [manualProvider, setManualProvider] = useState(value?.provider ?? '');
+  const [manualModel, setManualModel] = useState(value?.model ?? '');
+  const [pending, setPending] = useState(false);
   useEffect(() => {
     setSelection(value);
+    setManualProvider(value?.provider ?? '');
+    setManualModel(value?.model ?? '');
   }, [value]);
   const valueKey = selection
     ? modelOptionValue(selection.provider, selection.model)
     : '';
+  const commit = (
+    next: ModelSelection | undefined,
+    save: () => Promise<unknown>,
+  ) => {
+    const previous = selection;
+    setSelection(next);
+    setPending(true);
+    void Promise.resolve()
+      .then(save)
+      .catch(() => setSelection(previous))
+      .finally(() => setPending(false));
+  };
   const selectModel = (nextValue: string) => {
     const next = parseModelOptionValue(nextValue);
     if (!next) {
-      setSelection(undefined);
-      onReset();
+      commit(undefined, onReset);
       return;
     }
+    setManualProvider(next.provider);
+    setManualModel(next.model);
     const nextSelection: ModelSelection = {
       ...next,
       ...(selection?.thinking ? { thinking: selection.thinking } : {}),
@@ -158,16 +176,14 @@ function DefaultModelControl({
         ? { serviceTier: selection.serviceTier }
         : {}),
     };
-    setSelection(nextSelection);
-    onSave(nextSelection);
+    commit(nextSelection, () => onSave(nextSelection));
   };
   const saveThinking = (thinking: string) => {
     if (!selection) return;
     const next = { ...selection };
     if (thinking) next.thinking = thinking;
     else delete next.thinking;
-    setSelection(next);
-    onSave(next);
+    commit(next, () => onSave(next));
   };
   const saveSpeed = (speed: string) => {
     if (selection?.provider !== 'openai-codex') return;
@@ -176,8 +192,7 @@ function DefaultModelControl({
       speed === 'normal'
         ? withoutSpeed
         : { ...withoutSpeed, serviceTier: speed as 'fast' | 'ultrafast' };
-    setSelection(next);
-    onSave(next);
+    commit(next, () => onSave(next));
   };
   return (
     <div className={styles.defaultModelRow}>
@@ -187,10 +202,19 @@ function DefaultModelControl({
         <select
           aria-label={`${label} model`}
           value={valueKey}
-          disabled={disabled}
+          disabled={disabled || pending}
           onChange={(event) => selectModel(event.currentTarget.value)}
         >
           <option value="">Inherit / none</option>
+          {selection &&
+            !models.some(
+              (model) =>
+                modelOptionValue(model.provider, model.model) === valueKey,
+            ) && (
+              <option value={valueKey}>
+                {selection.model} ({selection.provider})
+              </option>
+            )}
           {models.map((model) => (
             <option
               key={modelOptionValue(model.provider, model.model)}
@@ -201,12 +225,57 @@ function DefaultModelControl({
           ))}
         </select>
       </label>
+      {models.length === 0 && (
+        <div className={styles.manualModel}>
+          <input
+            aria-label={`${label} provider`}
+            placeholder="Provider"
+            value={manualProvider}
+            disabled={disabled || pending}
+            onChange={(event) => setManualProvider(event.currentTarget.value)}
+          />
+          <input
+            aria-label={`${label} model id`}
+            placeholder="Model ID"
+            value={manualModel}
+            disabled={disabled || pending}
+            onChange={(event) => setManualModel(event.currentTarget.value)}
+          />
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={
+              disabled ||
+              pending ||
+              !manualProvider.trim() ||
+              !manualModel.trim()
+            }
+            onClick={() => {
+              const provider = manualProvider.trim();
+              const model = manualModel.trim();
+              const next: ModelSelection = {
+                provider,
+                model,
+                ...(selection?.thinking
+                  ? { thinking: selection.thinking }
+                  : {}),
+                ...(provider === 'openai-codex' && selection?.serviceTier
+                  ? { serviceTier: selection.serviceTier }
+                  : {}),
+              };
+              commit(next, () => onSave(next));
+            }}
+          >
+            Use model
+          </button>
+        </div>
+      )}
       <label>
         <span className="sr-only">{label} effort</span>
         <select
           aria-label={`${label} effort`}
           value={selection?.thinking ?? ''}
-          disabled={disabled || !selection}
+          disabled={disabled || pending || !selection}
           onChange={(event) => saveThinking(event.currentTarget.value)}
         >
           <option value="">Pi default effort</option>
@@ -222,7 +291,9 @@ function DefaultModelControl({
         <select
           aria-label={`${label} speed`}
           value={selection?.serviceTier ?? 'normal'}
-          disabled={disabled || selection?.provider !== 'openai-codex'}
+          disabled={
+            disabled || pending || selection?.provider !== 'openai-codex'
+          }
           onChange={(event) => saveSpeed(event.currentTarget.value)}
         >
           <option value="normal">Normal</option>
@@ -233,11 +304,8 @@ function DefaultModelControl({
       <button
         type="button"
         className="secondary-button"
-        disabled={disabled || !selection}
-        onClick={() => {
-          setSelection(undefined);
-          onReset();
-        }}
+        disabled={disabled || pending || !selection}
+        onClick={() => commit(undefined, onReset)}
       >
         Reset to inherit
       </button>
@@ -257,6 +325,9 @@ function DraftDefaultSettings({ snapshot }: { snapshot: BrowserSnapshot }) {
   const updateProject = useMutation(
     updateProjectDefaultModelMutationOptions(dashboardHttpClient),
   );
+  const [projectValues, setProjectValues] = useState<
+    Record<string, ModelSelection | null>
+  >({});
   const runtimeOptions = draftRuntimeOptions(snapshot.runtimes ?? []);
   const models = [
     ...runtimeOptions.models,
@@ -290,34 +361,38 @@ function DraftDefaultSettings({ snapshot }: { snapshot: BrowserSnapshot }) {
     void queryClient.invalidateQueries({
       queryKey: ['dashboard', 'draft-defaults'],
     });
-  const saveGlobal = (model: ModelSelection) => {
-    void updateGlobal.mutateAsync({ model }).then((saved) => {
+  const saveGlobal = (model: ModelSelection) =>
+    updateGlobal.mutateAsync({ model }).then((saved) => {
       queryClient.setQueryData(dashboardQueryKeys.settings(), saved);
       refreshDraftDefaults();
+      return saved;
     });
-  };
-  const resetGlobalDefault = () => {
-    void resetGlobal.mutateAsync().then((saved) => {
+  const resetGlobalDefault = () =>
+    resetGlobal.mutateAsync().then((saved) => {
       queryClient.setQueryData(dashboardQueryKeys.settings(), saved);
       refreshDraftDefaults();
+      return saved;
     });
-  };
-  const saveProject = (projectId: string, model: ModelSelection) => {
-    void updateProject
+  const saveProject = (projectId: string, model: ModelSelection) =>
+    updateProject
       .mutateAsync({ projectId, defaultModel: model })
-      .then(() =>
-        queryClient.invalidateQueries({
+      .then((saved) => {
+        setProjectValues((current) => ({ ...current, [projectId]: model }));
+        void queryClient.invalidateQueries({
           queryKey: dashboardQueryKeys.draftDefaults(projectId),
-        }),
-      );
-  };
-  const resetProject = (projectId: string) => {
-    void updateProject.mutateAsync({ projectId, defaultModel: null }).then(() =>
-      queryClient.invalidateQueries({
-        queryKey: dashboardQueryKeys.draftDefaults(projectId),
-      }),
-    );
-  };
+        });
+        return saved;
+      });
+  const resetProject = (projectId: string) =>
+    updateProject
+      .mutateAsync({ projectId, defaultModel: null })
+      .then((saved) => {
+        setProjectValues((current) => ({ ...current, [projectId]: null }));
+        void queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.draftDefaults(projectId),
+        });
+        return saved;
+      });
   const activeProjects = (snapshot.projects ?? []).filter(
     (project) => project.status === 'active',
   );
@@ -350,7 +425,11 @@ function DraftDefaultSettings({ snapshot }: { snapshot: BrowserSnapshot }) {
           <DefaultModelControl
             key={project.id}
             label={project.title}
-            value={project.defaultModel}
+            value={
+              Object.hasOwn(projectValues, project.id)
+                ? (projectValues[project.id] ?? undefined)
+                : project.defaultModel
+            }
             models={uniqueModels}
             levels={levels}
             disabled={!settingsQuery.data}

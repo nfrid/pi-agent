@@ -311,7 +311,8 @@ export function draftDefaultsQueryOptions(
   return queryOptions<DraftDefaults>({
     queryKey: dashboardQueryKeys.draftDefaults(projectId),
     queryFn: ({ signal }) => client.draftDefaults(projectId, signal),
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchInterval: 30_000,
     retry: networkRetry,
     enabled: Boolean(projectId),
   });

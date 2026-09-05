@@ -517,17 +517,9 @@ export class DashboardServerImpl implements DashboardServer {
         const browserCommand = command as Parameters<
           typeof service.retryRun
         >[1];
-        const thread = service.repository.getThread(threadId);
-        const resolvedDefaults =
-          browserCommand.model || !thread
-            ? undefined
-            : this.application.resolveDraftDefaults(thread.projectId).selection;
         return this.withUploadedImages(imageBuffers, (images, release) =>
           service.retryRun(threadId, {
             ...browserCommand,
-            ...(resolvedDefaults === undefined
-              ? {}
-              : { model: resolvedDefaults }),
             ...(images.length > 0 ? { images, releaseImages: release } : {}),
           }),
         );

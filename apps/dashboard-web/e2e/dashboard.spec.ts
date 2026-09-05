@@ -276,6 +276,20 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
+  await page.route('**/api/projects/p/draft-defaults', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        selection: {
+          provider: 'openai-codex',
+          model: 'careful',
+          thinking: 'high',
+          serviceTier: 'fast',
+        },
+        source: 'project',
+      }),
+    }),
+  );
   await page.route('**/trpc/composerCommands', async (route) =>
     route.fulfill({
       contentType: 'application/json',

@@ -938,8 +938,8 @@ describe('workspace-first agent navigation', () => {
         runtimes,
       ),
     ).toMatchObject({
-      model: { id: 'configured/default', alias: 'default' },
-      effort: { full: 'low', compact: 'l', color: 'green' },
+      model: { id: 'configured/spark', alias: 'spark' },
+      effort: { full: '? effort', compact: '?', color: 'purple' },
     });
   });
 
