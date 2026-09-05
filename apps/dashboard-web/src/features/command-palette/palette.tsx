@@ -18,7 +18,7 @@ import {
 import { useDashboardNavigate } from '../../routes/navigation';
 import { errorMessage } from '../../shared/lib/error-message';
 import { useDashboardSurfaces } from '../dashboard-surface-context';
-import { DashboardTime, timestampDate } from '../timestamp';
+import { DashboardTime } from '../timestamp';
 import {
   type PaletteGroup,
   type PaletteMatchRange,
@@ -34,8 +34,8 @@ const SEARCH_GROUP_ORDER: readonly PaletteGroup[] = [
   'Projects',
 ];
 const DEFAULT_GROUP_ORDER: readonly PaletteGroup[] = [
-  'Actions',
   'Threads',
+  'Actions',
   'Navigation',
   'Projects',
 ];
@@ -145,18 +145,6 @@ function groupedResults(
 
 function isEnabled(result: PaletteSearchResult): boolean {
   return result.item.kind !== 'action' || !result.item.needsInput;
-}
-
-function creationDate(timestamp: number): string | undefined {
-  const date = timestamp > 0 ? timestampDate(timestamp) : undefined;
-  if (!date) return undefined;
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    ...(date.getFullYear() === new Date().getFullYear()
-      ? {}
-      : { year: 'numeric' }),
-  }).format(date);
 }
 
 export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -335,20 +323,36 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
         aria-label="Commands and navigation"
       >
         {groups.map(({ group, items: groupItems }) => {
+          const contextualAction =
+            group === 'Actions'
+              ? (groupItems.find(
+                  (result) =>
+                    result.item.kind === 'action' &&
+                    result.item.contextual &&
+                    result.matches.meta?.length,
+                ) ??
+                groupItems.find(
+                  (result) =>
+                    result.item.kind === 'action' && result.item.contextual,
+                ))
+              : undefined;
           return (
             <fieldset className="palette-group" key={group}>
               <legend>{group}</legend>
+              {contextualAction?.item.meta && (
+                <p className="palette-action-scope" data-palette-action-scope>
+                  <span>Scope: </span>
+                  <HighlightedPaletteText
+                    text={contextualAction.item.meta}
+                    ranges={contextualAction.matches.meta}
+                  />
+                </p>
+              )}
               {groupItems.map((result) => {
                 const index = orderedResults.indexOf(result);
                 const { item, matches } = result;
                 const active = item.id === resolvedActiveId;
                 const disabled = !isEnabled(result);
-                const threadCreatedDate = item.thread
-                  ? timestampDate(item.thread.createdAt)
-                  : undefined;
-                const threadCreatedLabel = item.thread
-                  ? creationDate(item.thread.createdAt)
-                  : undefined;
                 return (
                   <button
                     type="button"
@@ -410,15 +414,6 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
                                 ranges={matches.description}
                               />
                             </span>
-                            {threadCreatedDate && threadCreatedLabel && (
-                              <time
-                                className="palette-thread-created"
-                                dateTime={threadCreatedDate.toISOString()}
-                                title={threadCreatedDate.toLocaleString()}
-                              >
-                                created {threadCreatedLabel}
-                              </time>
-                            )}
                           </small>
                         </>
                       ) : (
@@ -436,14 +431,15 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
                               ranges={matches.description}
                             />
                           </small>
-                          {item.meta && (
-                            <small className="palette-item-meta">
-                              <HighlightedPaletteText
-                                text={item.meta}
-                                ranges={matches.meta}
-                              />
-                            </small>
-                          )}
+                          {item.meta &&
+                            (item.kind !== 'action' || !item.contextual) && (
+                              <small className="palette-item-meta">
+                                <HighlightedPaletteText
+                                  text={item.meta}
+                                  ranges={matches.meta}
+                                />
+                              </small>
+                            )}
                         </>
                       )}
                     </span>
@@ -469,6 +465,7 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
         <span>↑↓ navigate</span>
         <span>Enter run</span>
         <span>Esc clear / close</span>
+        <span>Hold ⌘ for thread shortcuts</span>
         <span>&gt; actions only</span>
       </footer>
     </div>
