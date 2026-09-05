@@ -3,8 +3,10 @@ import { draftPath } from '../drafts';
 import type { AgentThreadRow } from './model';
 import {
   agentThreadRows,
+  agentThreadShortcutTargetIds,
   bulkThreadActions,
   canSettleThread,
+  displayedAgentThreadRows,
   durableThreadForSession,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
@@ -536,6 +538,42 @@ describe('agent thread view model', () => {
     expect(
       durableThreadForSession(snapshot, 'conflict-session', [], links),
     ).toBeUndefined();
+  });
+
+  it('numbers only the displayed shelf rows in sidebar order', () => {
+    const sections = sectionAgentThreadRows([
+      {
+        ...row('pinned', 'Dashboard'),
+        durableThread: {
+          threadId: 'thread-pinned',
+          pinnedAt: 1,
+          hasActiveRun: false,
+        },
+      },
+      row('active', 'Dashboard'),
+      {
+        ...row('settled', 'Dashboard'),
+        durableThread: {
+          threadId: 'thread-settled',
+          settledAt: 1,
+          hasActiveRun: false,
+        },
+      },
+      {
+        ...row('archived', 'Dashboard'),
+        durableThread: {
+          threadId: 'thread-archived',
+          archivedAt: 1,
+          hasActiveRun: false,
+        },
+      },
+    ]);
+    const displayed = displayedAgentThreadRows(sections, sections.settled, []);
+    expect(agentThreadShortcutTargetIds(displayed)).toEqual([
+      'pinned',
+      'active',
+      'settled',
+    ]);
   });
 
   it('partitions pinned rows globally before active and archived', () => {

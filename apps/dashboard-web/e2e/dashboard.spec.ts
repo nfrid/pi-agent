@@ -1077,9 +1077,30 @@ test('desktop project scope filters threads and starts project threads @desktop'
     nav.getByRole('button', { name: /Two thread ready/ }),
   ).toBeVisible();
   const activeThread = nav.locator('[data-row-density="card"]').first();
+  await expect(activeThread.locator('.threadCopy > *')).toHaveCount(2);
   await expect(activeThread).toContainText(/One|Two/);
   await expect(activeThread).toContainText('Resumes on send');
   await expect(activeThread).not.toContainText('/work/');
+
+  await page.keyboard.down('Meta');
+  await expect.poll(() => nav.locator('[data-shortcut-hint]').count()).toBe(2);
+  expect(await nav.locator('[data-shortcut-hint]').allTextContents()).toEqual([
+    '1',
+    '2',
+  ]);
+  await page.keyboard.press('2');
+  await expect(page).toHaveURL(/\/sessions\/two-session$/u);
+  await page.keyboard.up('Meta');
+  await page.goBack();
+  await expect(nav.locator('[data-shortcut-hint]')).toHaveCount(0);
+  await nav
+    .getByRole('combobox', { name: 'Project scope' })
+    .selectOption('one');
+  await page.keyboard.down('Meta');
+  await expect.poll(() => nav.locator('[data-shortcut-hint]').count()).toBe(1);
+  await page.keyboard.press('2');
+  await expect(page).toHaveURL(/\/$/u);
+  await page.keyboard.up('Meta');
   await nav.getByRole('button', { name: /New thread/ }).click();
   const projectChooser = page.getByRole('dialog', {
     name: 'Choose a project',
@@ -2122,23 +2143,23 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   await expect(palette.getByRole('button', { name: /Clear/ })).toHaveCount(0);
   await search.press('Control+j');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Abort run',
+    'Dashboard agent',
   );
   await search.press('Control+k');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'New thread',
+    'Dashboard',
   );
   await search.press('End');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Projects',
+    'Abort run',
   );
   await search.press('ArrowDown');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Projects',
+    'Abort run',
   );
   await search.press('Home');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'New thread',
+    'Dashboard',
   );
   await search.press('PageDown');
   await expect(palette.getByRole('option', { selected: true })).toHaveAttribute(
@@ -2147,7 +2168,7 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
   );
   await search.press('PageUp');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'New thread',
+    'Dashboard',
   );
   const paletteBox = await palette.boundingBox();
   expect(paletteBox).not.toBeNull();
@@ -2177,10 +2198,7 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
     'Dashboard project / feature/palette',
   );
   await expect(fuzzyResult).toContainText('ready');
-  await expect(fuzzyResult.locator('.palette-thread-created')).toHaveAttribute(
-    'datetime',
-    '1970-01-01T00:00:00.001Z',
-  );
+  await expect(fuzzyResult.locator('.palette-thread-created')).toHaveCount(0);
   await expect(
     fuzzyResult.locator('.palette-thread-location > span').first(),
   ).toHaveAttribute(

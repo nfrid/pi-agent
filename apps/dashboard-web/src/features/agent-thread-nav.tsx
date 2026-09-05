@@ -36,9 +36,11 @@ import {
 import {
   type AgentThreadRow,
   agentThreadRows,
+  agentThreadShortcutTargetIds,
   type BulkThreadAction,
   bulkThreadActions,
   canSettleThread,
+  displayedAgentThreadRows,
   filterAgentThreadRows,
   hiddenAgentThreadRowCount,
   isArchivedThread,
@@ -295,6 +297,7 @@ function AgentThreadLink({
   checkouts,
   preferences,
   inheritedDefault,
+  shortcutHint,
 }: {
   row: AgentThreadRow;
   selected: boolean;
@@ -310,6 +313,7 @@ function AgentThreadLink({
   checkouts: readonly CheckoutSummary[];
   preferences: ModelDisplayPreferences;
   inheritedDefault?: ModelSelection;
+  shortcutHint?: number;
 }) {
   const timestamp =
     density === 'slim' &&
@@ -325,7 +329,6 @@ function AgentThreadLink({
     timestamp,
     inheritedDefault,
   );
-  const showDetails = density === 'card';
   return (
     <button
       {...lifecycleProps}
@@ -339,17 +342,27 @@ function AgentThreadLink({
       aria-label={`${row.title} ${lifecycleStatus ?? statusLabel(row)}${unread ? ' unread' : ''}${bulkSelected ? ' selected for bulk actions' : ''}`}
       onClick={onSelect}
     >
+      {shortcutHint !== undefined && (
+        <kbd
+          className={styles.threadShortcutHint}
+          data-shortcut-hint={shortcutHint}
+        >
+          {shortcutHint}
+        </kbd>
+      )}
       <span className={`agent-thread-copy ${styles.threadCopy}`}>
-        <span className={styles.threadWorkspace} data-row-content="project">
-          {row.projectId && (
-            <ProjectIcon
-              projectId={row.projectId}
-              title={row.projectName}
-              size="tiny"
-            />
-          )}
-          <span className={styles.threadWorkspaceName}>{row.projectName}</span>
-          {density === 'slim' && (
+        <span className={styles.threadMetadataRow}>
+          <span className={styles.threadWorkspace} data-row-content="project">
+            {row.projectId && (
+              <ProjectIcon
+                projectId={row.projectId}
+                title={row.projectName}
+                size="tiny"
+              />
+            )}
+            <span className={styles.threadWorkspaceName}>
+              {row.projectName}
+            </span>
             <span className={styles.threadWorkspaceCheckout}>
               <span
                 className={styles.threadWorkspaceSeparator}
@@ -365,39 +378,17 @@ function AgentThreadLink({
                 {details.branch}
               </span>
             </span>
-          )}
-          {density === 'card' && row.durableThread?.pinnedAt !== undefined && (
-            <span
-              className={styles.threadPin}
-              title="Pinned"
-              role="img"
-              aria-label="Pinned"
-            >
-              •
-            </span>
-          )}
-          <span className={styles.threadMeta}>
-            {density === 'card' ? (
-              (lifecycleStatus ?? statusLabel(row))
-            ) : timestamp === undefined ? (
-              (lifecycleStatus ?? statusLabel(row))
-            ) : (
-              <DashboardTime
-                className={`agent-thread-time ${styles.threadTime}`}
-                timestamp={timestamp}
-                context="sidebar-relative"
-              />
+            {row.durableThread?.pinnedAt !== undefined && (
+              <span
+                className={styles.threadPin}
+                title="Pinned"
+                role="img"
+                aria-label="Pinned"
+              >
+                •
+              </span>
             )}
-            <span
-              className={`agent-thread-glyph ${styles.threadGlyph}`}
-              aria-hidden="true"
-            >
-              {lifecycleStatus ? '◐' : statusGlyph(row.status)}
-            </span>
           </span>
-        </span>
-        <strong>{row.title}</strong>
-        {showDetails && (
           <small
             className={styles.threadDetails}
             data-row-content="details"
@@ -413,12 +404,6 @@ function AgentThreadLink({
                 : []),
             ].join('; ')}
           >
-            <span
-              className={styles.threadCheckout}
-              data-checkout-kind={details.checkoutKind}
-            >
-              {details.branch}
-            </span>
             <span
               className={styles.threadModel}
               style={details.model ? { color: details.model.color } : undefined}
@@ -444,7 +429,7 @@ function AgentThreadLink({
                 </span>
               </>
             )}
-            {details.time !== undefined && (
+            {density === 'card' && details.time !== undefined && (
               <DashboardTime
                 className={`agent-thread-time ${styles.threadTime}`}
                 timestamp={details.time}
@@ -452,7 +437,27 @@ function AgentThreadLink({
               />
             )}
           </small>
-        )}
+          <span className={styles.threadMeta}>
+            {density === 'card' ? (
+              (lifecycleStatus ?? statusLabel(row))
+            ) : timestamp === undefined ? (
+              (lifecycleStatus ?? statusLabel(row))
+            ) : (
+              <DashboardTime
+                className={`agent-thread-time ${styles.threadTime}`}
+                timestamp={timestamp}
+                context="sidebar-relative"
+              />
+            )}
+            <span
+              className={`agent-thread-glyph ${styles.threadGlyph}`}
+              aria-hidden="true"
+            >
+              {lifecycleStatus ? '◐' : statusGlyph(row.status)}
+            </span>
+          </span>
+        </span>
+        <strong>{row.title}</strong>
       </span>
     </button>
   );
@@ -489,6 +494,10 @@ export function AgentThreadNav({
     unsettleThreadMutationOptions(dashboardHttpClient),
   );
   const [query, setQuery] = useState('');
+  const [shortcutTargetIds, setShortcutTargetIds] = useState<readonly string[]>(
+    [],
+  );
+  const [shortcutHintsVisible, setShortcutHintsVisible] = useState(false);
   const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [projectScope, setProjectScope] = useState('all');
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
@@ -505,6 +514,12 @@ export function AgentThreadNav({
   const [bulkError, setBulkError] = useState<string | undefined>(undefined);
   const modelDisplayPreferences = useModelDisplayPreferences();
   const selectionAnchorId = useRef<string | undefined>(undefined);
+  const displayedNavigationRowsRef = useRef<readonly AgentThreadRow[]>([]);
+  const shortcutTargetIdsRef = useRef<readonly string[]>([]);
+  const shortcutTimerRef = useRef<number | undefined>(undefined);
+  const selectRef = useRef<(id: string) => void>(() => undefined);
+  const surfacesRef = useRef(surfaces);
+  const selectionDisabledRef = useRef(false);
   useDrawerHistory(mode === 'session' && open, () => onOpenChange?.(false));
   const drafts = useDrafts();
   const {
@@ -635,6 +650,15 @@ export function AgentThreadNav({
         : sections.archived.filter((row) => row.id === currentSessionId),
     [archivedExpanded, currentSessionId, query, sections.archived],
   );
+  const displayedNavigationRows = useMemo(
+    () =>
+      displayedAgentThreadRows(
+        sections,
+        displayedCompletedRows,
+        displayedArchivedRows,
+      ),
+    [displayedArchivedRows, displayedCompletedRows, sections],
+  );
   const selectableRows = useMemo(
     () =>
       [
@@ -742,6 +766,98 @@ export function AgentThreadNav({
     go(row?.draft ? draftPath(id) : `/sessions/${encodeURIComponent(id)}`);
     if (mode === 'session') onOpenChange?.(false);
   };
+  displayedNavigationRowsRef.current = displayedNavigationRows;
+  selectRef.current = select;
+  surfacesRef.current = surfaces;
+  selectionDisabledRef.current = bulkPendingAction !== undefined;
+  useEffect(() => {
+    const clearShortcutGesture = () => {
+      if (shortcutTimerRef.current !== undefined) {
+        window.clearTimeout(shortcutTimerRef.current);
+        shortcutTimerRef.current = undefined;
+      }
+      shortcutTargetIdsRef.current = [];
+      setShortcutTargetIds([]);
+      setShortcutHintsVisible(false);
+    };
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return (
+        target.isContentEditable ||
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
+        target.getAttribute('role') === 'combobox'
+      );
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Meta' && !event.repeat) {
+        if (
+          event.defaultPrevented ||
+          isEditableTarget(event.target) ||
+          selectionDisabledRef.current ||
+          surfacesRef.current?.stack.length
+        ) {
+          clearShortcutGesture();
+          return;
+        }
+        const targetIds = agentThreadShortcutTargetIds(
+          displayedNavigationRowsRef.current,
+        );
+        shortcutTargetIdsRef.current = targetIds;
+        setShortcutTargetIds(targetIds);
+        if (targetIds.length) {
+          shortcutTimerRef.current = window.setTimeout(() => {
+            shortcutTimerRef.current = undefined;
+            setShortcutHintsVisible(true);
+          }, 250);
+        }
+        return;
+      }
+      if (
+        !event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        event.defaultPrevented ||
+        isEditableTarget(event.target) ||
+        selectionDisabledRef.current ||
+        surfacesRef.current?.stack.length
+      )
+        return;
+      const key = Number(event.key);
+      const targetId =
+        Number.isInteger(key) && key >= 1 && key <= 9
+          ? shortcutTargetIdsRef.current[key - 1]
+          : undefined;
+      if (!targetId) return;
+      event.preventDefault();
+      selectRef.current(targetId);
+    };
+    const onKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Meta') clearShortcutGesture();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', clearShortcutGesture);
+    document.addEventListener('visibilitychange', clearShortcutGesture);
+    return () => {
+      clearShortcutGesture();
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', clearShortcutGesture);
+      document.removeEventListener('visibilitychange', clearShortcutGesture);
+    };
+  }, []);
+  useEffect(() => {
+    if (surfaces?.stack.length || bulkPendingAction !== undefined) {
+      if (shortcutTimerRef.current !== undefined) {
+        window.clearTimeout(shortcutTimerRef.current);
+        shortcutTimerRef.current = undefined;
+      }
+      shortcutTargetIdsRef.current = [];
+      setShortcutTargetIds([]);
+      setShortcutHintsVisible(false);
+    }
+  }, [bulkPendingAction, surfaces?.stack.length]);
   const handleThreadClick = (
     row: AgentThreadRow,
     event: MouseEvent<HTMLButtonElement>,
@@ -839,6 +955,11 @@ export function AgentThreadNav({
     if (mode === 'session') onOpenChange?.(false);
   };
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
+    const shortcutIndex = shortcutTargetIds.indexOf(row.id);
+    const shortcutHint =
+      shortcutHintsVisible && shortcutIndex >= 0
+        ? shortcutIndex + 1
+        : undefined;
     const selected = row.draft
       ? row.id === currentDraftId
       : row.id === currentSessionId;
@@ -910,6 +1031,7 @@ export function AgentThreadNav({
               ? draftDefaultsByProject.get(row.draft.projectId)
               : undefined
           }
+          shortcutHint={shortcutHint}
         />
         {row.draft && (
           <QuickDeleteDraftAction draftId={row.id} title={row.title} />

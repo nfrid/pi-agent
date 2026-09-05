@@ -41,13 +41,13 @@
 .palette-search {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin: 14px 14px 10px;
+  gap: 7px;
+  margin: 10px 12px 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
   color: var(--dim);
-  padding: 10px 11px;
+  padding: 7px 9px;
 }
 .palette-search:focus-within {
   border-color: var(--purple);
@@ -111,15 +111,15 @@
 }
 .palette-list button[role="option"] {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 19px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
-  padding: 8px 9px;
+  padding: 5px 7px;
   cursor: pointer;
   text-align: left;
 }
@@ -136,8 +136,8 @@
 }
 .palette-item-icon {
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   place-items: center;
   border: 1px solid var(--line-soft);
   border-radius: 5px;
@@ -165,6 +165,15 @@
 .palette-item-copy .palette-item-meta {
   color: var(--dim);
 }
+.palette-action-scope {
+  min-height: 13px;
+  margin: 0 9px 2px;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .palette-thread-heading,
 .palette-thread-location {
   display: flex;
@@ -180,8 +189,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.palette-thread-state,
-.palette-thread-created {
+.palette-thread-state {
   display: inline-flex;
   flex: none;
   align-items: baseline;
@@ -190,9 +198,6 @@
   font-size: 9px;
   font-weight: 650;
   white-space: nowrap;
-}
-.palette-thread-created {
-  font-weight: 500;
 }
 .palette-list button[data-thread-lifecycle="active"] .palette-item-icon,
 .palette-list button[data-thread-lifecycle="active"] .palette-thread-state {
@@ -298,8 +303,8 @@
 }
 @media (min-width: 701px) {
   .command-palette-surface[data-surface-kind="utility"] {
-    width: min(660px, calc(100vw - 48px));
-    max-height: min(680px, calc(100vh - 48px));
+    width: min(580px, calc(100vw - 32px));
+    max-height: min(600px, calc(100vh - 32px));
   }
   .new-thread-project-surface[data-surface-kind="utility"] {
     width: min(440px, calc(100vw - 48px));

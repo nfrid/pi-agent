@@ -550,6 +550,33 @@ button.shelfHeading:focus-visible {
   min-width: 0;
   gap: 5px;
 }
+.threadMetadataRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+.threadShortcutHint {
+  position: absolute;
+  z-index: 3;
+  top: 3px;
+  right: 4px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border: 1px solid var(--purple);
+  border-radius: 4px;
+  background: var(--bg-alt);
+  color: var(--purple);
+  padding: 0;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+  pointer-events: none;
+}
 .threadCopy strong,
 .threadCopy small {
   min-width: 0;
@@ -579,6 +606,7 @@ button.shelfHeading:focus-visible {
 .threadWorkspace {
   display: flex;
   min-width: 0;
+  flex: 0 1 42%;
   align-items: center;
   gap: 5px;
   overflow: visible;
@@ -593,7 +621,7 @@ button.shelfHeading:focus-visible {
 }
 .threadWorkspaceName {
   min-width: 0;
-  flex: none;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -646,8 +674,10 @@ button.shelfHeading:focus-visible {
 .threadDetails {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   align-items: center;
   gap: 3px;
+  overflow: hidden;
 }
 .threadCheckout,
 .threadModel,

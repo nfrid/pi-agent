@@ -487,6 +487,25 @@ export function sectionAgentThreadRows(
   };
 }
 
+export function displayedAgentThreadRows(
+  sections: AgentThreadSections,
+  displayedSettled: readonly AgentThreadRow[] = sections.settled,
+  displayedArchived: readonly AgentThreadRow[] = sections.archived,
+): AgentThreadRow[] {
+  return [
+    ...sections.pinned,
+    ...sections.active,
+    ...displayedSettled,
+    ...displayedArchived,
+  ];
+}
+
+export function agentThreadShortcutTargetIds(
+  rows: readonly AgentThreadRow[],
+): string[] {
+  return rows.slice(0, 9).map((row) => row.id);
+}
+
 export function hiddenAgentThreadRowCount(
   rows: readonly AgentThreadRow[],
   visibleRows: readonly AgentThreadRow[],
