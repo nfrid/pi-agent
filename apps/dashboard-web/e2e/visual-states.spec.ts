@@ -250,6 +250,19 @@ test('waiting thread presents an actionable waiting state @desktop', async ({
   await expect(
     page.getByText('The checklist is ready for your review.', { exact: true }),
   ).toBeVisible();
+  const waitingGlyph = page
+    .getByRole('button', { name: /Waiting for approval waiting/ })
+    .locator('.agent-thread-glyph');
+  await expect(waitingGlyph).toBeVisible();
+  const waitingGeometry = await waitingGlyph.evaluate((glyph) => {
+    const row = glyph.closest('.agent-thread-row');
+    if (!row) throw new Error('waiting row missing');
+    const glyphBox = glyph.getBoundingClientRect();
+    const rowBox = row.getBoundingClientRect();
+    return { width: glyphBox.width, rightInset: rowBox.right - glyphBox.right };
+  });
+  expect(waitingGeometry.width).toBeGreaterThanOrEqual(10);
+  expect(waitingGeometry.rightInset).toBeGreaterThanOrEqual(0);
   await expect(page).toHaveScreenshot('waiting-thread-desktop.png', {
     animations: 'disabled',
     caret: 'hide',

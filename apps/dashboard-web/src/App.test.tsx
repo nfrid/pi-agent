@@ -254,6 +254,43 @@ describe('project thread navigation', () => {
 });
 
 describe('command palette', () => {
+  it('puts matching threads before actions while keeping > action-only mode', () => {
+    const items = paletteItems({
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          online: true,
+          liveState: 'working',
+          cwd: '/workspace',
+          session: { id: 'session-1', title: 'Thread session', entries: [] },
+          capabilities: {
+            manifests: [
+              {
+                actions: [{ id: 'thread-action', title: 'Thread action' }],
+              },
+            ],
+          },
+        },
+      ],
+      sessions: [
+        {
+          id: 'thread-session',
+          cwd: '/workspace',
+          title: 'Thread needle',
+          updatedAt: 1,
+        },
+      ],
+      projects: [],
+    } as never);
+    const regular = searchPaletteItems(items, 'thread');
+    expect(regular[0]?.item.group).toBe('Threads');
+    expect(
+      searchPaletteItems(items, '> thread').every(
+        (result) => result.item.group === 'Actions',
+      ),
+    ).toBe(true);
+  });
+
   it('keeps navigation available and indexes every ordinary thread', () => {
     const snapshot = {
       runtimes: [],

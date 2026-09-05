@@ -591,9 +591,10 @@ button.shelfHeading:focus-visible {
   place-items: center;
   border: 1px solid currentColor;
   border-radius: 3px;
-  background: transparent;
+  background: var(--bg-alt);
   color: inherit;
   padding: 0 3px;
+  box-shadow: 0 0 0 2px var(--bg-alt);
   font: inherit;
   font-size: 9px;
   font-weight: 700;
@@ -677,6 +678,7 @@ button.shelfHeading:focus-visible {
 }
 .threadMeta {
   display: inline-flex;
+  min-width: max-content;
   align-items: center;
   gap: 4px;
   margin-left: 0;
@@ -687,7 +689,12 @@ button.shelfHeading:focus-visible {
   text-transform: none;
 }
 .threadMeta .threadGlyph {
-  width: 8px;
+  box-sizing: content-box;
+  width: 10px;
+  min-width: 10px;
+  padding-inline: 1px;
+  overflow: visible;
+  text-align: center;
 }
 .threadPin {
   flex: none;

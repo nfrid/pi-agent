@@ -928,12 +928,12 @@ export function AgentThreadNav({
   const newThreadHint = useModifierShortcut(
     'n',
     openNewThread,
-    mode === 'home' || open,
+    mode === 'home' || !isMobile || open,
   );
   const settingsHint = useModifierShortcut(
     's',
     openSettings,
-    mode === 'home' || open,
+    mode === 'home' || !isMobile || open,
   );
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
     const shortcutIndex = shortcutTargetIds.indexOf(row.id);
