@@ -289,10 +289,31 @@ export type ModelDisplayPreferences = Static<
 
 /** Durable settings exchanged by the dashboard settings endpoints. */
 export const DashboardSettingsSchema = Type.Object(
-  { modelDisplayPreferences: ModelDisplayPreferencesSchema },
+  {
+    modelDisplayPreferences: ModelDisplayPreferencesSchema,
+    defaultModel: Type.Optional(ModelSelectionSchema),
+  },
   { additionalProperties: false },
 );
 export type DashboardSettings = Static<typeof DashboardSettingsSchema>;
+
+export const DraftDefaultsSourceSchema = Type.Union([
+  Type.Literal('project'),
+  Type.Literal('dashboard'),
+  Type.Literal('recent-thread'),
+  Type.Literal('pi'),
+]);
+export type DraftDefaultsSource = Static<typeof DraftDefaultsSourceSchema>;
+
+/** Server-resolved inherited selection for a new dashboard draft. */
+export const DraftDefaultsSchema = Type.Object(
+  {
+    selection: Type.Optional(ModelSelectionSchema),
+    source: Type.Optional(DraftDefaultsSourceSchema),
+  },
+  { additionalProperties: false },
+);
+export type DraftDefaults = Static<typeof DraftDefaultsSchema>;
 
 export const ModelDisplayPreferenceImportSchema = Type.Object(
   { modelDisplayPreferences: ModelDisplayPreferencesSchema },
@@ -1459,6 +1480,8 @@ export const SessionIndexEntrySchema = Type.Object(
     lastKnownContextTokens: Type.Optional(Type.Number({ minimum: 0 })),
     /** Session header timestamp, used for stable chronological ordering. */
     startedAt: Type.Optional(FiniteNumberSchema),
+    /** Timestamp of the latest user message on the active branch. */
+    lastUserMessageAt: Type.Optional(FiniteNumberSchema),
     updatedAt: FiniteNumberSchema,
     activeRuntimeId: Type.Optional(IdentifierSchema),
     entryCount: Type.Optional(Type.Integer({ minimum: 0 })),

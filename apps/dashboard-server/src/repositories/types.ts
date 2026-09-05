@@ -31,6 +31,11 @@ export interface ModelDisplayPreferenceRepository {
   importMissing(preferences: ModelDisplayPreferences): DashboardSettings;
 }
 
+export interface DashboardSettingsRepository {
+  readDefaultModel(): ModelSelection | undefined;
+  setDefaultModel(model: ModelSelection | null): ModelSelection | undefined;
+}
+
 export interface PushSubscriptionRecord {
   endpoint: string;
   subscription: unknown;
@@ -184,11 +189,10 @@ export type ProjectPatch = Partial<
     | 'rootPath'
     | 'repositoryIdentity'
     | 'defaultBaseBranch'
-    | 'defaultModel'
     | 'defaultIsolation'
     | 'maxParallelRuns'
   >
->;
+> & { defaultModel?: ModelSelection | null };
 export type CheckoutPatch = Partial<
   Pick<Checkout, 'kind' | 'path' | 'branch' | 'baseSha'>
 >;

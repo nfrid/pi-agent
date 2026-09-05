@@ -12,6 +12,7 @@ import type {
 } from '@pi-dashboard/protocol';
 import { credentialHash } from './metadata-credentials.js';
 import { runMigrations } from './repositories/migrations.js';
+import { SqliteDashboardSettingsRepository } from './repositories/sqlite-dashboard-settings-repository.js';
 import { SqliteMetadataRepository } from './repositories/sqlite-metadata-repository.js';
 import { SqliteModelDisplayPreferenceRepository } from './repositories/sqlite-model-display-preference-repository.js';
 import { SqliteNotificationRepository } from './repositories/sqlite-notification-repository.js';
@@ -45,6 +46,7 @@ export class MetadataStore {
   readonly db: DatabaseSync;
   readonly metadata: SqliteMetadataRepository;
   readonly modelDisplayPreferences: SqliteModelDisplayPreferenceRepository;
+  readonly dashboardSettings: SqliteDashboardSettingsRepository;
   readonly notifications: SqliteNotificationRepository;
   /** Durable project/thread/run state; runtime and transcript storage stay separate. */
   readonly orchestration: SqliteOrchestrationRepository;
@@ -70,6 +72,7 @@ export class MetadataStore {
     this.modelDisplayPreferences = new SqliteModelDisplayPreferenceRepository(
       this.db,
     );
+    this.dashboardSettings = new SqliteDashboardSettingsRepository(this.db);
     this.notifications = new SqliteNotificationRepository(this.db);
     this.orchestration = new SqliteOrchestrationRepository(this.db);
     this.usageHistory = new SqliteUsageHistoryRepository(this.db);
@@ -116,27 +119,45 @@ export class MetadataStore {
   }
 
   getDashboardSettings(): DashboardSettings {
+    return this.withDashboardDefault(this.modelDisplayPreferences.read());
+  }
+
+  private withDashboardDefault(settings: DashboardSettings): DashboardSettings {
+    const defaultModel = this.dashboardSettings.readDefaultModel();
     return {
-      modelDisplayPreferences:
-        this.modelDisplayPreferences.read().modelDisplayPreferences,
+      ...settings,
+      ...(defaultModel === undefined ? {} : { defaultModel }),
     };
+  }
+
+  updateDashboardDefaultModel(
+    model: import('@pi-dashboard/protocol').ModelSelection | null,
+  ): DashboardSettings {
+    this.dashboardSettings.setDefaultModel(model);
+    return this.getDashboardSettings();
   }
 
   updateModelDisplayPreference(
     modelKey: string,
     preference: ModelDisplayPreference,
   ): DashboardSettings {
-    return this.modelDisplayPreferences.set(modelKey, preference);
+    return this.withDashboardDefault(
+      this.modelDisplayPreferences.set(modelKey, preference),
+    );
   }
 
   resetModelDisplayPreference(modelKey: string): DashboardSettings {
-    return this.modelDisplayPreferences.reset(modelKey);
+    return this.withDashboardDefault(
+      this.modelDisplayPreferences.reset(modelKey),
+    );
   }
 
   importModelDisplayPreferences(
     preferences: ModelDisplayPreferences,
   ): DashboardSettings {
-    return this.modelDisplayPreferences.importMissing(preferences);
+    return this.withDashboardDefault(
+      this.modelDisplayPreferences.importMissing(preferences),
+    );
   }
 
   addNotification(event: NotificationEvent): void {

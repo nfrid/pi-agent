@@ -3,6 +3,7 @@ import {
   composerCommandsQueryOptions,
   createThreadMutationOptions,
   dashboardHttpClient,
+  draftDefaultsQueryOptions,
   retryThreadMutationOptions,
 } from '@pi-dashboard/client';
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
@@ -140,10 +141,16 @@ export function DraftThreadView({
   );
   const { initialDraft, text, updateText, clearDraft } =
     useComposerDraft(draftId);
+  const draftDefaults = useQuery(
+    draftDefaultsQueryOptions(
+      dashboardHttpClient,
+      fallbackDraft?.projectId ?? '',
+    ),
+  );
   const selectedModel = draftModelSelection(
     snapshot.runtimes,
     fallbackDraft?.model,
-    project?.defaultModel,
+    draftDefaults.data?.selection,
   );
   const attachments = useImageAttachments({
     enabled: draftModelSupportsImages(selectedModel, snapshot.runtimes),
@@ -249,11 +256,9 @@ export function DraftThreadView({
       const liveDraft =
         readDrafts().find((candidate) => candidate.id === draftId) ??
         fallbackDraft;
-      const submissionModel = draftModelSelection(
-        snapshot.runtimes,
-        liveDraft.model,
-        project.defaultModel,
-      );
+      // The server resolves inherited defaults at submission time. Sending
+      // only the persisted draft tuple avoids launching with stale settings.
+      const submissionModel = liveDraft.model;
       const location = locationForDraft(liveDraft);
       if (
         !liveDraft.promotedThreadId &&

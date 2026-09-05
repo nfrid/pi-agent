@@ -49,6 +49,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 vi.mock('@pi-dashboard/client', () => ({
   composerCommandsQueryOptions: vi.fn(() => ({})),
+  draftDefaultsQueryOptions: vi.fn(() => ({})),
   createThreadMutationOptions: vi.fn(() => ({})),
   retryThreadMutationOptions: vi.fn(() => ({})),
   dashboardHttpClient: { createThreadWithImages, retryThreadWithImages },
@@ -257,7 +258,7 @@ describe('draft thread controls', () => {
     ] as never;
     expect(
       draftModelSelection(runtimes, { provider: 'test', model: 'spark' }),
-    ).toEqual({ provider: 'test', model: 'sol', thinking: 'medium' });
+    ).toEqual({ provider: 'test', model: 'spark' });
     expect(
       draftModelSelection(runtimes, {
         provider: 'test',
@@ -278,11 +279,7 @@ describe('draft thread controls', () => {
         thinkingLevels: ['off', 'low', 'high'],
       },
     ] as never;
-    expect(draftModelSelection(runtimes)).toEqual({
-      provider: 'test',
-      model: 'fast',
-      thinking: 'high',
-    });
+    expect(draftModelSelection(runtimes)).toBeUndefined();
   });
 
   it('shows startup in place and only transitions when the runtime appears', async () => {
@@ -467,7 +464,8 @@ describe('draft thread promotion', () => {
     renderer.unmount();
   });
 
-  it('passes the selected model and effort into thread creation', async () => {
+  it('passes the explicit draft model and effort into thread creation', async () => {
+    draft.model = { provider: 'test', model: 'fast', thinking: 'high' };
     mutateAsync.mockResolvedValue({ thread: { id: 'thread-1' } });
     const modelSnapshot = {
       projects: [

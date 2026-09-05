@@ -43,7 +43,12 @@ import {
   type OrchestrationHost,
   type OrchestrationServiceOptions,
 } from './helpers.js';
-import { adoptProject, createProject, renameProject } from './projects.js';
+import {
+  adoptProject,
+  createProject,
+  renameProject,
+  updateProjectDefaultModel,
+} from './projects.js';
 import {
   cancelRun as cancelRunLifecycle,
   drain as drainLifecycle,
@@ -217,6 +222,13 @@ export class OrchestrationService implements OrchestrationHost {
     command: ProjectRenameCommand,
   ): Promise<unknown> {
     return renameProject(this, projectId, command);
+  }
+
+  async updateProjectDefaultModel(
+    projectId: string,
+    command: import('@pi-dashboard/protocol').ProjectDefaultModelCommand,
+  ): Promise<unknown> {
+    return updateProjectDefaultModel(this, projectId, command);
   }
 
   async adoptSession(

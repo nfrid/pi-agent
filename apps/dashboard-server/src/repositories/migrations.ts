@@ -865,6 +865,18 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       );
     },
   },
+  {
+    version: 20,
+    name: 'dashboard-default-model',
+    up(db) {
+      db.exec(`
+        CREATE TABLE dashboard_setting (
+          key TEXT NOT NULL PRIMARY KEY CHECK (length(key) BETWEEN 1 AND 128),
+          value_json TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

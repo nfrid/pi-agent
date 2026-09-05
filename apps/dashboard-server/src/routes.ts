@@ -14,14 +14,17 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   DelegateHistoryRunQuerySchema,
+  DraftDefaultsSchema,
   GitContextSchema,
   type ModelDisplayPreference,
   ModelDisplayPreferenceImportSchema,
   ModelDisplayPreferenceKeySchema,
   ModelDisplayPreferenceSchema,
+  ModelSelectionSchema,
   PinThreadCommandSchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
+  ProjectDefaultModelCommandSchema,
   ProjectRenameCommandSchema,
   parseExternalThreadCreateCommand,
   parseRetryCommand,
@@ -137,6 +140,9 @@ export interface DashboardRouteContext {
   ): Promise<AuthoritativeSessionSnapshot>;
   usage(): Promise<{ usage: unknown; error?: string }>;
   settings?(): DashboardSettings;
+  updateDashboardDefaultModel?(model: unknown): DashboardSettings;
+  resetDashboardDefaultModel?(): DashboardSettings;
+  draftDefaults?(projectId: string): unknown;
   updateModelDisplayPreference?(
     modelKey: string,
     preference: ModelDisplayPreference,
@@ -200,6 +206,10 @@ export interface DashboardRouteContext {
   vapidPublicKey(): string | null;
   adoptProject?(command: unknown): Promise<unknown>;
   renameProject?(projectId: string, command: unknown): Promise<unknown>;
+  updateProjectDefaultModel?(
+    projectId: string,
+    command: unknown,
+  ): Promise<unknown>;
   createThread?(
     projectId: string,
     command: unknown,
@@ -440,6 +450,35 @@ export const dashboardRoutes: FastifyPluginAsync<{
     { schema: { response: { 200: DashboardSettingsSchema } } },
     async () => context.settings?.() ?? { modelDisplayPreferences: {} },
   );
+  app.put(
+    '/api/settings/default-model',
+    {
+      schema: {
+        body: ModelSelectionSchema,
+        response: { 200: DashboardSettingsSchema },
+      },
+    },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.updateDashboardDefaultModel)(
+          request.body,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.delete(
+    '/api/settings/default-model',
+    { schema: { response: { 200: DashboardSettingsSchema } } },
+    async (_request, reply) => {
+      try {
+        return await requireOperation(context.resetDashboardDefaultModel)();
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.post(
     '/api/settings/model-display-preferences/import',
     {
@@ -567,12 +606,38 @@ export const dashboardRoutes: FastifyPluginAsync<{
   });
   app.patch<{ Params: { projectId: string } }>(
     '/api/projects/:projectId',
-    { schema: { body: ProjectRenameCommandSchema } },
+    {
+      schema: {
+        body: Type.Union([
+          ProjectRenameCommandSchema,
+          ProjectDefaultModelCommandSchema,
+        ]),
+      },
+    },
     async (request, reply) => {
       try {
+        const body = request.body as Record<string, unknown>;
+        if ('defaultModel' in body)
+          return await requireOperation(context.updateProjectDefaultModel)(
+            request.params.projectId,
+            body,
+          );
         return await requireOperation(context.renameProject)(
           request.params.projectId,
-          request.body,
+          body,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/draft-defaults',
+    { schema: { response: { 200: DraftDefaultsSchema } } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.draftDefaults)(
+          request.params.projectId,
         );
       } catch (error) {
         return sendError(reply, error);

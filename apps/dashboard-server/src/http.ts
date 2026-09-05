@@ -317,6 +317,20 @@ export class DashboardServerImpl implements DashboardServer {
         this.buildSessionSnapshot(id, undefined, sequence),
       usage: () => this.application.usage.get(),
       settings: () => this.metadata.getDashboardSettings(),
+      updateDashboardDefaultModel: (model) => {
+        const result = this.metadata.updateDashboardDefaultModel(
+          model as import('@pi-dashboard/protocol').ModelSelection,
+        );
+        this.publishChange();
+        return result;
+      },
+      resetDashboardDefaultModel: () => {
+        const result = this.metadata.updateDashboardDefaultModel(null);
+        this.publishChange();
+        return result;
+      },
+      draftDefaults: (projectId) =>
+        this.application.resolveDraftDefaults(projectId),
       updateModelDisplayPreference: (modelKey, preference) =>
         this.metadata.updateModelDisplayPreference(modelKey, preference),
       resetModelDisplayPreference: (modelKey) =>
@@ -447,12 +461,29 @@ export class DashboardServerImpl implements DashboardServer {
           command as Parameters<typeof service.renameProject>[1],
         );
       },
+      updateProjectDefaultModel: (projectId, command) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.updateProjectDefaultModel(
+          projectId,
+          command as Parameters<typeof service.updateProjectDefaultModel>[1],
+        );
+      },
       createThread: async (projectId, command, imageBuffers) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
+        const browserCommand = command as Parameters<
+          typeof service.createThread
+        >[1];
+        const resolvedDefaults = browserCommand.model
+          ? undefined
+          : this.application.resolveDraftDefaults(projectId).selection;
+        const inherited =
+          resolvedDefaults === undefined ? {} : { model: resolvedDefaults };
         return this.withUploadedImages(imageBuffers, (images, release) =>
           service.createThread(projectId, {
-            ...(command as Parameters<typeof service.createThread>[1]),
+            ...browserCommand,
+            ...inherited,
             ...(images.length > 0 ? { images, releaseImages: release } : {}),
           }),
         );
@@ -483,9 +514,20 @@ export class DashboardServerImpl implements DashboardServer {
       retryRun: async (threadId, command, imageBuffers) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
+        const browserCommand = command as Parameters<
+          typeof service.retryRun
+        >[1];
+        const thread = service.repository.getThread(threadId);
+        const resolvedDefaults =
+          browserCommand.model || !thread
+            ? undefined
+            : this.application.resolveDraftDefaults(thread.projectId).selection;
         return this.withUploadedImages(imageBuffers, (images, release) =>
           service.retryRun(threadId, {
-            ...(command as Parameters<typeof service.retryRun>[1]),
+            ...browserCommand,
+            ...(resolvedDefaults === undefined
+              ? {}
+              : { model: resolvedDefaults }),
             ...(images.length > 0 ? { images, releaseImages: release } : {}),
           }),
         );

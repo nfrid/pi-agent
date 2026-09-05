@@ -51,6 +51,7 @@ interface SessionLineDescriptor {
   readonly outlineKind?: SessionOutlineLandmark['kind'];
   readonly outlineLabel?: string;
   readonly timestamp?: number | string;
+  readonly userMessageAt?: number;
   readonly resume?: {
     readonly model?: { readonly provider: string; readonly model: string };
     readonly thinking?: string;
@@ -356,9 +357,7 @@ type BranchDescriptor = Pick<
 >;
 type IdentifiedBranchDescriptor = BranchDescriptor & { id: string };
 
-function timestampNumber(
-  value: number | string | undefined,
-): number | undefined {
+function timestampNumber(value: unknown): number | undefined {
   if (typeof value === 'number')
     return Number.isFinite(value) ? value : undefined;
   if (typeof value === 'string') {
@@ -647,6 +646,23 @@ function branchPageDescriptors(
   return { descriptors, leafId };
 }
 
+function lastUserMessageAtFromDescriptors(
+  index: SessionHistoryIndex,
+  leafId: string | undefined,
+): number | undefined {
+  if (!leafId) return undefined;
+  try {
+    const descriptors = branchPageDescriptors(index, leafId).descriptors;
+    for (let position = descriptors.length - 1; position >= 0; position -= 1) {
+      const value = descriptors[position]?.userMessageAt;
+      if (value !== undefined) return value;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 function resumeMetadataFromDescriptors(
   index: SessionHistoryIndex,
   leafId: string | undefined,
@@ -753,6 +769,51 @@ export class SessionIndex {
   get(id: string): SessionIndexEntry | undefined {
     const entry = this.files.get(id);
     return entry ? this.publicEntry(entry) : undefined;
+  }
+
+  /** Timestamp used to order recent user activity, optionally on a live leaf. */
+  lastUserMessageAt(id: string, leafId?: string): number | undefined {
+    const entry = this.files.get(id);
+    if (!entry) return undefined;
+    return leafId === undefined
+      ? entry.lastUserMessageAt
+      : lastUserMessageAtFromDescriptors(entry.historyIndex, leafId);
+  }
+
+  /** Resume tuple derived from the persisted active branch. */
+  resumeMetadata(
+    id: string,
+    leafId?: string,
+  ): Pick<
+    SessionIndexEntry,
+    'lastKnownModel' | 'lastKnownThinking' | 'lastKnownServiceTier'
+  > {
+    const entry = this.files.get(id);
+    if (!entry) return {};
+    if (leafId === undefined)
+      return {
+        ...(entry.lastKnownModel === undefined
+          ? {}
+          : { lastKnownModel: entry.lastKnownModel }),
+        ...(entry.lastKnownThinking === undefined
+          ? {}
+          : { lastKnownThinking: entry.lastKnownThinking }),
+        ...(entry.lastKnownServiceTier === undefined
+          ? {}
+          : { lastKnownServiceTier: entry.lastKnownServiceTier }),
+      };
+    const metadata = resumeMetadataFromDescriptors(entry.historyIndex, leafId);
+    return {
+      ...(metadata.lastKnownModel === undefined
+        ? {}
+        : { lastKnownModel: metadata.lastKnownModel }),
+      ...(metadata.lastKnownThinking === undefined
+        ? {}
+        : { lastKnownThinking: metadata.lastKnownThinking }),
+      ...(metadata.lastKnownServiceTier === undefined
+        ? {}
+        : { lastKnownServiceTier: metadata.lastKnownServiceTier }),
+    };
   }
 
   isAuxiliary(id: string): boolean {
@@ -1989,6 +2050,18 @@ export class SessionIndex {
               ...(isRecord(parsed) && Object.hasOwn(parsed, 'parentId')
                 ? { parentId: parsed.parentId }
                 : {}),
+              ...(isRecord(parsed) &&
+              parsed.type === 'message' &&
+              isRecord(parsed.message) &&
+              parsed.message.role === 'user' &&
+              timestampNumber(parsed.message.timestamp ?? parsed.timestamp) !==
+                undefined
+                ? {
+                    userMessageAt: timestampNumber(
+                      parsed.message.timestamp ?? parsed.timestamp,
+                    ),
+                  }
+                : {}),
               ...(isRecord(parsed) && typeof parsed.type === 'string'
                 ? { type: parsed.type }
                 : {}),
@@ -2141,6 +2214,10 @@ export class SessionIndex {
           })
             ? header.name.trim()
             : undefined;
+        const lastUserMessageAt = lastUserMessageAtFromDescriptors(
+          historyIndex,
+          latestEntryId,
+        );
         const entry: IndexedFile = {
           id,
           file: resolved,
@@ -2160,6 +2237,7 @@ export class SessionIndex {
               ? Date.parse(header.timestamp)
               : endStat.birthtimeMs,
           updatedAt: endStat.mtimeMs,
+          ...(lastUserMessageAt === undefined ? {} : { lastUserMessageAt }),
           ...resumeMetadataFromDescriptors(historyIndex, latestEntryId),
           header,
           lastEntryId,
