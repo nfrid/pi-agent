@@ -302,7 +302,7 @@
   font-size: 9px;
 }
 @media (min-width: 701px) {
-  .command-palette-surface[data-surface-kind="utility"] {
+  .surface-drawer.command-palette-surface[data-surface-kind="utility"] {
     width: min(580px, calc(100vw - 32px));
     max-height: min(600px, calc(100vh - 32px));
   }
