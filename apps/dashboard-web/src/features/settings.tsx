@@ -348,7 +348,9 @@ function DraftDefaultSettings({ snapshot }: { snapshot: BrowserSnapshot }) {
   ];
   const levels = [
     ...new Set([
-      ...runtimeOptions.thinkingLevels,
+      ...(runtimeOptions.thinkingLevels.length > 0
+        ? runtimeOptions.thinkingLevels
+        : ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']),
       ...(settingsQuery.data?.defaultModel?.thinking
         ? [settingsQuery.data.defaultModel.thinking]
         : []),

@@ -428,6 +428,10 @@ describe('draft thread promotion', () => {
     const form = renderer.root.findByType('form');
     expect(form.props['data-send-disabled']).toBe('true');
     expect(form.props['data-attachments-enabled']).toBe('false');
+    await act(async () => {
+      await form.props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(mutateAsync).not.toHaveBeenCalled();
     renderer.unmount();
   });
 

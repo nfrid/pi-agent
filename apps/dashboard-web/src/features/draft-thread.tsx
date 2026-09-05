@@ -249,6 +249,7 @@ export function DraftThreadView({
     if (
       (!prompt && attachments.attachments.length === 0) ||
       submitting ||
+      !modelResolutionReady ||
       createMutation.isPending ||
       retryMutation.isPending
     )

@@ -218,6 +218,12 @@ describe('settings drawer', () => {
         </QueryClientProvider>,
       );
     });
+    const effort = renderer.root.findByProps({
+      'aria-label': 'Dashboard effort',
+    });
+    expect(
+      effort.findAllByType('option').map((option) => option.props.value),
+    ).toContain('medium');
     const provider = renderer.root.findByProps({
       'aria-label': 'Dashboard provider',
     });
