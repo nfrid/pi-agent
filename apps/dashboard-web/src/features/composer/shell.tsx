@@ -1,4 +1,3 @@
-import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
   type ClipboardEventHandler,
   type FormEvent,
@@ -92,13 +91,12 @@ export function ComposerShell({
   onSelectImages,
   onRemoveImage,
   onPasteCapture,
-  editorRef,
   commands,
   cwd,
   onChange,
   placeholder,
   readOnly,
-  initialMarkdown,
+  markdown,
   submissionDisabled = false,
   sendDisabled,
   sendAriaLabel,
@@ -123,13 +121,12 @@ export function ComposerShell({
   onSelectImages: (files: readonly File[]) => void;
   onRemoveImage: (id: string) => void;
   onPasteCapture: ClipboardEventHandler<HTMLElement>;
-  editorRef: RefObject<MDXEditorMethods | null>;
   commands?: readonly ComposerCommandOption[];
   cwd?: string;
   onChange: (value: string) => void;
   placeholder: string;
   readOnly: boolean;
-  initialMarkdown?: string;
+  markdown: string;
   submissionDisabled?: boolean;
   sendDisabled: boolean;
   sendAriaLabel: string;
@@ -170,8 +167,7 @@ export function ComposerShell({
           }
         >
           <MarkdownComposerEditor
-            ref={editorRef}
-            {...(initialMarkdown === undefined ? {} : { initialMarkdown })}
+            markdown={markdown}
             commands={commands}
             cwd={cwd}
             onChange={onChange}

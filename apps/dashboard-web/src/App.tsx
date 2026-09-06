@@ -48,9 +48,13 @@ export {
   draftRetryCommandId,
   getOrCreateDraft,
   markDraftPromoted,
+  readDraftPersistenceError,
   readDrafts,
+  reconcileDraftPromotion,
+  setDraftAttachmentCount,
   setDraftModel,
   updateDraft,
+  useDraftPersistenceError,
   useDrafts,
 } from './features/drafts';
 export {

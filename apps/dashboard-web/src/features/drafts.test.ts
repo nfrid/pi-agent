@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { writeComposerDraft } from './composer/draft';
+import { readComposerDraft, writeComposerDraft } from './composer/draft';
 import {
   beginDraftRetry,
   createDraft,
@@ -9,7 +9,10 @@ import {
   draftRetryCommandId,
   getOrCreateDraft,
   markDraftPromoted,
+  readDraftPersistenceError,
   readDrafts,
+  reconcileDraftPromotion,
+  setDraftAttachmentCount,
   setDraftLocation,
   setDraftModel,
   updateDraft,
@@ -75,6 +78,23 @@ describe('browser-local draft metadata', () => {
     deleteDraft(invested.id);
   });
 
+  it('does not reuse or delete promoted and image-only drafts', () => {
+    installStorage();
+    const empty = createDraft('promotion-project', 'worktree', 123);
+    const promoted = createDraft('promotion-project', 'worktree', 124);
+    markDraftPromoted(promoted.id, 'thread-1');
+    const imageOnly = createDraft('promotion-project', 'worktree', 125);
+    setDraftAttachmentCount(imageOnly.id, 1);
+
+    expect(getOrCreateDraft('promotion-project', 'main').id).toBe(empty.id);
+    expect(readDrafts()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: promoted.id }),
+        expect.objectContaining({ id: imageOnly.id, attachmentCount: 1 }),
+      ]),
+    );
+  });
+
   it('stores promotion linkage and increments retry attempts', () => {
     installStorage();
     const draft = createDraft('promotion-project', 'worktree', 123);
@@ -135,6 +155,28 @@ describe('browser-local draft metadata', () => {
     );
   });
 
+  it('keeps the in-memory mutation after a quota failure and exposes the error', () => {
+    installStorage();
+    const first = createDraft('quota-project', 'worktree', 123);
+    const setItem = vi
+      .spyOn(globalThis.localStorage, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('quota exceeded');
+      });
+    updateDraft(first.id, 'Retained title');
+    expect(readDrafts()).toContainEqual(
+      expect.objectContaining({ id: first.id, title: 'Retained title' }),
+    );
+    expect(readDraftPersistenceError()).toContain('could not be saved');
+
+    setItem.mockRestore();
+    updateDraft(first.id, 'Persisted title');
+    expect(readDrafts()).toContainEqual(
+      expect.objectContaining({ id: first.id, title: 'Persisted title' }),
+    );
+    expect(readDraftPersistenceError()).toBeUndefined();
+  });
+
   it('reads fresh metadata before updating and persists the bounded title', () => {
     installStorage();
     const first = createDraft('fresh-project', 'worktree', 123);
@@ -155,6 +197,77 @@ describe('browser-local draft metadata', () => {
         expect.objectContaining({ id: 'external-draft' }),
         expect.objectContaining({ id: first.id, title: 'A derived title' }),
       ]),
+    );
+  });
+
+  it('reads legacy plain text and promotion metadata without guessing an ACK identity', () => {
+    installStorage();
+    values.set(
+      'pi-dashboard-drafts:v1',
+      JSON.stringify([
+        {
+          id: 'legacy-promotion',
+          projectId: 'legacy-project',
+          createdAt: 1,
+          updatedAt: 1,
+          isolation: 'main',
+          promotedThreadId: 'legacy-thread',
+        },
+      ]),
+    );
+    values.set('pi-dashboard-composer-draft:legacy-promotion', 'legacy text');
+    expect(readComposerDraft('legacy-promotion')).toBe('legacy text');
+    reconcileDraftPromotion('legacy-promotion');
+    expect(readComposerDraft('legacy-promotion')).toBe('legacy text');
+    expect(readDrafts()).toEqual([
+      expect.objectContaining({ id: 'legacy-promotion' }),
+    ]);
+    expect(readDrafts()[0]?.promotedThreadId).toBeUndefined();
+  });
+
+  it('reconciles a persisted promotion after a module reload', async () => {
+    installStorage();
+    const draft = createDraft('reload-project', 'worktree', 123);
+    writeComposerDraft(draft.id, 'submitted across reload');
+    markDraftPromoted(draft.id, 'thread-reload');
+    expect(
+      readDrafts().find((candidate) => candidate.id === draft.id)
+        ?.promotedDraftRevision,
+    ).toEqual(expect.any(String));
+
+    vi.resetModules();
+    const reloadedDrafts = await import('./drafts');
+    const reloadedComposer = await import('./composer/draft');
+    reloadedDrafts.reconcileDraftPromotion(draft.id);
+    expect(reloadedComposer.readComposerDraft(draft.id)).toBe('');
+    expect(reloadedDrafts.readDrafts()).not.toContainEqual(
+      expect.objectContaining({ id: draft.id }),
+    );
+  });
+
+  it('clears only the acknowledged promotion revision', () => {
+    installStorage();
+    const draft = createDraft('revision-project', 'worktree', 123);
+    writeComposerDraft(draft.id, 'submitted prompt');
+    markDraftPromoted(draft.id, 'thread-revision');
+    writeComposerDraft(draft.id, 'newer prompt');
+    reconcileDraftPromotion(draft.id);
+    expect(readComposerDraft(draft.id)).toBe('newer prompt');
+    expect(readDrafts().find((candidate) => candidate.id === draft.id)).toEqual(
+      expect.objectContaining({ id: draft.id }),
+    );
+    expect(
+      readDrafts().find((candidate) => candidate.id === draft.id)
+        ?.promotedThreadId,
+    ).toBeUndefined();
+
+    const matching = createDraft('revision-project', 'worktree', 124);
+    writeComposerDraft(matching.id, 'submitted prompt');
+    markDraftPromoted(matching.id, 'thread-matching');
+    reconcileDraftPromotion(matching.id);
+    expect(readComposerDraft(matching.id)).toBe('');
+    expect(readDrafts()).not.toContainEqual(
+      expect.objectContaining({ id: matching.id }),
     );
   });
 

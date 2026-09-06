@@ -1,4 +1,3 @@
-import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
   composerCommandsQueryOptions,
   createThreadMutationOptions,
@@ -132,15 +131,20 @@ export function DraftThreadView({
   const [localAgentNavOpen, setLocalAgentNavOpen] = useState(false);
   const agentNavOpen = sessionNavigation?.open ?? localAgentNavOpen;
   const setAgentNavOpen = sessionNavigation?.setOpen ?? setLocalAgentNavOpen;
-  const editorRef = useRef<MDXEditorMethods>(null);
   const createMutation = useMutation(
     createThreadMutationOptions(dashboardHttpClient),
   );
   const retryMutation = useMutation(
     retryThreadMutationOptions(dashboardHttpClient),
   );
-  const { initialDraft, text, updateText, clearDraft } =
-    useComposerDraft(draftId);
+  const {
+    initialDraft,
+    text,
+    updateText,
+    beginSubmission,
+    releaseSubmission,
+    acknowledgeDraft,
+  } = useComposerDraft(draftId);
   const draftDefaults = useQuery(
     draftDefaultsQueryOptions(
       dashboardHttpClient,
@@ -158,6 +162,7 @@ export function DraftThreadView({
   const attachments = useImageAttachments({
     enabled: draftModelSupportsImages(selectedModel, snapshot.runtimes),
     busy: submitting,
+    draftId,
     onError: setError,
   });
   const selectedLocation = fallbackDraft
@@ -194,6 +199,7 @@ export function DraftThreadView({
     runtimeStarted: Boolean(pendingRuntime),
     preparingWorktree: selectedLocation.kind === 'worktree',
   });
+  const submittedDraftRevisionRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (text !== initialDraft) updateDraft(draftId, threadTitle(text));
@@ -202,9 +208,10 @@ export function DraftThreadView({
   useEffect(() => {
     const sessionId = pendingRuntime?.session.id;
     if (!sessionId) return;
-    clearDraft();
+    const revision = submittedDraftRevisionRef.current;
+    if (revision !== undefined) acknowledgeDraft(revision);
     go(`/sessions/${encodeURIComponent(sessionId)}`, { replace: true });
-  }, [clearDraft, go, pendingRuntime?.session.id]);
+  }, [acknowledgeDraft, go, pendingRuntime?.session.id]);
 
   useEffect(() => {
     if (pendingRun?.status !== 'failed' && pendingRun?.status !== 'interrupted')
@@ -256,6 +263,8 @@ export function DraftThreadView({
       return;
     setError(undefined);
     setSubmitting(true);
+    const submittedDraftRevision = beginSubmission();
+    submittedDraftRevisionRef.current = submittedDraftRevision;
     try {
       const liveDraft =
         readDrafts().find((candidate) => candidate.id === draftId) ??
@@ -292,6 +301,7 @@ export function DraftThreadView({
             command: retryCommand,
           });
         if (attachments.attachments.length > 0) attachments.clearAttachments();
+        releaseSubmission(submittedDraftRevision);
         return;
       }
       const createCommand = {
@@ -341,8 +351,10 @@ export function DraftThreadView({
               command: createCommand,
             });
       if (attachments.attachments.length > 0) attachments.clearAttachments();
-      markDraftPromoted(draftId, result.thread.id);
+      markDraftPromoted(draftId, result.thread.id, submittedDraftRevision);
+      releaseSubmission(submittedDraftRevision);
     } catch (cause) {
+      releaseSubmission(submittedDraftRevision);
       setError(errorMessage(cause));
       setSubmitting(false);
     }
@@ -430,8 +442,7 @@ export function DraftThreadView({
             onSelectImages={attachments.selectImages}
             onRemoveImage={attachments.removeImage}
             onPasteCapture={attachments.onPasteCapture}
-            editorRef={editorRef}
-            initialMarkdown={initialDraft}
+            markdown={text}
             commands={composerCommands.data?.commands}
             cwd={composerCwd}
             onChange={updateText}

@@ -1,6 +1,12 @@
 import type { ModelSelection } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
-import { readComposerDraft, writeComposerDraft } from './composer/draft';
+import {
+  type ComposerDraftRevision,
+  clearComposerDraftIfRevision,
+  composerDraftRevision,
+  readComposerDraft,
+  writeComposerDraft,
+} from './composer/draft';
 
 export type DraftIsolation = 'worktree' | 'main';
 export type DraftLocation =
@@ -19,7 +25,11 @@ export type DraftMetadata = {
   location?: DraftLocation;
   title?: string;
   promotedThreadId?: string;
+  /** Composer revision identity acknowledged by the accepted promotion. */
+  promotedDraftRevision?: ComposerDraftRevision;
   promotionAttempt?: number;
+  /** Selected files are held by the composer and are not an empty draft. */
+  attachmentCount?: number;
   model?: ModelSelection;
 };
 
@@ -84,10 +94,18 @@ function validDraft(value: unknown): value is DraftMetadata {
     (draft.promotedThreadId === undefined ||
       (typeof draft.promotedThreadId === 'string' &&
         draft.promotedThreadId.length > 0)) &&
+    (draft.promotedDraftRevision === undefined ||
+      (typeof draft.promotedDraftRevision === 'string' &&
+        draft.promotedDraftRevision.length > 0 &&
+        draft.promotedDraftRevision.length <= 128)) &&
     (draft.promotionAttempt === undefined ||
       (typeof draft.promotionAttempt === 'number' &&
         Number.isInteger(draft.promotionAttempt) &&
         draft.promotionAttempt >= 0)) &&
+    (draft.attachmentCount === undefined ||
+      (typeof draft.attachmentCount === 'number' &&
+        Number.isInteger(draft.attachmentCount) &&
+        draft.attachmentCount >= 0)) &&
     (draft.model === undefined || validModel(draft.model))
   );
 }
@@ -104,16 +122,25 @@ function readStoredDrafts(): DraftMetadata[] | undefined {
   }
 }
 
+let draftPersistenceError: string | undefined;
+
 export function readDrafts(): DraftMetadata[] {
-  return readStoredDrafts() ?? [];
+  if (draftPersistenceError) return currentDrafts();
+  const drafts = readStoredDrafts();
+  if (drafts) {
+    cachedDrafts = drafts;
+    return drafts;
+  }
+  return currentDrafts();
 }
 
 function currentDrafts(): DraftMetadata[] {
-  if (!cachedDrafts) cachedDrafts = readDrafts();
+  if (!cachedDrafts) cachedDrafts = readStoredDrafts() ?? [];
   return cachedDrafts;
 }
 
 function freshDrafts(): DraftMetadata[] {
+  if (draftPersistenceError) return currentDrafts();
   const drafts = readStoredDrafts();
   if (drafts) {
     cachedDrafts = drafts;
@@ -132,9 +159,13 @@ function persistDrafts(drafts: DraftMetadata[]): void {
       DRAFTS_STORAGE_KEY,
       JSON.stringify(drafts),
     );
+    draftPersistenceError = undefined;
   } catch {
-    // Browser storage is best effort; the in-memory snapshot remains usable.
+    draftPersistenceError =
+      'Draft changes could not be saved locally. They will remain available until this page is reloaded.';
   }
+  // Keep the mutation authoritative even when storage accepted a stale value
+  // or rejected this write. freshDrafts() will not replace it while dirty.
   cachedDrafts = drafts;
   notifyDrafts();
 }
@@ -178,6 +209,14 @@ export function createDraft(
   return draft;
 }
 
+function isEmptyReusableDraft(draft: DraftMetadata): boolean {
+  return (
+    draft.promotedThreadId === undefined &&
+    (draft.attachmentCount ?? 0) === 0 &&
+    !readComposerDraft(draft.id).trim()
+  );
+}
+
 /** Reuse one empty draft and discard duplicate empty metadata for this project. */
 export function getOrCreateDraft(
   projectId: string,
@@ -186,16 +225,11 @@ export function getOrCreateDraft(
   const projectDrafts = freshDrafts()
     .filter((draft) => draft.projectId === projectId)
     .sort((left, right) => right.updatedAt - left.updatedAt);
-  const empty = projectDrafts.find(
-    (draft) => !readComposerDraft(draft.id).trim(),
-  );
+  const empty = projectDrafts.find(isEmptyReusableDraft);
   if (empty) {
     const emptyIds = new Set(
       projectDrafts
-        .filter(
-          (draft) =>
-            draft.id !== empty.id && !readComposerDraft(draft.id).trim(),
-        )
+        .filter((draft) => draft.id !== empty.id && isEmptyReusableDraft(draft))
         .map((draft) => draft.id),
     );
     if (emptyIds.size)
@@ -256,6 +290,7 @@ export function setDraftModel(draftId: string, model: ModelSelection): void {
 export function markDraftPromoted(
   draftId: string,
   promotedThreadId: string,
+  promotedDraftRevision = composerDraftRevision(draftId),
 ): void {
   const drafts = freshDrafts();
   persistDrafts(
@@ -264,11 +299,65 @@ export function markDraftPromoted(
         ? {
             ...draft,
             promotedThreadId,
+            promotedDraftRevision,
             promotionAttempt: 0,
             updatedAt: Date.now(),
           }
         : draft,
     ),
+  );
+}
+
+/** Record selected files so an image-only draft is not treated as empty. */
+export function setDraftAttachmentCount(
+  draftId: string,
+  attachmentCount: number,
+): void {
+  const drafts = freshDrafts();
+  if (!drafts.some((draft) => draft.id === draftId)) return;
+  persistDrafts(
+    drafts.map((draft) =>
+      draft.id === draftId
+        ? {
+            ...draft,
+            ...(attachmentCount > 0 ? { attachmentCount } : {}),
+            ...(attachmentCount === 0 ? { attachmentCount: undefined } : {}),
+            updatedAt: Date.now(),
+          }
+        : draft,
+    ),
+  );
+}
+
+/**
+ * Remove a promotion after its indexed session chronology is authoritative.
+ * Newer composer text is retained as a fresh draft rather than being cleared.
+ */
+export function reconcileDraftPromotion(draftId: string): void {
+  const drafts = freshDrafts();
+  const draft = drafts.find((candidate) => candidate.id === draftId);
+  if (!draft?.promotedThreadId) return;
+  const revision = draft.promotedDraftRevision;
+  // Legacy metadata has no identity proof: retain its text rather than guess
+  // that it still belongs to the accepted promotion.
+  const matches =
+    revision !== undefined && clearComposerDraftIfRevision(draftId, revision);
+  const currentText = readComposerDraft(draftId);
+  persistDrafts(
+    drafts.flatMap((candidate) => {
+      if (candidate.id !== draftId) return [candidate];
+      if (matches || (!currentText && (candidate.attachmentCount ?? 0) === 0))
+        return [];
+      return [
+        {
+          ...candidate,
+          promotedThreadId: undefined,
+          promotedDraftRevision: undefined,
+          promotionAttempt: undefined,
+          updatedAt: Date.now(),
+        },
+      ];
+    }),
   );
 }
 
@@ -302,7 +391,7 @@ function subscribeDrafts(onChange: () => void): () => void {
   const localListener = () => onChange();
   const storageListener = (event: StorageEvent) => {
     if (event.key !== null && event.key !== DRAFTS_STORAGE_KEY) return;
-    cachedDrafts = undefined;
+    if (!draftPersistenceError) cachedDrafts = undefined;
     onChange();
   };
   globalThis.addEventListener?.(DRAFTS_CHANGE_EVENT, localListener);
@@ -315,6 +404,18 @@ function subscribeDrafts(onChange: () => void): () => void {
 
 export function useDrafts(): readonly DraftMetadata[] {
   return useSyncExternalStore(subscribeDrafts, currentDrafts, () => []);
+}
+
+export function readDraftPersistenceError(): string | undefined {
+  return draftPersistenceError;
+}
+
+export function useDraftPersistenceError(): string | undefined {
+  return useSyncExternalStore(
+    subscribeDrafts,
+    readDraftPersistenceError,
+    () => undefined,
+  );
 }
 
 export const draftStorageKey = DRAFTS_STORAGE_KEY;

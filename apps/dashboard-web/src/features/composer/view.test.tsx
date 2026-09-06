@@ -5,8 +5,10 @@ import { draftRuntimeOptionsStorageKey } from '../model-option';
 
 const mutateAsync = vi.fn(async () => ({ result: { runtimeId: 'runtime-1' } }));
 const sendCommandWithImages = vi.fn(async () => undefined);
-const clearDraft = vi.fn();
 const clearAttachments = vi.fn();
+const acknowledgeDraft = vi.fn(() => true);
+const beginSubmission = vi.fn(() => 'revision-1');
+const releaseSubmission = vi.fn();
 let mockedAttachments: readonly { file: File; previewUrl: string }[] = [];
 
 vi.mock('@tanstack/react-query', () => ({
@@ -27,7 +29,10 @@ vi.mock('./draft', () => ({
     initialDraft: 'resume me',
     text: 'resume me',
     updateText: vi.fn(),
-    clearDraft,
+    revision: 'revision-1',
+    beginSubmission,
+    releaseSubmission,
+    acknowledgeDraft,
   }),
 }));
 vi.mock('./attachments', () => ({
@@ -81,42 +86,47 @@ vi.mock('./draft-pickers', () => ({
   ThreadLocationIndicator: () => <span>Thread checkout</span>,
 }));
 vi.mock('./shell', () => ({
-  ComposerShell: (props: Record<string, unknown>) => (
-    <div
-      data-send-disabled={String(props.sendDisabled)}
-      data-attachments-enabled={String(props.attachmentsEnabled)}
-      data-attachments-busy={String(props.attachmentsBusy)}
-    >
-      <button
-        type="button"
-        disabled={Boolean(props.sendDisabled)}
-        onClick={() => {
-          const event = { preventDefault: vi.fn() };
-          void (
-            props.onSubmit as (event: { preventDefault: () => void }) => void
-          )(event);
-        }}
+  ComposerShell: (props: Record<string, unknown>) => {
+    return (
+      <div
+        data-send-disabled={String(props.sendDisabled)}
+        data-attachments-enabled={String(props.attachmentsEnabled)}
+        data-attachments-busy={String(props.attachmentsBusy)}
       >
-        Send
-      </button>
-      <button
-        type="button"
-        disabled={!props.attachmentsEnabled || Boolean(props.attachmentsBusy)}
-      >
-        Attach
-      </button>
-      {props.mode as never}
-      {props.controls as never}
-      {props.footer as never}
-    </div>
-  ),
+        <button
+          type="button"
+          disabled={Boolean(props.sendDisabled)}
+          onClick={() => {
+            const event = { preventDefault: vi.fn() };
+            void (
+              props.onSubmit as (event: { preventDefault: () => void }) => void
+            )(event);
+          }}
+        >
+          Send
+        </button>
+        <button
+          type="button"
+          disabled={!props.attachmentsEnabled || Boolean(props.attachmentsBusy)}
+        >
+          Attach
+        </button>
+        {props.mode as never}
+        {props.controls as never}
+        {props.footer as never}
+      </div>
+    );
+  },
 }));
 
 afterEach(() => {
   mutateAsync.mockReset();
   mutateAsync.mockResolvedValue({ result: { runtimeId: 'runtime-1' } });
   sendCommandWithImages.mockClear();
-  clearDraft.mockClear();
+  acknowledgeDraft.mockClear();
+  acknowledgeDraft.mockReturnValue(true);
+  beginSubmission.mockClear();
+  releaseSubmission.mockClear();
   clearAttachments.mockClear();
   mockedAttachments = [];
   vi.unstubAllGlobals();
@@ -232,7 +242,7 @@ describe('Composer dormant resume transition', () => {
       sessionId: 'session-1',
       initialPrompt: 'resume me',
     });
-    expect(clearDraft).toHaveBeenCalledOnce();
+    expect(acknowledgeDraft).toHaveBeenCalledWith('revision-1');
 
     const runtime = {
       runtimeId: 'runtime-1',
@@ -379,6 +389,41 @@ describe('Composer dormant resume transition', () => {
     });
   });
 
+  it('acknowledges an accepted command after the composer unmounts', async () => {
+    acknowledgeDraft.mockReturnValue(true);
+    let resolveCommand!: () => void;
+    mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCommand = () =>
+            resolve({ result: { runtimeId: 'runtime-1' } });
+        }),
+    );
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'text' },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<Composer runtime={runtime} sessionId="session-1" />);
+    });
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    await act(async () => renderer.unmount());
+    resolveCommand();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(acknowledgeDraft).toHaveBeenCalledWith('revision-1');
+  });
+
   it('starts dormant image resumes without initialPrompt and sends once', async () => {
     mockedAttachments = [
       { file: { name: 'image.png' } as File, previewUrl: 'preview' },
@@ -430,7 +475,68 @@ describe('Composer dormant resume transition', () => {
     });
     expect(sendCommandWithImages).toHaveBeenCalledOnce();
     expect(clearAttachments).toHaveBeenCalledOnce();
-    expect(clearDraft).toHaveBeenCalledOnce();
+    expect(acknowledgeDraft).toHaveBeenCalledWith('revision-1');
+  });
+
+  it('completes an accepted image resume after the composer unmounts', async () => {
+    mockedAttachments = [
+      { file: { name: 'image.png' } as File, previewUrl: 'preview' },
+    ];
+    acknowledgeDraft.mockReturnValue(true);
+    let resolveStart!: (value: { result: { runtimeId: string } }) => void;
+    mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'vision', supportsImages: true },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const store = {
+      getSnapshot: () => ({ runtimesById: { 'runtime-1': runtime } }),
+      subscribe: vi.fn(),
+    } as never;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={undefined}
+          runtimes={[runtime]}
+          session={{
+            id: 'session-1',
+            file: '',
+            cwd: '/tmp',
+            updatedAt: 1,
+            lastKnownModel: { provider: 'test', model: 'vision' },
+          }}
+          store={store}
+          sessionId="session-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
+        />,
+      );
+    });
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      renderer.unmount();
+    });
+    resolveStart({ result: { runtimeId: 'runtime-1' } });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sendCommandWithImages).toHaveBeenCalledOnce();
+    expect(acknowledgeDraft).toHaveBeenCalledWith('revision-1');
+    expect(clearAttachments).toHaveBeenCalledOnce();
   });
 
   it('preserves dormant images when capability or delivery fails', async () => {
@@ -479,7 +585,7 @@ describe('Composer dormant resume transition', () => {
     });
     expect(sendCommandWithImages).not.toHaveBeenCalled();
     expect(clearAttachments).not.toHaveBeenCalled();
-    expect(clearDraft).not.toHaveBeenCalled();
+    expect(acknowledgeDraft).not.toHaveBeenCalled();
 
     startedRuntime.model = {
       provider: 'test',
@@ -493,6 +599,6 @@ describe('Composer dormant resume transition', () => {
     });
     expect(sendCommandWithImages).toHaveBeenCalledOnce();
     expect(clearAttachments).not.toHaveBeenCalled();
-    expect(clearDraft).not.toHaveBeenCalled();
+    expect(acknowledgeDraft).not.toHaveBeenCalled();
   });
 });

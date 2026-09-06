@@ -5,14 +5,7 @@ import {
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
-import { useComposerDraft } from './composer/draft';
-import {
-  deleteDraft,
-  draftPath,
-  getOrCreateDraft,
-  readDrafts,
-  useDrafts,
-} from './drafts';
+import { draftPath, getOrCreateDraft, readDrafts, useDrafts } from './drafts';
 import styles from './project-catalogue.module.css';
 
 export function threadTitle(prompt: string): string {
@@ -62,7 +55,6 @@ export function ProjectNewThreadView({
   const fallbackDraft =
     draft ?? readDrafts().find((candidate) => candidate.id === draftId);
   const resolvedProjectId = projectId ?? fallbackDraft?.projectId;
-  const { clearDraft } = useComposerDraft(draftId ?? '__legacy-pending__');
   const project = (snapshot.projects ?? []).find(
     (candidate) => candidate.id === resolvedProjectId,
   );
@@ -92,12 +84,8 @@ export function ProjectNewThreadView({
     const sessionId = pendingRuntime?.session.id;
     if (!sessionId || promotionCompleted.current) return;
     promotionCompleted.current = true;
-    if (draftId) {
-      clearDraft();
-      deleteDraft(draftId);
-    }
     go(`/sessions/${encodeURIComponent(sessionId)}`, { replace: true });
-  }, [clearDraft, draftId, go, pendingRuntime?.session.id]);
+  }, [go, pendingRuntime?.session.id]);
 
   useEffect(() => {
     if (pendingRun?.status !== 'failed' && pendingRun?.status !== 'interrupted')

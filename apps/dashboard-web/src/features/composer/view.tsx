@@ -1,4 +1,3 @@
-import type { MDXEditorMethods } from '@mdxeditor/editor';
 import type { DashboardLiveStore } from '@pi-dashboard/client';
 import {
   commandMutationOptions,
@@ -96,9 +95,13 @@ export function Composer({
 }) {
   const runtime =
     runtimeSnapshot?.online === false ? undefined : runtimeSnapshot;
-  const { initialDraft, text, updateText, clearDraft } =
-    useComposerDraft(sessionId);
-  const editorRef = useRef<MDXEditorMethods>(null);
+  const {
+    text,
+    updateText,
+    beginSubmission,
+    releaseSubmission,
+    acknowledgeDraft,
+  } = useComposerDraft(sessionId);
   const mountedRef = useRef(false);
   const [mode, setMode] = useState<'prompt' | 'steer' | 'followUp'>(() =>
     composerMode(runtime),
@@ -174,6 +177,7 @@ export function Composer({
   } = useImageAttachments({
     enabled: attachmentsEnabled,
     busy: busy || disabled || resumePending,
+    draftId: sessionId,
     clearOnDisable: !dormantImageAttemptRef.current,
     onError: setError,
   });
@@ -219,6 +223,7 @@ export function Composer({
     }
     setBusy(true);
     setError(undefined);
+    const submittedDraftRevision = beginSubmission();
     if (!runtime) {
       const hasImages = attachments.length > 0;
       const request = resumeRuntimeRequest(
@@ -236,6 +241,7 @@ export function Composer({
           : undefined,
       );
       if (!request) {
+        releaseSubmission(submittedDraftRevision);
         setResumeError('This session has no project checkout association.');
         setBusy(false);
         return;
@@ -244,9 +250,11 @@ export function Composer({
       dormantImageAttemptRef.current = hasImages;
       setResumePending(true);
       try {
-        // Text resumes use the start mutation's exact-once initialPrompt path.
+        // Text resumes use best-effort initialPrompt delivery; the durable
+        // start receipt acknowledges runtime readiness, not a model turn.
+        // The accepted operation continues after navigation; only React state
+        // and mounted-only callbacks remain guarded below.
         const result = await resumeMutation.mutateAsync(request);
-        if (!mountedRef.current) return;
         if (hasImages) {
           if (!store)
             throw new Error('The dormant session store is unavailable.');
@@ -265,10 +273,11 @@ export function Composer({
           );
           clearAttachments();
         }
-        clearDraft();
-        editorRef.current?.setMarkdown('');
+        acknowledgeDraft(submittedDraftRevision);
+        if (!mountedRef.current) return;
         onPromptSubmitted?.(trimmedText);
       } catch (cause) {
+        releaseSubmission(submittedDraftRevision);
         if (mountedRef.current) {
           setResumePending(false);
           setResumeError(errorMessage(cause));
@@ -331,12 +340,12 @@ export function Composer({
           runtimeId: runtime.runtimeId,
           command,
         });
-      if (!mountedRef.current) return;
+      acknowledgeDraft(submittedDraftRevision);
       clearAttachments();
-      clearDraft();
-      editorRef.current?.setMarkdown('');
+      if (!mountedRef.current) return;
       onMessageSubmitted?.();
     } catch (cause) {
+      releaseSubmission(submittedDraftRevision);
       if (mountedRef.current) setError(errorMessage(cause));
     } finally {
       if (mountedRef.current) setBusy(false);
@@ -387,8 +396,7 @@ export function Composer({
         onSelectImages={selectImages}
         onRemoveImage={removeImage}
         onPasteCapture={onPasteCapture}
-        editorRef={editorRef}
-        initialMarkdown={initialDraft}
+        markdown={text}
         cwd={composerCwd}
         commands={
           runtime?.liveState === 'working' && !settledBackground

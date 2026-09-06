@@ -23,8 +23,6 @@ import {
   type LexicalEditor,
 } from 'lexical';
 import {
-  type ForwardedRef,
-  forwardRef,
   useCallback,
   useEffect,
   useId,
@@ -56,19 +54,11 @@ type CompletionAnchor = ComposerCompletionToken & { nodeKey: string };
 type MarkdownComposerEditorProps = {
   commands?: readonly ComposerCommandOption[];
   cwd?: string;
-  initialMarkdown?: string;
+  markdown: string;
   onChange: (markdown: string) => void;
   placeholder: string;
   readOnly: boolean;
 };
-
-function assignEditorRef(
-  ref: ForwardedRef<MDXEditorMethods>,
-  value: MDXEditorMethods | null,
-): void {
-  if (typeof ref === 'function') ref(value);
-  else if (ref) ref.current = value;
-}
 
 function completionAnchor(editor: LexicalEditor): CompletionAnchor | undefined {
   return editor.getEditorState().read(() => {
@@ -95,15 +85,21 @@ function anchorKey(anchor: CompletionAnchor | undefined): string | undefined {
     : undefined;
 }
 
-const MarkdownComposerEditor = forwardRef<
-  MDXEditorMethods,
-  MarkdownComposerEditorProps
->(function MarkdownComposerEditor(
-  { commands = [], cwd, initialMarkdown = '', onChange, placeholder, readOnly },
-  forwardedRef,
-) {
+export default function MarkdownComposerEditor({
+  commands = [],
+  cwd,
+  markdown,
+  onChange,
+  placeholder,
+  readOnly,
+}: MarkdownComposerEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<MDXEditorMethods | null>(null);
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor && editor.getMarkdown() !== markdown)
+      editor.setMarkdown(markdown);
+  }, [markdown]);
   const lexicalEditorRef = useRef<LexicalEditor | null>(null);
   const listenerCleanupRef = useRef<() => void>(() => undefined);
   const anchorRef = useRef<CompletionAnchor | undefined>(undefined);
@@ -129,13 +125,6 @@ const MarkdownComposerEditor = forwardRef<
   const boundedIndex = suggestions.length
     ? Math.min(selectedIndex, suggestions.length - 1)
     : 0;
-  const setEditorRef = useCallback(
-    (value: MDXEditorMethods | null) => {
-      editorRef.current = value;
-      assignEditorRef(forwardedRef, value);
-    },
-    [forwardedRef],
-  );
   const connectLexicalEditor = useCallback((editor: LexicalEditor) => {
     listenerCleanupRef.current();
     lexicalEditorRef.current = editor;
@@ -287,10 +276,10 @@ const MarkdownComposerEditor = forwardRef<
       }}
     >
       <MDXEditor
-        ref={setEditorRef}
+        ref={editorRef}
         className="composer-rich-editor-root dark-theme"
         contentEditableClassName="composer-rich-editor"
-        markdown={initialMarkdown}
+        markdown={markdown}
         onChange={(next: string, initialMarkdownNormalize: boolean) => {
           if (!initialMarkdownNormalize) onChange(next);
         }}
@@ -307,6 +296,4 @@ const MarkdownComposerEditor = forwardRef<
       />
     </div>
   );
-});
-
-export default MarkdownComposerEditor;
+}

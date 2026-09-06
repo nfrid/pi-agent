@@ -6,6 +6,7 @@ import {
   DashboardSurfaceProvider,
   useDashboardSurfaces,
 } from '../features/dashboard-surface-context';
+import { DraftPromotionLifecycle } from '../features/draft-promotion-lifecycle';
 import { NewThreadProjectChooser } from '../features/new-thread-project-chooser';
 import { SessionNavigationContext } from '../features/session-navigation-context';
 import { type SurfacePage, SurfaceStack } from '../features/surface-stack';
@@ -66,6 +67,7 @@ export function RouteShell() {
   );
   return (
     <div className="app">
+      <DraftPromotionLifecycle snapshot={dashboard.snapshot} />
       <DashboardSurfaceProvider
         blocked={false}
         locationKey={routeState.pathname}

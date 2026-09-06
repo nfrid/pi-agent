@@ -19,7 +19,9 @@ const {
   deleteDraft,
   markDraftPromoted,
   beginDraftRetry,
-  clearDraft,
+  beginSubmission,
+  releaseSubmission,
+  acknowledgeDraft,
   clearAttachments,
   createThreadWithImages,
   retryThreadWithImages,
@@ -31,7 +33,9 @@ const {
   deleteDraft: vi.fn(),
   markDraftPromoted: vi.fn(),
   beginDraftRetry: vi.fn(),
-  clearDraft: vi.fn(),
+  beginSubmission: vi.fn(() => 'revision-1'),
+  releaseSubmission: vi.fn(),
+  acknowledgeDraft: vi.fn(() => true),
   clearAttachments: vi.fn(),
   createThreadWithImages: vi.fn(),
   retryThreadWithImages: vi.fn(),
@@ -103,7 +107,10 @@ vi.mock('./composer/draft', () => ({
     initialDraft: 'Do the thing',
     text: 'Do the thing',
     updateText: vi.fn(),
-    clearDraft,
+    revision: 'revision-1',
+    beginSubmission,
+    releaseSubmission,
+    acknowledgeDraft,
   }),
 }));
 vi.mock('./composer/shell', () => ({
@@ -144,7 +151,10 @@ afterEach(() => {
   deleteDraft.mockReset();
   markDraftPromoted.mockReset();
   beginDraftRetry.mockReset();
-  clearDraft.mockReset();
+  beginSubmission.mockClear();
+  releaseSubmission.mockClear();
+  acknowledgeDraft.mockClear();
+  acknowledgeDraft.mockReturnValue(true);
   clearAttachments.mockReset();
   createThreadWithImages.mockReset();
   retryThreadWithImages.mockReset();
@@ -380,7 +390,7 @@ describe('draft thread controls', () => {
         />,
       );
     });
-    expect(clearDraft).toHaveBeenCalledOnce();
+    expect(acknowledgeDraft).not.toHaveBeenCalled();
     expect(deleteDraft).not.toHaveBeenCalled();
     expect(go).toHaveBeenCalledWith('/sessions/session-1', { replace: true });
     renderer.unmount();
@@ -411,7 +421,11 @@ describe('draft thread promotion', () => {
         isolation: 'worktree',
       },
     });
-    expect(markDraftPromoted).toHaveBeenCalledWith('draft-1', 'thread-1');
+    expect(markDraftPromoted).toHaveBeenCalledWith(
+      'draft-1',
+      'thread-1',
+      'revision-1',
+    );
     expect(deleteDraft).not.toHaveBeenCalled();
     expect(go).not.toHaveBeenCalled();
     renderer.unmount();
@@ -630,7 +644,11 @@ describe('draft thread promotion', () => {
     );
     expect(mutateAsync).not.toHaveBeenCalled();
     expect(clearAttachments).toHaveBeenCalledOnce();
-    expect(markDraftPromoted).toHaveBeenCalledWith('draft-1', 'thread-image');
+    expect(markDraftPromoted).toHaveBeenCalledWith(
+      'draft-1',
+      'thread-image',
+      'revision-1',
+    );
     renderer.unmount();
   });
 

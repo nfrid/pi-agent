@@ -162,6 +162,13 @@ persisted.
   is terminal; create a new daemon rather than reusing closed resources.
 - Navigation derives rows from indexed run/link/thread joins and depends only on
   the entity arrays it reads. It must not own mutation or submission completion.
+- `DraftPromotionLifecycle` reconciles accepted drafts against authoritative
+  session chronology. The composer draft owner acquires leases on subscription,
+  not render, and pairs text with a random revision in one atomic local-storage
+  envelope. Acknowledgements clear only that revision, including after navigation;
+  the controlled editor reflects the same state. Clean unobserved records are
+  released; pending submissions and failed-write dirty data are retained. Legacy
+  plain-text drafts are read and migrated on their next write.
 
 When adding a feature, extend its existing owner rather than adding a second
 cache, retry loop, or lifecycle authority. Keep failure/reconnect tests with the
@@ -253,11 +260,29 @@ conflict.
 
 Workspace and session launch requests use IDs from trusted indexes, never raw
 paths or flags. Uploads are bounded, server-owned temporary files and are removed
-after command acknowledgement. Dashboard mutation command IDs are protected
-against concurrent duplicates and response-loss retries once their receipt is
-durable; a daemon crash after the runtime side effect but before receipt
-persistence can still permit one duplicate on retry. Missing usage or VAPID
-configuration is isolated from runtime control and in-app notifications.
+after command acknowledgement. Dashboard runtime mutations reserve a durable
+command intent before side effects. Start/restart plans reserve one runtime
+identity and bounded recovery configuration; prompts, images, action inputs, and
+raw credentials are not persisted in those plans. Migration 21 adds intent state
+and managed-launch readiness evidence without rewriting existing receipts.
+
+Runtime recovery runs after bridge/index startup and before HTTP admission. A
+matching readiness/stopped marker can establish the original result; missing or
+ambiguous evidence returns `runtime-command-uncertain` rather than blindly
+replaying an operation. The browser does not automatically retry this domain
+error. An initial prompt is best-effort: a successful launch acknowledges runtime
+readiness, not completion or delivery of a model turn.
+
+New bridge-command receipts persist only bounded `{accepted:true}` replay data;
+the first response may return the original ACK output. Old completed receipts
+retain their original results. For an external runtime, `stopped:true` denotes
+removal from dashboard control, not proof that its OS process terminated. Managed
+stop requires host evidence plus local PID absence, including when talking to an
+older host that returned permissive ACKs. Ordinary deployment must not restart
+the runtime or process host.
+
+Missing usage or VAPID configuration is isolated from runtime control and in-app
+notifications.
 
 ## Intentional limits
 

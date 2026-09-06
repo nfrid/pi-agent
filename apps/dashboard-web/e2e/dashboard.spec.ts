@@ -815,6 +815,10 @@ test('draft composer completes slash commands before a runtime starts', async ({
       }),
     }),
   );
+  await page.route(
+    '**/api/projects/project-autocomplete/draft-defaults',
+    (route) => route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
   let submittedPrompt: string | undefined;
   await page.route(
     '**/api/projects/project-autocomplete/threads',

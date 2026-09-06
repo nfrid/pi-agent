@@ -45,7 +45,6 @@ import {
   hiddenAgentThreadRowCount,
   isArchivedThread,
   MAX_VISIBLE_ACTIVE_THREADS,
-  resolvedDraftPromotionIds,
   sectionAgentThreadRows,
   sessionThreadIdentityKey,
   statusGlyph,
@@ -62,7 +61,12 @@ import {
 import styles from './agent-thread-nav.module.css';
 import { dormantResumeMetadata } from './composer/runtime';
 import { useDashboardSurfaces } from './dashboard-surface-context';
-import { deleteDraft, draftPath, useDrafts } from './drafts';
+import {
+  deleteDraft,
+  draftPath,
+  useDraftPersistenceError,
+  useDrafts,
+} from './drafts';
 import {
   hasActiveDrawerHistoryEntry,
   useDrawerHistory,
@@ -529,6 +533,7 @@ export function AgentThreadNav({
   const selectionDisabledRef = useRef(false);
   useDrawerHistory(mode === 'session' && open, () => onOpenChange?.(false));
   const drafts = useDrafts();
+  const draftPersistenceError = useDraftPersistenceError();
   const {
     state: unreadState,
     visitCurrent,
@@ -554,16 +559,11 @@ export function AgentThreadNav({
   const durableThreads =
     snapshot.threads ??
     (durableThreadsQuery.isSuccess ? durableThreadsQuery.data : undefined);
-  const directLinks = sessionThreadLinksQuery.isSuccess
-    ? sessionThreadLinksQuery.data
-    : [];
-  const resolvedPromotions = useMemo(
-    () => resolvedDraftPromotionIds(snapshot, directLinks, drafts),
-    [directLinks, drafts, snapshot],
+  const directLinks = useMemo(
+    () =>
+      sessionThreadLinksQuery.isSuccess ? sessionThreadLinksQuery.data : [],
+    [sessionThreadLinksQuery.isSuccess, sessionThreadLinksQuery.data],
   );
-  useEffect(() => {
-    for (const draftId of resolvedPromotions) deleteDraft(draftId);
-  }, [resolvedPromotions]);
   const sessionIdentityKey = useMemo(
     () =>
       sessionThreadIdentityKey({
@@ -1326,6 +1326,11 @@ export function AgentThreadNav({
         </button>
       )}
       <footer className={`agent-nav-footer ${styles.footer}`}>
+        {draftPersistenceError && (
+          <p className="error composer-error" role="alert">
+            {draftPersistenceError}
+          </p>
+        )}
         <UsageCapsule usage={snapshot.usage} />
         <button
           type="button"

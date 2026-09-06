@@ -12,6 +12,7 @@ import {
   IMAGE_TYPES,
   type ImageAttachment,
 } from '../../shared/image-attachments';
+import { setDraftAttachmentCount } from '../drafts';
 
 export type { ImageAttachment } from '../../shared/image-attachments';
 export {
@@ -87,11 +88,14 @@ export function useImageAttachments({
   enabled,
   busy,
   onError,
+  draftId,
   clearOnDisable = true,
 }: {
   enabled: boolean;
   busy: boolean;
   onError: (error: string | undefined) => void;
+  /** Draft metadata to protect while selected files are still held. */
+  draftId?: string;
   /** Dormant resume keeps selected files while the started runtime is checked. */
   clearOnDisable?: boolean;
 }) {
@@ -99,18 +103,34 @@ export function useImageAttachments({
   const attachmentsRef = useRef<ImageAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
 
+  const recordAttachmentCount = useCallback(
+    (count: number) => {
+      if (draftId) setDraftAttachmentCount(draftId, count);
+    },
+    [draftId],
+  );
   const clearAttachments = useCallback(() => {
     for (const attachment of attachmentsRef.current)
       URL.revokeObjectURL(attachment.previewUrl);
     attachmentsRef.current = [];
-    setAttachments([]);
-  }, []);
+    if (mountedRef.current) {
+      recordAttachmentCount(0);
+      setAttachments([]);
+    }
+  }, [recordAttachmentCount]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   useEffect(() => {
     if (!enabled && clearOnDisable) clearAttachments();
   }, [clearAttachments, clearOnDisable, enabled]);
@@ -118,8 +138,10 @@ export function useImageAttachments({
     () => () => {
       for (const attachment of attachmentsRef.current)
         URL.revokeObjectURL(attachment.previewUrl);
+      attachmentsRef.current = [];
+      if (draftId) setDraftAttachmentCount(draftId, 0);
     },
-    [],
+    [draftId],
   );
 
   const selectImages = useCallback(
@@ -135,26 +157,31 @@ export function useImageAttachments({
           previewUrl: URL.createObjectURL(file),
         }));
         attachmentsRef.current = [...attachmentsRef.current, ...added];
+        recordAttachmentCount(attachmentsRef.current.length);
         setAttachments((current) => [...current, ...added]);
       }
       onError(result.error);
     },
-    [busy, enabled, onError],
+    [busy, enabled, onError, recordAttachmentCount],
   );
 
-  const removeImage = useCallback((previewUrl: string) => {
-    const attachment = attachmentsRef.current.find(
-      (candidate) => candidate.previewUrl === previewUrl,
-    );
-    if (!attachment) return;
-    URL.revokeObjectURL(attachment.previewUrl);
-    attachmentsRef.current = attachmentsRef.current.filter(
-      (candidate) => candidate.previewUrl !== previewUrl,
-    );
-    setAttachments((current) =>
-      current.filter((candidate) => candidate.previewUrl !== previewUrl),
-    );
-  }, []);
+  const removeImage = useCallback(
+    (previewUrl: string) => {
+      const attachment = attachmentsRef.current.find(
+        (candidate) => candidate.previewUrl === previewUrl,
+      );
+      if (!attachment) return;
+      URL.revokeObjectURL(attachment.previewUrl);
+      attachmentsRef.current = attachmentsRef.current.filter(
+        (candidate) => candidate.previewUrl !== previewUrl,
+      );
+      recordAttachmentCount(attachmentsRef.current.length);
+      setAttachments((current) =>
+        current.filter((candidate) => candidate.previewUrl !== previewUrl),
+      );
+    },
+    [recordAttachmentCount],
+  );
 
   const onDragEnter = useCallback(
     (event: DragEvent<HTMLElement>) => {
