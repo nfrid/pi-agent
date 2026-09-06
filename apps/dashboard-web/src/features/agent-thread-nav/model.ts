@@ -298,8 +298,13 @@ export function resolvedDraftPromotionIds(
   });
 }
 
+export type AgentThreadSnapshot = Pick<
+  BrowserSnapshot,
+  'projects' | 'runs' | 'runtimes' | 'sessions' | 'threads'
+>;
+
 export function agentThreadRows(
-  snapshot: BrowserSnapshot,
+  snapshot: AgentThreadSnapshot,
   durableThreads?: readonly Pick<
     Thread,
     'id' | 'archivedAt' | 'pinnedAt' | 'settledAt'

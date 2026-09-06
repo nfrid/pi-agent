@@ -565,8 +565,13 @@ export function AgentThreadNav({
     for (const draftId of resolvedPromotions) deleteDraft(draftId);
   }, [resolvedPromotions]);
   const sessionIdentityKey = useMemo(
-    () => sessionThreadIdentityKey(snapshot),
-    [snapshot],
+    () =>
+      sessionThreadIdentityKey({
+        sessions: snapshot.sessions,
+        runtimes: snapshot.runtimes,
+        runs: snapshot.runs,
+      }),
+    [snapshot.sessions, snapshot.runtimes, snapshot.runs],
   );
   const priorSessionIdentityKey = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -586,8 +591,29 @@ export function AgentThreadNav({
     [snapshot.projects],
   );
   const rows = useMemo(
-    () => agentThreadRows(snapshot, durableThreads, directLinks, drafts),
-    [directLinks, drafts, durableThreads, snapshot],
+    () =>
+      agentThreadRows(
+        {
+          projects: snapshot.projects,
+          runs: snapshot.runs,
+          runtimes: snapshot.runtimes,
+          sessions: snapshot.sessions,
+          threads: snapshot.threads,
+        },
+        durableThreads,
+        directLinks,
+        drafts,
+      ),
+    [
+      directLinks,
+      drafts,
+      durableThreads,
+      snapshot.projects,
+      snapshot.runs,
+      snapshot.runtimes,
+      snapshot.sessions,
+      snapshot.threads,
+    ],
   );
   const draftProjectIds = useMemo(
     () => [
