@@ -26,10 +26,10 @@ type Subscription = { unsubscribe: () => void };
 
 type DomainEntry = {
   id: string;
+  /** Feed generation is a connection lifecycle token, not semantic ordering. */
   generation: number;
   refs: number;
-  sequence: number;
-  sequenceKnown: boolean;
+  /** Opaque transport cursor used for resume and callback deduplication. */
   lastEventId?: FeedCursorValue;
   subscription?: Subscription;
   opening: number;
@@ -159,8 +159,7 @@ export class DashboardConnectionRuntime {
   private trpc?: DashboardTrpcClient;
   private started = false;
   private shellGeneration = 0;
-  private shellSequence = 0;
-  private shellSequenceKnown = false;
+  /** Opaque transport identity; semantic sequence belongs to the store. */
   private shellSnapshotId?: FeedCursorValue;
   private shellOpening = 0;
   private shellSubscription?: Subscription;
@@ -285,8 +284,6 @@ export class DashboardConnectionRuntime {
         id: sessionId,
         generation: 1,
         refs: 0,
-        sequence: 0,
-        sequenceKnown: false,
         opening: 0,
         rebasing: false,
       };
@@ -322,14 +319,7 @@ export class DashboardConnectionRuntime {
     entry.opening += 1;
     entry.subscription?.unsubscribe();
     entry.subscription = undefined;
-    if (
-      !this.store.markSessionCached(
-        sessionId,
-        entry.generation,
-        entry.sequence,
-        entry.sequenceKnown,
-      )
-    ) {
+    if (!this.store.markSessionCached(sessionId, entry.generation)) {
       this.sessions.delete(sessionId);
       this.store.evictSessionProjection(sessionId);
       return;
@@ -364,10 +354,7 @@ export class DashboardConnectionRuntime {
         await this.sessionTranscriptCache.remove(entry.id);
         return;
       }
-      if (this.store.restoreCachedSessionTranscript(cached, entry.generation)) {
-        entry.sequence = cached.acceptedSequence;
-        entry.sequenceKnown = true;
-      }
+      this.store.restoreCachedSessionTranscript(cached, entry.generation);
     } catch {
       // Browser persistence is an optional warm-start path.
     }
@@ -431,8 +418,6 @@ export class DashboardConnectionRuntime {
 
   private resetShellDomain(): void {
     this.shellGeneration += 1;
-    this.shellSequence = 0;
-    this.shellSequenceKnown = false;
     this.shellSnapshotId = undefined;
     this.shellRebasing = false;
     this.store.beginShellSync(this.shellGeneration);
@@ -493,8 +478,6 @@ export class DashboardConnectionRuntime {
         previousServerId !== undefined &&
         payload.snapshot.snapshot.serverId !== previousServerId;
       if (serverChanged) this.resetShellDomain();
-      this.shellSequence = sequence;
-      this.shellSequenceKnown = true;
       this.shellSnapshotId = tracked.id;
       this.store.acceptShellSnapshot(
         payload.snapshot.snapshot,
@@ -508,30 +491,30 @@ export class DashboardConnectionRuntime {
       return;
     }
     if (isCaughtUp(payload)) {
-      if (this.shellSequenceKnown && sequence < this.shellSequence) return;
-      if (this.shellSequenceKnown && sequence > this.shellSequence) {
-        this.rebaseShell();
+      const ordering = this.store.shellCaughtUpOrdering(
+        sequence,
+        this.shellGeneration,
+      );
+      if (!ordering.accepted) {
+        if (ordering.reason === 'gap') this.rebaseShell();
         return;
       }
-      this.shellSequence = sequence;
-      this.shellSequenceKnown = true;
       if (this.store.getSnapshot().shellSync.status !== 'live')
         this.store.completeShellSync(sequence);
       return;
     }
-    if (this.shellSequenceKnown && sequence <= this.shellSequence) return;
-    if (this.shellSequenceKnown && sequence > this.shellSequence + 1) {
-      this.rebaseShell();
+    const ordering = this.store.shellEventOrdering(
+      sequence,
+      this.shellGeneration,
+    );
+    if (!ordering.accepted) {
+      if (ordering.reason === 'baseline' || ordering.reason === 'gap')
+        this.rebaseShell();
       return;
     }
     // A contiguous shell event is the complete state transition. There is no
     // finite shellSnapshot fallback in the live path.
-    if (!this.store.acceptShellEvent(payload, this.shellGeneration)) {
-      this.rebaseShell();
-      return;
-    }
-    this.shellSequence = sequence;
-    this.shellSequenceKnown = true;
+    if (!this.store.acceptShellEvent(payload, this.shellGeneration)) return;
   }
 
   private reacquireSessions(): void {
@@ -560,8 +543,6 @@ export class DashboardConnectionRuntime {
     const opening = ++entry.opening;
     if (rebase) {
       entry.generation += 1;
-      entry.sequence = 0;
-      entry.sequenceKnown = false;
       entry.lastEventId = undefined;
       entry.rebasing = false;
       this.store.beginSessionSync(entry.id, entry.generation);
@@ -655,26 +636,30 @@ export class DashboardConnectionRuntime {
         )
       )
         return;
-      entry.sequence = sequence;
-      entry.sequenceKnown = true;
       entry.lastEventId = tracked.id;
       return;
     }
     if (isCaughtUp(payload)) {
-      if (entry.sequenceKnown && sequence < entry.sequence) return;
-      if (entry.sequenceKnown && sequence > entry.sequence) {
-        this.rebaseSession(entry);
+      const ordering = this.store.sessionCaughtUpOrdering(
+        entry.id,
+        sequence,
+        entry.generation,
+      );
+      if (!ordering.accepted) {
+        if (ordering.reason === 'gap') this.rebaseSession(entry);
         return;
       }
-      entry.sequence = sequence;
-      entry.sequenceKnown = true;
       entry.lastEventId = tracked.id;
       this.store.completeSessionSync(entry.id, sequence);
       return;
     }
-    if (entry.sequenceKnown && sequence <= entry.sequence) return;
-    if (entry.sequenceKnown && sequence > entry.sequence + 1) {
-      this.rebaseSession(entry);
+    const ordering = this.store.sessionEventOrdering(
+      entry.id,
+      sequence,
+      entry.generation,
+    );
+    if (!ordering.accepted) {
+      if (ordering.reason === 'gap') this.rebaseSession(entry);
       return;
     }
     if (
@@ -688,8 +673,6 @@ export class DashboardConnectionRuntime {
       this.rebaseSession(entry);
       return;
     }
-    entry.sequence = sequence;
-    entry.sequenceKnown = true;
     entry.lastEventId = tracked.id;
   }
 

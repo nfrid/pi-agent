@@ -60,11 +60,20 @@ export interface TranscriptOrderingState {
   sequenceKnown: boolean;
 }
 
-export type TranscriptOrderingRejection = 'generation' | 'duplicate' | 'gap';
+export type TranscriptOrderingRejection =
+  | 'generation'
+  | 'duplicate'
+  | 'gap'
+  | 'baseline';
 
 export interface TranscriptOrderingDecision {
   accepted: boolean;
   reason?: TranscriptOrderingRejection;
+}
+
+export interface TranscriptEventOrderingOptions {
+  /** Shell feeds cannot apply an event until their snapshot establishes a cut. */
+  unknownBaseline?: 'accept' | 'reject';
 }
 
 export type HistoryPageWatermarkDecision =
@@ -90,6 +99,20 @@ export function classifyHistoryPageWatermark(
   return { status: 'ready', sequence: first };
 }
 
+export function acceptTranscriptCaughtUpOrdering(
+  current: TranscriptOrderingState | undefined,
+  sequence: number,
+  generation: number,
+): TranscriptOrderingDecision {
+  if (current && current.generation !== generation)
+    return { accepted: false, reason: 'generation' };
+  if (!current?.sequenceKnown) return { accepted: true };
+  if (sequence < current.sequence)
+    return { accepted: false, reason: 'duplicate' };
+  if (sequence > current.sequence) return { accepted: false, reason: 'gap' };
+  return { accepted: true };
+}
+
 export function acceptTranscriptSnapshotOrdering(
   current: TranscriptOrderingState | undefined,
   sequence: number,
@@ -111,10 +134,14 @@ export function acceptTranscriptEventOrdering(
   current: TranscriptOrderingState | undefined,
   sequence: number,
   generation: number,
+  options: TranscriptEventOrderingOptions = {},
 ): TranscriptOrderingDecision {
   if (current && current.generation !== generation)
     return { accepted: false, reason: 'generation' };
-  if (!current?.sequenceKnown) return { accepted: true };
+  if (!current?.sequenceKnown)
+    return options.unknownBaseline === 'reject'
+      ? { accepted: false, reason: 'baseline' }
+      : { accepted: true };
   if (sequence <= current.sequence)
     return { accepted: false, reason: 'duplicate' };
   if (sequence !== current.sequence + 1)

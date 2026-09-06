@@ -8,7 +8,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { SESSION_REQUEST_ORDER } from './http-client.js';
 import {
   DashboardLiveStore,
+  selectNotifications,
   selectRuntimeForSession,
+  selectRuntimes,
+  selectSessionSync,
+  selectSessions,
   selectSnapshot,
 } from './store.js';
 
@@ -61,6 +65,48 @@ function orderedResponse(
 }
 
 describe('DashboardLiveStore', () => {
+  it('keeps entity selector arrays stable across usage updates and stores', () => {
+    const source = {
+      ...snapshot('daemon-1', 1),
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          liveState: 'idle',
+          session: { id: 'session-1', entries: [] },
+        },
+      ],
+      sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 }],
+      unread: [{ id: 'notification-1', title: 'Notice' }],
+    } as never;
+    const first = new DashboardLiveStore();
+    const second = new DashboardLiveStore();
+    first.installSnapshot(source);
+    second.installSnapshot(source);
+
+    const firstRuntimes = selectRuntimes(first.getSnapshot());
+    const firstSessions = selectSessions(first.getSnapshot());
+    const firstNotifications = selectNotifications(first.getSnapshot());
+    first.updateUsage({ remaining: 2 });
+
+    expect(selectRuntimes(first.getSnapshot())).toBe(firstRuntimes);
+    expect(selectSessions(first.getSnapshot())).toBe(firstSessions);
+    expect(selectNotifications(first.getSnapshot())).toBe(firstNotifications);
+    expect(selectRuntimes(second.getSnapshot())).not.toBe(firstRuntimes);
+    expect(selectSessions(second.getSnapshot())).not.toBe(firstSessions);
+    expect(selectNotifications(second.getSnapshot())).not.toBe(
+      firstNotifications,
+    );
+  });
+
+  it('uses one stable empty sync value for missing sessions', () => {
+    const selector = selectSessionSync('missing');
+    const first = new DashboardLiveStore();
+    const second = new DashboardLiveStore();
+
+    expect(selector(first.getSnapshot())).toBe(selector(first.getSnapshot()));
+    expect(selector(first.getSnapshot())).toBe(selector(second.getSnapshot()));
+  });
+
   it('suspends domains to cached or empty while preserving their ordering cut', () => {
     const store = new DashboardLiveStore();
     store.beginShellSync(1);

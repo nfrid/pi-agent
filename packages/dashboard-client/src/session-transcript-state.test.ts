@@ -5,6 +5,7 @@ import type {
 } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
+  acceptTranscriptCaughtUpOrdering,
   acceptTranscriptEventOrdering,
   acceptTranscriptSnapshotOrdering,
   classifyHistoryPageWatermark,
@@ -31,6 +32,25 @@ describe('session transcript state', () => {
     expect(acceptTranscriptEventOrdering(current, 8, 4)).toEqual({
       accepted: false,
       reason: 'generation',
+    });
+  });
+
+  it('accepts an exact caught-up watermark and rebases an ahead one', () => {
+    const current = { generation: 3, sequence: 7, sequenceKnown: true };
+
+    expect(acceptTranscriptCaughtUpOrdering(current, 7, 3)).toEqual({
+      accepted: true,
+    });
+    expect(acceptTranscriptCaughtUpOrdering(current, 6, 3)).toEqual({
+      accepted: false,
+      reason: 'duplicate',
+    });
+    expect(acceptTranscriptCaughtUpOrdering(current, 8, 3)).toEqual({
+      accepted: false,
+      reason: 'gap',
+    });
+    expect(acceptTranscriptCaughtUpOrdering(undefined, 8, 3)).toEqual({
+      accepted: true,
     });
   });
 

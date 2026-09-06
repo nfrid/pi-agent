@@ -51,6 +51,80 @@ export type AgentThreadSections = {
 
 export const MAX_VISIBLE_ACTIVE_THREADS = 40;
 
+type SnapshotRun = NonNullable<BrowserSnapshot['runs']>[number];
+type DurableThread = Pick<
+  Thread,
+  'id' | 'checkoutId' | 'archivedAt' | 'pinnedAt' | 'settledAt'
+>;
+
+type ThreadNavIndexes = {
+  runsBySessionId: Map<string, SnapshotRun[]>;
+  runsByRuntimeId: Map<string, SnapshotRun[]>;
+  runsByThreadId: Map<string, SnapshotRun[]>;
+  linksBySessionId: Map<string, SessionThreadLink[]>;
+  threadsById: Map<string, DurableThread>;
+  runtimesBySessionId: Map<string, RuntimeSnapshot[]>;
+  draftsByThreadId: Map<string, DraftMetadata>;
+};
+
+/**
+ * Navigation is a read-only join over independent live/indexed projections.
+ * Build its indexes once per derivation so each row does not repeat the same
+ * session, run, link, and thread scans.
+ */
+function buildThreadNavIndexes(
+  snapshot: Pick<BrowserSnapshot, 'runs'> &
+    Partial<Pick<BrowserSnapshot, 'runtimes'>>,
+  threads: readonly DurableThread[],
+  directLinks: readonly SessionThreadLink[],
+  drafts: readonly DraftMetadata[],
+): ThreadNavIndexes {
+  const runsBySessionId = new Map<string, SnapshotRun[]>();
+  const runsByRuntimeId = new Map<string, SnapshotRun[]>();
+  const runsByThreadId = new Map<string, SnapshotRun[]>();
+  for (const run of snapshot.runs ?? []) {
+    if (run.piSessionId) {
+      const sessionRuns = runsBySessionId.get(run.piSessionId) ?? [];
+      sessionRuns.push(run);
+      runsBySessionId.set(run.piSessionId, sessionRuns);
+    }
+    if (run.runtimeId) {
+      const runtimeRuns = runsByRuntimeId.get(run.runtimeId) ?? [];
+      runtimeRuns.push(run);
+      runsByRuntimeId.set(run.runtimeId, runtimeRuns);
+    }
+    const threadRuns = runsByThreadId.get(run.threadId) ?? [];
+    threadRuns.push(run);
+    runsByThreadId.set(run.threadId, threadRuns);
+  }
+  const linksBySessionId = new Map<string, SessionThreadLink[]>();
+  for (const link of directLinks) {
+    const sessionLinks = linksBySessionId.get(link.sessionId) ?? [];
+    sessionLinks.push(link);
+    linksBySessionId.set(link.sessionId, sessionLinks);
+  }
+  const runtimesBySessionId = new Map<string, RuntimeSnapshot[]>();
+  for (const runtime of snapshot.runtimes ?? []) {
+    const sessionRuntimes = runtimesBySessionId.get(runtime.session.id) ?? [];
+    sessionRuntimes.push(runtime);
+    runtimesBySessionId.set(runtime.session.id, sessionRuntimes);
+  }
+  const draftsByThreadId = new Map<string, DraftMetadata>();
+  for (const draft of drafts) {
+    if (draft.promotedThreadId && !draftsByThreadId.has(draft.promotedThreadId))
+      draftsByThreadId.set(draft.promotedThreadId, draft);
+  }
+  return {
+    runsBySessionId,
+    runsByRuntimeId,
+    runsByThreadId,
+    linksBySessionId,
+    threadsById: new Map(threads.map((thread) => [thread.id, thread])),
+    runtimesBySessionId,
+    draftsByThreadId,
+  };
+}
+
 /** Stable unmatched identity set used to refresh persisted session links. */
 export function sessionThreadIdentityKey(
   snapshot: Pick<BrowserSnapshot, 'sessions' | 'runtimes' | 'runs'>,
@@ -118,107 +192,94 @@ export function isUnavailableThread(row: AgentThreadRow): boolean {
  * identity retained as a rollout fallback. Conflicting identities are left
  * unmapped rather than guessed.
  */
+function durableThreadForSessionFromIndexes(
+  indexes: ThreadNavIndexes,
+  sessionId: string,
+): DurableThreadMetadata | undefined {
+  const runThreadIds = new Set(
+    (indexes.runsBySessionId.get(sessionId) ?? []).map((run) => run.threadId),
+  );
+  const direct = indexes.linksBySessionId.get(sessionId) ?? [];
+  const directThreadIds = new Set(direct.map((link) => link.threadId));
+  if (directThreadIds.size > 1) return undefined;
+  const directLink = direct[0];
+  const threadId =
+    directLink?.threadId ??
+    (runThreadIds.size === 1 ? [...runThreadIds][0] : undefined);
+  if (threadId === undefined) return undefined;
+  if (
+    directLink &&
+    [...runThreadIds].some((candidate) => candidate !== directLink.threadId)
+  )
+    return undefined;
+  const thread = indexes.threadsById.get(threadId);
+  if (!directLink && !thread) return undefined;
+  const runs = indexes.runsByThreadId.get(threadId) ?? [];
+  const hasLiveRuntime = (
+    indexes.runtimesBySessionId.get(sessionId) ?? []
+  ).some((runtime) => runtime.online !== false);
+  return {
+    threadId,
+    ...(thread?.checkoutId ? { checkoutId: thread.checkoutId } : {}),
+    ...(directLink
+      ? directLink.archivedAt === undefined
+        ? {}
+        : { archivedAt: directLink.archivedAt }
+      : thread?.archivedAt === undefined
+        ? {}
+        : { archivedAt: thread.archivedAt }),
+    ...(directLink
+      ? directLink.pinnedAt === undefined
+        ? {}
+        : { pinnedAt: directLink.pinnedAt }
+      : thread?.pinnedAt === undefined
+        ? {}
+        : { pinnedAt: thread.pinnedAt }),
+    ...(directLink
+      ? directLink.settledAt === undefined
+        ? {}
+        : { settledAt: directLink.settledAt }
+      : thread?.settledAt === undefined
+        ? {}
+        : { settledAt: thread.settledAt }),
+    hasActiveRun:
+      directLink?.activeRunId !== undefined ||
+      runs.some((run) => ACTIVE_RUN_STATUSES.includes(run.status)) ||
+      hasLiveRuntime,
+  };
+}
+
+/** Public single-join API; row derivations use the shared pre-indexed path. */
 export function durableThreadForSession(
   snapshot: Pick<BrowserSnapshot, 'runs'> &
     Partial<Pick<BrowserSnapshot, 'runtimes'>>,
   sessionId: string,
-  threads: readonly Pick<
-    Thread,
-    'id' | 'checkoutId' | 'archivedAt' | 'pinnedAt' | 'settledAt'
-  >[],
+  threads: readonly DurableThread[],
   directLinks: readonly SessionThreadLink[] = [],
 ): DurableThreadMetadata | undefined {
-  const runs = snapshot.runs ?? [];
-  const runThreadIds = new Set(
-    runs
-      .filter((run) => run.piSessionId === sessionId)
-      .map((run) => run.threadId),
+  return durableThreadForSessionFromIndexes(
+    buildThreadNavIndexes(snapshot, threads, directLinks, []),
+    sessionId,
   );
-  const direct = directLinks.filter((link) => link.sessionId === sessionId);
-  const directThreadIds = new Set(direct.map((link) => link.threadId));
-  if (directThreadIds.size > 1) return undefined;
-  const directLink = direct[0];
-  if (directLink) {
-    // Direct links are authoritative, but an old run projection that names a
-    // different thread is a conflict, never a reason to guess.
-    if ([...runThreadIds].some((threadId) => threadId !== directLink.threadId))
-      return undefined;
-    const directThread = threads.find(
-      (candidate) => candidate.id === directLink.threadId,
-    );
-    return {
-      threadId: directLink.threadId,
-      ...(directThread?.checkoutId
-        ? { checkoutId: directThread.checkoutId }
-        : {}),
-      ...(directLink.archivedAt === undefined
-        ? {}
-        : { archivedAt: directLink.archivedAt }),
-      ...(directLink.pinnedAt === undefined
-        ? {}
-        : { pinnedAt: directLink.pinnedAt }),
-      ...(directLink.settledAt === undefined
-        ? {}
-        : { settledAt: directLink.settledAt }),
-      hasActiveRun:
-        directLink.activeRunId !== undefined ||
-        runs.some(
-          (run) =>
-            run.threadId === directLink.threadId &&
-            ACTIVE_RUN_STATUSES.includes(run.status),
-        ) ||
-        (snapshot.runtimes ?? []).some(
-          (runtime) =>
-            runtime.session.id === sessionId && runtime.online !== false,
-        ),
-    };
-  }
-  if (runThreadIds.size !== 1) return undefined;
-  const threadId = [...runThreadIds][0];
-  const thread = threads.find((candidate) => candidate.id === threadId);
-  if (!thread) return undefined;
-  return {
-    threadId,
-    ...(thread.checkoutId ? { checkoutId: thread.checkoutId } : {}),
-    ...(thread.archivedAt === undefined
-      ? {}
-      : { archivedAt: thread.archivedAt }),
-    ...(thread.pinnedAt === undefined ? {} : { pinnedAt: thread.pinnedAt }),
-    ...(thread.settledAt === undefined ? {} : { settledAt: thread.settledAt }),
-    hasActiveRun:
-      runs.some(
-        (run) =>
-          run.threadId === threadId && ACTIVE_RUN_STATUSES.includes(run.status),
-      ) ||
-      (snapshot.runtimes ?? []).some(
-        (runtime) =>
-          runtime.session.id === sessionId && runtime.online !== false,
-      ),
-  };
 }
 
 function promotedDraftForSession(
-  snapshot: Pick<BrowserSnapshot, 'runs'>,
-  directLinks: readonly SessionThreadLink[],
-  drafts: readonly DraftMetadata[],
+  indexes: ThreadNavIndexes,
   sessionId: string,
   runtimeId?: string,
 ): DraftMetadata | undefined {
   const threadIds = new Set(
-    directLinks
-      .filter((link) => link.sessionId === sessionId)
-      .map((link) => link.threadId),
+    (indexes.linksBySessionId.get(sessionId) ?? []).map(
+      (link) => link.threadId,
+    ),
   );
-  for (const run of snapshot.runs ?? []) {
-    if (
-      run.piSessionId === sessionId ||
-      (runtimeId !== undefined && run.runtimeId === runtimeId)
-    )
+  for (const run of indexes.runsBySessionId.get(sessionId) ?? [])
+    threadIds.add(run.threadId);
+  if (runtimeId !== undefined)
+    for (const run of indexes.runsByRuntimeId.get(runtimeId) ?? [])
       threadIds.add(run.threadId);
-  }
   if (threadIds.size !== 1) return undefined;
-  const threadId = [...threadIds][0];
-  return drafts.find((draft) => draft.promotedThreadId === threadId);
+  return indexes.draftsByThreadId.get([...threadIds][0]);
 }
 
 export function resolvedDraftPromotionIds(
@@ -226,16 +287,13 @@ export function resolvedDraftPromotionIds(
   directLinks: readonly SessionThreadLink[],
   drafts: readonly DraftMetadata[],
 ): string[] {
+  const indexes = buildThreadNavIndexes(snapshot, [], directLinks, drafts);
   return snapshot.sessions.flatMap((session) => {
     if (session.startedAt === undefined) return [];
-    const draft = promotedDraftForSession(
-      snapshot,
-      directLinks,
-      drafts,
-      session.id,
-      snapshot.runtimes.find((runtime) => runtime.session.id === session.id)
-        ?.runtimeId ?? session.activeRuntimeId,
-    );
+    const runtimeId =
+      indexes.runtimesBySessionId.get(session.id)?.[0]?.runtimeId ??
+      session.activeRuntimeId;
+    const draft = promotedDraftForSession(indexes, session.id, runtimeId);
     return draft ? [draft.id] : [];
   });
 }
@@ -250,21 +308,26 @@ export function agentThreadRows(
   drafts: readonly DraftMetadata[] = [],
 ): AgentThreadRow[] {
   const authoritativeThreads = snapshot.threads ?? durableThreads;
+  const indexes = buildThreadNavIndexes(
+    snapshot,
+    authoritativeThreads ?? [],
+    directLinks,
+    drafts,
+  );
+  const sessionIds = new Set([
+    ...snapshot.runtimes.map((runtime) => runtime.session.id),
+    ...snapshot.sessions.map((session) => session.id),
+  ]);
   const durableForSession =
     authoritativeThreads !== undefined || directLinks.length > 0
       ? new Map(
-          [
-            ...snapshot.runtimes.map((runtime) => runtime.session.id),
-            ...snapshot.sessions.map((session) => session.id),
-          ].map((sessionId) => [
-            sessionId,
-            durableThreadForSession(
-              snapshot,
-              sessionId,
-              authoritativeThreads ?? [],
-              directLinks,
-            ),
-          ]),
+          [...sessionIds].map(
+            (sessionId) =>
+              [
+                sessionId,
+                durableThreadForSessionFromIndexes(indexes, sessionId),
+              ] as const,
+          ),
         )
       : undefined;
   const projectsById = new Map(
@@ -281,9 +344,7 @@ export function agentThreadRows(
     const projectId = runtime.projectId ?? session?.projectId;
     const presentation = dashboardStatus(runtime);
     const promotedDraft = promotedDraftForSession(
-      snapshot,
-      directLinks,
-      drafts,
+      indexes,
       runtime.session.id,
       runtime.runtimeId,
     );
@@ -309,9 +370,7 @@ export function agentThreadRows(
     if (session.sessionKind === 'delegate' || rows.has(session.id)) continue;
     const projectId = session.projectId;
     const promotedDraft = promotedDraftForSession(
-      snapshot,
-      directLinks,
-      drafts,
+      indexes,
       session.id,
       session.activeRuntimeId,
     );
@@ -337,10 +396,8 @@ export function agentThreadRows(
     const prompt = readComposerDraft(draft.id).replace(/\s+/gu, ' ').trim();
     const starting = Boolean(
       draft.promotedThreadId &&
-        (snapshot.runs ?? []).some(
-          (run) =>
-            run.threadId === draft.promotedThreadId &&
-            ACTIVE_RUN_STATUSES.includes(run.status),
+        (indexes.runsByThreadId.get(draft.promotedThreadId) ?? []).some((run) =>
+          ACTIVE_RUN_STATUSES.includes(run.status),
         ),
     );
     rows.set(draft.id, {

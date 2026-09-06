@@ -31,6 +31,7 @@ import {
 } from './http-client.js';
 import type { CachedSessionTranscript } from './session-transcript-cache.js';
 import {
+  acceptTranscriptCaughtUpOrdering,
   acceptTranscriptEventOrdering,
   acceptTranscriptSnapshotOrdering,
   coverageWithPages as buildHistoryCoverage,
@@ -44,6 +45,7 @@ import {
   SESSION_HISTORY_BUDGET,
   type SessionHistoryCoverage,
   type SessionHistoryPageCoverage,
+  type TranscriptOrderingDecision,
   pageCoverage as transcriptPageCoverage,
 } from './session-transcript-state.js';
 
@@ -745,6 +747,59 @@ export class DashboardLiveStore {
     this.updateDomain('session', sessionId, { status: 'error', error });
   }
 
+  /** Return the store-owned ordering decision for a shell watermark. */
+  shellCaughtUpOrdering(
+    sequence: number,
+    generation: number,
+  ): TranscriptOrderingDecision {
+    return acceptTranscriptCaughtUpOrdering(
+      this.state.shellSync,
+      sequence,
+      generation,
+    );
+  }
+
+  /** Return the store-owned ordering decision for a session watermark. */
+  sessionCaughtUpOrdering(
+    sessionId: string,
+    sequence: number,
+    generation: number,
+  ): TranscriptOrderingDecision {
+    return acceptTranscriptCaughtUpOrdering(
+      this.state.sessionSyncById[sessionId],
+      sequence,
+      generation,
+    );
+  }
+
+  /** Return the store-owned ordering decision for a shell feed event. */
+  shellEventOrdering(
+    sequence: number,
+    generation: number,
+  ): TranscriptOrderingDecision {
+    return acceptTranscriptEventOrdering(
+      this.state.shellSync,
+      sequence,
+      generation,
+      {
+        unknownBaseline: 'reject',
+      },
+    );
+  }
+
+  /** Return the store-owned ordering decision for an acquired session event. */
+  sessionEventOrdering(
+    sessionId: string,
+    sequence: number,
+    generation: number,
+  ): TranscriptOrderingDecision {
+    return acceptTranscriptEventOrdering(
+      this.state.sessionSyncById[sessionId],
+      sequence,
+      generation,
+    );
+  }
+
   /** Install the shell feed's authoritative snapshot at its own sequence. */
   acceptShellSnapshot(
     next: BrowserSnapshot,
@@ -753,13 +808,13 @@ export class DashboardLiveStore {
     authoritativeRebase = false,
   ): boolean {
     const current = this.state.shellSync;
-    if (
-      current.generation !== generation ||
-      (!authoritativeRebase &&
-        current.sequenceKnown &&
-        sequence <= current.sequence)
-    )
-      return false;
+    const ordering = acceptTranscriptSnapshotOrdering(
+      current,
+      sequence,
+      generation,
+      authoritativeRebase,
+    );
+    if (!ordering.accepted) return false;
     const accepted = this.installSnapshot(next, {
       source: 'sse',
       authoritativeRebase,
@@ -783,13 +838,7 @@ export class DashboardLiveStore {
    * state from a partial payload.
    */
   acceptShellEvent(event: ShellFeedEvent, generation: number): boolean {
-    const sync = this.state.shellSync;
-    if (
-      sync.generation !== generation ||
-      !sync.sequenceKnown ||
-      event.sequence <= sync.sequence ||
-      event.sequence !== sync.sequence + 1
-    )
+    if (!this.shellEventOrdering(event.sequence, generation).accepted)
       return false;
 
     let nextState = this.state;
@@ -1252,12 +1301,7 @@ export class DashboardLiveStore {
     },
     generation: number,
   ): boolean {
-    const current = this.state.sessionSyncById[sessionId];
-    const ordering = acceptTranscriptEventOrdering(
-      current,
-      sequence,
-      generation,
-    );
+    const ordering = this.sessionEventOrdering(sessionId, sequence, generation);
     if (!ordering.accepted) {
       this.resetSessionHistoryToNewest(sessionId);
       return false;
@@ -1836,19 +1880,20 @@ export class DashboardLiveStore {
   markSessionCached(
     sessionId: string,
     generation: number,
-    sequence: number,
-    sequenceKnown: boolean,
+    sequence?: number,
+    sequenceKnown?: boolean,
   ): boolean {
     if (
       !this.state.sessionSnapshotsById[sessionId] ||
       !this.state.transcriptsBySessionId[sessionId]
     )
       return false;
+    const current = this.state.sessionSyncById[sessionId];
     this.updateDomain('session', sessionId, {
       status: 'cached',
       generation,
-      sequence,
-      sequenceKnown,
+      sequence: sequence ?? current?.sequence ?? 0,
+      sequenceKnown: sequenceKnown ?? current?.sequenceKnown ?? false,
       error: undefined,
     });
     return true;
@@ -1896,31 +1941,53 @@ export function useDashboardStore<T>(
   );
 }
 
-let lastMaterializedParts:
-  | Pick<
-      DashboardLiveState,
-      | 'serverId'
-      | 'revision'
-      | 'snapshotCursor'
-      | 'shellProjection'
-      | 'usage'
-      | 'projects'
-      | 'checkouts'
-      | 'threads'
-      | 'runs'
-      | 'runtimesById'
-      | 'sessionsById'
-      | 'notificationsById'
-    >
-  | undefined;
-let lastMaterializedSnapshot: BrowserSnapshot | undefined;
+type MaterializedParts = Pick<
+  DashboardLiveState,
+  | 'serverId'
+  | 'revision'
+  | 'snapshotCursor'
+  | 'shellProjection'
+  | 'usage'
+  | 'projects'
+  | 'checkouts'
+  | 'threads'
+  | 'runs'
+  | 'runtimesById'
+  | 'sessionsById'
+  | 'notificationsById'
+>;
+
+type MaterializedCache = {
+  parts: MaterializedParts;
+  snapshot: BrowserSnapshot;
+};
+
+/** Cache per normalized projection, never across unrelated store maps. */
+const materializedSnapshots = new WeakMap<object, MaterializedCache>();
+const runtimeArrays = new WeakMap<object, readonly RuntimeSnapshot[]>();
+const sessionArrays = new WeakMap<object, readonly SessionIndexEntry[]>();
+const notificationArrays = new WeakMap<
+  object,
+  readonly BrowserSnapshot['unread'][number][]
+>();
+
+function stableValues<T>(
+  source: Readonly<Record<string, T>>,
+  cache: WeakMap<object, readonly T[]>,
+): readonly T[] {
+  const cached = cache.get(source);
+  if (cached) return cached;
+  const values = Object.values(source);
+  cache.set(source, values);
+  return values;
+}
 
 /** Materialize the legacy wire shape only for shell/route consumers. */
 export function materializeSnapshot(
   state: DashboardLiveState,
 ): BrowserSnapshot | undefined {
   if (!state.serverId) return undefined;
-  const parts = {
+  const parts: MaterializedParts = {
     serverId: state.serverId,
     revision: state.revision,
     snapshotCursor: state.snapshotCursor,
@@ -1934,22 +2001,20 @@ export function materializeSnapshot(
     sessionsById: state.sessionsById,
     notificationsById: state.notificationsById,
   };
-  const previousParts = lastMaterializedParts;
+  const previous = materializedSnapshots.get(state.runtimesById);
   if (
-    previousParts &&
-    Object.keys(parts).every(
-      (key) =>
-        parts[key as keyof typeof parts] ===
-        previousParts[key as keyof typeof previousParts],
+    previous &&
+    (Object.keys(parts) as (keyof MaterializedParts)[]).every(
+      (key) => parts[key] === previous.parts[key],
     )
   )
-    return lastMaterializedSnapshot;
+    return previous.snapshot;
   const snapshot: BrowserSnapshot = {
     serverId: state.serverId,
     revision: state.revision,
     cursor: state.snapshotCursor,
-    runtimes: Object.values(state.runtimesById),
-    sessions: Object.values(state.sessionsById),
+    runtimes: stableValues(state.runtimesById, runtimeArrays),
+    sessions: stableValues(state.sessionsById, sessionArrays),
     ...(state.usage === undefined ? {} : { usage: state.usage }),
     ...(state.projects === undefined ? {} : { projects: state.projects }),
     ...(state.checkouts === undefined ? {} : { checkouts: state.checkouts }),
@@ -1958,10 +2023,9 @@ export function materializeSnapshot(
     ...(state.shellProjection === undefined
       ? {}
       : { shellProjection: state.shellProjection }),
-    unread: Object.values(state.notificationsById),
+    unread: stableValues(state.notificationsById, notificationArrays),
   };
-  lastMaterializedParts = parts;
-  lastMaterializedSnapshot = snapshot;
+  materializedSnapshots.set(state.runtimesById, { parts, snapshot });
   return snapshot;
 }
 
@@ -1973,6 +2037,12 @@ const EMPTY_RUNS: readonly RunSummary[] = [];
 const EMPTY_RUNTIMES: readonly RuntimeSnapshot[] = [];
 const EMPTY_SESSIONS: readonly SessionIndexEntry[] = [];
 const EMPTY_NOTIFICATIONS: readonly BrowserSnapshot['unread'][number][] = [];
+const EMPTY_DOMAIN_SYNC: DomainSyncState = {
+  status: 'empty',
+  generation: 0,
+  sequence: 0,
+  sequenceKnown: false,
+};
 export const selectProjects = (state: DashboardLiveState) =>
   state.projects ?? EMPTY_PROJECTS;
 export const selectCheckouts = (state: DashboardLiveState) =>
@@ -1982,20 +2052,21 @@ export const selectThreads = (state: DashboardLiveState) =>
 export const selectRuns = (state: DashboardLiveState) =>
   state.runs ?? EMPTY_RUNS;
 export const selectRuntimes = (state: DashboardLiveState) =>
-  materializeSnapshot(state)?.runtimes ?? EMPTY_RUNTIMES;
+  state.serverId
+    ? stableValues(state.runtimesById, runtimeArrays)
+    : EMPTY_RUNTIMES;
 export const selectSessions = (state: DashboardLiveState) =>
-  materializeSnapshot(state)?.sessions ?? EMPTY_SESSIONS;
+  state.serverId
+    ? stableValues(state.sessionsById, sessionArrays)
+    : EMPTY_SESSIONS;
 export const selectNotifications = (state: DashboardLiveState) =>
-  materializeSnapshot(state)?.unread ?? EMPTY_NOTIFICATIONS;
+  state.serverId
+    ? stableValues(state.notificationsById, notificationArrays)
+    : EMPTY_NOTIFICATIONS;
 export const selectShellSync = (state: DashboardLiveState) => state.shellSync;
 export const selectSessionSync =
   (sessionId: string) => (state: DashboardLiveState) =>
-    state.sessionSyncById[sessionId] ?? {
-      status: 'empty' as const,
-      generation: 0,
-      sequence: 0,
-      sequenceKnown: false,
-    };
+    state.sessionSyncById[sessionId] ?? EMPTY_DOMAIN_SYNC;
 export const selectTranscript =
   (sessionId: string) => (state: DashboardLiveState) =>
     state.transcriptsBySessionId[sessionId];
