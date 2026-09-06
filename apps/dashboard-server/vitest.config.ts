@@ -4,6 +4,18 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@pi-agent/background-jobs': path.resolve(
+        __dirname,
+        '../../packages/background-jobs/src/index.ts',
+      ),
+      '@pi-agent/session-title': path.resolve(
+        __dirname,
+        '../../packages/session-title/src/index.ts',
+      ),
+      '@pi-dashboard/extension-contributions': path.resolve(
+        __dirname,
+        '../../packages/extension-contributions/src/index.ts',
+      ),
       '@pi-dashboard/activity-model': path.resolve(
         __dirname,
         '../../packages/activity-model/src/index.ts',
