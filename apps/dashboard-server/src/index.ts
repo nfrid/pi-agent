@@ -31,7 +31,13 @@ export async function runDashboard(): Promise<void> {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    void server.stop().finally(() => process.exit(0));
+    void server.stop().then(
+      () => process.exit(0),
+      (error) => {
+        console.error('Dashboard shutdown failed:', error);
+        process.exit(1);
+      },
+    );
   };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
