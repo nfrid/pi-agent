@@ -718,6 +718,80 @@ describe('remote event normalization', () => {
     expect(nextStarted.messageId).not.toBe(started.messageId);
   });
 
+  it('retains assistant failure metadata and partial content at message_end', () => {
+    const normalizer = new LiveEventNormalizer('runtime-failure');
+    normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: [] },
+    });
+    normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: 'Partial answer',
+      },
+    });
+    const finished = normalizer.normalizeMessage('finished', {
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Partial answer' }],
+        stopReason: 'error',
+        errorMessage: 'Connection failed',
+      },
+    });
+    expect(finished).toMatchObject({
+      content: [{ type: 'text', text: 'Partial answer' }],
+      stopReason: 'error',
+      errorMessage: 'Connection failed',
+      phase: 'finished',
+    });
+    expect(
+      withoutOpaqueData({
+        type: 'message.finished',
+        sessionId: 's',
+        message: finished,
+      }),
+    ).toMatchObject({
+      message: { stopReason: 'error', errorMessage: 'Connection failed' },
+    });
+
+    const emptyTerminal = new LiveEventNormalizer('runtime-empty-error');
+    emptyTerminal.normalizeMessage('started', {
+      message: { role: 'assistant', content: [] },
+    });
+    emptyTerminal.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: 'Retained partial',
+      },
+    });
+    expect(
+      emptyTerminal.normalizeMessage('finished', {
+        message: {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          errorMessage: 'No final content',
+        },
+      }),
+    ).toMatchObject({
+      content: [{ type: 'text', text: 'Retained partial' }],
+      stopReason: 'error',
+    });
+
+    const longError = new LiveEventNormalizer(
+      'runtime-long-error',
+    ).normalizeMessage('finished', {
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'x'.repeat(40_000),
+      },
+    });
+    expect(longError.errorMessage).toHaveLength(32_768);
+  });
+
   it('handles 0.84 delta-only events without requiring partial', () => {
     const normalizer = new LiveEventNormalizer('runtime-delta-only');
     normalizer.normalizeMessage('started', {

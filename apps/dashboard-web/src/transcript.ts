@@ -81,6 +81,8 @@ export interface TranscriptModelItem {
   tool?: TranscriptRenderToolItem;
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
+  /** Presentation-ready native assistant failure detail. */
+  errorMessage?: string;
   /** Feature-owned replacement rendered in the normal transcript flow. */
   customMessage?: ReactNode;
   /** Optional outline presentation without changing transcript semantics. */
@@ -458,6 +460,10 @@ function messageRaw(item: Extract<TranscriptRenderItem, { kind: 'message' }>) {
       ...(item.toolCallIds.length === 0
         ? {}
         : { toolCallIds: item.toolCallIds }),
+      ...(item.stopReason === undefined ? {} : { stopReason: item.stopReason }),
+      ...(item.errorMessage === undefined
+        ? {}
+        : { errorMessage: item.errorMessage }),
       ...(item.streaming ? { __dashboardStreaming: true } : {}),
     },
   };
@@ -667,9 +673,20 @@ export function toTranscriptEntries(
         : thinkingHeaders.length > 0
           ? 'thought'
           : undefined;
-    const visibleText = text && !isNarration(text) ? text : undefined;
+    const failed = item.stopReason === 'error';
+    const visibleText =
+      text && (failed || !isNarration(text)) ? text : undefined;
+    const errorMessage = failed
+      ? item.errorMessage?.trim() || 'Unknown error'
+      : undefined;
     const hasAssociatedTools = item.associatedToolCallIds.length > 0;
-    if (!visibleText && thinking.length === 0 && imageCount === 0) continue;
+    if (
+      !visibleText &&
+      thinking.length === 0 &&
+      imageCount === 0 &&
+      !errorMessage
+    )
+      continue;
     const preamble =
       visibleText && hasAssociatedTools
         ? preambleTitle(visibleText)
@@ -694,6 +711,7 @@ export function toTranscriptEntries(
       raw,
       text: visibleText,
       ...(thinking.length > 0 ? { thinking } : {}),
+      ...(errorMessage === undefined ? {} : { errorMessage }),
       role,
       ...(sessionId ? { sessionId } : {}),
       ...(imageCount > 0 ? { imageCount, images } : {}),

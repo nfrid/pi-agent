@@ -33,6 +33,19 @@ describe('transcript entries', () => {
     expect(markup).not.toContain('preparing tool call');
   });
 
+  it('renders an assistant error even when the message has no text', () => {
+    const item: TranscriptModelItem = {
+      key: 'assistant-error',
+      raw: {},
+      entry: { kind: 'assistant', speaks: true, closesGroup: true },
+      role: 'assistant',
+      errorMessage: 'Unknown error',
+    };
+    const markup = renderToStaticMarkup(<TranscriptEntry item={item} />);
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain('Assistant error: Unknown error');
+  });
+
   it('shows a path indicator only for user bubbles with multiple immediate paths', () => {
     const item: TranscriptModelItem = {
       key: 'path-a',

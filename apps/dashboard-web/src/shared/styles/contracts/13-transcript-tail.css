@@ -82,6 +82,18 @@
   margin-right: 0;
   margin-left: 0;
 }
+.transcript-message-error {
+  max-width: 100%;
+  margin: 8px 0;
+  border-left: 2px solid var(--red);
+  background: color-mix(in srgb, var(--red) 10%, var(--bg));
+  padding: 8px 10px;
+  color: color-mix(in srgb, var(--red) 84%, var(--fg));
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 
 @media (max-width: 820px) {
   :where(.preparing-toolcall strong) {
