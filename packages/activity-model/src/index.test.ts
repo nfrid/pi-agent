@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityEntryFromRaw,
+  activityEntryFromSemantic,
   activityGroupFacts,
   activityPhases,
   groupTranscript,
@@ -533,6 +534,13 @@ describe('shared activity model', () => {
     };
 
     const streaming = activityEntryFromRaw(liveMessage);
+    const typedStreaming = activityEntryFromSemantic({
+      kind: 'assistant',
+      content: liveMessage.message.content,
+      associatedToolCallIds: [],
+      streaming: true,
+    });
+    expect(typedStreaming).toEqual(streaming);
     expect(streaming).toMatchObject({
       kind: 'assistant',
       speaks: true,
@@ -549,6 +557,14 @@ describe('shared activity model', () => {
         toolCallIds: ['edit-1'],
       },
     });
+    expect(
+      activityEntryFromSemantic({
+        kind: 'assistant',
+        content: liveMessage.message.content,
+        associatedToolCallIds: ['edit-1'],
+        streaming: true,
+      }),
+    ).toEqual(withTool);
     expect(withTool).toMatchObject({
       kind: 'assistant',
       speaks: false,

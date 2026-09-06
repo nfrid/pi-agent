@@ -1,7 +1,6 @@
-import type { AssistantMessage } from '@earendil-works/pi-ai';
 import {
   type TranscriptEntry as ActivityTranscriptEntry,
-  activityEntryFromRaw,
+  activityEntryFromSemantic,
   describeTools,
   headersOf,
   isNarration,
@@ -163,15 +162,6 @@ function messageText(content: unknown): string {
   if (Array.isArray(content))
     return content.map(contentText).filter(Boolean).join('\n\n').trim();
   return contentText(content).trim();
-}
-
-function preambleTitle(text: string): string {
-  return (
-    text
-      .split('\n')[0]
-      ?.trim()
-      .replace(/[.…:]+$/, '') || text
-  );
 }
 
 function messageThinking(content: unknown): string[] {
@@ -614,16 +604,15 @@ export function toTranscriptEntries(
     if (item.kind === 'tool') {
       result.push({
         key: item.key,
-        entry: {
+        entry: activityEntryFromSemantic({
           kind: 'tool',
           name: item.name,
           args: item.arguments,
           status: item.status,
-          ...(item.status === 'error' ? { isError: true } : {}),
           ...(item.isError === undefined ? {} : { isError: item.isError }),
           ...(item.result === undefined ? {} : { result: item.result }),
           ...(item.data === undefined ? {} : { data: item.data }),
-        },
+        }),
         raw: toolRaw(item),
         tool: item,
       });
@@ -655,42 +644,17 @@ export function toTranscriptEntries(
       });
       continue;
     }
-    const assistant = {
-      role: item.role,
-      content: Array.isArray(item.content) ? item.content : [],
-    } as unknown as AssistantMessage;
-    const textHeaders = headersOf(assistant, 'text');
-    const thinkingHeaders = headersOf(assistant, 'thinking');
-    const narration =
-      textHeaders.length > 0
-        ? 'announced'
-        : thinkingHeaders.length > 0
-          ? 'thought'
-          : undefined;
     const visibleText = text && !isNarration(text) ? text : undefined;
-    const hasAssociatedTools = item.associatedToolCallIds.length > 0;
     if (!visibleText && thinking.length === 0 && imageCount === 0) continue;
-    const preamble =
-      visibleText && hasAssociatedTools
-        ? preambleTitle(visibleText)
-        : undefined;
-    const narratedTitle = (
-      textHeaders.length > 0 ? textHeaders : thinkingHeaders
-    ).at(-1);
+    const entry = activityEntryFromSemantic({
+      kind: 'assistant',
+      content: item.content,
+      associatedToolCallIds: item.associatedToolCallIds,
+      streaming: item.streaming,
+    });
     result.push({
       key: item.key,
-      entry: {
-        kind: 'assistant',
-        speaks: item.preparing ? false : Boolean(visibleText),
-        ...(item.preparing ? { streaming: true } : {}),
-        narration,
-        title: preamble ?? narratedTitle,
-        ...(preamble
-          ? { titleKind: 'preamble' as const }
-          : narratedTitle
-            ? { titleKind: 'narration' as const }
-            : {}),
-      },
+      entry,
       raw,
       text: visibleText,
       ...(thinking.length > 0 ? { thinking } : {}),
@@ -700,20 +664,13 @@ export function toTranscriptEntries(
       ...(item.preparing ? { preparing: true } : {}),
     });
   }
-  // Reuse the shared adapter for canonical entry kinds and tool semantics while
-  // keeping all presentation fields above. Dashboard row segmentation is
-  // intentionally handled from the resulting model items, not this adapter.
-  const mapped = result.map((item) => ({
-    ...item,
-    entry: activityEntryFromRaw(item.raw),
-  }));
   const hidden = leadingContinuationSpan(
-    mapped.map((item) => item.entry),
+    result.map((item) => item.entry),
     options.leadingContinuation,
   );
   return hidden
-    ? mapped.filter((_, index) => index < hidden.start || index > hidden.end)
-    : mapped;
+    ? result.filter((_, index) => index < hidden.start || index > hidden.end)
+    : result;
 }
 
 /** Compatibility helper retained for consumers with raw tool entries. */
