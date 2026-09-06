@@ -527,7 +527,11 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await expect(
     settingsDrawer.getByRole('button', { name: /push/iu }),
   ).toBeVisible();
-  await expect(settingsDrawer.getByText('Usage project')).toBeVisible();
+  await expect(
+    settingsDrawer
+      .getByRole('region', { name: 'Projects' })
+      .getByText('Usage project', { exact: true }),
+  ).toBeVisible();
   await expect(
     settingsDrawer.getByText('Choose icon', { exact: true }),
   ).toHaveCount(0);

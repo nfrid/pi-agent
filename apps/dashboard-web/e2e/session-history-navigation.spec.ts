@@ -190,10 +190,11 @@ test('aborts older history when navigating away from a session', async ({
   });
 
   await page.goto('/sessions/session-1');
-  await expect(
-    page.getByRole('button', { name: 'Load earlier history' }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Load earlier history' }).click();
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
   await olderRequestStarted;
   await page.goto('/');
   await expect(page).toHaveURL(/\/$/u);
@@ -442,6 +443,39 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
   let activeRequests = 0;
+  await page.route('**/api/sessions/session-1/delegate-history', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        version: 2,
+        sessionId: 'session-1',
+        groups: [
+          {
+            id: 'lineage-delegate-current',
+            runId: 'delegate-current',
+            lineageId: 'lineage-delegate-current',
+            name: 'worker',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            runCount: 1,
+            runs: [
+              {
+                runId: 'delegate-current',
+                lineageId: 'lineage-delegate-current',
+                name: 'worker',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                allowWrites: false,
+              },
+            ],
+          },
+        ],
+      }),
+    }),
+  );
   await page.route('**/trpc/sessionSubscribe*', async (route) => {
     const input = dashboardTrpcInput(route.request()) as {
       sessionId?: string;
@@ -535,9 +569,11 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
   await expect(
     page.getByLabel('Transcript', { exact: true }).getByText('second session'),
   ).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Load earlier history' }),
-  ).toBeVisible();
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
   await page.goto('/sessions/session-1');
   await expect.poll(() => activeRequests).toBe(2);
   await expect(page.getByText('partial current')).toHaveCount(1);
@@ -546,7 +582,7 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
     page.locator('[data-transcript-key="assistant-current"]'),
   ).toHaveCount(1);
   await expect(
-    page.locator('[data-transcript-key="tool-current"]'),
+    page.locator('.tool-detail').filter({ hasText: 'Running read' }),
   ).toHaveCount(1);
 
   releaseStale();
@@ -556,9 +592,15 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
     page.locator('[data-transcript-key="assistant-current"]'),
   ).toHaveCount(1);
   await expect(
-    page.locator('[data-transcript-key="tool-current"]'),
+    page.locator('.tool-detail').filter({ hasText: 'Running read' }),
   ).toHaveCount(1);
-  await page.getByRole('button', { name: /Delegates/u }).click();
+  await page
+    .getByRole('button', { name: 'Run status Tasks and delegates' })
+    .click();
+  await page
+    .getByRole('article', { name: 'Delegates' })
+    .getByRole('button', { name: /Delegates 1 running/ })
+    .click();
   await expect(page.locator('.delegate-row')).toHaveCount(1);
   await expect(page.locator('.delegate-row').getByText('worker')).toHaveCount(
     1,

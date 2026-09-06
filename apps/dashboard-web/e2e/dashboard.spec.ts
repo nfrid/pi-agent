@@ -2622,9 +2622,10 @@ test('older active transcript events render before newer persisted history', asy
       ),
     )
     .toEqual(['Older active response', 'Newer persisted response']);
-  await expect(
-    page.getByRole('button', { name: /Older active response/ }),
-  ).toHaveAccessibleDescription(/1 tool/);
+  const activeTool = transcript
+    .locator('.tool-detail')
+    .filter({ hasText: 'Running search' });
+  await expect(activeTool).toHaveCount(1);
 });
 
 test('session shell exposes timestamps, dormant state, and persistent drafts', async ({
@@ -3165,14 +3166,15 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
       revision: 1,
       cursor: nextCursor,
       runtimes: [],
-      workspaces: [
+      projects: [
         {
-          id: `workspace-${generation}`,
-          name: `Live generation ${generation}`,
-          path: '/tmp',
-          canonicalPath: '/tmp',
-          source: 'directory',
-          active: false,
+          id: `project-${generation}`,
+          title: `Live generation ${generation}`,
+          rootPath: '/tmp',
+          status: 'active',
+          maxParallelRuns: 1,
+          activeRunCount: 0,
+          updatedAt: generation,
         },
       ],
       sessions: [],
@@ -3316,14 +3318,15 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
     revision: 1,
     cursor: 1,
     runtimes: [],
-    workspaces: [
+    projects: [
       {
-        id: 'workspace-1',
-        name: 'Live generation 1',
-        path: '/tmp',
-        canonicalPath: '/tmp',
-        source: 'directory',
-        active: false,
+        id: 'project-1',
+        title: 'Live generation 1',
+        rootPath: '/tmp',
+        status: 'active',
+        maxParallelRuns: 1,
+        activeRunCount: 0,
+        updatedAt: 1,
       },
     ],
     sessions: [],
@@ -3413,7 +3416,9 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
   expect(usageRequests).toBe(initialUsageRequests);
   await page.waitForTimeout(200);
   await page.goto('/projects');
-  await expect(page.getByText(/Live generation \d+/)).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Live generation \d+/u }),
+  ).toBeVisible();
   const streamsBeforeReplayGap = await page.evaluate(() =>
     (
       window as unknown as { dashboardLiveTest: { count(): number } }
@@ -3472,7 +3477,9 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
       });
   });
   await page.goto('/projects');
-  await expect(page.getByText(/Live generation \d+/)).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Live generation \d+/u }),
+  ).toBeVisible();
   await expect(page.getByText('ROLLED BACK')).toHaveCount(0);
   await page.goto('/');
   await expect(

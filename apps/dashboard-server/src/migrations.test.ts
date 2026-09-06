@@ -108,19 +108,33 @@ describe('migration metadata', () => {
       runMigrations(db);
       expect(
         db
-          .prepare('SELECT version FROM schema_migrations ORDER BY version')
+          .prepare('SELECT version,name FROM schema_migrations WHERE version=?')
+          .get(20),
+      ).toEqual({ version: 20, name: 'dashboard-default-model' });
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='dashboard_setting'",
+          )
+          .get(),
+      ).toEqual({ name: 'dashboard_setting' });
+      expect(
+        db
+          .prepare('PRAGMA table_info(dashboard_setting)')
           .all()
-          .at(-1),
-      ).toEqual({ version: 19 });
+          .map((row) => row.name),
+      ).toEqual(['key', 'value_json']);
     } finally {
       db.close();
     }
   });
 
-  it('uses stable ascending migration numbers', () => {
-    expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    ]);
+  it('uses unique ascending migration numbers starting at one', () => {
+    const versions = DASHBOARD_MIGRATIONS.map((migration) => migration.version);
+    expect(versions.length).toBeGreaterThan(0);
+    expect(versions[0]).toBe(1);
+    expect(new Set(versions).size).toBe(versions.length);
+    expect(versions).toEqual([...versions].sort((left, right) => left - right));
   });
 
   it('rebuilds lifecycle events for settlement without losing history', () => {
