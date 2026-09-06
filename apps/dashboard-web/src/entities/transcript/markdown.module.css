@@ -39,17 +39,17 @@
 }
 
 .markdown h1 {
-  color: var(--purple);
+  color: var(--pink);
   font-size: 1.4em;
 }
 
 .markdown h2 {
-  color: var(--orange);
+  color: var(--purple);
   font-size: 1.25em;
 }
 
 .markdown h3 {
-  color: var(--pink);
+  color: var(--red);
 }
 
 .markdown h4 {

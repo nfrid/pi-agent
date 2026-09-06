@@ -66,6 +66,9 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.transcript-thinking-blob .markdown strong {
+  color: inherit;
+}
 .transcript-thinking-blob .markdown > :first-child {
   margin-top: 0;
 }

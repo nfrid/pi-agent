@@ -31,7 +31,14 @@ for (const title of [
             id: 'markdown-colors-message',
             message: {
               role: 'assistant',
-              content: `# Heading one
+              content: [
+                {
+                  type: 'thinking',
+                  thinking: '**bold thought** surrounding thought',
+                },
+                {
+                  type: 'text',
+                  text: `# Heading one
 ## Heading two
 ### Heading three
 #### Heading four
@@ -43,6 +50,8 @@ for (const title of [
 \`\`\`text
 fenced code
 \`\`\``,
+                },
+              ],
             },
           },
         ],
@@ -53,11 +62,12 @@ fenced code
     });
 
     await page.goto('/sessions/markdown-colors-session');
-    const markdown = page.locator('.markdown');
+    const markdown = page.locator('.message-assistant .markdown');
+    const thinking = page.locator('.transcript-thinking-blob .markdown');
     const expectedHeadingColors = [
-      'rgb(189, 147, 249)',
-      'rgb(255, 184, 108)',
       'rgb(255, 121, 198)',
+      'rgb(189, 147, 249)',
+      'rgb(255, 85, 85)',
       'rgb(80, 250, 123)',
       'rgb(139, 233, 253)',
       'rgb(98, 114, 164)',
@@ -85,6 +95,15 @@ fenced code
     await expect(markdown.locator('a')).toHaveCSS(
       'color',
       'rgb(139, 233, 253)',
+    );
+
+    const thinkingColor = await thinking.evaluate(
+      (element) => getComputedStyle(element).color,
+    );
+    await expect(thinking.locator('strong')).toHaveCSS('color', thinkingColor);
+    await expect(thinking.locator('strong')).not.toHaveCSS(
+      'color',
+      'rgb(255, 184, 108)',
     );
   });
 }
