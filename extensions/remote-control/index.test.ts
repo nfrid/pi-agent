@@ -753,6 +753,31 @@ describe('remote event normalization', () => {
     ).toMatchObject({
       message: { stopReason: 'error', errorMessage: 'Connection failed' },
     });
+
+    const emptyTerminal = new LiveEventNormalizer('runtime-empty-error');
+    emptyTerminal.normalizeMessage('started', {
+      message: { role: 'assistant', content: [] },
+    });
+    emptyTerminal.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: 'Retained partial',
+      },
+    });
+    expect(
+      emptyTerminal.normalizeMessage('finished', {
+        message: {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          errorMessage: 'No final content',
+        },
+      }),
+    ).toMatchObject({
+      content: [{ type: 'text', text: 'Retained partial' }],
+      stopReason: 'error',
+    });
   });
 
   it('handles 0.84 delta-only events without requiring partial', () => {
