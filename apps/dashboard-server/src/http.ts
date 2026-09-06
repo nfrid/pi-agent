@@ -165,8 +165,14 @@ export class DashboardServerImpl implements DashboardServer {
   private readonly runtimeProvider: DashboardDependencies['runtimeProvider'];
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
-  private lifecycle: 'stopped' | 'starting' | 'started' | 'stopping' =
-    'stopped';
+  // A normally stopped server owns closed stateful resources and cannot be
+  // started again. Failed startup uses the restartable `stopped` state.
+  private lifecycle:
+    | 'stopped'
+    | 'starting'
+    | 'started'
+    | 'stopping'
+    | 'disposed' = 'stopped';
   private httpHasStarted = false;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
@@ -446,6 +452,7 @@ export class DashboardServerImpl implements DashboardServer {
       },
       pushSubscribe: (body) => this.savePushSubscription(body),
       vapidPublicKey: () => process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
+      assertMutationsOpen: () => this.assertMutationsOpen(),
       adoptProject: (command) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
@@ -598,6 +605,8 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   async start(): Promise<void> {
+    if (this.lifecycle === 'disposed')
+      throw new Error('Dashboard server has been disposed.');
     if (this.lifecycle === 'started') return;
     if (this.lifecycle === 'starting') {
       await this.startPromise;
@@ -696,14 +705,23 @@ export class DashboardServerImpl implements DashboardServer {
       }
       this.application.usage.start();
     } catch (error) {
-      await this.cleanupFailedStart();
+      // Failed startup is deliberately restartable. Preserve resources such
+      // as metadata and feeds, but clean every resource acquired so far.
       this.lifecycle = 'stopped';
+      try {
+        await this.cleanupFailedStart();
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `Dashboard startup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       throw error;
     }
   }
 
   async stop(): Promise<void> {
-    if (this.lifecycle === 'stopped') return;
+    if (this.lifecycle === 'stopped' || this.lifecycle === 'disposed') return;
     if (this.lifecycle === 'stopping') {
       await this.stopPromise;
       return;
@@ -723,7 +741,9 @@ export class DashboardServerImpl implements DashboardServer {
       await shutdown;
     } finally {
       if (this.stopPromise === shutdown) this.stopPromise = undefined;
-      this.lifecycle = 'stopped';
+      // Teardown attempts every owned resource even when one step fails. The
+      // closed state is therefore terminal, including rejected shutdowns.
+      this.lifecycle = 'disposed';
     }
   }
 
@@ -741,46 +761,80 @@ export class DashboardServerImpl implements DashboardServer {
     });
   }
 
-  private async stopInternal(): Promise<void> {
-    await this.application.usage.stop();
+  private async stopInternal(final = true): Promise<void> {
+    const failures: unknown[] = [];
+    const attempt = async (
+      label: string,
+      operation: () => void | Promise<void>,
+    ): Promise<void> => {
+      try {
+        await operation();
+      } catch (error) {
+        failures.push(
+          error instanceof Error
+            ? new Error(`${label}: ${error.message}`, { cause: error })
+            : new Error(`${label}: ${String(error)}`),
+        );
+      }
+    };
+
+    // Close both ingress paths before draining services. Existing requests can
+    // finish through Fastify's close, while new HTTP/bridge mutations are
+    // rejected as soon as lifecycle becomes `stopping`.
+    await attempt('bridge clients', () => this.bridge.destroyClients());
+    await attempt('bridge listener', () => this.bridge.close(this.socketPath));
+    await attempt('HTTP server', async () => {
+      if (this.httpHasStarted || this.http.listening) await this.app.close();
+    });
+
+    await attempt('usage service', () => this.application.usage.stop());
     if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
     this.feedSweepTimer = undefined;
-    await this.application.orchestrationService?.stop();
-    await (
-      this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
-        close?: () => Promise<void>;
-      }
-    ).close?.();
-    this.sessions.close();
-    this.shellFeed.close();
-    this.sessionFeeds.close();
-    this.registry.close();
-    // Destroy raw bridge clients before waiting for the HTTP server to close.
-    this.bridge.destroyClients();
-    await this.app.close();
-    await this.bridge.close(this.socketPath);
-    await this.application.uploads.close();
-    this.push.close?.();
-    this.metadata.close();
+    await attempt('orchestration service', () =>
+      this.application.orchestrationService?.stop(),
+    );
+    await attempt('runtime provider', () =>
+      (
+        this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
+          close?: () => Promise<void>;
+        }
+      ).close?.(),
+    );
+
+    // The daemon owns these local resources. The runtime host and managed
+    // runtime processes remain sidecar-owned; only the provider connection is
+    // closed above.
+    await attempt('session index', () => this.sessions.close());
+    if (final) {
+      await attempt('shell feed', () => this.shellFeed.close());
+      await attempt('session feeds', () => this.sessionFeeds.close());
+    }
+    await attempt('runtime registry', () => this.registry.close());
+    await attempt('uploads', () => this.application.uploads.close());
+    if (final) {
+      await attempt('push sender', () => this.push.close?.());
+      await attempt('metadata store', () => this.metadata.close());
+    }
+
+    if (failures.length > 0)
+      throw new AggregateError(
+        failures,
+        `Dashboard teardown failed: ${failures
+          .map((error) =>
+            error instanceof Error ? error.message : String(error),
+          )
+          .join('; ')}`,
+      );
   }
 
   private async cleanupFailedStart(): Promise<void> {
-    await this.application.usage.stop();
-    if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
-    this.feedSweepTimer = undefined;
-    await this.application.orchestrationService?.stop();
-    await (
-      this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
-        close?: () => Promise<void>;
-      }
-    ).close?.();
-    this.sessions.close();
-    this.registry.close();
-    this.bridge.destroyClients();
-    if (this.http.listening)
-      await new Promise<void>((resolve) => this.http.close(() => resolve()));
-    await this.bridge.close(this.socketPath);
-    await this.application.uploads.close().catch(() => undefined);
+    // Keep metadata and feeds open so a failed start can retry on this server.
+    await this.stopInternal(false);
+  }
+
+  private assertMutationsOpen(): void {
+    if (this.lifecycle !== 'started')
+      throw new Error('Dashboard server is shutting down.');
   }
 
   snapshot(cursor = this.shellFeed.sequence): BrowserSnapshot {

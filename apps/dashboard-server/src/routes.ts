@@ -205,6 +205,8 @@ export interface DashboardRouteContext {
   markAllNotificationsRead(): void;
   pushSubscribe(body: unknown): void;
   vapidPublicKey(): string | null;
+  /** Reject mutating requests once daemon teardown has begun. */
+  assertMutationsOpen?(): void;
   adoptProject?(command: unknown): Promise<unknown>;
   renameProject?(projectId: string, command: unknown): Promise<unknown>;
   updateProjectDefaultModel?(
@@ -369,6 +371,15 @@ function installCorsAndAuth(
       allowedOrigins: context.origins(),
     });
     if (!auth.ok) return reply.code(auth.status).send({ error: auth.error });
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      try {
+        context.assertMutationsOpen?.();
+      } catch (error) {
+        return reply.code(503).send({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   });
 }
 

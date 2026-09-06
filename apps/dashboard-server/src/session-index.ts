@@ -64,6 +64,11 @@ interface IndexedFile extends SessionIndexEntry {
   historyIndex: SessionHistoryIndex;
 }
 
+interface SessionCatalogue {
+  readonly files: Map<string, IndexedFile>;
+  readonly fileIds: Map<string, string>;
+}
+
 export interface SessionHistoryPage {
   version: 1;
   start: number;
@@ -533,8 +538,20 @@ function resumeMetadataFromDescriptors(
 }
 
 export class SessionIndex {
-  private readonly files = new Map<string, IndexedFile>();
-  private readonly fileIds = new Map<string, string>();
+  private catalogue: SessionCatalogue = {
+    files: new Map(),
+    fileIds: new Map(),
+  };
+  /** Changes made to the live catalogue invalidate in-flight rebuilds. */
+  private catalogueRevision = 0;
+  /** Rebuilds publish in request order, never in completion order. */
+  private rebuildQueue: Promise<void> = Promise.resolve();
+  private get files(): Map<string, IndexedFile> {
+    return this.catalogue.files;
+  }
+  private get fileIds(): Map<string, string> {
+    return this.catalogue.fileIds;
+  }
   private readonly watchers = new Map<
     string,
     ReturnType<typeof import('node:fs').watch>
@@ -565,12 +582,37 @@ export class SessionIndex {
   }
 
   async rebuild(): Promise<void> {
-    this.files.clear();
-    this.fileIds.clear();
-    const paths = (
-      await Promise.all(this.sessionRoots().map((root) => this.findJsonl(root)))
-    ).flat();
-    for (const file of paths) await this.indexFile(file).catch(() => undefined);
+    const rebuild = this.rebuildQueue.then(() => this.rebuildInternal());
+    this.rebuildQueue = rebuild.catch(() => undefined);
+    return rebuild;
+  }
+
+  private async rebuildInternal(): Promise<void> {
+    // Discovery and indexing can pause for filesystem I/O. Keep the previous
+    // catalogue live until the complete replacement is ready, then publish it
+    // with one synchronous pointer swap.
+    while (true) {
+      const revision = this.catalogueRevision;
+      const staged: SessionCatalogue = {
+        files: new Map(),
+        fileIds: new Map(),
+      };
+      const paths = (
+        await Promise.all(
+          this.sessionRoots().map((root) => this.findJsonl(root)),
+        )
+      ).flat();
+      for (const file of paths)
+        await this.indexFile(file, [], staged).catch(() => undefined);
+
+      // A watcher/index refresh may have committed while this replacement was
+      // being built. Retry rather than replacing its newer catalogue with a
+      // snapshot from before that commit.
+      if (revision !== this.catalogueRevision) continue;
+      this.catalogue = staged;
+      this.catalogueRevision += 1;
+      return;
+    }
   }
 
   async start(): Promise<void> {
@@ -1719,8 +1761,19 @@ export class SessionIndex {
       const previous = this.indexing.get(file) ?? Promise.resolve();
       const previousId = this.fileIds.get(path.resolve(file));
       const next = previous
-        .then(() => this.indexFile(file))
-        .catch(() => this.removeFile(file))
+        .then(async () => {
+          const catalogue = this.catalogue;
+          const revision = this.catalogueRevision;
+          try {
+            await this.indexFile(file, [], catalogue);
+          } catch (error) {
+            // Preserve the watcher behavior for a file that changed during its
+            // scan, but never remove a catalogue published after that scan
+            // began.
+            if (error instanceof SessionFileChangedError)
+              this.removeFile(file, catalogue, revision);
+          }
+        })
         .then(() =>
           this.notifyChange(
             this.fileIds.get(path.resolve(file)) ?? previousId,
@@ -1760,11 +1813,14 @@ export class SessionIndex {
   private async indexFile(
     file: string,
     proofOffsets: readonly number[] = [],
+    catalogue: SessionCatalogue = this.catalogue,
   ): Promise<void> {
     const resolved = path.resolve(file);
-    const existingId = this.fileIds.get(resolved);
+    const revision =
+      catalogue === this.catalogue ? this.catalogueRevision : undefined;
+    const existingId = catalogue.fileIds.get(resolved);
     const existing =
-      existingId === undefined ? undefined : this.files.get(existingId);
+      existingId === undefined ? undefined : catalogue.files.get(existingId);
     return this.indexFileStreaming(
       file,
       proofOffsets.concat(
@@ -1772,19 +1828,23 @@ export class SessionIndex {
           ? []
           : [...existing.historyIndex.prefixHashes.keys()],
       ),
+      catalogue,
+      revision,
     );
   }
 
   private async indexFileStreaming(
     file: string,
     proofOffsets: readonly number[],
+    catalogue: SessionCatalogue,
+    revision: number | undefined,
   ): Promise<void> {
     const resolved = path.resolve(file);
     if (
       !resolved.endsWith('.jsonl') ||
       !(await this.isSafeSessionFile(resolved))
     )
-      return this.removeFile(resolved);
+      return this.removeFile(resolved, catalogue, revision);
     try {
       const scan = await scanSessionFile(
         resolved,
@@ -1793,7 +1853,7 @@ export class SessionIndex {
       );
       const header = scan.header;
       if (!header || typeof header.cwd !== 'string') {
-        this.removeFile(resolved);
+        this.removeFile(resolved, catalogue, revision);
         return;
       }
       const groups = groupTranscript(
@@ -1811,15 +1871,20 @@ export class SessionIndex {
       };
       const id =
         typeof header.id === 'string' ? header.id : this.idForPath(resolved);
-      const previous = this.files.get(id);
-      if (previous && previous.file !== resolved) {
-        if (
-          !this.isAuxiliaryFile(previous.file) &&
-          this.isAuxiliaryFile(resolved)
-        )
-          return;
-        this.fileIds.delete(previous.file);
-      }
+      // A scan that began against an older live catalogue must not publish its
+      // result after a rebuild swap. Staged rebuild catalogues intentionally do
+      // not have a live revision and are always allowed to finish.
+      if (catalogue !== this.catalogue || revision === this.catalogueRevision) {
+        const previous = catalogue.files.get(id);
+        if (previous && previous.file !== resolved) {
+          if (
+            !this.isAuxiliaryFile(previous.file) &&
+            this.isAuxiliaryFile(resolved)
+          )
+            return;
+          catalogue.fileIds.delete(previous.file);
+        }
+      } else return;
       const auxiliaryDelegate =
         this.isAuxiliaryFile(resolved) && header.sessionKind === 'delegate';
       const headerParentSessionId =
@@ -1873,20 +1938,42 @@ export class SessionIndex {
         lastEntryId: scan.latestEntryId,
         historyIndex,
       };
-      this.files.set(id, entry);
-      this.fileIds.set(resolved, id);
+      if (catalogue === this.catalogue && revision !== this.catalogueRevision)
+        return;
+      const prior = catalogue.files.get(id);
+      catalogue.files.set(id, entry);
+      catalogue.fileIds.set(resolved, id);
       if (!this.isAuxiliaryFile(resolved)) this.metadata?.saveSession(entry);
+      if (catalogue === this.catalogue) this.catalogueRevision += 1;
+      // Preserve the old collision semantics when a prior ID points at a
+      // different file, while keeping the live-map commit synchronous.
+      if (prior && prior.file !== resolved && prior.file !== '')
+        catalogue.fileIds.delete(prior.file);
     } catch (error) {
       if (!(error instanceof SessionFileChangedError))
-        this.removeFile(resolved);
+        this.removeFile(resolved, catalogue, revision);
       throw error;
     }
   }
 
-  private removeFile(file: string): void {
+  private removeFile(
+    file: string,
+    catalogue: SessionCatalogue = this.catalogue,
+    revision?: number,
+  ): void {
+    if (
+      catalogue === this.catalogue &&
+      revision !== undefined &&
+      revision !== this.catalogueRevision
+    )
+      return;
     const resolved = path.resolve(file);
-    const id = this.fileIds.get(resolved);
-    this.fileIds.delete(resolved);
-    if (id && this.files.get(id)?.file === resolved) this.files.delete(id);
+    const id = catalogue.fileIds.get(resolved);
+    const removed = catalogue.fileIds.delete(resolved);
+    if (id && catalogue.files.get(id)?.file === resolved) {
+      catalogue.files.delete(id);
+      if (catalogue === this.catalogue) this.catalogueRevision += 1;
+    } else if (removed && catalogue === this.catalogue)
+      this.catalogueRevision += 1;
   }
 }

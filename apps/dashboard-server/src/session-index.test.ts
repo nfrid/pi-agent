@@ -77,6 +77,62 @@ describe('session index', () => {
     ).rejects.toThrow('Unknown session image');
   });
 
+  it('keeps the live catalogue readable while rebuilds stage and publish in order', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-rebuild-atomic-'),
+    );
+    const file = path.join(root, 'old.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'old-id', cwd: '/tmp' })}\n${JSON.stringify({ type: 'message', id: 'old-entry', message: { role: 'user', content: 'old' } })}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const internals = index as unknown as {
+      findJsonl(directory: string): Promise<string[]>;
+    };
+    const originalFindJsonl = internals.findJsonl.bind(index);
+    const firstDiscovery = new Promise<void>((resolve) => {
+      internals.findJsonl = async () => {
+        internals.findJsonl = originalFindJsonl;
+        resolve();
+        await new Promise<void>((release) => {
+          (
+            internals as unknown as { releaseDiscovery?: () => void }
+          ).releaseDiscovery = release;
+        });
+        return [file];
+      };
+    });
+    const rebuilding = index.refresh();
+    await firstDiscovery;
+    // Discovery is paused, but the previous maps and history remain live.
+    expect(index.list().map((entry) => entry.id)).toEqual(['old-id']);
+    await expect(index.readEntries('old-id')).resolves.toMatchObject({
+      entries: [
+        { type: 'session', id: 'old-id' },
+        { type: 'message', id: 'old-entry' },
+      ],
+    });
+
+    await writeFile(
+      path.join(root, 'new.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'new-id', cwd: '/tmp' })}\n`,
+    );
+    const overlapping = index.refresh();
+    const release = (internals as unknown as { releaseDiscovery: () => void })
+      .releaseDiscovery;
+    release();
+    await Promise.all([rebuilding, overlapping]);
+    expect(
+      index
+        .list()
+        .map((entry) => entry.id)
+        .sort(),
+    ).toEqual(['new-id', 'old-id']);
+  });
+
   it('removes a known session when a malformed scan has no valid header', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-malformed-'),

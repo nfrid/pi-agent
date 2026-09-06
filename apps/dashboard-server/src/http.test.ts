@@ -10,7 +10,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDashboardServer, sessionEventCoalesceKey } from './http.js';
 import type { ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
@@ -1258,6 +1258,126 @@ describe('dashboard HTTP boundary', () => {
       },
     );
     expect(response.status).toBe(500);
+  });
+
+  it('attempts all teardown steps and aggregates early and middle failures', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-stop-errors-'),
+    );
+    const push = { notify: async () => undefined, close: vi.fn() };
+    const runtimeProvider = {
+      requiresRegistration: true,
+      start: vi.fn(),
+      attach: vi.fn(),
+      stop: vi.fn(),
+      send: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+      close: vi.fn().mockRejectedValue(new Error('provider close failed')),
+    };
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(root, 'state', 'bridge.sock'),
+      push,
+      runtimeProvider: runtimeProvider as never,
+      usage: { get: async () => ({ snapshots: [] }) },
+    });
+    await server.start();
+    const internals = server as unknown as {
+      application: {
+        usage: { stop: () => Promise<void> };
+        orchestrationService: { stop: () => Promise<void> };
+        uploads: { close: () => Promise<void> };
+      };
+      sessions: { close: () => void };
+      metadata: { close: () => void };
+      shellFeed: { close: () => void };
+      sessionFeeds: { close: () => void };
+      registry: { close: () => void };
+    };
+    vi.spyOn(internals.application.usage, 'stop').mockRejectedValue(
+      new Error('usage stop failed'),
+    );
+    vi.spyOn(
+      internals.application.orchestrationService,
+      'stop',
+    ).mockRejectedValue(new Error('orchestration stop failed'));
+    vi.spyOn(internals.sessions, 'close').mockImplementation(() => {
+      throw new Error('session index close failed');
+    });
+    const closeOrder: string[] = [];
+    for (const [name, resource] of [
+      ['shell feed', internals.shellFeed],
+      ['session feeds', internals.sessionFeeds],
+      ['registry', internals.registry],
+      ['metadata', internals.metadata],
+    ] as const) {
+      const close = resource.close;
+      vi.spyOn(resource, 'close').mockImplementation(() => {
+        closeOrder.push(name);
+        close();
+      });
+    }
+
+    await expect(server.stop()).rejects.toThrow(
+      /usage stop failed.*orchestration stop failed.*provider close failed.*session index close failed/s,
+    );
+    expect(runtimeProvider.close).toHaveBeenCalledOnce();
+    expect(closeOrder).toEqual([
+      'shell feed',
+      'session feeds',
+      'registry',
+      'metadata',
+    ]);
+    expect(push.close).toHaveBeenCalledOnce();
+    await expect(server.start()).rejects.toThrow('disposed');
+  });
+
+  it('rejects a new HTTP mutation after shutdown starts', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-stop-request-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(root, 'state', 'bridge.sock'),
+      usage: { get: async () => ({ snapshots: [] }) },
+    });
+    await server.start();
+    const internals = server as unknown as {
+      bridge: { close: (socketPath: string) => Promise<void> };
+    };
+    const entered = new Promise<void>((resolve) => {
+      const original = internals.bridge.close.bind(internals.bridge);
+      vi.spyOn(internals.bridge, 'close').mockImplementation(
+        async (socketPath) => {
+          resolve();
+          await new Promise<void>((release) => {
+            (
+              internals as unknown as { releaseShutdown?: () => void }
+            ).releaseShutdown = release;
+          });
+          await original(socketPath);
+        },
+      );
+    });
+    const stopping = server.stop();
+    await entered;
+    const origin = `http://127.0.0.1:${server.port}`;
+    const response = await fetch(`${origin}/api/notifications/read-all`, {
+      method: 'POST',
+      headers: { Origin: origin, 'x-dashboard-token': 'test-token' },
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: 'Dashboard server is shutting down.',
+    });
+    (internals as unknown as { releaseShutdown: () => void }).releaseShutdown();
+    await stopping;
   });
 
   it('cleans up a failed startup so the server can be retried', async () => {
