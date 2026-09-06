@@ -146,9 +146,12 @@ function messageError(error: unknown): string {
 }
 
 /**
- * Owns the browser's tRPC feed lifecycle. tRPC/httpSubscriptionLink owns
- * retry and Last-Event-ID resume; this class only performs explicit lifecycle
- * replacement (offline/visibility) and deterministic feed rebases.
+ * Owns transport lifecycle only: subscriptions, refs, opening invalidation,
+ * opaque tracked IDs, and reconnect effects. Generation/opening counters stay
+ * here because they invalidate callbacks; semantic sequence acceptance and
+ * projections belong exclusively to DashboardLiveStore/domain-sync.ts.
+ * tRPC/httpSubscriptionLink owns retry and Last-Event-ID resume; this class
+ * performs explicit lifecycle replacement (offline/visibility) and rebases.
  */
 export class DashboardConnectionRuntime {
   private readonly client: DashboardHttpClient;

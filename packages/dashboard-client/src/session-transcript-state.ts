@@ -8,6 +8,7 @@ import type {
   DashboardEventEnvelope,
   SessionHistory,
 } from '@pi-dashboard/protocol';
+import type { DomainOrderingState } from './domain-sync.js';
 
 export interface SessionHistoryPageCoverage {
   start: number;
@@ -54,28 +55,6 @@ export interface LiveMessageIdentity {
   timestamp?: string | number;
 }
 
-export interface TranscriptOrderingState {
-  generation: number;
-  sequence: number;
-  sequenceKnown: boolean;
-}
-
-export type TranscriptOrderingRejection =
-  | 'generation'
-  | 'duplicate'
-  | 'gap'
-  | 'baseline';
-
-export interface TranscriptOrderingDecision {
-  accepted: boolean;
-  reason?: TranscriptOrderingRejection;
-}
-
-export interface TranscriptEventOrderingOptions {
-  /** Shell feeds cannot apply an event until their snapshot establishes a cut. */
-  unknownBaseline?: 'accept' | 'reject';
-}
-
 export type HistoryPageWatermarkDecision =
   | { status: 'ready'; sequence: number }
   | { status: 'ahead'; sequence: number }
@@ -83,7 +62,7 @@ export type HistoryPageWatermarkDecision =
   | { status: 'incoherent' };
 
 export function classifyHistoryPageWatermark(
-  current: TranscriptOrderingState | undefined,
+  current: DomainOrderingState | undefined,
   responses: readonly AuthoritativeSessionSnapshot[],
 ): HistoryPageWatermarkDecision {
   const first = responses[0]?.cursor;
@@ -97,56 +76,6 @@ export function classifyHistoryPageWatermark(
     return { status: 'ahead', sequence: first };
   if (first < current.sequence) return { status: 'stale', sequence: first };
   return { status: 'ready', sequence: first };
-}
-
-export function acceptTranscriptCaughtUpOrdering(
-  current: TranscriptOrderingState | undefined,
-  sequence: number,
-  generation: number,
-): TranscriptOrderingDecision {
-  if (current && current.generation !== generation)
-    return { accepted: false, reason: 'generation' };
-  if (!current?.sequenceKnown) return { accepted: true };
-  if (sequence < current.sequence)
-    return { accepted: false, reason: 'duplicate' };
-  if (sequence > current.sequence) return { accepted: false, reason: 'gap' };
-  return { accepted: true };
-}
-
-export function acceptTranscriptSnapshotOrdering(
-  current: TranscriptOrderingState | undefined,
-  sequence: number,
-  generation: number,
-  authoritativeRebase = false,
-): TranscriptOrderingDecision {
-  if (current && current.generation !== generation)
-    return { accepted: false, reason: 'generation' };
-  if (
-    current?.sequenceKnown === true &&
-    !authoritativeRebase &&
-    sequence <= current.sequence
-  )
-    return { accepted: false, reason: 'duplicate' };
-  return { accepted: true };
-}
-
-export function acceptTranscriptEventOrdering(
-  current: TranscriptOrderingState | undefined,
-  sequence: number,
-  generation: number,
-  options: TranscriptEventOrderingOptions = {},
-): TranscriptOrderingDecision {
-  if (current && current.generation !== generation)
-    return { accepted: false, reason: 'generation' };
-  if (!current?.sequenceKnown)
-    return options.unknownBaseline === 'reject'
-      ? { accepted: false, reason: 'baseline' }
-      : { accepted: true };
-  if (sequence <= current.sequence)
-    return { accepted: false, reason: 'duplicate' };
-  if (sequence !== current.sequence + 1)
-    return { accepted: false, reason: 'gap' };
-  return { accepted: true };
 }
 
 function sameTranscriptValue(left: unknown, right: unknown): boolean {

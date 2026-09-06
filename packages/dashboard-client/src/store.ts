@@ -22,8 +22,15 @@ import {
   type ThreadSummary,
   tryParseAuthoritativeSessionSnapshot,
 } from '@pi-dashboard/protocol';
-import { useSyncExternalStore } from 'react';
 import { DashboardConnectionRuntime } from './connection-runtime.js';
+import {
+  acceptDomainCaughtUpOrdering,
+  acceptDomainEventOrdering,
+  acceptDomainSnapshotOrdering,
+  type DomainOrderingDecision,
+  type DomainSyncState,
+  type DomainSyncStatus,
+} from './domain-sync.js';
 import type { DashboardHttpClient } from './http-client.js';
 import {
   type ClientAuthoritativeSessionSnapshot,
@@ -31,9 +38,6 @@ import {
 } from './http-client.js';
 import type { CachedSessionTranscript } from './session-transcript-cache.js';
 import {
-  acceptTranscriptCaughtUpOrdering,
-  acceptTranscriptEventOrdering,
-  acceptTranscriptSnapshotOrdering,
   coverageWithPages as buildHistoryCoverage,
   classifyHistoryPageWatermark,
   historyFromPages,
@@ -45,7 +49,6 @@ import {
   SESSION_HISTORY_BUDGET,
   type SessionHistoryCoverage,
   type SessionHistoryPageCoverage,
-  type TranscriptOrderingDecision,
   pageCoverage as transcriptPageCoverage,
 } from './session-transcript-state.js';
 
@@ -63,19 +66,9 @@ export type ConnectionStatus =
   | 'connected'
   | 'blocked'
   | 'error';
-export type SyncStatus =
-  | 'empty'
-  | 'cached'
-  | 'synchronizing'
-  | 'live'
-  | 'error';
-export interface DomainSyncState {
-  status: SyncStatus;
-  generation: number;
-  sequence: number;
-  sequenceKnown: boolean;
-  error?: string;
-}
+export type { DomainSyncState, DomainSyncStatus } from './domain-sync.js';
+/** Compatibility name retained for existing @pi-dashboard/client consumers. */
+export type SyncStatus = DomainSyncStatus;
 
 export interface DashboardLiveState {
   /** Transport metadata is retained separately from hydrated entities. */
@@ -255,8 +248,10 @@ interface PendingSessionHistory {
 }
 
 /**
- * The sole normalized live-state owner. It has no rendering or route logic;
- * React consumes it through useSyncExternalStore selectors.
+ * The sole normalized semantic-state owner. It accepts shell/session sequences,
+ * projects entities, and exposes immutable snapshots. Connection lifecycle
+ * state stays in DashboardConnectionRuntime; the React binding is in
+ * react-store.ts so this store remains framework-neutral.
  */
 export class DashboardLiveStore {
   private state: DashboardLiveState = emptyState();
@@ -751,8 +746,8 @@ export class DashboardLiveStore {
   shellCaughtUpOrdering(
     sequence: number,
     generation: number,
-  ): TranscriptOrderingDecision {
-    return acceptTranscriptCaughtUpOrdering(
+  ): DomainOrderingDecision {
+    return acceptDomainCaughtUpOrdering(
       this.state.shellSync,
       sequence,
       generation,
@@ -764,8 +759,8 @@ export class DashboardLiveStore {
     sessionId: string,
     sequence: number,
     generation: number,
-  ): TranscriptOrderingDecision {
-    return acceptTranscriptCaughtUpOrdering(
+  ): DomainOrderingDecision {
+    return acceptDomainCaughtUpOrdering(
       this.state.sessionSyncById[sessionId],
       sequence,
       generation,
@@ -776,8 +771,8 @@ export class DashboardLiveStore {
   shellEventOrdering(
     sequence: number,
     generation: number,
-  ): TranscriptOrderingDecision {
-    return acceptTranscriptEventOrdering(
+  ): DomainOrderingDecision {
+    return acceptDomainEventOrdering(
       this.state.shellSync,
       sequence,
       generation,
@@ -792,8 +787,8 @@ export class DashboardLiveStore {
     sessionId: string,
     sequence: number,
     generation: number,
-  ): TranscriptOrderingDecision {
-    return acceptTranscriptEventOrdering(
+  ): DomainOrderingDecision {
+    return acceptDomainEventOrdering(
       this.state.sessionSyncById[sessionId],
       sequence,
       generation,
@@ -808,7 +803,7 @@ export class DashboardLiveStore {
     authoritativeRebase = false,
   ): boolean {
     const current = this.state.shellSync;
-    const ordering = acceptTranscriptSnapshotOrdering(
+    const ordering = acceptDomainSnapshotOrdering(
       current,
       sequence,
       generation,
@@ -933,7 +928,7 @@ export class DashboardLiveStore {
     expectedSessionId = response.metadata.id,
   ): boolean {
     const current = this.state.sessionSyncById[expectedSessionId];
-    const ordering = acceptTranscriptSnapshotOrdering(
+    const ordering = acceptDomainSnapshotOrdering(
       current,
       sequence,
       generation,
@@ -1928,17 +1923,6 @@ export class DashboardLiveStore {
       sessionHistoryCoverageById,
     });
   }
-}
-
-export function useDashboardStore<T>(
-  store: DashboardLiveStore,
-  selector: (state: DashboardLiveState) => T,
-): T {
-  return useSyncExternalStore(
-    store.subscribe,
-    () => selector(store.getSnapshot()),
-    () => selector(store.getSnapshot()),
-  );
 }
 
 type MaterializedParts = Pick<

@@ -1,7 +1,9 @@
 export * from './authentication.js';
 export * from './connection-runtime.js';
+export * from './domain-sync.js';
 export * from './http-client.js';
 export * from './query-options.js';
+export * from './react-store.js';
 export * from './session-transcript-cache.js';
 export * from './session-transcript-state.js';
 export * from './store.js';
@@ -10,11 +12,8 @@ export * from './trpc-client.js';
 import { useEffect, useRef } from 'react';
 import type { DashboardHttpClient } from './http-client.js';
 import { dashboardHttpClient } from './http-client.js';
-import {
-  DashboardLiveStore,
-  selectSnapshot,
-  useDashboardStore,
-} from './store.js';
+import { useDashboardStore } from './react-store.js';
+import { DashboardLiveStore, selectSnapshot } from './store.js';
 
 export interface DashboardState {
   snapshot: ReturnType<typeof selectSnapshot>;

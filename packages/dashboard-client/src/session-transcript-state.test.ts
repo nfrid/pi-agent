@@ -5,9 +5,6 @@ import type {
 } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
-  acceptTranscriptCaughtUpOrdering,
-  acceptTranscriptEventOrdering,
-  acceptTranscriptSnapshotOrdering,
   classifyHistoryPageWatermark,
   mergeLatestTranscript,
   mergePrependedTranscript,
@@ -15,45 +12,6 @@ import {
 } from './session-transcript-state.js';
 
 describe('session transcript state', () => {
-  it('accepts only the next event after sequence is known', () => {
-    const current = { generation: 3, sequence: 7, sequenceKnown: true };
-
-    expect(acceptTranscriptEventOrdering(current, 8, 3)).toEqual({
-      accepted: true,
-    });
-    expect(acceptTranscriptEventOrdering(current, 7, 3)).toEqual({
-      accepted: false,
-      reason: 'duplicate',
-    });
-    expect(acceptTranscriptEventOrdering(current, 9, 3)).toEqual({
-      accepted: false,
-      reason: 'gap',
-    });
-    expect(acceptTranscriptEventOrdering(current, 8, 4)).toEqual({
-      accepted: false,
-      reason: 'generation',
-    });
-  });
-
-  it('accepts an exact caught-up watermark and rebases an ahead one', () => {
-    const current = { generation: 3, sequence: 7, sequenceKnown: true };
-
-    expect(acceptTranscriptCaughtUpOrdering(current, 7, 3)).toEqual({
-      accepted: true,
-    });
-    expect(acceptTranscriptCaughtUpOrdering(current, 6, 3)).toEqual({
-      accepted: false,
-      reason: 'duplicate',
-    });
-    expect(acceptTranscriptCaughtUpOrdering(current, 8, 3)).toEqual({
-      accepted: false,
-      reason: 'gap',
-    });
-    expect(acceptTranscriptCaughtUpOrdering(undefined, 8, 3)).toEqual({
-      accepted: true,
-    });
-  });
-
   it('classifies exact, ahead, stale, and incoherent history cuts', () => {
     const current = { generation: 3, sequence: 7, sequenceKnown: true };
     const response = (cursor: number) =>
@@ -74,18 +32,6 @@ describe('session transcript state', () => {
     expect(
       classifyHistoryPageWatermark(current, [response(7), response(8)]),
     ).toEqual({ status: 'incoherent' });
-  });
-
-  it('allows an authoritative snapshot to establish a lower sequence', () => {
-    const current = { generation: 3, sequence: 7, sequenceKnown: true };
-
-    expect(acceptTranscriptSnapshotOrdering(current, 6, 3)).toEqual({
-      accepted: false,
-      reason: 'duplicate',
-    });
-    expect(acceptTranscriptSnapshotOrdering(current, 6, 3, true)).toEqual({
-      accepted: true,
-    });
   });
 
   it('seeds a complete session snapshot event without prior projection', () => {
