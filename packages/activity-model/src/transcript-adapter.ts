@@ -69,14 +69,17 @@ function assistantEntry(raw: Record<string, unknown>): TranscriptEntry {
   } as unknown as AssistantMessage;
   const textHeaders = headersOf(assistant, 'text');
   const thinkingHeaders = headersOf(assistant, 'thinking');
-  const visibleText = text && !isNarration(text) ? text : undefined;
   const message = record(raw.message);
+  const stopReason =
+    stringField(message, 'stopReason') ?? stringField(raw, 'stopReason');
+  const failed = stopReason === 'error';
+  const visibleText = text && (failed || !isNarration(text)) ? text : undefined;
   const hasTools =
     toolCallParts(content).length > 0 ||
     (Array.isArray(message?.toolCallIds) && message.toolCallIds.length > 0) ||
     (Array.isArray(message?.toolCalls) && message.toolCalls.length > 0);
   const preamble =
-    visibleText && hasTools ? preambleTitle(visibleText) : undefined;
+    !failed && visibleText && hasTools ? preambleTitle(visibleText) : undefined;
   const narratedTitle = (
     textHeaders.length > 0 ? textHeaders : thinkingHeaders
   ).at(-1);
@@ -90,7 +93,8 @@ function assistantEntry(raw: Record<string, unknown>): TranscriptEntry {
     // Live text is ordinary speech until a tool association proves it is a
     // preamble. This keeps it outside the preceding activity while it streams;
     // once the call arrives, the same entry becomes the next group's leader.
-    speaks: Boolean(visibleText) && !preamble,
+    speaks: failed || (Boolean(visibleText) && !preamble),
+    ...(failed ? { closesGroup: true } : {}),
     ...(streaming ? { streaming: true } : {}),
     ...(textHeaders.length > 0
       ? { narration: 'announced' as const }

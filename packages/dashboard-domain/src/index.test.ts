@@ -49,6 +49,51 @@ function envelope(
 }
 
 describe('dashboard domain reducers', () => {
+  it('preserves assistant failure metadata through live, persisted, and legacy projections', () => {
+    const failure = {
+      messageId: 'assistant-failure',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Partial answer' }],
+      stopReason: 'error',
+      errorMessage: 'Connection failed',
+      phase: 'finished' as const,
+    };
+    const live = reduceTranscriptEvent(createTranscriptProjection('s'), {
+      type: 'message.finished',
+      sessionId: 's',
+      message: failure,
+    } as never);
+    const persisted = hydrateTranscript(
+      [{ type: 'message', id: 'assistant-failure', message: failure }],
+      's',
+    );
+    for (const projection of [live, persisted]) {
+      expect(projection.items['assistant-failure']).toMatchObject({
+        content: failure.content,
+        stopReason: 'error',
+        errorMessage: 'Connection failed',
+        status: 'finished',
+      });
+      expect(projectTranscriptForRender(projection).items[0]).toMatchObject({
+        stopReason: 'error',
+        errorMessage: 'Connection failed',
+        streaming: false,
+        preparing: false,
+      });
+      expect(selectLegacyTranscriptEntries(projection)[0]).toMatchObject({
+        message: { stopReason: 'error', errorMessage: 'Connection failed' },
+      });
+    }
+    expect(
+      persistedEntriesToTranscriptEvents(
+        [{ type: 'message', id: 'assistant-failure', message: failure }],
+        's',
+      )[0],
+    ).toMatchObject({
+      message: { stopReason: 'error', errorMessage: 'Connection failed' },
+    });
+  });
+
   it('upgrades provisional raw tool progress in place and clears it on execution', () => {
     let state = createTranscriptProjection('s');
     state = applyTranscriptEvent(

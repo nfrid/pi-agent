@@ -14,6 +14,8 @@ type ToolStreamItem = Pick<
   | 'thinking'
   | 'text'
   | 'imageCount'
+  | 'stopReason'
+  | 'errorMessage'
   | 'entry'
   | 'event'
 >;
@@ -23,7 +25,9 @@ function isThinkingOnly(item: ToolStreamItem | undefined): boolean {
     item?.role === 'assistant' &&
       item.thinking?.length &&
       !item.text &&
-      !item.imageCount,
+      !item.imageCount &&
+      !item.stopReason &&
+      !item.errorMessage,
   );
 }
 

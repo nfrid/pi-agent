@@ -353,6 +353,14 @@ export class LiveEventNormalizer {
     if (this.activeMessage) this.activeMessage.content = safeContent;
     const turnId =
       directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
+    const stopReason =
+      directString(message, 'stopReason') ??
+      directString(event, 'stopReason') ??
+      directString(assistantEvent, 'stopReason');
+    const errorMessage =
+      directString(message, 'errorMessage') ??
+      directString(event, 'errorMessage') ??
+      directString(assistantEvent, 'errorMessage');
     const messageData = eventRecord(directValue(message, 'data'));
     const eventData = eventRecord(directValue(event, 'data'));
     const rawData =
@@ -396,6 +404,8 @@ export class LiveEventNormalizer {
               .slice(0, 128),
           }
         : {}),
+      ...(stopReason === undefined ? {} : { stopReason }),
+      ...(errorMessage === undefined ? {} : { errorMessage }),
       ...(safeData === undefined ? {} : { data: safeData }),
     };
     if (phase === 'finished') {

@@ -1300,6 +1300,30 @@ describe('tool row views and virtual transcript construction', () => {
     expect(toolOutcome({ kind: 'tool', status: 'complete' })).toBe('success');
   });
 
+  it('keeps failed assistant messages visible as standalone transcript rows', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-failure',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Partial answer' }],
+          stopReason: 'error',
+          errorMessage: 'Connection failed',
+        },
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      text: 'Partial answer',
+      errorMessage: 'Connection failed',
+      entry: { kind: 'assistant', speaks: true, closesGroup: true },
+    });
+    expect(buildVirtualTranscriptRows(items)).toEqual([
+      { kind: 'entry', key: 'assistant-failure', index: 0 },
+    ]);
+  });
+
   it('renders a fully reached pause as a transient transcript event', () => {
     const html = renderToStaticMarkup(
       createElement(LivePauseEvent, {

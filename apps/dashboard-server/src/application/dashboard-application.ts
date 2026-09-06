@@ -525,6 +525,10 @@ function itemMessage(
     content: item.content,
     ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
     ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+    ...(item.stopReason === undefined ? {} : { stopReason: item.stopReason }),
+    ...(item.errorMessage === undefined
+      ? {}
+      : { errorMessage: item.errorMessage }),
     ...(item.toolCallIds === undefined
       ? {}
       : { toolCallIds: [...item.toolCallIds] }),

@@ -712,6 +712,10 @@ export const NormalizedMessagePayloadSchema = Type.Object(
         Type.Literal('finished'),
       ]),
     ),
+    /** Native assistant completion outcome, when the provider supplies one. */
+    stopReason: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    /** Provider failure detail, retained separately from opaque data. */
+    errorMessage: Type.Optional(Type.String({ maxLength: 32_768 })),
     sessionId: Type.Optional(IdentifierSchema),
     data: Type.Optional(UnknownSchema),
   },
