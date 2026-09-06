@@ -72,7 +72,9 @@ export function classifyDashboardError(
     code === 'sqlite-constraint';
   const message = databaseConflict
     ? 'The orchestration request conflicts with existing state.'
-    : messageOf(error);
+    : error instanceof Error
+      ? messageOf(error)
+      : undefined;
   return {
     ...(code ? { code } : {}),
     ...(message ? { message } : {}),

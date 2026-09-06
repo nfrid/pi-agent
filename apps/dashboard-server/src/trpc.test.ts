@@ -650,7 +650,7 @@ describe('dashboard tRPC boundary', () => {
       message: 'plain adapter failure',
     });
     expect(unknownAdapter.code).toBe('INTERNAL_SERVER_ERROR');
-    expect(unknownAdapter.message).toBe('plain adapter failure');
+    expect(unknownAdapter.message).toBe('Dashboard request failed.');
   });
 
   it('parses the public request adapter with strict fields', () => {

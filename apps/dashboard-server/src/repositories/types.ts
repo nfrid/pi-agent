@@ -221,14 +221,10 @@ export interface ProjectCheckoutRepository {
   getCheckout(id: string): Checkout | undefined;
 }
 
-/** Receipt persistence used by runtime command idempotency. */
-export interface RuntimeReceiptRepository {
+/** Repository surface used by runtime command receipts and thread activity. */
+export interface RuntimeServiceRepository {
   getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined;
   recordCommandReceipt(receipt: CommandReceipt): void;
-}
-
-/** Durable thread activity mutations used by runtime-facing actions. */
-export interface RuntimeActivityRepository {
   getSessionThreadLink(sessionId: string): SessionThreadLinkRecord | undefined;
   getThread(id: string): Thread | undefined;
   unsettleThread(
@@ -237,10 +233,6 @@ export interface RuntimeActivityRepository {
     now?: number,
   ): ThreadLifecycleCommandResult;
 }
-
-export interface RuntimeServiceRepository
-  extends RuntimeReceiptRepository,
-    RuntimeActivityRepository {}
 
 /** Read-only projection consumed by the dashboard application boundary. */
 export interface DashboardProjectionRepository

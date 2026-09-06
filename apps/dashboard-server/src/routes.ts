@@ -244,6 +244,12 @@ export interface DashboardRouteContext {
   readThread?(threadId: string): Promise<unknown> | unknown;
 }
 
+function explicitErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 function errorStatus(
   code: ReturnType<typeof classifyDashboardError>['code'],
 ): number {
@@ -264,9 +270,10 @@ function errorStatus(
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   const classified = classifyDashboardError(error);
+  const code = classified.code ?? explicitErrorCode(error);
   return reply.code(errorStatus(classified.code)).send({
     error: classified.message ?? String(error),
-    ...(classified.code === undefined ? {} : { code: classified.code }),
+    ...(code === undefined ? {} : { code }),
   });
 }
 

@@ -741,7 +741,24 @@ describe('Fastify dashboard route plugin', () => {
       payload: { commandId: 'nested-adapter-unknown' },
     });
     expect(unknown.statusCode).toBe(400);
-    expect(unknown.json()).toEqual({ error: 'plain adapter failure' });
+    expect(unknown.json()).toEqual({ error: '[object Object]' });
+
+    routeContext.mergeCheckout = vi.fn(async () => {
+      throw Object.assign(new Error('runtime conflict'), {
+        code: 'runtime-conflict',
+      });
+    });
+    const legacyCode = await app.inject({
+      method: 'POST',
+      url: '/api/checkouts/checkout-1/merge',
+      headers,
+      payload: { commandId: 'legacy-code' },
+    });
+    expect(legacyCode.statusCode).toBe(400);
+    expect(legacyCode.json()).toEqual({
+      error: 'runtime conflict',
+      code: 'runtime-conflict',
+    });
   });
 
   it('covers orchestration HTTP statuses, bounded schemas, auth, and coded conflicts', async () => {

@@ -238,28 +238,14 @@ export async function drain(host: OrchestrationHost): Promise<void> {
       if (!claimed) continue;
       // Register before starting execute: preparation and provider launch can
       // re-enter lifecycle code, including cancellation.
-      let resolveTask!: () => void;
-      let rejectTask!: (error: unknown) => void;
-      const task = new Promise<void>((resolve, reject) => {
-        resolveTask = resolve;
-        rejectTask = reject;
-      });
+      const task = Promise.resolve().then(() => execute(host, claimed));
       host.executionTasks.set(run.id, task);
-      void Promise.resolve()
-        .then(() => execute(host, claimed))
-        .then(resolveTask, rejectTask)
-        .then(
-          () => {
-            if (host.executionTasks.get(run.id) === task)
-              host.executionTasks.delete(run.id);
-            void drain(host);
-          },
-          () => {
-            if (host.executionTasks.get(run.id) === task)
-              host.executionTasks.delete(run.id);
-            void drain(host);
-          },
-        );
+      const cleanup = () => {
+        if (host.executionTasks.get(run.id) === task)
+          host.executionTasks.delete(run.id);
+        void drain(host);
+      };
+      void task.then(cleanup, cleanup);
     }
   } finally {
     host.draining = false;
