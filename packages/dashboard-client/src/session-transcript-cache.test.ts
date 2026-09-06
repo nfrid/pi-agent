@@ -1,11 +1,14 @@
-import type { AuthoritativeSessionSnapshot } from '@pi-dashboard/protocol';
+import type {
+  AuthoritativeSessionSnapshot,
+  BrowserSnapshot,
+} from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   type CachedSessionTranscript,
   decodeCachedSessionTranscript,
   InMemorySessionTranscriptCache,
 } from './session-transcript-cache.js';
-import { coverageWithPages } from './session-transcript-state.js';
+import { DashboardLiveStore } from './store.js';
 
 function snapshot(
   sessionId = 'session-a',
@@ -51,44 +54,99 @@ function cached(
   };
 }
 
-function cachedWithCoverage(): CachedSessionTranscript {
-  const coverage = coverageWithPages(
-    [
+function browserSnapshot(serverId = 'server-a'): BrowserSnapshot {
+  return {
+    serverId,
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    sessions: [],
+    unread: [],
+  };
+}
+
+function productionCachedWithCoverage(): CachedSessionTranscript {
+  const store = new DashboardLiveStore();
+  store.installSnapshot(browserSnapshot());
+  store.beginSessionSync('session-a', 1);
+  const initial = {
+    ...snapshot(),
+    cursor: 4,
+    entries: [
       {
-        start: 1,
-        end: 2,
-        hasOlder: true,
-        nextBefore: 'before-zero',
-        leadingContinuation: true,
-        entryIds: ['first'],
-        entryCount: 1,
-        byteCount: 10,
-      },
-      {
-        start: 2,
-        end: 3,
-        hasOlder: true,
-        nextBefore: 'before-first',
-        entryIds: ['middle'],
-        entryCount: 1,
-        byteCount: 20,
-      },
-      {
-        start: 3,
-        end: 4,
-        hasOlder: true,
-        nextBefore: 'before-middle',
-        entryIds: ['last'],
-        entryCount: 1,
-        byteCount: 30,
+        type: 'message',
+        id: 'newest',
+        message: { role: 'user', content: 'newest' },
       },
     ],
-    7,
-    'server-a',
-    'epoch-a',
-  );
-  if (!coverage) throw new Error('Expected coverage');
-  return { ...cached(), coverage };
+    history: {
+      version: 1 as const,
+      start: 10,
+      end: 20,
+      hasOlder: true,
+      nextBefore: 'before-10',
+    },
+  } satisfies AuthoritativeSessionSnapshot;
+  if (!store.acceptSessionSnapshot(initial, 4, 1, true))
+    throw new Error('Expected initial session snapshot');
+  if (
+    !store.prependSessionHistory({
+      ...snapshot(),
+      cursor: 4,
+      entries: [
+        {
+          type: 'message',
+          id: 'older-middle',
+          message: { role: 'user', content: 'older middle' },
+        },
+      ],
+      history: {
+        version: 1,
+        start: 5,
+        end: 10,
+        hasOlder: true,
+        nextBefore: 'before-5',
+      },
+    })
+  )
+    throw new Error('Expected middle session history');
+  if (
+    !store.prependSessionHistory({
+      ...snapshot(),
+      cursor: 4,
+      entries: [
+        {
+          type: 'message',
+          id: 'older',
+          message: { role: 'user', content: 'older' },
+        },
+      ],
+      history: { version: 1, start: 0, end: 5, hasOlder: false },
+    })
+  )
+    throw new Error('Expected older session history');
+
+  store.hydrateSession({
+    ...snapshot(),
+    cursor: 5,
+    entries: [
+      {
+        type: 'message',
+        id: 'expanded-newest',
+        message: { role: 'user', content: 'expanded newest' },
+      },
+    ],
+    history: {
+      version: 1,
+      start: 5,
+      end: 21,
+      hasOlder: true,
+      nextBefore: 'before-expanded',
+    },
+  });
+  const value = store.cachedSessionTranscript('session-a');
+  if (!value) throw new Error('Expected cached session transcript');
+  return value;
 }
 
 describe('session transcript cache', () => {
@@ -112,8 +170,13 @@ describe('session transcript cache', () => {
     ).toBeUndefined();
   });
 
-  it('round-trips valid multipage coverage with its watermarks and continuations', () => {
-    const value = cachedWithCoverage();
+  it('round-trips production-generated multipage coverage after a retained rebase', () => {
+    const value = productionCachedWithCoverage();
+    expect(value.coverage?.pages).toEqual([
+      expect.objectContaining({ start: 0, end: 5 }),
+      expect.objectContaining({ start: 5, end: 10 }),
+      expect.objectContaining({ start: 5, end: 21 }),
+    ]);
     expect(
       decodeCachedSessionTranscript(value, {
         expectedServerId: 'server-a',
@@ -122,12 +185,56 @@ describe('session transcript cache', () => {
     ).toEqual(value);
   });
 
+  it('round-trips the production origin placeholder coverage shape', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(browserSnapshot());
+    store.beginSessionSync('session-a', 1);
+    expect(
+      store.acceptSessionSnapshot({ ...snapshot(), cursor: 1 }, 1, 1, true),
+    ).toBe(true);
+    expect(
+      store.prependSessionHistory({
+        ...snapshot(),
+        cursor: 1,
+        entries: [
+          {
+            type: 'message',
+            id: 'origin-entry',
+            message: { role: 'user', content: 'origin' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeDefined();
+    const value = store.cachedSessionTranscript('session-a');
+    expect(value?.coverage?.pages).toEqual([
+      expect.objectContaining({ start: 0, end: 10 }),
+      expect.objectContaining({ start: 0, end: 0 }),
+    ]);
+    expect(value).toBeDefined();
+    expect(decodeCachedSessionTranscript(value)).toEqual(value);
+  });
+
   it.each([
     [
-      'inconsistent aggregate totals',
+      'inconsistent aggregate entry count',
       (coverage: CachedSessionTranscript['coverage']) => ({
         ...coverage,
         entryCount: (coverage?.entryCount ?? 0) + 1,
+      }),
+    ],
+    [
+      'inconsistent aggregate byte count',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        byteCount: (coverage?.byteCount ?? 0) + 1,
+      }),
+    ],
+    [
+      'inconsistent aggregate covered end',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        coveredEnd: (coverage?.coveredEnd ?? 0) + 1,
       }),
     ],
     [
@@ -135,12 +242,21 @@ describe('session transcript cache', () => {
       (coverage: CachedSessionTranscript['coverage']) => ({
         ...coverage,
         pages: coverage?.pages.map((page, index) =>
-          index === 1 ? { ...page, start: page.start + 1 } : page,
+          index === 1 ? { ...page, start: 11 } : page,
         ),
       }),
     ],
     [
-      'inconsistent pagination',
+      'missing pagination continuation',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        pages: coverage?.pages.map((page, index) =>
+          index === 2 ? { ...page, nextBefore: undefined } : page,
+        ),
+      }),
+    ],
+    [
+      'duplicate pagination cursor',
       (coverage: CachedSessionTranscript['coverage']) => ({
         ...coverage,
         pages: coverage?.pages.map((page, index) =>
@@ -150,8 +266,26 @@ describe('session transcript cache', () => {
         ),
       }),
     ],
+    [
+      'reversed page range',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        pages: coverage?.pages.map((page, index) =>
+          index === 1 ? { ...page, start: 4, end: 3 } : page,
+        ),
+      }),
+    ],
+    [
+      'conflicting page flags',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        pages: coverage?.pages.map((page, index) =>
+          index === 0 ? { ...page, hasOlder: true } : page,
+        ),
+      }),
+    ],
   ])('rejects %s in cached coverage', (_label, mutate) => {
-    const value = cachedWithCoverage();
+    const value = productionCachedWithCoverage();
     expect(
       decodeCachedSessionTranscript({
         ...value,

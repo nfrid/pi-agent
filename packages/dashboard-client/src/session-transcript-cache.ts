@@ -129,7 +129,7 @@ function validProjection(
   );
 }
 
-function validCoverage(
+function decodeCoverage(
   value: unknown,
   serverId: string,
 ): SessionHistoryCoverage | undefined {
@@ -175,9 +175,27 @@ function validCoverage(
       !isNonNegativeInteger(candidate.byteCount)
     )
       return undefined;
+    let newestExpansion = false;
+    let originPlaceholder = false;
     if (index > 0) {
       const previous = pages[index - 1];
-      if (previous.end !== candidate.start || !candidate.hasOlder)
+      newestExpansion =
+        index === value.pages.length - 1 &&
+        candidate.start < previous.end &&
+        candidate.end >= previous.end;
+      originPlaceholder =
+        index === value.pages.length - 1 &&
+        candidate.start === 0 &&
+        candidate.end === 0 &&
+        previous.start === 0 &&
+        previous.end > 0 &&
+        !previous.hasOlder;
+      if (
+        (!newestExpansion &&
+          !originPlaceholder &&
+          previous.end !== candidate.start) ||
+        (!newestExpansion && !originPlaceholder && !candidate.hasOlder)
+      )
         return undefined;
     }
     if (
@@ -199,11 +217,7 @@ function validCoverage(
     value.runtimeEpoch,
   );
   if (!rebuilt) return undefined;
-  return value.serverId === rebuilt.serverId &&
-    value.generation === rebuilt.generation &&
-    value.runtimeEpoch === rebuilt.runtimeEpoch &&
-    value.version === rebuilt.version &&
-    value.coveredStart === rebuilt.coveredStart &&
+  return value.coveredStart === rebuilt.coveredStart &&
     value.coveredEnd === rebuilt.coveredEnd &&
     value.hasOlder === rebuilt.hasOlder &&
     value.nextBefore === rebuilt.nextBefore &&
@@ -243,7 +257,7 @@ export function decodeCachedSessionTranscript(
   const coverage =
     value.coverage === undefined
       ? undefined
-      : validCoverage(value.coverage, value.serverId);
+      : decodeCoverage(value.coverage, value.serverId);
   if (
     !snapshot ||
     snapshot.serverId !== value.serverId ||
