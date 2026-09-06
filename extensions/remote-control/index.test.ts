@@ -778,6 +778,18 @@ describe('remote event normalization', () => {
       content: [{ type: 'text', text: 'Retained partial' }],
       stopReason: 'error',
     });
+
+    const longError = new LiveEventNormalizer(
+      'runtime-long-error',
+    ).normalizeMessage('finished', {
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'x'.repeat(40_000),
+      },
+    });
+    expect(longError.errorMessage).toHaveLength(32_768);
   });
 
   it('handles 0.84 delta-only events without requiring partial', () => {

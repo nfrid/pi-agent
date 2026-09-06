@@ -81,8 +81,7 @@ export interface TranscriptModelItem {
   tool?: TranscriptRenderToolItem;
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
-  /** Native assistant completion outcome metadata. */
-  stopReason?: string;
+  /** Presentation-ready native assistant failure detail. */
   errorMessage?: string;
   /** Feature-owned replacement rendered in the normal transcript flow. */
   customMessage?: ReactNode;

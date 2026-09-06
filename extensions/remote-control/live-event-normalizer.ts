@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import {
   type BridgeEvent,
+  MAX_ASSISTANT_ERROR_MESSAGE,
   MAX_FRAME_BYTES,
   MAX_TOOL_ARGUMENT_CHARS,
   MAX_TOOL_ARGUMENT_DELTA,
@@ -334,10 +335,11 @@ export class LiveEventNormalizer {
       directString(message, 'stopReason') ??
       directString(event, 'stopReason') ??
       directString(assistantEvent, 'stopReason');
-    const errorMessage =
+    const rawErrorMessage =
       directString(message, 'errorMessage') ??
       directString(event, 'errorMessage') ??
       directString(assistantEvent, 'errorMessage');
+    const errorMessage = rawErrorMessage?.slice(0, MAX_ASSISTANT_ERROR_MESSAGE);
     const fullContent = Object.hasOwn(message, 'content')
       ? directValue(message, 'content')
       : Object.hasOwn(event, 'content')

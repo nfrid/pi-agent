@@ -92,6 +92,24 @@ describe('dashboard domain reducers', () => {
     ).toMatchObject({
       message: { stopReason: 'error', errorMessage: 'Connection failed' },
     });
+    const longPersisted = persistedEntriesToTranscriptEvents(
+      [
+        {
+          type: 'message',
+          id: 'long-failure',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            errorMessage: 'x'.repeat(40_000),
+          },
+        },
+      ],
+      's',
+    )[0];
+    expect(longPersisted).toMatchObject({
+      message: { stopReason: 'error', errorMessage: 'x'.repeat(32_768) },
+    });
   });
 
   it('upgrades provisional raw tool progress in place and clears it on execution', () => {

@@ -1,6 +1,7 @@
 import {
   type BridgeEvent,
   type DashboardEventEnvelope,
+  MAX_ASSISTANT_ERROR_MESSAGE,
   MAX_TOOL_ARGUMENT_PREVIEW,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
@@ -168,6 +169,12 @@ function directString(
   key: string,
 ): string | undefined {
   return typeof value[key] === 'string' && value[key] ? value[key] : undefined;
+}
+
+function boundedErrorMessage(value: unknown): string | undefined {
+  return typeof value === 'string'
+    ? value.slice(0, MAX_ASSISTANT_ERROR_MESSAGE)
+    : undefined;
 }
 
 /** Return the direct compatibility tool record without recursive provider scans. */
@@ -347,9 +354,9 @@ function normalizedMessage(
     ...(directString(message, 'stopReason') === undefined
       ? {}
       : { stopReason: directString(message, 'stopReason') }),
-    ...(typeof message.errorMessage === 'string'
-      ? { errorMessage: message.errorMessage }
-      : {}),
+    ...(boundedErrorMessage(message.errorMessage) === undefined
+      ? {}
+      : { errorMessage: boundedErrorMessage(message.errorMessage) }),
     phase,
   };
 }
@@ -1093,9 +1100,9 @@ export function hydrateTranscript(
         ...(directString(message, 'stopReason') === undefined
           ? {}
           : { stopReason: directString(message, 'stopReason') }),
-        ...(typeof message.errorMessage === 'string'
-          ? { errorMessage: message.errorMessage }
-          : {}),
+        ...(boundedErrorMessage(message.errorMessage) === undefined
+          ? {}
+          : { errorMessage: boundedErrorMessage(message.errorMessage) }),
         ...(toolCallIds.length > 0 ? { toolCallIds } : {}),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
         status:

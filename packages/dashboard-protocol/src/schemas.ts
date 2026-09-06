@@ -95,6 +95,8 @@ export const PROTOCOL_VERSION = 1;
 /** Version of the browser HTTP/tRPC dashboard protocol. */
 export const DASHBOARD_PROTOCOL_VERSION = 3;
 export const MAX_FRAME_BYTES = 512 * 1024;
+/** Maximum provider failure detail carried in a normalized assistant message. */
+export const MAX_ASSISTANT_ERROR_MESSAGE = 32_768;
 
 /** Capabilities advertised by the authenticated dashboard HTTP boundary. */
 export const ProtocolCapabilitiesSchema = Type.Object(
@@ -715,7 +717,9 @@ export const NormalizedMessagePayloadSchema = Type.Object(
     /** Native assistant completion outcome, when the provider supplies one. */
     stopReason: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
     /** Provider failure detail, retained separately from opaque data. */
-    errorMessage: Type.Optional(Type.String({ maxLength: 32_768 })),
+    errorMessage: Type.Optional(
+      Type.String({ maxLength: MAX_ASSISTANT_ERROR_MESSAGE }),
+    ),
     sessionId: Type.Optional(IdentifierSchema),
     data: Type.Optional(UnknownSchema),
   },

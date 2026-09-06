@@ -14,7 +14,6 @@ type ToolStreamItem = Pick<
   | 'thinking'
   | 'text'
   | 'imageCount'
-  | 'stopReason'
   | 'errorMessage'
   | 'entry'
   | 'event'
@@ -26,7 +25,6 @@ function isThinkingOnly(item: ToolStreamItem | undefined): boolean {
       item.thinking?.length &&
       !item.text &&
       !item.imageCount &&
-      !item.stopReason &&
       !item.errorMessage,
   );
 }
@@ -69,7 +67,8 @@ export function buildTranscriptToolStreams(
       historyStart > 0 &&
       items[historyStart]?.tool &&
       items[historyStart - 1]?.role === 'assistant' &&
-      Boolean(items[historyStart - 1]?.thinking?.length);
+      Boolean(items[historyStart - 1]?.thinking?.length) &&
+      !items[historyStart - 1]?.errorMessage;
     const start = hasPreambleThoughts ? historyStart - 1 : historyStart;
     const key = items[start]?.key ?? `tool-stream-${start}`;
     result.push({ key, start, end: index - 1 });
