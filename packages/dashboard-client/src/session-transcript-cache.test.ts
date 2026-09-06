@@ -5,6 +5,7 @@ import {
   decodeCachedSessionTranscript,
   InMemorySessionTranscriptCache,
 } from './session-transcript-cache.js';
+import { coverageWithPages } from './session-transcript-state.js';
 
 function snapshot(
   sessionId = 'session-a',
@@ -50,6 +51,46 @@ function cached(
   };
 }
 
+function cachedWithCoverage(): CachedSessionTranscript {
+  const coverage = coverageWithPages(
+    [
+      {
+        start: 1,
+        end: 2,
+        hasOlder: true,
+        nextBefore: 'before-zero',
+        leadingContinuation: true,
+        entryIds: ['first'],
+        entryCount: 1,
+        byteCount: 10,
+      },
+      {
+        start: 2,
+        end: 3,
+        hasOlder: true,
+        nextBefore: 'before-first',
+        entryIds: ['middle'],
+        entryCount: 1,
+        byteCount: 20,
+      },
+      {
+        start: 3,
+        end: 4,
+        hasOlder: true,
+        nextBefore: 'before-middle',
+        entryIds: ['last'],
+        entryCount: 1,
+        byteCount: 30,
+      },
+    ],
+    7,
+    'server-a',
+    'epoch-a',
+  );
+  if (!coverage) throw new Error('Expected coverage');
+  return { ...cached(), coverage };
+}
+
 describe('session transcript cache', () => {
   it('decodes a valid version-one value and enforces identity', () => {
     const value = cached();
@@ -67,6 +108,54 @@ describe('session transcript cache', () => {
     expect(
       decodeCachedSessionTranscript(value, {
         expectedSessionId: 'other-session',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('round-trips valid multipage coverage with its watermarks and continuations', () => {
+    const value = cachedWithCoverage();
+    expect(
+      decodeCachedSessionTranscript(value, {
+        expectedServerId: 'server-a',
+        expectedSessionId: 'session-a',
+      }),
+    ).toEqual(value);
+  });
+
+  it.each([
+    [
+      'inconsistent aggregate totals',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        entryCount: (coverage?.entryCount ?? 0) + 1,
+      }),
+    ],
+    [
+      'inconsistent page ranges',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        pages: coverage?.pages.map((page, index) =>
+          index === 1 ? { ...page, start: page.start + 1 } : page,
+        ),
+      }),
+    ],
+    [
+      'inconsistent pagination',
+      (coverage: CachedSessionTranscript['coverage']) => ({
+        ...coverage,
+        pages: coverage?.pages.map((page, index) =>
+          index === 1
+            ? { ...page, nextBefore: coverage?.pages[2]?.nextBefore }
+            : page,
+        ),
+      }),
+    ],
+  ])('rejects %s in cached coverage', (_label, mutate) => {
+    const value = cachedWithCoverage();
+    expect(
+      decodeCachedSessionTranscript({
+        ...value,
+        coverage: mutate(value.coverage),
       }),
     ).toBeUndefined();
   });
