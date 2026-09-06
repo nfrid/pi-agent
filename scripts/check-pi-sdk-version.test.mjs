@@ -58,6 +58,26 @@ describe('Pi SDK version validation', () => {
     expect(sdkVersionMismatches(manifest, '0.84.1')).toHaveLength(3);
   });
 
+  it('rejects a dashboard server coding-agent version outside the runtime', () => {
+    const manifest = manifestWithVersions('0.85.1');
+    const serverManifest = {
+      dependencies: { '@earendil-works/pi-coding-agent': '0.84.1' },
+    };
+    const logError = vi.fn();
+
+    expect(
+      checkPiSdkVersions({
+        manifest,
+        serverManifest,
+        runtimeVersion: '0.85.1',
+        logError,
+      }),
+    ).toBe(false);
+    expect(logError).toHaveBeenCalledWith(
+      '- @earendil-works/pi-coding-agent (apps/dashboard-server): 0.84.1',
+    );
+  });
+
   it('rejects a TypeBox version outside the Pi-compatible exact release', () => {
     const manifest = manifestWithVersions('0.84.1', '1.1.38');
 

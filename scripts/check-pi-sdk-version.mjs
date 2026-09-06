@@ -12,6 +12,8 @@ export const PI_SDK_PACKAGES = [
 // Pi 0.84.x imports this exact TypeBox release. Keep it in the same check as
 // the SDK packages so a later SDK sync cannot silently reintroduce a drift.
 export const PI_SDK_TYPEBOX_VERSION = '1.3.7';
+export const PI_SERVER_CODING_AGENT =
+  '@earendil-works/pi-coding-agent (apps/dashboard-server)';
 
 export function sdkVersionMismatches(manifest, runtimeVersion) {
   const sdkMismatches = PI_SDK_PACKAGES.flatMap((packageName) => {
@@ -31,10 +33,24 @@ export function sdkVersionMismatches(manifest, runtimeVersion) {
 
 export function checkPiSdkVersions({
   manifest,
+  serverManifest,
   runtimeVersion,
   logError = console.error,
 }) {
-  const mismatches = sdkVersionMismatches(manifest, runtimeVersion);
+  const mismatches = [
+    ...sdkVersionMismatches(manifest, runtimeVersion),
+    ...(serverManifest === undefined ||
+    serverManifest.dependencies?.['@earendil-works/pi-coding-agent'] ===
+      runtimeVersion
+      ? []
+      : [
+          {
+            packageName: PI_SERVER_CODING_AGENT,
+            declaredVersion:
+              serverManifest?.dependencies?.['@earendil-works/pi-coding-agent'],
+          },
+        ]),
+  ];
   if (mismatches.length === 0) return true;
 
   logError(`Pi SDK versions must match the Pi runtime (${runtimeVersion}).`);
@@ -47,7 +63,12 @@ export function checkPiSdkVersions({
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const manifestUrl = new URL('../package.json', import.meta.url);
+  const serverManifestUrl = new URL(
+    '../apps/dashboard-server/package.json',
+    import.meta.url,
+  );
   const manifest = JSON.parse(readFileSync(manifestUrl, 'utf8'));
+  const serverManifest = JSON.parse(readFileSync(serverManifestUrl, 'utf8'));
   let runtimeVersion;
 
   try {
@@ -60,5 +81,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
 
-  if (!checkPiSdkVersions({ manifest, runtimeVersion })) process.exit(1);
+  if (!checkPiSdkVersions({ manifest, serverManifest, runtimeVersion }))
+    process.exit(1);
 }
