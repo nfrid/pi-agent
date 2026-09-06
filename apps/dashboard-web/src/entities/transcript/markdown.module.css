@@ -32,19 +32,44 @@
   margin-top: 0.25em;
 }
 
-.markdown :is(h1, h2, h3, h4) {
+.markdown :is(h1, h2, h3, h4, h5, h6) {
   margin: 1em 0 0.45em;
-  color: var(--fg);
   letter-spacing: normal;
   line-height: 1.25;
 }
 
 .markdown h1 {
+  color: var(--purple);
   font-size: 1.4em;
 }
 
 .markdown h2 {
+  color: var(--orange);
   font-size: 1.25em;
+}
+
+.markdown h3 {
+  color: var(--pink);
+}
+
+.markdown h4 {
+  color: var(--green);
+}
+
+.markdown h5 {
+  color: var(--cyan);
+}
+
+.markdown h6 {
+  color: var(--line);
+}
+
+.markdown em {
+  color: var(--yellow);
+}
+
+.markdown strong {
+  color: var(--orange);
 }
 
 .markdown :is(h3, h4) {
@@ -61,7 +86,7 @@
   border: var(--border-soft);
   background: var(--bg);
   padding: 0.12em 0.35em;
-  color: var(--cyan);
+  color: var(--green);
   font-size: 0.92em;
 }
 
