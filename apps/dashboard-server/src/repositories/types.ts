@@ -215,6 +215,42 @@ export interface ProjectLookupRepository {
   listProjects(): Project[];
 }
 
+/** The persisted project and checkout lookups required to launch a runtime. */
+export interface ProjectCheckoutRepository {
+  getProject(id: string): Project | undefined;
+  getCheckout(id: string): Checkout | undefined;
+}
+
+/** Repository surface used by runtime command receipts and thread activity. */
+export interface RuntimeServiceRepository {
+  getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined;
+  recordCommandReceipt(receipt: CommandReceipt): void;
+  getSessionThreadLink(sessionId: string): SessionThreadLinkRecord | undefined;
+  getThread(id: string): Thread | undefined;
+  unsettleThread(
+    commandId: string,
+    threadId: string,
+    now?: number,
+  ): ThreadLifecycleCommandResult;
+}
+
+/** Read-only projection consumed by the dashboard application boundary. */
+export interface DashboardProjectionRepository
+  extends ProjectCheckoutRepository {
+  listThreads(projectId?: string): Thread[];
+  sessionThreadLinks(): SessionThreadLink[];
+  getThread(id: string): Thread | undefined;
+  getRunByPiSessionId(piSessionId: string): Run | undefined;
+  projectSummaries(): ProjectSummary[];
+  checkoutSummaries(): CheckoutSummary[];
+  sessionRunAssociations(): Map<
+    string,
+    { projectId: string; checkoutId: string }
+  >;
+  threadSummaries(): ThreadSummary[];
+  runSummaries(): RunSummary[];
+}
+
 export interface ProjectAssociationRepository extends ProjectLookupRepository {
   listCheckouts(): Checkout[];
 }

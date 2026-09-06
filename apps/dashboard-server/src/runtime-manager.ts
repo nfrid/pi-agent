@@ -13,7 +13,7 @@ import {
   type ManagedLaunchRecord,
   type MetadataStore,
 } from './metadata.js';
-import type { OrchestrationRepository } from './repositories/types.js';
+import type { ProjectCheckoutRepository } from './repositories/types.js';
 import { runtimeHostLocation } from './runtime-host.js';
 import type { RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { sanitizeDisplayName } from './security.js';
@@ -66,7 +66,7 @@ export class RuntimeManager {
     private readonly sessions: SessionIndex,
     private readonly metadata: MetadataStore,
     private readonly socketPath: string,
-    private readonly orchestration?: OrchestrationRepository,
+    private readonly orchestration?: ProjectCheckoutRepository,
   ) {
     // Recover host ownership before accepting a reconnect. Raw
     // credentials are never restored; only their hashes live in SQLite.

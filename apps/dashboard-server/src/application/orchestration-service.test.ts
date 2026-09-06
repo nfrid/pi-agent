@@ -529,6 +529,32 @@ async function isolatedServiceFixture(
   };
 }
 
+it('drains a rejected production execution during shutdown', async () => {
+  const fixture = await isolatedServiceFixture();
+  try {
+    fixture.manager.hasLaunch.mockReturnValue(true);
+    fixture.manager.launch.mockRejectedValueOnce(
+      new Error('launch failed after registration'),
+    );
+    const created = (await fixture.service.createThread(fixture.projectId, {
+      commandId: 'rejected-production-run',
+      title: 'Rejected production run',
+      prompt: 'This launch should fail.',
+    })) as { run: { id: string } };
+
+    await fixture.service.start();
+    await fixture.service.stop();
+    expect(fixture.metadata.orchestration.getRun(created.run.id)).toMatchObject(
+      {
+        status: 'failed',
+        error: 'launch failed after registration',
+      },
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 describe('OrchestrationService', () => {
   it('persists the generated title before worktree preparation and seeds the runtime name', async () => {
     const events: string[] = [];

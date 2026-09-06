@@ -51,6 +51,7 @@ import type {
 } from 'fastify';
 import sharp from 'sharp';
 import { Type } from 'typebox';
+import { classifyDashboardError } from './application/error-classification.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { allowedOrigin, authorizeRequest } from './security.js';
 import { registerDashboardTrpc } from './trpc.js';
@@ -243,18 +244,15 @@ export interface DashboardRouteContext {
   readThread?(threadId: string): Promise<unknown> | unknown;
 }
 
-function errorCode(error: unknown): string | undefined {
-  const explicit = (error as { code?: unknown }).code;
-  if (typeof explicit === 'string') return explicit;
-  const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
-  if (lower.includes('unique constraint') || lower.includes('sqlite'))
-    return 'sqlite-constraint';
-  return undefined;
+function explicitErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
 }
 
-function errorStatus(error: unknown): number {
-  const code = errorCode(error);
+function errorStatus(
+  code: ReturnType<typeof classifyDashboardError>['code'],
+): number {
   return code === 'active-session' ||
     code === 'merge-conflict' ||
     code === 'restart-precondition' ||
@@ -271,15 +269,10 @@ function errorStatus(error: unknown): number {
 }
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
-  const code = errorCode(error);
-  const databaseDetail =
-    code === 'active-writer' || code === 'sqlite-constraint';
-  return reply.code(errorStatus(error)).send({
-    error: databaseDetail
-      ? 'The orchestration request conflicts with existing state.'
-      : error instanceof Error
-        ? error.message
-        : String(error),
+  const classified = classifyDashboardError(error);
+  const code = classified.code ?? explicitErrorCode(error);
+  return reply.code(errorStatus(classified.code)).send({
+    error: classified.message ?? String(error),
     ...(code === undefined ? {} : { code }),
   });
 }

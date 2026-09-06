@@ -38,7 +38,14 @@ import {
 import { initTRPC, TRPCError, tracked } from '@trpc/server';
 import { fastifyRequestHandler } from '@trpc/server/adapters/fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import {
+  classifyDashboardError,
+  type DashboardDomainCode,
+} from './application/error-classification.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
+
+export type { DashboardDomainCode } from './application/error-classification.js';
+export { DASHBOARD_DOMAIN_CODES } from './application/error-classification.js';
 
 /** Keep the server heartbeat comfortably below the client inactivity timeout. */
 export const DASHBOARD_FEED_PING_INTERVAL_MS = 15_000;
@@ -86,40 +93,6 @@ export interface DashboardTrpcContext {
   readonly protocolVersion?: number;
 }
 
-export const DASHBOARD_DOMAIN_CODES = [
-  'active-session',
-  'merge-conflict',
-  'restart-precondition',
-  'idempotency-conflict',
-  'active-writer',
-  'sqlite-constraint',
-  'orchestration-conflict',
-  'session-assigned',
-  'unknown-workspace',
-  'stale-history-cursor',
-  'protocol-mismatch',
-] as const;
-export type DashboardDomainCode = (typeof DASHBOARD_DOMAIN_CODES)[number];
-
-const domainCodes = new Set<string>(DASHBOARD_DOMAIN_CODES);
-const databaseDetailPattern =
-  /sqlite|unique constraint|constraint failed|database is locked|no such table|malformed database/i;
-
-function domainCode(error: unknown): DashboardDomainCode | undefined {
-  let current: unknown = error;
-  for (let depth = 0; depth < 3 && current; depth += 1) {
-    const code = (current as { code?: unknown }).code;
-    if (typeof code === 'string' && domainCodes.has(code))
-      return code as DashboardDomainCode;
-    const message = current instanceof Error ? current.message : '';
-    if (/sqlite|unique constraint/i.test(message)) return 'sqlite-constraint';
-    if (/^(?:stale|invalid) history cursor\.?$/iu.test(message))
-      return 'stale-history-cursor';
-    current = (current as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
-
 function transportCode(
   code: DashboardDomainCode,
 ): 'BAD_REQUEST' | 'CONFLICT' | 'NOT_FOUND' {
@@ -133,43 +106,22 @@ function transportCode(
     code === 'active-writer' ||
     code === 'sqlite-constraint' ||
     code === 'orchestration-conflict' ||
-    code === 'session-assigned'
+    code === 'session-assigned' ||
+    code === 'session-link-conflict'
   )
     return 'CONFLICT';
   return 'BAD_REQUEST';
 }
 
-function containsDatabaseDetail(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 3 && current; depth += 1) {
-    const message = current instanceof Error ? current.message : '';
-    if (databaseDetailPattern.test(message)) return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
-}
-
-function publicMessage(
-  error: unknown,
-  code: DashboardDomainCode | undefined,
-): string {
-  if (
-    code === 'active-writer' ||
-    code === 'sqlite-constraint' ||
-    containsDatabaseDetail(error)
-  )
-    return 'The orchestration request conflicts with existing state.';
-  if (error instanceof Error && error.message.length > 0) return error.message;
-  return 'Dashboard request failed.';
-}
-
 /** Convert domain failures without exposing database or implementation detail. */
 export function toDashboardTrpcError(error: unknown): TRPCError {
   if (error instanceof TRPCError) return error;
-  const code = domainCode(error);
+  const classified = classifyDashboardError(error);
   return new TRPCError({
-    code: code ? transportCode(code) : 'INTERNAL_SERVER_ERROR',
-    message: publicMessage(error, code),
+    code: classified.code
+      ? transportCode(classified.code)
+      : 'INTERNAL_SERVER_ERROR',
+    message: classified.message ?? 'Dashboard request failed.',
     cause: error,
   });
 }
@@ -219,7 +171,7 @@ const t = initTRPC.context<DashboardTrpcContext>().create({
     },
   },
   errorFormatter({ shape, error }) {
-    const code = domainCode(error);
+    const code = classifyDashboardError(error).code;
     const mismatch =
       code === 'protocol-mismatch' ? protocolMismatchDetails(error) : {};
     return {

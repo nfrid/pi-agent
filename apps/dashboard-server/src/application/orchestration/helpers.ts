@@ -139,7 +139,6 @@ export interface OrchestrationHost {
   readonly getSession?: OrchestrationServiceOptions['getSession'];
   readonly reconnectGraceMs: number;
 
-  readonly inFlight: Set<string>;
   readonly executionTasks: Map<string, Promise<void>>;
   readonly freshWorktreeRuns: Set<string>;
   readonly registryTasks: Set<Promise<void>>;

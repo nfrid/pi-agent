@@ -109,7 +109,6 @@ export class OrchestrationService implements OrchestrationHost {
   readonly readSessionTitleHistory?: OrchestrationServiceOptions['readSessionTitleHistory'];
   readonly readSession?: OrchestrationServiceOptions['readSession'];
   readonly getSession?: OrchestrationServiceOptions['getSession'];
-  readonly inFlight = new Set<string>();
   /** Execution remains observable while preparation or manager.launch is pending. */
   readonly executionTasks = new Map<string, Promise<void>>();
   /** Fresh WIP branches are discarded on cancellation, unlike resumable records. */
@@ -196,9 +195,9 @@ export class OrchestrationService implements OrchestrationHost {
     // Registry callbacks can enqueue another per-run reduction while the
     // current one completes. Drain until both the execution and callback sets
     // are empty so shutdown cannot leave a queued lifecycle task behind.
-    while (this.inFlight.size > 0 || this.registryTasks.size > 0) {
+    while (this.executionTasks.size > 0 || this.registryTasks.size > 0) {
       await Promise.allSettled([
-        ...[...this.inFlight].map((id) => this.waitForRun(id)),
+        ...this.executionTasks.values(),
         ...this.registryTasks,
       ]);
     }
@@ -541,11 +540,7 @@ export class OrchestrationService implements OrchestrationHost {
   }
 
   waitForRun(id: string): Promise<void> {
-    return new Promise((resolve) => {
-      const check = () =>
-        this.inFlight.has(id) ? setTimeout(check, 10) : resolve();
-      check();
-    });
+    return this.executionTasks.get(id) ?? Promise.resolve();
   }
 
   async recoverManagedRuntime(runtimeId: string): Promise<boolean> {

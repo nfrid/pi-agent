@@ -38,7 +38,7 @@ import {
 import type { MetadataStore } from '../metadata.js';
 import type { ProjectResolver } from '../project-resolver.js';
 import type { PushSender } from '../push.js';
-import type { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
+import type { DashboardProjectionRepository } from '../repositories/types.js';
 import type { RuntimeManager } from '../runtime-manager.js';
 import type { RegistryChange, RuntimeRegistry } from '../runtime-registry.js';
 import {
@@ -775,7 +775,7 @@ export class DashboardApplication {
   private readonly registry: RuntimeRegistry;
   private readonly manager: RuntimeManager;
   private readonly metadata: MetadataStore;
-  readonly orchestration: SqliteOrchestrationRepository;
+  readonly orchestration: DashboardProjectionRepository;
   private readonly sessionIndex: SessionIndex;
   /** Metadata emitted by the last authoritative snapshot/index publication. */
   private sessionMetadataBaseline?: ReadonlyMap<string, SessionIndexEntry>;

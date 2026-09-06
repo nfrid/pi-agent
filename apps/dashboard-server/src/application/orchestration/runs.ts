@@ -233,26 +233,19 @@ export async function drain(host: OrchestrationHost): Promise<void> {
   host.draining = true;
   try {
     for (const run of host.repository.listRuns()) {
-      if (run.status !== 'queued' || host.inFlight.has(run.id)) continue;
+      if (run.status !== 'queued' || host.executionTasks.has(run.id)) continue;
       const claimed = host.repository.claimQueuedRun(run.id);
       if (!claimed) continue;
-      host.inFlight.add(run.id);
-      const task = execute(host, claimed);
+      // Register before starting execute: preparation and provider launch can
+      // re-enter lifecycle code, including cancellation.
+      const task = Promise.resolve().then(() => execute(host, claimed));
       host.executionTasks.set(run.id, task);
-      void task.then(
-        () => {
-          if (host.executionTasks.get(run.id) === task)
-            host.executionTasks.delete(run.id);
-          host.inFlight.delete(run.id);
-          void drain(host);
-        },
-        () => {
-          if (host.executionTasks.get(run.id) === task)
-            host.executionTasks.delete(run.id);
-          host.inFlight.delete(run.id);
-          void drain(host);
-        },
-      );
+      const cleanup = () => {
+        if (host.executionTasks.get(run.id) === task)
+          host.executionTasks.delete(run.id);
+        void drain(host);
+      };
+      void task.then(cleanup, cleanup);
     }
   } finally {
     host.draining = false;
