@@ -5,28 +5,25 @@ import {
   type DelegateJobSnapshot,
   type DelegateJobStartOptions,
 } from './jobs';
-import {
-  cloneDelegateLifecycle,
-  ensureDelegateLifecycle,
-  getDelegateLifecycle,
-  hydrateDelegateLifecycle,
-} from './lifecycle';
+import { cloneDelegateLifecycle, hydrateDelegateLifecycle } from './lifecycle';
 import { buildParentHandoff } from './output';
 
 import {
   type DelegateChildCapability,
   type DelegatedRun,
   type DelegateRouteState,
-  type DelegateWorkflowBranchDescriptor,
   type DelegateWorkflowResultProjection,
   type DelegateWorkflowResultRecord,
   type DelegateWorkflowRunProjection,
   emptyUsage,
-  getExactFinalAssistantText,
 } from './types';
 import {
-  type BoundWorkflowSelector,
   captureWorkflowText,
+  compactWorkflowResult,
+  durableWorkflowResult,
+} from './workflow-contract';
+import {
+  type BoundWorkflowSelector,
   type ResolvedWorkflowInput,
   type ResolvedWorkflowInputs,
   resolveWorkflowInputs,
@@ -62,8 +59,6 @@ export const MAX_WORKFLOW_ATTEMPTS = 256;
 export const WORKFLOW_RELOAD_ORPHAN_REASON =
   'Workflow blocked: execution state unavailable after reload.' as const;
 const MAX_WORKFLOW_REASON_LENGTH = 256;
-const MAX_WORKFLOW_TOKEN_BYTES = 16 * 1024;
-const MAX_TERMINAL_FIELD_BYTES = 1024;
 const DEFAULT_PREPARATION_GRACE_MS = 100;
 
 type PreparationCleanup = () => void | Promise<void>;
@@ -322,152 +317,6 @@ function compactSessionId(
 
 function copyAttempt(attempt: WorkflowAttempt): WorkflowAttempt {
   return Object.freeze({ ...attempt });
-}
-
-function boundedTerminalField(value: string, fallback: string): string {
-  if (Buffer.byteLength(value, 'utf8') <= MAX_TERMINAL_FIELD_BYTES)
-    return value;
-  return fallback;
-}
-
-function copyOutputFile(
-  value: DelegatedRun['outputFile'],
-): DelegatedRun['outputFile'] {
-  return value ? Object.freeze({ ...value }) : undefined;
-}
-
-function copyBranch(
-  worktree: DelegatedRun['worktree'],
-): DelegateWorkflowBranchDescriptor | undefined {
-  if (!worktree) return undefined;
-  const within = (value: unknown, maxBytes: number): value is string =>
-    typeof value === 'string' && Buffer.byteLength(value, 'utf8') <= maxBytes;
-  if (
-    !within(worktree.id, 128) ||
-    !within(worktree.repositoryRoot, 4096) ||
-    !within(worktree.worktreePath, 4096) ||
-    !within(worktree.branch, 512) ||
-    (worktree.headCommit !== undefined && !within(worktree.headCommit, 128))
-  )
-    return undefined;
-  return Object.freeze({
-    id: worktree.id,
-    repositoryRoot: worktree.repositoryRoot,
-    worktreePath: worktree.worktreePath,
-    branch: worktree.branch,
-    ...(worktree.headCommit === undefined
-      ? {}
-      : { headCommit: worktree.headCommit }),
-  });
-}
-
-function compactRun(run: DelegatedRun): DelegateWorkflowRunProjection {
-  const lifecycle =
-    ['error', 'aborted', 'timed-out'].includes(run.state) &&
-    !getDelegateLifecycle(run)
-      ? ensureDelegateLifecycle(run)
-      : getDelegateLifecycle(run, {
-          includeFile: true,
-          includeBoundedFallback: true,
-        });
-  const compactLifecycle = lifecycle
-    ? cloneDelegateLifecycle(lifecycle, { includeFile: true })
-    : undefined;
-  const report = (() => {
-    const text = getExactFinalAssistantText(run.messages);
-    return text.trim() ? captureWorkflowText(text) : undefined;
-  })();
-  const continuation = run.continuation?.trim();
-  return Object.freeze({
-    runId: boundedTerminalField(run.runId, 'unknown-run'),
-    name: boundedTerminalField(run.name, 'Subagent'),
-    task: boundedTerminalField(run.task, '[oversized task omitted]'),
-    exitCode: run.exitCode,
-    state: run.state,
-    ...(run.model
-      ? { model: boundedTerminalField(run.model, '[oversized model omitted]') }
-      : {}),
-    ...(run.routing ? { routing: copyRouting(run.routing) } : {}),
-    ...(run.sessionId
-      ? { sessionId: boundedTerminalField(run.sessionId, '[session omitted]') }
-      : {}),
-    ...(run.lineageId
-      ? { lineageId: boundedTerminalField(run.lineageId, '[lineage omitted]') }
-      : {}),
-    ...(run.context ? { context: run.context } : {}),
-    ...(run.allowWrites === undefined ? {} : { allowWrites: run.allowWrites }),
-    ...(run.capabilities?.length
-      ? { capabilities: Object.freeze([...run.capabilities]) }
-      : {}),
-    ...(run.isolation ? { isolation: run.isolation } : {}),
-    ...(continuation &&
-    Buffer.byteLength(continuation, 'utf8') <= MAX_WORKFLOW_TOKEN_BYTES
-      ? { continuation }
-      : {}),
-    ...(copyBranch(run.worktree) ? { worktree: copyBranch(run.worktree) } : {}),
-    ...(copyOutputFile(run.outputFile)
-      ? { outputFile: copyOutputFile(run.outputFile) }
-      : {}),
-    ...(compactLifecycle ? { lifecycle: compactLifecycle } : {}),
-    ...(run.retryable ? { retryable: true } : {}),
-    ...(run.queuedAt === undefined ? {} : { queuedAt: run.queuedAt }),
-    ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
-    ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
-    ...(run.workflowAttempt
-      ? { workflowAttempt: Object.freeze({ ...run.workflowAttempt }) }
-      : {}),
-    ...(report ? { report } : {}),
-  });
-}
-
-function compactResult(
-  result: DelegateJobResult,
-): DelegateWorkflowResultRecord {
-  const sourceRuns = result.retainedRuns ?? result.runs;
-  const runs = Object.freeze(sourceRuns.map(compactRun));
-  const reports = Object.freeze(
-    runs.flatMap((run) => (run.report ? [run.report] : [])),
-  );
-  const rawTokens = sourceRuns
-    .map((run) => run.continuation?.trim())
-    .filter((token): token is string => Boolean(token));
-  const oversizedToken = rawTokens.some(
-    (token) => Buffer.byteLength(token, 'utf8') > MAX_WORKFLOW_TOKEN_BYTES,
-  );
-  const tokens = [...new Set(rawTokens)].filter(
-    (token) => Buffer.byteLength(token, 'utf8') <= MAX_WORKFLOW_TOKEN_BYTES,
-  );
-  return Object.freeze({
-    version: 1,
-    reports,
-    handoff: captureWorkflowText(result.handoff ?? ''),
-    runs,
-    ...(tokens.length === 1 ? { continuationToken: tokens[0] } : {}),
-    continuationAmbiguous: tokens.length > 1,
-    ...(oversizedToken ? { continuationUnavailable: true as const } : {}),
-  });
-}
-
-function durableResult(
-  result: DelegateWorkflowResultRecord,
-): DelegateWorkflowResultRecord {
-  return Object.freeze({
-    version: 1,
-    // The bounded handoff contains either a complete small report or an exact
-    // output-file reference. Keep duplicate report copies out of the journal.
-    reports: Object.freeze([]),
-    handoff: Object.freeze({ ...result.handoff }),
-    runs: Object.freeze(
-      result.runs.map(({ report: _report, ...run }) => Object.freeze(run)),
-    ),
-    ...(result.continuationToken
-      ? { continuationToken: result.continuationToken }
-      : {}),
-    continuationAmbiguous: result.continuationAmbiguous,
-    ...(result.continuationUnavailable
-      ? { continuationUnavailable: true as const }
-      : {}),
-  });
 }
 
 function emptyResult(reason: string): DelegateWorkflowResultRecord {
@@ -839,7 +688,7 @@ export class DelegateWorkflowCoordinator {
               ...(record.reason === undefined ? {} : { reason: record.reason }),
               ...(record.result === undefined
                 ? {}
-                : { result: durableResult(record.result) }),
+                : { result: durableWorkflowResult(record.result) }),
             });
           }),
       ),
@@ -1189,12 +1038,12 @@ export class DelegateWorkflowCoordinator {
         ),
         ...(metadata.result === undefined
           ? {}
-          : { result: durableResult(metadata.result) }),
+          : { result: durableWorkflowResult(metadata.result) }),
       };
       this.rememberChildSession(record, metadata.sessionId);
       if (record.result) this.results.set(attempt.identity, record.result);
       if (orphaned) {
-        record.result = compactResult(
+        record.result = compactWorkflowResult(
           setupFailureResult(record, WORKFLOW_RELOAD_ORPHAN_REASON),
         );
         this.results.set(attempt.identity, record.result);
@@ -1864,7 +1713,7 @@ export class DelegateWorkflowCoordinator {
   ): void {
     // Compact before publishing readiness. The full adapter result is used
     // only on this stack frame and is never assigned to a workflow record/map.
-    const evidence = compactResult(result);
+    const evidence = compactWorkflowResult(result);
     record.result = evidence;
     this.results.set(record.attempt.identity, evidence);
     this.rememberChildSession(
@@ -1913,7 +1762,7 @@ export class DelegateWorkflowCoordinator {
     if (!record.result) {
       const evidence =
         state === 'error' || state === 'blocked'
-          ? compactResult(
+          ? compactWorkflowResult(
               setupFailureResult(
                 record,
                 record.reason ?? `Workflow attempt ${state}.`,

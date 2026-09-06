@@ -79,27 +79,55 @@ export interface SymbolicBranchRequestPreflight {
   allowWrites?: boolean;
 }
 
+type SymbolicBranchWorkspaceFacts = {
+  continuation: boolean;
+  cwdExplicit: boolean;
+  isolation?: 'shared' | 'worktree';
+  isolationExplicit: boolean;
+  from?: 'wip' | 'head';
+  worktreePath?: string;
+  baseRef?: string;
+};
+
+function symbolicBranchViolations(
+  facts: SymbolicBranchWorkspaceFacts,
+): string[] {
+  const unmet: string[] = [];
+  if (facts.continuation)
+    unmet.push('the delegate must be fresh, not a continuation');
+  if (facts.cwdExplicit)
+    unmet.push(
+      'cwd must be omitted because the source branch supplies its repository',
+    );
+  if (facts.isolationExplicit && facts.isolation !== 'worktree')
+    unmet.push('explicit isolation must be "worktree" or omitted');
+  if (facts.from !== undefined)
+    unmet.push(
+      'from must be omitted because the source branch supplies the exact base',
+    );
+  if (facts.worktreePath !== undefined)
+    unmet.push(
+      'worktreePath must be omitted because the harness creates the checkout',
+    );
+  if (facts.baseRef !== undefined)
+    unmet.push(
+      'an internal baseRef cannot be combined with a symbolic branch source',
+    );
+  return unmet;
+}
+
 /** Validate model-facing branch workspace fields without creating a plan. */
 export function preflightSymbolicBranchRequest(
   request: SymbolicBranchRequestPreflight,
 ): void {
-  const unmet: string[] = [];
-  if (request.continuation)
-    unmet.push('the delegate must be fresh, not a continuation');
-  if (request.cwd !== undefined)
-    unmet.push(
-      'cwd must be omitted because the source branch supplies its repository',
-    );
-  if (request.isolation !== undefined && request.isolation !== 'worktree')
-    unmet.push('explicit isolation must be "worktree" or omitted');
-  if (request.from !== undefined)
-    unmet.push(
-      'from must be omitted because the source branch supplies the exact base',
-    );
-  if (request.worktreePath !== undefined)
-    unmet.push(
-      'worktreePath must be omitted because the harness creates the checkout',
-    );
+  const unmet = symbolicBranchViolations({
+    continuation: request.continuation,
+    cwdExplicit: request.cwd !== undefined,
+    isolation: request.isolation,
+    isolationExplicit: request.isolation !== undefined,
+    from: request.from,
+    worktreePath: request.worktreePath,
+  });
   if (unmet.length === 0) return;
 
   const requestedIsolation =
@@ -135,27 +163,15 @@ export function effectiveDelegatePlanConfiguration(
 export function preflightSymbolicBranchPlan(
   plan: import('./task-lifecycle').DelegateTaskPlan,
 ): import('./task-lifecycle').DelegateTaskPlan {
-  const unmet: string[] = [];
-  if (plan.resumed)
-    unmet.push('the delegate must be fresh, not a continuation');
-  if (plan.cwdExplicit)
-    unmet.push(
-      'cwd must be omitted because the source branch supplies its repository',
-    );
-  if (plan.isolationExplicit && plan.isolation !== 'worktree')
-    unmet.push('explicit isolation must be "worktree" or omitted');
-  if (plan.base !== undefined)
-    unmet.push(
-      'from must be omitted because the source branch supplies the exact base',
-    );
-  if (plan.worktreePath !== undefined)
-    unmet.push(
-      'worktreePath must be omitted because the harness creates the checkout',
-    );
-  if (plan.baseRef !== undefined)
-    unmet.push(
-      'an internal baseRef cannot be combined with a symbolic branch source',
-    );
+  const unmet = symbolicBranchViolations({
+    continuation: plan.resumed !== undefined,
+    cwdExplicit: plan.cwdExplicit === true,
+    isolation: plan.isolation,
+    isolationExplicit: plan.isolationExplicit === true,
+    from: plan.base,
+    worktreePath: plan.worktreePath,
+    baseRef: plan.baseRef,
+  });
 
   if (unmet.length > 0) {
     const requestedIsolation = `${plan.isolation} (${plan.isolationExplicit ? 'explicit' : 'implicit'})`;

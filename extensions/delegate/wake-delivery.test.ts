@@ -102,6 +102,81 @@ describe('wake delivery', () => {
     await workflow.dispose();
   });
 
+  test('keeps mixed explicit and default selector order through entry and restore', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const first = workflow.schedule({
+      logicalId: 'first-source',
+      mode: 'single',
+      tasks: ['first-source'],
+      execute: async () => result(),
+    });
+    const second = workflow.schedule({
+      logicalId: 'second-source',
+      mode: 'single',
+      tasks: ['second-source'],
+      execute: async () => result(),
+    });
+    await vi.waitFor(() =>
+      expect(
+        workflow.list().every((attempt) => attempt.settledAt !== undefined),
+      ).toBe(true),
+    );
+    const sendMessage = vi.fn();
+    let active: WakeCoordinator | undefined;
+    const delivery = createWakeDelivery({
+      pi: { sendMessage } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getActiveCoordinator: () => active,
+    });
+    active = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'mixed-selector-session',
+      ownerEpoch: 2,
+      dispatch: delivery.dispatch,
+    });
+    active.register({
+      id: 'mixed-selector',
+      condition: { all: [first.identity, second.identity] },
+      payload: [{ kind: 'metadata', node: second.identity }, 'handoff'],
+    });
+    const message = sendMessage.mock.calls[0]?.[0];
+    if (!message) throw new Error('missing mixed-selector wake message');
+    expect(message.details.sources).toEqual([second.identity, first.identity]);
+    const snapshot = active.snapshot();
+
+    delivery.markContextEntered([message]);
+    expect(active.enteredSourceIdentities()).toEqual([
+      second.identity,
+      first.identity,
+    ]);
+
+    let restored: WakeCoordinator | undefined;
+    const restoredDelivery = createWakeDelivery({
+      pi: { sendMessage: vi.fn() } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getActiveCoordinator: () => restored,
+    });
+    restored = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'mixed-selector-session',
+      ownerEpoch: 2,
+    });
+    const queuedSnapshot = {
+      ...snapshot,
+      wakes: snapshot.wakes.map((wake) => ({
+        ...wake,
+        state: 'queued' as const,
+      })),
+    };
+    expect(restored.restore(queuedSnapshot)).toBe(true);
+    expect(restoredDelivery.filterContext([message])).toEqual([message]);
+    expect(restored.enteredSourceIdentities()).toEqual([
+      second.identity,
+      first.identity,
+    ]);
+    await workflow.dispose();
+  });
+
   test('uses followUp only for an explicitly non-obstructive wake', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const attempt = workflow.schedule({

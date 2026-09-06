@@ -7,6 +7,7 @@ import {
   normalizeWakeCondition,
   normalizeWakePayload,
   parseWakeRestoreSnapshot,
+  selectWakePayloadSources,
   type WakeAcknowledgement,
   type WakeCondition,
   type WakePayload,
@@ -18,6 +19,7 @@ import {
 
 export type {
   CanonicalWakePayloadSelector,
+  SelectedWakePayloadSource,
   WakeAcknowledgement,
   WakeCondition,
   WakePayload,
@@ -572,14 +574,11 @@ export class WakeCoordinator {
     for (const record of this.records.values()) {
       if (record.state !== 'entered' || !record.readyReferences?.length)
         continue;
-      for (const selector of record.payloadSelectors) {
-        const selected =
-          selector.node === undefined
-            ? record.readyReferences
-            : [selector.node as AttemptIdentity];
-        for (const identity of selected) {
-          if (record.readyReferences.includes(identity)) sources.add(identity);
-        }
+      for (const { identity } of selectWakePayloadSources(
+        record.payloadSelectors,
+        record.readyReferences,
+      )) {
+        if (record.readyReferences.includes(identity)) sources.add(identity);
       }
     }
     return [...sources];
@@ -683,12 +682,11 @@ export class WakeCoordinator {
     selectors: readonly CanonicalWakePayloadSelector[],
   ): Set<string> {
     const channels = new Set<string>();
-    for (const selector of selectors) {
-      const sources =
-        selector.node === undefined ? references : [selector.node];
-      for (const source of sources)
-        channels.add(`${source}:${selector.kind}:${selector.name ?? ''}`);
-    }
+    for (const { selector, identity } of selectWakePayloadSources(
+      selectors,
+      references,
+    ))
+      channels.add(`${identity}:${selector.kind}:${selector.name ?? ''}`);
     // Keep the condition parameter explicit: any's omitted selectors can
     // become any terminal ref, while node/all are exact at readiness.
     if ('any' in condition && condition.any.length > 0) return channels;
@@ -817,11 +815,13 @@ export class WakeCoordinator {
   ): WakePayload {
     const sourceValues = new Map<AttemptIdentity, WakePayloadSource>();
     const used = new Set<string>();
-    for (const selector of record.payloadSelectors) {
-      const sources =
-        selector.node === undefined ? readyReferences : [selector.node];
-      if (sources.length === 0)
-        throw new WakePayloadPendingError('Wake payload has no ready source.');
+    const selectedSources = selectWakePayloadSources(
+      record.payloadSelectors,
+      readyReferences,
+    );
+    if (selectedSources.length === 0)
+      throw new WakePayloadPendingError('Wake payload has no ready source.');
+    for (const { selector, identity } of selectedSources) {
       if (
         selector.node !== undefined &&
         !readyReferences.includes(selector.node)
@@ -829,59 +829,54 @@ export class WakeCoordinator {
         throw new WakePayloadPendingError(
           `Wake payload source "${selector.node}" is not terminal yet.`,
         );
-      for (const identity of sources) {
-        const key = `${identity}:${selector.kind}:${selector.name ?? ''}`;
-        if (used.has(key))
-          throw new Error('Duplicate wake payload selectors are not allowed.');
-        used.add(key);
-        const attempt = this.workflow.get(identity);
-        if (!attempt || !this.isTerminalAttempt(attempt))
-          throw new WakePayloadPendingError(
-            `Wake payload source "${identity}" is not terminal yet.`,
-          );
-        const current = sourceValues.get(identity) ?? {};
-        let next: WakePayloadSource;
-        if (selector.kind === 'handoff') {
-          const handoff =
-            this.workflow.getResultEvidence(identity)?.handoff.text;
-          if (handoff === undefined)
-            throw new Error('Wake handoff payload is unavailable.');
-          if (
-            Buffer.byteLength(handoff, 'utf8') > WAKE_PAYLOAD_CAPS.handoffBytes
-          )
-            throw new Error('Wake handoff payload exceeds its bounded limit.');
-          next = { ...current, handoff };
-        } else {
-          const symbolic: SymbolicWorkflowSelector = {
-            node: identity,
-            include: [selector.kind],
-          };
-          const bound: BoundWorkflowSelector = Object.freeze({
-            selector: Object.freeze(symbolic),
-            identity,
-          });
-          const resolved = this.workflow.resolveBoundWorkflowInputs([bound]);
-          const selected = resolved.inputs.find(
-            (candidate: ResolvedWorkflowInput) =>
-              candidate.kind === selector.kind,
-          );
-          if (!selected)
-            throw new Error(`Wake payload ${selector.kind} is unavailable.`);
-          if (
-            selected.value === undefined ||
-            jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.metadataBytes
-          )
-            throw new Error('Wake metadata payload exceeds its bounded limit.');
-          next = {
-            ...current,
-            metadata: cloneAndFreezeWakeJson(selected.value) as Record<
-              string,
-              unknown
-            >,
-          };
-        }
-        sourceValues.set(identity, next);
+      const key = `${identity}:${selector.kind}:${selector.name ?? ''}`;
+      if (used.has(key))
+        throw new Error('Duplicate wake payload selectors are not allowed.');
+      used.add(key);
+      const attempt = this.workflow.get(identity);
+      if (!attempt || !this.isTerminalAttempt(attempt))
+        throw new WakePayloadPendingError(
+          `Wake payload source "${identity}" is not terminal yet.`,
+        );
+      const current = sourceValues.get(identity) ?? {};
+      let next: WakePayloadSource;
+      if (selector.kind === 'handoff') {
+        const handoff = this.workflow.getResultEvidence(identity)?.handoff.text;
+        if (handoff === undefined)
+          throw new Error('Wake handoff payload is unavailable.');
+        if (Buffer.byteLength(handoff, 'utf8') > WAKE_PAYLOAD_CAPS.handoffBytes)
+          throw new Error('Wake handoff payload exceeds its bounded limit.');
+        next = { ...current, handoff };
+      } else {
+        const symbolic: SymbolicWorkflowSelector = {
+          node: identity,
+          include: [selector.kind],
+        };
+        const bound: BoundWorkflowSelector = Object.freeze({
+          selector: Object.freeze(symbolic),
+          identity,
+        });
+        const resolved = this.workflow.resolveBoundWorkflowInputs([bound]);
+        const selected = resolved.inputs.find(
+          (candidate: ResolvedWorkflowInput) =>
+            candidate.kind === selector.kind,
+        );
+        if (!selected)
+          throw new Error(`Wake payload ${selector.kind} is unavailable.`);
+        if (
+          selected.value === undefined ||
+          jsonBytes(selected.value) > WAKE_PAYLOAD_CAPS.metadataBytes
+        )
+          throw new Error('Wake metadata payload exceeds its bounded limit.');
+        next = {
+          ...current,
+          metadata: cloneAndFreezeWakeJson(selected.value) as Record<
+            string,
+            unknown
+          >,
+        };
       }
+      sourceValues.set(identity, next);
     }
     const sources = Object.fromEntries(
       [...sourceValues.entries()].map(([identity, source]) => [

@@ -8,6 +8,7 @@ import type {
   WakeDispatchHandler,
   WakeSnapshot,
 } from './wake-coordinator';
+import { selectWakePayloadSources } from './wake-restore-policy';
 
 export const DELEGATE_WAKE_MESSAGE_TYPE = 'delegate-wake-result';
 
@@ -185,14 +186,13 @@ function expectedSources(wake: WakeSnapshot): readonly string[] | undefined {
   const readyReferences = wake.readyReferences;
   if (!readyReferences || readyReferences.length === 0) return undefined;
   const sources: string[] = [];
-  for (const selector of wake.payload) {
-    const selected =
-      selector.node === undefined ? readyReferences : [selector.node];
-    for (const source of selected) {
-      if (!readyReferences.includes(source)) return undefined;
-      if (sources.includes(source)) continue;
-      sources.push(source);
-    }
+  for (const { identity } of selectWakePayloadSources(
+    wake.payload,
+    readyReferences,
+  )) {
+    if (!readyReferences.includes(identity)) return undefined;
+    if (sources.includes(identity)) continue;
+    sources.push(identity);
   }
   return sources.length > 0 ? sources : undefined;
 }

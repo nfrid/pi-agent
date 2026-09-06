@@ -146,6 +146,40 @@ describe('symbolic branch preflight', () => {
     );
   });
 
+  test('applies the same workspace conflict matrix at request and plan boundaries', () => {
+    const conflicts = [
+      ['continuation', { continuation: true }],
+      ['cwd', { cwd: '/tmp/explicit' }],
+      ['isolation', { isolation: 'shared' as const }],
+      ['from', { from: 'head' as const }],
+      ['worktreePath', { worktreePath: '/tmp/caller-worktree' }],
+    ] as const;
+    for (const [label, request] of conflicts) {
+      expect(() =>
+        preflightSymbolicBranchRequest({ continuation: false, ...request }),
+      ).toThrow(/Symbolic branch input preflight failed/);
+
+      const candidate = plan();
+      const conflicted =
+        label === 'continuation'
+          ? { ...candidate, resumed: {} as never }
+          : label === 'cwd'
+            ? { ...candidate, cwdExplicit: true }
+            : label === 'isolation'
+              ? {
+                  ...candidate,
+                  isolation: 'shared' as const,
+                  isolationExplicit: true,
+                }
+              : label === 'from'
+                ? { ...candidate, base: 'head' as const }
+                : { ...candidate, worktreePath: '/tmp/caller-worktree' };
+      expect(() => preflightSymbolicBranchPlan(conflicted)).toThrow(
+        /Symbolic branch input preflight failed/,
+      );
+    }
+  });
+
   test('reports every unmet constraint with the effective configuration', () => {
     const candidate = {
       ...plan({ cwd: '/tmp/other', isolation: 'shared' }),

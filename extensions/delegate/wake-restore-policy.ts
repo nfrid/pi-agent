@@ -25,6 +25,11 @@ export interface CanonicalWakePayloadSelector {
   readonly node?: AttemptIdentity;
 }
 
+export interface SelectedWakePayloadSource {
+  readonly selector: CanonicalWakePayloadSelector;
+  readonly identity: AttemptIdentity;
+}
+
 export type WakeState =
   | 'pending'
   | 'ready'
@@ -215,6 +220,21 @@ export function normalizeWakeCondition(
     };
   }
   throw new Error('Invalid wake condition.');
+}
+
+/** Expand canonical selectors in caller-visible selector/source order. */
+export function selectWakePayloadSources(
+  selectors: readonly CanonicalWakePayloadSelector[],
+  readyReferences: readonly AttemptIdentity[],
+): readonly SelectedWakePayloadSource[] {
+  const selected: SelectedWakePayloadSource[] = [];
+  for (const selector of selectors) {
+    const sources =
+      selector.node === undefined ? readyReferences : [selector.node];
+    for (const identity of sources)
+      selected.push(Object.freeze({ selector, identity }));
+  }
+  return Object.freeze(selected);
 }
 
 /** Normalize either payload option spelling without workflow lookups. */

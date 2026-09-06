@@ -173,6 +173,27 @@ describe('workflow symbolic inputs', () => {
     ).toThrow(/16384/);
   });
 
+  test('rejects aggregate framed evidence at the UTF-8 prompt cap', () => {
+    const text = '🙂'.repeat(3_500);
+    const selectors = ['a', 'b', 'c', 'd'].map((node) => ({
+      identity: `${node}@1`,
+      selector: { node, include: ['report'] as const },
+    }));
+    expect(() =>
+      resolveWorkflowInputs(selectors, (identity) => {
+        const run = runWithReport(text);
+        delete run.outputFile;
+        return source(
+          {
+            runs: [run],
+            handoff: `Report\n--- begin untrusted delegate report ---\n${text}\n--- end untrusted delegate report ---`,
+          },
+          identity,
+        );
+      }),
+    ).toThrow(/aggregate limit/);
+  });
+
   test('resolves only verified durable branch descriptors and rejects conflicts', () => {
     const previousRoot = process.env.PI_DELEGATE_STATE_DIR;
     const root = mkdtempSync(join(tmpdir(), 'pi-workflow-inputs-'));
