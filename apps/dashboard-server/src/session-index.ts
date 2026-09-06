@@ -31,12 +31,15 @@ import {
   isLegacyHistoryCursor,
 } from './session-index/history-cursor.js';
 import {
+  compactOutlineText,
   HISTORY_PAGE_BYTES,
   INDEX_MAX_LINE_BYTES,
+  outlineIdentityId,
   SessionFileChangedError,
   type SessionFileVersion,
   type SessionLineDescriptor,
   scanSessionFile,
+  timestampNumber,
 } from './session-index/scanner.js';
 
 interface SessionHistoryIndex {
@@ -180,44 +183,6 @@ function within(root: string, file: string): boolean {
   );
 }
 
-function compactOutlineText(value: unknown, limit = 220): string | undefined {
-  if (typeof value === 'string') {
-    const text = value.replace(/\s+/gu, ' ').trim();
-    return text ? text.slice(0, limit) : undefined;
-  }
-  if (Array.isArray(value)) {
-    for (const part of value) {
-      const text = compactOutlineText(part, limit);
-      if (text) return text;
-    }
-    return undefined;
-  }
-  if (!isRecord(value)) return undefined;
-  return compactOutlineText(value.text ?? value.content, limit);
-}
-
-function outlineIdentityId(value: unknown): string | undefined {
-  if (!isRecord(value)) return undefined;
-  const message = isRecord(value.message) ? value.message : value;
-  const candidateId =
-    typeof message.messageId === 'string'
-      ? message.messageId
-      : typeof message.id === 'string'
-        ? message.id
-        : typeof value.id === 'string'
-          ? value.id
-          : undefined;
-  return candidateId !== undefined &&
-    candidateId.length > 0 &&
-    candidateId.length <= 256 &&
-    ![...candidateId].some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127;
-    })
-    ? candidateId
-    : undefined;
-}
-
 function buildSessionOutline(
   descriptors: readonly SessionLineDescriptor[],
   groups: readonly ActivityGroup[],
@@ -273,16 +238,6 @@ type BranchDescriptor = Pick<
   | 'timestamp'
 >;
 type IdentifiedBranchDescriptor = BranchDescriptor & { id: string };
-
-function timestampNumber(value: unknown): number | undefined {
-  if (typeof value === 'number')
-    return Number.isFinite(value) ? value : undefined;
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-}
 
 function branchTopologyFromDescriptors(
   descriptors: readonly BranchDescriptor[],

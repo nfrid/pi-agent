@@ -1,4 +1,4 @@
-import { createHash, type Hash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import {
   activityEntryFromRaw,
@@ -88,7 +88,10 @@ function isBlankJsonlLine(line: Uint8Array): boolean {
   return true;
 }
 
-function compactOutlineText(value: unknown, limit = 220): string | undefined {
+export function compactOutlineText(
+  value: unknown,
+  limit = 220,
+): string | undefined {
   if (typeof value === 'string') {
     const text = value.replace(/\s+/gu, ' ').trim();
     return text ? text.slice(0, limit) : undefined;
@@ -104,7 +107,7 @@ function compactOutlineText(value: unknown, limit = 220): string | undefined {
   return compactOutlineText(value.text ?? value.content, limit);
 }
 
-function outlineIdentityId(value: unknown): string | undefined {
+export function outlineIdentityId(value: unknown): string | undefined {
   if (!isRecord(value)) return undefined;
   const message = isRecord(value.message) ? value.message : value;
   const candidateId =
@@ -126,7 +129,7 @@ function outlineIdentityId(value: unknown): string | undefined {
     : undefined;
 }
 
-function timestampNumber(value: unknown): number | undefined {
+export function timestampNumber(value: unknown): number | undefined {
   if (typeof value === 'number')
     return Number.isFinite(value) ? value : undefined;
   if (typeof value === 'string') {
@@ -266,33 +269,6 @@ function descriptorFromRawEntry(
   };
 }
 
-function updateRawPrefix(
-  fullHash: Hash,
-  prefixHashes: Map<number, string>,
-  checkpoints: readonly number[],
-  checkpointIndexRef: { value: number },
-  rawLine: Buffer,
-  start: number,
-): void {
-  let consumed = 0;
-  while (checkpointIndexRef.value < checkpoints.length) {
-    const checkpoint = checkpoints[checkpointIndexRef.value];
-    if (checkpoint === undefined || checkpoint >= start + rawLine.length) break;
-    if (checkpoint < start) {
-      checkpointIndexRef.value += 1;
-      continue;
-    }
-    const length = checkpoint - start - consumed;
-    if (length > 0)
-      fullHash.update(rawLine.subarray(consumed, consumed + length));
-    consumed += Math.max(0, length);
-    prefixHashes.set(checkpoint, fullHash.copy().digest('hex'));
-    checkpointIndexRef.value += 1;
-  }
-  if (consumed < rawLine.length) fullHash.update(rawLine.subarray(consumed));
-  prefixHashes.set(start + rawLine.length, fullHash.copy().digest('hex'));
-}
-
 /** Scan one already path-validated JSONL file without publishing catalogue state. */
 export async function scanSessionFile(
   file: string,
@@ -310,7 +286,7 @@ export async function scanSessionFile(
     const checkpoints = [...new Set([0, ...proofOffsets])]
       .filter((offset) => Number.isSafeInteger(offset) && offset >= 0)
       .sort((left, right) => left - right);
-    const checkpointIndexRef = { value: 0 };
+    let checkpointIndex = 0;
     prefixHashes.set(0, fullHash.copy().digest('hex'));
     let header: Record<string, unknown> | undefined;
     let name: string | undefined;
@@ -319,6 +295,27 @@ export async function scanSessionFile(
     let latestEntryId: string | undefined;
     let ordinal = 0;
     let offset = 0;
+    const updateRawPrefix = (rawLine: Buffer, start: number): void => {
+      let consumed = 0;
+      while (checkpointIndex < checkpoints.length) {
+        const checkpoint = checkpoints[checkpointIndex];
+        if (checkpoint === undefined || checkpoint >= start + rawLine.length)
+          break;
+        if (checkpoint < start) {
+          checkpointIndex += 1;
+          continue;
+        }
+        const length = checkpoint - start - consumed;
+        if (length > 0)
+          fullHash.update(rawLine.subarray(consumed, consumed + length));
+        consumed += Math.max(0, length);
+        prefixHashes.set(checkpoint, fullHash.copy().digest('hex'));
+        checkpointIndex += 1;
+      }
+      if (consumed < rawLine.length)
+        fullHash.update(rawLine.subarray(consumed));
+      prefixHashes.set(start + rawLine.length, fullHash.copy().digest('hex'));
+    };
     const processLine = (rawLine: Buffer): void => {
       const start = offset;
       const end = start + rawLine.length;
@@ -339,14 +336,7 @@ export async function scanSessionFile(
         } catch {
           // Malformed and partial lines remain physical bytes but are not
           // logical descriptors.
-          updateRawPrefix(
-            fullHash,
-            prefixHashes,
-            checkpoints,
-            checkpointIndexRef,
-            rawLine,
-            start,
-          );
+          updateRawPrefix(rawLine, start);
           offset = end;
           return;
         }
@@ -388,14 +378,7 @@ export async function scanSessionFile(
         }
         ordinal += 1;
       }
-      updateRawPrefix(
-        fullHash,
-        prefixHashes,
-        checkpoints,
-        checkpointIndexRef,
-        rawLine,
-        start,
-      );
+      updateRawPrefix(rawLine, start);
       offset = end;
     };
     const chunk = Buffer.allocUnsafe(INDEX_SCAN_CHUNK_BYTES);
