@@ -104,6 +104,7 @@ async function inspectPersistedDelegate(
   page: Page,
   { canonicalTranscript = false, compactContext = false } = {},
 ) {
+  if (compactContext) await page.setViewportSize({ width: 393, height: 851 });
   const selectedRun = canonicalTranscript
     ? { ...historicalRun, sessionId: 'historical-session' }
     : historicalRun;
@@ -236,9 +237,14 @@ async function inspectPersistedDelegate(
   );
 
   await page.goto('/sessions/historical-session');
-  const delegateLauncher = page.getByRole('button', {
-    name: /Delegates.*0 running, 0 queued, 0 need attention, 1 done.*All delegates complete/,
-  });
+  if (compactContext) {
+    const runStatus = page.locator('.run-status-disclosure-trigger');
+    await expect(runStatus).toBeVisible();
+    await runStatus.click();
+  }
+  const delegateLauncher = page.locator(
+    'article.extension-surface[aria-label="Delegates"] button.surface-launcher',
+  );
   await expect(delegateLauncher).toBeVisible();
   await delegateLauncher.click();
   await page.getByRole('button', { name: /Offline historical worker/ }).click();
@@ -337,7 +343,8 @@ async function inspectPersistedDelegate(
         bodyTop: Math.round(body.getBoundingClientRect().top),
       };
     });
-    expect(stickyGeometry.stickyTop - stickyGeometry.bodyTop).toBe(14);
+    // The setup header is flush with the scrolling viewport, not its padding.
+    expect(stickyGeometry.stickyTop - stickyGeometry.bodyTop).toBe(0);
     const jump = page.getByRole('button', {
       name: 'Jump to latest delegate transcript activity',
     });

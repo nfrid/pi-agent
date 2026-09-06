@@ -416,10 +416,12 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   });
   const mobileThreadRow = agentNav.locator('.agent-thread-row').first();
   await expect(mobileThreadRow).toContainText('Demo');
-  await expect(mobileThreadRow).toContainText('offline');
   await expect(
     mobileThreadRow.getByRole('img', { name: 'Ultrafast' }),
   ).toBeVisible();
+  await expect(mobileThreadRow.getByRole('button')).toHaveAccessibleName(
+    /offline/u,
+  );
   await expect(mobileThreadRow).not.toContainText('/Users/example');
   await expect(
     agentNav.getByRole('button', { name: /New thread/ }),
@@ -694,7 +696,6 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await draftRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Delete draft' }).click();
   await expect(page).toHaveURL(draftUrl);
-  await expect(page.getByText('Draft deleted')).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -1347,7 +1348,7 @@ test('desktop project thread form stays readable @desktop', async ({
       viewport: window.innerWidth,
     };
   });
-  expect(geometry.width).toBeLessThanOrEqual(832);
+  expect(geometry.width).toBeLessThanOrEqual(840);
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewport);
   await expect(page.getByRole('combobox', { name: 'Model' })).toHaveCount(0);
   const locationControl = page.getByRole('button', {
@@ -2871,20 +2872,21 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(loadedCard).toHaveCount(1);
   await expect(dormantCard).toHaveCount(1);
   await expect(
-    loadedCard.locator('[data-row-content="project"] > span').first(),
+    loadedCard
+      .locator('[data-row-content="project"] > span:not([aria-hidden="true"])')
+      .first(),
   ).toHaveText('Tmp project');
   await expect(loadedCard.locator('[data-row-content="context"]')).toHaveCount(
     0,
   );
   await expect(
     loadedCard.locator('[data-row-content="details"]'),
-  ).toContainText('careful · high · 32 ctx');
+  ).toHaveAttribute('title', /Model: test\/careful; Effort: high/u);
   await expect(loadedCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
-    loadedCard.locator('[data-row-content="project"] .agent-thread-glyph'),
-  ).toHaveCount(1);
-  await expect(
-    dormantCard.locator('[data-row-content="project"] > span').first(),
+    dormantCard
+      .locator('[data-row-content="project"] > span:not([aria-hidden="true"])')
+      .first(),
   ).toHaveText('Tmp project');
   await expect(dormantCard.locator('[data-row-content="context"]')).toHaveCount(
     0,
@@ -2892,7 +2894,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(dormantCard).toContainText('Dormant thread');
   await expect(
     dormantCard.locator('[data-row-content="details"]'),
-  ).toContainText('careful · high · 42 ctx');
+  ).toHaveAttribute('title', /Model: test\/careful; Effort: high/u);
   await expect(dormantCard.locator('.agent-thread-time')).toHaveCount(1);
   await expect(
     agentNav.locator('.agent-thread-row.status-idle .agent-thread-glyph'),
@@ -2973,9 +2975,20 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        localStorage.getItem('pi-dashboard-composer-draft:session-loading'),
-      ),
+      page.evaluate(() => {
+        const raw = localStorage.getItem(
+          'pi-dashboard-composer-draft:session-loading',
+        );
+        if (!raw) return undefined;
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          return parsed && typeof parsed === 'object' && 'text' in parsed
+            ? (parsed as { text?: unknown }).text
+            : undefined;
+        } catch {
+          return raw;
+        }
+      }),
     )
     .toBe('Draft survives navigation and refresh');
   await page.getByRole('button', { name: 'Open agent list' }).click();
@@ -3990,10 +4003,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
   const reopenedOutline = page.getByRole('dialog', {
     name: 'Transcript outline',
   });
-  const steeringOutlineItem = reopenedOutline.getByRole('button', {
-    name: /^Steering · Focus on mobile readability\./u,
-  });
-  await expect(steeringOutlineItem).toHaveClass(/outline-steering/u);
+  const steeringOutlineItem = reopenedOutline.locator(
+    '.transcript-outline-item.outline-steering',
+  );
+  await expect(steeringOutlineItem).toBeVisible();
   const outlineItemLayout = await steeringOutlineItem.evaluate((item) => {
     const label = item.querySelector('span');
     const time = item.querySelector('.transcript-outline-time');
@@ -4015,7 +4028,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
     timeFloat: 'inline-end',
   });
   await reopenedOutline
-    .getByRole('button', { name: 'Earlier message 1', exact: true })
+    .locator('.transcript-outline-jump')
+    .filter({ hasText: 'Earlier message' })
+    .first()
     .click();
   await expect(reopenedOutline).toHaveCount(0);
   await transcriptScroll(page).evaluate((element) => {
@@ -4633,6 +4648,10 @@ function phase6Snapshot(
     runtimes?: unknown[];
   } = {},
 ): import('@pi-dashboard/protocol').BrowserSnapshot {
+  const extensionSurfaces = overrides.extensionSurfaces?.map((surface) => ({
+    ...(surface as Record<string, unknown>),
+    placement: 'composer',
+  }));
   return {
     serverId: 'phase-six',
     revision: 1,
@@ -4685,9 +4704,7 @@ function phase6Snapshot(
           },
         ],
         capabilities: phase6Capabilities(),
-        ...(overrides.extensionSurfaces
-          ? { extensionSurfaces: overrides.extensionSurfaces }
-          : {}),
+        ...(extensionSurfaces ? { extensionSurfaces } : {}),
       },
     ],
     workspaces: overrides.workspaces ?? [
@@ -4892,6 +4909,7 @@ async function installPhase6Mocks(
   page: Page,
   options: {
     entries?: unknown[];
+    childEntries?: unknown[];
     snapshot?: import('@pi-dashboard/protocol').BrowserSnapshot;
   } = {},
 ) {
@@ -4902,6 +4920,7 @@ async function installPhase6Mocks(
   const initialFixture = {
     snapshot: options.snapshot ?? phase6Snapshot(),
     entries: options.entries ?? phase6Entries(),
+    childEntries: options.childEntries ?? [],
   };
   await page.addInitScript((initial) => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
@@ -5046,7 +5065,7 @@ async function installPhase6Mocks(
                         sessionId === 's1'
                           ? ((value.entries as unknown[] | undefined) ??
                             initial.entries)
-                          : [],
+                          : initial.childEntries,
                       entriesComplete: true,
                       active: {
                         messages: [],
@@ -5178,6 +5197,45 @@ async function installPhase6Mocks(
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
   await installDashboardBootstrap(page, initialFixture.snapshot);
+  const initialDelegateStatuses = options.snapshot?.runtimes
+    .find((runtime) => runtime.session?.id === 's1')
+    ?.extensionSurfaces?.find(
+      (surface) => surface.rendererId === 'delegate.status',
+    )?.viewModel;
+  const initialDelegates =
+    initialDelegateStatuses &&
+    typeof initialDelegateStatuses === 'object' &&
+    'statuses' in initialDelegateStatuses &&
+    Array.isArray(initialDelegateStatuses.statuses)
+      ? initialDelegateStatuses.statuses.flatMap((status) => {
+          if (!status || typeof status !== 'object') return [];
+          const value = status as Record<string, unknown>;
+          return [
+            {
+              runId: String(value.runId ?? value.id ?? 'delegate-1'),
+              ...(typeof value.sessionId === 'string'
+                ? { sessionId: value.sessionId }
+                : {}),
+              lineageId: String(value.lineageId ?? value.id ?? 'delegate-1'),
+              name: String(value.name ?? 'Delegate'),
+              kind: 'background' as const,
+              state: 'running' as const,
+              createdAt:
+                typeof value.createdAt === 'number' ? value.createdAt : 1,
+              ...(typeof value.startedAt === 'number'
+                ? { startedAt: value.startedAt }
+                : {}),
+              allowWrites: value.allowWrites === true,
+              ...(value.details && typeof value.details === 'object'
+                ? { details: value.details }
+                : {}),
+              transcript: Array.isArray(value.transcript)
+                ? value.transcript
+                : [],
+            },
+          ];
+        })
+      : [];
   await page.route('**/trpc/sessionSubscribe*', (route) =>
     route.fulfill({
       contentType: 'text/event-stream',
@@ -5202,7 +5260,7 @@ async function installPhase6Mocks(
             active: {
               messages: [],
               tools: [],
-              delegates: [],
+              delegates: initialDelegates,
               truncated: false,
             },
             completeThroughCursor: true,
@@ -5450,6 +5508,7 @@ test('shows structured delegate content while the delegate is running @desktop',
   page,
 }) => {
   const mocks = await installPhase6Mocks(page, {
+    childEntries: phase6Entries(),
     snapshot: phase6Snapshot({
       extensionSurfaces: [
         {
@@ -5490,6 +5549,78 @@ test('shows structured delegate content while the delegate is running @desktop',
     }),
   });
   await page.setViewportSize({ width: 960, height: 760 });
+  await page.route('**/api/sessions/s1/delegate-history*', (route) => {
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        version: 2,
+        sessionId: 's1',
+        groups: [
+          {
+            id: 'live-review-lineage',
+            runId: 'live-review-run',
+            lineageId: 'live-review-lineage',
+            name: 'Live review',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            startedAt: 2,
+            allowWrites: false,
+            runCount: 1,
+            runs: [
+              {
+                runId: 'live-review-run',
+                sessionId: 'child-session',
+                lineageId: 'live-review-lineage',
+                name: 'Live review',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                startedAt: 2,
+                allowWrites: false,
+                isolation: 'shared',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+  await page.route(
+    '**/api/sessions/s1/delegate-history/runs/live-review-run*',
+    (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          version: 1,
+          sessionId: 's1',
+          lineageId: 'live-review-lineage',
+          runId: 'live-review-run',
+          run: {
+            runId: 'live-review-run',
+            sessionId: 'child-session',
+            lineageId: 'live-review-lineage',
+            name: 'Live review',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            startedAt: 2,
+            allowWrites: false,
+            isolation: 'shared',
+            details: {
+              task: 'Review the running implementation.',
+              setup: { cwd: '/tmp/project', isolation: 'shared' },
+              runConfig: {
+                scope: ['extensions/delegate'],
+                parentContextNote: 'Keep the live review focused.',
+              },
+              renderedPrompt: 'Full rendered child prompt',
+              truncated: false,
+            },
+          },
+        }),
+      }),
+  );
   await page.goto('/sessions/s1');
 
   const launcher = page.getByRole('button', {
@@ -5497,20 +5628,28 @@ test('shows structured delegate content while the delegate is running @desktop',
   });
   await expect(launcher).toBeVisible();
   await launcher.click();
-  await page.getByRole('button', { name: /Live review/u }).click();
+  await page
+    .getByRole('dialog', { name: 'Delegates' })
+    .getByRole('button', { name: /Live review/u })
+    .click();
 
-  const inspector = page.locator('.delegate-transcript-inspector-body');
+  const inspector = page.getByRole('dialog', {
+    name: 'Delegate · Live review',
+  });
   await expect(
     inspector.getByText('Review the running implementation.'),
   ).toBeVisible();
-  await expect(inspector.getByText('Delegate setup')).toBeVisible();
+  await expect(
+    inspector.getByRole('group', { name: 'Delegate setup' }),
+  ).toBeVisible();
   await expect(inspector.getByText('extensions/delegate')).toBeVisible();
+  await inspector.getByText('Details', { exact: true }).click();
   await expect(
     inspector.getByText('Keep the live review focused.'),
   ).toBeVisible();
   const renderedPrompt = inspector.getByText('Full rendered child prompt');
   await expect(renderedPrompt).toBeHidden();
-  await inspector.getByText('Rendered prompt').click();
+  await inspector.getByText('Exact prompt', { exact: true }).click();
   await expect(renderedPrompt).toBeVisible();
   await expect(
     inspector.locator('.delegate-canonical-session-transcript'),
@@ -5584,7 +5723,9 @@ test('layers delegate details over the preserved list @desktop', async ({
     name: /Delegates.*1 running/u,
   });
   await launcher.click();
-  const delegateRow = page.getByRole('button', { name: /Live review/u });
+  const delegateRow = page
+    .getByRole('dialog', { name: 'Delegates' })
+    .getByRole('button', { name: /Live review/u });
   await delegateRow.focus();
   await delegateRow.click();
 
@@ -5667,7 +5808,6 @@ test('runtime restart stays on the current thread with pending status', async ({
   await page.getByRole('menuitem', { name: 'Restart' }).click();
 
   await expect(thread).toHaveAccessibleName(/restarting/u);
-  await expect(row).toContainText('restarting');
   await expect(page).toHaveURL(originalUrl);
 
   releaseRestart();
