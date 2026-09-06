@@ -44,6 +44,27 @@ describe('dashboard usage broker', () => {
     expect(read).toHaveBeenCalledWith(true, signal);
   });
 
+  it('converts legacy seconds resets from captured broker snapshots', async () => {
+    const capturedAt = Date.now();
+    getScopedServices(scope).dashboardUsage = {
+      read: async () => ({
+        usage: {
+          capturedAt,
+          snapshots: [
+            { primary: { usedPercent: 10, resetsAt: 1_800_000_000 } },
+          ],
+        },
+      }),
+    };
+
+    await expect(
+      queryUsage(context(), new AbortController().signal),
+    ).resolves.toMatchObject({
+      capturedAt,
+      snapshots: [{ primary: { resetsAt: 1_800_000_000_000 } }],
+    });
+  });
+
   it('does not make a second provider request after a broker-side error', async () => {
     getScopedServices(scope).dashboardUsage = {
       read: async () => ({ error: 'provider unavailable' }),

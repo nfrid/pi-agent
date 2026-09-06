@@ -29,6 +29,19 @@ export type UsageLimitHistoryResponse = Omit<UsageHistoryResponse, 'spend'>;
 
 type UsageRow = Record<string, unknown>;
 
+function historyWindowLabel(
+  minutes: number | undefined,
+  kind: UsageHistorySample['windowKind'],
+): string {
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0)
+    return kind;
+  if (minutes === 300) return '5h';
+  if (minutes === 10_080) return 'wk';
+  if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
+}
+
 /** Projects canonical usage into bounded, durable per-window samples. */
 export function normalizeUsageHistorySamples(
   usage: UsageReport,
@@ -44,7 +57,9 @@ export function normalizeUsageHistorySamples(
           limitId: snapshot.limitId,
           limitName: snapshot.limitName ?? snapshot.limitId,
           windowKind: kind,
-          windowLabel: window.windowLabel ?? kind,
+          windowLabel:
+            window.windowLabel ??
+            historyWindowLabel(window.windowMinutes, kind),
           ...(window.windowMinutes === undefined
             ? {}
             : { windowMinutes: window.windowMinutes }),

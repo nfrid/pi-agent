@@ -70,7 +70,15 @@ function windowLabel(
   window: NonNullable<UsageSnapshot['primary']>,
   fallback: string,
 ): string {
-  return window.windowLabel ?? fallback;
+  if (window.windowLabel) return window.windowLabel;
+  const minutes = window.windowMinutes;
+  if (!minutes || !Number.isFinite(minutes) || minutes <= 0) return fallback;
+  if (minutes === 300) return '5h';
+  if (minutes === 10_080) return 'wk';
+  if (minutes % 10_080 === 0) return `${minutes / 10_080}w`;
+  if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
 }
 
 function formatUsagePart(

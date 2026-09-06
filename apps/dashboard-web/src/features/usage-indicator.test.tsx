@@ -37,6 +37,7 @@ describe('usage parsing and formatting', () => {
 
   it('normalizes both windows and seconds or milliseconds reset timestamps', () => {
     const [limit] = parseUsage({
+      capturedAt: Date.now(),
       snapshots: [
         {
           limitId: 'codex',
@@ -67,6 +68,13 @@ describe('usage parsing and formatting', () => {
     });
     expect(invalid?.primary?.resetsAt).toBeUndefined();
     expect(invalid?.secondary?.resetsAt).toBeUndefined();
+  });
+
+  it('keeps dashboard day labels for week-multiple windows', () => {
+    const [limit] = parseUsage({
+      snapshots: [{ primary: { usedPercent: 9, windowMinutes: 20_160 } }],
+    });
+    expect(limit?.primary?.label).toBe('14d');
   });
 
   it('uses restrained boundary colors and chooses the urgent window', () => {

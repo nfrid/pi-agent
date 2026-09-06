@@ -28,12 +28,30 @@ export type UsageLimit = {
   secondary?: UsageWindow;
 };
 
+function formatWindowLabel(
+  minutes: number | undefined,
+  kind: UsageWindow['kind'],
+): string {
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0)
+    return kind;
+  if (minutes === 300) return '5h';
+  if (minutes === 10_080) return 'wk';
+  if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
+}
+
 function adaptWindow(
   window: NormalizedUsageWindow | undefined,
   kind: UsageWindow['kind'],
 ): UsageWindow | undefined {
   return window
-    ? { ...window, kind, label: window.windowLabel ?? kind }
+    ? {
+        ...window,
+        kind,
+        label:
+          window.windowLabel ?? formatWindowLabel(window.windowMinutes, kind),
+      }
     : undefined;
 }
 

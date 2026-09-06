@@ -53,7 +53,6 @@ export const UsageReportSchema = Type.Object(
 export type UsageReport = Static<typeof UsageReportSchema>;
 
 type RecordValue = Record<string, unknown>;
-type WindowKind = 'primary' | 'secondary';
 
 function record(value: unknown): RecordValue | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -90,7 +89,10 @@ function capturedTimestamp(value: unknown): number | undefined {
   return result === undefined ? undefined : boundedUsageTimestamp(result);
 }
 
-function windowMinutes(value: RecordValue): number | undefined {
+function windowMinutes(
+  value: RecordValue,
+  roundBackendSeconds: boolean,
+): number | undefined {
   const minutes = numberFrom(value, [
     'windowMinutes',
     'windowDurationMins',
@@ -105,13 +107,14 @@ function windowMinutes(value: RecordValue): number | undefined {
     'limit_window_seconds',
   ]);
   return seconds !== undefined && seconds > 0
-    ? Math.ceil(seconds / 60)
+    ? roundBackendSeconds
+      ? Math.ceil(seconds / 60)
+      : seconds / 60
     : undefined;
 }
 
 function windowLabel(
   value: RecordValue,
-  kind: WindowKind,
   minutes: number | undefined,
 ): string | undefined {
   const explicit = text(
@@ -125,20 +128,15 @@ function windowLabel(
   }
   if (minutes === 300) return '5h';
   if (minutes === 10_080) return 'wk';
-  if (minutes !== undefined) {
-    if (minutes % 10_080 === 0) return `${minutes / 10_080}w`;
+  if (minutes !== undefined && minutes % 10_080 !== 0) {
     if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
     if (minutes % 60 === 0) return `${minutes / 60}h`;
     return `${minutes}m`;
   }
-  return kind;
+  return undefined;
 }
 
-function resetAt(
-  value: RecordValue,
-  capturedAt: number,
-  canonical: boolean,
-): number | undefined {
+function resetAt(value: RecordValue, capturedAt: number): number | undefined {
   for (const key of [
     'resetsAt',
     'resetAt',
@@ -147,11 +145,7 @@ function resetAt(
     'resetTime',
     'reset_time',
   ]) {
-    const numeric = number(value[key]);
-    const result =
-      canonical && key === 'resetsAt' && numeric !== undefined
-        ? boundedUsageTimestamp(numeric)
-        : parseUsageTimestamp(value[key]);
+    const result = parseUsageTimestamp(value[key]);
     if (result !== undefined) return result;
   }
   const after = boundedUsageResetAfterSeconds(
@@ -169,17 +163,16 @@ function resetAt(
 
 function normalizeWindow(
   value: unknown,
-  kind: WindowKind,
   capturedAt: number,
-  canonical: boolean,
+  roundBackendSeconds: boolean,
 ): UsageWindow | undefined {
   const source = record(value);
   if (!source) return undefined;
   const usedPercent = numberFrom(source, ['usedPercent', 'used_percent']);
   if (usedPercent === undefined) return undefined;
-  const minutes = windowMinutes(source);
-  const label = windowLabel(source, kind, minutes);
-  const resetsAt = resetAt(source, capturedAt, canonical);
+  const minutes = windowMinutes(source, roundBackendSeconds);
+  const label = windowLabel(source, minutes);
+  const resetsAt = resetAt(source, capturedAt);
   return {
     usedPercent: Math.max(0, Math.min(100, usedPercent)),
     ...(minutes === undefined ? {} : { windowMinutes: minutes }),
@@ -203,21 +196,19 @@ function normalizeSnapshot(
   value: unknown,
   fallbackId: string,
   capturedAt: number,
-  canonical: boolean,
+  roundBackendSeconds: boolean,
 ): UsageSnapshot | undefined {
   const source = record(value);
   if (!source) return undefined;
   const primary = normalizeWindow(
     source.primary ?? source.primaryWindow ?? source.primary_window,
-    'primary',
     capturedAt,
-    canonical,
+    roundBackendSeconds,
   );
   const secondary = normalizeWindow(
     source.secondary ?? source.secondaryWindow ?? source.secondary_window,
-    'secondary',
     capturedAt,
-    canonical,
+    roundBackendSeconds,
   );
   if (!primary && !secondary) return undefined;
   const limitId = boundedText(
@@ -250,7 +241,9 @@ function mergeSnapshot(
 
 /**
  * Converts supported provider responses into one bounded dashboard usage
- * contract. Window reset timestamps are always Unix milliseconds.
+ * contract. Window reset timestamps are always Unix milliseconds; numeric
+ * timestamps use the existing seconds/milliseconds magnitude heuristic so
+ * legacy reports with a capturedAt field remain supported.
  */
 export function normalizeUsage(
   value: unknown,
@@ -269,13 +262,13 @@ export function normalizeUsage(
     value: unknown,
     fallbackId: string,
     fallbackName?: string,
-    canonical = false,
+    roundBackendSeconds = false,
   ) => {
     const normalized = normalizeSnapshot(
       value,
       fallbackId,
       capturedAt,
-      canonical,
+      roundBackendSeconds,
     );
     if (!normalized) return;
     const snapshot =
@@ -294,14 +287,11 @@ export function normalizeUsage(
       ? nested.snapshots
       : undefined;
   if (snapshotValues) {
-    const canonical =
-      capturedTimestamp(root?.capturedAt) !== undefined ||
-      capturedTimestamp(nested?.capturedAt) !== undefined;
     for (const [index, value] of snapshotValues.entries())
-      add(value, String(index), undefined, canonical);
+      add(value, String(index));
   } else {
     const backend = root?.rate_limit;
-    if (backend !== undefined) add(backend, 'codex');
+    if (backend !== undefined) add(backend, 'codex', undefined, true);
     const additional = root?.additional_rate_limits;
     if (Array.isArray(additional)) {
       for (const value of additional) {
@@ -311,7 +301,12 @@ export function normalizeUsage(
           text(item.metered_feature, MAX_USAGE_LIMIT_ID) ??
           text(item.limit_name, MAX_USAGE_LIMIT_ID) ??
           'codex';
-        add(item.rate_limit, id, text(item.limit_name, MAX_USAGE_LIMIT_NAME));
+        add(
+          item.rate_limit,
+          id,
+          text(item.limit_name, MAX_USAGE_LIMIT_NAME),
+          true,
+        );
       }
     }
 
@@ -329,7 +324,12 @@ export function normalizeUsage(
     }
   }
 
-  if (!snapshotValues && snapshots.size === 0)
+  if (
+    (!snapshotValues && snapshots.size === 0) ||
+    (snapshotValues !== undefined &&
+      snapshotValues.length > 0 &&
+      snapshots.size === 0)
+  )
     throw new Error('Usage response returned no rate-limit windows.');
   return {
     capturedAt,

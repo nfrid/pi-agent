@@ -136,15 +136,47 @@ describe('usage contract normalization', () => {
     });
   });
 
-  it('is idempotent for normalized values and rejects unknown payloads', () => {
+  it('keeps legacy captured-at snapshots in seconds and preserves fractional durations', () => {
+    const report = normalizeUsage({
+      capturedAt: 1_800_000_000_000,
+      snapshots: [
+        {
+          primary: {
+            usedPercent: 10,
+            windowSeconds: 91,
+            resetsAt: 1_800_000_000,
+          },
+          secondary: { usedPercent: 20 },
+        },
+      ],
+    });
+    expect(report.snapshots[0]).toEqual({
+      limitId: '0',
+      primary: {
+        usedPercent: 10,
+        windowMinutes: 91 / 60,
+        windowLabel: `${91 / 60}m`,
+        resetsAt: 1_800_000_000_000,
+      },
+      secondary: { usedPercent: 20 },
+    });
+  });
+
+  it('is idempotent for normalized values and rejects invalid snapshots', () => {
     expect(
       normalizeUsage({ capturedAt: 123, snapshots: [], provider: 'codex' }),
     ).toEqual({ capturedAt: 123, snapshots: [], provider: 'codex' });
     const report = normalizeUsage(
-      { snapshots: [{ primary: { usedPercent: 10, resetAfterSeconds: 60 } }] },
+      {
+        capturedAt: 1_800_000_000_000,
+        snapshots: [{ primary: { usedPercent: 10, resetAfterSeconds: 60 } }],
+      },
       1_000,
     );
     expect(normalizeUsage(report)).toEqual(report);
+    expect(() => normalizeUsage({ snapshots: [{ limitId: 'codex' }] })).toThrow(
+      'no rate-limit windows',
+    );
     expect(() => normalizeUsage({ rateLimits: { primary: {} } })).toThrow(
       'no rate-limit windows',
     );
