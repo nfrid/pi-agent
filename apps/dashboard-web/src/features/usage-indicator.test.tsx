@@ -67,8 +67,6 @@ describe('usage parsing and formatting', () => {
     });
     expect(invalid?.primary?.resetsAt).toBeUndefined();
     expect(invalid?.secondary?.resetsAt).toBeUndefined();
-    expect(invalid?.primary?.resetAfterSeconds).toBeUndefined();
-    expect(invalid?.secondary?.resetAfterSeconds).toBeUndefined();
   });
 
   it('uses restrained boundary colors and chooses the urgent window', () => {
@@ -94,10 +92,7 @@ describe('usage parsing and formatting', () => {
     expect(formatResetCountdown(Date.now() + 61 * 60_000, Date.now())).toBe(
       'in 1h 1m',
     );
-    expect(formatResetCountdown(undefined, Date.now(), -1)).toBeUndefined();
-    expect(
-      formatResetCountdown(undefined, Date.now(), 40_000_000),
-    ).toBeUndefined();
+    expect(formatResetCountdown(undefined, Date.now())).toBeUndefined();
   });
 
   it('renders both windows and their reset countdowns', () => {

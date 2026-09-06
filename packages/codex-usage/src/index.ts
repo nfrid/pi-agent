@@ -1,64 +1,16 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { normalizeUsage, type UsageReport } from '@pi-dashboard/protocol';
 
 const TIMEOUT_MS = 15_000;
-export interface UsageReport {
-  capturedAt: number;
-  snapshots: unknown[];
-}
+
+export type { UsageReport } from '@pi-dashboard/protocol';
 
 function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
     : new Error('Codex app-server query aborted.');
 }
-export function normalizeUsageResponse(value: unknown): UsageReport {
-  const root =
-    value && typeof value === 'object'
-      ? (value as Record<string, unknown>)
-      : {};
-  const snapshots = new Map<string, Record<string, unknown>>();
-  const add = (raw: unknown, fallbackId: string) => {
-    if (!raw || typeof raw !== 'object') return;
-    const item = raw as Record<string, unknown>;
-    const primary = item.primary ?? item.primary_window;
-    const secondary = item.secondary ?? item.secondary_window;
-    if (!primary && !secondary) return;
-    const limitId =
-      typeof item.limitId === 'string' ? item.limitId : fallbackId;
-    snapshots.set(limitId, {
-      ...snapshots.get(limitId),
-      limitId,
-      ...(typeof item.limitName === 'string'
-        ? { limitName: item.limitName }
-        : {}),
-      ...(primary ? { primary } : {}),
-      ...(secondary ? { secondary } : {}),
-    });
-  };
-  const limits = root.rateLimits ?? root.rate_limits;
-  if (limits && typeof limits === 'object') {
-    const record = limits as Record<string, unknown>;
-    if (
-      'primary' in record ||
-      'secondary' in record ||
-      'primary_window' in record ||
-      'secondary_window' in record
-    )
-      add(record, 'codex');
-    else for (const [limitId, raw] of Object.entries(record)) add(raw, limitId);
-  }
-  const byId = root.rateLimitsByLimitId;
-  if (byId && typeof byId === 'object')
-    for (const [limitId, raw] of Object.entries(
-      byId as Record<string, unknown>,
-    ))
-      add(raw, limitId);
-  if (!snapshots.size)
-    throw new Error('Codex app-server returned no rate-limit windows.');
-  return { capturedAt: Date.now(), snapshots: [...snapshots.values()] };
-}
-
 export async function queryViaCodexAppServer(
   signal: AbortSignal,
 ): Promise<UsageReport> {
@@ -143,7 +95,7 @@ export async function queryViaCodexAppServer(
       },
     });
     child.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`);
-    return normalizeUsageResponse(await request('account/rateLimits/read'));
+    return normalizeUsage(await request('account/rateLimits/read'));
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', onAbort);

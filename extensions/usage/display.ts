@@ -55,15 +55,8 @@ function usageToColor(percent: number): ThemeColor {
   return 'dim';
 }
 
-function resetTimeToMs(resetsAt: number): number {
-  return resetsAt > 1_000_000_000_000 ? resetsAt : resetsAt * 1000;
-}
-
 function formatDurationLeft(resetsAt: number, now = Date.now()): string {
-  const totalMinutes = Math.max(
-    0,
-    Math.ceil((resetTimeToMs(resetsAt) - now) / 60_000),
-  );
+  const totalMinutes = Math.max(0, Math.ceil((resetsAt - now) / 60_000));
   const days = Math.floor(totalMinutes / 1440);
   const hours = Math.floor((totalMinutes % 1440) / 60);
   const minutes = totalMinutes % 60;
@@ -77,14 +70,7 @@ function windowLabel(
   window: NonNullable<UsageSnapshot['primary']>,
   fallback: string,
 ): string {
-  const minutes = window.windowMinutes;
-  if (!minutes || !Number.isFinite(minutes) || minutes <= 0) return fallback;
-  if (minutes === 300) return '5h';
-  if (minutes === 10_080) return 'wk';
-  if (minutes % 10_080 === 0) return `${minutes / 10_080}w`;
-  if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  return `${minutes}m`;
+  return window.windowLabel ?? fallback;
 }
 
 function formatUsagePart(

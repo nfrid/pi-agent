@@ -25,6 +25,10 @@
     "./dashboard-api": {
       "types": "./src/dashboard-api.ts",
       "default": "./dist/dashboard-api.js"
+    },
+    "./usage": {
+      "types": "./src/usage.ts",
+      "default": "./dist/usage.js"
     }
   },
   "scripts": {

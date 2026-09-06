@@ -19,14 +19,27 @@ afterEach(() => releaseScopedServices(scope));
 describe('dashboard usage broker', () => {
   it('reads normalized usage through the scoped dashboard bridge', async () => {
     const read = vi.fn(async () => ({
-      usage: { capturedAt: 123, snapshots: [{ limitId: 'codex' }] },
+      usage: {
+        capturedAt: 123,
+        snapshots: [
+          {
+            limitId: 'codex',
+            primary: { usedPercent: 25, windowLabel: 'primary' },
+          },
+        ],
+      },
     }));
     getScopedServices(scope).dashboardUsage = { read };
     const signal = new AbortController().signal;
 
     await expect(queryUsage(context(), signal, true)).resolves.toEqual({
       capturedAt: 123,
-      snapshots: [{ limitId: 'codex' }],
+      snapshots: [
+        {
+          limitId: 'codex',
+          primary: { usedPercent: 25, windowLabel: 'primary' },
+        },
+      ],
     });
     expect(read).toHaveBeenCalledWith(true, signal);
   });

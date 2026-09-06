@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { MAX_USAGE_TIMESTAMP } from '@pi-dashboard/protocol';
+import { MAX_USAGE_TIMESTAMP, normalizeUsage } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runMigrations } from './migrations.js';
 import {
@@ -40,27 +40,30 @@ function sample(
 }
 
 describe('usage history persistence', () => {
-  it('normalizes provider aliases into bounded per-window samples', () => {
+  it('projects canonical windows into bounded per-window samples', () => {
     expect(
       normalizeUsageHistorySamples(
-        {
-          snapshots: [
-            {
-              limitId: 'codex',
-              limitName: 'Codex',
-              primary_window: {
-                used_percent: 35,
-                window_duration_mins: 300,
-                reset_after_seconds: 60,
+        normalizeUsage(
+          {
+            snapshots: [
+              {
+                limitId: 'codex',
+                limitName: 'Codex',
+                primary_window: {
+                  used_percent: 35,
+                  window_duration_mins: 300,
+                  reset_after_seconds: 60,
+                },
+                secondary: {
+                  usedPercent: 150,
+                  windowMinutes: 10_080,
+                  resetsAt: 2_000_000_000,
+                },
               },
-              secondary: {
-                usedPercent: 150,
-                windowMinutes: 10_080,
-                resetsAt: 2_000_000_000,
-              },
-            },
-          ],
-        },
+            ],
+          },
+          1_000,
+        ),
         1_000,
       ),
     ).toEqual([
@@ -89,22 +92,25 @@ describe('usage history persistence', () => {
 
   it('drops provider reset timestamps outside the JavaScript date range', () => {
     const samples = normalizeUsageHistorySamples(
-      {
-        snapshots: [
-          {
-            primary: {
-              usedPercent: 10,
-              resetsAt: -1,
-              resetAfterSeconds: -1,
+      normalizeUsage(
+        {
+          snapshots: [
+            {
+              primary: {
+                usedPercent: 10,
+                resetsAt: -1,
+                resetAfterSeconds: -1,
+              },
+              secondary: {
+                usedPercent: 20,
+                resetsAt: MAX_USAGE_TIMESTAMP + 1,
+                resetAfterSeconds: 40_000_000,
+              },
             },
-            secondary: {
-              usedPercent: 20,
-              resetsAt: MAX_USAGE_TIMESTAMP + 1,
-              resetAfterSeconds: 40_000_000,
-            },
-          },
-        ],
-      },
+          ],
+        },
+        1_000,
+      ),
       1_000,
     );
     expect(samples).toHaveLength(2);

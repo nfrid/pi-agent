@@ -44,7 +44,11 @@ describe('usage display', () => {
       snapshots: [
         {
           limitId: 'codex',
-          primary: { usedPercent: 9, windowMinutes: 45 },
+          primary: {
+            usedPercent: 9,
+            windowMinutes: 45,
+            windowLabel: '45m',
+          },
         },
       ],
     };

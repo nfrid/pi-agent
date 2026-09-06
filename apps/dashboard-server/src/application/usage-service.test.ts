@@ -19,10 +19,16 @@ describe('UsageService', () => {
     const first = service.get();
     const second = service.get();
     expect(provider.get).toHaveBeenCalledTimes(1);
-    resolve?.({ remaining: 7 });
-    await expect(first).resolves.toEqual({ usage: { remaining: 7 } });
-    await expect(second).resolves.toEqual({ usage: { remaining: 7 } });
-    await expect(service.get()).resolves.toEqual({ usage: { remaining: 7 } });
+    resolve?.({ capturedAt: 1, snapshots: [] });
+    await expect(first).resolves.toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
+    });
+    await expect(second).resolves.toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
+    });
+    await expect(service.get()).resolves.toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
+    });
     expect(provider.get).toHaveBeenCalledTimes(1);
     expect(changed).toHaveBeenCalledTimes(1);
   });
@@ -31,14 +37,16 @@ describe('UsageService', () => {
     const provider = {
       get: vi
         .fn()
-        .mockResolvedValueOnce({ remaining: 7 })
-        .mockResolvedValueOnce({ remaining: 6 }),
+        .mockResolvedValueOnce({ capturedAt: 1, snapshots: [] })
+        .mockResolvedValueOnce({ capturedAt: 2, snapshots: [] }),
     };
     const service = new UsageService(provider);
 
-    await expect(service.get()).resolves.toEqual({ usage: { remaining: 7 } });
+    await expect(service.get()).resolves.toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
+    });
     await expect(service.get(true)).resolves.toEqual({
-      usage: { remaining: 6 },
+      usage: { capturedAt: 2, snapshots: [] },
     });
     expect(provider.get).toHaveBeenCalledTimes(2);
   });
@@ -47,7 +55,13 @@ describe('UsageService', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
     let active = false;
-    const provider = { get: vi.fn(async () => ({ active })) };
+    const provider = {
+      get: vi.fn(async () => ({
+        capturedAt: Date.now(),
+        provider: active ? 'active' : 'idle',
+        snapshots: [],
+      })),
+    };
     const service = new UsageService(provider, undefined, {
       freshMs: () => (active ? 60_000 : 20 * 60_000),
       pollMs: 60_000,
@@ -178,11 +192,13 @@ describe('UsageService', () => {
     const provider = {
       get: vi
         .fn()
-        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce({ capturedAt: 1, snapshots: [] })
         .mockResolvedValueOnce('x'.repeat(300_000)),
     };
     const service = new UsageService(provider);
-    await expect(service.get()).resolves.toEqual({ usage: { ok: true } });
+    await expect(service.get()).resolves.toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
+    });
     // The cache is deliberately short-circuited in this test by changing the
     // provider request through a fresh service; the size guard is still a
     // service-only behavior and does not involve Fastify.

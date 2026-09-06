@@ -1,13 +1,12 @@
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  boundedUsageResetAfterSeconds,
   boundedUsageTimestamp,
   isUsageResetBoundary,
-  parseUsageTimestamp,
   type UsageBurnRate,
   type UsageHistoryRange,
   type UsageHistoryResponse,
   type UsageHistorySeries,
+  type UsageReport,
   usageHistoryPeriod,
 } from '@pi-dashboard/protocol';
 
@@ -30,153 +29,33 @@ export type UsageLimitHistoryResponse = Omit<UsageHistoryResponse, 'spend'>;
 
 type UsageRow = Record<string, unknown>;
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function numberFrom(value: Record<string, unknown>, keys: readonly string[]) {
-  for (const key of keys) {
-    const number = finiteNumber(value[key]);
-    if (number !== undefined) return number;
-  }
-  return undefined;
-}
-
-function boundedText(value: unknown, fallback: string, max: number): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return (text || fallback).slice(0, max);
-}
-
-function resetFrom(
-  value: Record<string, unknown>,
-  capturedAt: number,
-): number | undefined {
-  for (const key of [
-    'resetsAt',
-    'resetAt',
-    'reset_at',
-    'resets_at',
-    'resetTime',
-    'reset_time',
-  ]) {
-    const reset = parseUsageTimestamp(value[key]);
-    if (reset !== undefined) return reset;
-  }
-  const after = boundedUsageResetAfterSeconds(
-    numberFrom(value, [
-      'resetAfterSeconds',
-      'reset_after_seconds',
-      'resetInSeconds',
-      'reset_in_seconds',
-    ]),
-  );
-  return after === undefined
-    ? undefined
-    : boundedUsageTimestamp(capturedAt + after * 1_000);
-}
-
-function windowMinutes(value: Record<string, unknown>): number | undefined {
-  const minutes = numberFrom(value, [
-    'windowMinutes',
-    'windowDurationMins',
-    'window_minutes',
-    'window_duration_mins',
-  ]);
-  if (minutes !== undefined && minutes > 0) return minutes;
-  const seconds = numberFrom(value, [
-    'windowSeconds',
-    'window_seconds',
-    'limitWindowSeconds',
-    'limit_window_seconds',
-  ]);
-  return seconds !== undefined && seconds > 0 ? seconds / 60 : undefined;
-}
-
-function windowLabel(
-  value: Record<string, unknown>,
-  kind: 'primary' | 'secondary',
-  minutes?: number,
-): string {
-  const explicit = value.windowLabel ?? value.window_label ?? value.label;
-  if (typeof explicit === 'string' && explicit.trim()) {
-    const normalized = explicit.trim();
-    if (/^weekly$/iu.test(normalized)) return 'wk';
-    if (/^5\s*hours?$/iu.test(normalized)) return '5h';
-    return normalized.slice(0, 64);
-  }
-  if (minutes === 300) return '5h';
-  if (minutes === 10_080) return 'wk';
-  if (minutes !== undefined) {
-    if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
-    if (minutes % 60 === 0) return `${minutes / 60}h`;
-    return `${minutes}m`;
-  }
-  return kind;
-}
-
-/** Projects a provider response into bounded, durable per-window samples. */
+/** Projects canonical usage into bounded, durable per-window samples. */
 export function normalizeUsageHistorySamples(
-  usage: unknown,
+  usage: UsageReport,
   capturedAt: number,
 ): UsageHistorySample[] {
-  const root = record(usage);
-  const nested = record(root?.usage);
-  const source = Array.isArray(root?.snapshots)
-    ? root
-    : Array.isArray(nested?.snapshots)
-      ? nested
-      : undefined;
-  if (!source || !Array.isArray(source.snapshots)) return [];
-  return source.snapshots.flatMap((raw, index) => {
-    const snapshot = record(raw);
-    if (!snapshot) return [];
-    const limitId = boundedText(
-      snapshot.limitId ?? snapshot.id,
-      `${index}`,
-      128,
-    );
-    const limitName = boundedText(
-      snapshot.limitName ?? snapshot.name,
-      limitId,
-      256,
-    );
-    return (['primary', 'secondary'] as const).flatMap((kind) => {
-      const value = record(
-        kind === 'primary'
-          ? (snapshot.primary ??
-              snapshot.primaryWindow ??
-              snapshot.primary_window)
-          : (snapshot.secondary ??
-              snapshot.secondaryWindow ??
-              snapshot.secondary_window),
-      );
-      if (!value) return [];
-      const usedPercent = numberFrom(value, ['usedPercent', 'used_percent']);
-      if (usedPercent === undefined) return [];
-      const minutes = windowMinutes(value);
-      const resetsAt = resetFrom(value, capturedAt);
+  return usage.snapshots.flatMap((snapshot) =>
+    (['primary', 'secondary'] as const).flatMap((kind) => {
+      const window = snapshot[kind];
+      if (!window) return [];
       return [
         {
           capturedAt,
-          limitId,
-          limitName,
+          limitId: snapshot.limitId,
+          limitName: snapshot.limitName ?? snapshot.limitId,
           windowKind: kind,
-          windowLabel: windowLabel(value, kind, minutes),
-          ...(minutes === undefined ? {} : { windowMinutes: minutes }),
-          usedPercent: Math.max(0, Math.min(100, usedPercent)),
-          ...(resetsAt === undefined ? {} : { resetsAt }),
+          windowLabel: window.windowLabel ?? kind,
+          ...(window.windowMinutes === undefined
+            ? {}
+            : { windowMinutes: window.windowMinutes }),
+          usedPercent: window.usedPercent,
+          ...(window.resetsAt === undefined
+            ? {}
+            : { resetsAt: window.resetsAt }),
         },
       ];
-    });
-  });
+    }),
+  );
 }
 
 function rawPoint(row: UsageRow) {

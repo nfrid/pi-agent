@@ -124,6 +124,9 @@
     "packages/codex-usage": {
       "name": "@pi-dashboard/codex-usage",
       "version": "0.1.0",
+      "dependencies": {
+        "@pi-dashboard/protocol": "workspace:*",
+      },
     },
     "packages/dashboard-client": {
       "name": "@pi-dashboard/client",
