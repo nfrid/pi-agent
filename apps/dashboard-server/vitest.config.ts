@@ -20,6 +20,14 @@ export default defineConfig({
         __dirname,
         '../../packages/activity-model/src/index.ts',
       ),
+      '@pi-dashboard/protocol/dashboard-api': path.resolve(
+        __dirname,
+        '../../packages/dashboard-protocol/src/dashboard-api.ts',
+      ),
+      '@pi-dashboard/protocol/pi-runtime-protocol': path.resolve(
+        __dirname,
+        '../../packages/dashboard-protocol/src/pi-runtime-protocol.ts',
+      ),
       '@pi-dashboard/protocol': path.resolve(
         __dirname,
         '../../packages/dashboard-protocol/src/index.ts',

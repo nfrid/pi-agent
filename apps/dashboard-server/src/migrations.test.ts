@@ -313,6 +313,10 @@ describe('migration metadata', () => {
           created_at: 16,
           runtime_id: 'rename-runtime',
           command_fingerprint: null,
+          execution_state: 'completed',
+          execution_plan_json: null,
+          planned_runtime_id: null,
+          updated_at: null,
         },
       ]);
       const replayed = new SqliteOrchestrationRepository(db).getCommandReceipt(
