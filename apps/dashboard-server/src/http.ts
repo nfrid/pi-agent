@@ -639,6 +639,9 @@ export class DashboardServerImpl implements DashboardServer {
       this.application.orchestrationService?.ensureSessionThreadLinks(
         this.sessions.list(),
       );
+      // Recovery may inspect persisted launches or wait for authenticated
+      // bridge evidence. Never admit a competing browser retry before this cut.
+      await this.application.runtime.reconcilePendingIntents();
       if (this.httpHasStarted) await this.listenHttp();
       else {
         await this.app.listen({ port: this.port, host: this.host });
@@ -709,7 +712,6 @@ export class DashboardServerImpl implements DashboardServer {
       // failed start can retry. Once Fastify has listened, closing it is
       // terminal because its transport cannot be reopened.
       const restartable = !this.httpHasStarted && !this.http.listening;
-      this.lifecycle = restartable ? 'stopped' : 'disposed';
       try {
         await this.cleanupFailedStart(restartable);
       } catch (cleanupError) {
@@ -717,6 +719,10 @@ export class DashboardServerImpl implements DashboardServer {
           [error, cleanupError],
           `Dashboard startup failed: ${error instanceof Error ? error.message : String(error)}`,
         );
+      } finally {
+        // Keep concurrent start/stop calls waiting for the same startup until
+        // cleanup settles, rather than racing a second start against teardown.
+        this.lifecycle = restartable ? 'stopped' : 'disposed';
       }
       throw error;
     }

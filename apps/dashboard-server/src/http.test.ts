@@ -24,6 +24,47 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('reconciles runtime intents after bridge startup but before HTTP admission', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pd-intent-'));
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+    });
+    const internal = server as unknown as {
+      application: { runtime: { reconcilePendingIntents(): Promise<void> } };
+      http: { listening: boolean };
+    };
+    let entered!: () => void;
+    const recoveryEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const recoveryFinished = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const recovery = vi
+      .spyOn(internal.application.runtime, 'reconcilePendingIntents')
+      .mockImplementation(async () => {
+        entered();
+        await recoveryFinished;
+      });
+    const startup = server.start();
+    try {
+      await recoveryEntered;
+      expect((await stat(server.socketPath)).isSocket()).toBe(true);
+      expect(internal.http.listening).toBe(false);
+      release();
+      await startup;
+      expect(internal.http.listening).toBe(true);
+      expect(recovery).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await startup;
+      recovery.mockRestore();
+    }
+  });
   it('does not replay-coalesce raw tool argument deltas', () => {
     expect(
       sessionEventCoalesceKey({
