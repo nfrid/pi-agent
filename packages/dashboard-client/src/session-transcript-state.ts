@@ -164,12 +164,15 @@ export function historyPageCoverage(
 
 export function pageCoverage(
   response: AuthoritativeSessionSnapshot,
+  hydratedPage?: TranscriptProjection,
 ): SessionHistoryPageCoverage | undefined {
   if (!response.history) return undefined;
-  const page = hydrateTranscript(response.entries, response.metadata.id, {
-    fallbackEntryIds: true,
-    fallbackEntryOffset: response.history.start,
-  });
+  const page =
+    hydratedPage ??
+    hydrateTranscript(response.entries, response.metadata.id, {
+      fallbackEntryIds: true,
+      fallbackEntryOffset: response.history.start,
+    });
   return historyPageCoverage(response.history, response.entries, page.order);
 }
 
@@ -260,6 +263,7 @@ export function installAuthoritativeTranscript({
       ? {}
       : { runtimeSeq: baselineRuntimeSeq }),
   });
+  const persistedPage = projection;
 
   const active = response.active;
   const activeEpoch = active?.runtimeEpoch ?? response.runtimeEpoch;
@@ -367,7 +371,7 @@ export function installAuthoritativeTranscript({
     }
   }
 
-  const responsePage = pageCoverage(response);
+  const responsePage = pageCoverage(response, persistedPage);
   let nextCoverage: SessionHistoryCoverage | undefined;
   let retainVerifiedCoverage = false;
   if (responsePage) {
@@ -388,18 +392,17 @@ export function installAuthoritativeTranscript({
         responsePage.start <= newestPage.start &&
         responsePage.end >= newestPage.start &&
         responsePage.end >= previousCoverage.coveredEnd;
-      const rewrite =
+      let rewrite = false;
+      if (
         response.cursor !== undefined &&
         previousProjection !== undefined &&
-        response.cursor <= previousProjection.lastCursor &&
-        (!sameAuthoritativePage(
-          newestProjection(previousProjection, previousCoverage),
-          response,
-        ) ||
-          !sameTranscriptProjection(
-            newestProjection(previousProjection, previousCoverage),
-            projection,
-          ));
+        response.cursor <= previousProjection.lastCursor
+      ) {
+        const newest = newestProjection(previousProjection, previousCoverage);
+        rewrite =
+          !sameAuthoritativePage(newest, response, persistedPage) ||
+          !sameTranscriptProjection(newest, projection);
+      }
       retainVerifiedCoverage =
         sameIdentity && contiguousLatestWindow && !rewrite;
       if (retainVerifiedCoverage) {
@@ -528,12 +531,15 @@ export function sameTranscriptProjection(
 export function sameAuthoritativePage(
   current: TranscriptProjection,
   response: AuthoritativeSessionSnapshot,
+  hydratedPage?: TranscriptProjection,
 ): boolean {
   if (!response.history) return false;
-  const page = hydrateTranscript(response.entries, response.metadata.id, {
-    fallbackEntryIds: true,
-    fallbackEntryOffset: response.history.start,
-  });
+  const page =
+    hydratedPage ??
+    hydrateTranscript(response.entries, response.metadata.id, {
+      fallbackEntryIds: true,
+      fallbackEntryOffset: response.history.start,
+    });
   return (
     page.order.length === page.order.filter((id) => current.items[id]).length &&
     page.order.every((id) =>

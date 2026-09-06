@@ -479,8 +479,9 @@ export class DashboardLiveStore {
 
   private pageCoverage(
     response: AuthoritativeSessionSnapshot,
+    hydratedPage?: TranscriptProjection,
   ): SessionHistoryPageCoverage | undefined {
-    return transcriptPageCoverage(response);
+    return transcriptPageCoverage(response, hydratedPage);
   }
 
   private coverageWithPages(
@@ -1513,7 +1514,13 @@ export class DashboardLiveStore {
     let workingCoverage = coverage;
     let projection = current;
     for (const response of responses) {
-      const page = this.pageCoverage(response);
+      const hydratedPage = response.history
+        ? hydrateTranscript(response.entries, sessionId, {
+            fallbackEntryIds: true,
+            fallbackEntryOffset: response.history.start,
+          })
+        : undefined;
+      const page = this.pageCoverage(response, hydratedPage);
       const emptyOriginPlaceholder =
         workingCoverage.coveredStart === 0 &&
         workingCoverage.coveredEnd === 0 &&
@@ -1551,11 +1558,8 @@ export class DashboardLiveStore {
           coverage.serverId,
           coverage.runtimeEpoch,
         ) ?? workingCoverage;
-      const older = hydrateTranscript(response.entries, sessionId, {
-        fallbackEntryIds: true,
-        fallbackEntryOffset: page.start,
-      });
-      projection = mergePrependedTranscript(projection, older);
+      if (hydratedPage)
+        projection = mergePrependedTranscript(projection, hydratedPage);
     }
 
     if (

@@ -1,7 +1,11 @@
 import type { TranscriptProjection } from '@pi-dashboard/domain';
 import type { AuthoritativeSessionSnapshot } from '@pi-dashboard/protocol';
 import { tryParseAuthoritativeSessionSnapshot } from '@pi-dashboard/protocol';
-import type { SessionHistoryCoverage } from './session-transcript-state.js';
+import {
+  coverageWithPages,
+  type SessionHistoryCoverage,
+  type SessionHistoryPageCoverage,
+} from './session-transcript-state.js';
 
 /** The on-disk format is deliberately bumped rather than migrated in place. */
 export const SESSION_TRANSCRIPT_CACHE_VERSION = 1 as const;
@@ -125,11 +129,11 @@ function validProjection(
   );
 }
 
-function validCoverage(
+function decodeCoverage(
   value: unknown,
   serverId: string,
-): value is SessionHistoryCoverage {
-  if (!isRecord(value)) return false;
+): SessionHistoryCoverage | undefined {
+  if (!isRecord(value)) return undefined;
   if (
     !isOptionalString(value.serverId) ||
     (value.serverId !== undefined && value.serverId !== serverId) ||
@@ -150,22 +154,79 @@ function validCoverage(
     !isNonNegativeInteger(value.byteCount) ||
     value.pageCount !== value.pages.length
   )
-    return false;
-  return value.pages.every((page) => {
-    if (!isRecord(page)) return false;
-    return (
-      isNonNegativeInteger(page.start) &&
-      isNonNegativeInteger(page.end) &&
-      typeof page.hasOlder === 'boolean' &&
-      (page.nextBefore === undefined ||
-        (typeof page.nextBefore === 'string' && page.nextBefore.length > 0)) &&
-      (page.leadingContinuation === undefined ||
-        typeof page.leadingContinuation === 'boolean') &&
-      isStringArray(page.entryIds) &&
-      isNonNegativeInteger(page.entryCount) &&
-      isNonNegativeInteger(page.byteCount)
-    );
-  });
+    return undefined;
+
+  const pages: SessionHistoryPageCoverage[] = [];
+  const cursors = new Set<string>();
+  for (const [index, candidate] of value.pages.entries()) {
+    if (!isRecord(candidate)) return undefined;
+    if (
+      !isNonNegativeInteger(candidate.start) ||
+      !isNonNegativeInteger(candidate.end) ||
+      candidate.start > candidate.end ||
+      typeof candidate.hasOlder !== 'boolean' ||
+      (candidate.nextBefore !== undefined &&
+        (typeof candidate.nextBefore !== 'string' ||
+          candidate.nextBefore.length === 0)) ||
+      (candidate.leadingContinuation !== undefined &&
+        typeof candidate.leadingContinuation !== 'boolean') ||
+      !isStringArray(candidate.entryIds) ||
+      !isNonNegativeInteger(candidate.entryCount) ||
+      !isNonNegativeInteger(candidate.byteCount)
+    )
+      return undefined;
+    let newestExpansion = false;
+    let originPlaceholder = false;
+    if (index > 0) {
+      const previous = pages[index - 1];
+      newestExpansion =
+        index === value.pages.length - 1 &&
+        candidate.start < previous.end &&
+        candidate.end >= previous.end;
+      originPlaceholder =
+        index === value.pages.length - 1 &&
+        candidate.start === 0 &&
+        candidate.end === 0 &&
+        previous.start === 0 &&
+        previous.end > 0 &&
+        !previous.hasOlder;
+      if (
+        (!newestExpansion &&
+          !originPlaceholder &&
+          previous.end !== candidate.start) ||
+        (!newestExpansion && !originPlaceholder && !candidate.hasOlder)
+      )
+        return undefined;
+    }
+    if (
+      (candidate.hasOlder && candidate.nextBefore === undefined) ||
+      (!candidate.hasOlder && candidate.nextBefore !== undefined)
+    )
+      return undefined;
+    if (candidate.nextBefore !== undefined) {
+      if (cursors.has(candidate.nextBefore)) return undefined;
+      cursors.add(candidate.nextBefore);
+    }
+    pages.push(candidate as unknown as SessionHistoryPageCoverage);
+  }
+
+  const rebuilt = coverageWithPages(
+    pages,
+    value.generation,
+    value.serverId,
+    value.runtimeEpoch,
+  );
+  if (!rebuilt) return undefined;
+  return value.coveredStart === rebuilt.coveredStart &&
+    value.coveredEnd === rebuilt.coveredEnd &&
+    value.hasOlder === rebuilt.hasOlder &&
+    value.nextBefore === rebuilt.nextBefore &&
+    value.leadingContinuation === rebuilt.leadingContinuation &&
+    value.pageCount === rebuilt.pageCount &&
+    value.entryCount === rebuilt.entryCount &&
+    value.byteCount === rebuilt.byteCount
+    ? rebuilt
+    : undefined;
 }
 
 /**
@@ -193,13 +254,16 @@ export function decodeCachedSessionTranscript(
     return undefined;
 
   const snapshot = tryParseAuthoritativeSessionSnapshot(value.snapshot);
+  const coverage =
+    value.coverage === undefined
+      ? undefined
+      : decodeCoverage(value.coverage, value.serverId);
   if (
     !snapshot ||
     snapshot.serverId !== value.serverId ||
     snapshot.metadata.id !== value.sessionId ||
     !validProjection(value.projection, value.sessionId) ||
-    (value.coverage !== undefined &&
-      !validCoverage(value.coverage, value.serverId))
+    (value.coverage !== undefined && coverage === undefined)
   )
     return undefined;
 
@@ -211,7 +275,7 @@ export function decodeCachedSessionTranscript(
     acceptedSequence: value.acceptedSequence,
     snapshot,
     projection: value.projection,
-    ...(value.coverage === undefined ? {} : { coverage: value.coverage }),
+    ...(coverage === undefined ? {} : { coverage }),
   };
 }
 
