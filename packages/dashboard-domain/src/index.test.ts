@@ -49,6 +49,36 @@ function envelope(
 }
 
 describe('dashboard domain reducers', () => {
+  it('preserves terminal status when hydrating an unwrapped compatibility tool', () => {
+    const projection = hydrateTranscript([
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'finished-tool',
+          name: 'read',
+          result: 'done',
+          status: 'finished',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'failed-tool',
+          name: 'read',
+          isError: true,
+          status: 'error',
+        },
+      },
+    ]);
+    expect(projection.items['finished-tool']).toMatchObject({
+      status: 'finished',
+      result: 'done',
+    });
+    expect(projection.items['failed-tool']).toMatchObject({
+      status: 'error',
+      isError: true,
+    });
+  });
   it('preserves assistant failure metadata through live, persisted, and legacy projections', () => {
     const failure = {
       messageId: 'assistant-failure',

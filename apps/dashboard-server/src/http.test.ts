@@ -954,6 +954,8 @@ describe('dashboard HTTP boundary', () => {
       before.sessions.find((item) => item.id === 'shared-session'),
     ).toMatchObject({ activeRuntimeId: 'shared-runtime-2' });
 
+    const shellFeed = (server as unknown as { shellFeed: ShellFeed }).shellFeed;
+    const publications = vi.spyOn(shellFeed, 'publishSemantic');
     server.registry.forget('shared-runtime-1');
     const after = server.snapshot();
     expect(after.runtimes.map((runtime) => runtime.runtimeId)).toEqual([
@@ -969,7 +971,13 @@ describe('dashboard HTTP boundary', () => {
         }
       ).sessionFeeds.get('shared-session').active,
     ).toBe(true);
-    expect(after.cursor - before.cursor).toBe(1);
+    // Snapshot reads no longer consume pending catalogue changes. Removal
+    // publishes both the runtime patch and that session-index delta.
+    expect(publications.mock.calls.map(([domain]) => domain)).toEqual([
+      'session-index',
+      'runtime',
+    ]);
+    expect(after.cursor - before.cursor).toBe(2);
     for (const bridge of bridges) bridge.destroy();
   });
 
@@ -1424,9 +1432,7 @@ describe('dashboard HTTP boundary', () => {
   });
 
   it('disposes after startup fails after HTTP listen', async () => {
-    const root = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-dashboard-startup-after-listen-'),
-    );
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pd-start-'));
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',

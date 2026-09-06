@@ -18,6 +18,7 @@ interface Fixture {
   app: DashboardApplication;
   metadata: MetadataStore;
   sessions: SessionIndex;
+  close(): Promise<void>;
   register(
     runtime: RuntimeSnapshot,
     epoch?: string,
@@ -36,7 +37,7 @@ const fixtures: Fixture[] = [];
 
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) {
-    await fixture.app.close();
+    await fixture.close();
     await rm(fixture.root, { recursive: true, force: true });
   }
   vi.restoreAllMocks();
@@ -100,6 +101,14 @@ async function fixture(
     app,
     metadata,
     sessions,
+    async close() {
+      await app.usage.stop();
+      await app.uploads.close();
+      sessions.close();
+      registry.close();
+      app.notifications.close();
+      metadata.close();
+    },
     register(runtime, epoch = 'epoch-1', reconnected = false) {
       current = [runtime];
       provenance.set(runtime.runtimeId, { runtimeEpoch: epoch, runtimeSeq: 1 });
@@ -813,6 +822,41 @@ describe('authoritative application snapshot lifecycle', () => {
       inactive: true,
       uncertain: true,
     });
+  });
+
+  it('does not treat a durable tool declaration as proof of a newer live result', async () => {
+    const f = await fixture('snapshot-session', [
+      { type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' },
+      {
+        type: 'tool',
+        id: 'declared-tool',
+        tool: { toolCallId: 'tool-1', name: 'read', status: 'pending' },
+      },
+    ]);
+    const live = runtime(f.file, { liveState: 'idle' });
+    f.register(live);
+    f.event(live, {
+      type: 'tool.updated',
+      sessionId: 'snapshot-session',
+      tool: {
+        toolCallId: 'tool-1',
+        name: 'read',
+        status: 'running',
+        result: 'unpersisted output',
+        phase: 'updated',
+      },
+    });
+    f.offline(live);
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-tool',
+      'snapshot-session',
+    );
+    expect(snapshot.entriesComplete).toBe(true);
+    expect(snapshot.completeThroughCursor).toBe(false);
+    expect(snapshot.active.tools).toMatchObject([
+      { toolCallId: 'tool-1', result: 'unpersisted output', status: 'running' },
+    ]);
+    expect(activeTranscriptIds(f.app)).toContain('snapshot-session');
   });
 
   it('marks a prior session inactive when one runtime switches sessions', async () => {

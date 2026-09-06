@@ -187,7 +187,7 @@ async function realSessionSnapshotFixture() {
       throw new Error('runtime registration timed out');
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
-  return { application, file, registry, root, sessions };
+  return { application, file, registry, root, sessions, metadata };
 }
 
 describe('dashboard tRPC boundary', () => {
@@ -381,7 +381,11 @@ describe('dashboard tRPC boundary', () => {
       expect(sparse.json().result.data.completeThroughCursor).toBe(false);
     } finally {
       fixture.registry.close();
-      await fixture.application.close();
+      await fixture.application.usage.stop();
+      await fixture.application.uploads.close();
+      fixture.sessions.close();
+      fixture.application.notifications.close();
+      fixture.metadata.close();
       await rm(fixture.root, { recursive: true, force: true });
     }
   });

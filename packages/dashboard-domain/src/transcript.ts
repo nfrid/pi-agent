@@ -961,7 +961,9 @@ function persistedTimestamp(
 function persistedToolStatus(
   tool: Record<string, unknown>,
 ): Exclude<TranscriptEntityStatus, 'streaming'> {
-  const outcome = transcriptToolOutcome(tool);
+  // The caller already unwrapped the compatibility entry. Restore its marker
+  // so the shared raw-record adapter does not reject a named inner tool.
+  const outcome = transcriptToolOutcome({ kind: 'tool', tool });
   if (outcome === 'error') return 'error';
   if (outcome === 'running') return 'running';
   if (outcome === 'success') return 'finished';

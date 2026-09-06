@@ -708,20 +708,30 @@ export function retirePersistedMessageOverlays(
   };
 }
 
-/** Retire live tool overlays only when their call IDs occur in durable history. */
+/** A durable call declaration alone does not prove a newer live tool update. */
 function retirePersistedToolOverlays(
   active: TranscriptProjection,
   persisted: TranscriptProjection,
 ): TranscriptProjection {
-  const persistedToolIds = new Set(
-    Object.values(persisted.items).flatMap((item) =>
-      item.kind === 'tool' ? [item.toolCallId] : [],
-    ),
+  const persistedTools = Object.values(persisted.items).filter(
+    (item): item is Extract<TranscriptItem, { kind: 'tool' }> =>
+      item.kind === 'tool',
   );
   const retire = new Set(
     active.order.filter((id) => {
       const item = active.items[id];
-      return item?.kind === 'tool' && persistedToolIds.has(item.toolCallId);
+      if (item?.kind !== 'tool') return false;
+      return persistedTools.some(
+        (candidate) =>
+          candidate.toolCallId === item.toolCallId &&
+          candidate.name === item.name &&
+          candidate.status === item.status &&
+          Boolean(candidate.isError) === Boolean(item.isError) &&
+          normalizedMessageContent(candidate.result) ===
+            normalizedMessageContent(item.result) &&
+          normalizedMessageContent(candidate.arguments) ===
+            normalizedMessageContent(item.arguments),
+      );
     }),
   );
   if (retire.size === 0) return active;
@@ -1885,15 +1895,6 @@ export class DashboardApplication {
     record: Parameters<MetadataStore['savePushSubscription']>[0],
   ): void {
     this.metadata.savePushSubscription(record);
-  }
-
-  async close(): Promise<void> {
-    await this.orchestrationService?.stop();
-    await this.uploads.close();
-    this.sessionIndex.close();
-    this.registry.close();
-    this.notifications.close();
-    this.metadata.close();
   }
 
   private async sessionsStart(): Promise<void> {
