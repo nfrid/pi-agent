@@ -3,13 +3,19 @@ import type { DelegateJobResult } from './jobs';
 import { ensureDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
 import { INLINE_REPORT_END, INLINE_REPORT_START } from './output';
 import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
+import { captureWorkflowText, WORKFLOW_INPUT_CAPS } from './workflow-contract';
+
+export {
+  captureWorkflowText,
+  WORKFLOW_INPUT_CAPS,
+  WORKFLOW_OVERSIZED_EVIDENCE_MARKER,
+} from './workflow-contract';
 
 import type {
   DelegatedRun,
   DelegateWorkflowBranchDescriptor,
   DelegateWorkflowResultRecord,
   DelegateWorkflowRunProjection,
-  DelegateWorkflowTextEvidence,
 } from './types';
 import type {
   AttemptIdentity,
@@ -17,29 +23,6 @@ import type {
   WorkflowAttemptState,
 } from './workflow-model';
 import { loadWorktree } from './worktree/records';
-
-export const WORKFLOW_INPUT_CAPS = {
-  perItemMaxBytes: 16 * 1024,
-  aggregateMaxBytes: 48 * 1024,
-} as const;
-
-/** A marker is retained instead of clipping evidence that cannot be forwarded. */
-export const WORKFLOW_OVERSIZED_EVIDENCE_MARKER =
-  '[oversized workflow evidence omitted]' as const;
-
-/** Capture exact text only when it fits the existing raw per-item bound. */
-export function captureWorkflowText(
-  value: string,
-): DelegateWorkflowTextEvidence {
-  const bytes = Buffer.byteLength(value, 'utf8');
-  if (bytes <= WORKFLOW_INPUT_CAPS.perItemMaxBytes)
-    return Object.freeze({ text: value, bytes });
-  return Object.freeze({
-    text: WORKFLOW_OVERSIZED_EVIDENCE_MARKER,
-    bytes,
-    oversized: true as const,
-  });
-}
 
 export type WorkflowInputKind = 'report' | 'handoff' | 'branch' | 'metadata';
 
