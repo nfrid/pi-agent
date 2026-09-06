@@ -42,7 +42,11 @@ import type {
   CreateThreadWithRunInput,
   OrchestrationRepository,
   ProjectPatch,
+  ReserveRuntimeCommandIntentInput,
   RetryRunInput,
+  RuntimeCommandIntent,
+  RuntimeIntentPlan,
+  RuntimeIntentState,
   SessionThreadLinkRecord,
   ThreadPatch,
 } from './types.js';
@@ -83,16 +87,19 @@ function normalizeSqliteError(error: unknown): unknown {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
   if (!lower.includes('unique') && !lower.includes('constraint')) return error;
-  const code =
-    lower.includes('active_writer_per_checkout') ||
-    lower.includes('orchestration_run.checkout_id')
+  const code = lower.includes('planned_runtime_id')
+    ? 'idempotency-conflict'
+    : lower.includes('active_writer_per_checkout') ||
+        lower.includes('orchestration_run.checkout_id')
       ? 'active-writer'
       : 'sqlite-constraint';
   return Object.assign(
     new Error(
       code === 'active-writer'
         ? 'The checkout already has an active writer.'
-        : 'The orchestration request conflicts with existing state.',
+        : code === 'idempotency-conflict'
+          ? 'The runtime identity is reserved by another command.'
+          : 'The orchestration request conflicts with existing state.',
     ),
     { code },
   );
@@ -109,6 +116,82 @@ function optionalString(
 }
 function jsonValue<T>(value: unknown): T | undefined {
   return value == null ? undefined : (JSON.parse(String(value)) as T);
+}
+
+function boundedIntentPlan(plan: RuntimeIntentPlan): RuntimeIntentPlan {
+  const copy: RuntimeIntentPlan = { operation: plan.operation };
+  const stringBounds: Readonly<Record<string, number>> = {
+    runtimeId: 256,
+    replacementRuntimeId: 256,
+    oldRuntimeId: 256,
+    projectId: 256,
+    checkoutId: 256,
+    cwd: 4096,
+    sessionId: 256,
+    sessionFile: 4096,
+    name: 120,
+    runtimeProvider: 128,
+  };
+  for (const [key, bound] of Object.entries(stringBounds)) {
+    const value = plan[key as keyof RuntimeIntentPlan];
+    if (typeof value === 'string') {
+      if (value.length > bound)
+        throw new Error(`Runtime intent plan field ${key} exceeds its bound.`);
+      copy[key as keyof RuntimeIntentPlan] = value as never;
+    }
+  }
+  if (plan.mode === 'read' || plan.mode === 'write') copy.mode = plan.mode;
+  if (typeof plan.force === 'boolean') copy.force = plan.force;
+  if (plan.model) {
+    if (
+      plan.model.provider.length > 200 ||
+      plan.model.model.length > 300 ||
+      (plan.model.thinking !== undefined && plan.model.thinking.length > 64) ||
+      (plan.model.serviceTier !== undefined &&
+        plan.model.serviceTier.length > 64)
+    )
+      throw new Error('Runtime intent model configuration exceeds its bound.');
+    copy.model = {
+      provider: plan.model.provider,
+      model: plan.model.model,
+      ...(plan.model.thinking === undefined
+        ? {}
+        : { thinking: plan.model.thinking }),
+      ...(plan.model.serviceTier === undefined
+        ? {}
+        : { serviceTier: plan.model.serviceTier }),
+    };
+  }
+  return copy;
+}
+
+function intentFromRow(row: Record<string, unknown>): RuntimeCommandIntent {
+  const plan = jsonValue<RuntimeIntentPlan>(row.execution_plan_json);
+  const result = JSON.parse(String(row.result_json));
+  return {
+    idempotencyKey: stringValue(row, 'idempotency_key'),
+    commandType: stringValue(row, 'command_type'),
+    ...(optionalString(row, 'resource_type') === undefined
+      ? {}
+      : { resourceType: optionalString(row, 'resource_type') }),
+    ...(optionalString(row, 'resource_id') === undefined
+      ? {}
+      : { resourceId: optionalString(row, 'resource_id') }),
+    ...(optionalString(row, 'runtime_id') === undefined
+      ? {}
+      : { runtimeId: optionalString(row, 'runtime_id') }),
+    ...(optionalString(row, 'command_fingerprint') === undefined
+      ? {}
+      : { commandFingerprint: optionalString(row, 'command_fingerprint') }),
+    result,
+    createdAt: Number(row.created_at),
+    ...(row.updated_at == null ? {} : { updatedAt: Number(row.updated_at) }),
+    executionState: String(row.execution_state) as RuntimeIntentState,
+    ...(plan === undefined ? {} : { executionPlan: plan }),
+    ...(optionalString(row, 'planned_runtime_id') === undefined
+      ? {}
+      : { plannedRuntimeId: optionalString(row, 'planned_runtime_id') }),
+  };
 }
 
 function rows<T>(value: unknown): T[] {
@@ -1494,42 +1577,200 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     });
   }
 
-  getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined {
+  getCommandIntent(idempotencyKey: string): RuntimeCommandIntent | undefined {
     const row = this.db
       .prepare('SELECT * FROM command_receipt WHERE idempotency_key=?')
       .get(idempotencyKey) as Record<string, unknown> | undefined;
-    if (!row) return undefined;
+    return row === undefined ? undefined : intentFromRow(row);
+  }
+
+  getCommandIntentByPlannedRuntimeId(
+    runtimeId: string,
+  ): RuntimeCommandIntent | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT * FROM command_receipt WHERE planned_runtime_id=? ORDER BY created_at DESC LIMIT 1',
+      )
+      .get(runtimeId) as Record<string, unknown> | undefined;
+    return row === undefined ? undefined : intentFromRow(row);
+  }
+
+  reserveCommandIntent(
+    input: ReserveRuntimeCommandIntentInput,
+  ): RuntimeCommandIntent {
+    return this.withTransaction(() => {
+      const existing = this.getCommandIntent(input.idempotencyKey);
+      if (existing) {
+        if (
+          existing.commandType !== input.commandType ||
+          existing.runtimeId !== input.runtimeId ||
+          existing.resourceType !== input.resourceType ||
+          existing.resourceId !== input.resourceId ||
+          existing.commandFingerprint !== input.commandFingerprint
+        )
+          throw idempotencyConflict(input.idempotencyKey, existing.commandType);
+        return existing;
+      }
+      if (input.plannedRuntimeId) {
+        const owner = this.getCommandIntentByPlannedRuntimeId(
+          input.plannedRuntimeId,
+        );
+        if (owner && owner.idempotencyKey !== input.idempotencyKey)
+          throw idempotencyConflict(
+            input.idempotencyKey,
+            `runtime ${input.plannedRuntimeId}`,
+          );
+      }
+      const now = input.createdAt ?? Date.now();
+      try {
+        this.db
+          .prepare(
+            `INSERT INTO command_receipt
+             (idempotency_key,command_type,resource_type,resource_id,runtime_id,command_fingerprint,result_json,created_at,execution_state,execution_plan_json,planned_runtime_id,updated_at)
+             VALUES (?,?,?,?,?,?,?,?,'prepared',?,?,?)`,
+          )
+          .run(
+            input.idempotencyKey,
+            input.commandType,
+            input.resourceType ?? null,
+            input.resourceId ?? null,
+            input.runtimeId ?? null,
+            input.commandFingerprint,
+            'null',
+            now,
+            JSON.stringify(boundedIntentPlan(input.executionPlan)),
+            input.plannedRuntimeId ?? null,
+            now,
+          );
+      } catch (error) {
+        throw normalizeSqliteError(error);
+      }
+      return this.getCommandIntent(
+        input.idempotencyKey,
+      ) as RuntimeCommandIntent;
+    });
+  }
+
+  transitionCommandIntent(
+    idempotencyKey: string,
+    state: RuntimeIntentState,
+  ): RuntimeCommandIntent {
+    if (state === 'completed')
+      throw new Error('Use completeCommandIntent for completed intents.');
+    return this.withTransaction(() => {
+      const result = this.db
+        .prepare(
+          'UPDATE command_receipt SET execution_state=?,updated_at=? WHERE idempotency_key=? AND execution_state<>?',
+        )
+        .run(state, Date.now(), idempotencyKey, 'completed');
+      if (Number(result.changes) !== 1) {
+        const existing = this.getCommandIntent(idempotencyKey);
+        if (!existing)
+          throw new Error('Runtime command intent does not exist.');
+        return existing;
+      }
+      return this.getCommandIntent(idempotencyKey) as RuntimeCommandIntent;
+    });
+  }
+
+  completeCommandIntent(receipt: CommandReceipt): void {
+    this.withTransaction(() => {
+      const existing = this.getCommandIntent(receipt.idempotencyKey);
+      if (existing) {
+        if (
+          existing.commandType !== receipt.commandType ||
+          existing.runtimeId !== receipt.runtimeId ||
+          existing.resourceType !== receipt.resourceType ||
+          existing.resourceId !== receipt.resourceId ||
+          existing.commandFingerprint !== receipt.commandFingerprint
+        )
+          throw idempotencyConflict(
+            receipt.idempotencyKey,
+            existing.commandType,
+          );
+        if (existing.executionState === 'completed') return;
+        this.db
+          .prepare(
+            `UPDATE command_receipt
+             SET result_json=?,execution_state='completed',updated_at=?
+             WHERE idempotency_key=? AND execution_state<>'completed'`,
+          )
+          .run(
+            JSON.stringify(
+              // Bridge success is ACK evidence, not permission to retain its
+              // arbitrary output (queue drafts include prompt text). Preserve
+              // the first response in memory; durable replay is success only.
+              receipt.commandType === 'runtime.command'
+                ? { accepted: true }
+                : receipt.result === undefined
+                  ? null
+                  : receipt.result,
+            ),
+            Date.now(),
+            receipt.idempotencyKey,
+          );
+        return;
+      }
+      throw new Error('Runtime command intent does not exist.');
+    });
+  }
+
+  pendingCommandIntents(): RuntimeCommandIntent[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM command_receipt WHERE execution_state <> 'completed' ORDER BY created_at,idempotency_key",
+        )
+        .all() as Array<Record<string, unknown>>
+    ).map(intentFromRow);
+  }
+
+  getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined {
+    const intent = this.getCommandIntent(idempotencyKey);
+    if (!intent) return undefined;
+    // This lookup guards the shared command namespace before callers perform
+    // Git, filesystem, or service effects. Pending runtime ownership is not
+    // absence; runtime recovery uses getCommandIntent instead.
+    if (intent.executionState !== 'completed')
+      throw idempotencyConflict(idempotencyKey, intent.commandType);
     return {
-      idempotencyKey: stringValue(row, 'idempotency_key'),
-      commandType: stringValue(row, 'command_type'),
-      ...(optionalString(row, 'resource_type') === undefined
+      idempotencyKey: intent.idempotencyKey,
+      commandType: intent.commandType,
+      ...(intent.resourceType === undefined
         ? {}
-        : { resourceType: optionalString(row, 'resource_type') }),
-      ...(optionalString(row, 'resource_id') === undefined
+        : { resourceType: intent.resourceType }),
+      ...(intent.resourceId === undefined
         ? {}
-        : { resourceId: optionalString(row, 'resource_id') }),
-      ...(optionalString(row, 'runtime_id') === undefined
+        : { resourceId: intent.resourceId }),
+      ...(intent.runtimeId === undefined
         ? {}
-        : { runtimeId: optionalString(row, 'runtime_id') }),
-      ...(optionalString(row, 'command_fingerprint') === undefined
+        : { runtimeId: intent.runtimeId }),
+      ...(intent.commandFingerprint === undefined
         ? {}
-        : { commandFingerprint: optionalString(row, 'command_fingerprint') }),
-      result: JSON.parse(stringValue(row, 'result_json')) as unknown,
-      createdAt: Number(row.created_at),
+        : { commandFingerprint: intent.commandFingerprint }),
+      result: intent.result,
+      createdAt: intent.createdAt,
     };
   }
 
   recordCommandReceipt(receipt: CommandReceipt): void {
     this.withTransaction(() => {
       const existing = this.getCommandReceipt(receipt.idempotencyKey);
-      if (
-        existing &&
-        (existing.commandType !== receipt.commandType ||
+      if (existing) {
+        if (
+          existing.commandType !== receipt.commandType ||
           existing.runtimeId !== receipt.runtimeId ||
-          existing.commandFingerprint !== receipt.commandFingerprint)
-      )
-        throw idempotencyConflict(receipt.idempotencyKey, existing.commandType);
-      if (!existing) this.insertReceipt(receipt);
+          existing.commandFingerprint !== receipt.commandFingerprint
+        )
+          throw idempotencyConflict(
+            receipt.idempotencyKey,
+            existing.commandType,
+          );
+        return;
+      }
+      if (receipt.commandType === 'runtime.command')
+        throw new Error('Runtime commands require a durable intent.');
+      this.insertReceipt(receipt);
     });
   }
 
@@ -1838,22 +2079,30 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   }
 
   private insertReceipt(receipt: CommandReceipt): void {
-    this.db
-      .prepare(
-        `INSERT INTO command_receipt
-         (idempotency_key,command_type,resource_type,resource_id,runtime_id,command_fingerprint,result_json,created_at)
-         VALUES (?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        receipt.idempotencyKey,
-        receipt.commandType,
-        receipt.resourceType ?? null,
-        receipt.resourceId ?? null,
-        receipt.runtimeId ?? null,
-        receipt.commandFingerprint ?? null,
-        JSON.stringify(receipt.result === undefined ? null : receipt.result),
-        receipt.createdAt,
-      );
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO command_receipt
+           (idempotency_key,command_type,resource_type,resource_id,runtime_id,command_fingerprint,result_json,created_at,execution_state,execution_plan_json,planned_runtime_id,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,'completed',NULL,NULL,?)`,
+        )
+        .run(
+          receipt.idempotencyKey,
+          receipt.commandType,
+          receipt.resourceType ?? null,
+          receipt.resourceId ?? null,
+          receipt.runtimeId ?? null,
+          receipt.commandFingerprint ?? null,
+          JSON.stringify(receipt.result === undefined ? null : receipt.result),
+          receipt.createdAt,
+          receipt.createdAt,
+        );
+    } catch (error) {
+      const intent = this.getCommandIntent(receipt.idempotencyKey);
+      if (intent)
+        throw idempotencyConflict(receipt.idempotencyKey, intent.commandType);
+      throw normalizeSqliteError(error);
+    }
   }
 
   private applyThreadLifecycle(

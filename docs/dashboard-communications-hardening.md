@@ -48,6 +48,46 @@ Current production defaults are 256 replay records, 4 MiB replay bytes, 128 queu
 
 Production browser code contains no `/ws`, `/api/events`, `/api/snapshot`, or old tRPC bootstrap live path. Playwright fixtures fail if those transports are requested. Multipart runtime uploads and unrelated finite REST resources remain intentionally outside the live-transport cutover.
 
+## Durable runtime mutation receipts
+
+Runtime mutations require SQLite intents before effects; pending IDs also block
+orchestration commands in the shared namespace before Git or filesystem work.
+Managed launch insertion atomically checks the owning intent and never replaces
+an existing runtime identity, including stopped history.
+
+Bridge ACK results are not durable application state. Queue ACKs contain draft
+text, and semantic action handlers can return arbitrary private output. The
+first response (and same-process in-flight waiters) retains the original result;
+new completed `runtime.command` receipts store only `{accepted:true}` (17 UTF-8
+bytes). A later retry returns that success-only result without redispatch. Old
+completed receipts are replayed unchanged, not rewritten. Receipt-shaped bridge
+outputs fail closed. The browser queue/composer, runtime controls, command
+palette, and transcript action callers await success but do not consume command
+result data; queue state comes from runtime feeds. Lifecycle results such as the
+replacement runtime ID remain available on replay. ACK followed by failed
+receipt storage remains uncertain and is never automatically resent.
+
+Restart captures the exact session file and supported configuration, validates
+it before stopping, and reuses that file after recovery without depending on a
+session-index snapshot. Missing resume evidence is an error, never a new session.
+A launch with durable readiness proof can complete after response/storage loss;
+without that proof it remains uncertain.
+
+`stopped:true` for an external runtime means dashboard removal/tombstoning, not
+OS termination. Shutdown rejection does not prevent that removal; a lost receipt
+cannot be reconstructed as an external-stop success. Managed stop requires
+provider termination evidence. The daemon's host client independently inspects
+retained stopped history and verifies PID absence after the ACK, so an older
+long-lived host's permissive ACK cannot produce a durable stopped marker.
+Missing host history, an inaccessible PID, or PID reuse remains uncertain.
+Production readiness additionally requires the managed bridge registration;
+the host start protocol already waits for its Pi readiness probe. None of these
+changes requires an ordinary deploy to restart the runtime or process host.
+
+Fault/reopen evidence is in `runtime-intent-recovery.test.ts`; actual extension
+ACK privacy is covered in `test/runtime-ack-privacy.test.ts`. These are isolated
+checks, not a production rollout or browser deployment verification.
+
 ## Remaining limitations
 
 - The O(1) unavailable-through boundary intentionally prefers extra snapshot rebases for cursors before the latest removed sequence over retaining exact coalesced-gap intervals.

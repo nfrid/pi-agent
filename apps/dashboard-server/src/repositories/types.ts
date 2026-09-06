@@ -62,7 +62,66 @@ export interface ManagedLaunchRecord {
   launchTokenHash: string;
   launchConsumed: boolean;
   launchedAt: number;
+  readyAt?: number;
   stoppedAt?: number;
+}
+
+export type RuntimeIntentState =
+  | 'prepared'
+  | 'stopping'
+  | 'launching'
+  | 'dispatched'
+  | 'uncertain'
+  | 'completed';
+
+/** Bounded, server-only data needed to reconcile a lifecycle side effect. */
+export interface RuntimeIntentPlan {
+  operation: 'start' | 'restart' | 'stop' | 'rename' | 'command';
+  runtimeId?: string;
+  replacementRuntimeId?: string;
+  oldRuntimeId?: string;
+  projectId?: string;
+  checkoutId?: string;
+  cwd?: string;
+  sessionId?: string;
+  sessionFile?: string;
+  name?: string;
+  model?: {
+    provider: string;
+    model: string;
+    thinking?: string;
+    serviceTier?: string;
+  };
+  mode?: 'read' | 'write';
+  runtimeProvider?: string;
+  force?: boolean;
+}
+
+export interface RuntimeCommandIntent {
+  idempotencyKey: string;
+  commandType: string;
+  resourceType?: string;
+  resourceId?: string;
+  runtimeId?: string;
+  commandFingerprint?: string;
+  result?: unknown;
+  createdAt: number;
+  updatedAt?: number;
+  executionState: RuntimeIntentState;
+  executionPlan?: RuntimeIntentPlan;
+  plannedRuntimeId?: string;
+}
+
+export interface ReserveRuntimeCommandIntentInput {
+  idempotencyKey: string;
+  commandType: string;
+  resourceType?: string;
+  resourceId?: string;
+  runtimeId?: string;
+  commandFingerprint: string;
+  executionPlan: RuntimeIntentPlan;
+  plannedRuntimeId?: string;
+  createdAt?: number;
 }
 
 export interface MetadataRepository {
@@ -82,6 +141,9 @@ export interface MetadataRepository {
   managedLaunches(): ManagedLaunchRecord[];
   consumeLaunchCredential(runtimeId: string): void;
   markManagedStopped(runtimeId: string): void;
+  markManagedReady?(runtimeId: string, readyAt?: number): void;
+  /** Includes stopped rows for conservative recovery; managedLaunches stays live-only. */
+  managedLaunchHistory?(): ManagedLaunchRecord[];
 }
 
 export interface CreateProjectInput {
@@ -225,6 +287,19 @@ export interface ProjectCheckoutRepository {
 export interface RuntimeServiceRepository {
   getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined;
   recordCommandReceipt(receipt: CommandReceipt): void;
+  getCommandIntent(idempotencyKey: string): RuntimeCommandIntent | undefined;
+  getCommandIntentByPlannedRuntimeId(
+    runtimeId: string,
+  ): RuntimeCommandIntent | undefined;
+  reserveCommandIntent(
+    input: ReserveRuntimeCommandIntentInput,
+  ): RuntimeCommandIntent;
+  transitionCommandIntent(
+    idempotencyKey: string,
+    state: RuntimeIntentState,
+  ): RuntimeCommandIntent;
+  completeCommandIntent(receipt: CommandReceipt): void;
+  pendingCommandIntents(): RuntimeCommandIntent[];
   getSessionThreadLink(sessionId: string): SessionThreadLinkRecord | undefined;
   getThread(id: string): Thread | undefined;
   unsettleThread(
@@ -359,6 +434,19 @@ export interface OrchestrationRepository extends ProjectAssociationRepository {
   ): { thread: Thread; run: Run; receipt: CommandReceipt };
   getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined;
   recordCommandReceipt(receipt: CommandReceipt): void;
+  getCommandIntent(idempotencyKey: string): RuntimeCommandIntent | undefined;
+  getCommandIntentByPlannedRuntimeId(
+    runtimeId: string,
+  ): RuntimeCommandIntent | undefined;
+  reserveCommandIntent(
+    input: ReserveRuntimeCommandIntentInput,
+  ): RuntimeCommandIntent;
+  transitionCommandIntent(
+    idempotencyKey: string,
+    state: RuntimeIntentState,
+  ): RuntimeCommandIntent;
+  completeCommandIntent(receipt: CommandReceipt): void;
+  pendingCommandIntents(): RuntimeCommandIntent[];
   setRunRuntime(id: string, runtimeId: string): Run;
   setRunError(id: string, error: string): Run;
   clearRunError(id: string): Run;

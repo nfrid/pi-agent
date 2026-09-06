@@ -97,12 +97,14 @@ export class MetadataStore {
       launchConsumed?: boolean;
       mode?: 'read' | 'write';
     },
+    owningIntentId?: string,
   ): void {
     this.metadata.recordManagedLaunch(
       runtimeId,
       identity,
       location,
       credentials,
+      owningIntentId,
     );
   }
 
@@ -114,8 +116,16 @@ export class MetadataStore {
     this.metadata.consumeLaunchCredential(runtimeId);
   }
 
+  markManagedReady(runtimeId: string, readyAt?: number): void {
+    this.metadata.markManagedReady(runtimeId, readyAt);
+  }
+
   markManagedStopped(runtimeId: string): void {
     this.metadata.markManagedStopped(runtimeId);
+  }
+
+  managedLaunchHistory(): ManagedLaunchRecord[] {
+    return this.metadata.managedLaunchHistory();
   }
 
   getDashboardSettings(): DashboardSettings {

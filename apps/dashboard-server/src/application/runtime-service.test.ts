@@ -1,21 +1,29 @@
 import { DatabaseSync } from 'node:sqlite';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../repositories/migrations.js';
 import { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
 import { RuntimeService } from './runtime-service.js';
 
+const databases: DatabaseSync[] = [];
+afterEach(() => {
+  for (const db of databases.splice(0)) db.close();
+});
+
+function receiptRepository() {
+  const db = new DatabaseSync(':memory:');
+  databases.push(db);
+  runMigrations(db);
+  const repository = new SqliteOrchestrationRepository(db);
+  return Object.assign(repository, {
+    getSessionThreadLink: vi.fn(),
+    getThread: vi.fn(),
+    unsettleThread: vi.fn(),
+  });
+}
+
 describe('RuntimeService runtime command receipts', () => {
   function fixture() {
-    const receipts = new Map<string, Record<string, unknown>>();
-    const repository = {
-      getCommandReceipt: (id: string) => receipts.get(id),
-      recordCommandReceipt: (receipt: Record<string, unknown>) => {
-        receipts.set(receipt.idempotencyKey as string, receipt);
-      },
-      getSessionThreadLink: vi.fn(),
-      getThread: vi.fn(),
-      unsettleThread: vi.fn(),
-    };
+    const repository = receiptRepository();
     const sendCommand = vi.fn(async () => ({ accepted: true }));
     const registry = { get: vi.fn(), sendCommand };
     const onThreadActivity = vi.fn();
@@ -28,13 +36,32 @@ describe('RuntimeService runtime command receipts', () => {
     );
     return {
       onThreadActivity,
-      receipts,
       registry,
       repository,
       sendCommand,
       service,
     };
   }
+
+  it('rejects missing durable capability before dispatching', async () => {
+    const sendCommand = vi.fn();
+    const service = new RuntimeService(
+      { sendCommand } as never,
+      {} as never,
+      {} as never,
+      {
+        getCommandReceipt: () => undefined,
+        recordCommandReceipt: vi.fn(),
+      } as never,
+    );
+    await expect(
+      service.commandWithReceipt('runtime', {
+        id: 'no-durability',
+        type: 'abort',
+      }),
+    ).rejects.toThrow('Durable runtime command intents are unavailable');
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
 
   it('replays an acknowledged command after a lost response', async () => {
     const { service, sendCommand } = fixture();
@@ -168,25 +195,33 @@ describe('RuntimeService runtime command receipts', () => {
 
 describe('RuntimeService lifecycle mutation receipts', () => {
   function lifecycleFixture() {
-    const receipts = new Map<string, Record<string, unknown>>();
-    const repository = {
-      getCommandReceipt: (id: string) => receipts.get(id),
-      recordCommandReceipt: (receipt: Record<string, unknown>) => {
-        receipts.set(receipt.idempotencyKey as string, receipt);
-      },
-      getSessionThreadLink: vi.fn(),
-      getThread: vi.fn(),
-      unsettleThread: vi.fn(),
-    };
+    const repository = receiptRepository();
     const snapshots: unknown[] = [];
     const registry = {
       snapshots: () => snapshots,
       sendCommand: vi.fn(async () => ({ accepted: true })),
     };
     const manager = {
-      launch: vi.fn(async () => ({ runtimeId: 'runtime-started' })),
+      prepareLaunch: vi.fn(async () => ({
+        runtimeId: 'runtime-started',
+        projectId: 'project-1',
+        checkoutId: 'checkout-1',
+        cwd: '/repo',
+      })),
+      prepareRestart: vi.fn(async () => ({
+        replacementRuntimeId: 'runtime-restarted',
+        sessionFile: '/repo/session.jsonl',
+        request: {
+          projectId: 'project-1',
+          checkoutId: 'checkout-1',
+          sessionId: 'session',
+        },
+      })),
+      launch: vi.fn(async (request: { runtimeId?: string }) => ({
+        runtimeId: request.runtimeId ?? 'runtime-started',
+      })),
       canRestart: vi.fn(() => true),
-      restart: vi.fn(async () => ({ runtimeId: 'runtime-restarted' })),
+      canStop: vi.fn(() => true),
       stop: vi.fn(async () => undefined),
     };
     const sessions = { rename: vi.fn(async () => ({ id: 'dormant' })) };
@@ -280,7 +315,7 @@ describe('RuntimeService lifecycle mutation receipts', () => {
     ).resolves.toMatchObject({
       status: 'already-completed',
     });
-    expect(fixture.manager.restart).toHaveBeenCalledOnce();
+    expect(fixture.manager.launch).toHaveBeenCalledOnce();
     await expect(
       fixture.service.restartWithReceipt({
         commandId: 'restart-once',

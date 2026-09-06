@@ -412,6 +412,7 @@ describe('dashboard query and mutation factories', () => {
     expect(
       (lifecycleRetry as (count: number, error: unknown) => boolean)(0, {
         kind: 'domain',
+        code: 'runtime-command-uncertain',
       }),
     ).toBe(false);
     expect(

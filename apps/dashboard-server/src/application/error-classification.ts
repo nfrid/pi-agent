@@ -2,6 +2,7 @@ export const DASHBOARD_DOMAIN_CODES = [
   'active-session',
   'merge-conflict',
   'restart-precondition',
+  'runtime-command-uncertain',
   'idempotency-conflict',
   'active-writer',
   'sqlite-constraint',

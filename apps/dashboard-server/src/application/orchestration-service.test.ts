@@ -2105,6 +2105,34 @@ describe('OrchestrationService', () => {
         diff?: string;
       };
       expect(review.diff).toContain('merged.txt');
+      repository.reserveCommandIntent({
+        idempotencyKey: 'pending-runtime-merge-collision',
+        commandType: 'runtime.command',
+        runtimeId: merged.runtimeId,
+        commandFingerprint: 'a'.repeat(64),
+        executionPlan: { operation: 'command', runtimeId: merged.runtimeId },
+      });
+      const headBeforeCollision = await gitOutput(
+        fixture.root,
+        'rev-parse',
+        'HEAD',
+      );
+      await expect(
+        fixture.service.mergeCheckout(
+          merged.run.checkoutId,
+          'pending-runtime-merge-collision',
+        ),
+      ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+      expect(await gitOutput(fixture.root, 'rev-parse', 'HEAD')).toBe(
+        headBeforeCollision,
+      );
+      await expect(access(merged.checkoutPath)).resolves.toBeUndefined();
+      await expect(
+        access(path.join(fixture.root, 'merged.txt')),
+      ).rejects.toBeDefined();
+      expect(repository.getCheckout(merged.run.checkoutId)?.status).not.toBe(
+        'retired',
+      );
       const mergedResult = (await fixture.service.mergeCheckout(
         merged.run.checkoutId,
         'lifecycle-merge',

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type {
   AgentRuntimeProvider,
@@ -34,8 +34,41 @@ interface LaunchRecord {
   mode: 'read' | 'write';
   /** Preserve requested provider routing when restarting within this daemon. */
   runtimeProvider: RuntimeProvider;
+  sessionId?: string;
+  sessionFile?: string;
+  name?: string;
+  model?: {
+    provider: string;
+    model: string;
+    thinking?: string;
+    serviceTier?: string;
+  };
   metadataRecorded: boolean;
   createdAt: number;
+}
+
+interface LaunchContext {
+  owningIntentId?: string;
+  /** Exact server-captured resume evidence, never accepted from browser input. */
+  sessionFile?: string;
+  restartingRuntimeId?: string;
+}
+
+export interface PreparedRuntimeLaunch {
+  readonly request: Record<string, unknown>;
+  readonly runtimeId: string;
+  readonly runtimeProvider?: RuntimeProvider;
+  readonly projectId: string;
+  readonly checkoutId: string;
+  readonly cwd: string;
+  readonly sessionFile?: string;
+}
+
+export interface PreparedRuntimeRestart {
+  readonly oldRuntimeId: string;
+  readonly replacementRuntimeId: string;
+  readonly request: Record<string, unknown>;
+  readonly sessionFile?: string;
 }
 
 function bindingFromLocation(
@@ -162,11 +195,20 @@ export class RuntimeManager {
     return this.launch(input);
   }
 
-  async launch(input: unknown): Promise<{ runtimeId: string }> {
+  /** Validate and allocate an identity without recording metadata or starting a child. */
+  async prepareLaunch(
+    input: unknown,
+    context: LaunchContext = {},
+  ): Promise<PreparedRuntimeLaunch> {
     const raw =
       input && typeof input === 'object'
         ? (input as Record<string, unknown>)
         : undefined;
+    if (
+      raw?.runtimeProvider !== undefined &&
+      raw.runtimeProvider !== 'extension-bridge'
+    )
+      throw new Error('Unsupported runtime provider.');
     const runtimeProvider =
       raw?.runtimeProvider === 'extension-bridge'
         ? (raw.runtimeProvider as RuntimeProvider)
@@ -193,25 +235,22 @@ export class RuntimeManager {
     const cwd = realpathSync.native(request.checkoutCwd ?? checkout.path);
     if (!this.containsPath(checkout.path, cwd))
       throw new Error('Launch cwd is outside the selected checkout.');
-    const projectId = project.id;
-    const checkoutId = checkout.id;
     let sessionFile: string | undefined;
     if (request.sessionId) {
-      const session = this.sessions.get(request.sessionId);
-      if (!session) throw new Error('Resume target is not a known session.');
-      if (!existsSync(session.file))
+      sessionFile =
+        context.sessionFile ?? this.sessions.get(request.sessionId)?.file;
+      if (!sessionFile)
+        throw new Error('Resume target is not a known session.');
+      if (!statSync(sessionFile, { throwIfNoEntry: false })?.isFile())
         throw new Error('Resume target no longer exists.');
-      sessionFile = session.file;
-    }
-    if (request.sessionId) {
       const active = this.registry
         .snapshots()
         .find(
           (runtime) =>
+            runtime.runtimeId !== context.restartingRuntimeId &&
             runtime.online !== false &&
             (runtime.session.id === request.sessionId ||
-              (sessionFile !== undefined &&
-                runtime.session.file === sessionFile)),
+              runtime.session.file === sessionFile),
         );
       if (active) {
         const error = new Error(
@@ -226,15 +265,52 @@ export class RuntimeManager {
     }
     const runtimeId = request.runtimeId ?? `runtime-${randomUUID()}`;
     const registered = (
-      this.registry as RuntimeRegistry & {
-        get?: (id: string) => unknown;
-      }
+      this.registry as RuntimeRegistry & { get?: (id: string) => unknown }
     ).get?.(runtimeId);
     if (
       this.launches.has(runtimeId) ||
       registered ||
       this.launchingIds.has(runtimeId)
     )
+      throw new Error('This runtime identity is already active.');
+    if (
+      this.metadata
+        .managedLaunchHistory()
+        .some((record) => record.runtimeId === runtimeId)
+    )
+      throw new Error('This runtime identity has already been used.');
+    const owner =
+      this.metadata.orchestration.getCommandIntentByPlannedRuntimeId(runtimeId);
+    if (owner && owner.idempotencyKey !== context.owningIntentId)
+      throw new Error('Runtime identity belongs to another intent.');
+    return {
+      request: { ...request, runtimeId },
+      runtimeId,
+      ...(runtimeProvider === undefined ? {} : { runtimeProvider }),
+      projectId: project.id,
+      checkoutId: checkout.id,
+      cwd,
+      ...(sessionFile === undefined ? {} : { sessionFile }),
+    };
+  }
+
+  async launch(
+    input: unknown,
+    context: LaunchContext = {},
+  ): Promise<{ runtimeId: string }> {
+    const prepared = await this.prepareLaunch(input, context);
+    const {
+      runtimeId,
+      runtimeProvider,
+      projectId,
+      checkoutId,
+      cwd,
+      sessionFile,
+    } = prepared;
+    const request = validateStartRuntimeRequest(prepared.request);
+    // prepareLaunch yields; the SQLite insertion below is the atomic ownership
+    // and historical identity boundary before provider.start.
+    if (this.launchingIds.has(runtimeId))
       throw new Error('This runtime identity is already active.');
     const launchToken = randomUUID();
     const identityToken = randomUUID();
@@ -263,6 +339,7 @@ export class RuntimeManager {
           launchConsumed: false,
           mode: request.mode ?? 'write',
         },
+        context.owningIntentId,
       );
       metadataRecorded = true;
       binding = await this.provider.start({
@@ -288,6 +365,7 @@ export class RuntimeManager {
         ).requiresRegistration
       )
         await this.waitForRegistration(runtimeId);
+      this.metadata.markManagedReady(runtimeId);
       const launch: LaunchRecord = {
         runtimeId,
         launchToken,
@@ -298,6 +376,10 @@ export class RuntimeManager {
         binding,
         mode: request.mode ?? 'write',
         runtimeProvider: runtimeProvider ?? 'extension-bridge',
+        ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+        ...(sessionFile ? { sessionFile } : {}),
+        ...(request.name ? { name: sanitizeDisplayName(request.name) } : {}),
+        ...(request.model ? { model: request.model } : {}),
         metadataRecorded: true,
         createdAt: Date.now(),
       };
@@ -347,6 +429,24 @@ export class RuntimeManager {
       snapshot &&
         snapshot.ownership === 'managed' &&
         this.launches.has(runtimeId),
+    );
+  }
+
+  canStop(runtimeId: string): boolean {
+    return Boolean(
+      this.registry.get(runtimeId) || this.launches.has(runtimeId),
+    );
+  }
+
+  /** A stopped marker is the only durable proof accepted for managed stop replay. */
+  reconcileStop(runtimeId: string): boolean {
+    return Boolean(
+      this.metadata
+        .managedLaunchHistory()
+        .some(
+          (record) =>
+            record.runtimeId === runtimeId && record.stoppedAt !== undefined,
+        ),
     );
   }
 
@@ -403,25 +503,30 @@ export class RuntimeManager {
     this.dispatchInitialPrompt(runtimeId);
   }
 
-  async restart(runtimeId: string): Promise<{ runtimeId: string }> {
+  async prepareRestart(runtimeId: string): Promise<PreparedRuntimeRestart> {
     const snapshot = this.registry.get(runtimeId);
     const launch = this.launches.get(runtimeId);
     if (!snapshot || !launch)
       throw new Error('Only managed runtimes can restart.');
     const session = this.sessions.get(snapshot.session.id);
+    const sessionFile = snapshot.session.file ?? session?.file;
+    if (!snapshot.session.id || !sessionFile)
+      throw new Error('Restart requires exact persisted session evidence.');
     const request =
       launch.projectId && launch.checkoutId
         ? {
             projectId: launch.projectId,
             checkoutId: launch.checkoutId,
             checkoutCwd: snapshot.cwd,
-            ...(session ? { sessionId: session.id } : {}),
+            sessionId: snapshot.session.id,
           }
         : undefined;
     if (!request)
       throw new Error('Managed runtime has no persisted launch identity.');
+    const replacementRuntimeId = `runtime-${randomUUID()}`;
     const restartRequest = {
       ...request,
+      runtimeId: replacementRuntimeId,
       ...(snapshot.session.name ? { name: snapshot.session.name } : {}),
       ...(snapshot.model
         ? {
@@ -436,12 +541,49 @@ export class RuntimeManager {
                 : {}),
             },
           }
-        : {}),
+        : launch.model
+          ? { model: launch.model }
+          : {}),
       mode: launch.mode,
       runtimeProvider: launch.runtimeProvider,
     };
-    await this.stop(runtimeId);
-    return this.launch(restartRequest);
+    await this.prepareLaunch(restartRequest, {
+      sessionFile,
+      restartingRuntimeId: runtimeId,
+    });
+    return {
+      oldRuntimeId: runtimeId,
+      replacementRuntimeId,
+      request: restartRequest,
+      sessionFile,
+    };
+  }
+
+  async restartPrepared(
+    prepared: PreparedRuntimeRestart,
+  ): Promise<{ runtimeId: string }> {
+    await this.prepareLaunch(prepared.request, {
+      sessionFile: prepared.sessionFile,
+      restartingRuntimeId: prepared.oldRuntimeId,
+    });
+    await this.stop(prepared.oldRuntimeId);
+    return this.launch(prepared.request, { sessionFile: prepared.sessionFile });
+  }
+
+  async restart(runtimeId: string): Promise<{ runtimeId: string }> {
+    return this.restartPrepared(await this.prepareRestart(runtimeId));
+  }
+
+  /** Reconcile a durable launch without issuing another provider start. */
+  reconcileLaunch(runtimeId: string): 'ready' | 'uncertain' | 'absent' {
+    const record = this.metadata
+      .managedLaunchHistory()
+      .find((item) => item.runtimeId === runtimeId);
+    if (!record) return 'absent';
+    // A readiness marker is durable proof that the provider accepted this
+    // exact identity. It remains valid even when the child later stopped.
+    if (record.readyAt !== undefined) return 'ready';
+    return 'uncertain';
   }
 
   async stop(runtimeId: string, force = false): Promise<void> {

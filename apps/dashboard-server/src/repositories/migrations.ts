@@ -877,6 +877,36 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 21,
+    name: 'runtime-intent-recovery',
+    up(db) {
+      const receiptColumns = columns(db, 'command_receipt');
+      if (!receiptColumns.has('execution_state'))
+        db.exec(
+          "ALTER TABLE command_receipt ADD COLUMN execution_state TEXT NOT NULL DEFAULT 'completed' CHECK (execution_state IN ('prepared','stopping','launching','dispatched','uncertain','completed'))",
+        );
+      if (!receiptColumns.has('execution_plan_json'))
+        db.exec(
+          'ALTER TABLE command_receipt ADD COLUMN execution_plan_json TEXT',
+        );
+      if (!receiptColumns.has('planned_runtime_id'))
+        db.exec(
+          'ALTER TABLE command_receipt ADD COLUMN planned_runtime_id TEXT',
+        );
+      if (!receiptColumns.has('updated_at'))
+        db.exec('ALTER TABLE command_receipt ADD COLUMN updated_at INTEGER');
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS command_receipt_planned_runtime_unique
+          ON command_receipt(planned_runtime_id)
+          WHERE planned_runtime_id IS NOT NULL;
+      `);
+
+      const launchColumns = columns(db, 'managed_launch');
+      if (!launchColumns.has('ready_at'))
+        db.exec('ALTER TABLE managed_launch ADD COLUMN ready_at INTEGER');
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

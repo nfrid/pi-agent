@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
@@ -326,7 +326,8 @@ describe('managed runtime launch safety', () => {
     const start = vi.fn(async ({ runtimeId }: { runtimeId: string }) =>
       binding(runtimeId),
     );
-    const recordManagedLaunch = vi.fn();
+    const metadata = new MetadataStore(path.join(root, 'dashboard.sqlite'));
+    const recordManagedLaunch = vi.spyOn(metadata, 'recordManagedLaunch');
     const project = { id: 'project-1', status: 'active' };
     const checkout = {
       id: 'checkout-1',
@@ -338,7 +339,7 @@ describe('managed runtime launch safety', () => {
       { snapshots: () => [] } as never,
       { start } as never,
       {} as never,
-      { managedLaunches: () => [], recordManagedLaunch } as never,
+      metadata,
       '/tmp/bridge.sock',
       {
         getProject: (id: string) => (id === project.id ? project : undefined),
@@ -368,6 +369,7 @@ describe('managed runtime launch safety', () => {
       },
       expect.objectContaining({ id: expect.stringMatching(/^runtime-host:/) }),
       expect.objectContaining({ mode: 'write' }),
+      undefined,
     );
 
     await expect(
@@ -377,6 +379,7 @@ describe('managed runtime launch safety', () => {
         checkoutCwd: path.dirname(root),
       }),
     ).rejects.toThrow('outside the selected checkout');
+    metadata.close();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -417,8 +420,18 @@ describe('managed runtime launch safety', () => {
         mode: 'read',
       },
     );
+    const sessionFile = path.join(root, 'session.jsonl');
+    await writeFile(
+      sessionFile,
+      '{"type":"session","id":"session-project-restored"}\n',
+    );
     const snapshot = {
       ...runtime('session-project-restored'),
+      session: {
+        id: 'session-project-restored',
+        file: sessionFile,
+        entries: [],
+      },
       runtimeId,
       cwd: checkoutRoot,
       model: {

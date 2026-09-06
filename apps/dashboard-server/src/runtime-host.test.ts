@@ -6,7 +6,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { createConnection } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -31,6 +31,37 @@ async function eventually(check: () => Promise<boolean>): Promise<void> {
 }
 
 describe('runtime host', () => {
+  it.each([
+    'running',
+    'stopped',
+    'absent',
+  ] as const)('rejects an old host success ACK with %s or live-PID evidence', async (status) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'legacy-runtime-host-'));
+    const socket = path.join(root, 'host.sock');
+    const server = createServer((connection) => {
+      connection.once('data', () =>
+        connection.end(
+          `${JSON.stringify({
+            ok: true,
+            ...(status === 'absent'
+              ? {}
+              : { runtime: { runtimeId: 'legacy', status, pid: process.pid } }),
+          })}\n`,
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    try {
+      await expect(
+        new RuntimeHostClient(socket).stop('legacy'),
+      ).rejects.toThrow(status === 'stopped' ? 'still exists' : 'not proven');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it('loads exported variables after shell startup output', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'runtime-shell-env-'));
     const shell = path.join(root, 'login-shell');

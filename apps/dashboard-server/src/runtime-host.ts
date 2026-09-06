@@ -482,6 +482,8 @@ export class RuntimeHostService {
         const runtime = this.runtimes.get(request.runtimeId);
         if (!runtime) return { ok: true };
         await this.stopRuntime(runtime, request.force === true);
+        if (runtime.status !== 'stopped')
+          throw new Error('Runtime host could not confirm termination.');
         return { ok: true, runtime: summary(runtime) };
       }
     }
@@ -633,6 +635,8 @@ export class RuntimeHostService {
       signalGroup(runtime, 'SIGKILL');
       await waitForClose(runtime, 500);
     }
+    if ((runtime as HostRuntime).status !== 'stopped')
+      throw new Error('Runtime host could not confirm termination.');
   }
 }
 
@@ -716,6 +720,24 @@ export class RuntimeHostClient {
 
   async stop(runtimeId: string, force = false): Promise<void> {
     await this.request({ op: 'stop', runtimeId, force });
+    // The long-lived host may predate strict stop ACKs. Independently inspect
+    // its retained close evidence and verify local process absence before the
+    // daemon writes a durable stopped marker. Missing host history is unknown.
+    const runtime = await this.inspect(runtimeId);
+    if (
+      runtime?.runtimeId !== runtimeId ||
+      runtime.status !== 'stopped' ||
+      !Number.isSafeInteger(runtime.pid) ||
+      runtime.pid <= 0
+    )
+      throw new Error('Runtime termination is not proven by the host.');
+    try {
+      process.kill(runtime.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+      throw error;
+    }
+    throw new Error('Runtime process still exists after stop acknowledgement.');
   }
 }
 

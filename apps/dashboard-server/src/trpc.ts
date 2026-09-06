@@ -102,6 +102,7 @@ function transportCode(
     code === 'active-session' ||
     code === 'merge-conflict' ||
     code === 'restart-precondition' ||
+    code === 'runtime-command-uncertain' ||
     code === 'idempotency-conflict' ||
     code === 'active-writer' ||
     code === 'sqlite-constraint' ||
