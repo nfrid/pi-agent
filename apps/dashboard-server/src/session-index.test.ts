@@ -77,6 +77,68 @@ describe('session index', () => {
     ).rejects.toThrow('Unknown session image');
   });
 
+  it('removes a known session when a malformed scan has no valid header', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-malformed-'),
+    );
+    const file = path.join(root, 'malformed.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'malformed-id', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    expect(index.get('malformed-id')).toBeDefined();
+
+    await writeFile(file, '{not-json\n');
+    const reindex = (
+      index as unknown as { indexFile: (target: string) => Promise<void> }
+    ).indexFile.bind(index);
+    await expect(reindex(file)).resolves.toBeUndefined();
+    expect(index.get('malformed-id')).toBeUndefined();
+  });
+
+  it('keeps the previous catalogue entry when scanning observes a concurrent change', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-scan-race-'),
+    );
+    const file = path.join(root, 'race.jsonl');
+    const source = `${[
+      { type: 'session', id: 'stable-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'large-entry',
+        message: { role: 'user', content: 'x'.repeat(80_000) },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join('\n')}\n`;
+    let mutate = false;
+    let mutated = false;
+    const index = new SessionIndex(
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        if (!mutate) return;
+        mutate = false;
+        mutated = true;
+        writeFileSync(file, '');
+      },
+    );
+    await writeFile(file, source);
+    await index.rebuild();
+    mutate = true;
+    const reindex = (
+      index as unknown as { indexFile: (target: string) => Promise<void> }
+    ).indexFile.bind(index);
+    await expect(reindex(file)).rejects.toThrow('Session file changed');
+    expect(mutated).toBe(true);
+    expect(index.get('stable-id')).toMatchObject({ id: 'stable-id' });
+  });
+
   it('projects linked delegate auxiliary sessions without exposing their paths', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-linked-'));
     const auxiliary = await mkdtemp(
