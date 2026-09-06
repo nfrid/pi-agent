@@ -54,6 +54,64 @@ The bounded audit implementation completed these items:
 
 The final cycle inventory still contains three pre-existing extension-internal components: the delegate execution/type component, the delegate plan/orchestration/tool component, and the task store/domain pair. They were not coupled to the corrected dashboard or contribution boundaries and should be handled only as separate behavior-preserving work.
 
+## Follow-up implementation (September 2026)
+
+The follow-up audit at `8a359e32` was implemented as six isolated batches:
+
+- Usage has one portable, typed normalization contract in dashboard-protocol.
+  Codex transport, broker reads, footer, browser views, and history storage use
+  that contract. Provider parsing is no longer independently maintained by the
+  consumers. Legacy reset timestamps retain the seconds/milliseconds heuristic;
+  relative resets are anchored to capture time. Duration-less footer labels and
+  presentation-specific multiweek labels remain distinct from dashboard labels.
+- Compact workflow evidence projection, bounds, and journal validation share a
+  contract owner. Live and durable evidence remain distinct, and coordinators
+  still own lifecycle mutation. Wake source expansion and symbolic-branch
+  workspace constraints also share their underlying rules without unifying
+  caller-specific rejection and diagnostic behavior.
+- Dashboard activity entries are derived once through a typed activity-model
+  adapter. Raw compatibility adaptation uses the same semantic implementation.
+  Unresolved declared/inline tool calls and explicit tool errors retain their
+  previous grouping semantics.
+- Authoritative history pages reuse their hydrated projection. Cached coverage
+  is validated against page facts and reconstructed with the existing coverage
+  constructor. Production-generated overlap and origin-placeholder shapes are
+  covered by round-trip tests; inconsistent aggregates are rejected.
+- Orchestration tracks execution through one promise map instead of a parallel
+  set and polling helper. REST/tRPC share domain classification and database
+  redaction while retaining transport-specific defaults and REST explicit error
+  codes. Runtime and dashboard consumers use narrower repository capabilities;
+  SQLite remains the sole transaction owner.
+- SessionIndex retains path safety, catalogue publication, metadata persistence,
+  and watcher ownership. Its bounded JSONL scanner returns descriptors, physical
+  byte proofs, header facts, and file version information without publishing
+  catalogue state. Malformed-file removal and concurrent-change behavior remain
+  distinct.
+
+The extraction includes explicit correctness changes at two boundaries: cached
+coverage rejects inconsistent persisted facts, and REST now uses the richer
+nested database-detail redaction policy already present in tRPC. Both transports
+recognize `session-link-conflict`. These are not a protocol or storage migration.
+
+### Follow-up validation
+
+- `PATH="$PATH:/usr/sbin:/sbin" bun run check`: typechecks and lint pass;
+  2,218 tests pass. Two assertions in `apps/dashboard-server/src/migrations.test.ts`
+  fail because they expect migration 19 while the existing migration list includes
+  20. Both failures reproduce at the original `8a359e32` revision. Adding the
+  system-tool PATH resolves the process-host test's environment-only `lsof` error.
+- Workspace production builds pass. Codex usage has a package-local Vitest config
+  so its new protocol dependency resolves from package cwd as well as root tests.
+- Fourteen filtered Playwright checks cover usage, transcript grouping, pagination,
+  retained caches, and reconnect. Nine pass; five failures reproduce in a detached
+  `8a359e32` worktree: the older-active transcript button assertion, the reconnect
+  fixture's `Live generation` assertion, two history-navigation `Load earlier
+  history` assertions, and the desktop usage/settings ambiguous text locator.
+- The temporary baseline worktree was removed. Tests used isolated web/API ports;
+  no production state, sockets, runtime host, or process host were used.
+- This branch has not been merged into the production checkout or deployed.
+  Baseline failures remain explicit release caveats, not passing checks.
+
 ## Validation baseline
 
 The integrated change is expected to pass `bun run check`, a production dashboard-web build, focused contribution/protocol/delegate/web tests, and the usage Playwright flow. The final commands and counts belong in the implementing change record; do not treat this note as a substitute for rerunning them after later edits.

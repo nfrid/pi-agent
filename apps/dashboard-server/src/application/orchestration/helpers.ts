@@ -183,7 +183,6 @@ export interface OrchestrationHost {
   assertCheckoutQuiescent(checkoutId: string): void;
   quiesceCheckoutRuntimes(checkoutId: string): Promise<void>;
   serializedPreparation<T>(operation: () => Promise<T>): Promise<T>;
-  waitForRun(id: string): Promise<void>;
   recoverManagedRuntime(runtimeId: string): Promise<boolean>;
   waitForRuntimeHello(runtimeId: string): Promise<boolean>;
   stopRecoveredRuntime(runtimeId: string): Promise<void>;
