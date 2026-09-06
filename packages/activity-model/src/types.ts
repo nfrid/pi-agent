@@ -60,3 +60,26 @@ export type SequenceRenderer = (
   theme: Theme,
   context: RendererContext,
 ) => Component | undefined;
+
+/** Typed semantic input shared by live projections and persisted raw entries. */
+export type ActivitySemanticEntry =
+  | {
+      kind: 'assistant';
+      content: unknown;
+      /** Includes declared calls that have not produced a materialized tool. */
+      hasTools: boolean;
+      streaming: boolean;
+    }
+  | {
+      kind: 'tool';
+      name: string;
+      args?: unknown;
+      status?: 'pending' | 'running' | 'complete' | 'success' | 'error';
+      result?: unknown;
+      data?: unknown;
+      isError?: boolean;
+    }
+  | {
+      kind: 'other';
+      continuesGroup?: boolean;
+    };

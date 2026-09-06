@@ -5,6 +5,7 @@ import {
   type TranscriptEntry,
 } from './grouping.js';
 import { headersOf, isNarration } from './title.js';
+import type { ActivitySemanticEntry } from './types.js';
 
 /** A small raw JSONL shape accepted by the shared transcript boundary adapter. */
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -59,49 +60,65 @@ function preambleTitle(text: string): string {
   );
 }
 
-function assistantEntry(raw: Record<string, unknown>): TranscriptEntry {
-  const content = messageContent(raw);
-  const parts = Array.isArray(content) ? content : [];
-  const text = contentText(content).trim();
-  const assistant = {
-    role: 'assistant',
-    content: parts,
-  } as unknown as AssistantMessage;
-  const textHeaders = headersOf(assistant, 'text');
-  const thinkingHeaders = headersOf(assistant, 'thinking');
-  const visibleText = text && !isNarration(text) ? text : undefined;
-  const message = record(raw.message);
-  const hasTools =
-    toolCallParts(content).length > 0 ||
-    (Array.isArray(message?.toolCallIds) && message.toolCallIds.length > 0) ||
-    (Array.isArray(message?.toolCalls) && message.toolCalls.length > 0);
-  const preamble =
-    visibleText && hasTools ? preambleTitle(visibleText) : undefined;
-  const narratedTitle = (
-    textHeaders.length > 0 ? textHeaders : thinkingHeaders
-  ).at(-1);
-  const streaming =
-    raw.__dashboardStreaming === true ||
-    raw.streaming === true ||
-    message?.__dashboardStreaming === true ||
-    message?.streaming === true;
+/**
+ * Convert typed domain semantics into the shared activity entry. Raw JSONL
+ * adaptation below is only a compatibility translation into this function.
+ */
+export function activityEntryFromSemantic(
+  input: ActivitySemanticEntry,
+): TranscriptEntry {
+  if (input.kind === 'assistant') {
+    const parts = Array.isArray(input.content) ? input.content : [];
+    const text = contentText(input.content).trim();
+    const assistant = {
+      role: 'assistant',
+      content: parts,
+    } as unknown as AssistantMessage;
+    const textHeaders = headersOf(assistant, 'text');
+    const thinkingHeaders = headersOf(assistant, 'thinking');
+    const visibleText = text && !isNarration(text) ? text : undefined;
+    const preamble =
+      visibleText && input.hasTools ? preambleTitle(visibleText) : undefined;
+    const narratedTitle = (
+      textHeaders.length > 0 ? textHeaders : thinkingHeaders
+    ).at(-1);
+    return {
+      kind: 'assistant',
+      // Live text is ordinary speech until a tool association proves it is a
+      // preamble. Once the call arrives, the same entry becomes the group's
+      // leader.
+      speaks: Boolean(visibleText) && !preamble,
+      ...(input.streaming ? { streaming: true } : {}),
+      ...(textHeaders.length > 0
+        ? { narration: 'announced' as const }
+        : thinkingHeaders.length > 0
+          ? { narration: 'thought' as const }
+          : {}),
+      ...(preamble
+        ? { title: preamble, titleKind: 'preamble' as const }
+        : narratedTitle
+          ? { title: narratedTitle, titleKind: 'narration' as const }
+          : {}),
+    };
+  }
+  if (input.kind === 'tool') {
+    return {
+      kind: 'tool',
+      name: input.name,
+      args: input.args,
+      ...(input.status === undefined && !input.isError
+        ? {}
+        : { status: input.isError ? 'error' : input.status }),
+      ...(input.isError || input.status === 'error' ? { isError: true } : {}),
+      ...(input.result === undefined ? {} : { result: input.result }),
+      ...(input.data === undefined ? {} : { data: input.data }),
+    };
+  }
   return {
-    kind: 'assistant',
-    // Live text is ordinary speech until a tool association proves it is a
-    // preamble. This keeps it outside the preceding activity while it streams;
-    // once the call arrives, the same entry becomes the next group's leader.
-    speaks: Boolean(visibleText) && !preamble,
-    ...(streaming ? { streaming: true } : {}),
-    ...(textHeaders.length > 0
-      ? { narration: 'announced' as const }
-      : thinkingHeaders.length > 0
-        ? { narration: 'thought' as const }
-        : {}),
-    ...(preamble
-      ? { title: preamble, titleKind: 'preamble' as const }
-      : narratedTitle
-        ? { title: narratedTitle, titleKind: 'narration' as const }
-        : {}),
+    kind: 'other',
+    ...(input.continuesGroup === undefined
+      ? {}
+      : { continuesGroup: input.continuesGroup }),
   };
 }
 
@@ -113,70 +130,71 @@ type RawToolStatus =
   | 'error'
   | undefined;
 
-function toolEntry(
-  name: string | undefined,
-  args: unknown,
-  status: RawToolStatus,
-  result?: unknown,
-  data?: unknown,
-  isError = false,
-): TranscriptEntry {
-  return {
-    kind: 'tool',
-    name: name ?? 'tool',
-    args,
-    ...(status === undefined ? {} : { status }),
-    ...(isError || status === 'error' ? { isError: true } : {}),
-    ...(result === undefined ? {} : { result }),
-    ...(data === undefined ? {} : { data }),
-  };
-}
-
 /**
- * Convert one persisted Pi entry to the exact semantic entry used for
- * activity grouping. Presentation adapters may omit the raw event, but they
- * must use this value for their boundary fields.
+ * Convert one persisted Pi entry to typed semantic input, then use the same
+ * authority as live projections for activity grouping.
  */
 export function activityEntryFromRaw(raw: unknown): TranscriptEntry {
   const value = record(raw);
-  if (!value) return { kind: 'other' };
+  if (!value) return activityEntryFromSemantic({ kind: 'other' });
 
   const type = stringField(value, 'type');
   const message = record(value.message);
   const role = messageRole(value);
   if (type === 'message' || message !== undefined || role !== undefined) {
-    if (role === 'assistant') return assistantEntry(value);
+    if (role === 'assistant') {
+      const content = messageContent(value);
+      const toolCalls = toolCallParts(content);
+      return activityEntryFromSemantic({
+        kind: 'assistant',
+        content,
+        hasTools:
+          toolCalls.length > 0 ||
+          (Array.isArray(message?.toolCallIds) &&
+            message.toolCallIds.length > 0) ||
+          (Array.isArray(message?.toolCalls) && message.toolCalls.length > 0),
+        streaming:
+          value.__dashboardStreaming === true ||
+          value.streaming === true ||
+          message?.__dashboardStreaming === true ||
+          message?.streaming === true,
+      });
+    }
     if (role === 'toolResult' || role === 'tool_result' || role === 'tool') {
-      return toolEntry(
-        stringField(message, 'toolName') ??
+      const isError = message?.isError === true || value.isError === true;
+      return activityEntryFromSemantic({
+        kind: 'tool',
+        name:
+          stringField(message, 'toolName') ??
           stringField(value, 'toolName') ??
-          stringField(value, 'name'),
-        message?.arguments ?? message?.args ?? value.arguments ?? value.args,
-        message?.isError === true || value.isError === true
-          ? 'error'
-          : 'complete',
-        message?.result ?? value.result ?? message?.content ?? value.content,
-        message?.data ?? value.data,
-        message?.isError === true || value.isError === true,
-      );
+          stringField(value, 'name') ??
+          'tool',
+        args:
+          message?.arguments ?? message?.args ?? value.arguments ?? value.args,
+        status: isError ? 'error' : 'complete',
+        result:
+          message?.result ?? value.result ?? message?.content ?? value.content,
+        data: message?.data ?? value.data,
+        isError,
+      });
     }
     // User messages, and provider messages unknown to the model, terminate an
     // activity just as the web transcript does.
-    return { kind: 'other' };
+    return activityEntryFromSemantic({ kind: 'other' });
   }
 
   if (type === 'tool') {
     const tool = record(value.tool) ?? value;
-    return toolEntry(
-      stringField(tool, 'name') ?? stringField(tool, 'toolName'),
-      tool.arguments ?? tool.args,
-      tool.isError === true || tool.status === 'error'
-        ? 'error'
-        : (tool.status as RawToolStatus),
-      tool.result,
-      tool.data,
-      tool.isError === true,
-    );
+    return activityEntryFromSemantic({
+      kind: 'tool',
+      name:
+        stringField(tool, 'name') ?? stringField(tool, 'toolName') ?? 'tool',
+      args: tool.arguments ?? tool.args,
+      status: tool.status as RawToolStatus,
+      result: tool.result,
+      data: tool.data,
+      isError: tool.isError === true,
+    });
   }
 
   // Session metadata and extension persistence are transparent to an active
@@ -192,8 +210,8 @@ export function activityEntryFromRaw(raw: unknown): TranscriptEntry {
     type === 'session_info' ||
     type === 'label'
   )
-    return { kind: 'other', continuesGroup: true };
-  return { kind: 'other' };
+    return activityEntryFromSemantic({ kind: 'other', continuesGroup: true });
+  return activityEntryFromSemantic({ kind: 'other' });
 }
 
 export function activityEntriesFromRaw(

@@ -10,6 +10,7 @@ export * from './title.js';
 export * from './tool-presentations.js';
 export {
   activityEntriesFromRaw,
+  activityEntryFromSemantic,
   activityGroupBoundary,
   adaptRawTranscriptEntry,
   groupOwningBoundary,

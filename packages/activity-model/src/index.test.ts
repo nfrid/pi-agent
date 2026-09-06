@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activityEntryFromRaw,
+  activityEntryFromSemantic,
   activityGroupFacts,
   activityPhases,
   groupTranscript,
@@ -533,6 +534,13 @@ describe('shared activity model', () => {
     };
 
     const streaming = activityEntryFromRaw(liveMessage);
+    const typedStreaming = activityEntryFromSemantic({
+      kind: 'assistant',
+      content: liveMessage.message.content,
+      hasTools: false,
+      streaming: true,
+    });
+    expect(typedStreaming).toEqual(streaming);
     expect(streaming).toMatchObject({
       kind: 'assistant',
       speaks: true,
@@ -549,6 +557,14 @@ describe('shared activity model', () => {
         toolCallIds: ['edit-1'],
       },
     });
+    expect(
+      activityEntryFromSemantic({
+        kind: 'assistant',
+        content: liveMessage.message.content,
+        hasTools: true,
+        streaming: true,
+      }),
+    ).toEqual(withTool);
     expect(withTool).toMatchObject({
       kind: 'assistant',
       speaks: false,
@@ -566,6 +582,26 @@ describe('shared activity model', () => {
       { start: 0, end: 1 },
       { start: 2, end: 3 },
     ]);
+  });
+
+  it('normalizes error tools through the typed semantic authority', () => {
+    const semantic = activityEntryFromSemantic({
+      kind: 'tool',
+      name: 'bash',
+      status: 'complete',
+      isError: true,
+    });
+    expect(semantic).toMatchObject({
+      kind: 'tool',
+      status: 'error',
+      isError: true,
+    });
+    expect(
+      activityEntryFromRaw({
+        type: 'tool',
+        tool: { name: 'bash', status: 'complete', isError: true },
+      }),
+    ).toEqual(semantic);
   });
 
   it('maps persisted preambles, narration, tools, and continuation events canonically', () => {
