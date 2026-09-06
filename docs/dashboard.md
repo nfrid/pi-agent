@@ -85,8 +85,8 @@ Pi extension events
   -> extensions/remote-control
   -> bounded JSONL over a user-private Unix socket
   -> RuntimeRegistry and DashboardApplication
-  -> canonical event stream + runtime/transcript projections
-  -> authenticated HTTP snapshots and resumable SSE
+  -> independent shell/session feeds + runtime/transcript projections
+  -> authenticated protocol-v3 tRPC snapshots and resumable SSE
   -> DashboardLiveStore
   -> TanStack Router/Query React UI
 ```
@@ -121,21 +121,51 @@ primary synchronization mechanism.
 
 ### Synchronization model
 
-`DashboardEventStream` is the daemon-global cursor and bounded replay log. Every
-publication receives one cursor before subscribers are notified. The browser
-connects with a header-authenticated fetch-based SSE client, rejects duplicate
-or older records, and reconnects from its last accepted cursor. A cursor outside
-the retained window returns a replay gap, causing the client to fetch a fresh
-authoritative snapshot before reconnecting. Cursor ordering is scoped by
-`serverId`, so a daemon restart can safely begin again at a lower cursor.
+`ShellFeed` and per-session `SessionFeed` instances use `BoundedFeed` for replay,
+queue limits, and tracked cursors. Each domain has its own semantic sequence.
+Tracked IDs also distinguish snapshot, event, and caught-up frames; they are not
+interchangeable with semantic sequence numbers. Replay gaps receive an
+authoritative subscription snapshot rather than triggering finite HTTP polling.
+The shell establishes daemon-generation authority before sessions rebase.
 
-`DashboardLiveStore` is the browser's single external store for normalized
-snapshots, entity indexes, bounded event history, transcript projections,
-connection state, and daemon-generation acceptance. Session hydration installs
-an HTTP projection at its cursor and applies only newer buffered events through
-the shared transcript reducer. Persisted/live convergence uses explicit runtime,
-session, message, and tool identities rather than recursively inferring IDs from
-provider payloads.
+`DashboardConnectionRuntime` owns subscriptions, reference counts, callback
+invalidation, opaque resume IDs, and browser online/visibility handling. tRPC owns
+transport retry. `DashboardLiveStore` alone owns accepted semantic sequences and
+normalized projections; `domain-sync.ts` defines its pure acceptance rules.
+`react-store.ts` is the React binding, separate from the core store. Entity-array
+selectors cache by the relevant normalized index, not by unrelated usage updates
+or another store's last read.
+
+`session-transcript-state.ts` owns history coverage and persisted/live
+reconciliation. Persisted/live convergence uses explicit runtime, session,
+message, and tool identities rather than recursively inferring IDs from provider
+payloads. A durable tool declaration does not prove that a newer live result was
+persisted.
+
+### Ownership rules for changes
+
+- Snapshot/projection reads do not advance the session metadata publication
+  baseline. Only initialization and delta publication own that baseline.
+- `SessionIndex` keeps its current catalogue readable while staging a rebuild.
+  One synchronous publication replaces it; live scans use catalogue epochs and
+  per-file revisions so unrelated scans do not discard each other's updates.
+  Staging does not write session metadata.
+- The application retains at most 256 uncertain inactive transcript overlays;
+  active sessions are not evicted by this limit. Exact IDs of evicted uncertain
+  overlays are bounded separately at 256. If that evidence overflows, snapshot
+  completeness remains conservatively false for the daemon lifetime rather than
+  silently claiming lost observations were persisted. This is process-local
+  evidence, not a durable transcript archive.
+- The daemon in `http.ts` owns teardown. It closes mutation admission and live
+  feeds before awaiting HTTP drain, then attempts every collaborator cleanup and
+  aggregates errors. Normal disposal, including failure after HTTP has listened,
+  is terminal; create a new daemon rather than reusing closed resources.
+- Navigation derives rows from indexed run/link/thread joins and depends only on
+  the entity arrays it reads. It must not own mutation or submission completion.
+
+When adding a feature, extend its existing owner rather than adding a second
+cache, retry loop, or lifecycle authority. Keep failure/reconnect tests with the
+boundary whose invariant they protect.
 
 ### Runtime bridge invariants
 
@@ -268,6 +298,5 @@ the dashboard and launch routes:
 bun run --filter @pi-dashboard/web test:e2e
 ```
 
-Real Pi/Sesh discovery and browser-device push delivery remain opt-in
-integration checks because they require local credentials and an HTTPS secure
-context.
+Real Pi runtime integration and browser-device push delivery remain opt-in
+checks because they require local credentials and an HTTPS secure context.
