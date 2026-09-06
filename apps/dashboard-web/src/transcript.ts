@@ -80,6 +80,8 @@ export interface TranscriptModelItem {
   tool?: TranscriptRenderToolItem;
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
+  /** Presentation-ready native assistant failure detail. */
+  errorMessage?: string;
   /** Feature-owned replacement rendered in the normal transcript flow. */
   customMessage?: ReactNode;
   /** Optional outline presentation without changing transcript semantics. */
@@ -448,6 +450,10 @@ function messageRaw(item: Extract<TranscriptRenderItem, { kind: 'message' }>) {
       ...(item.toolCallIds.length === 0
         ? {}
         : { toolCallIds: item.toolCallIds }),
+      ...(item.stopReason === undefined ? {} : { stopReason: item.stopReason }),
+      ...(item.errorMessage === undefined
+        ? {}
+        : { errorMessage: item.errorMessage }),
       ...(item.streaming ? { __dashboardStreaming: true } : {}),
     },
   };
@@ -644,14 +650,26 @@ export function toTranscriptEntries(
       });
       continue;
     }
-    const visibleText = text && !isNarration(text) ? text : undefined;
-    if (!visibleText && thinking.length === 0 && imageCount === 0) continue;
+    const failed = item.stopReason === 'error';
+    const visibleText =
+      text && (failed || !isNarration(text)) ? text : undefined;
+    const errorMessage = failed
+      ? item.errorMessage?.trim() || 'Unknown error'
+      : undefined;
+    if (
+      !visibleText &&
+      thinking.length === 0 &&
+      imageCount === 0 &&
+      !errorMessage
+    )
+      continue;
     const entry = activityEntryFromSemantic({
       kind: 'assistant',
       content: item.content,
       hasTools:
         item.toolCallIds.length > 0 || item.associatedToolCallIds.length > 0,
       streaming: item.streaming,
+      failed,
     });
     result.push({
       key: item.key,
@@ -659,6 +677,7 @@ export function toTranscriptEntries(
       raw,
       text: visibleText,
       ...(thinking.length > 0 ? { thinking } : {}),
+      ...(errorMessage === undefined ? {} : { errorMessage }),
       role,
       ...(sessionId ? { sessionId } : {}),
       ...(imageCount > 0 ? { imageCount, images } : {}),

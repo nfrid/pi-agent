@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import {
   type BridgeEvent,
+  MAX_ASSISTANT_ERROR_MESSAGE,
   MAX_FRAME_BYTES,
   MAX_TOOL_ARGUMENT_CHARS,
   MAX_TOOL_ARGUMENT_DELTA,
@@ -330,6 +331,15 @@ export class LiveEventNormalizer {
       directString(message, 'role') ??
       directString(event, 'role') ??
       'assistant';
+    const stopReason =
+      directString(message, 'stopReason') ??
+      directString(event, 'stopReason') ??
+      directString(assistantEvent, 'stopReason');
+    const rawErrorMessage =
+      directString(message, 'errorMessage') ??
+      directString(event, 'errorMessage') ??
+      directString(assistantEvent, 'errorMessage');
+    const errorMessage = rawErrorMessage?.slice(0, MAX_ASSISTANT_ERROR_MESSAGE);
     const fullContent = Object.hasOwn(message, 'content')
       ? directValue(message, 'content')
       : Object.hasOwn(event, 'content')
@@ -338,8 +348,24 @@ export class LiveEventNormalizer {
     let rawContent: unknown = this.activeMessage?.content ?? null;
     if (phase === 'started' || phase === 'finished' || role !== 'assistant') {
       // message_end is authoritative; user steering updates also carry their
-      // complete message rather than an AssistantMessageEvent delta.
-      if (fullContent !== undefined) rawContent = fullContent;
+      // complete message rather than an AssistantMessageEvent delta. A few
+      // providers emit an empty terminal error wrapper after streaming text;
+      // retain that partial text instead of turning the failure invisible.
+      const emptyFinalContent =
+        fullContent === null ||
+        fullContent === '' ||
+        (Array.isArray(fullContent) && fullContent.length === 0);
+      if (
+        fullContent !== undefined &&
+        !(
+          phase === 'finished' &&
+          stopReason === 'error' &&
+          emptyFinalContent &&
+          this.activeMessage?.content !== undefined &&
+          this.activeMessage.content !== null
+        )
+      )
+        rawContent = fullContent;
     } else if (assistantEventValue && typeof assistantEventValue === 'object') {
       // 0.84's event union is intentionally handled case-by-case. In
       // particular, a toolcall_delta is not a visible text delta.
@@ -396,6 +422,8 @@ export class LiveEventNormalizer {
               .slice(0, 128),
           }
         : {}),
+      ...(stopReason === undefined ? {} : { stopReason }),
+      ...(errorMessage === undefined ? {} : { errorMessage }),
       ...(safeData === undefined ? {} : { data: safeData }),
     };
     if (phase === 'finished') {

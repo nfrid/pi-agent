@@ -69,6 +69,8 @@ export type ActivitySemanticEntry =
       /** Includes declared calls that have not produced a materialized tool. */
       hasTools: boolean;
       streaming: boolean;
+      /** Native assistant failure must remain visible and close activity. */
+      failed?: boolean;
     }
   | {
       kind: 'tool';

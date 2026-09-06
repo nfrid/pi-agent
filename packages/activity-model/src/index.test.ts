@@ -637,4 +637,36 @@ describe('shared activity model', () => {
       end: 3,
     });
   });
+
+  it('keeps assistant failures outside collapsed tool activity', () => {
+    const entries = [
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: 'Inspecting',
+          toolCallIds: ['call-1'],
+        },
+      },
+      {
+        type: 'tool',
+        tool: { name: 'read', toolCallId: 'call-1', status: 'finished' },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          errorMessage: 'Provider failed',
+        },
+      },
+    ].map(activityEntryFromRaw);
+    expect(entries.at(-1)).toMatchObject({
+      kind: 'assistant',
+      speaks: true,
+      closesGroup: true,
+    });
+    expect(groupTranscript(entries)).toEqual([{ start: 0, end: 1 }]);
+  });
 });

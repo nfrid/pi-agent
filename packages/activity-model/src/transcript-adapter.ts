@@ -76,9 +76,13 @@ export function activityEntryFromSemantic(
     } as unknown as AssistantMessage;
     const textHeaders = headersOf(assistant, 'text');
     const thinkingHeaders = headersOf(assistant, 'thinking');
-    const visibleText = text && !isNarration(text) ? text : undefined;
+    const failed = input.failed === true;
+    const visibleText =
+      text && (failed || !isNarration(text)) ? text : undefined;
     const preamble =
-      visibleText && input.hasTools ? preambleTitle(visibleText) : undefined;
+      !failed && visibleText && input.hasTools
+        ? preambleTitle(visibleText)
+        : undefined;
     const narratedTitle = (
       textHeaders.length > 0 ? textHeaders : thinkingHeaders
     ).at(-1);
@@ -87,7 +91,8 @@ export function activityEntryFromSemantic(
       // Live text is ordinary speech until a tool association proves it is a
       // preamble. Once the call arrives, the same entry becomes the group's
       // leader.
-      speaks: Boolean(visibleText) && !preamble,
+      speaks: failed || (Boolean(visibleText) && !preamble),
+      ...(failed ? { closesGroup: true } : {}),
       ...(input.streaming ? { streaming: true } : {}),
       ...(textHeaders.length > 0
         ? { narration: 'announced' as const }
@@ -148,6 +153,9 @@ export function activityEntryFromRaw(raw: unknown): TranscriptEntry {
       return activityEntryFromSemantic({
         kind: 'assistant',
         content,
+        failed:
+          (stringField(message, 'stopReason') ??
+            stringField(value, 'stopReason')) === 'error',
         hasTools:
           toolCalls.length > 0 ||
           (Array.isArray(message?.toolCallIds) &&

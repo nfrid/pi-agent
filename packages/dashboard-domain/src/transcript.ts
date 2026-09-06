@@ -1,6 +1,7 @@
 import {
   type BridgeEvent,
   type DashboardEventEnvelope,
+  MAX_ASSISTANT_ERROR_MESSAGE,
   MAX_TOOL_ARGUMENT_PREVIEW,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
@@ -31,6 +32,8 @@ export interface TranscriptMessageItem {
   timestamp?: number | string;
   turnId?: string;
   toolCallIds?: readonly string[];
+  stopReason?: string;
+  errorMessage?: string;
   deliveryMode?: TranscriptDeliveryMode;
   status: 'streaming' | 'finished';
   data?: unknown;
@@ -96,6 +99,8 @@ export interface TranscriptRenderMessageItem {
   turnId?: string;
   toolCallIds: readonly string[];
   associatedToolCallIds: readonly string[];
+  stopReason?: string;
+  errorMessage?: string;
   deliveryMode?: TranscriptDeliveryMode;
   status: TranscriptMessageItem['status'];
   streaming: boolean;
@@ -164,6 +169,12 @@ function directString(
   key: string,
 ): string | undefined {
   return typeof value[key] === 'string' && value[key] ? value[key] : undefined;
+}
+
+function boundedErrorMessage(value: unknown): string | undefined {
+  return typeof value === 'string'
+    ? value.slice(0, MAX_ASSISTANT_ERROR_MESSAGE)
+    : undefined;
 }
 
 /** Return the direct compatibility tool record without recursive provider scans. */
@@ -340,6 +351,12 @@ function normalizedMessage(
     ...(directString(message, 'turnId') === undefined
       ? {}
       : { turnId: directString(message, 'turnId') }),
+    ...(directString(message, 'stopReason') === undefined
+      ? {}
+      : { stopReason: directString(message, 'stopReason') }),
+    ...(boundedErrorMessage(message.errorMessage) === undefined
+      ? {}
+      : { errorMessage: boundedErrorMessage(message.errorMessage) }),
     phase,
   };
 }
@@ -612,6 +629,12 @@ function mergeMessage(
       ? {}
       : { timestamp: payload.timestamp }),
     ...(payload.turnId === undefined ? {} : { turnId: payload.turnId }),
+    ...(payload.stopReason === undefined
+      ? {}
+      : { stopReason: payload.stopReason }),
+    ...(payload.errorMessage === undefined
+      ? {}
+      : { errorMessage: payload.errorMessage }),
     ...(toolCallIds === undefined ? {} : { toolCallIds }),
     ...(deliveryMode === undefined ? {} : { deliveryMode }),
     status:
@@ -1074,6 +1097,12 @@ export function hydrateTranscript(
         content,
         ...(timestamp === undefined ? {} : { timestamp }),
         ...(turnId === undefined ? {} : { turnId }),
+        ...(directString(message, 'stopReason') === undefined
+          ? {}
+          : { stopReason: directString(message, 'stopReason') }),
+        ...(boundedErrorMessage(message.errorMessage) === undefined
+          ? {}
+          : { errorMessage: boundedErrorMessage(message.errorMessage) }),
         ...(toolCallIds.length > 0 ? { toolCallIds } : {}),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
         status:
@@ -1258,6 +1287,12 @@ export function persistedEntriesToTranscriptEvents(
         content: item.content,
         ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
         ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        ...(item.stopReason === undefined
+          ? {}
+          : { stopReason: item.stopReason }),
+        ...(item.errorMessage === undefined
+          ? {}
+          : { errorMessage: item.errorMessage }),
         ...(item.toolCallIds === undefined
           ? {}
           : { toolCallIds: [...item.toolCallIds] }),
@@ -1452,6 +1487,12 @@ export function projectTranscriptForRender(
         content: renderedMessageContent(item, projection, virtualToolCallIds),
         ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
         ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        ...(item.stopReason === undefined
+          ? {}
+          : { stopReason: item.stopReason }),
+        ...(item.errorMessage === undefined
+          ? {}
+          : { errorMessage: item.errorMessage }),
         ...(item.deliveryMode === undefined
           ? {}
           : { deliveryMode: item.deliveryMode }),
@@ -1569,6 +1610,12 @@ export function selectLegacyTranscriptEntries(
             ? {}
             : { timestamp: item.timestamp }),
           ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+          ...(item.stopReason === undefined
+            ? {}
+            : { stopReason: item.stopReason }),
+          ...(item.errorMessage === undefined
+            ? {}
+            : { errorMessage: item.errorMessage }),
           ...(item.deliveryMode === undefined
             ? {}
             : { deliveryMode: item.deliveryMode }),

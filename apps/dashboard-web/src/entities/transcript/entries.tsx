@@ -675,7 +675,10 @@ function TranscriptEntry({
         {item.customMessage}
       </div>
     );
-  if (item.role && (item.text || item.imageCount || item.thinking?.length)) {
+  if (
+    item.role &&
+    (item.text || item.imageCount || item.thinking?.length || item.errorMessage)
+  ) {
     const skill =
       item.role === 'user' && item.text
         ? parseSkillInvocation(item.text)
@@ -689,6 +692,11 @@ function TranscriptEntry({
       );
     return (
       <div className="transcript-message-entry">
+        {item.errorMessage ? (
+          <div className="transcript-message-error" role="alert">
+            Assistant error: {item.errorMessage}
+          </div>
+        ) : null}
         {showThinking && item.role === 'assistant' && item.thinking?.length ? (
           <ThinkingBlobs thinking={item.thinking} timestamp={timestamp} />
         ) : null}

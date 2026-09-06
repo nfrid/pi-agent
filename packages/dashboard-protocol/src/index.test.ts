@@ -1196,6 +1196,19 @@ describe('dashboard protocol', () => {
     });
     expect(message.messageId).toBe('m-1');
     expect(
+      parseNormalizedMessagePayload({
+        messageId: 'failed',
+        role: 'assistant',
+        content: [],
+        phase: 'finished',
+        stopReason: 'error',
+        errorMessage: 'Provider unavailable',
+      }),
+    ).toMatchObject({
+      stopReason: 'error',
+      errorMessage: 'Provider unavailable',
+    });
+    expect(
       tryParseNormalizedToolPayload({
         toolCallId: 'tool-1',
         name: 'read',

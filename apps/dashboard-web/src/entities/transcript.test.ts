@@ -591,6 +591,29 @@ describe('tool row views and virtual transcript construction', () => {
     expect(html).toContain('Second checkpoint.');
   });
 
+  it('does not absorb failed thinking messages into a following tool stream', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'Failure context.' }],
+          stopReason: 'error',
+          errorMessage: 'Provider failed',
+        },
+      },
+      { type: 'tool', tool: { toolCallId: 'after-failure', name: 'read' } },
+    ]);
+    expect(items[0]).toMatchObject({
+      errorMessage: 'Provider failed',
+      entry: { kind: 'assistant', speaks: true },
+    });
+    expect(buildVirtualTranscriptRows(items)).toEqual([
+      { kind: 'entry', key: items[0]?.key, index: 0 },
+      { kind: 'tool-stream', key: items[1]?.key, start: 1, end: 1 },
+    ]);
+  });
+
   it('keeps speaking assistant messages as tool-stream boundaries', () => {
     const items = toTranscriptEntries([
       { type: 'tool', tool: { toolCallId: 'boundary-1', name: 'read' } },
@@ -1343,6 +1366,68 @@ describe('tool row views and virtual transcript construction', () => {
     expect(failed).toHaveLength(2);
     expect(toolOutcome({ kind: 'tool', status: 'finished' })).toBe('success');
     expect(toolOutcome({ kind: 'tool', status: 'complete' })).toBe('success');
+  });
+
+  it('keeps failed assistant messages visible as standalone transcript rows', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-failure',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Partial answer' }],
+          stopReason: 'error',
+          errorMessage: 'Connection failed',
+        },
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      text: 'Partial answer',
+      errorMessage: 'Connection failed',
+      entry: { kind: 'assistant', speaks: true, closesGroup: true },
+    });
+    expect(buildVirtualTranscriptRows(items)).toEqual([
+      { kind: 'entry', key: 'assistant-failure', index: 0 },
+    ]);
+  });
+
+  it('uses an error fallback and does not label aborted messages as failures', () => {
+    const failed = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'missing-detail',
+        message: {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+        },
+      },
+    ]);
+    expect(failed).toMatchObject([
+      {
+        errorMessage: 'Unknown error',
+        entry: { kind: 'assistant', speaks: true },
+      },
+    ]);
+    const aborted = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'aborted',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Interrupted answer' }],
+          stopReason: 'aborted',
+        },
+      },
+    ]);
+    expect(aborted).toMatchObject([
+      {
+        text: 'Interrupted answer',
+        entry: { kind: 'assistant', speaks: true },
+      },
+    ]);
+    expect(aborted[0]?.errorMessage).toBeUndefined();
   });
 
   it('renders a fully reached pause as a transient transcript event', () => {

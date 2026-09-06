@@ -95,6 +95,7 @@ export {
   ExtensionSurfacePlacementSchema,
   ExtensionSurfaceSchema,
   LiveExtensionSurfaceSchema,
+  MAX_ASSISTANT_ERROR_MESSAGE,
   MAX_FRAME_BYTES,
   MAX_NON_IDEMPOTENT_ACTION_IDS,
   MAX_QUEUE_DRAFT_TEXT,
