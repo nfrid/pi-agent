@@ -173,6 +173,16 @@ function activeTranscriptIds(app: DashboardApplication): string[] {
   return [...internal.activeTranscripts.keys()];
 }
 
+function activeTranscriptState(
+  app: DashboardApplication,
+  sessionId: string,
+): { inactive: boolean; uncertain: boolean } | undefined {
+  const internal = app as unknown as {
+    activeTranscripts: Map<string, { inactive: boolean; uncertain: boolean }>;
+  };
+  return internal.activeTranscripts.get(sessionId);
+}
+
 describe('authoritative application snapshot lifecycle', () => {
   it('resolves same-project recent defaults across offline and active branches', async () => {
     const value = await fixture('resolver-session');
@@ -682,6 +692,25 @@ describe('authoritative application snapshot lifecycle', () => {
     }
     expect(activeTranscriptIds(f.app)).toEqual(['snapshot-session']);
 
+    const evicted = runtime(f.file, { runtimeId: 'evicted-runtime' });
+    f.register(evicted, 'evicted-epoch');
+    f.event(
+      evicted,
+      {
+        type: 'message.updated',
+        sessionId: 'snapshot-session',
+        message: {
+          messageId: 'evicted-live',
+          role: 'assistant',
+          content: 'lost if evicted',
+          phase: 'updated',
+        },
+      },
+      'evicted-epoch',
+      2,
+    );
+    f.offline(evicted, 'evicted-epoch', 3);
+
     for (let index = 0; index < 300; index += 1) {
       const sessionId = `inactive-${index}`;
       const inactive = runtime(`/tmp/${sessionId}.jsonl`, {
@@ -700,8 +729,17 @@ describe('authoritative application snapshot lifecycle', () => {
 
     const ids = activeTranscriptIds(f.app);
     expect(ids).toHaveLength(256);
+    expect(ids).not.toContain('snapshot-session');
     expect(ids).not.toContain('inactive-0');
     expect(ids).toContain('inactive-299');
+
+    const evictedSnapshot = await f.app.sessionSnapshot(
+      'generation-evicted',
+      'snapshot-session',
+    );
+    expect(evictedSnapshot.entriesComplete).toBe(true);
+    expect(evictedSnapshot.active.messages).toEqual([]);
+    expect(evictedSnapshot.completeThroughCursor).toBe(false);
 
     const active = runtime(f.file, { runtimeId: 'still-active' });
     f.register(active, 'active-epoch');
@@ -726,6 +764,183 @@ describe('authoritative application snapshot lifecycle', () => {
     ).resolves.toMatchObject({
       active: { messages: [{ messageId: 'still-live' }] },
     });
+  });
+
+  it('does not retire inactive message or tool overlays absent from complete history', async () => {
+    const f = await fixture();
+    const live = runtime(f.file, { liveState: 'idle' });
+    f.register(live);
+    f.event(live, {
+      type: 'message.updated',
+      sessionId: 'snapshot-session',
+      message: {
+        messageId: 'not-durable-message',
+        role: 'assistant',
+        content: 'not durable',
+        phase: 'updated',
+      },
+    });
+    f.event(
+      live,
+      {
+        type: 'tool.updated',
+        sessionId: 'snapshot-session',
+        tool: {
+          toolCallId: 'not-durable-tool',
+          name: 'read',
+          status: 'running',
+          phase: 'updated',
+        },
+      },
+      'epoch-1',
+      3,
+    );
+    f.offline(live, 'epoch-1', 4);
+
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-not-durable',
+      'snapshot-session',
+    );
+    expect(snapshot.entriesComplete).toBe(true);
+    expect(snapshot.completeThroughCursor).toBe(false);
+    expect(snapshot.active.messages).toMatchObject([
+      { messageId: 'not-durable-message' },
+    ]);
+    expect(snapshot.active.tools).toMatchObject([
+      { toolCallId: 'not-durable-tool' },
+    ]);
+    expect(activeTranscriptState(f.app, 'snapshot-session')).toMatchObject({
+      inactive: true,
+      uncertain: true,
+    });
+  });
+
+  it('marks a prior session inactive when one runtime switches sessions', async () => {
+    const f = await fixture();
+    const old = runtime(f.file, { runtimeId: 'shared-runtime' });
+    f.register(old, 'shared-epoch');
+    f.event(
+      old,
+      {
+        type: 'message.updated',
+        sessionId: 'snapshot-session',
+        message: {
+          messageId: 'old-session-live',
+          role: 'assistant',
+          content: 'old session',
+          phase: 'updated',
+        },
+      },
+      'shared-epoch',
+      2,
+    );
+
+    const next = runtime('/tmp/next-session.jsonl', {
+      runtimeId: 'shared-runtime',
+      session: {
+        id: 'next-session',
+        file: '/tmp/next-session.jsonl',
+        cwd: '/tmp/snapshot',
+        entries: [],
+        entriesComplete: false,
+      },
+    });
+    f.event(
+      next,
+      {
+        type: 'message.updated',
+        sessionId: 'next-session',
+        message: {
+          messageId: 'next-session-live',
+          role: 'assistant',
+          content: 'next session',
+          phase: 'updated',
+        },
+      },
+      'shared-epoch',
+      3,
+    );
+
+    expect(activeTranscriptState(f.app, 'snapshot-session')).toMatchObject({
+      inactive: true,
+      uncertain: true,
+    });
+    const oldSnapshot = await f.app.sessionSnapshot(
+      'generation-old-session',
+      'snapshot-session',
+    );
+    expect(oldSnapshot.active.messages).toMatchObject([
+      { messageId: 'old-session-live' },
+    ]);
+    expect(oldSnapshot.completeThroughCursor).toBe(false);
+
+    const returned = runtime(f.file, { runtimeId: 'shared-runtime' });
+    f.event(
+      returned,
+      {
+        type: 'message.updated',
+        sessionId: 'snapshot-session',
+        message: {
+          messageId: 'old-session-returned',
+          role: 'assistant',
+          content: 'old session returned',
+          phase: 'updated',
+        },
+      },
+      'shared-epoch',
+      4,
+    );
+    expect(activeTranscriptState(f.app, 'snapshot-session')).toMatchObject({
+      inactive: false,
+    });
+  });
+
+  it('retires message and tool overlays once complete history proves both', async () => {
+    const f = await fixture();
+    const live = runtime(f.file, { liveState: 'idle' });
+    f.register(live);
+    f.event(live, {
+      type: 'message.finished',
+      sessionId: 'snapshot-session',
+      message: {
+        messageId: 'durable-message-live',
+        role: 'assistant',
+        content: 'durable message',
+        timestamp: 100,
+        phase: 'finished',
+      },
+    });
+    f.event(
+      live,
+      {
+        type: 'tool.finished',
+        sessionId: 'snapshot-session',
+        tool: {
+          toolCallId: 'durable-tool-live',
+          name: 'read',
+          result: 'durable tool',
+          status: 'finished',
+          phase: 'finished',
+        },
+      },
+      'epoch-1',
+      3,
+    );
+    f.offline(live, 'epoch-1', 4);
+    await writeFile(
+      f.file,
+      `${JSON.stringify({ type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' })}\n${JSON.stringify({ type: 'message', id: 'durable-message-disk', message: { role: 'assistant', content: 'durable message', timestamp: 100 } })}\n${JSON.stringify({ type: 'tool', id: 'durable-tool-disk', tool: { toolCallId: 'durable-tool-live', name: 'read', result: 'durable tool', status: 'finished' } })}\n`,
+    );
+    await f.sessions.refresh();
+
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-durable-both',
+      'snapshot-session',
+    );
+    expect(snapshot.active.messages).toEqual([]);
+    expect(snapshot.active.tools).toEqual([]);
+    expect(snapshot.completeThroughCursor).toBe(true);
+    expect(activeTranscriptIds(f.app)).not.toContain('snapshot-session');
   });
 
   it('keeps inactive uncertainty flagged while durable history is incomplete', async () => {

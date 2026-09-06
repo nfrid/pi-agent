@@ -332,6 +332,8 @@ const MAX_ACTIVE_ENTITIES = 256;
 const MAX_ACTIVE_BYTES = 512 * 1024;
 /** Keep uncertain overlays for inactive sessions from growing without bound. */
 const MAX_INACTIVE_TRANSCRIPTS = 256;
+/** Exact uncertainty IDs are bounded; overflow falls back to global caution. */
+const MAX_REMEMBERED_INACTIVE_UNCERTAINTY = 256;
 const MAX_SHELL_SURFACE_BYTES = 64 * 1024;
 const MAX_SHELL_SURFACES = 32;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,200}$/;
@@ -706,6 +708,32 @@ export function retirePersistedMessageOverlays(
   };
 }
 
+/** Retire live tool overlays only when their call IDs occur in durable history. */
+function retirePersistedToolOverlays(
+  active: TranscriptProjection,
+  persisted: TranscriptProjection,
+): TranscriptProjection {
+  const persistedToolIds = new Set(
+    Object.values(persisted.items).flatMap((item) =>
+      item.kind === 'tool' ? [item.toolCallId] : [],
+    ),
+  );
+  const retire = new Set(
+    active.order.filter((id) => {
+      const item = active.items[id];
+      return item?.kind === 'tool' && persistedToolIds.has(item.toolCallId);
+    }),
+  );
+  if (retire.size === 0) return active;
+  const items = { ...active.items };
+  for (const id of retire) delete items[id];
+  return {
+    ...active,
+    order: active.order.filter((id) => !retire.has(id)),
+    items,
+  };
+}
+
 function itemTool(
   item: TranscriptItem,
   includeTerminal = false,
@@ -789,6 +817,13 @@ export class DashboardApplication {
   private sessionMetadataBaseline?: ReadonlyMap<string, SessionIndexEntry>;
   /** Bounded, process-local live transcript projection; never persisted. */
   private readonly activeTranscripts = new Map<string, ActiveTranscriptState>();
+  /**
+   * IDs whose uncertain inactive overlays were evicted. This exact evidence is
+   * bounded; after overflow, capture-less snapshots conservatively remain
+   * incomplete because the lost evidence can no longer be attributed safely.
+   */
+  private readonly rememberedInactiveUncertainty = new Set<string>();
+  private inactiveUncertaintyOverflow = false;
   private readonly dormantSessionAssociations = new Map<
     string,
     { cwd: string; projectId: string | null; checkoutId: string | null }
@@ -1270,18 +1305,60 @@ export class DashboardApplication {
     };
   }
 
+  private rememberInactiveUncertainty(sessionId: string): void {
+    if (
+      this.inactiveUncertaintyOverflow ||
+      this.rememberedInactiveUncertainty.has(sessionId)
+    )
+      return;
+    if (
+      this.rememberedInactiveUncertainty.size >=
+      MAX_REMEMBERED_INACTIVE_UNCERTAINTY
+    ) {
+      this.inactiveUncertaintyOverflow = true;
+      return;
+    }
+    this.rememberedInactiveUncertainty.add(sessionId);
+  }
+
   private pruneInactiveTranscripts(): void {
     const inactive = [...this.activeTranscripts].filter(
       ([, state]) => state.inactive && state.uncertain,
     );
     const excess = inactive.length - MAX_INACTIVE_TRANSCRIPTS;
-    for (const [sessionId] of inactive.slice(0, Math.max(0, excess)))
+    for (const [sessionId] of inactive.slice(0, Math.max(0, excess))) {
+      this.rememberInactiveUncertainty(sessionId);
       this.activeTranscripts.delete(sessionId);
+    }
+  }
+
+  /** Mark a prior session inactive when one runtime starts reporting another. */
+  private markSupersededRuntimeSessions(
+    runtimeId: string,
+    currentSessionId: string,
+  ): void {
+    let changed = false;
+    for (const [sessionId, state] of this.activeTranscripts) {
+      if (
+        sessionId === currentSessionId ||
+        state.runtimeId !== runtimeId ||
+        state.inactive
+      )
+        continue;
+      this.activeTranscripts.set(sessionId, {
+        ...state,
+        uncertain: true,
+        inactive: true,
+      });
+      changed = true;
+    }
+    if (changed) this.pruneInactiveTranscripts();
   }
 
   private updateActiveTranscript(change: RegistryChange): void {
     const sessionId = change.snapshot.session?.id;
     if (!sessionId) return;
+    this.markSupersededRuntimeSessions(change.snapshot.runtimeId, sessionId);
     if (change.kind === 'offline' || change.kind === 'removed') {
       const prior = this.activeTranscripts.get(sessionId);
       if (prior) {
@@ -1307,7 +1384,12 @@ export class DashboardApplication {
         unresolvedTerminalIds: [],
         // A fresh registration starts with a complete live observation. A
         // reconnect starts uncertain because its earlier lifecycle is unknown.
-        uncertain: change.reconnected === true,
+        // Remembered uncertainty also survives a replacement runtime because
+        // registration does not prove the evicted observation was persisted.
+        uncertain:
+          change.reconnected === true ||
+          this.rememberedInactiveUncertainty.has(sessionId) ||
+          this.inactiveUncertaintyOverflow,
         inactive: false,
       });
       return;
@@ -1370,8 +1452,12 @@ export class DashboardApplication {
           ];
           // A malformed terminal payload may not produce a reducer item. It
           // is still unsafe to claim durability until a complete read proves
-          // that no lifecycle state was lost.
-          if (unresolvedTerminalIds.length === 0) uncertain = true;
+          // that no lifecycle state was lost. No item means the gap cannot be
+          // reconciled later, so retain the conservative truncation marker.
+          if (unresolvedTerminalIds.length === 0) {
+            uncertain = true;
+            truncated = true;
+          }
         }
         // Live lifecycle events update the bounded projection but do not
         // prove that earlier persisted lifecycle events were replayed. In
@@ -1395,8 +1481,8 @@ export class DashboardApplication {
         ? true
         : uncertain;
     const inactive =
-      change.kind === 'event' && change.event.type === 'runtime.goodbye'
-        ? true
+      change.kind === 'event'
+        ? change.event.type === 'runtime.goodbye'
         : prior.inactive;
     this.activeTranscripts.set(sessionId, {
       ...prior,
@@ -1597,8 +1683,12 @@ export class DashboardApplication {
       let resolvedCapture = capture;
       if (before === undefined && capture.state) {
         const persisted = hydrateTranscript(result.entries, sessionId);
-        const reconciledProjection = retirePersistedMessageOverlays(
+        const messageReconciledProjection = retirePersistedMessageOverlays(
           capture.state.projection,
+          persisted,
+        );
+        const reconciledProjection = retirePersistedToolOverlays(
+          messageReconciledProjection,
           persisted,
         );
         const reconciledState = {
@@ -1617,9 +1707,15 @@ export class DashboardApplication {
             );
             return key === undefined || persistedMessageCounts.get(key) !== 1;
           });
+        const historicalUncertainty =
+          this.rememberedInactiveUncertainty.has(sessionId) ||
+          this.inactiveUncertaintyOverflow;
         const fullyProved =
           result.entriesComplete &&
+          reconciledProjection.order.length === 0 &&
+          !reconciledState.truncated &&
           unresolvedTerminalIds.length === 0 &&
+          !historicalUncertainty &&
           !runtimeIsWorking(capture.runtime);
         const state = {
           ...reconciledState,
@@ -1664,11 +1760,19 @@ export class DashboardApplication {
       // persisted branch, or runtime-only topology when the live leaf is not
       // persisted yet. Do not replace it with a second indexed lookup.
       const branchTopology = result.branchTopology;
+      // If an exact inactive overlay was evicted, or exact attribution was
+      // lost after bounded bookkeeping overflow, no later read can safely
+      // prove that observation durable. Keep the response conservative.
+      const lostInactiveUncertainty =
+        before === undefined &&
+        (this.rememberedInactiveUncertainty.has(sessionId) ||
+          this.inactiveUncertaintyOverflow);
       const completeThroughCursor =
         before === undefined &&
         result.entriesComplete &&
         !active.truncated &&
-        (!resolvedCapture.runtime || resolvedCapture.state !== undefined);
+        (!resolvedCapture.runtime || resolvedCapture.state !== undefined) &&
+        !lostInactiveUncertainty;
       return {
         metadata,
         entries: result.entries,
