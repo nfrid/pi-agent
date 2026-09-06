@@ -330,6 +330,8 @@ export function projectShellArray<T>(
 
 const MAX_ACTIVE_ENTITIES = 256;
 const MAX_ACTIVE_BYTES = 512 * 1024;
+/** Keep uncertain overlays for inactive sessions from growing without bound. */
+const MAX_INACTIVE_TRANSCRIPTS = 256;
 const MAX_SHELL_SURFACE_BYTES = 64 * 1024;
 const MAX_SHELL_SURFACES = 32;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,200}$/;
@@ -345,6 +347,8 @@ type ActiveTranscriptState = {
   unresolvedTerminalIds: readonly string[];
   /** Set on settlement/offline/reconnect until a complete disk read proves safety. */
   uncertain: boolean;
+  /** True after the runtime no longer supplies live observations. */
+  inactive: boolean;
 };
 
 type ActiveCapture = {
@@ -1134,7 +1138,6 @@ export class DashboardApplication {
       throw new Error(
         'The authoritative session index exceeds shell capacity.',
       );
-    this.setSessionMetadataBaseline(sessions);
     let runtimes = liveRuntimes.map(
       (runtime) => shellRuntime(runtime) as ShellRuntimeSnapshot,
     );
@@ -1252,7 +1255,6 @@ export class DashboardApplication {
     // projection; callers supply the owning feed sequence explicitly.
     const liveRuntimes = this.registry.snapshots();
     const sessions = this.sessionMetadata(liveRuntimes);
-    this.setSessionMetadataBaseline(sessions);
     return {
       serverId,
       revision,
@@ -1268,16 +1270,28 @@ export class DashboardApplication {
     };
   }
 
+  private pruneInactiveTranscripts(): void {
+    const inactive = [...this.activeTranscripts].filter(
+      ([, state]) => state.inactive && state.uncertain,
+    );
+    const excess = inactive.length - MAX_INACTIVE_TRANSCRIPTS;
+    for (const [sessionId] of inactive.slice(0, Math.max(0, excess)))
+      this.activeTranscripts.delete(sessionId);
+  }
+
   private updateActiveTranscript(change: RegistryChange): void {
     const sessionId = change.snapshot.session?.id;
     if (!sessionId) return;
     if (change.kind === 'offline' || change.kind === 'removed') {
       const prior = this.activeTranscripts.get(sessionId);
-      if (prior)
+      if (prior) {
         this.activeTranscripts.set(sessionId, {
           ...prior,
           uncertain: true,
+          inactive: true,
         });
+        this.pruneInactiveTranscripts();
+      }
       return;
     }
     const runtimeEpoch = change.runtimeEpoch ?? change.snapshot.runtimeId;
@@ -1294,6 +1308,7 @@ export class DashboardApplication {
         // A fresh registration starts with a complete live observation. A
         // reconnect starts uncertain because its earlier lifecycle is unknown.
         uncertain: change.reconnected === true,
+        inactive: false,
       });
       return;
     }
@@ -1306,6 +1321,7 @@ export class DashboardApplication {
       truncated: false,
       unresolvedTerminalIds: [],
       uncertain: true,
+      inactive: false,
     };
     if (prior.runtimeEpoch !== runtimeEpoch) {
       this.activeTranscripts.set(sessionId, {
@@ -1318,6 +1334,7 @@ export class DashboardApplication {
         truncated: false,
         unresolvedTerminalIds: [],
         uncertain: true,
+        inactive: false,
       });
       return;
     }
@@ -1373,6 +1390,14 @@ export class DashboardApplication {
       projection = trimmed.projection;
       truncated = trimmed.truncated;
     }
+    const nextUncertain =
+      change.kind === 'event' && change.event.type === 'runtime.goodbye'
+        ? true
+        : uncertain;
+    const inactive =
+      change.kind === 'event' && change.event.type === 'runtime.goodbye'
+        ? true
+        : prior.inactive;
     this.activeTranscripts.set(sessionId, {
       ...prior,
       runtimeId: change.snapshot.runtimeId,
@@ -1382,11 +1407,10 @@ export class DashboardApplication {
       projection,
       truncated,
       unresolvedTerminalIds,
-      uncertain:
-        change.kind === 'event' && change.event.type === 'runtime.goodbye'
-          ? true
-          : uncertain,
+      uncertain: nextUncertain,
+      inactive,
     });
+    if (inactive && nextUncertain) this.pruneInactiveTranscripts();
   }
 
   private captureActive(sessionId: string): ActiveCapture {
@@ -1602,11 +1626,17 @@ export class DashboardApplication {
           unresolvedTerminalIds,
           uncertain: fullyProved ? false : reconciledState.uncertain,
         };
+        const retireInactive =
+          fullyProved &&
+          capture.state.inactive &&
+          capture.runtime === undefined;
         // `feedSequence` pins the response and deliberately skips the normal
         // retry, so the active map may have advanced while disk I/O awaited.
         // Never let this old reconciliation erase that newer publication.
-        if (sameActiveCapture(capture, this.captureActive(sessionId)))
-          this.activeTranscripts.set(sessionId, state);
+        if (sameActiveCapture(capture, this.captureActive(sessionId))) {
+          if (retireInactive) this.activeTranscripts.delete(sessionId);
+          else this.activeTranscripts.set(sessionId, state);
+        }
         // The response still uses its pinned, reconciled capture even when a
         // newer publication won the race; only the process-global map is
         // protected from the stale write above.

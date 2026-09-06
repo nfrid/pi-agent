@@ -166,6 +166,13 @@ function runtime(
   };
 }
 
+function activeTranscriptIds(app: DashboardApplication): string[] {
+  const internal = app as unknown as {
+    activeTranscripts: Map<string, unknown>;
+  };
+  return [...internal.activeTranscripts.keys()];
+}
+
 describe('authoritative application snapshot lifecycle', () => {
   it('resolves same-project recent defaults across offline and active branches', async () => {
     const value = await fixture('resolver-session');
@@ -293,6 +300,50 @@ describe('authoritative application snapshot lifecycle', () => {
       projectId: null,
       checkoutId: null,
       activeRuntimeId: 'runtime-project-session',
+    });
+  });
+
+  it('keeps metadata deltas pending across read-only projections', async () => {
+    const f = await fixture();
+    const initial = runtime(f.file, {
+      liveState: 'idle',
+    });
+    f.register(initial);
+    expect(f.app.sessionMetadataDelta()).toMatchObject({
+      upsert: [{ id: 'snapshot-session', activeRuntimeId: 'snapshot-runtime' }],
+      remove: [],
+    });
+
+    const changed = runtime(f.file, {
+      runtimeId: 'snapshot-runtime-v2',
+      liveState: 'idle',
+      session: {
+        ...initial.session,
+        title: 'Changed after publication',
+      },
+    });
+    f.event(changed, {
+      type: 'message.updated',
+      sessionId: 'snapshot-session',
+      message: {
+        messageId: 'metadata-change',
+        role: 'assistant',
+        content: 'metadata changed',
+        phase: 'updated',
+      },
+    });
+    f.app.shellProjection();
+    f.app.snapshot('generation-read-only', 1);
+
+    expect(f.app.sessionMetadataDelta()).toMatchObject({
+      upsert: [
+        {
+          id: 'snapshot-session',
+          title: 'Changed after publication',
+          activeRuntimeId: 'snapshot-runtime-v2',
+        },
+      ],
+      remove: [],
     });
   });
 
@@ -602,6 +653,7 @@ describe('authoritative application snapshot lifecycle', () => {
     );
     expect(durable.active.messages).toEqual([]);
     expect(durable.completeThroughCursor).toBe(true);
+    expect(activeTranscriptIds(f.app)).not.toContain('snapshot-session');
 
     const old = await fixture('old-session', [
       { type: 'session', id: 'old-session', cwd: '/tmp/snapshot' },
@@ -617,6 +669,110 @@ describe('authoritative application snapshot lifecycle', () => {
     );
     expect(oldSnapshot.completeThroughCursor).toBe(true);
     expect(oldSnapshot.active.messages).toEqual([]);
+  });
+
+  it('bounds repeated inactive transcript registrations without evicting active state', async () => {
+    const f = await fixture();
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const repeated = runtime(f.file, {
+        runtimeId: `repeated-runtime-${attempt}`,
+      });
+      f.register(repeated, `repeated-epoch-${attempt}`);
+      f.offline(repeated, `repeated-epoch-${attempt}`, attempt + 2);
+    }
+    expect(activeTranscriptIds(f.app)).toEqual(['snapshot-session']);
+
+    for (let index = 0; index < 300; index += 1) {
+      const sessionId = `inactive-${index}`;
+      const inactive = runtime(`/tmp/${sessionId}.jsonl`, {
+        runtimeId: `runtime-${sessionId}`,
+        session: {
+          id: sessionId,
+          file: `/tmp/${sessionId}.jsonl`,
+          cwd: '/tmp/snapshot',
+          entries: [],
+          entriesComplete: false,
+        },
+      });
+      f.register(inactive, `epoch-${index}`);
+      f.offline(inactive, `epoch-${index}`, 2);
+    }
+
+    const ids = activeTranscriptIds(f.app);
+    expect(ids).toHaveLength(256);
+    expect(ids).not.toContain('inactive-0');
+    expect(ids).toContain('inactive-299');
+
+    const active = runtime(f.file, { runtimeId: 'still-active' });
+    f.register(active, 'active-epoch');
+    f.event(
+      active,
+      {
+        type: 'message.updated',
+        sessionId: 'snapshot-session',
+        message: {
+          messageId: 'still-live',
+          role: 'assistant',
+          content: 'still live',
+          phase: 'updated',
+        },
+      },
+      'active-epoch',
+      2,
+    );
+    expect(activeTranscriptIds(f.app)).toContain('snapshot-session');
+    await expect(
+      f.app.sessionSnapshot('generation-active', 'snapshot-session'),
+    ).resolves.toMatchObject({
+      active: { messages: [{ messageId: 'still-live' }] },
+    });
+  });
+
+  it('keeps inactive uncertainty flagged while durable history is incomplete', async () => {
+    const sessionId = 'incomplete-session';
+    const f = await fixture(sessionId, [
+      { type: 'session', id: sessionId, cwd: '/tmp/snapshot' },
+      ...Array.from({ length: 5_000 }, (_, index) => ({
+        type: 'message',
+        id: `durable-${index}`,
+        message: { role: 'user', content: `durable-${index}` },
+      })),
+    ]);
+    const live = runtime(f.file, {
+      runtimeId: 'incomplete-runtime',
+      liveState: 'idle',
+      session: {
+        id: sessionId,
+        file: f.file,
+        cwd: '/tmp/snapshot',
+        entries: [],
+        entriesComplete: false,
+      },
+    });
+    f.register(live);
+    f.event(live, {
+      type: 'message.updated',
+      sessionId,
+      message: {
+        messageId: 'incomplete-live',
+        role: 'assistant',
+        content: 'not durable yet',
+        phase: 'updated',
+      },
+    });
+    f.offline(live);
+
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-incomplete',
+      sessionId,
+    );
+    expect(snapshot.entriesComplete).toBe(false);
+    expect(snapshot.completeThroughCursor).toBe(false);
+    expect(snapshot.active.truncated).toBe(true);
+    expect(snapshot.active.messages).toMatchObject([
+      { messageId: 'incomplete-live' },
+    ]);
+    expect(activeTranscriptIds(f.app)).toContain(sessionId);
   });
 
   it('retires a live delegate completion once its custom message is durable', async () => {
