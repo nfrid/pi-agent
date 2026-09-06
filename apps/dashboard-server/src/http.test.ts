@@ -1509,7 +1509,7 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
       usage: {
         get: async () => {
           calls += 1;
-          return { calls };
+          return { capturedAt: calls, snapshots: [] };
         },
       },
     });
@@ -1520,12 +1520,19 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
       fetch(url, { headers }),
       fetch(url, { headers }),
     ]);
-    expect(await first.json()).toEqual({ usage: { calls: 1 } });
-    expect(await second.json()).toEqual({ usage: { calls: 1 } });
-    expect((await (await fetch(url, { headers })).json()) as unknown).toEqual({
-      usage: { calls: 1 },
+    expect(await first.json()).toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
     });
-    expect(server.snapshot().usage).toEqual({ calls: 1 });
+    expect(await second.json()).toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
+    });
+    expect((await (await fetch(url, { headers })).json()) as unknown).toEqual({
+      usage: { capturedAt: 1, snapshots: [] },
+    });
+    expect(server.snapshot().usage).toEqual({
+      capturedAt: 1,
+      snapshots: [],
+    });
     expect(calls).toBe(1);
   });
 

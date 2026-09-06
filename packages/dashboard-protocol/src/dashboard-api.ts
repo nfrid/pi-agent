@@ -499,4 +499,5 @@ export {
   SESSION_NAME_MAX_LENGTH,
   SESSION_TITLE_MAX_LENGTH,
 } from './semantic.js';
+export * from './usage.js';
 export * from './usage-history.js';

@@ -1,4 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { isRecord, normalizeUsage } from '@pi-dashboard/protocol';
 import { fetchHeaders } from '../shared/provider-headers';
 import { withAbort } from '../shared/runtime/async';
 import {
@@ -8,8 +9,8 @@ import {
 import { queryViaCodexAppServer } from './app-server';
 import { CODEX_USAGE_URL, TIMEOUT_MS } from './constants';
 import { isCodexModel } from './display';
-import { hasHeader, normalizeBackendPayload } from './parse';
-import type { BackendPayload, PiModel, UsageReport } from './types';
+import { hasHeader } from './parse';
+import type { PiModel, UsageReport } from './types';
 
 export async function fetchWithTimeout(
   url: string,
@@ -81,7 +82,7 @@ export async function queryViaPiAuth(
       `Codex usage endpoint returned ${response.status}: ${text.slice(0, 300)}`,
     );
   }
-  return normalizeBackendPayload(JSON.parse(text) as BackendPayload);
+  return normalizeUsage(JSON.parse(text));
 }
 
 class DashboardUsageUnavailableError extends Error {}
@@ -104,18 +105,14 @@ async function queryViaDashboard(
       error instanceof Error ? error.message : String(error),
     );
   }
-  const response =
-    result && typeof result === 'object' && !Array.isArray(result)
-      ? (result as { usage?: unknown; error?: unknown })
-      : undefined;
-  const usage = response?.usage as Partial<UsageReport> | undefined;
-  if (
-    usage &&
-    typeof usage.capturedAt === 'number' &&
-    Number.isFinite(usage.capturedAt) &&
-    Array.isArray(usage.snapshots)
-  )
-    return usage as UsageReport;
+  const response = isRecord(result) ? result : undefined;
+  if (response && 'usage' in response && response.usage !== undefined) {
+    try {
+      return normalizeUsage(response.usage);
+    } catch {
+      // Fall through to the broker's explicit error when its payload is invalid.
+    }
+  }
   throw new Error(
     typeof response?.error === 'string'
       ? response.error

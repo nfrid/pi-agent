@@ -19,16 +19,50 @@ afterEach(() => releaseScopedServices(scope));
 describe('dashboard usage broker', () => {
   it('reads normalized usage through the scoped dashboard bridge', async () => {
     const read = vi.fn(async () => ({
-      usage: { capturedAt: 123, snapshots: [{ limitId: 'codex' }] },
+      usage: {
+        capturedAt: 123,
+        snapshots: [
+          {
+            limitId: 'codex',
+            primary: { usedPercent: 25, windowLabel: 'primary' },
+          },
+        ],
+      },
     }));
     getScopedServices(scope).dashboardUsage = { read };
     const signal = new AbortController().signal;
 
     await expect(queryUsage(context(), signal, true)).resolves.toEqual({
       capturedAt: 123,
-      snapshots: [{ limitId: 'codex' }],
+      snapshots: [
+        {
+          limitId: 'codex',
+          primary: { usedPercent: 25, windowLabel: 'primary' },
+        },
+      ],
     });
     expect(read).toHaveBeenCalledWith(true, signal);
+  });
+
+  it('converts legacy seconds resets from captured broker snapshots', async () => {
+    const capturedAt = Date.now();
+    getScopedServices(scope).dashboardUsage = {
+      read: async () => ({
+        usage: {
+          capturedAt,
+          snapshots: [
+            { primary: { usedPercent: 10, resetsAt: 1_800_000_000 } },
+          ],
+        },
+      }),
+    };
+
+    await expect(
+      queryUsage(context(), new AbortController().signal),
+    ).resolves.toMatchObject({
+      capturedAt,
+      snapshots: [{ primary: { resetsAt: 1_800_000_000_000 } }],
+    });
   });
 
   it('does not make a second provider request after a broker-side error', async () => {

@@ -25,7 +25,14 @@ lines.on('line', (line) => {
   } else if (!process.env.FAKE_CODEX_HANG) {
     process.stdout.write(JSON.stringify({
       id: message.id,
-      result: { rateLimits: { primary: { usedPercent: 12 } } },
+      result: { rateLimits: {
+        primary: {
+          usedPercent: 12,
+          windowDurationMins: 300,
+          resetsAt: 1_800_000_000,
+          resetAfterSeconds: 60,
+        },
+      } },
     }) + '\\n');
   }
 });
@@ -45,7 +52,12 @@ afterEach(() => {
 describe('Codex app-server lifecycle', () => {
   it('drains bounded stderr while processing RPC output', async () => {
     const report = await queryViaCodexAppServer(new AbortController().signal);
-    expect(report.snapshots[0]?.primary?.usedPercent).toBe(12);
+    expect(report.snapshots[0]?.primary).toMatchObject({
+      usedPercent: 12,
+      windowMinutes: 300,
+      windowLabel: '5h',
+      resetsAt: 1_800_000_000_000,
+    });
   });
 
   it('kills and rejects pending work on caller cancellation', async () => {

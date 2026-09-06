@@ -4,9 +4,10 @@ import {
 } from '@pi-dashboard/client';
 import {
   type BrowserSnapshot,
-  boundedUsageResetAfterSeconds,
-  parseUsageTimestamp,
+  type UsageWindow as NormalizedUsageWindow,
+  normalizeUsage,
   type UsageHistoryResponse,
+  type UsageReport,
 } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
@@ -15,12 +16,9 @@ import { shortcutLabel, useModifierShortcut } from './modifier-shortcuts';
 import { UsageSparkline } from './usage-analytics';
 import styles from './usage-indicator.module.css';
 
-export type UsageWindow = {
+export type UsageWindow = NormalizedUsageWindow & {
   kind: 'primary' | 'secondary';
   label: string;
-  usedPercent: number;
-  resetsAt?: number;
-  resetAfterSeconds?: number;
 };
 
 export type UsageLimit = {
@@ -30,126 +28,54 @@ export type UsageLimit = {
   secondary?: UsageWindow;
 };
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function numberFrom(value: Record<string, unknown>, keys: readonly string[]) {
-  for (const key of keys) {
-    const number = finiteNumber(value[key]);
-    if (number !== undefined) return number;
-  }
-  return undefined;
-}
-
-function resetFrom(value: Record<string, unknown>): number | undefined {
-  for (const key of [
-    'resetsAt',
-    'resetAt',
-    'reset_at',
-    'resets_at',
-    'resetTime',
-    'reset_time',
-  ]) {
-    const reset = parseUsageTimestamp(value[key]);
-    if (reset !== undefined) return reset;
-  }
-  return undefined;
-}
-
-function windowLabel(
-  value: Record<string, unknown>,
-  kind: 'primary' | 'secondary',
+function formatWindowLabel(
+  minutes: number | undefined,
+  kind: UsageWindow['kind'],
 ): string {
-  const explicit = value.windowLabel ?? value.window_label ?? value.label;
-  if (typeof explicit === 'string' && explicit.trim()) {
-    const normalized = explicit.trim();
-    if (/^weekly$/iu.test(normalized)) return 'wk';
-    if (/^5\s*hours?$/iu.test(normalized)) return '5h';
-    return normalized;
-  }
-  const minutes =
-    numberFrom(value, [
-      'windowMinutes',
-      'windowDurationMins',
-      'window_minutes',
-      'window_duration_mins',
-    ]) ??
-    (numberFrom(value, [
-      'windowSeconds',
-      'window_seconds',
-      'limitWindowSeconds',
-      'limit_window_seconds',
-    ]) ?? 0) / 60;
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0)
+    return kind;
   if (minutes === 300) return '5h';
   if (minutes === 10_080) return 'wk';
-  if (minutes !== undefined && minutes > 0) {
-    if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
-    if (minutes % 60 === 0) return `${minutes / 60}h`;
-    return `${minutes}m`;
-  }
-  return kind === 'primary' ? 'primary' : 'secondary';
+  if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
 }
 
-function parseWindow(
-  value: unknown,
-  kind: 'primary' | 'secondary',
+function adaptWindow(
+  window: NormalizedUsageWindow | undefined,
+  kind: UsageWindow['kind'],
 ): UsageWindow | undefined {
-  const source = record(value);
-  if (!source) return undefined;
-  const usedPercent = numberFrom(source, ['usedPercent', 'used_percent']);
-  if (usedPercent === undefined) return undefined;
-  const resetAfterSeconds = boundedUsageResetAfterSeconds(
-    numberFrom(source, [
-      'resetAfterSeconds',
-      'reset_after_seconds',
-      'resetInSeconds',
-      'reset_in_seconds',
-    ]),
-  );
-  return {
-    kind,
-    label: windowLabel(source, kind),
-    usedPercent: Math.max(0, Math.min(100, usedPercent)),
-    resetsAt: resetFrom(source),
-    ...(resetAfterSeconds === undefined ? {} : { resetAfterSeconds }),
-  };
+  return window
+    ? {
+        ...window,
+        kind,
+        label:
+          window.windowLabel ?? formatWindowLabel(window.windowMinutes, kind),
+      }
+    : undefined;
 }
 
-/** Converts provider variants into the shape shared by dashboard usage views. */
+/** Adapts the canonical protocol report for the footer's view model. */
 export function parseUsage(usage: unknown): UsageLimit[] {
-  const root = record(usage);
-  const nested = record(root?.usage);
-  const source = root?.snapshots
-    ? root
-    : nested?.snapshots
-      ? nested
-      : undefined;
-  if (!source || !Array.isArray(source.snapshots)) return [];
-  return source.snapshots.flatMap((item, index) => {
-    const snapshot = record(item);
-    if (!snapshot) return [];
-    const id = String(snapshot.limitId ?? snapshot.id ?? index);
-    const name = String(snapshot.limitName ?? snapshot.name ?? id);
-    const primary = parseWindow(
-      snapshot.primary ?? snapshot.primaryWindow ?? snapshot.primary_window,
-      'primary',
-    );
-    const secondary = parseWindow(
-      snapshot.secondary ??
-        snapshot.secondaryWindow ??
-        snapshot.secondary_window,
-      'secondary',
-    );
-    return primary || secondary ? [{ id, name, primary, secondary }] : [];
+  let report: UsageReport;
+  try {
+    report = normalizeUsage(usage);
+  } catch {
+    return [];
+  }
+  return report.snapshots.flatMap((snapshot) => {
+    const primary = adaptWindow(snapshot.primary, 'primary');
+    const secondary = adaptWindow(snapshot.secondary, 'secondary');
+    return primary || secondary
+      ? [
+          {
+            id: snapshot.limitId,
+            name: snapshot.limitName ?? snapshot.limitId,
+            primary,
+            secondary,
+          },
+        ]
+      : [];
   });
 }
 
@@ -178,15 +104,8 @@ export function selectUrgentWindow(
 export function formatResetCountdown(
   resetsAt: number | undefined,
   now = Date.now(),
-  resetAfterSeconds?: number,
 ): string | undefined {
-  const validResetAfter = boundedUsageResetAfterSeconds(resetAfterSeconds);
-  const milliseconds =
-    resetsAt !== undefined
-      ? resetsAt - now
-      : validResetAfter !== undefined
-        ? validResetAfter * 1_000
-        : undefined;
+  const milliseconds = resetsAt === undefined ? undefined : resetsAt - now;
   if (milliseconds === undefined) return undefined;
   const minutes = Math.max(0, Math.ceil(milliseconds / 60_000));
   if (minutes === 0) return 'now';
@@ -201,11 +120,7 @@ export function formatResetCountdown(
 function WindowSummary({ window, now }: { window: UsageWindow; now: number }) {
   const percent = Math.round(window.usedPercent);
   const tone = usageTone(window.usedPercent);
-  const countdown = formatResetCountdown(
-    window.resetsAt,
-    now,
-    window.resetAfterSeconds,
-  );
+  const countdown = formatResetCountdown(window.resetsAt, now);
   return (
     <span className={styles.window} data-tone={tone} data-window={window.kind}>
       <i className={styles.dot} aria-hidden="true" />
@@ -270,11 +185,7 @@ function UsageHistoryDetails({
               (item) =>
                 item.limitId === limit.id && item.windowKind === window.kind,
             );
-            const countdown = formatResetCountdown(
-              window.resetsAt,
-              now,
-              window.resetAfterSeconds,
-            );
+            const countdown = formatResetCountdown(window.resetsAt, now);
             return (
               <div className={styles.historyWindow} key={window.kind}>
                 <div className={styles.historyWindowHeader}>

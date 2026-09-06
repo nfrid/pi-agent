@@ -1,6 +1,8 @@
 import {
+  normalizeUsage,
   type UsageHistoryRange,
   type UsageHistoryResponse,
+  type UsageReport,
   usageHistoryPeriod,
 } from '@pi-dashboard/protocol';
 import {
@@ -15,7 +17,7 @@ const DEFAULT_FRESH_MS = 30_000;
 const DEFAULT_POLL_MS = 60_000;
 
 export interface UsageResult {
-  usage: unknown;
+  usage: UsageReport | undefined;
   error?: string;
 }
 
@@ -29,7 +31,7 @@ export interface UsageServiceOptions {
 
 /** Bounded, coalescing usage provider cache independent of HTTP requests. */
 export class UsageService {
-  private snapshot: unknown;
+  private snapshot: UsageReport | undefined;
   private updatedAt = 0;
   private attemptedAt = 0;
   private request: Promise<unknown> | undefined;
@@ -63,7 +65,7 @@ export class UsageService {
     await this.options.sessionUsage?.stop();
   }
 
-  cached(): unknown {
+  cached(): UsageReport | undefined {
     return this.snapshot;
   }
 
@@ -141,10 +143,11 @@ export class UsageService {
       )
         throw new Error('Usage payload exceeds the dashboard size limit.');
       const capturedAt = this.now();
+      const normalized = normalizeUsage(usage, capturedAt);
       this.options.history?.append(
-        normalizeUsageHistorySamples(usage, capturedAt),
+        normalizeUsageHistorySamples(normalized, capturedAt),
       );
-      this.snapshot = usage;
+      this.snapshot = normalized;
       this.updatedAt = capturedAt;
       this.onChange?.();
       return { usage: this.snapshot };

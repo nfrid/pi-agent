@@ -1,4 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { normalizeUsage } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import { formatUsage } from './display';
 import type { UsageReport } from './types';
@@ -38,13 +39,37 @@ describe('usage display', () => {
     expect(formatUsage(report, ctx)).toMatch(/wk 34% .*reset 3d/);
   });
 
+  it('keeps footer defaults when normalized windows have no label or duration', () => {
+    const report = normalizeUsage({
+      snapshots: [
+        {
+          primary: { usedPercent: 9 },
+          secondary: { usedPercent: 34 },
+        },
+      ],
+    });
+    expect(formatUsage(report, ctx)).toMatch(/5h 9% .*wk 34%/);
+  });
+
+  it('keeps footer week-multiple formatting distinct from dashboard labels', () => {
+    const report = normalizeUsage({
+      snapshots: [{ primary: { usedPercent: 9, windowMinutes: 20_160 } }],
+    });
+    expect(report.snapshots[0]?.primary?.windowLabel).toBeUndefined();
+    expect(formatUsage(report, ctx)).toContain('2w 9%');
+  });
+
   it('uses reported duration for an otherwise unknown window', () => {
     const report: UsageReport = {
       capturedAt: Date.now(),
       snapshots: [
         {
           limitId: 'codex',
-          primary: { usedPercent: 9, windowMinutes: 45 },
+          primary: {
+            usedPercent: 9,
+            windowMinutes: 45,
+            windowLabel: '45m',
+          },
         },
       ],
     };
