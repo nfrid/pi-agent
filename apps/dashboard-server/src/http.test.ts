@@ -478,6 +478,49 @@ describe('dashboard HTTP boundary', () => {
     ).resolves.toBe(true);
   });
 
+  it('stops with a live tRPC SSE subscriber still open', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sse-stop-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(root, 'state', 'bridge.sock'),
+    });
+    await server.start();
+    const origin = `http://127.0.0.1:${server.port}`;
+    const response = await fetch(
+      `${origin}/trpc/shellSubscribe?input=${encodeURIComponent(JSON.stringify({ json: {} }))}`,
+      {
+        headers: {
+          Origin: origin,
+          authorization: 'Bearer test-token',
+          'x-dashboard-protocol-version': '3',
+        },
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(response.body).toBeTruthy();
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('SSE response has no body.');
+    try {
+      await reader.read();
+      const stopping = server.stop();
+      await expect(
+        Promise.race([
+          stopping.then(() => true),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 2_000),
+          ),
+        ]),
+      ).resolves.toBe(true);
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+  });
+
   it('skips unchanged application catalogue projections', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-catalogue-signature-'),
@@ -1378,6 +1421,31 @@ describe('dashboard HTTP boundary', () => {
     });
     (internals as unknown as { releaseShutdown: () => void }).releaseShutdown();
     await stopping;
+  });
+
+  it('disposes after startup fails after HTTP listen', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-startup-after-listen-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(root, 'state', 'bridge.sock'),
+    });
+    const implementation = server as unknown as {
+      application: { shellProjection: () => unknown };
+    };
+    vi.spyOn(implementation.application, 'shellProjection').mockImplementation(
+      () => {
+        throw new Error('startup failed after HTTP listen');
+      },
+    );
+    await expect(server.start()).rejects.toThrow(
+      'startup failed after HTTP listen',
+    );
+    await expect(server.start()).rejects.toThrow('disposed');
   });
 
   it('cleans up a failed startup so the server can be retried', async () => {

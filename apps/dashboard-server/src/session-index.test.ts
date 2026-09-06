@@ -11,6 +11,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import * as scanner from './session-index/scanner.js';
 import {
   deriveSessionBranchTopology,
   HISTORY_OVERSCAN_BYTES,
@@ -131,6 +132,134 @@ describe('session index', () => {
         .map((entry) => entry.id)
         .sort(),
     ).toEqual(['new-id', 'old-id']);
+  });
+
+  it('commits simultaneous scans for different files independently', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-two-file-scans-'),
+    );
+    const firstFile = path.join(root, 'first.jsonl');
+    const secondFile = path.join(root, 'second.jsonl');
+    await writeFile(
+      firstFile,
+      `${[
+        { type: 'session', id: 'first-id', cwd: '/tmp' },
+        ...Array.from({ length: 240 }, (_, index) => ({
+          type: 'message',
+          id: `first-entry-${index}`,
+          message: { role: 'assistant', content: 'x'.repeat(24_000) },
+        })),
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join(
+          '\n',
+        )}\n${JSON.stringify({ type: 'session_info', id: 'first-info', name: 'First old' })}\n`,
+    );
+    await writeFile(
+      secondFile,
+      `${JSON.stringify({ type: 'session', id: 'second-id', cwd: '/tmp' })}\n${JSON.stringify({ type: 'session_info', id: 'second-info', name: 'Second old' })}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    await appendFile(
+      firstFile,
+      `${JSON.stringify({ type: 'session_info', id: 'first-new-info', name: 'First updated' })}\n`,
+    );
+    await appendFile(
+      secondFile,
+      `${JSON.stringify({ type: 'session_info', id: 'second-new-info', name: 'Second updated' })}\n`,
+    );
+    const internals = index as unknown as {
+      indexFile(file: string): Promise<void>;
+    };
+    const originalScan = scanner.scanSessionFile;
+    let delayed = true;
+    let releaseDelayed!: () => void;
+    let firstScanReady!: () => void;
+    const firstScan = new Promise<void>((resolve) => {
+      firstScanReady = resolve;
+    });
+    const scanSpy = vi
+      .spyOn(scanner, 'scanSessionFile')
+      .mockImplementation(async (file, proofOffsets, onPendingBytes) => {
+        const result = await originalScan(file, proofOffsets, onPendingBytes);
+        if (file === firstFile && delayed) {
+          delayed = false;
+          firstScanReady();
+          await new Promise<void>((resolve) => {
+            releaseDelayed = resolve;
+          });
+        }
+        return result;
+      });
+    try {
+      const first = internals.indexFile(firstFile);
+      await firstScan;
+      const second = internals.indexFile(secondFile);
+      releaseDelayed();
+      await Promise.all([first, second]);
+    } finally {
+      scanSpy.mockRestore();
+    }
+    expect(index.get('first-id')).toMatchObject({ name: 'First updated' });
+    expect(index.get('second-id')).toMatchObject({ name: 'Second updated' });
+  });
+
+  it('does not persist a discarded old scan after a newer catalogue swap', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-discarded-scan-meta-'),
+    );
+    const file = path.join(root, 'metadata.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'metadata-id', cwd: '/tmp' })}\n${JSON.stringify({ type: 'session_info', id: 'old-info', name: 'Old metadata' })}\n`,
+    );
+    const saved: Record<string, unknown>[] = [];
+    const index = new SessionIndex(root, {
+      saveSession: (entry: Record<string, unknown>) => saved.push(entry),
+    } as never);
+    await index.rebuild();
+    const internals = index as unknown as {
+      indexFile(file: string): Promise<void>;
+    };
+    const originalScan = scanner.scanSessionFile;
+    let releaseOldScan!: () => void;
+    let oldScanReady!: () => void;
+    const oldScan = new Promise<void>((resolve) => {
+      oldScanReady = resolve;
+    });
+    const scanSpy = vi
+      .spyOn(scanner, 'scanSessionFile')
+      .mockImplementation(async (target, proofOffsets, onPendingBytes) => {
+        const result = await originalScan(target, proofOffsets, onPendingBytes);
+        if (target === file && releaseOldScan === undefined) {
+          oldScanReady();
+          await new Promise<void>((resolve) => {
+            releaseOldScan = resolve;
+          });
+        }
+        return result;
+      });
+    try {
+      const oldIndex = internals.indexFile(file);
+      await oldScan;
+      await writeFile(
+        file,
+        `${JSON.stringify({ type: 'session', id: 'metadata-id', cwd: '/tmp' })}\n${JSON.stringify({ type: 'session_info', id: 'new-info', name: 'New metadata' })}\n`,
+      );
+      await index.refresh();
+      expect(saved.slice(1).map((entry) => entry.name)).toEqual([
+        'New metadata',
+      ]);
+      releaseOldScan();
+      await oldIndex;
+    } finally {
+      scanSpy.mockRestore();
+    }
+    expect(saved.slice(1).map((entry) => entry.name)).not.toContain(
+      'Old metadata',
+    );
+    expect(index.get('metadata-id')).toMatchObject({ name: 'New metadata' });
   });
 
   it('removes a known session when a malformed scan has no valid header', async () => {

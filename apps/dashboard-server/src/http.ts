@@ -705,11 +705,13 @@ export class DashboardServerImpl implements DashboardServer {
       }
       this.application.usage.start();
     } catch (error) {
-      // Failed startup is deliberately restartable. Preserve resources such
-      // as metadata and feeds, but clean every resource acquired so far.
-      this.lifecycle = 'stopped';
+      // Before HTTP has listened, cleanup leaves stateful resources open so a
+      // failed start can retry. Once Fastify has listened, closing it is
+      // terminal because its transport cannot be reopened.
+      const restartable = !this.httpHasStarted && !this.http.listening;
+      this.lifecycle = restartable ? 'stopped' : 'disposed';
       try {
-        await this.cleanupFailedStart();
+        await this.cleanupFailedStart(restartable);
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
@@ -778,11 +780,15 @@ export class DashboardServerImpl implements DashboardServer {
       }
     };
 
-    // Close both ingress paths before draining services. Existing requests can
-    // finish through Fastify's close, while new HTTP/bridge mutations are
-    // rejected as soon as lifecycle becomes `stopping`.
+    // Close admission before draining services. Existing finite requests can
+    // finish while their application services remain alive; feed closure must
+    // happen before Fastify close so live SSE requests cannot hold that drain.
     await attempt('bridge clients', () => this.bridge.destroyClients());
     await attempt('bridge listener', () => this.bridge.close(this.socketPath));
+    if (final) {
+      await attempt('shell feed', () => this.shellFeed.close());
+      await attempt('session feeds', () => this.sessionFeeds.close());
+    }
     await attempt('HTTP server', async () => {
       if (this.httpHasStarted || this.http.listening) await this.app.close();
     });
@@ -805,10 +811,6 @@ export class DashboardServerImpl implements DashboardServer {
     // runtime processes remain sidecar-owned; only the provider connection is
     // closed above.
     await attempt('session index', () => this.sessions.close());
-    if (final) {
-      await attempt('shell feed', () => this.shellFeed.close());
-      await attempt('session feeds', () => this.sessionFeeds.close());
-    }
     await attempt('runtime registry', () => this.registry.close());
     await attempt('uploads', () => this.application.uploads.close());
     if (final) {
@@ -827,9 +829,9 @@ export class DashboardServerImpl implements DashboardServer {
       );
   }
 
-  private async cleanupFailedStart(): Promise<void> {
-    // Keep metadata and feeds open so a failed start can retry on this server.
-    await this.stopInternal(false);
+  private async cleanupFailedStart(restartable: boolean): Promise<void> {
+    // Keep metadata and feeds open only when Fastify remains reusable.
+    await this.stopInternal(!restartable);
   }
 
   private assertMutationsOpen(): void {

@@ -65,8 +65,12 @@ interface IndexedFile extends SessionIndexEntry {
 }
 
 interface SessionCatalogue {
+  readonly kind: 'live' | 'staged';
+  readonly epoch: number;
   readonly files: Map<string, IndexedFile>;
   readonly fileIds: Map<string, string>;
+  readonly fileRevisions: Map<string, number>;
+  readonly pendingMetadata: Map<string, IndexedFile>;
 }
 
 export interface SessionHistoryPage {
@@ -539,11 +543,16 @@ function resumeMetadataFromDescriptors(
 
 export class SessionIndex {
   private catalogue: SessionCatalogue = {
+    kind: 'live',
+    epoch: 0,
     files: new Map(),
     fileIds: new Map(),
+    fileRevisions: new Map(),
+    pendingMetadata: new Map(),
   };
-  /** Changes made to the live catalogue invalidate in-flight rebuilds. */
-  private catalogueRevision = 0;
+  private nextCatalogueEpoch = 0;
+  /** Live mutations invalidate an in-flight staged rebuild. */
+  private liveMutationGeneration = 0;
   /** Rebuilds publish in request order, never in completion order. */
   private rebuildQueue: Promise<void> = Promise.resolve();
   private get files(): Map<string, IndexedFile> {
@@ -592,10 +601,16 @@ export class SessionIndex {
     // catalogue live until the complete replacement is ready, then publish it
     // with one synchronous pointer swap.
     while (true) {
-      const revision = this.catalogueRevision;
+      const live = this.catalogue;
+      const epoch = live.epoch;
+      const generation = this.liveMutationGeneration;
       const staged: SessionCatalogue = {
+        kind: 'staged',
+        epoch: this.nextCatalogueEpoch + 1,
         files: new Map(),
         fileIds: new Map(),
+        fileRevisions: new Map(),
+        pendingMetadata: new Map(),
       };
       const paths = (
         await Promise.all(
@@ -608,9 +623,29 @@ export class SessionIndex {
       // A watcher/index refresh may have committed while this replacement was
       // being built. Retry rather than replacing its newer catalogue with a
       // snapshot from before that commit.
-      if (revision !== this.catalogueRevision) continue;
-      this.catalogue = staged;
-      this.catalogueRevision += 1;
+      if (
+        live !== this.catalogue ||
+        epoch !== this.catalogue.epoch ||
+        generation !== this.liveMutationGeneration
+      )
+        continue;
+      const published: SessionCatalogue = {
+        ...staged,
+        kind: 'live',
+        epoch: ++this.nextCatalogueEpoch,
+        pendingMetadata: new Map(),
+      };
+      this.catalogue = published;
+      this.liveMutationGeneration += 1;
+      // Metadata persistence is part of publication, not staging. A discarded
+      // scan therefore cannot persist stale headers or titles.
+      for (const entry of staged.pendingMetadata.values()) {
+        try {
+          this.metadata?.saveSession(entry);
+        } catch {
+          this.removeFile(entry.file, published, published.epoch);
+        }
+      }
       return;
     }
   }
@@ -1763,15 +1798,15 @@ export class SessionIndex {
       const next = previous
         .then(async () => {
           const catalogue = this.catalogue;
-          const revision = this.catalogueRevision;
+          const epoch = catalogue.epoch;
           try {
-            await this.indexFile(file, [], catalogue);
+            await this.indexFile(file);
           } catch (error) {
             // Preserve the watcher behavior for a file that changed during its
             // scan, but never remove a catalogue published after that scan
             // began.
             if (error instanceof SessionFileChangedError)
-              this.removeFile(file, catalogue, revision);
+              this.removeFile(file, catalogue, epoch);
           }
         })
         .then(() =>
@@ -1813,38 +1848,67 @@ export class SessionIndex {
   private async indexFile(
     file: string,
     proofOffsets: readonly number[] = [],
-    catalogue: SessionCatalogue = this.catalogue,
+    target?: SessionCatalogue,
   ): Promise<void> {
     const resolved = path.resolve(file);
-    const revision =
-      catalogue === this.catalogue ? this.catalogueRevision : undefined;
-    const existingId = catalogue.fileIds.get(resolved);
-    const existing =
-      existingId === undefined ? undefined : catalogue.files.get(existingId);
-    return this.indexFileStreaming(
-      file,
-      proofOffsets.concat(
-        existing === undefined
-          ? []
-          : [...existing.historyIndex.prefixHashes.keys()],
-      ),
-      catalogue,
-      revision,
-    );
+    if (target?.kind === 'staged') {
+      const existingId = target.fileIds.get(resolved);
+      const existing =
+        existingId === undefined ? undefined : target.files.get(existingId);
+      await this.indexFileStreaming(
+        file,
+        proofOffsets.concat(
+          existing === undefined
+            ? []
+            : [...existing.historyIndex.prefixHashes.keys()],
+        ),
+        target,
+        target.epoch,
+        undefined,
+      );
+      return;
+    }
+
+    // A live scan can race another scan of the same path or a catalogue swap.
+    // Retry against the new live epoch instead of dropping a valid update.
+    while (true) {
+      const catalogue = this.catalogue;
+      const epoch = catalogue.epoch;
+      const fileRevision = catalogue.fileRevisions.get(resolved) ?? 0;
+      const existingId = catalogue.fileIds.get(resolved);
+      const existing =
+        existingId === undefined ? undefined : catalogue.files.get(existingId);
+      const result = await this.indexFileStreaming(
+        file,
+        proofOffsets.concat(
+          existing === undefined
+            ? []
+            : [...existing.historyIndex.prefixHashes.keys()],
+        ),
+        catalogue,
+        epoch,
+        fileRevision,
+      );
+      if (result === 'committed') return;
+    }
   }
 
   private async indexFileStreaming(
     file: string,
     proofOffsets: readonly number[],
     catalogue: SessionCatalogue,
-    revision: number | undefined,
-  ): Promise<void> {
+    epoch: number,
+    fileRevision: number | undefined,
+  ): Promise<'committed' | 'discarded'> {
     const resolved = path.resolve(file);
     if (
       !resolved.endsWith('.jsonl') ||
       !(await this.isSafeSessionFile(resolved))
-    )
-      return this.removeFile(resolved, catalogue, revision);
+    ) {
+      return this.removeFile(resolved, catalogue, epoch, fileRevision)
+        ? 'committed'
+        : 'discarded';
+    }
     try {
       const scan = await scanSessionFile(
         resolved,
@@ -1852,10 +1916,10 @@ export class SessionIndex {
         this.onIndexPendingBytes,
       );
       const header = scan.header;
-      if (!header || typeof header.cwd !== 'string') {
-        this.removeFile(resolved, catalogue, revision);
-        return;
-      }
+      if (!header || typeof header.cwd !== 'string')
+        return this.removeFile(resolved, catalogue, epoch, fileRevision)
+          ? 'committed'
+          : 'discarded';
       const groups = groupTranscript(
         scan.descriptors.map((descriptor) => descriptor.activity),
       );
@@ -1872,19 +1936,24 @@ export class SessionIndex {
       const id =
         typeof header.id === 'string' ? header.id : this.idForPath(resolved);
       // A scan that began against an older live catalogue must not publish its
-      // result after a rebuild swap. Staged rebuild catalogues intentionally do
-      // not have a live revision and are always allowed to finish.
-      if (catalogue !== this.catalogue || revision === this.catalogueRevision) {
-        const previous = catalogue.files.get(id);
-        if (previous && previous.file !== resolved) {
-          if (
-            !this.isAuxiliaryFile(previous.file) &&
-            this.isAuxiliaryFile(resolved)
-          )
-            return;
-          catalogue.fileIds.delete(previous.file);
-        }
-      } else return;
+      // result after a rebuild swap. Staged rebuild catalogues are explicit and
+      // do not use live per-file revisions.
+      const current =
+        catalogue.kind === 'live' &&
+        catalogue === this.catalogue &&
+        catalogue.epoch === epoch &&
+        (fileRevision === undefined ||
+          (catalogue.fileRevisions.get(resolved) ?? 0) === fileRevision);
+      if (!current && catalogue.kind === 'live') return 'discarded';
+      const previous = catalogue.files.get(id);
+      if (previous && previous.file !== resolved) {
+        if (
+          !this.isAuxiliaryFile(previous.file) &&
+          this.isAuxiliaryFile(resolved)
+        )
+          return 'committed';
+        catalogue.fileIds.delete(previous.file);
+      }
       const auxiliaryDelegate =
         this.isAuxiliaryFile(resolved) && header.sessionKind === 'delegate';
       const headerParentSessionId =
@@ -1938,20 +2007,32 @@ export class SessionIndex {
         lastEntryId: scan.latestEntryId,
         historyIndex,
       };
-      if (catalogue === this.catalogue && revision !== this.catalogueRevision)
-        return;
+      const stillCurrent =
+        catalogue.kind === 'staged' ||
+        (catalogue === this.catalogue &&
+          catalogue.epoch === epoch &&
+          (fileRevision === undefined ||
+            (catalogue.fileRevisions.get(resolved) ?? 0) === fileRevision));
+      if (!stillCurrent) return 'discarded';
       const prior = catalogue.files.get(id);
       catalogue.files.set(id, entry);
       catalogue.fileIds.set(resolved, id);
-      if (!this.isAuxiliaryFile(resolved)) this.metadata?.saveSession(entry);
-      if (catalogue === this.catalogue) this.catalogueRevision += 1;
+      if (catalogue.kind === 'staged') {
+        if (!this.isAuxiliaryFile(resolved))
+          catalogue.pendingMetadata.set(id, entry);
+      } else {
+        if (!this.isAuxiliaryFile(resolved)) this.metadata?.saveSession(entry);
+        catalogue.fileRevisions.set(resolved, (fileRevision ?? 0) + 1);
+        this.liveMutationGeneration += 1;
+      }
       // Preserve the old collision semantics when a prior ID points at a
       // different file, while keeping the live-map commit synchronous.
       if (prior && prior.file !== resolved && prior.file !== '')
         catalogue.fileIds.delete(prior.file);
+      return 'committed';
     } catch (error) {
       if (!(error instanceof SessionFileChangedError))
-        this.removeFile(resolved, catalogue, revision);
+        this.removeFile(resolved, catalogue, epoch, fileRevision);
       throw error;
     }
   }
@@ -1959,21 +2040,35 @@ export class SessionIndex {
   private removeFile(
     file: string,
     catalogue: SessionCatalogue = this.catalogue,
-    revision?: number,
-  ): void {
-    if (
-      catalogue === this.catalogue &&
-      revision !== undefined &&
-      revision !== this.catalogueRevision
-    )
-      return;
+    epoch = catalogue.epoch,
+    fileRevision?: number,
+  ): boolean {
+    if (catalogue.kind === 'live') {
+      if (
+        catalogue !== this.catalogue ||
+        catalogue.epoch !== epoch ||
+        (fileRevision !== undefined &&
+          (catalogue.fileRevisions.get(path.resolve(file)) ?? 0) !==
+            fileRevision)
+      )
+        return false;
+    }
     const resolved = path.resolve(file);
     const id = catalogue.fileIds.get(resolved);
-    const removed = catalogue.fileIds.delete(resolved);
-    if (id && catalogue.files.get(id)?.file === resolved) {
+    catalogue.fileIds.delete(resolved);
+    if (id && catalogue.files.get(id)?.file === resolved)
       catalogue.files.delete(id);
-      if (catalogue === this.catalogue) this.catalogueRevision += 1;
-    } else if (removed && catalogue === this.catalogue)
-      this.catalogueRevision += 1;
+    if (id && catalogue.pendingMetadata.get(id)?.file === resolved)
+      catalogue.pendingMetadata.delete(id);
+    if (catalogue.kind === 'live') {
+      catalogue.fileRevisions.set(
+        resolved,
+        (catalogue.fileRevisions.get(resolved) ?? 0) + 1,
+      );
+      this.liveMutationGeneration += 1;
+    }
+    // `true` means the requested catalogue/epoch was still authoritative,
+    // including when the file was already absent.
+    return true;
   }
 }
