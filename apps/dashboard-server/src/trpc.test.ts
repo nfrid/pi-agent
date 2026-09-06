@@ -636,6 +636,21 @@ describe('dashboard tRPC boundary', () => {
     );
     expect(staleCursor.code).toBe('BAD_REQUEST');
     expect(staleCursor.message).toBe('Stale history cursor.');
+
+    const adapterConflict = toDashboardTrpcError({
+      code: 'session-link-conflict',
+      cause: { message: 'database is locked: private detail' },
+    });
+    expect(adapterConflict.code).toBe('CONFLICT');
+    expect(adapterConflict.message).toBe(
+      'The orchestration request conflicts with existing state.',
+    );
+
+    const unknownAdapter = toDashboardTrpcError({
+      message: 'plain adapter failure',
+    });
+    expect(unknownAdapter.code).toBe('INTERNAL_SERVER_ERROR');
+    expect(unknownAdapter.message).toBe('plain adapter failure');
   });
 
   it('parses the public request adapter with strict fields', () => {

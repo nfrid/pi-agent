@@ -529,6 +529,56 @@ async function isolatedServiceFixture(
   };
 }
 
+it('drains pending execution and registry rejections through shutdown', async () => {
+  const service = new OrchestrationService({
+    repository: {} as never,
+    manager: {} as never,
+    registry: {} as never,
+  });
+  let rejectExecution!: (error: Error) => void;
+  const execution = new Promise<void>((_resolve, reject) => {
+    rejectExecution = reject;
+  });
+  const trackExecution = execution.then(
+    () => {
+      if (service.executionTasks.get('run-pending') === execution)
+        service.executionTasks.delete('run-pending');
+    },
+    () => {
+      if (service.executionTasks.get('run-pending') === execution)
+        service.executionTasks.delete('run-pending');
+    },
+  );
+  service.executionTasks.set('run-pending', execution);
+
+  let rejectRegistry!: (error: Error) => void;
+  const firstRegistry = new Promise<void>((_resolve, reject) => {
+    rejectRegistry = reject;
+  });
+  let resolveSecondRegistry!: () => void;
+  const secondRegistry = new Promise<void>((resolve) => {
+    resolveSecondRegistry = resolve;
+  });
+  service.registryTasks.add(firstRegistry);
+  void firstRegistry.catch(() => {
+    service.registryTasks.delete(firstRegistry);
+    service.registryTasks.add(secondRegistry);
+    void secondRegistry.then(() => {
+      service.registryTasks.delete(secondRegistry);
+    });
+  });
+
+  const stopping = service.stop();
+  rejectExecution(new Error('execution failed'));
+  rejectRegistry(new Error('registry failed'));
+  await Promise.resolve();
+  resolveSecondRegistry();
+  await stopping;
+  await trackExecution;
+  expect(service.executionTasks.size).toBe(0);
+  expect(service.registryTasks.size).toBe(0);
+});
+
 describe('OrchestrationService', () => {
   it('persists the generated title before worktree preparation and seeds the runtime name', async () => {
     const events: string[] = [];

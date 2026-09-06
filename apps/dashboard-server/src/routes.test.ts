@@ -703,6 +703,47 @@ describe('Fastify dashboard route plugin', () => {
     expect(routeContext.reviewCheckout).toHaveBeenCalledTimes(2);
   });
 
+  it('classifies nested adapter errors without changing REST defaults', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.mergeCheckout = vi.fn(async () => {
+      throw {
+        code: 'session-link-conflict',
+        cause: { message: 'database is locked: private detail' },
+      };
+    });
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/checkouts/checkout-1/merge',
+      headers,
+      payload: { commandId: 'nested-adapter-conflict' },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toEqual({
+      error: 'The orchestration request conflicts with existing state.',
+      code: 'session-link-conflict',
+    });
+
+    routeContext.mergeCheckout = vi.fn(async () => {
+      throw { message: 'plain adapter failure' };
+    });
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/api/checkouts/checkout-1/merge',
+      headers,
+      payload: { commandId: 'nested-adapter-unknown' },
+    });
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json()).toEqual({ error: 'plain adapter failure' });
+  });
+
   it('covers orchestration HTTP statuses, bounded schemas, auth, and coded conflicts', async () => {
     const app = Fastify({
       ajv: { customOptions: { removeAdditional: false } },

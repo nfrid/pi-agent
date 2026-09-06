@@ -14,7 +14,7 @@ import {
   type StopRuntimeMutationOutput,
   validateBridgeCommand,
 } from '@pi-dashboard/protocol';
-import type { OrchestrationRepository } from '../repositories/types.js';
+import type { RuntimeServiceRepository } from '../repositories/types.js';
 import type { RuntimeManager } from '../runtime-manager.js';
 import type { RuntimeRegistry } from '../runtime-registry.js';
 import type { SessionIndex } from '../session-index.js';
@@ -60,7 +60,7 @@ export class RuntimeService {
     private readonly registry: RuntimeRegistry,
     private readonly manager: RuntimeManager,
     private readonly sessions: SessionIndex,
-    private readonly repository?: OrchestrationRepository,
+    private readonly repository?: RuntimeServiceRepository,
     private readonly onThreadActivity?: (threadId: string) => void,
   ) {}
 
