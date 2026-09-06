@@ -1207,6 +1207,51 @@ describe('tool row views and virtual transcript construction', () => {
     ]);
   });
 
+  it('keeps unresolved declared and inline calls as activity preambles', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'orphan-inline',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Inspecting an unresolved inline call.' },
+            { type: 'toolCall', id: 'inline-orphan', name: 'read' },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'orphan-declared',
+        message: {
+          role: 'assistant',
+          toolCallIds: ['declared-orphan'],
+          content: [{ type: 'text', text: 'Inspecting a declared call.' }],
+        },
+      },
+    ]);
+    expect(
+      items.filter(({ entry }) => entry.kind === 'assistant'),
+    ).toMatchObject([
+      {
+        key: 'orphan-inline',
+        entry: {
+          title: 'Inspecting an unresolved inline call',
+          titleKind: 'preamble',
+          speaks: false,
+        },
+      },
+      {
+        key: 'orphan-declared',
+        entry: {
+          title: 'Inspecting a declared call',
+          titleKind: 'preamble',
+          speaks: false,
+        },
+      },
+    ]);
+  });
+
   it('normalizes historical Pi toolResult messages out of order', () => {
     const successful = toTranscriptEntries([
       {

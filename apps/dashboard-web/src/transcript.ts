@@ -649,7 +649,8 @@ export function toTranscriptEntries(
     const entry = activityEntryFromSemantic({
       kind: 'assistant',
       content: item.content,
-      associatedToolCallIds: item.associatedToolCallIds,
+      hasTools:
+        item.toolCallIds.length > 0 || item.associatedToolCallIds.length > 0,
       streaming: item.streaming,
     });
     result.push({

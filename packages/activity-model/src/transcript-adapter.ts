@@ -77,11 +77,8 @@ export function activityEntryFromSemantic(
     const textHeaders = headersOf(assistant, 'text');
     const thinkingHeaders = headersOf(assistant, 'thinking');
     const visibleText = text && !isNarration(text) ? text : undefined;
-    const hasTools =
-      input.associatedToolCallIds.length > 0 ||
-      input.hasAssociatedTools === true;
     const preamble =
-      visibleText && hasTools ? preambleTitle(visibleText) : undefined;
+      visibleText && input.hasTools ? preambleTitle(visibleText) : undefined;
     const narratedTitle = (
       textHeaders.length > 0 ? textHeaders : thinkingHeaders
     ).at(-1);
@@ -109,7 +106,9 @@ export function activityEntryFromSemantic(
       kind: 'tool',
       name: input.name,
       args: input.args,
-      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(input.status === undefined && !input.isError
+        ? {}
+        : { status: input.isError ? 'error' : input.status }),
       ...(input.isError || input.status === 'error' ? { isError: true } : {}),
       ...(input.result === undefined ? {} : { result: input.result }),
       ...(input.data === undefined ? {} : { data: input.data }),
@@ -146,24 +145,10 @@ export function activityEntryFromRaw(raw: unknown): TranscriptEntry {
     if (role === 'assistant') {
       const content = messageContent(value);
       const toolCalls = toolCallParts(content);
-      const toolCallIds = Array.isArray(message?.toolCallIds)
-        ? message.toolCallIds.filter(
-            (id): id is string => typeof id === 'string',
-          )
-        : [];
       return activityEntryFromSemantic({
         kind: 'assistant',
         content,
-        associatedToolCallIds: [
-          ...toolCallIds,
-          ...toolCalls
-            .map(
-              (part) =>
-                stringField(part, 'id') ?? stringField(part, 'toolCallId'),
-            )
-            .filter((id): id is string => id !== undefined),
-        ],
-        hasAssociatedTools:
+        hasTools:
           toolCalls.length > 0 ||
           (Array.isArray(message?.toolCallIds) &&
             message.toolCallIds.length > 0) ||
@@ -205,10 +190,7 @@ export function activityEntryFromRaw(raw: unknown): TranscriptEntry {
       name:
         stringField(tool, 'name') ?? stringField(tool, 'toolName') ?? 'tool',
       args: tool.arguments ?? tool.args,
-      status:
-        tool.isError === true || tool.status === 'error'
-          ? 'error'
-          : (tool.status as RawToolStatus),
+      status: tool.status as RawToolStatus,
       result: tool.result,
       data: tool.data,
       isError: tool.isError === true,

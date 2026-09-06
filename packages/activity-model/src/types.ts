@@ -66,9 +66,8 @@ export type ActivitySemanticEntry =
   | {
       kind: 'assistant';
       content: unknown;
-      associatedToolCallIds: readonly string[];
-      /** Compatibility inputs may know there are tools without stable IDs. */
-      hasAssociatedTools?: boolean;
+      /** Includes declared calls that have not produced a materialized tool. */
+      hasTools: boolean;
       streaming: boolean;
     }
   | {
