@@ -42,7 +42,7 @@
     "test": "node scripts/clean-npm-env.mjs sh -c \"node scripts/check-node.mjs && vitest run\"",
     "session:metrics": "node scripts/session-metrics/index.mjs",
     "pi:update": "pi update && bun run pi:sdk-sync",
-    "pi:sdk-sync": "VERSION=$(pi --version) && TYPEBOX_VERSION=1.3.7 && bun add --exact @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION typebox@$TYPEBOX_VERSION && bun add --exact --filter @pi-dashboard/activity-model @earendil-works/pi-ai@$VERSION && bun add --exact --filter @pi-dashboard/server --filter @pi-dashboard/web --filter @pi-dashboard/extension-contributions typebox@$TYPEBOX_VERSION",
+    "pi:sdk-sync": "VERSION=$(pi --version) && TYPEBOX_VERSION=1.3.7 && bun add --exact @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION typebox@$TYPEBOX_VERSION && bun add --exact --filter @pi-dashboard/activity-model --filter @pi-agent/session-title @earendil-works/pi-ai@$VERSION && bun add --exact --filter @pi-dashboard/server --filter @pi-dashboard/web --filter @pi-dashboard/extension-contributions typebox@$TYPEBOX_VERSION",
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "dependencies": {

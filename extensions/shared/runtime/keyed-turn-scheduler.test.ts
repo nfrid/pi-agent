@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import {
   AgentSession,
   type ExtensionAPI,
@@ -83,19 +84,19 @@ describe('keyed turn scheduler', () => {
     'patches the constructor owned by the running CLI instead of a local SDK copy',
     () => {
       const requireModule = createRequire(__filename);
-      const installed = requireModule(`${GLOBAL_PI_DIST}/index.js`) as {
-        AgentSession: typeof AgentSession;
-      };
       const previousEntry = process.argv[1];
       try {
         for (const entry of [`${GLOBAL_PI_DIST}/cli.js`, PI_EXECUTABLE]) {
+          // The executable may use Pi's bundled CLI, whose constructor is not
+          // the one exported by the adjacent unbundled SDK installation.
+          const installed = requireModule(
+            path.join(path.dirname(realpathSync(entry)), 'index.js'),
+          ) as { AgentSession: typeof AgentSession };
           process.argv[1] = entry;
-          expect(resolveHostAgentSession()?.prototype).toBe(
-            installed.AgentSession.prototype,
-          );
-          expect(resolveHostAgentSession()?.prototype).not.toBe(
-            AgentSession.prototype,
-          );
+          const resolved = resolveHostAgentSession();
+          // Comparing booleans avoids inspecting prototype getters on failure.
+          expect(resolved === installed.AgentSession).toBe(true);
+          expect(resolved === AgentSession).toBe(false);
         }
       } finally {
         process.argv[1] = previousEntry;
