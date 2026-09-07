@@ -539,6 +539,18 @@ test('does not borrow a following visit when restoring a manually read thread', 
   await expect(page.getByText(/session-1 message 119/u)).toBeVisible();
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
   await navigateInDashboard(page, '/sessions/session-2');
+  const restoredTop = await transcriptScroll(page).evaluate(
+    (element) => element.scrollTop,
+  );
+  await transcriptScroll(page).evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(page.getByText('session-2 live update')).toBeVisible();
+  await transcriptScroll(page).evaluate((element, top) => {
+    element.scrollTop = top;
+    element.dispatchEvent(new Event('scroll'));
+  }, restoredTop);
   const restoredRow = page.locator(
     `[data-transcript-key="${savedAnchor.key}"]`,
   );
