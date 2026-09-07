@@ -382,31 +382,44 @@ export async function scanSessionFile(
       offset = end;
     };
     const chunk = Buffer.allocUnsafe(INDEX_SCAN_CHUNK_BYTES);
-    let pending = Buffer.alloc(0);
+    let pendingFragments: Buffer[] = [];
+    let pendingBytes = 0;
     let pendingStart = 0;
     while (true) {
       const result = await handle.read(chunk, 0, chunk.length, null);
       if (result.bytesRead === 0) break;
-      pending =
-        pending.length === 0
-          ? Buffer.from(chunk.subarray(0, result.bytesRead))
-          : Buffer.concat([pending, chunk.subarray(0, result.bytesRead)]);
-      onPendingBytes?.(pending.length);
-      while (true) {
-        const newline = pending.indexOf(0x0a);
-        if (newline < 0) break;
-        const rawLine = Buffer.from(pending.subarray(0, newline + 1));
-        offset = pendingStart;
-        processLine(rawLine);
-        pending = pending.subarray(newline + 1);
-        pendingStart += rawLine.length;
+      const bytes = chunk.subarray(0, result.bytesRead);
+      let cursor = 0;
+      while (cursor < bytes.length) {
+        const newline = bytes.indexOf(0x0a, cursor);
+        if (newline < 0) {
+          if (pendingBytes === 0) pendingStart = offset;
+          const fragment = Buffer.from(bytes.subarray(cursor));
+          pendingFragments.push(fragment);
+          pendingBytes += fragment.length;
+          break;
+        }
+        const end = newline + 1;
+        if (pendingBytes === 0) {
+          processLine(bytes.subarray(cursor, end));
+        } else {
+          const fragment = Buffer.from(bytes.subarray(cursor, end));
+          pendingFragments.push(fragment);
+          pendingBytes += fragment.length;
+          offset = pendingStart;
+          processLine(Buffer.concat(pendingFragments, pendingBytes));
+          pendingFragments = [];
+          pendingBytes = 0;
+        }
+        cursor = end;
       }
-      if (pending.length > INDEX_MAX_LINE_BYTES)
+      onPendingBytes?.(pendingBytes);
+      if (pendingBytes > INDEX_MAX_LINE_BYTES)
         throw new Error('Session index line exceeds bounded scan limit.');
     }
-    if (pending.length > 0) {
+    if (pendingBytes > 0) {
       offset = pendingStart;
-      processLine(Buffer.from(pending));
+      processLine(Buffer.concat(pendingFragments, pendingBytes));
     }
     const endStat = await handle.stat();
     if (
