@@ -91,22 +91,7 @@ export function SessionView({
   const sessionMounted = Boolean(
     data && projection && !waitingForInitialHistory,
   );
-  const {
-    awayFromLatest,
-    controlLayerRef,
-    jumpToLatest,
-    sessionPageRef,
-    stopFollowing,
-    tailReadySessionId,
-    tailScrollRequest,
-  } = useSessionScroll({
-    id,
-    data,
-    projection,
-    sessionMounted,
-    enabled: !embedded,
-    scrollElementRef: transcriptScrollRef,
-  });
+  const tailStateRef = useRef({ ready: false, restoring: true });
   const {
     history,
     historyError,
@@ -122,8 +107,36 @@ export function SessionView({
     store,
     sessionMounted,
     scrollElementRef: embedded ? undefined : transcriptScrollRef,
-    autoloadAtTop: !embedded && tailReadySessionId === id,
+    autoloadAtTop: !embedded
+      ? () => tailStateRef.current.ready && !tailStateRef.current.restoring
+      : false,
   });
+  const {
+    awayFromLatest,
+    controlLayerRef,
+    jumpToLatest,
+    sessionPageRef,
+    stopFollowing,
+    tailReadySessionId,
+    scrollCommand,
+    restoring,
+  } = useSessionScroll({
+    id,
+    serverId: snapshot.serverId,
+    history,
+    historyAvailable: data?.history !== undefined,
+    loadThroughOrdinal,
+    cancelHistoryRestore: cancelScrollRestore,
+    data,
+    projection,
+    sessionMounted,
+    enabled: !embedded,
+    scrollElementRef: transcriptScrollRef,
+  });
+  tailStateRef.current = {
+    ready: tailReadySessionId === id,
+    restoring,
+  };
 
   useEffect(() => {
     if (outlineOpen) outlineWasOpenRef.current = true;
@@ -244,7 +257,6 @@ export function SessionView({
             projection={projection}
             runtime={runtime}
             cwd={runtime?.cwd ?? data.metadata.cwd}
-            tailScrollRequest={tailScrollRequest}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}
             onBeforeScroll={handleBeforeTranscriptNavigation}
@@ -261,6 +273,7 @@ export function SessionView({
             }
             prependAnchor={prependAnchor}
             onPrependAnchorRestored={completePrependRestore}
+            scrollCommand={scrollCommand}
             virtualize={!embedded}
           />
         </section>
@@ -281,6 +294,7 @@ export function SessionView({
             checkout={checkout}
             onPromptSubmitted={(text) => {
               cancelScrollRestore();
+              if (restoring) stopFollowing();
               store.optimisticallyTitleSession(id, text);
             }}
           />

@@ -208,7 +208,7 @@ function DelegateCanonicalTranscript({
         modelItems={modelItems}
         runtime={runtime}
         cwd={runtime?.cwd ?? snapshot?.metadata.cwd}
-        tailScrollRequest={follow.tailScrollRequest}
+        scrollCommand={follow.scrollCommand}
         onBeforeScroll={follow.stopFollowing}
         scrollElementRef={transcriptScrollRef}
         outline={delegateOutline}

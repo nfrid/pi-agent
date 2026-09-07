@@ -9,6 +9,7 @@ import {
   type Dispatch,
   type RefObject,
   type SetStateAction,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -24,7 +25,12 @@ import {
   transcriptItemTimestamp,
 } from '../landmarks';
 import { TranscriptOutline } from '../outline';
+import type { TranscriptScrollCommand } from '../scroll-command';
 import { TranscriptToolStream } from '../tool-stream';
+import {
+  restoreRenderedAnchor,
+  useTranscriptScrollCommand,
+} from '../use-scroll-command';
 import { buildVirtualTranscriptRows } from '../virtual-rows';
 import { useVirtualTranscriptScrollRestoration } from '../virtual-scroll';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
@@ -40,12 +46,12 @@ export function VirtualizedTranscript({
   onOpenBranchPaths,
   onBranchPointChange,
   onJumpToLandmark,
-  tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
   onBeforeScroll,
   pendingJumpKey,
   onPendingJumpHandled,
+  scrollCommand,
   scrollElementRef,
   previewStartCount,
   previewEndCount,
@@ -62,13 +68,13 @@ export function VirtualizedTranscript({
   onJumpToLandmark?: (
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
-  tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
   /** A jump requested before a regular-to-virtualized renderer transition. */
   pendingJumpKey?: string;
   onPendingJumpHandled?: () => void;
+  scrollCommand?: TranscriptScrollCommand;
   scrollElementRef: RefObject<HTMLDivElement | null>;
   previewStartCount: number;
   previewEndCount: number;
@@ -86,14 +92,13 @@ export function VirtualizedTranscript({
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
     measureElement: (element) => element.getBoundingClientRect().height,
   });
-  useLayoutEffect(() => {
-    if (!tailScrollRequest || rows.length === 0) return;
-    virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
-    const frame = window.requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [rows.length, tailScrollRequest, virtualizer]);
+  // During restoration our measured anchor, not estimated-row compensation,
+  // owns the offset. Otherwise asynchronous size adjustments race the command
+  // against the virtualizer's last observed (pre-command) scroll position.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange =
+    scrollCommand?.kind === 'anchor' && !scrollCommand.signal.aborted
+      ? () => false
+      : undefined;
   useLayoutEffect(() => {
     void open;
     void rows.length;
@@ -145,6 +150,40 @@ export function VirtualizedTranscript({
     });
     return result;
   }, [items, rows]);
+  // scrollToIndex/scrollToOffset start TanStack's private reconciliation loop.
+  // Read its measurement instead: only our cancellable controller may schedule
+  // writes, otherwise that loop can undo restoration or later manual input.
+  const scrollToRow = useCallback(
+    (index: number, align: 'start' | 'end') => {
+      const offset = virtualizer.getOffsetForIndex(index, align)?.[0];
+      const element = scrollElementRef.current;
+      if (element && offset !== undefined) element.scrollTop = offset;
+    },
+    [scrollElementRef, virtualizer],
+  );
+  const placeScrollCommand = useCallback(
+    (command: TranscriptScrollCommand) => {
+      const element = scrollElementRef.current;
+      if (!element || rows.length === 0) return false;
+      if (command.kind === 'latest') {
+        scrollToRow(rows.length - 1, 'end');
+        return true;
+      }
+      const settled = restoreRenderedAnchor(element, command);
+      if (settled !== undefined) return settled;
+      const index = command.rowKey
+        ? rowIndexByKey.get(command.rowKey)
+        : undefined;
+      if (index === undefined) {
+        element.scrollTop = command.scrollTop;
+        return true;
+      }
+      scrollToRow(index, 'start');
+      return false;
+    },
+    [rowIndexByKey, rows.length, scrollElementRef, scrollToRow],
+  );
+  useTranscriptScrollCommand(scrollCommand, placeScrollCommand);
   useLayoutEffect(() => {
     if (!requestedJumpKey) return;
     const rowIndex =
@@ -153,9 +192,9 @@ export function VirtualizedTranscript({
     if (rowIndex === undefined) return;
     if (pendingJumpKey !== undefined) onPendingJumpHandled?.();
     else setLocalPendingJumpKey(undefined);
-    virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+    scrollToRow(rowIndex, 'start');
     const frame = window.requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+      scrollToRow(rowIndex, 'start');
     });
     return () => window.cancelAnimationFrame(frame);
   }, [
@@ -163,7 +202,7 @@ export function VirtualizedTranscript({
     pendingJumpKey,
     requestedJumpKey,
     rowIndexByKey,
-    virtualizer,
+    scrollToRow,
   ]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
@@ -171,7 +210,7 @@ export function VirtualizedTranscript({
       rowIndexByKey.get(landmark.key) ??
       rowIndexByKey.get(`group-${landmark.key}`);
     if (loadedRowIndex !== undefined) {
-      virtualizer.scrollToIndex(loadedRowIndex, { align: 'start' });
+      scrollToRow(loadedRowIndex, 'start');
       return;
     }
     const target = outline?.find(

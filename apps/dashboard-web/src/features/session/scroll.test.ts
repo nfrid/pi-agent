@@ -2,36 +2,72 @@ import type { TranscriptProjection } from '@pi-dashboard/domain';
 import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  distanceFromScrollEnd,
-  FOLLOW_REARM_DISTANCE_PX,
-  nextFollowMode,
-  useSessionScroll,
-} from './scroll';
+import { readSessionScrollMemory, useSessionScroll } from './scroll';
 
-describe('session follow mode', () => {
-  it('rearms only within 40 pixels of the real content end', () => {
-    expect(FOLLOW_REARM_DISTANCE_PX).toBe(40);
-    expect(nextFollowMode('manual', 41, false)).toBe('manual');
-    expect(nextFollowMode('manual', 40, false)).toBe('following');
+describe('session scroll memory storage', () => {
+  it('isolates server sessions and ignores corrupt values', () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+    try {
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-a:session-1',
+        JSON.stringify({
+          version: 1,
+          mode: 'manual',
+          rowKey: 'message-4',
+          rowOffset: 18,
+          scrollTop: 420,
+          oldestOrdinal: 4,
+        }),
+      );
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-b:session-1',
+        JSON.stringify({ version: 1, mode: 'following', scrollTop: 0 }),
+      );
+      expect(readSessionScrollMemory('session-1', 'server-a')?.rowKey).toBe(
+        'message-4',
+      );
+      expect(readSessionScrollMemory('session-1', 'server-b')?.mode).toBe(
+        'following',
+      );
+      values.set('pi.dashboard.session-scroll.v1:server-a:broken', '{bad');
+      expect(readSessionScrollMemory('broken', 'server-a')).toBeUndefined();
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-a:invalid',
+        JSON.stringify({ version: 1, mode: 'manual', scrollTop: 'bad' }),
+      );
+      expect(readSessionScrollMemory('invalid', 'server-a')).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
-  it('treats upward intent as manual even at the content end', () => {
-    expect(nextFollowMode('following', 0, true)).toBe('manual');
-    expect(nextFollowMode('manual', 0, true)).toBe('manual');
+  it('does not fail when session storage is unavailable', () => {
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: () => {
+          throw new Error('blocked');
+        },
+      },
+    });
+    try {
+      expect(readSessionScrollMemory('session-1', 'server-a')).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
+});
 
-  it('keeps following while layout growth moves the end away', () => {
-    expect(nextFollowMode('following', 200, false)).toBe('following');
-  });
-
-  it('calculates distance from the scroll element rather than the window', () => {
-    expect(distanceFromScrollEnd(1_000, 600, 300)).toBe(100);
-    expect(distanceFromScrollEnd(1_000, 800, 300)).toBe(0);
-  });
-
+describe('session follow lifecycle', () => {
   it('attaches after initial history mounts and preserves manual mode through settlement', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('Element', class {});
+    const windowListeners = new Map<string, EventListener>();
     const listeners = new Map<string, Set<EventListener>>();
     let scrollHeight = 1_000;
     const transcript = {
@@ -63,8 +99,9 @@ describe('session follow mode', () => {
         return id;
       },
       setTimeout,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
+      addEventListener: (type: string, listener: EventListener) =>
+        windowListeners.set(type, listener),
+      removeEventListener: (type: string) => windowListeners.delete(type),
       innerHeight: 800,
       visualViewport: undefined,
     };
@@ -82,14 +119,16 @@ describe('session follow mode', () => {
     function Probe({
       waiting,
       version,
+      id = 'session-1',
     }: {
       waiting: boolean;
       version: number;
+      id?: string;
     }) {
       const data = { entries: [`entry-${version}`] };
       const projection = {} as TranscriptProjection;
       controls = useSessionScroll({
-        id: 'session-1',
+        id,
         data,
         projection,
         sessionMounted: Boolean(data && projection && !waiting),
@@ -122,7 +161,12 @@ describe('session follow mode', () => {
       expect(controls.awayFromLatest).toBe(true);
 
       await act(async () => {
-        renderer?.update(createElement(Probe, { waiting: false, version: 2 }));
+        renderer?.update(
+          createElement(Probe, {
+            waiting: false,
+            version: 2,
+          }),
+        );
       });
       await act(async () => runFrames());
       expect(transcript.scrollTop).toBe(700);
@@ -132,6 +176,8 @@ describe('session follow mode', () => {
       await act(async () => runFrames());
       expect(transcript.scrollTop).toBe(1_300);
       expect(controls.awayFromLatest).toBe(false);
+      const oldTailCommand = controls.scrollCommand;
+      expect(oldTailCommand?.kind).toBe('latest');
 
       scrollHeight = 1_400;
       await act(async () => {
@@ -149,6 +195,37 @@ describe('session follow mode', () => {
       await act(async () => runFrames());
       expect(transcript.scrollTop).toBe(900);
       expect(controls.awayFromLatest).toBe(true);
+      expect(controls.scrollCommand).toBeUndefined();
+      expect(oldTailCommand?.signal.aborted).toBe(true);
+      await act(async () => {
+        renderer?.update(
+          createElement(Probe, { waiting: false, version: 4, id: 'session-2' }),
+        );
+      });
+      expect(controls.scrollCommand?.kind).toBe('latest');
+      await act(async () => {
+        renderer?.update(createElement(Probe, { waiting: false, version: 4 }));
+      });
+      expect(controls.scrollCommand?.kind).toBe('latest');
+      // No persistence is enabled here: inspectors still receive all inputs.
+      await act(async () => {
+        dispatch('touchstart', {
+          touches: [{ clientY: 100 }],
+        } as unknown as TouchEvent);
+        dispatch('touchmove', {
+          touches: [{ clientY: 200 }],
+        } as unknown as TouchEvent);
+      });
+      expect(controls.scrollCommand).toBeUndefined();
+      await act(async () => controls.jumpToLatest());
+      await act(async () => {
+        windowListeners.get('keydown')?.({
+          code: 'Home',
+          target: null,
+        } as unknown as KeyboardEvent);
+      });
+      expect(controls.scrollCommand).toBeUndefined();
+      expect(controls.tailReadySessionId).toBe('session-1');
     } finally {
       await act(async () => renderer?.unmount());
       vi.unstubAllGlobals();
