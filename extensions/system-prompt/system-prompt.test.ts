@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
@@ -8,7 +9,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import systemPromptExtension, {
   aggregateAssistantUsage,
   buildSystemPrompt,
@@ -123,6 +132,105 @@ describe('canonical prompt composition', () => {
     ).toEqual(files);
   });
 
+  it('filters only paired AGENTS files across real nested and external worktrees', () => {
+    const main = temporaryDirectory();
+    const externalParent = temporaryDirectory();
+    const nested = join(main, '.worktrees', 'nested');
+    const external = join(externalParent, 'external');
+    execFileSync('git', ['init', '-q', main]);
+    execFileSync('git', ['-C', main, 'config', 'user.name', 'Test']);
+    execFileSync('git', [
+      '-C',
+      main,
+      'config',
+      'user.email',
+      'test@example.invalid',
+    ]);
+    writeFileSync(join(main, 'README.md'), 'fixture');
+    execFileSync('git', ['-C', main, 'add', 'README.md']);
+    execFileSync('git', ['-C', main, 'commit', '-qm', 'init']);
+    execFileSync('git', [
+      '-C',
+      main,
+      'worktree',
+      'add',
+      '-q',
+      '-b',
+      'nested-fixture',
+      nested,
+    ]);
+    execFileSync('git', [
+      '-C',
+      main,
+      'worktree',
+      'add',
+      '-q',
+      '-b',
+      'external-fixture',
+      external,
+    ]);
+    mkdirSync(join(main, 'packages'), { recursive: true });
+    mkdirSync(join(nested, 'packages'), { recursive: true });
+    mkdirSync(join(external, 'packages'), { recursive: true });
+    writeFileSync(join(main, 'AGENTS.md'), 'original');
+    writeFileSync(join(nested, 'AGENTS.md'), 'diverged nested');
+    writeFileSync(
+      join(main, 'packages', 'AGENTS.md'),
+      'original nested instruction',
+    );
+    writeFileSync(
+      join(nested, 'packages', 'AGENTS.md'),
+      'diverged nested instruction',
+    );
+    const ancestor = join(externalParent, 'AGENTS.md');
+    writeFileSync(ancestor, 'distinct ancestor');
+    const files = [
+      { path: join(main, 'AGENTS.md'), content: 'original' },
+      { path: join(nested, 'AGENTS.md'), content: 'diverged nested' },
+      {
+        path: join(main, 'packages', 'AGENTS.md'),
+        content: 'original nested instruction',
+      },
+      {
+        path: join(nested, 'packages', 'AGENTS.md'),
+        content: 'diverged nested instruction',
+      },
+      { path: ancestor, content: 'distinct ancestor' },
+    ];
+
+    for (const [cwd, worktreeRoot] of [
+      [join(nested, 'packages'), nested],
+      [join(external, 'packages'), external],
+    ] as const) {
+      const worktreeFiles = [
+        files[0],
+        {
+          path: join(worktreeRoot, 'AGENTS.md'),
+          content: 'diverged worktree instruction',
+        },
+        files[2],
+        {
+          path: join(worktreeRoot, 'packages', 'AGENTS.md'),
+          content: 'diverged nested instruction',
+        },
+        files[4],
+      ];
+      writeFileSync(worktreeFiles[1].path, worktreeFiles[1].content);
+      writeFileSync(worktreeFiles[3].path, worktreeFiles[3].content);
+      const filtered = filterGlobalContextFiles(worktreeFiles, cwd, main);
+      expect(filtered.map((file) => file.path)).toEqual([
+        join(worktreeRoot, 'AGENTS.md'),
+        join(worktreeRoot, 'packages', 'AGENTS.md'),
+        ancestor,
+      ]);
+    }
+
+    const unpaired = [files[0], files[4]];
+    expect(
+      filterGlobalContextFiles(unpaired, join(nested, 'packages'), main),
+    ).toEqual(unpaired);
+  });
+
   it('injects completion guidance only for a main agent in a linked worktree', () => {
     const checkout = temporaryDirectory();
     const nested = join(checkout, 'packages', 'app');
@@ -195,6 +303,73 @@ describe('canonical prompt composition', () => {
     expect(prompt).not.toContain('UNCONTROLLED APPEND');
   });
 
+  it('warns once per session when direct prompt inputs are discarded', () => {
+    const notifications: string[] = [];
+    const handlers = new Map<
+      string,
+      (event?: unknown, ctx?: unknown) => unknown
+    >();
+    systemPromptExtension({
+      on: (
+        name: string,
+        handler: (event: unknown, ctx: unknown) => unknown,
+      ) => {
+        handlers.set(name, handler);
+      },
+      registerCommand: () => {},
+    } as unknown as ExtensionAPI);
+    const ctx = {
+      mode: 'json',
+      hasUI: true,
+      ui: { notify: (message: string) => notifications.push(message) },
+    };
+    const invoke = (customPrompt = '', appendSystemPrompt = '') =>
+      handlers.get('before_agent_start')?.(
+        { systemPromptOptions: options({ customPrompt, appendSystemPrompt }) },
+        ctx,
+      );
+
+    invoke();
+    expect(notifications).toHaveLength(0);
+    const canonical = invoke('secret custom', 'secret append') as {
+      systemPrompt: string;
+    };
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).not.toContain('secret');
+    expect(canonical.systemPrompt).not.toContain('secret');
+    invoke('second custom');
+    expect(notifications).toHaveLength(1);
+
+    handlers.get('session_start')?.();
+    invoke('', 'after reset');
+    expect(notifications).toHaveLength(2);
+  });
+
+  it('warns through stderr-safe output without UI in headless mode', () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const handlers = new Map<
+      string,
+      (event?: unknown, ctx?: unknown) => unknown
+    >();
+    systemPromptExtension({
+      on: (
+        name: string,
+        handler: (event: unknown, ctx: unknown) => unknown,
+      ) => {
+        handlers.set(name, handler);
+      },
+      registerCommand: () => {},
+    } as unknown as ExtensionAPI);
+    const ctx = { mode: 'print', hasUI: false, ui: {} };
+    const event = {
+      systemPromptOptions: options({ customPrompt: 'discarded' }),
+    };
+    handlers.get('before_agent_start')?.(event, ctx);
+    handlers.get('before_agent_start')?.(event, ctx);
+    expect(warnings).toHaveBeenCalledTimes(1);
+    warnings.mockRestore();
+  });
+
   it('loads each Markdown instruction exactly once in interactive and headless prompts', () => {
     const prompts = [
       buildSystemPrompt(options(), 'tui'),
@@ -224,18 +399,18 @@ describe('canonical prompt composition', () => {
   it('keeps work-mode and repair-loop guidance in the canonical agent prompt', () => {
     const prompt = buildSystemPrompt(options(), 'json');
     expect(prompt).toContain(
-      'Preserve the current work mode across turns—exploration, plan-only, implementation, review, or operation.',
+      'Keep the current work mode across turns—exploration, plan-only, implementation, review, or operation.',
     );
     expect(prompt).toContain(
       'Leave plan-only only after an explicit transition; do not edit before then.',
     );
     expect(prompt).toContain(
-      'Treat scope-changing corrections as updates to accepted constraints; preserve any resulting non-goals without verbose restatement.',
+      'Treat scope-changing corrections as updates to accepted constraints and preserve resulting non-goals without verbose restatement.',
     );
     expect(prompt).toContain(
-      'when retries yield no new evidence—summarize remaining blockers and stop rather than widening scope.',
+      'If repeated attempts yield no new evidence, report the blocker and do not widen the scope.',
     );
-    expect(prompt.match(/Preserve the current work mode/g)).toHaveLength(1);
+    expect(prompt.match(/Keep the current work mode/g)).toHaveLength(1);
   });
 
   it('keeps simplicity and scope guidance in the canonical agent prompt', () => {
@@ -245,7 +420,12 @@ describe('canonical prompt composition', () => {
       'Use DRY to prevent behavior from drifting, not to eliminate every repeated line.',
     );
     expect(prompt).toContain('Treat scope spillover as a defect.');
-    expect(prompt).toContain('After implementation, run a deletion pass.');
+    expect(prompt).toContain(
+      'Remove unused production code; retain tests and tooling that verify supported behavior.',
+    );
+    expect(prompt).toContain(
+      'After implementation, run a deletion pass for unnecessary additions and code made obsolete by this change.',
+    );
     expect(prompt.match(/Treat scope spillover as a defect/g)).toHaveLength(1);
   });
 

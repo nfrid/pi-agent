@@ -49,11 +49,13 @@ export default defineExtension('system-prompt', (pi: ExtensionAPI) => {
   let contextCalls = 0;
   let lastContext = summarizeContextMessages([], contextCalls);
   let lastPrompt = '';
+  let warnedAboutIgnoredPromptInputs = false;
 
   pi.on('session_start', () => {
     contextCalls = 0;
     lastContext = summarizeContextMessages([], contextCalls);
     lastPrompt = '';
+    warnedAboutIgnoredPromptInputs = false;
   });
 
   pi.on('context', (event) => {
@@ -62,6 +64,18 @@ export default defineExtension('system-prompt', (pi: ExtensionAPI) => {
   });
 
   pi.on('before_agent_start', (event, ctx) => {
+    const { customPrompt, appendSystemPrompt } = event.systemPromptOptions;
+    const hasIgnoredInput =
+      (typeof customPrompt === 'string' && customPrompt.length > 0) ||
+      (typeof appendSystemPrompt === 'string' && appendSystemPrompt.length > 0);
+    if (hasIgnoredInput && !warnedAboutIgnoredPromptInputs) {
+      const warning =
+        'Canonical system prompt ignores non-empty customPrompt and appendSystemPrompt inputs; use shared files, tool metadata, project context, or skills instead.';
+      if (ctx.hasUI) ctx.ui.notify(warning, 'warning');
+      else console.warn(warning);
+      warnedAboutIgnoredPromptInputs = true;
+    }
+
     const rebuiltPrompt = buildSystemPrompt(
       event.systemPromptOptions,
       String(ctx.mode),

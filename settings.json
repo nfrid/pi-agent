@@ -19,7 +19,7 @@
   },
   "delegate": {
     "provider": "openai-codex",
-    "routingGuidance": "Luna routes are for bounded work whose path and finish line are already sufficiently defined; increase Luna effort for more exploration or verification within that bounded shape. Astra low is for work that requires the delegate itself to discover the path, exercise substantial judgement, or determine what correct completion means. Prefer Luna whenever the task can be made reliably verifiable up front; do not treat Astra as the automatic next rung after Luna max.",
+    "routingGuidance": "Choose the cheapest eligible Luna route for bounded work with a known finish line; use Astra low when the delegate must discover the path or exercise substantial judgement. Do not escalate speculatively.",
     "timeoutMs": 1800000,
     "modelCatalog": {
       "luna-low": {
@@ -27,48 +27,48 @@
         "model": "gpt-5.6-luna",
         "thinking": "low",
         "relativeCost": 1,
-        "useFor": "Bounded background work that is fully mechanical with one deterministic answer: a named-file lookup, exact rename, generated fixture, or command-and-report task with an exact verifier.",
-        "avoid": "Discovery, judgement, or any task whose finish line is not already decided."
+        "useFor": "Fully mechanical bounded work with one deterministic answer and an exact verifier.",
+        "avoid": "Discovery, judgement, or an undecided finish line."
       },
       "luna-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "medium",
         "relativeCost": 3,
-        "useFor": "Bounded background work with a failing test or exact specification: check one named invariant, confirm a fix, or implement a localized change inside one subsystem and a few files.",
-        "avoid": "Open-ended review, cross-subsystem work, security reasoning, or choosing the design and finish line."
+        "useFor": "Bounded work with a failing test or exact specification, such as one invariant, fix, or localized subsystem change.",
+        "avoid": "Open-ended review, cross-subsystem work, security reasoning, or choosing the design or finish line."
       },
       "luna-high": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "high",
         "relativeCost": 11,
-        "useFor": "Default bounded background implementation or review where the architecture, scope, acceptance criteria, and relevant files are known; established-pattern multi-file work fits here.",
-        "avoid": "A short wall-clock deadline, open-ended judgement, broad high-stakes review, or work likely to require sustained exploration across subsystems."
+        "useFor": "Bounded implementation or review with known architecture, scope, criteria, and files; established multi-file work fits.",
+        "avoid": "Short deadlines, open-ended judgement, broad high-stakes review, or sustained cross-subsystem exploration."
       },
       "luna-xhigh": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "xhigh",
         "relativeCost": 21,
-        "useFor": "Difficult bounded background implementation, diagnosis, regression review, or security verification spanning multiple files or subsystems, with explicit acceptance criteria or named security invariants.",
-        "avoid": "Foreground work blocking the parent on a deadline, unclear criteria that require maintainer judgement, or unbounded repository-wide review."
+        "useFor": "Difficult bounded implementation, diagnosis, regression review, or security verification across files or subsystems with explicit criteria.",
+        "avoid": "Foreground deadline work, unclear criteria needing maintainer judgement, or unbounded repository-wide review."
       },
       "luna-max": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "max",
         "relativeCost": 42,
-        "useFor": "Difficult bounded background work expected to need unusually deep exploration or verification; select it directly when that depth is predictable.",
-        "avoid": "Short deadlines, interactive foreground work, tasks without a bounded finish line, or assuming more reasoning replaces better route's judgement."
+        "useFor": "Difficult bounded work expected to need unusually deep exploration or verification.",
+        "avoid": "Short deadlines, interactive foreground work, no bounded finish line, or using depth to replace route judgement."
       },
       "astra-low": {
         "provider": "openai-codex",
         "model": "gpt-6-astra",
         "thinking": "low",
         "relativeCost": 75,
-        "useFor": "Difficult work where the child must discover the path rather than merely execute a known one: ambiguous diagnosis, broad exploration across subsystems, architecture or design judgement, adversarial review, security reasoning, or implementation where important constraints and the correct finish line may emerge during the work.",
-        "avoid": "Bounded work with explicit acceptance criteria that a cheaper route can execute or verify reliably, or trivial mechanical work."
+        "useFor": "Work where the child must discover the path: ambiguous diagnosis, broad exploration, architecture or design judgement, adversarial review, security reasoning, or an emerging finish line.",
+        "avoid": "Bounded work a cheaper route can execute or verify reliably, or trivial mechanical work."
       }
     }
   }

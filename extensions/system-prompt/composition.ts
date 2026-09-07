@@ -1,5 +1,12 @@
-import { lstatSync, readFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import {
   type BuildSystemPromptOptions,
   formatSkillsForPrompt as formatPiSkillsForPrompt,
@@ -11,10 +18,18 @@ import {
   loadInstruction,
 } from '../shared/instructions';
 
-export function loadAgentInstructions(): LoadedInstruction[] {
-  const workingStyle = loadInstruction('instructions/agent/working-style.md');
-  const interaction = loadInstruction('instructions/agent/interaction.md');
-  const toolUse = loadInstruction('instructions/agent/tool-use.md');
+export function loadAgentInstructions(
+  agentDir = getAgentDir(),
+): LoadedInstruction[] {
+  const workingStyle = loadInstruction(
+    'instructions/agent/working-style.md',
+    agentDir,
+  );
+  const interaction = loadInstruction(
+    'instructions/agent/interaction.md',
+    agentDir,
+  );
+  const toolUse = loadInstruction('instructions/agent/tool-use.md', agentDir);
   return [workingStyle, interaction, toolUse];
 }
 
@@ -46,20 +61,110 @@ export function isIsolatedGitWorktree(cwd: string): boolean {
   }
 }
 
+interface GitIdentity {
+  root: string;
+  commonDir: string;
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function gitIdentity(cwd: string): GitIdentity | undefined {
+  let current = resolve(cwd);
+  while (true) {
+    const dotGit = resolve(current, '.git');
+    try {
+      if (lstatSync(dotGit).isDirectory()) {
+        return { root: current, commonDir: canonicalPath(dotGit) };
+      }
+      if (lstatSync(dotGit).isFile()) {
+        const match = /^gitdir:\s*(.+)$/u.exec(
+          readFileSync(dotGit, 'utf8').trim(),
+        );
+        if (!match?.[1]) return undefined;
+        const gitDir = resolve(current, match[1]);
+        const commonDirFile = resolve(gitDir, 'commondir');
+        let commonDir = gitDir;
+        try {
+          commonDir = resolve(
+            gitDir,
+            readFileSync(commonDirFile, 'utf8').trim(),
+          );
+        } catch {
+          if (basename(dirname(gitDir)) === 'worktrees') {
+            commonDir = dirname(dirname(gitDir));
+          }
+        }
+        if (basename(dirname(gitDir)) !== 'worktrees') return undefined;
+        return { root: current, commonDir: canonicalPath(commonDir) };
+      }
+    } catch {
+      // Continue to an ancestor when this directory has no usable Git marker.
+    }
+
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function isWithin(path: string, parent: string): boolean {
+  const fromParent = relative(parent, path);
+  return (
+    fromParent === '' ||
+    (!isAbsolute(fromParent) &&
+      fromParent !== '..' &&
+      !fromParent.startsWith(`..${sep}`))
+  );
+}
+
 export function filterGlobalContextFiles(
   contextFiles: NonNullable<BuildSystemPromptOptions['contextFiles']>,
   cwd: string,
   agentDir = getAgentDir(),
 ): NonNullable<BuildSystemPromptOptions['contextFiles']> {
   const resolvedAgentDir = resolve(agentDir);
-  const fromAgentDir = relative(resolvedAgentDir, resolve(cwd));
-  const cwdIsInsideAgentDir =
-    fromAgentDir === '' ||
-    (!isAbsolute(fromAgentDir) &&
-      fromAgentDir !== '..' &&
-      !fromAgentDir.startsWith(
-        `..${process.platform === 'win32' ? '\\' : '/'}`,
-      ));
+  const resolvedCwd = resolve(cwd);
+  const cwdIsInsideAgentDir = isWithin(resolvedCwd, resolvedAgentDir);
+  const cwdIdentity = gitIdentity(resolvedCwd);
+  const agentIdentity = gitIdentity(resolvedAgentDir);
+
+  if (
+    cwdIdentity &&
+    agentIdentity &&
+    canonicalPath(cwdIdentity.commonDir) ===
+      canonicalPath(agentIdentity.commonDir) &&
+    canonicalPath(cwdIdentity.root) !== canonicalPath(agentIdentity.root)
+  ) {
+    const contextPaths = new Set(
+      contextFiles.map((file) => canonicalPath(file.path)),
+    );
+    const worktreeRoot = canonicalPath(cwdIdentity.root);
+    const mainRoot = canonicalPath(agentIdentity.root);
+    return contextFiles.filter((file) => {
+      const path = canonicalPath(file.path);
+      if (basename(path) !== 'AGENTS.md') return true;
+
+      const fromMain = relative(mainRoot, path);
+      if (
+        !isAbsolute(fromMain) &&
+        fromMain !== '..' &&
+        !fromMain.startsWith(`..${sep}`)
+      ) {
+        const correspondingWorktreeFile = canonicalPath(
+          resolve(worktreeRoot, fromMain),
+        );
+        if (contextPaths.has(correspondingWorktreeFile)) return false;
+      }
+      return true;
+    });
+  }
+
   if (cwdIsInsideAgentDir) return contextFiles;
 
   return contextFiles.filter(

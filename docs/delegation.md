@@ -65,7 +65,7 @@ Bare references bind to immutable exact attempts when admitted. There is no sepa
 {
   "id": "reconnect-race-review",
   "task": "Review the implementation for correctness, regressions, and unnecessary complexity.",
-  "route": "sol-medium",
+  "route": "astra-low",
   "base": "reconnect-race-fix"
 }
 ```
@@ -135,6 +135,6 @@ Use `delegate_changes` with a workflow node:
 
 Fresh tasks choose one exact key from `delegate.modelCatalog`; unknown routes fail. Continuations inherit their route unless explicitly replaced.
 
-The configured catalog uses Luna routes for bounded background work and Sol routes for maintainer judgement about what completion or quality should mean. Choose the cheapest route whose `useFor` matches and whose `avoid` does not. `relativeCost` is benchmark-relative total task cost, not a quality score or token-price ratio.
+The configured catalog uses Luna routes for bounded work and Astra low for work requiring path discovery or maintainer judgement. Choose the cheapest route whose `useFor` matches and whose `avoid` does not. `relativeCost` is benchmark-relative total task cost, not a quality score or token-price ratio.
 
 No prompt or active configuration should refer to unavailable route families.

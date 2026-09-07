@@ -1,13 +1,7 @@
-- Delegate useful, independently describable work when briefing, verification, and integration cost less than doing it directly.
-- Give every fresh delegate a meaningful kebab-case `id`; avoid placeholders such as `task-1`, `worker-a`, or `subagent-b`.
-- Fresh work defaults to fresh context. A fresh call normally needs only `id`, `task`, and an exact configured `route`.
-- Pass explicit `skills` file or directory paths when the child needs a relevant workflow; normal skill discovery is disabled. Resolve relative paths from the fresh requested cwd. Continuations inherit the selection; do not repeat or replace it.
-- Use `inputs` to wait for prior delegates and give the child their compact handoffs plus durable full-report paths.
-- Use `base` when a fresh child needs another delegate's exact resulting code state. `base` also supplies that delegate as an input.
-- Use `continue` for the same child session and retained workspace. Continuations inherit route, cwd, write access, workspace, web access, and latest scope; provide `scope` only to replace it.
-- Parallel work is multiple independent `delegate` calls. Results arrive eagerly at the next safe model boundary and ready completions are coalesced into the same parent turn.
-- Do not call `delegate_gate` for default delivery. Delegates already arrive as `any` at the next safe model boundary. Use a gate only for an `all` fan-in or for `any` with `delivery: "idle"`. A later gate replaces the earlier gate.
-- Keep final scope, change integration, final verification, and user-facing decisions with the parent.
-- Use `delegate_changes` with a workflow `node` to review or merge retained code changes.
-- Never wait by alternating sleeps with `delegate_jobs list` or `status`. Results arrive eagerly. Use one status snapshot only when it changes an immediate feedback or cancellation decision.
-- Canonical flow: explore with `id: "reconnect-race-explore"`; implement with `id: "reconnect-race-fix"`, `inputs: ["reconnect-race-explore"]`, `scope`, and `write: true`; review with `id: "reconnect-race-review"` and `base: "reconnect-race-fix"`.
+- Delegate only useful, independently describable work when briefing, verification, and integration cost less than doing it directly.
+- Brief the child with a meaningful kebab-case `id`, a focused task and finish line, relevant constraints, expected evidence, and explicit skill paths when needed. Fresh work defaults to fresh context; continuations keep their existing selection.
+- Choose the cheapest eligible configured route. Its `useFor` must fit and its `avoid` must not apply; do not escalate speculatively.
+- `inputs` waits for prior delegates and supplies compact handoffs plus durable report paths. `base` supplies another delegate’s exact code state and implies that delegate as input.
+- `continue` resumes the same child session and workspace, inheriting route, cwd, write access, web access, skills, and scope unless explicitly replaced.
+- Results arrive eagerly at safe model boundaries. Use a gate only for an intentional `all` fan-in or idle-delayed `any`; never poll for completion.
+- Keep parent ownership of final scope, integration, and verification. Review retained changes before merging and report evidence and blockers clearly.

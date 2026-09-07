@@ -1002,22 +1002,20 @@ describe('delegate', () => {
     ).join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
     expect(guidelines).toContain(
-      'Delegate useful, independently describable work',
+      'Delegate only useful, independently describable work',
     );
     expect(guidelines).toContain('Fresh work defaults to fresh context');
-    expect(guidelines).toContain('Use `inputs` to wait for prior delegates');
+    expect(guidelines).toContain('`inputs` waits for prior delegates');
     expect(guidelines).toContain(
-      'Use `base` when a fresh child needs another delegate',
+      '`base` supplies another delegate’s exact code state',
     );
     expect(guidelines).toContain('Results arrive eagerly');
     expect(guidelines).toContain(
-      'Do not call `delegate_gate` for default delivery',
+      'Use a gate only for an intentional `all` fan-in or idle-delayed `any`',
     );
+    expect(guidelines).toContain('never poll for completion');
     expect(guidelines).toContain(
-      'Use a gate only for an `all` fan-in or for `any` with `delivery: "idle"`',
-    );
-    expect(guidelines).toContain(
-      'Use `delegate_changes` with a workflow `node`',
+      'Keep parent ownership of final scope, integration, and verification',
     );
     expect(guidelines).not.toContain('delegate_wake');
     expect(guidelines).not.toContain('delegate_branches');
