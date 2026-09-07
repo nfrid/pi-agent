@@ -131,13 +131,19 @@ export async function bindAndDeliverPrompt(
   });
   const promptReceiptId = host.promptReceiptId(run.id);
   if (!host.repository.getCommandReceipt(promptReceiptId)) {
-    if (run.model?.provider === 'openai-codex')
+    if (run.model?.provider === 'openai-codex') {
       await host.registry.sendCommand(runtimeId, {
         type: 'setModel',
         provider: run.model.provider,
         model: run.model.model,
         serviceTier: run.model.serviceTier ?? null,
       });
+      if (run.model.thinking !== undefined)
+        await host.registry.sendCommand(runtimeId, {
+          type: 'setThinking',
+          level: run.model.thinking,
+        });
+    }
     const images = host.initialImages(run.id);
     if (run.error === 'Initial images pending delivery.' && !images)
       throw new Error(

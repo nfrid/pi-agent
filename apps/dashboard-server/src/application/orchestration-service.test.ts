@@ -1220,15 +1220,29 @@ describe('OrchestrationService', () => {
     }
   });
 
-  it('establishes a Codex service tier before delivering the initial prompt', async () => {
+  it('restores explicit Codex thinking after service-tier selection', async () => {
     const fixture = await orchestrationFixture({
       model: {
         provider: 'openai-codex',
         model: 'gpt-test',
+        thinking: 'low',
         serviceTier: 'fast',
       },
     });
     try {
+      let activeThinking = 'medium';
+      let promptThinking: string | undefined;
+      fixture.registry.sendCommand.mockImplementation(
+        async (...args: unknown[]) => {
+          const command = args[1] as { type: string; level?: string };
+          const type = command.type;
+          if (type === 'setModel') activeThinking = 'medium';
+          if (type === 'setThinking')
+            activeThinking = (command as { level: string }).level;
+          if (type === 'prompt') promptThinking = activeThinking;
+          return { accepted: true };
+        },
+      );
       const repository = fixture.metadata.orchestration;
       repository.transitionRun(fixture.runId, 'preparing');
       repository.transitionRun(fixture.runId, 'starting');
@@ -1248,12 +1262,120 @@ describe('OrchestrationService', () => {
           model: 'gpt-test',
           serviceTier: 'fast',
         },
+        { type: 'setThinking', level: 'low' },
         {
           id: `run-prompt:${fixture.runId}`,
           type: 'prompt',
           text: 'Matrix prompt',
         },
       ]);
+      expect(promptThinking).toBe('low');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('does not send a thinking override when Codex thinking is omitted', async () => {
+    const fixture = await orchestrationFixture({
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-test',
+        serviceTier: 'fast',
+      },
+    });
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-codex-default-thinking');
+      await fixture.service.handleRegistryChange({
+        kind: 'registered',
+        snapshot: runtimeHello('runtime-codex-default-thinking'),
+      } as never);
+      expect(
+        fixture.registry.sendCommand.mock.calls.map(
+          (call) => (call as unknown[])[1],
+        ),
+      ).toEqual([
+        {
+          type: 'setModel',
+          provider: 'openai-codex',
+          model: 'gpt-test',
+          serviceTier: 'fast',
+        },
+        {
+          id: `run-prompt:${fixture.runId}`,
+          type: 'prompt',
+          text: 'Matrix prompt',
+        },
+      ]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('does not deliver the prompt when restoring Codex thinking fails, then retries', async () => {
+    const fixture = await orchestrationFixture({
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-test',
+        thinking: 'low',
+        serviceTier: 'fast',
+      },
+    });
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-codex-thinking-retry');
+      fixture.registry.sendCommand.mockImplementationOnce(async () => ({
+        accepted: true,
+      }));
+      fixture.registry.sendCommand.mockRejectedValueOnce(
+        new Error('thinking ACK lost'),
+      );
+      const change = {
+        kind: 'registered' as const,
+        snapshot: runtimeHello('runtime-codex-thinking-retry'),
+      };
+      await fixture.service.handleRegistryChange(change as never);
+      expect(
+        repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
+      ).toBeUndefined();
+      expect(fixture.registry.sendCommand).toHaveBeenCalledTimes(2);
+      expect(repository.getRun(fixture.runId)?.status).toBe('starting');
+
+      await fixture.service.handleRegistryChange(change as never);
+      expect(fixture.registry.sendCommand).toHaveBeenCalledTimes(5);
+      expect(
+        fixture.registry.sendCommand.mock.calls.map(
+          (call) => (call as unknown[])[1],
+        ),
+      ).toEqual([
+        {
+          type: 'setModel',
+          provider: 'openai-codex',
+          model: 'gpt-test',
+          serviceTier: 'fast',
+        },
+        { type: 'setThinking', level: 'low' },
+        {
+          type: 'setModel',
+          provider: 'openai-codex',
+          model: 'gpt-test',
+          serviceTier: 'fast',
+        },
+        { type: 'setThinking', level: 'low' },
+        {
+          id: `run-prompt:${fixture.runId}`,
+          type: 'prompt',
+          text: 'Matrix prompt',
+        },
+      ]);
+      expect(
+        repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
+      ).toBeDefined();
+      expect(repository.getRun(fixture.runId)?.status).toBe('running');
     } finally {
       await fixture.close();
     }
