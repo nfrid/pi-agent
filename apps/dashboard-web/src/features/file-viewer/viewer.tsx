@@ -1,26 +1,31 @@
+import type { DashboardHttpClient } from '@pi-dashboard/client';
 import {
   CodeView,
   type CodeViewHandle,
   type FileContents,
 } from '@pierre/diffs/react';
-import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { copyText, Markdown } from '../../Markdown';
 import styles from './file-viewer.module.css';
 import { FileLinkContext } from './link-context';
+import { fileLocationKey, type ViewerEntry, type ViewerMode } from './model';
 import type { FileLocation } from './reference';
 
-type ViewerMode = 'source' | 'preview';
-type ViewerEntry = {
-  location: FileLocation;
-  mode: ViewerMode;
-  scrollTop: number;
-};
-type ReadFileClient = {
-  readFile(
-    input: { path: string; cwd?: string },
-    signal?: AbortSignal,
-  ): Promise<{ path: string; content: string }>;
-};
+type FileReadResult = Awaited<ReturnType<DashboardHttpClient['readFile']>>;
+
+type SourceSelection = { id: string; range: { start: number; end: number } };
+
+function fileLineCount(content: string): number {
+  if (content === '') return 0;
+  const count = content.split(/\r\n|\r|\n/).length;
+  return /(?:\r\n|\r|\n)$/.test(content) ? count - 1 : count;
+}
+
+function parentDirectory(path: string): string | undefined {
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  if (separator < 0) return undefined;
+  return path.slice(0, separator) || path.slice(0, 1);
+}
 
 export function FileViewer({
   client,
@@ -30,20 +35,24 @@ export function FileViewer({
   onBack,
   onForward,
   onClose,
-  onEntryChange,
+  onModeChange,
+  onScroll,
 }: {
-  client: ReadFileClient;
+  client: DashboardHttpClient;
   entry: ViewerEntry;
   canGoBack: boolean;
   canGoForward: boolean;
   onBack: () => void;
   onForward: () => void;
   onClose: () => void;
-  onEntryChange: (
-    patch: Partial<Pick<ViewerEntry, 'mode' | 'scrollTop'>>,
+  onModeChange: (mode: ViewerMode) => void;
+  onScroll: (
+    location: FileLocation,
+    mode: ViewerMode,
+    scrollTop: number,
   ) => void;
 }) {
-  const [file, setFile] = useState<{ path: string; content: string }>();
+  const [file, setFile] = useState<FileReadResult>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -52,13 +61,14 @@ export function FileViewer({
   const previewRef = useRef<HTMLDivElement>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined, undefined>>(null);
   const requestId = useRef(0);
+  const restoredVisit = useRef<string | undefined>(undefined);
   const markdown = /\.(?:md|markdown)$/i.test(entry.location.path);
+  const destinationKey = fileLocationKey(entry.location);
   const targetLine = entry.location.startLine;
   const selectedRange = useMemo(() => {
     if (!file || targetLine === undefined) return undefined;
-    const lineCount =
-      file.content === '' ? 0 : file.content.split(/\r\n|\r|\n/).length;
     const end = entry.location.endLine ?? targetLine;
+    const lineCount = fileLineCount(file.content);
     if (targetLine < 1 || end < targetLine || end > lineCount) return undefined;
     return { start: targetLine, end };
   }, [entry.location.endLine, file, targetLine]);
@@ -66,6 +76,34 @@ export function FileViewer({
     targetLine !== undefined &&
     file !== undefined &&
     selectedRange === undefined;
+  const savedScrollTop = entry.scrollTop[entry.mode];
+  const fileContents = useMemo<FileContents | undefined>(
+    () => (file ? { name: file.path, contents: file.content } : undefined),
+    [file],
+  );
+  const items = useMemo(
+    () =>
+      fileContents
+        ? [{ id: 'file', type: 'file' as const, file: fileContents }]
+        : [],
+    [fileContents],
+  );
+  const options = useMemo(
+    () => ({ theme: 'dracula' as const, disableFileHeader: true }),
+    [],
+  );
+  const sourceSelection = useMemo<SourceSelection | null>(
+    () => (selectedRange ? { id: 'file', range: selectedRange } : null),
+    [selectedRange],
+  );
+
+  useEffect(() => {
+    void destinationKey;
+    void refreshToken;
+    setCopied(false);
+    setHeadingFound(undefined);
+    restoredVisit.current = undefined;
+  }, [destinationKey, refreshToken]);
 
   useEffect(() => {
     void refreshToken;
@@ -80,7 +118,7 @@ export function FileViewer({
         controller.signal,
       )
       .then((result) => {
-        if (id !== requestId.current) return;
+        if (id !== requestId.current || controller.signal.aborted) return;
         setFile(result);
         setLoading(false);
       })
@@ -96,50 +134,77 @@ export function FileViewer({
 
   useEffect(() => {
     if (!file || entry.mode !== 'preview') return;
-    setHeadingFound(undefined);
+    const visitKey = `${destinationKey}:preview:${refreshToken}`;
+    if (restoredVisit.current === visitKey) return;
     const frame = requestAnimationFrame(() => {
       if (!previewRef.current) return;
-      if (entry.location.heading) {
-        const heading = previewRef.current.querySelector<HTMLElement>(
-          `#file-heading-${CSS.escape(entry.location.heading)}`,
-        );
-        setHeadingFound(Boolean(heading));
-        if (heading) heading.scrollIntoView({ block: 'center' });
-        else previewRef.current.scrollTop = entry.scrollTop;
+      restoredVisit.current = visitKey;
+      const heading = entry.location.heading
+        ? previewRef.current.querySelector<HTMLElement>(
+            `#file-heading-${CSS.escape(entry.location.heading)}`,
+          )
+        : undefined;
+      if (entry.location.heading) setHeadingFound(Boolean(heading));
+      else setHeadingFound(true);
+      if (savedScrollTop !== undefined) {
+        previewRef.current.scrollTop = savedScrollTop;
+      } else if (heading) {
+        heading.scrollIntoView({ block: 'center' });
       } else {
-        setHeadingFound(true);
-        previewRef.current.scrollTop = entry.scrollTop;
+        previewRef.current.scrollTop = 0;
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [entry.location.heading, entry.mode, entry.scrollTop, file]);
+  }, [
+    destinationKey,
+    entry.location.heading,
+    entry.mode,
+    file,
+    refreshToken,
+    savedScrollTop,
+  ]);
 
   useEffect(() => {
-    if (
-      !file ||
-      entry.mode !== 'source' ||
-      targetLine === undefined ||
-      !selectedRange ||
-      !codeViewRef.current
-    )
-      return;
+    if (!file || entry.mode !== 'source' || !codeViewRef.current) return;
+    const visitKey = `${destinationKey}:source:${refreshToken}`;
+    if (restoredVisit.current === visitKey) return;
     const frame = requestAnimationFrame(() => {
-      const selection = { id: 'file', range: selectedRange };
-      codeViewRef.current?.setSelectedLines(selection);
-      codeViewRef.current?.scrollTo({
-        type: 'range',
-        id: 'file',
-        range: selectedRange,
-        align: 'center',
-      });
+      if (!codeViewRef.current) return;
+      restoredVisit.current = visitKey;
+      if (savedScrollTop !== undefined) {
+        codeViewRef.current.scrollTo({
+          type: 'position',
+          position: savedScrollTop,
+          behavior: 'instant',
+        });
+      } else if (selectedRange) {
+        codeViewRef.current.scrollTo({
+          type: 'range',
+          id: 'file',
+          range: selectedRange,
+          align: 'center',
+          behavior: 'instant',
+        });
+      }
     });
     return () => cancelAnimationFrame(frame);
-  }, [entry.mode, file, selectedRange, targetLine]);
+  }, [
+    destinationKey,
+    entry.mode,
+    file,
+    refreshToken,
+    savedScrollTop,
+    selectedRange,
+  ]);
 
-  const fileContents = file
-    ? ({ name: file.path, contents: file.content } satisfies FileContents)
-    : undefined;
-  const setMode = (mode: ViewerMode) => onEntryChange({ mode });
+  const handlePreviewScroll = useCallback(
+    (scrollTop: number) => onScroll(entry.location, 'preview', scrollTop),
+    [entry.location, onScroll],
+  );
+  const handleSourceScroll = useCallback(
+    (scrollTop: number) => onScroll(entry.location, 'source', scrollTop),
+    [entry.location, onScroll],
+  );
   const refresh = () => {
     setCopied(false);
     setRefreshToken((current) => current + 1);
@@ -152,6 +217,7 @@ export function FileViewer({
       setCopied(false);
     }
   };
+
   return (
     <div className={styles.viewer}>
       <header className={styles.header}>
@@ -212,7 +278,7 @@ export function FileViewer({
             type="button"
             aria-label="Preview"
             aria-pressed={entry.mode === 'preview'}
-            onClick={() => setMode('preview')}
+            onClick={() => onModeChange('preview')}
           >
             Preview
           </button>
@@ -220,7 +286,7 @@ export function FileViewer({
             type="button"
             aria-label="Source"
             aria-pressed={entry.mode === 'source'}
-            onClick={() => setMode('source')}
+            onClick={() => onModeChange('source')}
           >
             Source
           </button>
@@ -246,12 +312,16 @@ export function FileViewer({
             className={`${styles.preview} markdown`}
             ref={previewRef}
             onScroll={(event) =>
-              onEntryChange({ scrollTop: event.currentTarget.scrollTop })
+              handlePreviewScroll(event.currentTarget.scrollTop)
             }
           >
-            <MarkdownWithLocalOptions path={file.path}>
-              {file.content}
-            </MarkdownWithLocalOptions>
+            <FileLinkContext.Provider
+              value={{ cwd: parentDirectory(file.path), path: file.path }}
+            >
+              <Markdown headingIds allowImages={false}>
+                {file.content}
+              </Markdown>
+            </FileLinkContext.Provider>
             {entry.location.heading && headingFound === false && (
               <p className={styles.message} role="status">
                 Heading not found in this file.
@@ -264,26 +334,19 @@ export function FileViewer({
             {targetOutOfRange && (
               <div className={styles.rangeNotice} role="status">
                 Lines {targetLine}–{entry.location.endLine ?? targetLine} are
-                outside this file (
-                {file.content === ''
-                  ? 0
-                  : file.content.split(/\r\n|\r|\n/).length}{' '}
-                lines); showing the file without a selection.
+                outside this file ({fileLineCount(file.content)} lines); showing
+                the file without a selection.
               </div>
             )}
             <div className={styles.code}>
-              {fileContents && (
-                <CodeView
-                  ref={codeViewRef}
-                  items={[{ id: 'file', type: 'file', file: fileContents }]}
-                  className={styles.codeView}
-                  options={{ theme: 'dracula', disableFileHeader: true }}
-                  selectedLines={
-                    selectedRange ? { id: 'file', range: selectedRange } : null
-                  }
-                  onScroll={(scrollTop) => onEntryChange({ scrollTop })}
-                />
-              )}
+              <CodeView
+                ref={codeViewRef}
+                items={items}
+                className={styles.codeView}
+                options={options}
+                selectedLines={sourceSelection}
+                onScroll={handleSourceScroll}
+              />
             </div>
           </>
         )}
@@ -291,32 +354,3 @@ export function FileViewer({
     </div>
   );
 }
-
-/** Keeps the viewer coupled to the existing renderer while allowing its local safety props to land independently. */
-function parentDirectory(path: string): string | undefined {
-  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-  if (separator < 0) return undefined;
-  return path.slice(0, separator) || path.slice(0, 1);
-}
-
-function MarkdownWithLocalOptions({
-  path,
-  children,
-}: {
-  path: string;
-  children: string;
-}) {
-  return (
-    <FileLinkContext.Provider value={{ cwd: parentDirectory(path), path }}>
-      <MarkdownWithOptions headingIds allowImages={false}>
-        {children}
-      </MarkdownWithOptions>
-    </FileLinkContext.Provider>
-  );
-}
-
-const MarkdownWithOptions = Markdown as unknown as (props: {
-  children: string;
-  headingIds?: boolean;
-  allowImages?: boolean;
-}) => ReactElement;

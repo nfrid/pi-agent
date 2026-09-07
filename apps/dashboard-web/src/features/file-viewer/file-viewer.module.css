@@ -75,6 +75,17 @@
   justify-content: flex-end;
 }
 
+.fallbackClose {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  background: var(--bg-alt);
+  cursor: pointer;
+  font-size: 12px;
+}
+
 .actions button,
 .modeControls button,
 .message button {
@@ -188,7 +199,7 @@
 @media (max-width: 700px) {
   .surface {
     width: 100vw;
-    height: 100vh;
+    height: 100dvh;
     max-height: none;
     border: 0;
     border-radius: 0;
