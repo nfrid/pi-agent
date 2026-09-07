@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { Transcript } from '../../entities/transcript';
@@ -7,6 +8,9 @@ import { FileLinkContext } from './link-context';
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 const open = vi.hoisted(() => vi.fn());
 vi.mock('./context', () => ({ useFileViewer: () => ({ open }) }));
+vi.mock('../../entities/transcript/outline', () => ({
+  TranscriptOutline: () => null,
+}));
 
 const message = {
   type: 'message',
@@ -36,9 +40,11 @@ describe('transcript file-link origins', () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
-        <FileLinkContext.Provider value={{ cwd: '/parent' }}>
-          <Transcript entries={[message]} cwd="/archived-child" />
-        </FileLinkContext.Provider>,
+        <QueryClientProvider client={new QueryClient()}>
+          <FileLinkContext.Provider value={{ cwd: '/parent' }}>
+            <Transcript entries={[message]} cwd="/archived-child" />
+          </FileLinkContext.Provider>
+        </QueryClientProvider>,
       );
     });
     clickFile(tree);
@@ -73,6 +79,7 @@ describe('transcript file-link origins', () => {
               ...(known
                 ? {
                     details: {
+                      truncated: false,
                       setup: {
                         cwd: '/parent',
                         worktree: { worktreePath: '/child-worktree' },

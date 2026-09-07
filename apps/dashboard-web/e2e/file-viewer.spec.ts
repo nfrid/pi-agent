@@ -29,7 +29,7 @@ const markdown =
 for (const suffix of ['', ' @desktop']) {
   test(`file viewer opens links and preserves navigation${suffix}`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     const requests: Record<string, unknown>[] = [];
     const remoteImages: string[] = [];
     page.on('request', (request) => {
@@ -106,14 +106,25 @@ for (const suffix of ['', ' @desktop']) {
     await expect(page).toHaveURL(new RegExp(`/sessions/${sessionId}$`));
     // The real renderer must highlight the requested range, not just scroll nearby.
     await expect(viewer.locator('[data-selected-line]').first()).toBeVisible();
-    const colored = await viewer
-      .locator('diffs-container')
-      .evaluate((element) =>
-        Array.from(element.shadowRoot?.querySelectorAll('[style]') ?? []).some(
-          (node) => node.getAttribute('style')?.includes('color'),
-        ),
-      );
-    expect(colored).toBe(true);
+    await expect(
+      viewer.locator('[data-line][data-selected-line]'),
+    ).toContainText([
+      'export const value123 = 123;',
+      'export const value124 = 124;',
+      'export const value125 = 125;',
+    ]);
+    await expect
+      .poll(async () =>
+        viewer
+          .locator('[data-line][data-selected-line] span')
+          .evaluateAll(
+            (tokens) =>
+              new Set(tokens.map((token) => getComputedStyle(token).color))
+                .size,
+          ),
+      )
+      .toBeGreaterThan(1);
+    await page.screenshot({ path: testInfo.outputPath('source.png') });
     await viewer
       .getByRole('button', { name: 'Close file viewer', exact: true })
       .click();
@@ -135,14 +146,27 @@ for (const suffix of ['', ' @desktop']) {
       path: '../src/file.ts',
       cwd: '/project/docs',
     });
+    await viewer
+      .getByRole('region', { name: 'File source', exact: true })
+      .hover();
+    await page.mouse.wheel(0, -10000);
+    await expect(
+      viewer.getByText('export const value1 = 1;', { exact: false }),
+    ).toBeInViewport();
+    await viewer
+      .getByRole('button', { name: 'Refresh file', exact: true })
+      .click();
+    await expect(
+      viewer.getByText('export const value1 = 1;', { exact: false }),
+    ).toBeInViewport();
     await viewer.getByRole('button', { name: 'Back', exact: true }).click();
     await expect(
       viewer.getByRole('heading', { name: 'Guide', exact: true }),
     ).toBeVisible();
     await viewer.getByRole('button', { name: 'Forward', exact: true }).click();
     await expect(
-      viewer.getByText('export const value123 = 123;', { exact: false }),
-    ).toBeVisible();
+      viewer.getByText('export const value1 = 1;', { exact: false }),
+    ).toBeInViewport();
     await viewer.getByRole('button', { name: 'Back', exact: true }).click();
     await viewer.getByRole('link', { name: 'Section', exact: true }).click();
     await expect(

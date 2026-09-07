@@ -13,69 +13,37 @@ import {
 } from 'react';
 import { SurfaceStack } from '../surface-stack';
 import styles from './file-viewer.module.css';
-import {
-  fileLocationKey,
-  type ViewerEntry,
-  type ViewerMode,
-  type ViewerScrollPositions,
-} from './model';
+import { fileLocationKey, type ViewerEntry, type ViewerMode } from './model';
 import type { FileLocation } from './reference';
 
 const LazyFileViewer = lazy(() =>
   import('./viewer').then(({ FileViewer }) => ({ default: FileViewer })),
 );
 
-export type { ViewerEntry, ViewerMode, ViewerScrollPositions } from './model';
-
-export type FileViewerContextValue = {
-  open(location: FileLocation): void;
-};
-
+type FileViewerContextValue = { open(location: FileLocation): void };
 export const FileViewerContext = createContext<
   FileViewerContextValue | undefined
 >(undefined);
 
-function isMarkdown(path: string): boolean {
-  return /\.(?:md|markdown)$/i.test(path);
-}
-
-function initialMode(location: FileLocation): ViewerMode {
-  return isMarkdown(location.path) &&
-    location.startLine === undefined &&
-    location.endLine === undefined
-    ? 'preview'
-    : 'source';
-}
+type History = { entries: readonly ViewerEntry[]; index: number };
+const emptyHistory: History = { entries: [], index: -1 };
 
 export function FileViewerProvider({
   children,
-  locationKey: routeKey,
+  locationKey,
 }: {
   children: ReactNode;
   locationKey?: string;
 }) {
-  const [entries, setEntries] = useState<readonly ViewerEntry[]>([]);
-  const [index, setIndex] = useState(-1);
-  const entriesRef = useRef(entries);
-  const indexRef = useRef(index);
+  const [history, setHistory] = useState<History>(emptyHistory);
   const launcherRef = useRef<HTMLElement | null>(null);
-  const scrollPositionsRef = useRef(new Map<string, ViewerScrollPositions>());
-  entriesRef.current = entries;
-  indexRef.current = index;
-
-  const close = useCallback(() => {
-    scrollPositionsRef.current.clear();
-    setEntries((current) => (current.length === 0 ? current : []));
-    setIndex(-1);
-  }, []);
-
+  const close = useCallback(() => setHistory(emptyHistory), []);
   useEffect(() => {
-    void routeKey;
+    void locationKey;
     close();
-  }, [close, routeKey]);
-
+  }, [close, locationKey]);
   useEffect(() => {
-    if (entries.length > 0 || !launcherRef.current) return;
+    if (history.entries.length > 0 || !launcherRef.current) return;
     const launcher = launcherRef.current;
     launcherRef.current = null;
     const frame = requestAnimationFrame(() => {
@@ -83,137 +51,107 @@ export function FileViewerProvider({
         launcher.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [entries.length]);
+  }, [history.entries.length]);
 
-  const open = useCallback((location: FileLocation) => {
-    const currentEntries = entriesRef.current;
-    const currentIndex = indexRef.current;
-    const current = currentEntries[currentIndex];
-    if (
-      current &&
-      fileLocationKey(current.location) === fileLocationKey(location)
-    )
-      return;
-    if (currentEntries.length === 0 && typeof document !== 'undefined')
-      launcherRef.current = document.activeElement as HTMLElement | null;
-    const next: ViewerEntry = {
-      location,
-      mode: initialMode(location),
-      scrollTop: {},
-    };
-    const base =
-      currentIndex >= 0 ? currentEntries.slice(0, currentIndex + 1) : [];
-    for (const discarded of currentEntries.slice(currentIndex + 1))
-      scrollPositionsRef.current.delete(fileLocationKey(discarded.location));
-    setEntries([...base, next]);
-    setIndex(base.length);
-  }, []);
-
-  const updateMode = useCallback((mode: ViewerMode) => {
-    setEntries((current) => {
-      const currentIndex = indexRef.current;
-      const entry = current[currentIndex];
-      if (!entry || entry.mode === mode) return current;
-      const next = current.slice();
-      next[currentIndex] = { ...entry, mode };
-      return next;
-    });
-  }, []);
-  const updateScroll = useCallback(
-    (location: FileLocation, mode: ViewerMode, scrollTop: number) => {
-      const key = fileLocationKey(location);
-      const prior = scrollPositionsRef.current.get(key) ?? {};
-      if (prior[mode] === scrollTop) return;
-      scrollPositionsRef.current.set(key, { ...prior, [mode]: scrollTop });
+  const open = useCallback(
+    (location: FileLocation) => {
+      if (history.entries.length === 0 && typeof document !== 'undefined')
+        launcherRef.current = document.activeElement as HTMLElement | null;
+      setHistory((current) => {
+        const entry = current.entries[current.index];
+        if (
+          entry &&
+          fileLocationKey(entry.location) === fileLocationKey(location)
+        )
+          return current;
+        const entries = current.entries.slice(0, current.index + 1);
+        const mode =
+          /\.(?:md|markdown)$/i.test(location.path) &&
+          location.startLine === undefined
+            ? 'preview'
+            : 'source';
+        return {
+          entries: [...entries, { location, mode, scrollTop: {} }],
+          index: entries.length,
+        };
+      });
     },
-    [],
+    [history.entries.length],
   );
-
-  const goBack = useCallback(() => {
-    setIndex((current) => Math.max(0, current - 1));
-  }, []);
-  const goForward = useCallback(() => {
-    setIndex((current) => Math.min(entriesRef.current.length - 1, current + 1));
-  }, []);
-
-  const currentBase = index >= 0 ? entries[index] : undefined;
-  const current = currentBase
-    ? {
-        ...currentBase,
-        scrollTop: {
-          ...currentBase.scrollTop,
-          ...scrollPositionsRef.current.get(
-            fileLocationKey(currentBase.location),
-          ),
-        },
-      }
-    : undefined;
-  const value = useMemo<FileViewerContextValue>(() => ({ open }), [open]);
-  const pages = current
-    ? [
-        {
-          id: 'file-viewer',
-          title: current.location.path,
-          hideHeader: true,
-          children: (
-            <Suspense
-              fallback={
-                <div className={styles.viewer}>
-                  <header className={styles.header}>
-                    <div className={styles.heading}>
-                      <span className={styles.eyebrow}>File viewer</span>
-                      <h2>{current.location.path}</h2>
-                      <span className={styles.diskStatus}>Loading…</span>
-                    </div>
-                    <button
-                      type="button"
-                      className={styles.fallbackClose}
-                      onClick={close}
-                      aria-label="Close file viewer"
-                    >
-                      Close
-                    </button>
-                  </header>
-                  <div className={styles.loading} role="status">
-                    Loading file viewer…
-                  </div>
-                </div>
-              }
-            >
-              <LazyFileViewer
-                client={dashboardHttpClient}
-                entry={current}
-                canGoBack={index > 0}
-                canGoForward={index < entries.length - 1}
-                onBack={goBack}
-                onForward={goForward}
-                onClose={close}
-                onModeChange={updateMode}
-                onScroll={updateScroll}
-              />
-            </Suspense>
-          ),
-        },
-      ]
-    : [];
-
+  const go = (direction: number) =>
+    setHistory((current) => ({
+      ...current,
+      index: Math.max(
+        0,
+        Math.min(current.entries.length - 1, current.index + direction),
+      ),
+    }));
+  const setMode = (mode: ViewerMode) =>
+    setHistory((current) => ({
+      ...current,
+      entries: current.entries.map((entry, index) =>
+        index === current.index ? { ...entry, mode } : entry,
+      ),
+    }));
+  const current = history.entries[history.index];
+  const value = useMemo(() => ({ open }), [open]);
   return (
     <FileViewerContext.Provider value={value}>
       {children}
       <SurfaceStack
-        pages={pages}
+        pages={
+          current
+            ? [
+                {
+                  id: 'file-viewer',
+                  title: current.location.path,
+                  hideHeader: true,
+                  children: (
+                    <Suspense
+                      fallback={
+                        <div className={styles.loading}>
+                          <p role="status">Loading file viewer…</p>
+                          <button
+                            type="button"
+                            className={styles.fallbackClose}
+                            onClick={close}
+                            aria-label="Close file viewer"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      }
+                    >
+                      <LazyFileViewer
+                        key={history.index}
+                        client={dashboardHttpClient}
+                        entry={current}
+                        canGoBack={history.index > 0}
+                        canGoForward={
+                          history.index < history.entries.length - 1
+                        }
+                        onBack={() => go(-1)}
+                        onForward={() => go(1)}
+                        onClose={close}
+                        onModeChange={setMode}
+                      />
+                    </Suspense>
+                  ),
+                },
+              ]
+            : []
+        }
         kind="inspector"
         size="wide"
         className={`surface-drawer file-viewer-surface ${styles.surface}`}
-        isOpen={pages.length > 0}
-        onDepthChange={() => undefined}
+        isOpen={Boolean(current)}
+        onDepthChange={close}
         onClose={close}
       />
     </FileViewerContext.Provider>
   );
 }
 
-/** File links are optional consumers, so callers outside the provider get no-op behavior. */
 export function useFileViewer(): FileViewerContextValue | undefined {
   return useContext(FileViewerContext);
 }

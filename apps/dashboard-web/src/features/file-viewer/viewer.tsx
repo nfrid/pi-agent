@@ -4,12 +4,11 @@ import {
   type CodeViewHandle,
   type FileContents,
 } from '@pierre/diffs/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { copyText, Markdown } from '../../Markdown';
 import styles from './file-viewer.module.css';
 import { FileLinkContext } from './link-context';
-import { fileLocationKey, type ViewerEntry, type ViewerMode } from './model';
-import type { FileLocation } from './reference';
+import type { ViewerEntry, ViewerMode } from './model';
 
 type FileReadResult = Awaited<ReturnType<DashboardHttpClient['readFile']>>;
 
@@ -21,10 +20,8 @@ function fileLineCount(content: string): number {
   return /(?:\r\n|\r|\n)$/.test(content) ? count - 1 : count;
 }
 
-function parentDirectory(path: string): string | undefined {
-  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-  if (separator < 0) return undefined;
-  return path.slice(0, separator) || path.slice(0, 1);
+function parentDirectory(path: string): string {
+  return path.slice(0, path.lastIndexOf('/')) || '/';
 }
 
 export function FileViewer({
@@ -36,9 +33,8 @@ export function FileViewer({
   onForward,
   onClose,
   onModeChange,
-  onScroll,
 }: {
-  client: DashboardHttpClient;
+  client: Pick<DashboardHttpClient, 'readFile'>;
   entry: ViewerEntry;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -46,11 +42,6 @@ export function FileViewer({
   onForward: () => void;
   onClose: () => void;
   onModeChange: (mode: ViewerMode) => void;
-  onScroll: (
-    location: FileLocation,
-    mode: ViewerMode,
-    scrollTop: number,
-  ) => void;
 }) {
   const [file, setFile] = useState<FileReadResult>();
   const [error, setError] = useState<string>();
@@ -60,10 +51,8 @@ export function FileViewer({
   const [headingFound, setHeadingFound] = useState<boolean | undefined>();
   const previewRef = useRef<HTMLDivElement>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined, undefined>>(null);
-  const requestId = useRef(0);
   const restoredVisit = useRef<string | undefined>(undefined);
   const markdown = /\.(?:md|markdown)$/i.test(entry.location.path);
-  const destinationKey = fileLocationKey(entry.location);
   const targetLine = entry.location.startLine;
   const selectedRange = useMemo(() => {
     if (!file || targetLine === undefined) return undefined;
@@ -76,7 +65,6 @@ export function FileViewer({
     targetLine !== undefined &&
     file !== undefined &&
     selectedRange === undefined;
-  const savedScrollTop = entry.scrollTop[entry.mode];
   const fileContents = useMemo<FileContents | undefined>(
     () => (file ? { name: file.path, contents: file.content } : undefined),
     [file],
@@ -98,16 +86,14 @@ export function FileViewer({
   );
 
   useEffect(() => {
-    void destinationKey;
     void refreshToken;
     setCopied(false);
     setHeadingFound(undefined);
     restoredVisit.current = undefined;
-  }, [destinationKey, refreshToken]);
+  }, [refreshToken]);
 
   useEffect(() => {
     void refreshToken;
-    const id = ++requestId.current;
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
@@ -118,12 +104,12 @@ export function FileViewer({
         controller.signal,
       )
       .then((result) => {
-        if (id !== requestId.current || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         setFile(result);
         setLoading(false);
       })
       .catch((cause: unknown) => {
-        if (id !== requestId.current || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         setError(
           cause instanceof Error ? cause.message : 'Could not read this file.',
         );
@@ -133,8 +119,8 @@ export function FileViewer({
   }, [client, entry.location.cwd, entry.location.path, refreshToken]);
 
   useEffect(() => {
-    if (!file || entry.mode !== 'preview') return;
-    const visitKey = `${destinationKey}:preview:${refreshToken}`;
+    if (!file || loading || entry.mode !== 'preview') return;
+    const visitKey = `preview:${refreshToken}`;
     if (restoredVisit.current === visitKey) return;
     const frame = requestAnimationFrame(() => {
       if (!previewRef.current) return;
@@ -146,6 +132,7 @@ export function FileViewer({
         : undefined;
       if (entry.location.heading) setHeadingFound(Boolean(heading));
       else setHeadingFound(true);
+      const savedScrollTop = entry.scrollTop.preview;
       if (savedScrollTop !== undefined) {
         previewRef.current.scrollTop = savedScrollTop;
       } else if (heading) {
@@ -156,21 +143,23 @@ export function FileViewer({
     });
     return () => cancelAnimationFrame(frame);
   }, [
-    destinationKey,
     entry.location.heading,
     entry.mode,
+    entry.scrollTop,
     file,
+    loading,
     refreshToken,
-    savedScrollTop,
   ]);
 
   useEffect(() => {
-    if (!file || entry.mode !== 'source' || !codeViewRef.current) return;
-    const visitKey = `${destinationKey}:source:${refreshToken}`;
+    if (!file || loading || entry.mode !== 'source' || !codeViewRef.current)
+      return;
+    const visitKey = `source:${refreshToken}`;
     if (restoredVisit.current === visitKey) return;
     const frame = requestAnimationFrame(() => {
       if (!codeViewRef.current) return;
       restoredVisit.current = visitKey;
+      const savedScrollTop = entry.scrollTop.source;
       if (savedScrollTop !== undefined) {
         codeViewRef.current.scrollTo({
           type: 'position',
@@ -188,23 +177,14 @@ export function FileViewer({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [
-    destinationKey,
-    entry.mode,
-    file,
-    refreshToken,
-    savedScrollTop,
-    selectedRange,
-  ]);
+  }, [entry.mode, entry.scrollTop, file, loading, refreshToken, selectedRange]);
 
-  const handlePreviewScroll = useCallback(
-    (scrollTop: number) => onScroll(entry.location, 'preview', scrollTop),
-    [entry.location, onScroll],
-  );
-  const handleSourceScroll = useCallback(
-    (scrollTop: number) => onScroll(entry.location, 'source', scrollTop),
-    [entry.location, onScroll],
-  );
+  // Scroll positions are restoration metadata, not render state. Each history
+  // entry owns its record, including repeated visits to the same destination.
+  const rememberScroll = (mode: ViewerMode, scrollTop: number) => {
+    if (restoredVisit.current === `${mode}:${refreshToken}`)
+      entry.scrollTop[mode] = scrollTop;
+  };
   const refresh = () => {
     setCopied(false);
     setRefreshToken((current) => current + 1);
@@ -218,14 +198,15 @@ export function FileViewer({
     }
   };
 
+  const displayPath = file?.path ?? entry.location.path;
   return (
     <div className={styles.viewer}>
       <header className={styles.header}>
         <div className={styles.heading}>
-          <span className={styles.eyebrow}>File viewer</span>
-          <h2 title={file?.path ?? entry.location.path}>
-            {file?.path ?? entry.location.path}
-          </h2>
+          <h2>{displayPath.split('/').at(-1)}</h2>
+          <span className={styles.path} title={displayPath}>
+            {displayPath}
+          </span>
           <span className={styles.diskStatus} role="status">
             {loading ? 'Loading…' : error ? 'Unavailable' : 'Current on disk'}
           </span>
@@ -312,7 +293,7 @@ export function FileViewer({
             className={`${styles.preview} markdown`}
             ref={previewRef}
             onScroll={(event) =>
-              handlePreviewScroll(event.currentTarget.scrollTop)
+              rememberScroll('preview', event.currentTarget.scrollTop)
             }
           >
             <FileLinkContext.Provider
@@ -338,16 +319,16 @@ export function FileViewer({
                 the file without a selection.
               </div>
             )}
-            <div className={styles.code}>
+            <section className={styles.code} aria-label="File source">
               <CodeView
                 ref={codeViewRef}
                 items={items}
                 className={styles.codeView}
                 options={options}
                 selectedLines={sourceSelection}
-                onScroll={handleSourceScroll}
+                onScroll={(scrollTop) => rememberScroll('source', scrollTop)}
               />
-            </div>
+            </section>
           </>
         )}
       </div>

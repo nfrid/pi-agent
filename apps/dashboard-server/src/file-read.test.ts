@@ -153,6 +153,12 @@ describe('host file reads', () => {
     await writeFile(large, Buffer.alloc(MAX_FILE_READ_BYTES + 1, 0x61));
     await expect(readFile({ path: large })).rejects.toThrow('too large');
 
+    const atLimit = path.join(root, 'at-limit.txt');
+    await writeFile(atLimit, 'π'.repeat(MAX_FILE_READ_BYTES / 2));
+    await expect(readFile({ path: atLimit })).resolves.toMatchObject({
+      content: 'π'.repeat(MAX_FILE_READ_BYTES / 2),
+    });
+
     const binary = path.join(root, 'binary');
     await writeFile(binary, Buffer.from([0, 1, 2, 3]));
     await expect(readFile({ path: binary })).rejects.toThrow('binary');
@@ -169,7 +175,7 @@ describe('host file reads', () => {
     }
   });
 
-  it('serves the readFile query only through the authenticated protocol-v3 POST boundary', async () => {
+  it('serves file reads through the authenticated, origin-checked protocol-v3 boundary', async () => {
     const root = await tempRoot('dashboard-file-read-route-');
     const file = path.join(root, 'route.txt');
     await writeFile(file, 'route content');
@@ -205,6 +211,20 @@ describe('host file reads', () => {
       payload: { path: file },
     });
     expect(unauthorized.statusCode).toBe(401);
+
+    const { origin: _origin, ...originlessHeaders } = headers;
+    for (const deniedHeaders of [
+      originlessHeaders,
+      { ...headers, origin: 'http://untrusted.test' },
+    ]) {
+      const denied = await app.inject({
+        method: 'POST',
+        url: '/trpc/readFile',
+        headers: deniedHeaders,
+        payload: { path: file },
+      });
+      expect(denied.statusCode).toBe(403);
+    }
 
     const staleProtocol = await app.inject({
       method: 'POST',
