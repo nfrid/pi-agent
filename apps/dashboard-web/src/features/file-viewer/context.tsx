@@ -21,7 +21,6 @@ const LazyFileViewer = lazy(() =>
 );
 
 const FILE_VIEWER_HISTORY_KEY = '__piDashboardFileViewer';
-let nextViewerId = 0;
 
 type FileViewerHistoryMarker = {
   id: string;
@@ -66,7 +65,7 @@ function currentViewerMarker(): FileViewerHistoryMarker | undefined {
   return viewerMarker(historyState()[FILE_VIEWER_HISTORY_KEY]);
 }
 
-export type FileViewerContextValue = { open(location: FileLocation): void };
+type FileViewerContextValue = { open(location: FileLocation): void };
 export const FileViewerContext = createContext<
   FileViewerContextValue | undefined
 >(undefined);
@@ -84,7 +83,6 @@ export function FileViewerProvider({
   const launcherRef = useRef<HTMLElement | null>(null);
   const routeRef = useRef(locationKey ?? '');
   routeRef.current = locationKey ?? '';
-  historyRef.current = history;
 
   const commitHistory = useCallback((next: History) => {
     historyRef.current = next;
@@ -134,6 +132,8 @@ export function FileViewerProvider({
         marker.route === routeRef.current &&
         marker.index < session.entries.length
       ) {
+        if (historyRef.current.index < 0)
+          launcherRef.current = document.activeElement as HTMLElement | null;
         commitHistory({ entries: session.entries, index: marker.index });
         return;
       }
@@ -155,7 +155,7 @@ export function FileViewerProvider({
     (location: FileLocation) => {
       const route = routeRef.current;
       const current = historyRef.current;
-      const activeSession = sessionRef.current;
+      let activeSession = sessionRef.current;
       const currentEntry = current.entries[current.index];
       if (
         activeSession &&
@@ -173,28 +173,8 @@ export function FileViewerProvider({
       ) {
         if (typeof document !== 'undefined')
           launcherRef.current = document.activeElement as HTMLElement | null;
-        nextViewerId += 1;
-        const entry = createViewerEntry(location);
-        const session: ViewerSession = {
-          id: `viewer-${nextViewerId.toString(36)}`,
-          route,
-          entries: [entry],
-        };
-        sessionRef.current = session;
-        window.history.pushState(
-          {
-            ...historyState(),
-            [FILE_VIEWER_HISTORY_KEY]: {
-              id: session.id,
-              index: 0,
-              route,
-            },
-          },
-          '',
-          window.location.href,
-        );
-        commitHistory({ entries: session.entries, index: 0 });
-        return;
+        activeSession = { id: crypto.randomUUID(), route, entries: [] };
+        sessionRef.current = activeSession;
       }
 
       const entries = activeSession.entries.slice(0, current.index + 1);
@@ -242,7 +222,8 @@ export function FileViewerProvider({
           current
             ? [
                 {
-                  id: 'file-viewer',
+                  id: `file-viewer-${history.index}`,
+                  initialFocus: '[aria-label="Close file viewer"]',
                   title: current.location.path,
                   hideHeader: true,
                   children: (

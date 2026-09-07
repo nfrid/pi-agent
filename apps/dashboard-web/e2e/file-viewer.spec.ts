@@ -131,6 +131,13 @@ for (const suffix of ['', ' @desktop']) {
     await expect(
       transcript.getByRole('link', { name: 'Method', exact: true }),
     ).toBeFocused();
+    // Native Forward (including trackpad navigation) restores a closed trail.
+    await page.goForward();
+    await expect(
+      viewer.getByText('export const value123 = 123;', { exact: false }),
+    ).toBeVisible();
+    await page.goBack();
+    await expect(viewer).not.toBeVisible();
 
     await transcript.getByRole('link', { name: 'Guide', exact: true }).click();
     await expect(
@@ -159,7 +166,7 @@ for (const suffix of ['', ' @desktop']) {
     await expect(
       viewer.getByText('export const value1 = 1;', { exact: false }),
     ).toBeInViewport();
-    await viewer.getByRole('button', { name: 'Back', exact: true }).click();
+    await page.goBack();
     await expect(
       viewer.getByRole('heading', { name: 'Guide', exact: true }),
     ).toBeVisible();
@@ -175,7 +182,12 @@ for (const suffix of ['', ' @desktop']) {
     await expect(
       viewer.getByRole('button', { name: 'Forward', exact: true }),
     ).toBeDisabled();
-    await viewer.getByRole('button', { name: 'Back', exact: true }).click();
+    // A new heading after Back discards the old file's native forward entry.
+    await page.goForward();
+    await expect(
+      viewer.getByRole('heading', { name: 'Details', exact: true }),
+    ).toBeInViewport();
+    await page.goBack();
     await expect(
       viewer.getByRole('link', { name: 'Section', exact: true }),
     ).toBeInViewport();
