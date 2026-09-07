@@ -67,22 +67,22 @@ describe('delegate activity inspection', () => {
       1_000,
     );
 
-    expect(inspected.text.length).toBeLessThanOrEqual(
+    expect(Buffer.byteLength(inspected.text, 'utf8')).toBeLessThanOrEqual(
       DELEGATE_INSPECT_MAX_TEXT,
     );
     expect(inspected.text).toContain(
       'tool write [completed] — path=/tmp/result.txt',
     );
     expect(inspected.text).toContain('tool bash [completed] — command=printf');
-    expect(inspected.text).toContain(
-      'command=write operation (details omitted)',
-    );
+    expect(inspected.text).toContain('command=apply_patch (details omitted)');
     expect(inspected.text).not.toContain('secret patch content');
     expect(inspected.text).not.toContain('old continuation activity');
     expect(inspected.text).not.toContain('raw reasoning');
     expect(inspected.text).not.toContain('DO NOT EXPOSE');
     expect(inspected.text).not.toContain('hidden result');
     expect(inspected.text).toContain('omitted/truncated');
+    expect(inspected.text).toContain('last recorded activity (event start):');
+    expect(inspected.text).not.toContain('ago)');
   });
 
   test('reports unavailable queued activity and metadata-only settled state', () => {
@@ -114,6 +114,103 @@ describe('delegate activity inspection', () => {
     expect(settled.text).toContain('metadata only');
     expect(settled.text).not.toContain('final report');
     expect(settled.details.activity).toBe('settled');
+  });
+
+  test('treats settled workflow or job state as metadata-only despite stale live status', () => {
+    const workflowSettled = inspectDelegateTarget({
+      reference: 'workflow-settled',
+      state: 'running',
+      workflow: { state: 'success', settledAt: 500 } as never,
+      status: status({
+        state: 'running',
+        transcript: [
+          {
+            id: 'final',
+            type: 'assistant',
+            label: 'Response',
+            text: 'stale final report',
+            at: 490,
+            run: 2,
+          },
+        ],
+      }),
+    });
+    expect(workflowSettled.text).toContain('workflow-settled: success');
+    expect(workflowSettled.text).toContain('metadata only');
+    expect(workflowSettled.text).not.toContain('stale final report');
+
+    const jobSettled = inspectDelegateTarget({
+      reference: 'job-settled',
+      state: 'running',
+      job: { state: 'success', settledAt: 500 } as never,
+      status: status({ state: 'running' }),
+    });
+    expect(jobSettled.text).toContain('job-settled: success');
+    expect(jobSettled.text).toContain('metadata only');
+  });
+
+  test('scopes error information to the current invocation', () => {
+    const inspected = inspectDelegateTarget({
+      reference: 'failed@2',
+      state: 'error',
+      status: status({
+        state: 'error',
+        transcript: [
+          {
+            id: 'old-error',
+            type: 'error',
+            label: 'Error',
+            text: 'old continuation error',
+            at: 200,
+            run: 1,
+          },
+          {
+            id: 'current-error',
+            type: 'error',
+            label: 'Error',
+            text: 'current invocation error',
+            at: 300,
+            run: 2,
+          },
+        ],
+      }),
+    });
+    expect(inspected.text).toContain('error: current invocation error');
+    expect(inspected.text).not.toContain('old continuation error');
+  });
+
+  test('clips Unicode without exceeding the byte bound or splitting surrogates', () => {
+    const inspected = inspectDelegateTarget({
+      reference: 'unicode',
+      state: 'running',
+      status: status({
+        runCount: 1,
+        transcript: [
+          {
+            id: 'unicode-progress',
+            type: 'assistant',
+            label: 'Response',
+            text: '🙂'.repeat(5_000),
+            at: 300,
+            run: 1,
+          },
+        ],
+      }),
+    });
+    expect(Buffer.byteLength(inspected.text, 'utf8')).toBeLessThanOrEqual(
+      DELEGATE_INSPECT_MAX_TEXT,
+    );
+    for (let index = 0; index < inspected.text.length; index++) {
+      const code = inspected.text.charCodeAt(index);
+      if (code >= 0xd800 && code <= 0xdbff)
+        expect(inspected.text.charCodeAt(index + 1)).toBeGreaterThanOrEqual(
+          0xdc00,
+        );
+      if (code >= 0xdc00 && code <= 0xdfff)
+        expect(inspected.text.charCodeAt(index - 1)).toBeGreaterThanOrEqual(
+          0xd800,
+        );
+    }
   });
 
   test('includes bounded error information without exposing result payloads', () => {

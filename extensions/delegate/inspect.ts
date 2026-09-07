@@ -29,7 +29,10 @@ export interface InspectDetails {
 
 function compact(value: string, max = MAX_FIELD): string {
   const text = value.replace(/\s+/g, ' ').trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  const characters = Array.from(text);
+  return characters.length > max
+    ? `${characters.slice(0, max - 1).join('')}…`
+    : text;
 }
 
 function elapsed(startedAt: number | undefined, endAt: number): string {
@@ -37,9 +40,9 @@ function elapsed(startedAt: number | undefined, endAt: number): string {
   return `${Math.max(0, endAt - startedAt)}ms`;
 }
 
-function timestamp(at: number | undefined, now: number): string {
+function timestamp(at: number | undefined): string {
   if (at === undefined) return 'unavailable';
-  return `${new Date(at).toISOString()} (${Math.max(0, now - at)}ms ago)`;
+  return new Date(at).toISOString();
 }
 
 function argumentSummary(name: string, args: unknown): string | undefined {
@@ -51,15 +54,18 @@ function argumentSummary(name: string, args: unknown): string | undefined {
       ? compact(record[key] as string)
       : undefined;
   if (name === 'bash' || name === 'shell') {
+    const description = value('description');
+    if (description) return `description=${description}`;
     const command = value('command');
     if (!command) return undefined;
-    if (
-      /apply_patch|git apply|(?:^|\s)patch(?:\s|$)|<<|(?:^|\s)(?:tee|cat)\s+/.test(
+    const executable = command.split(/\s+/)[0] ?? 'shell';
+    const unsafe =
+      /apply_patch|git\s+apply|(?:^|\s)patch(?:\s|$)|<<|[<>]|\b(?:python|python3|node|ruby|perl|bash|sh)\s+-(?:c|e)\b/.test(
         command,
-      )
-    )
-      return 'command=write operation (details omitted)';
-    return `command=${command}`;
+      );
+    return unsafe
+      ? `command=${compact(executable, 80)} (details omitted)`
+      : `command=${command}`;
   }
   if (name === 'read' || name === 'write' || name === 'edit') {
     const path = value('path') ?? value('filePath');
@@ -95,7 +101,7 @@ function eventLine(entry: DelegateTranscriptEntry): string | undefined {
     return text ? `assistant: ${compact(text)}` : undefined;
   }
   if (entry.type !== 'tool') return undefined;
-  const name = compact(entry.name ?? entry.label, 80);
+  const name = compact(entry.name ?? 'unknown', 80);
   const args = argumentSummary(entry.name ?? '', entry.arguments);
   const suffix = args ? ` — ${args}` : '';
   const truncation = entry.argumentsTruncated ? ' (args truncated)' : '';
@@ -121,7 +127,9 @@ function metadataError(target: InspectTarget): string | undefined {
   if (reason) return compact(reason, 240);
   const diagnostic = target.status?.lifecycle?.diagnostic;
   if (diagnostic) return compact(diagnostic, 240);
-  const transcriptError = [...(target.status?.transcript ?? [])]
+  const transcriptError = [
+    ...(target.status ? currentInvocationEntries(target.status) : []),
+  ]
     .reverse()
     .find((entry) => entry.type === 'error')?.text;
   return transcriptError ? compact(transcriptError, 240) : undefined;
@@ -132,8 +140,19 @@ export function inspectDelegateTarget(
   now = Date.now(),
 ): { text: string; details: InspectDetails } {
   const status = target.status;
-  const state = target.state;
-  const settled = isSettled(state);
+  const states = [
+    target.workflow?.state,
+    target.job?.state,
+    target.status?.state,
+    target.state,
+  ];
+  const state =
+    states.find(
+      (candidate) => candidate !== undefined && isSettled(candidate),
+    ) ?? target.state;
+  const settled = states.some(
+    (candidate) => candidate !== undefined && isSettled(candidate),
+  );
   const startedAt =
     status?.startedAt ?? target.workflow?.startedAt ?? target.job?.startedAt;
   const finishedAt =
@@ -147,7 +166,7 @@ export function inspectDelegateTarget(
     (status ? currentInvocationEntries(status).at(-1)?.at : undefined) ??
     status?.activity?.startedAt;
   if (lastAt !== undefined)
-    lines.push(`last activity: ${timestamp(lastAt, now)}`);
+    lines.push(`last recorded activity (event start): ${timestamp(lastAt)}`);
 
   if (settled) {
     const error = metadataError(target);
@@ -181,14 +200,17 @@ export function inspectDelegateTarget(
   let text = lines.join('\n');
   if (Buffer.byteLength(text, 'utf8') > DELEGATE_INSPECT_MAX_TEXT) {
     const suffix = '\n… inspect snapshot truncated';
-    let end = text.length;
-    while (
-      end > 0 &&
-      Buffer.byteLength(`${text.slice(0, end)}${suffix}`, 'utf8') >
+    let clipped = '';
+    for (const character of text) {
+      const next = `${clipped}${character}`;
+      if (
+        Buffer.byteLength(`${next}${suffix}`, 'utf8') >
         DELEGATE_INSPECT_MAX_TEXT
-    )
-      end--;
-    text = `${text.slice(0, end)}${suffix}`;
+      )
+        break;
+      clipped = next;
+    }
+    text = `${clipped}${suffix}`;
   }
   return {
     text,

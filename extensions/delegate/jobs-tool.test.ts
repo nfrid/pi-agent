@@ -180,6 +180,251 @@ describe('delegate_jobs rendering', () => {
     ).not.toHaveBeenCalled();
   });
 
+  test('switches inspect to the current branch workflow and status runtime', async () => {
+    const attempt = (identity: string, jobId: string) =>
+      ({
+        identity,
+        logicalId: identity.split('@')[0],
+        state: 'running',
+        jobId,
+        dependencies: [],
+        waitingFor: [],
+        inputs: [],
+        createdAt: 100,
+        scheduledAt: 100,
+        startedAt: 110,
+        attempt: {
+          logicalId: identity.split('@')[0],
+          ordinal: Number(identity.split('@')[1]),
+          identity,
+        },
+      }) as never;
+    const job = (id: string) => ({
+      id,
+      name: 'worker',
+      mode: 'single' as const,
+      state: 'running' as const,
+      tasks: ['task'],
+      createdAt: 100,
+      startedAt: 110,
+      runs: [],
+    });
+    const get = vi.fn((id: string) =>
+      id === 'job-a' ? job('job-a') : id === 'job-b' ? job('job-b') : undefined,
+    );
+    const manager = {
+      get,
+      sendFeedback: vi.fn(),
+      cancel: vi.fn(),
+      list: vi.fn(),
+      peek: vi.fn(),
+      materialize: vi.fn(),
+    } as unknown as DelegateJobManager;
+    const workflowA = { get: vi.fn(() => attempt('a@1', 'job-a')) };
+    const workflowB = { get: vi.fn(() => attempt('b@1', 'job-b')) };
+    const statusA = {
+      list: vi.fn(() => [
+        {
+          state: 'running',
+          workflow: { identity: 'a@1' },
+          runCount: 1,
+          transcript: [
+            {
+              type: 'assistant',
+              label: 'Response',
+              text: 'branch A progress',
+              run: 1,
+              at: 120,
+            },
+          ],
+        },
+      ]),
+    };
+    const statusB = {
+      list: vi.fn(() => [
+        {
+          state: 'running',
+          workflow: { identity: 'b@1' },
+          runCount: 1,
+          transcript: [
+            {
+              type: 'assistant',
+              label: 'Response',
+              text: 'branch B progress',
+              run: 1,
+              at: 120,
+            },
+          ],
+        },
+      ]),
+    };
+    let activeWorkflow = workflowA;
+    let activeStatuses = statusA;
+    const entered = vi.fn();
+    let tool: RegisteredTool | undefined;
+    const pi = {
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+    } as unknown as ExtensionAPI;
+    registerDelegateJobsTool(
+      pi,
+      manager,
+      entered,
+      undefined,
+      undefined,
+      () => activeWorkflow as never,
+      () => activeStatuses as never,
+    );
+
+    const first = await tool?.execute('inspect-a', {
+      action: 'inspect',
+      id: 'a',
+    });
+    activeWorkflow = workflowB;
+    activeStatuses = statusB;
+    const second = await tool?.execute('inspect-b', {
+      action: 'inspect',
+      id: 'b',
+    });
+    expect(first?.content[0]?.text).toContain('branch A progress');
+    expect(first?.content[0]?.text).not.toContain('branch B progress');
+    expect(second?.content[0]?.text).toContain('branch B progress');
+    expect(second?.content[0]?.text).not.toContain('branch A progress');
+    expect(statusA.list).toHaveBeenCalledOnce();
+    expect(statusB.list).toHaveBeenCalledOnce();
+    expect(entered).not.toHaveBeenCalled();
+    expect(
+      (manager as unknown as { peek: ReturnType<typeof vi.fn> }).peek,
+    ).not.toHaveBeenCalled();
+    expect(
+      (manager as unknown as { materialize: ReturnType<typeof vi.fn> })
+        .materialize,
+    ).not.toHaveBeenCalled();
+  });
+
+  test('rejects unknown IDs and foreign branch job references without effects', async () => {
+    const peek = vi.fn();
+    const materialize = vi.fn();
+    const entered = vi.fn();
+    const manager = {
+      get: vi.fn((id: string) =>
+        id === 'foreign-job'
+          ? ({
+              id,
+              name: 'foreign',
+              mode: 'single',
+              state: 'running',
+              tasks: [],
+              createdAt: 1,
+              attemptIdentity: 'foreign@1',
+            } as never)
+          : undefined,
+      ),
+      sendFeedback: vi.fn(),
+      cancel: vi.fn(),
+      list: vi.fn(),
+      peek,
+      materialize,
+    } as unknown as DelegateJobManager;
+    const workflow = { get: vi.fn(() => undefined) };
+    const statuses = { list: vi.fn(() => []) };
+    let tool: RegisteredTool | undefined;
+    const pi = {
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+    } as unknown as ExtensionAPI;
+    registerDelegateJobsTool(
+      pi,
+      manager,
+      entered,
+      undefined,
+      undefined,
+      () => workflow as never,
+      () => statuses as never,
+    );
+
+    await expect(
+      tool?.execute('unknown', { action: 'inspect', id: 'missing' }),
+    ).rejects.toThrow('Unknown delegate attempt or job');
+    await expect(
+      tool?.execute('foreign', { action: 'inspect', id: 'foreign-job' }),
+    ).rejects.toThrow('Unknown delegate attempt or job');
+    expect(statuses.list).not.toHaveBeenCalled();
+    expect(entered).not.toHaveBeenCalled();
+    expect(peek).not.toHaveBeenCalled();
+    expect(materialize).not.toHaveBeenCalled();
+  });
+
+  test('exact attempt inspection does not select a continuation transcript', async () => {
+    const attempt = {
+      identity: 'impl@1',
+      logicalId: 'impl',
+      state: 'running',
+      dependencies: [],
+      waitingFor: [],
+      inputs: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      startedAt: 2,
+      attempt: { logicalId: 'impl', ordinal: 1, identity: 'impl@1' },
+    } as never;
+    const manager = {
+      get: vi.fn(() => undefined),
+      sendFeedback: vi.fn(),
+      cancel: vi.fn(),
+      list: vi.fn(),
+      peek: vi.fn(),
+      materialize: vi.fn(),
+    } as unknown as DelegateJobManager;
+    const workflow = {
+      get: vi.fn((id: string) => (id === 'impl@1' ? attempt : undefined)),
+    };
+    const statuses = {
+      list: vi.fn(() => [
+        {
+          state: 'running',
+          runCount: 2,
+          workflow: { identity: 'impl@2' },
+          transcript: [
+            {
+              type: 'assistant',
+              label: 'Response',
+              text: 'continuation must not leak',
+              run: 2,
+              at: 3,
+            },
+          ],
+        },
+      ]),
+    };
+    let tool: RegisteredTool | undefined;
+    const pi = {
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+    } as unknown as ExtensionAPI;
+    registerDelegateJobsTool(
+      pi,
+      manager,
+      undefined,
+      undefined,
+      undefined,
+      () => workflow as never,
+      () => statuses as never,
+    );
+
+    const result = await tool?.execute('exact', {
+      action: 'inspect',
+      id: 'impl@1',
+    });
+    expect(result?.content[0]?.text).toContain('impl@1: running');
+    expect(result?.content[0]?.text).not.toContain(
+      'continuation must not leak',
+    );
+  });
+
   test('returns bounded workflow failure reasons without result bodies', async () => {
     const manager = new DelegateJobManager();
     const workflow = new DelegateWorkflowCoordinator({ jobs: manager });
