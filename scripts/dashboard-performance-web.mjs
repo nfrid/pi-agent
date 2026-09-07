@@ -47,8 +47,14 @@ const build = spawnSync(
   ['run', 'build', '--', '--outDir', buildDirectory],
   { cwd: webDirectory, env, stdio: 'inherit' },
 );
-if (build.error) throw build.error;
-if (build.status !== 0) process.exit(build.status ?? 1);
+if (build.error) {
+  rmSync(buildDirectory, { recursive: true, force: true });
+  throw build.error;
+}
+if (build.status !== 0) {
+  rmSync(buildDirectory, { recursive: true, force: true });
+  process.exit(build.status ?? 1);
+}
 
 const preview = spawn(
   bun,
