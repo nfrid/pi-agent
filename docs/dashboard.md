@@ -89,9 +89,12 @@ to the dashboard host and its user, not the browser device. Relative transcript
 links use the originating session's cwd (including delegate checkouts); links
 inside a Markdown preview use the viewed file's directory.
 
-The viewer has independent Back/Forward history, scroll restoration, Refresh,
-and Copy path. Markdown defaults to Preview, except line-targeted links open
-Source. Preview heading links participate in viewer history. Raw HTML is not
+The viewer has Back/Forward history, scroll restoration, Refresh, and Copy path.
+Browser Back/Forward (including trackpad navigation) follows the same file and
+heading history as its toolbar. Back before the first file returns to the
+underlying surface; Forward can reopen the viewer. Markdown defaults to Preview,
+except line-targeted links open Source. Preview heading links participate in
+viewer history. Raw HTML is not
 executed and preview images are disabled to avoid implicit network/file loads.
 
 **Access boundary:** authenticated dashboard users can explicitly read any
