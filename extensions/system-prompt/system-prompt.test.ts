@@ -8,7 +8,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import {
+  type ExtensionAPI,
+  loadProjectContextFiles,
+} from '@earendil-works/pi-coding-agent';
 import {
   afterAll,
   afterEach,
@@ -132,7 +135,7 @@ describe('canonical prompt composition', () => {
     ).toEqual(files);
   });
 
-  it('filters only paired AGENTS files across real nested and external worktrees', () => {
+  it('filters only paired context files across real nested and external worktrees', () => {
     const main = temporaryDirectory();
     const externalParent = temporaryDirectory();
     const nested = join(main, '.worktrees', 'nested');
@@ -172,28 +175,47 @@ describe('canonical prompt composition', () => {
     mkdirSync(join(main, 'packages'), { recursive: true });
     mkdirSync(join(nested, 'packages'), { recursive: true });
     mkdirSync(join(external, 'packages'), { recursive: true });
+    mkdirSync(join(main, 'docs'), { recursive: true });
+    mkdirSync(join(nested, 'docs'), { recursive: true });
+    mkdirSync(join(external, 'docs'), { recursive: true });
     writeFileSync(join(main, 'AGENTS.md'), 'original');
-    writeFileSync(join(nested, 'AGENTS.md'), 'diverged nested');
+    writeFileSync(join(nested, 'AGENTS.override.md'), 'diverged nested');
     writeFileSync(
-      join(main, 'packages', 'AGENTS.md'),
+      join(main, 'packages', 'AGENTS.MD'),
       'original nested instruction',
     );
     writeFileSync(
-      join(nested, 'packages', 'AGENTS.md'),
+      join(nested, 'packages', 'CLAUDE.MD'),
       'diverged nested instruction',
+    );
+    writeFileSync(join(main, 'docs', 'CLAUDE.md'), 'original docs instruction');
+    writeFileSync(
+      join(nested, 'docs', 'AGENTS.md'),
+      'diverged docs instruction',
     );
     const ancestor = join(externalParent, 'AGENTS.md');
     writeFileSync(ancestor, 'distinct ancestor');
     const files = [
       { path: join(main, 'AGENTS.md'), content: 'original' },
-      { path: join(nested, 'AGENTS.md'), content: 'diverged nested' },
       {
-        path: join(main, 'packages', 'AGENTS.md'),
+        path: join(nested, 'AGENTS.override.md'),
+        content: 'diverged nested',
+      },
+      {
+        path: join(main, 'packages', 'AGENTS.MD'),
         content: 'original nested instruction',
       },
       {
-        path: join(nested, 'packages', 'AGENTS.md'),
+        path: join(nested, 'packages', 'CLAUDE.MD'),
         content: 'diverged nested instruction',
+      },
+      {
+        path: join(main, 'docs', 'CLAUDE.md'),
+        content: 'original docs instruction',
+      },
+      {
+        path: join(nested, 'docs', 'AGENTS.md'),
+        content: 'diverged docs instruction',
       },
       { path: ancestor, content: 'distinct ancestor' },
     ];
@@ -205,27 +227,52 @@ describe('canonical prompt composition', () => {
       const worktreeFiles = [
         files[0],
         {
-          path: join(worktreeRoot, 'AGENTS.md'),
+          path: join(worktreeRoot, 'AGENTS.override.md'),
           content: 'diverged worktree instruction',
         },
         files[2],
         {
-          path: join(worktreeRoot, 'packages', 'AGENTS.md'),
+          path: join(worktreeRoot, 'packages', 'CLAUDE.MD'),
           content: 'diverged nested instruction',
         },
         files[4],
+        {
+          path: join(worktreeRoot, 'docs', 'AGENTS.md'),
+          content: 'diverged docs instruction',
+        },
+        files[6],
       ];
       writeFileSync(worktreeFiles[1].path, worktreeFiles[1].content);
       writeFileSync(worktreeFiles[3].path, worktreeFiles[3].content);
+      writeFileSync(worktreeFiles[5].path, worktreeFiles[5].content);
       const filtered = filterGlobalContextFiles(worktreeFiles, cwd, main);
       expect(filtered.map((file) => file.path)).toEqual([
-        join(worktreeRoot, 'AGENTS.md'),
-        join(worktreeRoot, 'packages', 'AGENTS.md'),
+        join(worktreeRoot, 'AGENTS.override.md'),
+        join(worktreeRoot, 'packages', 'CLAUDE.MD'),
+        join(worktreeRoot, 'docs', 'AGENTS.md'),
         ancestor,
       ]);
     }
 
-    const unpaired = [files[0], files[4]];
+    const loaded = loadProjectContextFiles({
+      cwd: join(nested, 'packages'),
+      agentDir: main,
+    });
+    expect(loaded.map((file) => file.path.toLowerCase())).toEqual([
+      join(main, 'AGENTS.md').toLowerCase(),
+      join(nested, 'AGENTS.override.md').toLowerCase(),
+      join(nested, 'packages', 'CLAUDE.MD').toLowerCase(),
+    ]);
+    expect(
+      filterGlobalContextFiles(loaded, join(nested, 'packages'), main).map(
+        (file) => file.path.toLowerCase(),
+      ),
+    ).toEqual([
+      join(nested, 'AGENTS.override.md').toLowerCase(),
+      join(nested, 'packages', 'CLAUDE.MD').toLowerCase(),
+    ]);
+
+    const unpaired = [files[0], files[6]];
     expect(
       filterGlobalContextFiles(unpaired, join(nested, 'packages'), main),
     ).toEqual(unpaired);
@@ -235,10 +282,10 @@ describe('canonical prompt composition', () => {
     const checkout = temporaryDirectory();
     const nested = join(checkout, 'packages', 'app');
     mkdirSync(nested, { recursive: true });
-    writeFileSync(
-      join(checkout, '.git'),
-      `gitdir: ${join(checkout, '.git-common', 'worktrees', 'task')}\n`,
-    );
+    const gitDir = join(checkout, '.git-common', 'worktrees', 'task');
+    mkdirSync(gitDir, { recursive: true });
+    writeFileSync(join(gitDir, 'commondir'), '../..\n');
+    writeFileSync(join(checkout, '.git'), `gitdir: ${gitDir}\n`);
     expect(isIsolatedGitWorktree(nested)).toBe(true);
 
     const previousDelegateChild = process.env.PI_DELEGATE_CHILD;
@@ -269,6 +316,20 @@ describe('canonical prompt composition', () => {
     expect(
       buildSystemPrompt(options({ cwd: mainCheckout }), 'json'),
     ).not.toContain('This main agent is running in an isolated Git worktree.');
+
+    const malformedCheckout = temporaryDirectory();
+    const malformedGitDir = join(
+      malformedCheckout,
+      '.git-common',
+      'worktrees',
+      'task',
+    );
+    mkdirSync(malformedGitDir, { recursive: true });
+    writeFileSync(
+      join(malformedCheckout, '.git'),
+      `gitdir: ${malformedGitDir}\n`,
+    );
+    expect(isIsolatedGitWorktree(malformedCheckout)).toBe(false);
   });
 
   it('teaches JSON-mode delegate children to announce activity preambles', () => {

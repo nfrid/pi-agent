@@ -51,7 +51,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "xhigh",
         "relativeCost": 21,
-        "useFor": "Difficult bounded implementation, diagnosis, regression review, or security verification across files or subsystems with explicit criteria.",
+        "useFor": "Difficult bounded implementation, diagnosis, regression review, or security verification across files or subsystems with explicit acceptance criteria or named security invariants.",
         "avoid": "Foreground deadline work, unclear criteria needing maintainer judgement, or unbounded repository-wide review."
       },
       "luna-max": {
@@ -67,7 +67,7 @@
         "model": "gpt-6-astra",
         "thinking": "low",
         "relativeCost": 75,
-        "useFor": "Work where the child must discover the path: ambiguous diagnosis, broad exploration, architecture or design judgement, adversarial review, security reasoning, or an emerging finish line.",
+        "useFor": "Difficult work where the child must discover the path: ambiguous diagnosis, broad exploration, architecture or design judgement, adversarial review, security reasoning, or an emerging finish line.",
         "avoid": "Bounded work a cheaper route can execute or verify reliably, or trivial mechanical work."
       }
     }

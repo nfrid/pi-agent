@@ -18,18 +18,10 @@ import {
   loadInstruction,
 } from '../shared/instructions';
 
-export function loadAgentInstructions(
-  agentDir = getAgentDir(),
-): LoadedInstruction[] {
-  const workingStyle = loadInstruction(
-    'instructions/agent/working-style.md',
-    agentDir,
-  );
-  const interaction = loadInstruction(
-    'instructions/agent/interaction.md',
-    agentDir,
-  );
-  const toolUse = loadInstruction('instructions/agent/tool-use.md', agentDir);
+export function loadAgentInstructions(): LoadedInstruction[] {
+  const workingStyle = loadInstruction('instructions/agent/working-style.md');
+  const interaction = loadInstruction('instructions/agent/interaction.md');
+  const toolUse = loadInstruction('instructions/agent/tool-use.md');
   return [workingStyle, interaction, toolUse];
 }
 
@@ -40,30 +32,13 @@ export function formatSkillsForPrompt(
 }
 
 export function isIsolatedGitWorktree(cwd: string): boolean {
-  let current = resolve(cwd);
-  while (true) {
-    const dotGit = resolve(current, '.git');
-    try {
-      if (lstatSync(dotGit).isFile()) {
-        const match = /^gitdir:\s*(.+)$/u.exec(
-          readFileSync(dotGit, 'utf8').trim(),
-        );
-        if (!match?.[1]) return false;
-        const gitDir = resolve(current, match[1]);
-        return basename(dirname(gitDir)) === 'worktrees';
-      }
-      return false;
-    } catch {
-      const parent = dirname(current);
-      if (parent === current) return false;
-      current = parent;
-    }
-  }
+  return gitIdentity(cwd)?.isWorktree ?? false;
 }
 
 interface GitIdentity {
   root: string;
   commonDir: string;
+  isWorktree: boolean;
 }
 
 function canonicalPath(path: string): string {
@@ -80,7 +55,11 @@ function gitIdentity(cwd: string): GitIdentity | undefined {
     const dotGit = resolve(current, '.git');
     try {
       if (lstatSync(dotGit).isDirectory()) {
-        return { root: current, commonDir: canonicalPath(dotGit) };
+        return {
+          root: current,
+          commonDir: canonicalPath(dotGit),
+          isWorktree: false,
+        };
       }
       if (lstatSync(dotGit).isFile()) {
         const match = /^gitdir:\s*(.+)$/u.exec(
@@ -88,20 +67,17 @@ function gitIdentity(cwd: string): GitIdentity | undefined {
         );
         if (!match?.[1]) return undefined;
         const gitDir = resolve(current, match[1]);
-        const commonDirFile = resolve(gitDir, 'commondir');
-        let commonDir = gitDir;
-        try {
-          commonDir = resolve(
-            gitDir,
-            readFileSync(commonDirFile, 'utf8').trim(),
-          );
-        } catch {
-          if (basename(dirname(gitDir)) === 'worktrees') {
-            commonDir = dirname(dirname(gitDir));
-          }
-        }
         if (basename(dirname(gitDir)) !== 'worktrees') return undefined;
-        return { root: current, commonDir: canonicalPath(commonDir) };
+        const commonDir = readFileSync(
+          resolve(gitDir, 'commondir'),
+          'utf8',
+        ).trim();
+        if (!commonDir) return undefined;
+        return {
+          root: current,
+          commonDir: canonicalPath(resolve(gitDir, commonDir)),
+          isWorktree: true,
+        };
       }
     } catch {
       // Continue to an ancestor when this directory has no usable Git marker.
@@ -135,20 +111,50 @@ export function filterGlobalContextFiles(
   const agentIdentity = gitIdentity(resolvedAgentDir);
 
   if (
-    cwdIdentity &&
+    cwdIdentity?.isWorktree &&
     agentIdentity &&
+    !agentIdentity.isWorktree &&
     canonicalPath(cwdIdentity.commonDir) ===
       canonicalPath(agentIdentity.commonDir) &&
     canonicalPath(cwdIdentity.root) !== canonicalPath(agentIdentity.root)
   ) {
-    const contextPaths = new Set(
-      contextFiles.map((file) => canonicalPath(file.path)),
-    );
+    const contextFileNames = new Set([
+      'AGENTS.override.md',
+      'AGENTS.md',
+      'AGENTS.MD',
+      'CLAUDE.md',
+      'CLAUDE.MD',
+    ]);
     const worktreeRoot = canonicalPath(cwdIdentity.root);
     const mainRoot = canonicalPath(agentIdentity.root);
-    return contextFiles.filter((file) => {
-      const path = canonicalPath(file.path);
-      if (basename(path) !== 'AGENTS.md') return true;
+    const worktreeContextDirectories = new Set<string>();
+    const paths = contextFiles.map((file) => canonicalPath(file.path));
+    for (const path of paths) {
+      if (!contextFileNames.has(basename(path))) continue;
+      const fromWorktree = relative(worktreeRoot, path);
+      if (
+        !isAbsolute(fromWorktree) &&
+        fromWorktree !== '..' &&
+        !fromWorktree.startsWith(`..${sep}`)
+      ) {
+        const directory = dirname(fromWorktree);
+        worktreeContextDirectories.add(directory === '.' ? '' : directory);
+      }
+    }
+
+    return contextFiles.filter((_file, index) => {
+      const path = paths[index];
+      if (!contextFileNames.has(basename(path))) return true;
+
+      // A worktree can be nested below its main checkout, so classify it first.
+      const fromWorktree = relative(worktreeRoot, path);
+      if (
+        !isAbsolute(fromWorktree) &&
+        fromWorktree !== '..' &&
+        !fromWorktree.startsWith(`..${sep}`)
+      ) {
+        return true;
+      }
 
       const fromMain = relative(mainRoot, path);
       if (
@@ -156,10 +162,12 @@ export function filterGlobalContextFiles(
         fromMain !== '..' &&
         !fromMain.startsWith(`..${sep}`)
       ) {
-        const correspondingWorktreeFile = canonicalPath(
-          resolve(worktreeRoot, fromMain),
-        );
-        if (contextPaths.has(correspondingWorktreeFile)) return false;
+        const directory = dirname(fromMain);
+        if (
+          worktreeContextDirectories.has(directory === '.' ? '' : directory)
+        ) {
+          return false;
+        }
       }
       return true;
     });

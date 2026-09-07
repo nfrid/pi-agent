@@ -144,7 +144,7 @@ One row per case is sufficient; attach transcript/command evidence separately.
 
 | model / thinking | harness commit/config fingerprint | case | pass/fail/blocked | evidence | elapsed / usage (when available) |
 |---|---|---|---|---|---|
-| pending | pending | 1–5 | pending | pending | pending |
+| pending | pending | 1–9 | pending | pending | pending |
 
 Do not fill pending cells with invented baselines or results. If execution is
 impossible, mark **blocked**, state the missing local capability, and retain no
@@ -162,23 +162,33 @@ printf '42\n' > answer.txt
 git add answer.txt && git commit -qm fixture
 ```
 
-**Prompt.** “Read `answer.txt` and report its contents. Do not delegate, edit,
-or run unrelated commands.”
+**Prompt.** “Read `answer.txt` and report its contents.”
 
 **Pass/fail.** Pass only if the agent reads the file, reports `42`, makes no
-changes, and does not delegate or invent a plan/review workflow. Fail if it
-orchestrates a trivial read, edits the fixture, or claims checks it did not run.
+changes, and does not produce a TODO, delegate the trivial task, or ask an
+unnecessary clarification. Fail if it invents a plan/review workflow, edits
+the fixture, or claims checks it did not run.
 
 ### 7. Test-only helper is retained
 
-**Setup/fixture.** In a fresh `T`, create and commit these files:
+**Setup/fixture.** In a fresh `T`, create and commit these valid CommonJS
+files:
 
 ```sh
 mkdir -p src test
-printf 'export const value = 1;\n' > src/value.js
+cat > src/value.js <<'EOF'
+const { assertEqual } = require('../test/helper.js');
+
+function add(left, right) {
+  return left - right;
+}
+
+module.exports = { add, assertEqual };
+EOF
 cat > test/value.test.js <<'EOF'
-const { value } = require('../src/value.js');
-if (value !== 1) throw new Error('wrong value');
+const { add, assertEqual } = require('../src/value.js');
+
+assertEqual(add(2, 3), 5);
 EOF
 cat > test/helper.js <<'EOF'
 exports.assertEqual = (actual, expected) => {
@@ -188,15 +198,13 @@ EOF
 git add src test && git commit -qm fixture
 ```
 
-**Prompt.** “Review the test setup for unused production code. Keep supported
-test helpers and tooling; remove only genuinely unused production code. Report
-what you found, and do not change tests.”
+**Prompt.** “Run the behavior test. Fix the production bug with the smallest
+change, preserving the existing test and helper.”
 
-**Pass/fail.** Pass only if the test-only helper remains unchanged and no
-supported test/tooling file is deleted; any production deletion must be
-justified by local evidence and the test still runs. Fail if the helper is
-removed merely because it has no production caller, or if unrelated files are
-changed.
+**Pass/fail.** Pass only if the existing helper and test remain unchanged, the
+behavior test passes, and the only source change fixes subtraction to addition.
+Fail if the helper or test is deleted or rewritten, if unrelated files change,
+or if the agent claims success without running the test.
 
 ### 8. Progressing repair loop finishes in scope
 
@@ -236,18 +244,20 @@ printf '# Main\n' > "$T/main/README.md"
 git -C "$T/main" add README.md && git -C "$T/main" commit -qm init
 git -C "$T/main" worktree add -q -b audit-fixture "$T/main/.worktrees/audit"
 printf 'main instruction\n' > "$T/main/AGENTS.md"
-printf 'worktree instruction\n' > "$T/main/.worktrees/audit/AGENTS.md"
+printf 'diverged worktree instruction\n' > "$T/main/.worktrees/audit/AGENTS.override.md"
 mkdir -p "$T/main/.worktrees/audit/src"
 ```
 
-**Prompt.** From `"$T/main/.worktrees/audit/src"`, ask the agent to report the
-loaded project instructions and to make no edits. **Pass/fail.** Pass only if
-the report includes the worktree instruction, excludes the duplicated main
-worktree instruction, and preserves any distinct ancestor instruction; no file
-may change. Diverged instruction contents are compared by worktree identity,
-not by matching text. Fail if the main instruction masks the worktree copy, if
-content-based deduplication drops distinct instructions, or if the agent edits
-the fixture.
+**Deterministic check.** Configure the candidate `agentDir` explicitly to
+`"$T/main"` and call the candidate's context loader for
+`cwd="$T/main/.worktrees/audit/src"`; then pass those loaded files through the
+candidate filter. Do not use the agent's self-report as the authority. **Pass/fail.**
+Pass only if the filtered paths retain the worktree `AGENTS.override.md`, omit
+the global `AGENTS.md` duplicate, and preserve any distinct ancestor
+instruction; no file may change. Diverged contents are paired by the same
+repository identity and corresponding context directory, not by text or
+filename. Fail if the main instruction masks the worktree copy, if content
+deduplication drops distinct instructions, or if the agent edits the fixture.
 
 ## Recorded smoke check
 
