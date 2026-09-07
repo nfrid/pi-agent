@@ -9,7 +9,7 @@ import {
   type Dispatch,
   type RefObject,
   type SetStateAction,
-  useEffect,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -25,7 +25,12 @@ import {
   transcriptItemTimestamp,
 } from '../landmarks';
 import { TranscriptOutline } from '../outline';
+import type { TranscriptScrollCommand } from '../scroll-command';
 import { TranscriptToolStream } from '../tool-stream';
+import {
+  restoreRenderedAnchor,
+  useTranscriptScrollCommand,
+} from '../use-scroll-command';
 import { buildVirtualTranscriptRows } from '../virtual-rows';
 import { useVirtualTranscriptScrollRestoration } from '../virtual-scroll';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
@@ -41,15 +46,12 @@ export function VirtualizedTranscript({
   onOpenBranchPaths,
   onBranchPointChange,
   onJumpToLandmark,
-  tailScrollRequest,
-  tailScrollRequestSessionId,
   outlineOpen,
   onOutlineOpenChange,
   onBeforeScroll,
   pendingJumpKey,
   onPendingJumpHandled,
-  scrollRestore,
-  onScrollRestoreComplete,
+  scrollCommand,
   scrollElementRef,
   previewStartCount,
   previewEndCount,
@@ -66,21 +68,13 @@ export function VirtualizedTranscript({
   onJumpToLandmark?: (
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
-  tailScrollRequest?: number;
-  tailScrollRequestSessionId?: string;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
   /** A jump requested before a regular-to-virtualized renderer transition. */
   pendingJumpKey?: string;
   onPendingJumpHandled?: () => void;
-  scrollRestore?: {
-    mode: 'following' | 'manual';
-    rowKey?: string;
-    rowOffset?: number;
-    scrollTop: number;
-  };
-  onScrollRestoreComplete?: () => void;
+  scrollCommand?: TranscriptScrollCommand;
   scrollElementRef: RefObject<HTMLDivElement | null>;
   previewStartCount: number;
   previewEndCount: number;
@@ -88,7 +82,6 @@ export function VirtualizedTranscript({
   const rows = useMemo(() => buildVirtualTranscriptRows(items), [items]);
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
-  const consumedTailRequestRef = useRef<string | undefined>(undefined);
   const [localPendingJumpKey, setLocalPendingJumpKey] = useState<string>();
   const requestedJumpKey = pendingJumpKey ?? localPendingJumpKey;
   const virtualizer = useVirtualizer({
@@ -99,17 +92,13 @@ export function VirtualizedTranscript({
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
     measureElement: (element) => element.getBoundingClientRect().height,
   });
-  useLayoutEffect(() => {
-    if (!tailScrollRequest || rows.length === 0) return;
-    const requestKey = `${tailScrollRequestSessionId ?? ''}:${tailScrollRequest}`;
-    if (consumedTailRequestRef.current === requestKey) return;
-    consumedTailRequestRef.current = requestKey;
-    virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
-    const frame = window.requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [rows.length, tailScrollRequest, tailScrollRequestSessionId, virtualizer]);
+  // During restoration our measured anchor, not estimated-row compensation,
+  // owns the offset. Otherwise asynchronous size adjustments race the command
+  // against the virtualizer's last observed (pre-command) scroll position.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange =
+    scrollCommand?.kind === 'anchor' && !scrollCommand.signal.aborted
+      ? () => false
+      : undefined;
   useLayoutEffect(() => {
     void open;
     void rows.length;
@@ -161,90 +150,40 @@ export function VirtualizedTranscript({
     });
     return result;
   }, [items, rows]);
-  const scrollRestoreRef = useRef<typeof scrollRestore>(undefined);
-  const restoreFramesRef = useRef<{
-    request: NonNullable<typeof scrollRestore>;
-    first?: number;
-    second?: number;
-  }>(undefined);
-  useEffect(() => {
-    const previous = restoreFramesRef.current;
-    if (!scrollRestore) {
-      if (previous?.first !== undefined)
-        window.cancelAnimationFrame(previous.first);
-      if (previous?.second !== undefined)
-        window.cancelAnimationFrame(previous.second);
-      restoreFramesRef.current = undefined;
-      return;
-    }
-    if (scrollRestoreRef.current === scrollRestore) return;
-    if (previous) {
-      if (previous.first !== undefined)
-        window.cancelAnimationFrame(previous.first);
-      if (previous.second !== undefined)
-        window.cancelAnimationFrame(previous.second);
-    }
-    const attempt: {
-      request: NonNullable<typeof scrollRestore>;
-      first?: number;
-      second?: number;
-    } = { request: scrollRestore };
-    restoreFramesRef.current = attempt;
-    const element = scrollElementRef.current;
-    const finish = () => {
-      if (restoreFramesRef.current !== attempt) return;
-      restoreFramesRef.current = undefined;
-      scrollRestoreRef.current = scrollRestore;
-      onScrollRestoreComplete?.();
-    };
-    if (!element) return finish();
-    if (scrollRestore.mode === 'following') return finish();
-    const rowIndex = scrollRestore.rowKey
-      ? rowIndexByKey.get(scrollRestore.rowKey)
-      : undefined;
-    if (rowIndex === undefined) {
-      element.scrollTop = scrollRestore.scrollTop;
-      return finish();
-    }
-    virtualizer.scrollToIndex(rowIndex, { align: 'start' });
-    attempt.first = window.requestAnimationFrame(() => {
-      if (restoreFramesRef.current !== attempt) return;
-      virtualizer.measure();
-      virtualizer.scrollToIndex(rowIndex, { align: 'start' });
-      attempt.second = window.requestAnimationFrame(() => {
-        if (restoreFramesRef.current !== attempt) return;
-        const row = Array.from(
-          virtualizerRef.current?.querySelectorAll<HTMLElement>(
-            '[data-index]',
-          ) ?? [],
-        ).find(
-          (candidate) =>
-            candidate.dataset.transcriptRow === scrollRestore.rowKey,
-        );
-        if (row && scrollRestore.rowOffset !== undefined) {
-          element.scrollTop +=
-            row.getBoundingClientRect().top -
-            element.getBoundingClientRect().top -
-            scrollRestore.rowOffset;
-        } else element.scrollTop = scrollRestore.scrollTop;
-        finish();
-      });
-    });
-    return () => {
-      if (restoreFramesRef.current !== attempt) return;
-      if (attempt.first !== undefined)
-        window.cancelAnimationFrame(attempt.first);
-      if (attempt.second !== undefined)
-        window.cancelAnimationFrame(attempt.second);
-      restoreFramesRef.current = undefined;
-    };
-  }, [
-    onScrollRestoreComplete,
-    rowIndexByKey,
-    scrollElementRef,
-    scrollRestore,
-    virtualizer,
-  ]);
+  // scrollToIndex/scrollToOffset start TanStack's private reconciliation loop.
+  // Read its measurement instead: only our cancellable controller may schedule
+  // writes, otherwise that loop can undo restoration or later manual input.
+  const scrollToRow = useCallback(
+    (index: number, align: 'start' | 'end') => {
+      const offset = virtualizer.getOffsetForIndex(index, align)?.[0];
+      const element = scrollElementRef.current;
+      if (element && offset !== undefined) element.scrollTop = offset;
+    },
+    [scrollElementRef, virtualizer],
+  );
+  const placeScrollCommand = useCallback(
+    (command: TranscriptScrollCommand) => {
+      const element = scrollElementRef.current;
+      if (!element || rows.length === 0) return false;
+      if (command.kind === 'latest') {
+        scrollToRow(rows.length - 1, 'end');
+        return true;
+      }
+      const settled = restoreRenderedAnchor(element, command);
+      if (settled !== undefined) return settled;
+      const index = command.rowKey
+        ? rowIndexByKey.get(command.rowKey)
+        : undefined;
+      if (index === undefined) {
+        element.scrollTop = command.scrollTop;
+        return true;
+      }
+      scrollToRow(index, 'start');
+      return false;
+    },
+    [rowIndexByKey, rows.length, scrollElementRef, scrollToRow],
+  );
+  useTranscriptScrollCommand(scrollCommand, placeScrollCommand);
   useLayoutEffect(() => {
     if (!requestedJumpKey) return;
     const rowIndex =
@@ -253,9 +192,9 @@ export function VirtualizedTranscript({
     if (rowIndex === undefined) return;
     if (pendingJumpKey !== undefined) onPendingJumpHandled?.();
     else setLocalPendingJumpKey(undefined);
-    virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+    scrollToRow(rowIndex, 'start');
     const frame = window.requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+      scrollToRow(rowIndex, 'start');
     });
     return () => window.cancelAnimationFrame(frame);
   }, [
@@ -263,7 +202,7 @@ export function VirtualizedTranscript({
     pendingJumpKey,
     requestedJumpKey,
     rowIndexByKey,
-    virtualizer,
+    scrollToRow,
   ]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
@@ -271,7 +210,7 @@ export function VirtualizedTranscript({
       rowIndexByKey.get(landmark.key) ??
       rowIndexByKey.get(`group-${landmark.key}`);
     if (loadedRowIndex !== undefined) {
-      virtualizer.scrollToIndex(loadedRowIndex, { align: 'start' });
+      scrollToRow(loadedRowIndex, 'start');
       return;
     }
     const target = outline?.find(

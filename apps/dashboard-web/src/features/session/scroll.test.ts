@@ -2,14 +2,7 @@ import type { TranscriptProjection } from '@pi-dashboard/domain';
 import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  distanceFromScrollEnd,
-  FOLLOW_REARM_DISTANCE_PX,
-  nextFollowMode,
-  readSessionScrollMemory,
-  useSessionScroll,
-  useSessionScrollMemory,
-} from './scroll';
+import { readSessionScrollMemory, useSessionScroll } from './scroll';
 
 describe('session scroll memory storage', () => {
   it('isolates server sessions and ignores corrupt values', () => {
@@ -68,154 +61,13 @@ describe('session scroll memory storage', () => {
       vi.unstubAllGlobals();
     }
   });
-
-  it('loads the saved ordinal before exposing restoration and can cancel it', async () => {
-    const values = new Map<string, string>([
-      [
-        'pi.dashboard.session-scroll.v1:server-a:session-1',
-        JSON.stringify({
-          version: 1,
-          mode: 'manual',
-          scrollTop: 420,
-          oldestOrdinal: 0,
-        }),
-      ],
-    ]);
-    const loadThroughOrdinal = vi.fn().mockResolvedValue(false);
-    const cancelHistoryRestore = vi.fn();
-    vi.stubGlobal('window', {
-      sessionStorage: {
-        getItem: (key: string) => values.get(key) ?? null,
-        setItem: (key: string, value: string) => values.set(key, value),
-      },
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      requestAnimationFrame: (callback: FrameRequestCallback) => {
-        callback(0);
-        return 1;
-      },
-      cancelAnimationFrame: () => undefined,
-    });
-    const modeRef = { current: 'manual' as const };
-    let controls!: ReturnType<typeof useSessionScrollMemory>;
-    function Probe() {
-      controls = useSessionScrollMemory({
-        id: 'session-1',
-        serverId: 'server-a',
-        history: { start: 10, hasOlder: true },
-        historyAvailable: true,
-        sessionMounted: true,
-        enabled: true,
-        scrollElementRef: { current: null },
-        modeRef,
-        loadThroughOrdinal,
-        cancelHistoryRestore,
-      });
-      return null;
-    }
-    let renderer: ReturnType<typeof create> | undefined;
-    try {
-      await act(async () => {
-        renderer = create(createElement(Probe));
-      });
-      await vi.waitFor(() =>
-        expect(loadThroughOrdinal).toHaveBeenCalledWith(0),
-      );
-      await act(async () => controls.cancelRestore());
-      expect(cancelHistoryRestore).toHaveBeenCalledTimes(1);
-      expect(controls.restoring).toBe(false);
-    } finally {
-      await act(async () => renderer?.unmount());
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('finishes restoration when a multi-page load fails after a rerender', async () => {
-    const values = new Map<string, string>([
-      [
-        'pi.dashboard.session-scroll.v1:server-a:session-1',
-        JSON.stringify({
-          version: 1,
-          mode: 'manual',
-          scrollTop: 420,
-          oldestOrdinal: 0,
-        }),
-      ],
-    ]);
-    let rejectLoad!: (error: Error) => void;
-    const firstLoad = () =>
-      new Promise<boolean>((_resolve, reject) => {
-        rejectLoad = reject;
-      });
-    const secondLoad = vi.fn().mockResolvedValue(false);
-    vi.stubGlobal('window', {
-      sessionStorage: {
-        getItem: (key: string) => values.get(key) ?? null,
-        setItem: (key: string, value: string) => values.set(key, value),
-      },
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-    });
-    const modeRef = { current: 'manual' as const };
-    let controls!: ReturnType<typeof useSessionScrollMemory>;
-    function Probe({ load }: { load: (ordinal: number) => Promise<boolean> }) {
-      controls = useSessionScrollMemory({
-        id: 'session-1',
-        serverId: 'server-a',
-        history: { start: 10, hasOlder: true },
-        historyAvailable: true,
-        sessionMounted: true,
-        enabled: true,
-        scrollElementRef: { current: null },
-        modeRef,
-        loadThroughOrdinal: load,
-        cancelHistoryRestore: vi.fn(),
-      });
-      return null;
-    }
-    let renderer: ReturnType<typeof create> | undefined;
-    try {
-      await act(async () => {
-        renderer = create(createElement(Probe, { load: firstLoad }));
-      });
-      await act(async () => {
-        renderer?.update(createElement(Probe, { load: secondLoad }));
-      });
-      rejectLoad(new Error('page two failed'));
-      await vi.waitFor(() =>
-        expect(controls.restoreRequest?.oldestOrdinal).toBe(0),
-      );
-      expect(secondLoad).not.toHaveBeenCalled();
-    } finally {
-      await act(async () => renderer?.unmount());
-      vi.unstubAllGlobals();
-    }
-  });
 });
 
-describe('session follow mode', () => {
-  it('rearms only within 40 pixels of the real content end', () => {
-    expect(FOLLOW_REARM_DISTANCE_PX).toBe(40);
-    expect(nextFollowMode('manual', 41, false)).toBe('manual');
-    expect(nextFollowMode('manual', 40, false)).toBe('following');
-  });
-
-  it('treats upward intent as manual even at the content end', () => {
-    expect(nextFollowMode('following', 0, true)).toBe('manual');
-    expect(nextFollowMode('manual', 0, true)).toBe('manual');
-  });
-
-  it('keeps following while layout growth moves the end away', () => {
-    expect(nextFollowMode('following', 200, false)).toBe('following');
-  });
-
-  it('calculates distance from the scroll element rather than the window', () => {
-    expect(distanceFromScrollEnd(1_000, 600, 300)).toBe(100);
-    expect(distanceFromScrollEnd(1_000, 800, 300)).toBe(0);
-  });
-
+describe('session follow lifecycle', () => {
   it('attaches after initial history mounts and preserves manual mode through settlement', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('Element', class {});
+    const windowListeners = new Map<string, EventListener>();
     const listeners = new Map<string, Set<EventListener>>();
     let scrollHeight = 1_000;
     const transcript = {
@@ -247,8 +99,9 @@ describe('session follow mode', () => {
         return id;
       },
       setTimeout,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
+      addEventListener: (type: string, listener: EventListener) =>
+        windowListeners.set(type, listener),
+      removeEventListener: (type: string) => windowListeners.delete(type),
       innerHeight: 800,
       visualViewport: undefined,
     };
@@ -267,12 +120,10 @@ describe('session follow mode', () => {
       waiting,
       version,
       id = 'session-1',
-      restorationReady = false,
     }: {
       waiting: boolean;
       version: number;
       id?: string;
-      restorationReady?: boolean;
     }) {
       const data = { entries: [`entry-${version}`] };
       const projection = {} as TranscriptProjection;
@@ -283,7 +134,6 @@ describe('session follow mode', () => {
         sessionMounted: Boolean(data && projection && !waiting),
         enabled: true,
         scrollElementRef,
-        restorationReady,
       });
       return null;
     }
@@ -315,7 +165,6 @@ describe('session follow mode', () => {
           createElement(Probe, {
             waiting: false,
             version: 2,
-            restorationReady: true,
           }),
         );
       });
@@ -327,6 +176,8 @@ describe('session follow mode', () => {
       await act(async () => runFrames());
       expect(transcript.scrollTop).toBe(1_300);
       expect(controls.awayFromLatest).toBe(false);
+      const oldTailCommand = controls.scrollCommand;
+      expect(oldTailCommand?.kind).toBe('latest');
 
       scrollHeight = 1_400;
       await act(async () => {
@@ -344,17 +195,37 @@ describe('session follow mode', () => {
       await act(async () => runFrames());
       expect(transcript.scrollTop).toBe(900);
       expect(controls.awayFromLatest).toBe(true);
-      expect(controls.tailScrollRequest).toBe(1);
+      expect(controls.scrollCommand).toBeUndefined();
+      expect(oldTailCommand?.signal.aborted).toBe(true);
       await act(async () => {
         renderer?.update(
           createElement(Probe, { waiting: false, version: 4, id: 'session-2' }),
         );
       });
-      expect(controls.tailScrollRequest).toBe(0);
+      expect(controls.scrollCommand?.kind).toBe('latest');
       await act(async () => {
         renderer?.update(createElement(Probe, { waiting: false, version: 4 }));
       });
-      expect(controls.tailScrollRequest).toBe(0);
+      expect(controls.scrollCommand?.kind).toBe('latest');
+      // No persistence is enabled here: inspectors still receive all inputs.
+      await act(async () => {
+        dispatch('touchstart', {
+          touches: [{ clientY: 100 }],
+        } as unknown as TouchEvent);
+        dispatch('touchmove', {
+          touches: [{ clientY: 200 }],
+        } as unknown as TouchEvent);
+      });
+      expect(controls.scrollCommand).toBeUndefined();
+      await act(async () => controls.jumpToLatest());
+      await act(async () => {
+        windowListeners.get('keydown')?.({
+          code: 'Home',
+          target: null,
+        } as unknown as KeyboardEvent);
+      });
+      expect(controls.scrollCommand).toBeUndefined();
+      expect(controls.tailReadySessionId).toBe('session-1');
     } finally {
       await act(async () => renderer?.unmount());
       vi.unstubAllGlobals();

@@ -8,6 +8,7 @@ import type {
 import {
   type ComponentProps,
   type RefObject,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -28,7 +29,12 @@ import {
   transcriptItemTimestamp,
 } from '../landmarks';
 import { TranscriptOutline } from '../outline';
+import type { TranscriptScrollCommand } from '../scroll-command';
 import { TranscriptToolStream } from '../tool-stream';
+import {
+  restoreRenderedAnchor,
+  useTranscriptScrollCommand,
+} from '../use-scroll-command';
 import { buildTranscriptToolStreams } from '../virtual-rows';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
 import { VirtualizedTranscript } from './virtualized';
@@ -56,8 +62,6 @@ function TranscriptContent({
   outline,
   branchTopology,
   onJumpToLandmark,
-  tailScrollRequest,
-  tailScrollRequestSessionId,
   outlineOpen,
   onOutlineOpenChange,
   onBeforeScroll,
@@ -65,8 +69,7 @@ function TranscriptContent({
   leadingContinuation,
   prependAnchor,
   onPrependAnchorRestored,
-  scrollRestore,
-  onScrollRestoreComplete,
+  scrollCommand,
   virtualize = false,
 }: {
   /** Legacy raw-entry input retained for embedders. */
@@ -81,8 +84,6 @@ function TranscriptContent({
   onJumpToLandmark?: (
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
-  tailScrollRequest?: number;
-  tailScrollRequestSessionId?: string;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
@@ -98,13 +99,7 @@ function TranscriptContent({
     revision: number;
   };
   onPrependAnchorRestored?: (revision: number) => void;
-  scrollRestore?: {
-    mode: 'following' | 'manual';
-    rowKey?: string;
-    rowOffset?: number;
-    scrollTop: number;
-  };
-  onScrollRestoreComplete?: () => void;
+  scrollCommand?: TranscriptScrollCommand;
 }) {
   const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
@@ -133,46 +128,25 @@ function TranscriptContent({
   const isVirtualizedTranscript =
     items.length > 80 && virtualize && Boolean(transcriptScrollElementRef);
   const restoredRevisionRef = useRef(0);
-  const scrollRestoreRef = useRef<typeof scrollRestore>(undefined);
-  useLayoutEffect(() => {
-    const element = transcriptScrollElementRef?.current;
-    if (
-      isVirtualizedTranscript ||
-      !element ||
-      !scrollRestore ||
-      scrollRestoreRef.current === scrollRestore
-    )
-      return;
-    scrollRestoreRef.current = scrollRestore;
-    if (scrollRestore.mode === 'following') {
-      onScrollRestoreComplete?.();
-      return;
-    }
-    const viewportTop = element.getBoundingClientRect().top;
-    const target = scrollRestore.rowKey
-      ? Array.from(
-          element.querySelectorAll<HTMLElement>(
-            '[data-transcript-key], [data-transcript-row]',
-          ),
-        ).find(
-          (candidate) =>
-            (candidate.dataset.transcriptKey ??
-              candidate.dataset.transcriptRow) === scrollRestore.rowKey,
-        )
-      : undefined;
-    if (target && scrollRestore.rowOffset !== undefined) {
-      element.scrollTop +=
-        target.getBoundingClientRect().top -
-        viewportTop -
-        scrollRestore.rowOffset;
-    } else element.scrollTop = scrollRestore.scrollTop;
-    onScrollRestoreComplete?.();
-  }, [
-    isVirtualizedTranscript,
-    onScrollRestoreComplete,
-    scrollRestore,
-    transcriptScrollElementRef,
-  ]);
+  const placeScrollCommand = useCallback(
+    (command: TranscriptScrollCommand) => {
+      const element = transcriptScrollElementRef?.current;
+      if (!element) return false;
+      if (command.kind === 'latest') {
+        element.scrollTop = element.scrollHeight;
+        return true;
+      }
+      const settled = restoreRenderedAnchor(element, command);
+      if (settled !== undefined) return settled;
+      element.scrollTop = command.scrollTop;
+      return true;
+    },
+    [transcriptScrollElementRef],
+  );
+  useTranscriptScrollCommand(
+    isVirtualizedTranscript ? undefined : scrollCommand,
+    placeScrollCommand,
+  );
   useLayoutEffect(() => {
     const element = transcriptScrollElementRef?.current;
     if (
@@ -280,15 +254,12 @@ function TranscriptContent({
         open={open}
         setOpen={setOpen}
         runtime={runtime}
-        tailScrollRequest={tailScrollRequest}
-        tailScrollRequestSessionId={tailScrollRequestSessionId}
         outlineOpen={outlineOpen}
         onOutlineOpenChange={handleOutlineOpenChange}
         onBeforeScroll={onBeforeScroll}
         pendingJumpKey={pendingJumpKey}
         onPendingJumpHandled={() => setPendingJumpKey(undefined)}
-        scrollRestore={scrollRestore}
-        onScrollRestoreComplete={onScrollRestoreComplete}
+        scrollCommand={scrollCommand}
         scrollElementRef={transcriptScrollElementRef}
         previewStartCount={transcriptPreview.start}
         previewEndCount={transcriptPreview.end}

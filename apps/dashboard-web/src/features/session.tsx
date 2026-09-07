@@ -21,11 +21,7 @@ import { runtimePauseStatus } from './extension-surfaces';
 import { dashboardStatus } from './presentation-status';
 import { useOlderSessionHistory } from './session/history';
 import { useSessionHydration } from './session/hydration';
-import {
-  type SessionFollowMode,
-  useSessionScroll,
-  useSessionScrollMemory,
-} from './session/scroll';
+import { useSessionScroll } from './session/scroll';
 import {
   type SessionComposerProps,
   SessionControlLayer,
@@ -96,7 +92,6 @@ export function SessionView({
     data && projection && !waitingForInitialHistory,
   );
   const tailStateRef = useRef({ ready: false, restoring: true });
-  const modeRef = useRef<SessionFollowMode>('following');
   const {
     history,
     historyError,
@@ -116,18 +111,6 @@ export function SessionView({
       ? () => tailStateRef.current.ready && !tailStateRef.current.restoring
       : false,
   });
-  const scrollMemory = useSessionScrollMemory({
-    id,
-    serverId: snapshot.serverId,
-    history,
-    historyAvailable: data?.history !== undefined,
-    sessionMounted,
-    modeRef,
-    enabled: !embedded,
-    scrollElementRef: transcriptScrollRef,
-    loadThroughOrdinal,
-    cancelHistoryRestore: cancelScrollRestore,
-  });
   const {
     awayFromLatest,
     controlLayerRef,
@@ -135,23 +118,24 @@ export function SessionView({
     sessionPageRef,
     stopFollowing,
     tailReadySessionId,
-    tailScrollRequest,
-    tailScrollRequestSessionId,
+    scrollCommand,
+    restoring,
   } = useSessionScroll({
     id,
+    serverId: snapshot.serverId,
+    history,
+    historyAvailable: data?.history !== undefined,
+    loadThroughOrdinal,
+    cancelHistoryRestore: cancelScrollRestore,
     data,
     projection,
     sessionMounted,
     enabled: !embedded,
     scrollElementRef: transcriptScrollRef,
-    modeRef,
-    initialMode: scrollMemory.initialMode,
-    suppressInitialBottom: scrollMemory.restoring,
-    restorationReady: scrollMemory.restorationComplete,
   });
   tailStateRef.current = {
     ready: tailReadySessionId === id,
-    restoring: scrollMemory.restoring,
+    restoring,
   };
 
   useEffect(() => {
@@ -163,14 +147,12 @@ export function SessionView({
   }, [outlineOpen]);
   const handleJumpToLatest = useCallback(() => {
     cancelScrollRestore();
-    scrollMemory.cancelRestore();
     jumpToLatest();
-  }, [cancelScrollRestore, jumpToLatest, scrollMemory]);
+  }, [cancelScrollRestore, jumpToLatest]);
   const handleBeforeTranscriptNavigation = useCallback(() => {
     cancelScrollRestore();
-    scrollMemory.cancelRestore();
     stopFollowing();
-  }, [cancelScrollRestore, scrollMemory, stopFollowing]);
+  }, [cancelScrollRestore, stopFollowing]);
   useEffect(() => {
     if (replacementSessionId && replacementSessionId !== id)
       replaceSession(replacementSessionId);
@@ -275,8 +257,6 @@ export function SessionView({
             projection={projection}
             runtime={runtime}
             cwd={runtime?.cwd ?? data.metadata.cwd}
-            tailScrollRequest={tailScrollRequest}
-            tailScrollRequestSessionId={tailScrollRequestSessionId}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}
             onBeforeScroll={handleBeforeTranscriptNavigation}
@@ -293,8 +273,7 @@ export function SessionView({
             }
             prependAnchor={prependAnchor}
             onPrependAnchorRestored={completePrependRestore}
-            scrollRestore={embedded ? undefined : scrollMemory.restoreRequest}
-            onScrollRestoreComplete={scrollMemory.completeRestore}
+            scrollCommand={scrollCommand}
             virtualize={!embedded}
           />
         </section>
@@ -315,7 +294,7 @@ export function SessionView({
             checkout={checkout}
             onPromptSubmitted={(text) => {
               cancelScrollRestore();
-              scrollMemory.cancelRestore();
+              if (restoring) stopFollowing();
               store.optimisticallyTitleSession(id, text);
             }}
           />

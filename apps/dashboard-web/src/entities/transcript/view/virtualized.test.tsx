@@ -2,13 +2,18 @@ import type { RefObject } from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TranscriptModelItem } from '../../../transcript';
+import type { TranscriptScrollCommand } from '../scroll-command';
 
 const virtualizer = vi.hoisted(() => {
   let count = 0;
   return {
     measure: vi.fn(),
     measureElement: vi.fn(),
+    getOffsetForIndex: vi.fn((index: number) => [index * 96, 'start']),
     scrollToIndex: vi.fn(),
+    shouldAdjustScrollPositionOnItemSizeChange: undefined as
+      | undefined
+      | (() => boolean),
     setCount(nextCount: number) {
       count = nextCount;
     },
@@ -55,20 +60,19 @@ function item(index: number): TranscriptModelItem {
 
 function transcript(
   items: readonly TranscriptModelItem[],
-  scrollRestore?: {
-    mode: 'following' | 'manual';
-    rowKey?: string;
-    rowOffset?: number;
-    scrollTop: number;
-  },
+  scrollCommand?: TranscriptScrollCommand,
 ) {
   return (
     <VirtualizedTranscript
       items={items}
-      scrollRestore={scrollRestore}
+      scrollCommand={scrollCommand}
       open={new Set()}
       setOpen={vi.fn()}
-      scrollElementRef={{ current: {} } as RefObject<HTMLDivElement>}
+      scrollElementRef={
+        {
+          current: { scrollTop: 0, querySelectorAll: () => [] },
+        } as unknown as RefObject<HTMLDivElement>
+      }
       previewStartCount={2}
       previewEndCount={3}
     />
@@ -96,15 +100,17 @@ describe('virtualized transcript measurement', () => {
     });
 
     expect(virtualizer.measure).not.toHaveBeenCalled();
+    expect(virtualizer.scrollToIndex).not.toHaveBeenCalled();
   });
 
-  it('cancels both restoration frames when navigation removes the request', () => {
+  it('owns anchor adjustments without starting virtualizer reconciliation and cancels queued writes', () => {
     const items = Array.from({ length: 81 }, (_, index) => item(index));
     const frames = new Map<number, FrameRequestCallback>();
     const cancelled: number[] = [];
+    let nextFrame = 0;
     vi.stubGlobal('window', {
       requestAnimationFrame: (callback: FrameRequestCallback) => {
-        const id = frames.size + 1;
+        const id = ++nextFrame;
         frames.set(id, callback);
         return id;
       },
@@ -118,7 +124,9 @@ describe('virtualized transcript measurement', () => {
       act(() => {
         tree = create(
           transcript(items, {
-            mode: 'manual',
+            kind: 'anchor',
+            signal: new AbortController().signal,
+            complete: vi.fn(),
             rowKey: 'message-0',
             rowOffset: 0,
             scrollTop: 10,
@@ -126,10 +134,21 @@ describe('virtualized transcript measurement', () => {
         );
       });
       expect(frames.size).toBe(1);
+      expect(virtualizer.shouldAdjustScrollPositionOnItemSizeChange?.()).toBe(
+        false,
+      );
+      const first = frames.get(1);
+      frames.delete(1);
+      act(() => first?.(0));
+      expect(virtualizer.getOffsetForIndex).toHaveBeenCalledWith(0, 'start');
+      expect(virtualizer.scrollToIndex).not.toHaveBeenCalled();
       act(() => {
         tree.update(transcript(items));
       });
-      expect(cancelled).toEqual([1]);
+      expect(
+        virtualizer.shouldAdjustScrollPositionOnItemSizeChange,
+      ).toBeUndefined();
+      expect(cancelled).toEqual([2]);
       expect(frames.size).toBe(0);
     } finally {
       act(() => tree?.unmount());

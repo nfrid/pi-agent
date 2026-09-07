@@ -4,9 +4,8 @@ import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 import { useSessionScroll } from './scroll';
 
-// Known baseline defect: remove `.fails` when the visit controller is fixed.
-// Run without `.fails` to observe scrollTop 1300 instead of the expected 900.
-it.fails('does not resume following after a programmatic bottom scroll', async () => {
+// Failed on e61d3b20: scrollTop became 1300 instead of remaining 900.
+it('does not resume following after a programmatic bottom scroll', async () => {
   const listeners = new Map<string, EventListener>();
   const frames = new Map<number, FrameRequestCallback>();
   let frameId = 0;

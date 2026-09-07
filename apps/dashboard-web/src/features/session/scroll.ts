@@ -1,652 +1,218 @@
 import type { TranscriptProjection } from '@pi-dashboard/domain';
 import {
   type RefObject,
-  useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
-  useState,
+  useSyncExternalStore,
 } from 'react';
-import { shouldShowJumpToLatest } from '../../app-helpers';
-import { FOLLOW_REARM_DISTANCE_PX } from '../../entities/transcript/virtual-scroll';
+import { SessionScrollController } from './scroll-controller';
+import {
+  readSessionScrollMemory,
+  sessionScrollMemoryKey,
+} from './scroll-memory';
 
-export { FOLLOW_REARM_DISTANCE_PX } from '../../entities/transcript/virtual-scroll';
+export { readSessionScrollMemory } from './scroll-memory';
 
-const SESSION_TAIL_SETTLE_MS = 64;
-const SESSION_SCROLL_MEMORY_VERSION = 1;
-const SESSION_SCROLL_MEMORY_PREFIX = 'pi.dashboard.session-scroll.v1:';
-
-export type SessionFollowMode = 'following' | 'manual';
-
-export type SessionScrollMemory = {
-  version: typeof SESSION_SCROLL_MEMORY_VERSION;
-  mode: SessionFollowMode;
-  rowKey?: string;
-  rowOffset?: number;
-  scrollTop: number;
-  oldestOrdinal?: number;
-};
-
-function sessionScrollMemoryKey(sessionId: string, serverId: string): string {
-  return `${SESSION_SCROLL_MEMORY_PREFIX}${serverId}:${sessionId}`;
-}
-
-export function readSessionScrollMemory(
-  sessionId: string,
-  serverId: string,
-): SessionScrollMemory | undefined {
-  try {
-    const raw = window.sessionStorage.getItem(
-      sessionScrollMemoryKey(sessionId, serverId),
-    );
-    if (!raw) return undefined;
-    const value = JSON.parse(raw) as Partial<SessionScrollMemory>;
-    if (
-      value.version !== SESSION_SCROLL_MEMORY_VERSION ||
-      (value.mode !== 'following' && value.mode !== 'manual') ||
-      typeof value.scrollTop !== 'number' ||
-      !Number.isFinite(value.scrollTop) ||
-      (value.rowKey !== undefined && typeof value.rowKey !== 'string') ||
-      (value.rowOffset !== undefined &&
-        (typeof value.rowOffset !== 'number' ||
-          !Number.isFinite(value.rowOffset))) ||
-      (value.oldestOrdinal !== undefined &&
-        (typeof value.oldestOrdinal !== 'number' ||
-          !Number.isFinite(value.oldestOrdinal)))
-    )
-      return undefined;
-    return value as SessionScrollMemory;
-  } catch {
-    return undefined;
-  }
-}
-
-function writeSessionScrollMemory(
-  key: string,
-  memory: SessionScrollMemory,
-): void {
-  try {
-    window.sessionStorage.setItem(key, JSON.stringify(memory));
-  } catch {
-    // Storage is optional (privacy mode, quota, and disabled browser storage).
-  }
-}
-
-function visibleTranscriptAnchor(element: HTMLDivElement) {
-  const viewportTop = element.getBoundingClientRect().top;
-  const row = Array.from(
-    element.querySelectorAll<HTMLElement>(
-      '[data-transcript-key], [data-transcript-row]',
-    ),
-  ).find(
-    (candidate) => candidate.getBoundingClientRect().bottom >= viewportTop,
-  );
-  const rowKey = row?.dataset.transcriptKey ?? row?.dataset.transcriptRow;
-  return row && rowKey
-    ? {
-        rowKey,
-        rowOffset: row.getBoundingClientRect().top - viewportTop,
-      }
-    : {};
-}
-
-export function useSessionScrollMemory({
-  id,
-  serverId,
-  history,
-  historyAvailable,
-  sessionMounted,
-  enabled,
-  scrollElementRef,
-  modeRef,
-  loadThroughOrdinal,
-  cancelHistoryRestore,
-}: {
-  id: string;
-  serverId: string;
-  history?: { start: number; hasOlder: boolean };
-  historyAvailable: boolean;
-  sessionMounted: boolean;
-  enabled: boolean;
-  scrollElementRef: RefObject<HTMLDivElement | null>;
-  modeRef: { current: SessionFollowMode };
-  loadThroughOrdinal: (ordinal: number) => Promise<boolean>;
-  cancelHistoryRestore: () => void;
-}) {
-  const storageKey = sessionScrollMemoryKey(id, serverId);
-  const latchedMemoryRef = useRef<{
-    key: string;
-    value?: SessionScrollMemory;
-  }>({ key: '', value: undefined });
-  if (latchedMemoryRef.current.key !== storageKey)
-    latchedMemoryRef.current = {
-      key: storageKey,
-      value: enabled ? readSessionScrollMemory(id, serverId) : undefined,
-    };
-  const storageMemory = latchedMemoryRef.current.value;
-  const [restoreState, setRestoreState] = useState<{
-    key: string;
-    status: 'pending' | 'complete' | 'cancelled';
-  }>({ key: storageKey, status: 'pending' });
-  const historyRequestRef = useRef<
-    { key: string; generation: number } | undefined
-  >(undefined);
-  const historyGenerationRef = useRef(0);
-  const activeIdentityRef = useRef(storageKey);
-  const activeElementRef = useRef<HTMLDivElement | null>(null);
-  const activeOrdinalRef = useRef<number | undefined>(undefined);
-  const lastSnapshotRef = useRef<
-    { key: string; value: SessionScrollMemory } | undefined
-  >(undefined);
-  const saveElement = useCallback(
-    (
-      key: string,
-      element: HTMLDivElement,
-      oldestOrdinal: number | undefined,
-      persist = true,
-    ) => {
-      const anchor = visibleTranscriptAnchor(element);
-      const value: SessionScrollMemory = {
-        version: SESSION_SCROLL_MEMORY_VERSION,
-        mode: modeRef.current,
-        scrollTop: element.scrollTop,
-        ...(anchor.rowKey ? anchor : {}),
-        ...(oldestOrdinal === undefined ? {} : { oldestOrdinal }),
-      };
-      lastSnapshotRef.current = { key, value };
-      if (persist) writeSessionScrollMemory(key, value);
-    },
-    [modeRef],
-  );
-  const [historyLoadFailed, setHistoryLoadFailed] = useState(false);
-
-  useLayoutEffect(() => {
-    if (activeIdentityRef.current !== storageKey && enabled) {
-      const previousKey = activeIdentityRef.current;
-      const previous = lastSnapshotRef.current;
-      if (previous?.key === previousKey)
-        writeSessionScrollMemory(previous.key, previous.value);
-      else {
-        const element = activeElementRef.current;
-        if (element)
-          saveElement(previousKey, element, activeOrdinalRef.current);
-      }
-    }
-    activeIdentityRef.current = storageKey;
-    setRestoreState({ key: storageKey, status: 'pending' });
-    setHistoryLoadFailed(false);
-    historyGenerationRef.current += 1;
-    historyRequestRef.current = undefined;
-  }, [enabled, saveElement, storageKey]);
-
-  const identityReady = restoreState.key === storageKey;
-  const hasMemory = Boolean(
-    enabled &&
-      storageMemory &&
-      identityReady &&
-      restoreState.status === 'pending',
-  );
-  const historyPending = Boolean(
-    hasMemory &&
-      storageMemory?.oldestOrdinal !== undefined &&
-      historyAvailable &&
-      history === undefined,
-  );
-  const needsHistory = Boolean(
-    hasMemory &&
-      storageMemory?.oldestOrdinal !== undefined &&
-      history?.start !== undefined &&
-      history.start > storageMemory.oldestOrdinal &&
-      history.hasOlder,
-  );
-  useEffect(() => {
-    if (!needsHistory || !storageMemory || history === undefined) return;
-    const target = storageMemory.oldestOrdinal;
-    if (target === undefined) return;
-    const key = `${storageKey}:${target}`;
-    const current = historyRequestRef.current;
-    if (current?.key === key) return;
-    const request = { key, generation: historyGenerationRef.current + 1 };
-    historyGenerationRef.current = request.generation;
-    historyRequestRef.current = request;
-    void loadThroughOrdinal(target)
-      .then((loaded) => {
-        if (
-          historyRequestRef.current !== request ||
-          activeIdentityRef.current !== storageKey
-        )
-          return;
-        if (!loaded) setHistoryLoadFailed(true);
-      })
-      .catch(() => {
-        if (
-          historyRequestRef.current !== request ||
-          activeIdentityRef.current !== storageKey
-        )
-          return;
-        setHistoryLoadFailed(true);
-      });
-  }, [history, loadThroughOrdinal, needsHistory, storageKey, storageMemory]);
-
-  const cancelRestore = useCallback(() => {
-    if (!hasMemory) return;
-    cancelHistoryRestore();
-    historyGenerationRef.current += 1;
-    historyRequestRef.current = undefined;
-    setRestoreState((current) =>
-      current.key === storageKey
-        ? { ...current, status: 'cancelled' }
-        : current,
-    );
-  }, [cancelHistoryRestore, hasMemory, storageKey]);
-  const completeRestore = useCallback(() => {
-    setRestoreState((current) =>
-      current.key === storageKey ? { ...current, status: 'complete' } : current,
-    );
-  }, [storageKey]);
-  useEffect(() => {
-    const element = scrollElementRef.current;
-    if (!enabled || !sessionMounted || !identityReady || !element) return;
-    activeElementRef.current = element;
-    activeOrdinalRef.current = history?.start;
-    if (!hasMemory) saveElement(storageKey, element, history?.start);
-    let touchY: number | undefined;
-    let saveFrame: number | undefined;
-    const save = () => {
-      if (hasMemory) return;
-      saveElement(storageKey, element, history?.start);
-    };
-    const onScroll = () => {
-      if (!hasMemory) saveElement(storageKey, element, history?.start, false);
-      if (saveFrame !== undefined) window.cancelAnimationFrame(saveFrame);
-      saveFrame = window.requestAnimationFrame(() => {
-        saveFrame = undefined;
-        if (activeIdentityRef.current === storageKey) save();
-      });
-    };
-    const cancel = () => cancelRestore();
-    const onTouchStart = (event: TouchEvent) => {
-      touchY = event.touches[0]?.clientY;
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      const nextY = event.touches[0]?.clientY;
-      if (touchY !== undefined && nextY !== undefined && nextY !== touchY)
-        cancelRestore();
-      touchY = nextY;
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest(
-          'input, textarea, [contenteditable="true"], [role="textbox"]',
-        )
-      )
-        return;
-      if (
-        [
-          'ArrowUp',
-          'ArrowDown',
-          'PageUp',
-          'PageDown',
-          'Home',
-          'End',
-          'Space',
-        ].includes(event.code)
-      )
-        cancelRestore();
-    };
-    element.addEventListener('wheel', cancel, { passive: true });
-    element.addEventListener('pointerdown', cancel, { passive: true });
-    element.addEventListener('touchstart', onTouchStart, { passive: true });
-    element.addEventListener('touchmove', onTouchMove, { passive: true });
-    element.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      element.removeEventListener('wheel', cancel);
-      element.removeEventListener('pointerdown', cancel);
-      element.removeEventListener('touchstart', onTouchStart);
-      element.removeEventListener('touchmove', onTouchMove);
-      element.removeEventListener('scroll', onScroll);
-      window.removeEventListener('keydown', onKeyDown);
-      if (saveFrame !== undefined) window.cancelAnimationFrame(saveFrame);
-      saveFrame = undefined;
-      if (activeIdentityRef.current === storageKey) save();
-    };
-  }, [
-    cancelRestore,
-    enabled,
-    hasMemory,
-    history,
-    identityReady,
-    saveElement,
-    scrollElementRef,
-    sessionMounted,
-    storageKey,
-  ]);
-
-  const restorationReady =
-    !hasMemory || historyLoadFailed || (!historyPending && !needsHistory);
-  useLayoutEffect(() => {
-    if (hasMemory && restorationReady && storageMemory?.mode === 'following')
-      completeRestore();
-  }, [completeRestore, hasMemory, restorationReady, storageMemory]);
-  return {
-    initialMode: storageMemory?.mode ?? 'following',
-    restoring: hasMemory,
-    restorationComplete: Boolean(storageMemory && !hasMemory),
-    restoreRequest: hasMemory && restorationReady ? storageMemory : undefined,
-    cancelRestore,
-    completeRestore,
-  };
-}
-
-export function distanceFromScrollEnd(
-  scrollHeight: number,
-  scrollTop: number,
-  clientHeight: number,
-): number {
-  return Math.max(0, scrollHeight - scrollTop - clientHeight);
-}
-
-export function nextFollowMode(
-  current: SessionFollowMode,
-  distanceFromEnd: number,
-  upwardIntent: boolean,
-): SessionFollowMode {
-  if (upwardIntent) return 'manual';
-  return distanceFromEnd <= FOLLOW_REARM_DISTANCE_PX ? 'following' : current;
-}
-
-type SessionScrollElement = HTMLDivElement;
-
+/** React/DOM bindings only; follow and restoration policy belongs to the visit. */
 export function useSessionScroll({
   id,
+  serverId,
   data,
   projection,
   sessionMounted,
   enabled,
   scrollElementRef,
-  modeRef: modeRefProp,
-  initialMode = 'following',
-  suppressInitialBottom = false,
-  restorationReady = false,
+  history,
+  historyAvailable = false,
+  loadThroughOrdinal,
+  cancelHistoryRestore,
 }: {
   id: string;
+  serverId?: string;
   data: { entries: readonly unknown[] } | undefined;
   projection: TranscriptProjection | undefined;
   sessionMounted: boolean;
   enabled: boolean;
-  scrollElementRef: RefObject<SessionScrollElement | null>;
-  modeRef?: { current: SessionFollowMode };
-  initialMode?: SessionFollowMode;
-  suppressInitialBottom?: boolean;
-  restorationReady?: boolean;
+  scrollElementRef: RefObject<HTMLDivElement | null>;
+  history?: { start: number; hasOlder: boolean };
+  historyAvailable?: boolean;
+  loadThroughOrdinal?: (ordinal: number) => Promise<boolean>;
+  cancelHistoryRestore?: () => void;
 }) {
-  const [awayFromLatest, setAwayFromLatest] = useState(false);
-  const [tailRequest, setTailRequest] = useState({ id, revision: 0 });
-  const tailScrollRequest = tailRequest.id === id ? tailRequest.revision : 0;
-  const [tailReadySessionId, setTailReadySessionId] = useState<
-    string | undefined
-  >(undefined);
-  const ownedModeRef = useRef<SessionFollowMode>('following');
-  const modeRef = modeRefProp ?? ownedModeRef;
-  const mountedSessionIdRef = useRef<string | undefined>(undefined);
-  const bottomFrameRef = useRef<number | undefined>(undefined);
-  const bottomWriteMarksReadyRef = useRef(false);
-  const readyTimerRef = useRef<number | undefined>(undefined);
+  // Even without storage (inspectors), each id/enabled transition owns a fresh
+  // instance. A -> B -> A cannot revive callbacks from the first A visit.
+  const controller = useMemo(
+    () =>
+      new SessionScrollController(
+        enabled && serverId ? readSessionScrollMemory(id, serverId) : undefined,
+        enabled && serverId ? sessionScrollMemoryKey(id, serverId) : undefined,
+      ),
+    [enabled, id, serverId],
+  );
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.snapshot,
+    controller.snapshot,
+  );
   const sessionPageRef = useRef<HTMLElement>(null);
   const controlLayerRef = useRef<HTMLDivElement>(null);
 
-  const cancelBottomWrite = useCallback(() => {
-    if (bottomFrameRef.current === undefined) return;
-    window.cancelAnimationFrame(bottomFrameRef.current);
-    bottomFrameRef.current = undefined;
-    bottomWriteMarksReadyRef.current = false;
-  }, []);
-
-  const cancelReadyTimer = useCallback(() => {
-    if (readyTimerRef.current === undefined) return;
-    window.clearTimeout(readyTimerRef.current);
-    readyTimerRef.current = undefined;
-  }, []);
-
-  const enterManualMode = useCallback(() => {
-    modeRef.current = 'manual';
-    cancelBottomWrite();
-    cancelReadyTimer();
-    setTailReadySessionId(id);
-  }, [cancelBottomWrite, cancelReadyTimer, id, modeRef]);
-
-  const requestBottomWrite = useCallback(
-    (markReady: boolean) => {
-      if (
-        !enabled ||
-        mountedSessionIdRef.current !== id ||
-        suppressInitialBottom
-      )
-        return;
-      bottomWriteMarksReadyRef.current ||= markReady;
-      if (bottomFrameRef.current !== undefined)
-        window.cancelAnimationFrame(bottomFrameRef.current);
-      bottomFrameRef.current = window.requestAnimationFrame(() => {
-        bottomFrameRef.current = undefined;
-        const shouldMarkReady = bottomWriteMarksReadyRef.current;
-        bottomWriteMarksReadyRef.current = false;
-        const element = scrollElementRef.current;
-        if (
-          !element ||
-          mountedSessionIdRef.current !== id ||
-          modeRef.current !== 'following'
-        )
-          return;
-        element.scrollTop = element.scrollHeight;
-        setAwayFromLatest(false);
-        if (!shouldMarkReady) return;
-        cancelReadyTimer();
-        readyTimerRef.current = window.setTimeout(() => {
-          readyTimerRef.current = undefined;
-          setTailReadySessionId(id);
-        }, SESSION_TAIL_SETTLE_MS);
-      });
-    },
-    [
-      cancelReadyTimer,
-      enabled,
-      id,
-      modeRef,
-      scrollElementRef,
-      suppressInitialBottom,
-    ],
-  );
-
+  // Invalidate at commit, before any queued frame can touch a new transcript.
   useLayoutEffect(() => {
-    modeRef.current = initialMode;
-    setTailRequest({ id, revision: 0 });
-    setAwayFromLatest(false);
-    setTailReadySessionId(enabled ? undefined : id);
-    cancelBottomWrite();
-    cancelReadyTimer();
-  }, [cancelBottomWrite, cancelReadyTimer, enabled, id, initialMode, modeRef]);
-
-  useLayoutEffect(() => {
-    mountedSessionIdRef.current = enabled && sessionMounted ? id : undefined;
-    return () => {
-      if (mountedSessionIdRef.current === id)
-        mountedSessionIdRef.current = undefined;
-    };
-  }, [enabled, id, sessionMounted]);
+    if (!sessionMounted) return;
+    return () => controller.disconnect();
+  }, [controller, sessionMounted]);
+  // Inspectors use an ancestor-owned scrollport: its ref is assigned after
+  // child layout effects. Bind only once the whole DOM commit is complete.
+  useEffect(() => {
+    const element = scrollElementRef.current;
+    if (!enabled || !sessionMounted || !element) return;
+    controller.connect(element);
+    return () => controller.disconnect();
+  }, [controller, enabled, scrollElementRef, sessionMounted]);
 
   useEffect(() => {
-    if (!enabled || !sessionMounted) return;
+    if (!sessionMounted) return;
+    controller.updateHistory(
+      history,
+      historyAvailable,
+      loadThroughOrdinal,
+      cancelHistoryRestore,
+    );
+  }, [
+    controller,
+    history,
+    historyAvailable,
+    loadThroughOrdinal,
+    cancelHistoryRestore,
+    sessionMounted,
+  ]);
+
+  useLayoutEffect(() => {
+    if (enabled && sessionMounted && data && projection)
+      controller.contentChanged();
+  }, [controller, enabled, data, projection, sessionMounted]);
+
+  useEffect(() => {
     const element = scrollElementRef.current;
-    if (!element) return;
+    if (!enabled || !sessionMounted || !element) return;
     let touchY: number | undefined;
-    const update = () => {
-      if (suppressInitialBottom) return;
-      const distance = distanceFromScrollEnd(
-        element.scrollHeight,
-        element.scrollTop,
-        element.clientHeight,
-      );
-      modeRef.current = nextFollowMode(modeRef.current, distance, false);
-      if (modeRef.current === 'following') setAwayFromLatest(false);
-      else
-        setAwayFromLatest(
-          shouldShowJumpToLatest(
-            element.scrollHeight,
-            element.scrollTop,
-            element.clientHeight,
-          ),
-        );
+    let pointerY: number | undefined;
+    const wheel = (event: WheelEvent) => {
+      if (event.deltaY) controller.userIntent(event.deltaY);
     };
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) enterManualMode();
+    const pointerDown = (event: PointerEvent) => {
+      pointerY = event.clientY;
+      controller.read();
     };
-    const onPointerDown = () => enterManualMode();
-    const onTouchStart = (event: TouchEvent) => {
+    const pointerMove = (event: PointerEvent) => {
+      if (pointerY === undefined) return;
+      if (event.clientY !== pointerY)
+        controller.userIntent(event.clientY - pointerY);
+      pointerY = event.clientY;
+    };
+    const pointerUp = () => {
+      pointerY = undefined;
+    };
+    const touchStart = (event: TouchEvent) => {
       touchY = event.touches[0]?.clientY;
     };
-    const onTouchMove = (event: TouchEvent) => {
-      const nextY = event.touches[0]?.clientY;
-      if (touchY !== undefined && nextY !== undefined && nextY > touchY)
-        enterManualMode();
-      touchY = nextY;
+    const touchMove = (event: TouchEvent) => {
+      const next = event.touches[0]?.clientY;
+      if (next !== undefined && touchY !== undefined && next !== touchY)
+        controller.userIntent(touchY - next);
+      touchY = next;
     };
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
+    const keyDown = (event: KeyboardEvent) => {
       if (
-        target instanceof Element &&
-        target.closest(
+        event.target instanceof Element &&
+        event.target.closest(
           'input, textarea, [contenteditable="true"], [role="textbox"]',
         )
       )
         return;
-      if (['ArrowUp', 'PageUp', 'Home'].includes(event.code)) enterManualMode();
+      if (
+        ['ArrowUp', 'PageUp', 'Home'].includes(event.code) ||
+        (event.code === 'Space' && event.shiftKey)
+      )
+        controller.userIntent(-1);
+      else if (['ArrowDown', 'PageDown', 'End', 'Space'].includes(event.code))
+        controller.userIntent(1);
     };
-    element.addEventListener('scroll', update, { passive: true });
-    element.addEventListener('pointerdown', onPointerDown, { passive: true });
-    element.addEventListener('wheel', onWheel, { passive: true });
-    element.addEventListener('touchstart', onTouchStart, { passive: true });
-    element.addEventListener('touchmove', onTouchMove, { passive: true });
-    window.addEventListener('keydown', onKeyDown);
-    update();
+    element.addEventListener('scroll', controller.onScroll, { passive: true });
+    element.addEventListener('wheel', wheel, { passive: true });
+    element.addEventListener('pointerdown', pointerDown, { passive: true });
+    element.addEventListener('touchstart', touchStart, { passive: true });
+    element.addEventListener('touchmove', touchMove, { passive: true });
+    window.addEventListener('pointermove', pointerMove, { passive: true });
+    window.addEventListener('pointerup', pointerUp, { passive: true });
+    window.addEventListener('keydown', keyDown);
+    const save = () => controller.onScroll();
+    window.addEventListener('pagehide', save);
     return () => {
-      element.removeEventListener('scroll', update);
-      element.removeEventListener('pointerdown', onPointerDown);
-      element.removeEventListener('wheel', onWheel);
-      element.removeEventListener('touchstart', onTouchStart);
-      element.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('keydown', onKeyDown);
+      element.removeEventListener('scroll', controller.onScroll);
+      element.removeEventListener('wheel', wheel);
+      element.removeEventListener('pointerdown', pointerDown);
+      element.removeEventListener('touchstart', touchStart);
+      element.removeEventListener('touchmove', touchMove);
+      window.removeEventListener('pointermove', pointerMove);
+      window.removeEventListener('pointerup', pointerUp);
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('pagehide', save);
     };
-  }, [
-    enabled,
-    enterManualMode,
-    modeRef,
-    scrollElementRef,
-    sessionMounted,
-    suppressInitialBottom,
-  ]);
+  }, [controller, enabled, scrollElementRef, sessionMounted]);
 
-  useLayoutEffect(() => {
-    if (suppressInitialBottom) {
-      cancelBottomWrite();
-      return;
-    }
-    if (!enabled || !data || !projection || !sessionMounted) return;
-    requestBottomWrite(tailReadySessionId !== id);
-  }, [
-    cancelBottomWrite,
-    data,
-    enabled,
-    id,
-    projection,
-    requestBottomWrite,
-    sessionMounted,
-    suppressInitialBottom,
-    tailReadySessionId,
-  ]);
-
-  useLayoutEffect(() => {
-    if (enabled && sessionMounted && restorationReady)
-      setTailReadySessionId(id);
-  }, [enabled, id, restorationReady, sessionMounted]);
-
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!enabled || !sessionMounted) return;
     const page = sessionPageRef.current;
-    const controlLayer = controlLayerRef.current;
-    const scrollElement = scrollElementRef.current;
-    if (!page || !controlLayer || !scrollElement) return;
-    const updateViewport = (followResize: boolean) => {
-      const viewport = window.visualViewport;
-      const visibleBottom = viewport
+    const controls = controlLayerRef.current;
+    const element = scrollElementRef.current;
+    if (!page || !element) return;
+    const viewport = window.visualViewport;
+    const updateViewport = () => {
+      const bottom = viewport
         ? viewport.offsetTop + viewport.height
         : window.innerHeight;
-      const availableHeight = Math.max(
-        0,
-        visibleBottom - page.getBoundingClientRect().top,
-      );
       page.style.setProperty(
         '--session-viewport-height',
-        `${Math.ceil(availableHeight)}px`,
+        `${Math.ceil(Math.max(0, bottom - page.getBoundingClientRect().top))}px`,
       );
-      if (followResize && modeRef.current === 'following')
-        requestBottomWrite(false);
     };
-    const onResize = () => updateViewport(true);
-    const onViewportScroll = () => updateViewport(false);
+    const resize = () => {
+      updateViewport();
+      controller.contentChanged();
+    };
     const observer =
       typeof ResizeObserver === 'undefined'
         ? undefined
-        : new ResizeObserver(onResize);
+        : new ResizeObserver(resize);
     observer?.observe(page);
-    observer?.observe(controlLayer);
-    observer?.observe(scrollElement);
-    const transcriptContent = scrollElement.querySelector(
-      '.transcript-virtualizer',
-    );
-    if (transcriptContent) observer?.observe(transcriptContent);
-    window.addEventListener('resize', onResize);
-    window.visualViewport?.addEventListener('resize', onResize);
-    window.visualViewport?.addEventListener('scroll', onViewportScroll);
-    updateViewport(true);
+    observer?.observe(element);
+    if (controls) observer?.observe(controls);
+    const content = element.querySelector('.transcript-virtualizer');
+    if (content) observer?.observe(content);
+    window.addEventListener('resize', resize);
+    viewport?.addEventListener('resize', resize);
+    viewport?.addEventListener('scroll', updateViewport);
+    resize();
     return () => {
       observer?.disconnect();
-      window.removeEventListener('resize', onResize);
-      window.visualViewport?.removeEventListener('resize', onResize);
-      window.visualViewport?.removeEventListener('scroll', onViewportScroll);
+      window.removeEventListener('resize', resize);
+      viewport?.removeEventListener('resize', resize);
+      viewport?.removeEventListener('scroll', updateViewport);
     };
-  }, [enabled, modeRef, requestBottomWrite, scrollElementRef, sessionMounted]);
-
-  useEffect(
-    () => () => {
-      cancelBottomWrite();
-      cancelReadyTimer();
-    },
-    [cancelBottomWrite, cancelReadyTimer],
-  );
-
-  const jumpToLatest = useCallback(() => {
-    if (!enabled || mountedSessionIdRef.current !== id) return;
-    modeRef.current = 'following';
-    setAwayFromLatest(false);
-    setTailRequest((current) => ({
-      id,
-      revision: current.id === id ? current.revision + 1 : 1,
-    }));
-    requestBottomWrite(true);
-  }, [enabled, id, modeRef, requestBottomWrite]);
+  }, [controller, enabled, scrollElementRef, sessionMounted]);
 
   return {
-    awayFromLatest: enabled ? awayFromLatest : false,
-    controlLayerRef,
-    jumpToLatest,
+    awayFromLatest: enabled && state.away,
+    tailReadySessionId: !enabled || state.ready ? id : undefined,
+    restoring: state.phase === 'restoring',
+    scrollCommand: enabled ? state.command : undefined,
+    jumpToLatest: controller.latest,
+    stopFollowing: controller.read,
     sessionPageRef,
-    stopFollowing: enterManualMode,
-    tailReadySessionId,
-    tailScrollRequest,
-    tailScrollRequestSessionId: id,
-    modeRef,
+    controlLayerRef,
   };
 }
