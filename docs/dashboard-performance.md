@@ -166,10 +166,14 @@ another file-content cache.
 
 ## Verification and rollout status
 
-- Final scoped Vitest run: 964 passed, one failed across server, client and web.
-  The only failure is the unrelated process-host watchdog test invoking `lsof`
-  (`spawnSync lsof ENOENT`). The same test fails in the pristine baseline
-  checkout; it was not skipped or changed in this pass.
+- Follow-up scoped Vitest run: all 965 tests pass across server, client and web.
+  The initial watchdog failure (`spawnSync lsof ENOENT`) was caused by the
+  background runner's `PATH` omitting `/usr/sbin`, where macOS installs `lsof`.
+  The test now signals its directly spawned Node child instead of rediscovering
+  its PID with `lsof`. A failed `ps` invocation can no longer masquerade as a
+  terminated descendant. All 13 process-host tests and the complete dashboard
+  suite pass under the original restricted `PATH`; no runner or production
+  runtime configuration was changed.
 - Server, client and web typechecks pass. Biome checks pass for all 33 changed
   code/benchmark/configuration files. This repository's Biome configuration
   ignores Markdown; documentation was reviewed separately.
