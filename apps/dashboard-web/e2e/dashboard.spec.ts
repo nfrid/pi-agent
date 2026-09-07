@@ -4911,6 +4911,7 @@ async function installPhase6Mocks(
     entries?: unknown[];
     childEntries?: unknown[];
     snapshot?: import('@pi-dashboard/protocol').BrowserSnapshot;
+    initialSessionIncomplete?: boolean;
   } = {},
 ) {
   const commands: Array<Record<string, unknown>> = [];
@@ -4921,6 +4922,7 @@ async function installPhase6Mocks(
     snapshot: options.snapshot ?? phase6Snapshot(),
     entries: options.entries ?? phase6Entries(),
     childEntries: options.childEntries ?? [],
+    initialSessionIncomplete: options.initialSessionIncomplete ?? false,
   };
   await page.addInitScript((initial) => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
@@ -4933,12 +4935,18 @@ async function installPhase6Mocks(
     const sessionStreams: Stream[] = [];
     let shellSequence = 0;
     const sessionSequences = new Map<string, number>();
-    let initialSessionRequest = true;
+    let initialSessionRequest = !initial.initialSessionIncomplete;
+    let initialIncompleteSessionSent = false;
     let latestSnapshot = initial.snapshot;
     const originalFetch = window.fetch.bind(window);
     const trackedFrame = (id: string, value: unknown) =>
       `id: ${id}\ndata: ${JSON.stringify(value)}\n\n`;
     const createStream = (kind: 'shell' | 'session', sessionId = 's1') => {
+      const initialIncompleteSession =
+        kind === 'session' &&
+        initial.initialSessionIncomplete &&
+        !initialIncompleteSessionSent;
+      if (initialIncompleteSession) initialIncompleteSessionSent = true;
       const nextSequence = () => {
         if (kind === 'shell') return ++shellSequence;
         const sequence = (sessionSequences.get(sessionId) ?? 0) + 1;
@@ -5066,14 +5074,14 @@ async function installPhase6Mocks(
                           ? ((value.entries as unknown[] | undefined) ??
                             initial.entries)
                           : initial.childEntries,
-                      entriesComplete: true,
+                      entriesComplete: !initialIncompleteSession,
                       active: {
                         messages: [],
                         tools: [],
                         delegates: activeDelegates,
                         truncated: false,
                       },
-                      completeThroughCursor: true,
+                      completeThroughCursor: !initialIncompleteSession,
                     },
                   };
           } else {
@@ -5429,6 +5437,86 @@ async function installPhase6Mocks(
       ),
   };
 }
+
+test('mounts follow lifecycle after initial history and survives settlement @desktop', async ({
+  page,
+}) => {
+  const entries = Array.from({ length: 96 }, (_, index) => ({
+    type: 'message',
+    message: {
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `Initial history entry ${index + 1} ${'transcript detail '.repeat(6)}`,
+    },
+  }));
+  const liveEntries = [
+    ...entries,
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: 'Live activity after initial history',
+      },
+    },
+  ];
+  const settledSnapshot = phase6Snapshot({ liveState: 'idle' });
+  const mocks = await installPhase6Mocks(page, {
+    entries: [],
+    initialSessionIncomplete: true,
+    snapshot: phase6Snapshot({ liveState: 'working' }),
+  });
+
+  await page.goto('/sessions/s1');
+  await expect(page.locator('.session-page-loading')).toBeVisible();
+  await mocks.emit({ type: 'session-snapshot', entries });
+  await expect(page.getByText(/Initial history entry 96/u)).toBeVisible();
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
+
+  const scroll = transcriptScroll(page);
+  await scroll.evaluate((element) => {
+    element.scrollTop = Math.max(
+      0,
+      element.scrollHeight - element.clientHeight - 240,
+    );
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -240 }));
+    element.dispatchEvent(new Event('scroll'));
+  });
+  const jumpLatest = page.getByRole('button', {
+    name: 'Jump to latest transcript activity',
+  });
+  await expect(jumpLatest).toBeVisible();
+  await mocks.emit({ type: 'session-snapshot', entries: liveEntries });
+  await expect(
+    page.getByText('Live activity after initial history'),
+  ).toBeVisible();
+  await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
+  await expect(jumpLatest).toBeVisible();
+
+  await mocks.emit({
+    type: 'snapshot',
+    snapshot: settledSnapshot,
+    entries: liveEntries,
+  });
+  await expect(page.locator('.session-status')).toHaveText(/ready/u);
+  await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
+  await expect(jumpLatest).toBeVisible();
+
+  await jumpLatest.click();
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
+  const settledEntries = [
+    ...liveEntries,
+    {
+      type: 'message',
+      message: { role: 'assistant', content: 'Settled trailing activity' },
+    },
+  ];
+  await mocks.emit({
+    type: 'snapshot',
+    snapshot: settledSnapshot,
+    entries: settledEntries,
+  });
+  await expect(page.getByText('Settled trailing activity')).toBeVisible();
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
+});
 
 test('keeps virtual row measurements after appending a user message @desktop', async ({
   page,

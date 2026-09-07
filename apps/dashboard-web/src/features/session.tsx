@@ -88,7 +88,9 @@ export function SessionView({
     store,
     onReplacement: replaceSession,
   });
-  const sessionMounted = Boolean(data && projection);
+  const sessionMounted = Boolean(
+    data && projection && !waitingForInitialHistory,
+  );
   const {
     awayFromLatest,
     controlLayerRef,
