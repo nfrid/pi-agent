@@ -46,6 +46,8 @@ export function VirtualizedTranscript({
   onBeforeScroll,
   pendingJumpKey,
   onPendingJumpHandled,
+  scrollRestore,
+  onScrollRestoreComplete,
   scrollElementRef,
   previewStartCount,
   previewEndCount,
@@ -69,6 +71,13 @@ export function VirtualizedTranscript({
   /** A jump requested before a regular-to-virtualized renderer transition. */
   pendingJumpKey?: string;
   onPendingJumpHandled?: () => void;
+  scrollRestore?: {
+    mode: 'following' | 'manual';
+    rowKey?: string;
+    rowOffset?: number;
+    scrollTop: number;
+  };
+  onScrollRestoreComplete?: () => void;
   scrollElementRef: RefObject<HTMLDivElement | null>;
   previewStartCount: number;
   previewEndCount: number;
@@ -145,6 +154,53 @@ export function VirtualizedTranscript({
     });
     return result;
   }, [items, rows]);
+  const scrollRestoreRef = useRef<typeof scrollRestore>(undefined);
+  useLayoutEffect(() => {
+    if (!scrollRestore || scrollRestoreRef.current === scrollRestore) return;
+    scrollRestoreRef.current = scrollRestore;
+    if (scrollRestore.mode === 'following') {
+      onScrollRestoreComplete?.();
+      return;
+    }
+    const element = scrollElementRef.current;
+    if (!element) return;
+    const rowIndex = scrollRestore.rowKey
+      ? rowIndexByKey.get(scrollRestore.rowKey)
+      : undefined;
+    if (rowIndex === undefined) {
+      element.scrollTop = scrollRestore.scrollTop;
+      onScrollRestoreComplete?.();
+      return;
+    }
+    virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+    const frame = window.requestAnimationFrame(() => {
+      const settleFrame = window.requestAnimationFrame(() => {
+        const row = Array.from(
+          virtualizerRef.current?.querySelectorAll<HTMLElement>(
+            '[data-index]',
+          ) ?? [],
+        ).find(
+          (candidate) =>
+            candidate.dataset.transcriptRow === scrollRestore.rowKey,
+        );
+        if (row && scrollRestore.rowOffset !== undefined) {
+          element.scrollTop +=
+            row.getBoundingClientRect().top -
+            element.getBoundingClientRect().top -
+            scrollRestore.rowOffset;
+        } else element.scrollTop = scrollRestore.scrollTop;
+        onScrollRestoreComplete?.();
+      });
+      void settleFrame;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    onScrollRestoreComplete,
+    rowIndexByKey,
+    scrollElementRef,
+    scrollRestore,
+    virtualizer,
+  ]);
   useLayoutEffect(() => {
     if (!requestedJumpKey) return;
     const rowIndex =

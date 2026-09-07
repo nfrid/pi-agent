@@ -6,8 +6,68 @@ import {
   distanceFromScrollEnd,
   FOLLOW_REARM_DISTANCE_PX,
   nextFollowMode,
+  readSessionScrollMemory,
   useSessionScroll,
 } from './scroll';
+
+describe('session scroll memory storage', () => {
+  it('isolates server sessions and ignores corrupt values', () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+    try {
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-a:session-1',
+        JSON.stringify({
+          version: 1,
+          mode: 'manual',
+          rowKey: 'message-4',
+          rowOffset: 18,
+          scrollTop: 420,
+          oldestOrdinal: 4,
+        }),
+      );
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-b:session-1',
+        JSON.stringify({ version: 1, mode: 'following', scrollTop: 0 }),
+      );
+      expect(readSessionScrollMemory('session-1', 'server-a')?.rowKey).toBe(
+        'message-4',
+      );
+      expect(readSessionScrollMemory('session-1', 'server-b')?.mode).toBe(
+        'following',
+      );
+      values.set('pi.dashboard.session-scroll.v1:server-a:broken', '{bad');
+      expect(readSessionScrollMemory('broken', 'server-a')).toBeUndefined();
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-a:invalid',
+        JSON.stringify({ version: 1, mode: 'manual', scrollTop: 'bad' }),
+      );
+      expect(readSessionScrollMemory('invalid', 'server-a')).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not fail when session storage is unavailable', () => {
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: () => {
+          throw new Error('blocked');
+        },
+      },
+    });
+    try {
+      expect(readSessionScrollMemory('session-1', 'server-a')).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe('session follow mode', () => {
   it('rearms only within 40 pixels of the real content end', () => {

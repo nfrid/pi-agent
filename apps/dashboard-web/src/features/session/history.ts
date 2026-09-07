@@ -142,7 +142,7 @@ export function useOlderSessionHistory({
   /** Drain remaining older pages without a user pagination control. */
   autoloadAll?: boolean;
   /** Load older pages while the initialized scrollport remains at its top. */
-  autoloadAtTop?: boolean;
+  autoloadAtTop?: boolean | (() => boolean);
 }) {
   const coverage = useDashboardStore(store, selectSessionHistoryCoverage(id));
   const [history, setHistory] = useState<SessionApiResponse['history']>();
@@ -317,7 +317,9 @@ export function useOlderSessionHistory({
         if (pointerGestureRef.current || historyRequestRef.current)
           cancelPendingRestore();
       }
-      if (autoloadAtTop && top <= 1) {
+      const shouldAutoloadAtTop =
+        typeof autoloadAtTop === 'function' ? autoloadAtTop() : autoloadAtTop;
+      if (shouldAutoloadAtTop && top <= 1) {
         topIntentRef.current = false;
         void loadEarlierHistoryRef.current();
         return;
@@ -582,9 +584,13 @@ export function useOlderSessionHistory({
 
   useEffect(() => {
     const element = scrollElementRef?.current;
-    if (!sessionMounted || !autoloadAtTop || !element) return;
+    const shouldAutoloadAtTop =
+      typeof autoloadAtTop === 'function' ? autoloadAtTop() : autoloadAtTop;
+    if (!sessionMounted || !shouldAutoloadAtTop || !element) return;
     const loadIfAtTop = () => {
-      if (element.scrollTop <= 1) void loadEarlierHistory();
+      const enabled =
+        typeof autoloadAtTop === 'function' ? autoloadAtTop() : autoloadAtTop;
+      if (enabled && element.scrollTop <= 1) void loadEarlierHistory();
     };
     loadIfAtTop();
     const observer =

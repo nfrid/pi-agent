@@ -274,8 +274,13 @@ test('switching chats establishes the new transcript tail', async ({
   await page.goto('/sessions/session-1');
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
   await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -240 }));
     element.scrollTop = Math.min(300, element.scrollHeight);
+    element.dispatchEvent(new Event('scroll'));
   });
+  const sessionOnePosition = await transcriptScroll(page).evaluate(
+    (element) => element.scrollTop,
+  );
   await expect
     .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
@@ -302,6 +307,29 @@ test('switching chats establishes the new transcript tail', async ({
     element.scrollTop = Math.max(0, element.scrollTop - 240);
   });
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
+  const sessionTwoPosition = await transcriptScroll(page).evaluate(
+    (element) => element.scrollTop,
+  );
+  await navigateInDashboard(page, '/sessions/session-1');
+  await expect(page.getByText(/session-1 message 106/u)).toBeVisible();
+  await expect
+    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
+    .toBeGreaterThanOrEqual(Math.max(0, sessionOnePosition - 200));
+  await expect
+    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
+    .toBeLessThanOrEqual(sessionOnePosition + 200);
+  const restoredSessionOnePosition = await transcriptScroll(page).evaluate(
+    (element) => element.scrollTop,
+  );
+  await page.reload();
+  await expect(page.getByText(/session-1 message 106/u)).toBeVisible();
+  await expect
+    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
+    .toBeGreaterThanOrEqual(Math.max(0, restoredSessionOnePosition - 200));
+  await expect
+    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
+    .toBeLessThanOrEqual(restoredSessionOnePosition + 200);
+  expect(sessionTwoPosition).toBeGreaterThan(0);
 });
 
 test('renders retained and persisted cached sessions immediately', async ({
