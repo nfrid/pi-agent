@@ -266,16 +266,18 @@ describe('session follow mode', () => {
     function Probe({
       waiting,
       version,
+      id = 'session-1',
       restorationReady = false,
     }: {
       waiting: boolean;
       version: number;
+      id?: string;
       restorationReady?: boolean;
     }) {
       const data = { entries: [`entry-${version}`] };
       const projection = {} as TranscriptProjection;
       controls = useSessionScroll({
-        id: 'session-1',
+        id,
         data,
         projection,
         sessionMounted: Boolean(data && projection && !waiting),
@@ -342,6 +344,17 @@ describe('session follow mode', () => {
       await act(async () => runFrames());
       expect(transcript.scrollTop).toBe(900);
       expect(controls.awayFromLatest).toBe(true);
+      expect(controls.tailScrollRequest).toBe(1);
+      await act(async () => {
+        renderer?.update(
+          createElement(Probe, { waiting: false, version: 4, id: 'session-2' }),
+        );
+      });
+      expect(controls.tailScrollRequest).toBe(0);
+      await act(async () => {
+        renderer?.update(createElement(Probe, { waiting: false, version: 4 }));
+      });
+      expect(controls.tailScrollRequest).toBe(0);
     } finally {
       await act(async () => renderer?.unmount());
       vi.unstubAllGlobals();

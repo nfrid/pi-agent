@@ -384,7 +384,8 @@ export function useSessionScroll({
   restorationReady?: boolean;
 }) {
   const [awayFromLatest, setAwayFromLatest] = useState(false);
-  const [tailScrollRequest, setTailScrollRequest] = useState(0);
+  const [tailRequest, setTailRequest] = useState({ id, revision: 0 });
+  const tailScrollRequest = tailRequest.id === id ? tailRequest.revision : 0;
   const [tailReadySessionId, setTailReadySessionId] = useState<
     string | undefined
   >(undefined);
@@ -461,6 +462,7 @@ export function useSessionScroll({
 
   useLayoutEffect(() => {
     modeRef.current = initialMode;
+    setTailRequest({ id, revision: 0 });
     setAwayFromLatest(false);
     setTailReadySessionId(enabled ? undefined : id);
     cancelBottomWrite();
@@ -629,7 +631,10 @@ export function useSessionScroll({
     if (!enabled || mountedSessionIdRef.current !== id) return;
     modeRef.current = 'following';
     setAwayFromLatest(false);
-    setTailScrollRequest((current) => current + 1);
+    setTailRequest((current) => ({
+      id,
+      revision: current.id === id ? current.revision + 1 : 1,
+    }));
     requestBottomWrite(true);
   }, [enabled, id, modeRef, requestBottomWrite]);
 
