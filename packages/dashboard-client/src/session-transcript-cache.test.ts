@@ -170,6 +170,50 @@ describe('session transcript cache', () => {
     ).toBeUndefined();
   });
 
+  it('preserves projection boundary acceptance', () => {
+    const duplicateOrder = cached();
+    duplicateOrder.projection = {
+      ...duplicateOrder.projection,
+      order: ['item', 'item'],
+      items: {
+        item: {
+          kind: 'other',
+          id: 'item',
+          raw: null,
+        },
+      },
+    };
+    expect(decodeCachedSessionTranscript(duplicateOrder)).toEqual(
+      duplicateOrder,
+    );
+
+    const prototypeName = cached();
+    prototypeName.projection = {
+      ...prototypeName.projection,
+      order: ['__proto__', '__proto__'],
+      items: JSON.parse(
+        '{"__proto__":{"kind":"other","id":"__proto__"}}',
+      ) as unknown as CachedSessionTranscript['projection']['items'],
+    };
+    expect(decodeCachedSessionTranscript(prototypeName)).toEqual(prototypeName);
+
+    const missingId = cached();
+    missingId.projection = {
+      ...missingId.projection,
+      order: ['missing'],
+    };
+    expect(decodeCachedSessionTranscript(missingId)).toBeUndefined();
+
+    const invalidUnorderedItem = cached();
+    invalidUnorderedItem.projection = {
+      ...invalidUnorderedItem.projection,
+      items: {
+        hidden: { kind: 'invalid' },
+      } as unknown as CachedSessionTranscript['projection']['items'],
+    };
+    expect(decodeCachedSessionTranscript(invalidUnorderedItem)).toBeUndefined();
+  });
+
   it('round-trips production-generated multipage coverage after a retained rebase', () => {
     const value = productionCachedWithCoverage();
     expect(value.coverage?.pages).toEqual([

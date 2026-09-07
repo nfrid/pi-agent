@@ -122,11 +122,11 @@ function validProjection(
     return false;
   const items = value.items as Record<string, unknown>;
   const itemIds = Object.keys(items);
-  return (
-    value.order.every(
-      (id) => itemIds.includes(id) && validTranscriptItem(items[id]),
-    ) && itemIds.every((id) => validTranscriptItem(items[id]))
-  );
+  for (const id of itemIds) {
+    if (!validTranscriptItem(items[id])) return false;
+  }
+  const itemIdSet = new Set(itemIds);
+  return value.order.every((id) => itemIdSet.has(id));
 }
 
 function decodeCoverage(
