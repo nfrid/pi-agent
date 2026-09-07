@@ -15,6 +15,8 @@ import {
   type DelegateHistoryRunQuery,
   DelegateHistoryRunQuerySchema,
   DraftDefaultsSchema,
+  type FileReadRequest,
+  type FileReadResult,
   GitContextSchema,
   type ModelDisplayPreference,
   ModelDisplayPreferenceImportSchema,
@@ -128,6 +130,7 @@ export interface DashboardRouteContext {
     cwd: string,
     query: string,
   ): Promise<ComposerFileSuggestions>;
+  readFile?(request: FileReadRequest): Promise<FileReadResult>;
   sessionSnapshot?(
     id: string,
     before?: string,
@@ -418,6 +421,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
     snapshot: context.snapshot,
     composerCommands: context.composerCommands,
     composerFileSuggestions: context.composerFileSuggestions,
+    readFile: context.readFile,
     shellSnapshot:
       context.shellSnapshot ??
       (() => {

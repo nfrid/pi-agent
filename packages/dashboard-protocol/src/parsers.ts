@@ -43,6 +43,8 @@ import {
   DraftDefaultsSchema,
   type FeedCursor,
   FeedCursorSchema,
+  type FileReadResult,
+  FileReadResultSchema,
   type GitContext,
   GitContextSchema,
   type LiveDiagnosticsRequest,
@@ -1029,6 +1031,14 @@ export function tryParseComposerFileSuggestions(
   value: unknown,
 ): ComposerFileSuggestions | undefined {
   return tryParseSchema(ComposerFileSuggestionsSchema, value);
+}
+export function parseFileReadResult(value: unknown): FileReadResult {
+  return parseSchema(FileReadResultSchema, value, 'file read result');
+}
+export function tryParseFileReadResult(
+  value: unknown,
+): FileReadResult | undefined {
+  return tryParseSchema(FileReadResultSchema, value);
 }
 
 function assertSessionBranchTopologyBound(

@@ -1,5 +1,7 @@
 export const MAX_ID = 256;
 export const MAX_PATH = 4096;
+/** Maximum UTF-8 bytes returned by an authenticated host-file read. */
+export const MAX_FILE_READ_BYTES = 1024 * 1024;
 export const MAX_TEXT = 100_000;
 /** Bounds for provisional tool-call argument tracing. */
 export const MAX_TOOL_ARGUMENT_DELTA = 4_096;

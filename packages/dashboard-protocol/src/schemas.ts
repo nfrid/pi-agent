@@ -26,6 +26,7 @@ import {
   MAX_COMPOSER_COMMANDS,
   MAX_COMPOSER_FILE_QUERY,
   MAX_COMPOSER_FILE_SUGGESTIONS,
+  MAX_FILE_READ_BYTES,
   MAX_ID,
   MAX_MODEL_DISPLAY_ALIAS,
   MAX_MODEL_DISPLAY_PREFERENCE_KEY,
@@ -475,6 +476,25 @@ export const ComposerFileSuggestionsSchema = Type.Object(
 export type ComposerFileSuggestions = Static<
   typeof ComposerFileSuggestionsSchema
 >;
+
+export const FileReadRequestSchema = Type.Object(
+  {
+    path: Type.String({ minLength: 1, maxLength: MAX_PATH }),
+    cwd: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
+  },
+  { additionalProperties: false },
+);
+export type FileReadRequest = Static<typeof FileReadRequestSchema>;
+
+export const FileReadResultSchema = Type.Object(
+  {
+    path: Type.String({ minLength: 1, maxLength: MAX_PATH }),
+    content: Type.String({ maxLength: MAX_FILE_READ_BYTES }),
+  },
+  { additionalProperties: false },
+);
+export type FileReadResult = Static<typeof FileReadResultSchema>;
+
 /** Runtime composer-command catalogue response. */
 export const ComposerCommandsResponseSchema = ComposerCommandCatalogueSchema;
 export type ComposerCommandsResponse = ComposerCommandCatalogue;

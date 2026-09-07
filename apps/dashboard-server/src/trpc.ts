@@ -9,6 +9,10 @@ import {
   ComposerFileSuggestionsSchema,
   ComposerResourceRequestSchema,
   DASHBOARD_PROTOCOL_VERSION,
+  type FileReadRequest,
+  FileReadRequestSchema,
+  type FileReadResult,
+  FileReadResultSchema,
   type ProtocolInfo,
   ProtocolInfoSchema,
   parseAuthoritativeSessionSnapshot,
@@ -42,6 +46,7 @@ import {
   classifyDashboardError,
   type DashboardDomainCode,
 } from './application/error-classification.js';
+import { FileReadError } from './file-read.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 
 export type { DashboardDomainCode } from './application/error-classification.js';
@@ -68,6 +73,7 @@ export interface DashboardTrpcContext {
     cwd: string,
     query: string,
   ) => Promise<ComposerFileSuggestions>;
+  readonly readFile?: (request: FileReadRequest) => Promise<FileReadResult>;
   readonly sessionSnapshot?: (
     sessionId: string,
     before?: string,
@@ -117,6 +123,12 @@ function transportCode(
 /** Convert domain failures without exposing database or implementation detail. */
 export function toDashboardTrpcError(error: unknown): TRPCError {
   if (error instanceof TRPCError) return error;
+  if (error instanceof FileReadError)
+    return new TRPCError({
+      code: error.trpcCode,
+      message: error.message,
+      cause: error,
+    });
   const classified = classifyDashboardError(error);
   return new TRPCError({
     code: classified.code
@@ -278,6 +290,25 @@ const dashboardRouter = t.router({
         });
       try {
         return await ctx.composerFileSuggestions(input.cwd, input.query);
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  readFile: dashboardProcedure
+    .input((value: unknown) =>
+      parseSchema(FileReadRequestSchema, value, 'file read request'),
+    )
+    .output((value: unknown) =>
+      parseSchema(FileReadResultSchema, value, 'file read result'),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!ctx.readFile)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Host file reads are unavailable.',
+        });
+      try {
+        return await ctx.readFile(input);
       } catch (error) {
         throw toDashboardTrpcError(error);
       }

@@ -41,6 +41,7 @@ import type {
   DashboardDependencies,
   DashboardServerOptions,
 } from './composition.js';
+import { readFile } from './file-read.js';
 import { readGitContext } from './git-context.js';
 import { BridgeListener } from './http/bridge-listener.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
@@ -253,6 +254,7 @@ export class DashboardServerImpl implements DashboardServer {
         ),
       composerCommands: composerCommandCatalogue,
       composerFileSuggestions,
+      readFile,
       shellSnapshot: () => {
         const snapshot = this.application.shellSnapshot(
           this.serverId,
