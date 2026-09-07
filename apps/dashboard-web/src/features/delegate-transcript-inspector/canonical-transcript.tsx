@@ -5,10 +5,18 @@ import {
   selectTranscript,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import { type RefObject, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ComponentProps,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Transcript } from '../../entities/transcript';
 import { toTranscriptEntries } from '../../transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
+import { FileLinkContext } from '../file-viewer/link-context';
 import { useOlderSessionHistory } from '../session/history';
 import { SessionHistoryControl } from '../session/history-control';
 import { useSessionScroll } from '../session/scroll';
@@ -199,6 +207,7 @@ function DelegateCanonicalTranscript({
       <Transcript
         modelItems={modelItems}
         runtime={runtime}
+        cwd={runtime?.cwd ?? snapshot?.metadata.cwd}
         tailScrollRequest={follow.tailScrollRequest}
         onBeforeScroll={follow.stopFollowing}
         scrollElementRef={transcriptScrollRef}
@@ -262,7 +271,22 @@ function DelegateBoundedRequests({
   ));
 }
 
-export function DelegateInspectorTranscript({
+export function DelegateInspectorTranscript(
+  props: ComponentProps<typeof DelegateInspectorTranscriptContent>,
+) {
+  // Never inherit the parent's checkout when bounded child metadata is absent.
+  const setup =
+    props.detail?.run?.run.details?.setup ?? props.row.details?.setup;
+  const cwd = setup?.worktree?.worktreePath ?? setup?.cwd;
+  const base = useMemo(() => ({ cwd }), [cwd]);
+  return (
+    <FileLinkContext.Provider value={base}>
+      <DelegateInspectorTranscriptContent {...props} />
+    </FileLinkContext.Provider>
+  );
+}
+
+function DelegateInspectorTranscriptContent({
   row,
   store,
   isOpen,

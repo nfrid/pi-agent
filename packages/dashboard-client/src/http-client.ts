@@ -13,6 +13,8 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   type DraftDefaults,
+  type FileReadRequest,
+  type FileReadResult,
   type GitContext,
   type ModelDisplayPreference,
   type ModelDisplayPreferences,
@@ -49,6 +51,7 @@ import {
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
   tryParseDraftDefaults,
+  tryParseFileReadResult,
   tryParseGitContext,
   tryParseProject,
   tryParseProtocolInfo,
@@ -587,6 +590,26 @@ export class DashboardHttpClient {
     if (!response)
       throw malformedOutput(
         'Dashboard returned invalid composer file suggestions.',
+        value,
+      );
+    return response;
+  }
+
+  async readFile(
+    request: FileReadRequest,
+    signal?: AbortSignal,
+  ): Promise<FileReadResult> {
+    const client = await this.getTrpcClient();
+    let value: unknown;
+    try {
+      value = await client.readFile.query(request, signal ? { signal } : {});
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const response = tryParseFileReadResult(value);
+    if (!response)
+      throw malformedOutput(
+        'Dashboard returned an invalid file read result.',
         value,
       );
     return response;

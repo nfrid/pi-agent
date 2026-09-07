@@ -3,13 +3,21 @@ import {
   isValidElement,
   memo,
   type ReactNode,
+  useContext,
+  useMemo,
   useState,
 } from 'react';
-import MarkdownRenderer from 'react-markdown';
+import MarkdownRenderer, { defaultUrlTransform } from 'react-markdown';
+import rehypeSlug from 'rehype-slug';
 import remarkGfm from 'remark-gfm';
 import styles from './entities/transcript/markdown.module.css';
+import { useFileViewer } from './features/file-viewer/context';
+import { FileLinkContext } from './features/file-viewer/link-context';
+import { parseFileReference } from './features/file-viewer/reference';
 
 const remarkPlugins = [remarkGfm];
+const headingPlugins: ComponentProps<typeof MarkdownRenderer>['rehypePlugins'] =
+  [[rehypeSlug, { prefix: 'file-heading-' }]];
 
 export async function copyText(text: string) {
   if (navigator.clipboard) {
@@ -76,23 +84,61 @@ function CodeBlock({
   );
 }
 
-const markdownComponents = {
-  a: ({ node: _node, ...props }: ComponentProps<'a'> & { node?: unknown }) => (
-    <a {...props} target="_blank" rel="noreferrer noopener" />
-  ),
-  pre: CodeBlock,
-};
+function MarkdownLink({
+  node: _node,
+  href,
+  ...props
+}: ComponentProps<'a'> & { node?: unknown }) {
+  const viewer = useFileViewer();
+  const base = useContext(FileLinkContext);
+  const location = href ? parseFileReference(href, base) : undefined;
+  if (viewer && location)
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          // Touch activation does not consistently focus anchors; make the
+          // originating link the surface's focus-restoration target.
+          event.currentTarget.focus({ preventScroll: true });
+          viewer.open(location);
+        }}
+        onAuxClick={(event) => event.preventDefault()}
+      />
+    );
+  return <a {...props} href={href} target="_blank" rel="noreferrer noopener" />;
+}
+
+const markdownComponents = { a: MarkdownLink, pre: CodeBlock };
 
 export const Markdown = memo(function Markdown({
   children,
+  headingIds = false,
+  allowImages = true,
 }: {
   children: string;
+  headingIds?: boolean;
+  allowImages?: boolean;
 }) {
+  const viewer = useFileViewer();
+  const base = useContext(FileLinkContext);
+  const urlTransform = useMemo(
+    () => (url: string, key: string) =>
+      key === 'href' && viewer && parseFileReference(url, base)
+        ? url
+        : defaultUrlTransform(url),
+    [base, viewer],
+  );
   return (
     <div className={`markdown ${styles.markdown} ${styles.markdownColors}`}>
       <MarkdownRenderer
         remarkPlugins={remarkPlugins}
         components={markdownComponents}
+        rehypePlugins={headingIds ? headingPlugins : undefined}
+        urlTransform={urlTransform}
+        disallowedElements={allowImages ? undefined : ['img']}
       >
         {children}
       </MarkdownRenderer>

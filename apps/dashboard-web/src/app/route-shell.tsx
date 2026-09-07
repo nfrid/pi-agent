@@ -7,6 +7,7 @@ import {
   useDashboardSurfaces,
 } from '../features/dashboard-surface-context';
 import { DraftPromotionLifecycle } from '../features/draft-promotion-lifecycle';
+import { FileViewerProvider } from '../features/file-viewer/context';
 import { Header } from '../features/navigation';
 import { NewThreadProjectChooser } from '../features/new-thread-project-chooser';
 import { SessionNavigationContext } from '../features/session-navigation-context';
@@ -82,21 +83,27 @@ export function RouteShell() {
         blocked={false}
         locationKey={routeState.pathname}
       >
-        <Header snapshot={dashboard.snapshot} />
-        {(dashboard.error || dashboard.connectionState !== 'connected') && (
-          <div className="notice sync-notice" role="status" aria-live="polite">
-            {dashboard.error ??
-              (dashboard.connectionState === 'connecting'
-                ? 'Connecting to live updates…'
-                : 'Live updates unavailable.')}
-          </div>
-        )}
-        <main
-          className={`shell route-content ${routeState.isSession ? 'session-shell' : ''}`}
-        >
-          {routeContent}
-        </main>
-        <DashboardSurfaceOverlay snapshot={dashboard.snapshot} />
+        <FileViewerProvider locationKey={routeState.pathname}>
+          <Header snapshot={dashboard.snapshot} />
+          {(dashboard.error || dashboard.connectionState !== 'connected') && (
+            <div
+              className="notice sync-notice"
+              role="status"
+              aria-live="polite"
+            >
+              {dashboard.error ??
+                (dashboard.connectionState === 'connecting'
+                  ? 'Connecting to live updates…'
+                  : 'Live updates unavailable.')}
+            </div>
+          )}
+          <main
+            className={`shell route-content ${routeState.isSession ? 'session-shell' : ''}`}
+          >
+            {routeContent}
+          </main>
+          <DashboardSurfaceOverlay snapshot={dashboard.snapshot} />
+        </FileViewerProvider>
       </DashboardSurfaceProvider>
     </div>
   );

@@ -6,10 +6,13 @@ import {
   DelegateWorkflowMetadataSchema,
   deriveSessionTitle,
   ExtensionSurfaceSchema,
+  FileReadRequestSchema,
+  FileReadResultSchema,
   firstUserMessageText,
   isBridgeEvent,
   LiveDiagnosticsResponseSchema,
   LiveExtensionSurfaceSchema,
+  MAX_FILE_READ_BYTES,
   MAX_FRAME_BYTES,
   MAX_MODEL_DISPLAY_ALIAS,
   MAX_MODEL_DISPLAY_PREFERENCES,
@@ -26,6 +29,7 @@ import {
   parseDashboardSettings,
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
+  parseFileReadResult,
   parseFrame,
   parseGitContext,
   parseLiveDiagnosticsRequest,
@@ -63,6 +67,21 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('defines the bounded host file-read request and result contract', () => {
+    expect(FileReadRequestSchema).toBeDefined();
+    expect(FileReadResultSchema).toBeDefined();
+    expect(
+      parseFileReadResult({ path: '/tmp/read.txt', content: 'hello' }),
+    ).toEqual({ path: '/tmp/read.txt', content: 'hello' });
+    expect(() => parseFileReadResult({ path: '/tmp/read.txt' })).toThrow();
+    expect(() =>
+      parseFileReadResult({
+        path: '/tmp/read.txt',
+        content: 'x'.repeat(MAX_FILE_READ_BYTES + 1),
+      }),
+    ).toThrow();
+  });
+
   it('bounds provisional tool argument chunks and previews', () => {
     expect(() =>
       parseNormalizedToolPayload({

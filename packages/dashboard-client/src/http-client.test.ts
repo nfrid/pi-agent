@@ -70,6 +70,37 @@ function tokenStore() {
   };
 }
 
+describe('DashboardHttpClient host file reads', () => {
+  it('posts the exact file-read request through authenticated tRPC and parses the result', async () => {
+    const fetch = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) =>
+        String(input).endsWith('/protocolInfo')
+          ? protocolInfoResponse()
+          : trpcResponse({ path: '/tmp/read-me.txt', content: 'read me' }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    const signal = new AbortController().signal;
+
+    await expect(
+      client.readFile({ path: 'read-me.txt', cwd: '/tmp' }, signal),
+    ).resolves.toEqual({ path: '/tmp/read-me.txt', content: 'read me' });
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/trpc/protocolInfo',
+      '/trpc/readFile',
+    ]);
+    expect(fetch.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: 'read-me.txt', cwd: '/tmp' }),
+        signal,
+      }),
+    );
+  });
+});
+
 describe('DashboardHttpClient session images', () => {
   it('requests the dedicated thumbnail variant', async () => {
     const fetch = vi.fn(

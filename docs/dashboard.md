@@ -80,6 +80,32 @@ benchmarks and measured tradeoffs, see
 | `PI_PROCESS_HOST_SOCKET` | Separate owner-private Unix socket for durable shell jobs; defaults to `background-jobs.sock` under the state directory. |
 | `PI_EXECUTABLE` | Optional Pi executable override for the runtime host; the launchd template pins `/opt/homebrew/bin/pi`. |
 
+## File viewer
+
+Markdown file links open a read-only surface without leaving the conversation:
+`[method](src/file.ts:123)`, `src/file.ts:123-145`, and
+`src/file.ts#L123-L145` target source lines. Absolute paths and `~/` paths refer
+to the dashboard host and its user, not the browser device. Relative transcript
+links use the originating session's cwd (including delegate checkouts); links
+inside a Markdown preview use the viewed file's directory.
+
+The viewer has independent Back/Forward history, scroll restoration, Refresh,
+and Copy path. Markdown defaults to Preview, except line-targeted links open
+Source. Preview heading links participate in viewer history. Raw HTML is not
+executed and preview images are disabled to avoid implicit network/file loads.
+
+**Access boundary:** authenticated dashboard users can explicitly read any
+regular UTF-8 text file accessible to the daemon account, including files outside
+registered projects. This is intentionally not a checkout sandbox. Reads are
+bounded to 1 MiB and reject binary files and special files. No file contents are
+prefetched from transcript links or persisted in browser storage. The viewer
+shows the current file on disk, not a historical message-time snapshot.
+
+Source rendering uses `@pierre/diffs`' virtualized `CodeView`. File destinations
+and viewer history are separate from rendering, leaving room for a future file
+list/tree and stacked diffs. Diff comparisons, revision identities, agent-change
+attribution, symbol navigation, and editing are not implemented yet.
+
 ## Architecture
 
 ```text
