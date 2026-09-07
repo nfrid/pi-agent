@@ -27,7 +27,7 @@ import { TranscriptToolStream } from './transcript/tool-stream';
 import { LivePauseEvent } from './transcript/view';
 
 describe('tool row views and virtual transcript construction', () => {
-  it('renders increasing provisional argument progress without parsed args', () => {
+  it('renders provisional argument progress without mounting the inspector', () => {
     const item = {
       key: 'call-1',
       entry: { kind: 'tool', toolCallId: 'call-1', name: 'write' },
@@ -50,7 +50,7 @@ describe('tool row views and virtual transcript construction', () => {
         onToggle: () => undefined,
       }),
     );
-    expect(markup).toContain('{&quot;path&quot;:&quot;a&quot;,');
+    expect(markup).not.toContain('tool-inspector');
     expect(markup).toContain('1 line received');
   });
   it('projects skill protocol envelopes as compact invocation data', () => {

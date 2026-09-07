@@ -1208,10 +1208,9 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('message-bubble message-user');
     expect(markup).toContain('Inspect the queue');
     expect(markup).toContain('tool-detail');
-    expect(markup).toContain('Arguments');
-    expect(markup).toContain('Result');
+    expect(markup).not.toContain('tool-inspector');
     expect(markup).toContain('npm test');
-    expect(markup).toContain('&quot;exitCode&quot;: 0');
+    expect(markup).toContain('exit 0');
     expect(markup).toContain('<strong>Done</strong>');
     expect(markup).toContain('event-delegate-result event-failed');
     expect(markup).toContain(

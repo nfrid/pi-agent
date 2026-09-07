@@ -16,10 +16,14 @@ const bounds = {
   maxFrameBytes: payloadBytes * 2,
 };
 
-async function run(subscriberCount) {
+async function run(subscriberCount, burstSize) {
   const feed = new BoundedFeed(
     `bench-${subscriberCount}`,
-    bounds,
+    {
+      ...bounds,
+      subscriberQueueCount: Math.max(bounds.subscriberQueueCount, burstSize),
+      subscriberQueueBytes: payloadBytes * Math.max(2, burstSize + 1),
+    },
     'bench-generation',
   );
   const iterators = Array.from({ length: subscriberCount }, () =>
@@ -32,10 +36,20 @@ async function run(subscriberCount) {
     }
     let received;
     const started = performance.now();
-    for (let index = 0; index < eventCount; index += 1) {
-      const pending = iterators.map((iterator) => iterator.next());
-      feed.publish({ index, payload });
-      received = await Promise.all(pending);
+    for (let index = 0; index < eventCount; index += burstSize) {
+      if (burstSize === 1) {
+        const pending = iterators.map((iterator) => iterator.next());
+        feed.publish({ index, payload });
+        received = await Promise.all(pending);
+      } else {
+        const end = Math.min(eventCount, index + burstSize);
+        for (let next = index; next < end; next += 1)
+          feed.publish({ index: next, payload });
+        for (let next = index; next < end; next += 1)
+          received = await Promise.all(
+            iterators.map((iterator) => iterator.next()),
+          );
+      }
     }
     const elapsed = performance.now() - started;
     assert.ok(
@@ -50,16 +64,22 @@ async function run(subscriberCount) {
   }
 }
 
-for (const subscribers of [1, 8]) {
-  for (let index = 0; index < warmupCount; index += 1) await run(subscribers);
+for (const [subscribers, burstSize] of [
+  [1, 1],
+  [8, 1],
+  [8, 32],
+]) {
+  for (let index = 0; index < warmupCount; index += 1)
+    await run(subscribers, burstSize);
   const samples = [];
   for (let index = 0; index < sampleCount; index += 1)
-    samples.push(await run(subscribers));
+    samples.push(await run(subscribers, burstSize));
   samples.sort((a, b) => a - b);
   console.log(
     JSON.stringify({
       node: process.version,
       subscribers,
+      burstSize,
       events: eventCount,
       payloadBytes,
       warmups: warmupCount,

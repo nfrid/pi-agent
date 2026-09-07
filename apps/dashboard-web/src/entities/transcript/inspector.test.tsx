@@ -12,6 +12,19 @@ import {
 } from './inspector';
 
 describe('transcript payload inspection', () => {
+  it('shows provisional argument text before arguments can be parsed', () => {
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'write',
+          argumentPreview: '{"path":"a",',
+          argumentLines: 1,
+        }}
+      />,
+    );
+    expect(markup).toContain('{&quot;path&quot;:&quot;a&quot;,');
+  });
+
   it('marks bounded previews without making copy the primary interaction', () => {
     const value = { output: 'x'.repeat(14_000) };
     const markup = renderToStaticMarkup(
