@@ -21,7 +21,11 @@ import { runtimePauseStatus } from './extension-surfaces';
 import { dashboardStatus } from './presentation-status';
 import { useOlderSessionHistory } from './session/history';
 import { useSessionHydration } from './session/hydration';
-import { useSessionScroll, useSessionScrollMemory } from './session/scroll';
+import {
+  type SessionFollowMode,
+  useSessionScroll,
+  useSessionScrollMemory,
+} from './session/scroll';
 import {
   type SessionComposerProps,
   SessionControlLayer,
@@ -92,6 +96,7 @@ export function SessionView({
     data && projection && !waitingForInitialHistory,
   );
   const tailStateRef = useRef({ ready: false, restoring: true });
+  const modeRef = useRef<SessionFollowMode>('following');
   const {
     history,
     historyError,
@@ -113,11 +118,11 @@ export function SessionView({
   });
   const scrollMemory = useSessionScrollMemory({
     id,
-    serverId: data?.serverId,
-    historyStart: history?.start,
-    historyHasOlder: history?.hasOlder,
-    oldestOrdinal: history?.start,
+    serverId: snapshot.serverId,
+    history,
+    historyAvailable: data?.history !== undefined,
     sessionMounted,
+    modeRef,
     enabled: !embedded,
     scrollElementRef: transcriptScrollRef,
     loadThroughOrdinal,
@@ -138,6 +143,7 @@ export function SessionView({
     sessionMounted,
     enabled: !embedded,
     scrollElementRef: transcriptScrollRef,
+    modeRef,
     initialMode: scrollMemory.initialMode,
     suppressInitialBottom: scrollMemory.restoring,
     restorationReady: scrollMemory.restorationComplete,

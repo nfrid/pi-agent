@@ -8,6 +8,7 @@ import {
   nextFollowMode,
   readSessionScrollMemory,
   useSessionScroll,
+  useSessionScrollMemory,
 } from './scroll';
 
 describe('session scroll memory storage', () => {
@@ -64,6 +65,67 @@ describe('session scroll memory storage', () => {
     try {
       expect(readSessionScrollMemory('session-1', 'server-a')).toBeUndefined();
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('loads the saved ordinal before exposing restoration and can cancel it', async () => {
+    const values = new Map<string, string>([
+      [
+        'pi.dashboard.session-scroll.v1:server-a:session-1',
+        JSON.stringify({
+          version: 1,
+          mode: 'manual',
+          scrollTop: 420,
+          oldestOrdinal: 0,
+        }),
+      ],
+    ]);
+    const loadThroughOrdinal = vi.fn().mockResolvedValue(false);
+    const cancelHistoryRestore = vi.fn();
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      },
+      cancelAnimationFrame: () => undefined,
+    });
+    const modeRef = { current: 'manual' as const };
+    let controls!: ReturnType<typeof useSessionScrollMemory>;
+    function Probe() {
+      controls = useSessionScrollMemory({
+        id: 'session-1',
+        serverId: 'server-a',
+        history: { start: 10, hasOlder: true },
+        historyAvailable: true,
+        sessionMounted: true,
+        enabled: true,
+        scrollElementRef: { current: null },
+        modeRef,
+        loadThroughOrdinal,
+        cancelHistoryRestore,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe));
+      });
+      await vi.waitFor(() =>
+        expect(loadThroughOrdinal).toHaveBeenCalledWith(0),
+      );
+      await act(async () => controls.cancelRestore());
+      expect(cancelHistoryRestore).toHaveBeenCalledTimes(1);
+      expect(controls.restoring).toBe(false);
+    } finally {
+      await act(async () => renderer?.unmount());
       vi.unstubAllGlobals();
     }
   });

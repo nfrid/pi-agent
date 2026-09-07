@@ -278,9 +278,6 @@ test('switching chats establishes the new transcript tail', async ({
     element.scrollTop = Math.min(300, element.scrollHeight);
     element.dispatchEvent(new Event('scroll'));
   });
-  const sessionOnePosition = await transcriptScroll(page).evaluate(
-    (element) => element.scrollTop,
-  );
   await expect
     .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
@@ -310,25 +307,63 @@ test('switching chats establishes the new transcript tail', async ({
   const sessionTwoPosition = await transcriptScroll(page).evaluate(
     (element) => element.scrollTop,
   );
-  await navigateInDashboard(page, '/sessions/session-1');
-  await expect(page.getByText(/session-1 message 106/u)).toBeVisible();
-  await expect
-    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
-    .toBeGreaterThanOrEqual(Math.max(0, sessionOnePosition - 200));
-  await expect
-    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
-    .toBeLessThanOrEqual(sessionOnePosition + 200);
-  const restoredSessionOnePosition = await transcriptScroll(page).evaluate(
-    (element) => element.scrollTop,
+  const savedMemory = await page.evaluate(() =>
+    JSON.parse(
+      sessionStorage.getItem(
+        'pi.dashboard.session-scroll.v1:history-navigation-test:session-1',
+      ) ?? '{}',
+    ),
   );
+  expect(savedMemory.mode).toBe('manual');
+  expect(savedMemory.rowKey).toBeTruthy();
+  const savedRow = () =>
+    page
+      .locator(
+        `[data-transcript-row="${savedMemory.rowKey}"], [data-transcript-key="${savedMemory.rowKey}"]`,
+      )
+      .first();
+  const savedOffset = Number(savedMemory.rowOffset);
+  const expectSavedRow = async () => {
+    await expect(savedRow()).toBeVisible();
+    await expect
+      .poll(() =>
+        savedRow().evaluate(
+          (row) =>
+            row.getBoundingClientRect().top -
+            (row.closest('.session-transcript-scroll')?.getBoundingClientRect()
+              .top ?? 0),
+        ),
+      )
+      .toBeGreaterThanOrEqual(savedOffset - 8);
+    await expect
+      .poll(() =>
+        savedRow().evaluate(
+          (row) =>
+            row.getBoundingClientRect().top -
+            (row.closest('.session-transcript-scroll')?.getBoundingClientRect()
+              .top ?? 0),
+        ),
+      )
+      .toBeLessThanOrEqual(savedOffset + 8);
+  };
+  await navigateInDashboard(page, '/sessions/session-1');
+  await expectSavedRow();
   await page.reload();
-  await expect(page.getByText(/session-1 message 106/u)).toBeVisible();
-  await expect
-    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
-    .toBeGreaterThanOrEqual(Math.max(0, restoredSessionOnePosition - 200));
-  await expect
-    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
-    .toBeLessThanOrEqual(restoredSessionOnePosition + 200);
+  await expectSavedRow();
+  await page.getByRole('button', { name: 'Jump to latest' }).click();
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
+  await navigateInDashboard(page, '/sessions/session-2');
+  const savedSessionTwoMemory = await page.evaluate(() =>
+    JSON.parse(
+      sessionStorage.getItem(
+        'pi.dashboard.session-scroll.v1:history-navigation-test:session-2',
+      ) ?? '{}',
+    ),
+  );
+  expect(savedSessionTwoMemory.mode).toBe('manual');
+  expect(savedSessionTwoMemory.rowKey).toBeTruthy();
+  await navigateInDashboard(page, '/sessions/session-1');
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
   expect(sessionTwoPosition).toBeGreaterThan(0);
 });
 

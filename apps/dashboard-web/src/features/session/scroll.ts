@@ -27,27 +27,17 @@ export type SessionScrollMemory = {
   oldestOrdinal?: number;
 };
 
-function sessionScrollMemoryKey(sessionId: string, serverId?: string): string {
-  return `${SESSION_SCROLL_MEMORY_PREFIX}${serverId ?? 'unknown'}:${sessionId}`;
+function sessionScrollMemoryKey(sessionId: string, serverId: string): string {
+  return `${SESSION_SCROLL_MEMORY_PREFIX}${serverId}:${sessionId}`;
 }
 
 export function readSessionScrollMemory(
   sessionId: string,
-  serverId?: string,
+  serverId: string,
 ): SessionScrollMemory | undefined {
   try {
-    const keys = [sessionScrollMemoryKey(sessionId, serverId)];
-    if (serverId !== undefined)
-      keys.push(sessionScrollMemoryKey(sessionId, undefined));
-    else {
-      for (let index = 0; index < window.sessionStorage.length; index += 1) {
-        const key = window.sessionStorage.key(index);
-        if (key?.endsWith(`:${sessionId}`)) keys.push(key);
-      }
-    }
-    const raw = keys.reduce<string | null>(
-      (value, key) => value ?? window.sessionStorage.getItem(key),
-      null,
+    const raw = window.sessionStorage.getItem(
+      sessionScrollMemoryKey(sessionId, serverId),
     );
     if (!raw) return undefined;
     const value = JSON.parse(raw) as Partial<SessionScrollMemory>;
@@ -72,15 +62,11 @@ export function readSessionScrollMemory(
 }
 
 function writeSessionScrollMemory(
-  sessionId: string,
-  serverId: string | undefined,
+  key: string,
   memory: SessionScrollMemory,
 ): void {
   try {
-    window.sessionStorage.setItem(
-      sessionScrollMemoryKey(sessionId, serverId),
-      JSON.stringify(memory),
-    );
+    window.sessionStorage.setItem(key, JSON.stringify(memory));
   } catch {
     // Storage is optional (privacy mode, quota, and disabled browser storage).
   }
@@ -107,54 +93,114 @@ function visibleTranscriptAnchor(element: HTMLDivElement) {
 export function useSessionScrollMemory({
   id,
   serverId,
-  historyStart,
-  historyHasOlder,
-  oldestOrdinal,
+  history,
+  historyAvailable,
   sessionMounted,
   enabled,
   scrollElementRef,
+  modeRef,
   loadThroughOrdinal,
   cancelHistoryRestore,
 }: {
   id: string;
-  serverId?: string;
-  historyStart?: number;
-  historyHasOlder?: boolean;
-  oldestOrdinal?: number;
+  serverId: string;
+  history?: { start: number; hasOlder: boolean };
+  historyAvailable: boolean;
   sessionMounted: boolean;
   enabled: boolean;
   scrollElementRef: RefObject<HTMLDivElement | null>;
+  modeRef: { current: SessionFollowMode };
   loadThroughOrdinal: (ordinal: number) => Promise<boolean>;
   cancelHistoryRestore: () => void;
 }) {
-  const storageMemory = readSessionScrollMemory(id, serverId);
   const storageKey = sessionScrollMemoryKey(id, serverId);
+  const latchedMemoryRef = useRef<{
+    key: string;
+    value?: SessionScrollMemory;
+  }>({ key: '', value: undefined });
+  if (latchedMemoryRef.current.key !== storageKey)
+    latchedMemoryRef.current = {
+      key: storageKey,
+      value: enabled ? readSessionScrollMemory(id, serverId) : undefined,
+    };
+  const storageMemory = latchedMemoryRef.current.value;
   const [restoreState, setRestoreState] = useState<{
     key: string;
     status: 'pending' | 'complete' | 'cancelled';
   }>({ key: storageKey, status: 'pending' });
   const loadTargetRef = useRef<string | undefined>(undefined);
+  const activeIdentityRef = useRef(storageKey);
+  const activeElementRef = useRef<HTMLDivElement | null>(null);
+  const activeOrdinalRef = useRef<number | undefined>(undefined);
+  const activeHasMemoryRef = useRef(false);
+  const lastSnapshotRef = useRef<
+    { key: string; value: SessionScrollMemory } | undefined
+  >(undefined);
+  const saveElement = useCallback(
+    (
+      key: string,
+      element: HTMLDivElement,
+      oldestOrdinal: number | undefined,
+    ) => {
+      if (activeHasMemoryRef.current) return;
+      const anchor = visibleTranscriptAnchor(element);
+      const value: SessionScrollMemory = {
+        version: SESSION_SCROLL_MEMORY_VERSION,
+        mode: modeRef.current,
+        scrollTop: element.scrollTop,
+        ...(anchor.rowKey ? anchor : {}),
+        ...(oldestOrdinal === undefined ? {} : { oldestOrdinal }),
+      };
+      lastSnapshotRef.current = { key, value };
+      writeSessionScrollMemory(key, value);
+    },
+    [modeRef],
+  );
+  const [historyLoadFailed, setHistoryLoadFailed] = useState(false);
 
   useLayoutEffect(() => {
+    if (activeIdentityRef.current !== storageKey && enabled) {
+      const previous = lastSnapshotRef.current;
+      if (previous?.key === activeIdentityRef.current)
+        writeSessionScrollMemory(previous.key, previous.value);
+      else {
+        const element = activeElementRef.current;
+        if (element)
+          saveElement(
+            activeIdentityRef.current,
+            element,
+            activeOrdinalRef.current,
+          );
+      }
+    }
+    activeIdentityRef.current = storageKey;
     setRestoreState({ key: storageKey, status: 'pending' });
+    setHistoryLoadFailed(false);
     loadTargetRef.current = undefined;
-  }, [storageKey]);
+  }, [enabled, saveElement, storageKey]);
 
+  const identityReady = restoreState.key === storageKey;
   const hasMemory = Boolean(
     enabled &&
       storageMemory &&
-      restoreState.key === storageKey &&
+      identityReady &&
       restoreState.status === 'pending',
+  );
+  const historyPending = Boolean(
+    hasMemory &&
+      storageMemory?.oldestOrdinal !== undefined &&
+      historyAvailable &&
+      history === undefined,
   );
   const needsHistory = Boolean(
     hasMemory &&
       storageMemory?.oldestOrdinal !== undefined &&
-      historyStart !== undefined &&
-      historyStart > storageMemory.oldestOrdinal &&
-      historyHasOlder === true,
+      history?.start !== undefined &&
+      history.start > storageMemory.oldestOrdinal &&
+      history.hasOlder,
   );
   useEffect(() => {
-    if (!needsHistory || !storageMemory || historyStart === undefined) return;
+    if (!needsHistory || !storageMemory || history === undefined) return;
     const target = storageMemory.oldestOrdinal;
     if (
       target === undefined ||
@@ -162,14 +208,18 @@ export function useSessionScrollMemory({
     )
       return;
     loadTargetRef.current = `${storageKey}:${target}`;
-    void loadThroughOrdinal(target).catch(() => undefined);
-  }, [
-    historyStart,
-    loadThroughOrdinal,
-    needsHistory,
-    storageKey,
-    storageMemory,
-  ]);
+    let active = true;
+    void loadThroughOrdinal(target)
+      .then((loaded) => {
+        if (active && !loaded) setHistoryLoadFailed(true);
+      })
+      .catch(() => {
+        if (active) setHistoryLoadFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [history, loadThroughOrdinal, needsHistory, storageKey, storageMemory]);
 
   const cancelRestore = useCallback(() => {
     if (!hasMemory) return;
@@ -188,81 +238,86 @@ export function useSessionScrollMemory({
 
   useEffect(() => {
     const element = scrollElementRef.current;
-    if (!enabled || !sessionMounted || !element) return;
-    let mode: SessionFollowMode = storageMemory?.mode ?? 'following';
+    if (!enabled || !sessionMounted || !identityReady || !element) return;
+    activeElementRef.current = element;
+    activeOrdinalRef.current = history?.start;
+    activeHasMemoryRef.current = hasMemory;
     let touchY: number | undefined;
-    let downwardIntent = false;
+    let saveFrame: number | undefined;
     const save = () => {
       if (hasMemory) return;
-      const anchor = visibleTranscriptAnchor(element);
-      const distance = distanceFromScrollEnd(
-        element.scrollHeight,
-        element.scrollTop,
-        element.clientHeight,
-      );
-      if (downwardIntent && distance <= FOLLOW_REARM_DISTANCE_PX)
-        mode = 'following';
-      downwardIntent = false;
-      writeSessionScrollMemory(id, serverId, {
-        version: SESSION_SCROLL_MEMORY_VERSION,
-        mode,
-        scrollTop: element.scrollTop,
-        ...(anchor.rowKey ? anchor : {}),
-        ...(oldestOrdinal === undefined ? {} : { oldestOrdinal }),
+      saveElement(storageKey, element, history?.start);
+    };
+    const onScroll = () => {
+      if (saveFrame !== undefined) window.cancelAnimationFrame(saveFrame);
+      saveFrame = window.requestAnimationFrame(() => {
+        saveFrame = undefined;
+        if (activeIdentityRef.current === storageKey) save();
       });
     };
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) {
-        mode = 'manual';
-        cancelRestore();
-      } else if (event.deltaY > 0) {
-        downwardIntent = true;
-        cancelRestore();
-      }
-    };
-    const onPointerDown = () => {
-      mode = 'manual';
-      cancelRestore();
-    };
+    const cancel = () => cancelRestore();
     const onTouchStart = (event: TouchEvent) => {
       touchY = event.touches[0]?.clientY;
     };
     const onTouchMove = (event: TouchEvent) => {
       const nextY = event.touches[0]?.clientY;
-      if (touchY !== undefined && nextY !== undefined && nextY !== touchY) {
-        mode = 'manual';
+      if (touchY !== undefined && nextY !== undefined && nextY !== touchY)
         cancelRestore();
-      }
       touchY = nextY;
     };
-    const onScroll = () => save();
-    element.addEventListener('wheel', onWheel, { passive: true });
-    element.addEventListener('pointerdown', onPointerDown, { passive: true });
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          'input, textarea, [contenteditable="true"], [role="textbox"]',
+        )
+      )
+        return;
+      if (
+        [
+          'ArrowUp',
+          'ArrowDown',
+          'PageUp',
+          'PageDown',
+          'Home',
+          'End',
+          'Space',
+        ].includes(event.code)
+      )
+        cancelRestore();
+    };
+    element.addEventListener('wheel', cancel, { passive: true });
+    element.addEventListener('pointerdown', cancel, { passive: true });
     element.addEventListener('touchstart', onTouchStart, { passive: true });
     element.addEventListener('touchmove', onTouchMove, { passive: true });
     element.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('keydown', onKeyDown);
     return () => {
-      element.removeEventListener('wheel', onWheel);
-      element.removeEventListener('pointerdown', onPointerDown);
+      element.removeEventListener('wheel', cancel);
+      element.removeEventListener('pointerdown', cancel);
       element.removeEventListener('touchstart', onTouchStart);
       element.removeEventListener('touchmove', onTouchMove);
       element.removeEventListener('scroll', onScroll);
-      save();
+      window.removeEventListener('keydown', onKeyDown);
+      if (saveFrame !== undefined) window.cancelAnimationFrame(saveFrame);
+      saveFrame = undefined;
+      if (activeIdentityRef.current === storageKey) save();
     };
   }, [
     cancelRestore,
     enabled,
     hasMemory,
-    id,
-    oldestOrdinal,
+    history,
+    identityReady,
+    saveElement,
     scrollElementRef,
-    serverId,
     sessionMounted,
-    storageMemory?.mode,
+    storageKey,
   ]);
 
   const restorationReady =
-    !hasMemory || historyStart === undefined || !needsHistory;
+    !hasMemory || historyLoadFailed || (!historyPending && !needsHistory);
   return {
     initialMode: storageMemory?.mode ?? 'following',
     restoring: hasMemory,
@@ -299,9 +354,10 @@ export function useSessionScroll({
   sessionMounted,
   enabled,
   scrollElementRef,
+  modeRef: modeRefProp,
   initialMode = 'following',
   suppressInitialBottom = false,
-  restorationReady = true,
+  restorationReady = false,
 }: {
   id: string;
   data: { entries: readonly unknown[] } | undefined;
@@ -309,6 +365,7 @@ export function useSessionScroll({
   sessionMounted: boolean;
   enabled: boolean;
   scrollElementRef: RefObject<SessionScrollElement | null>;
+  modeRef?: { current: SessionFollowMode };
   initialMode?: SessionFollowMode;
   suppressInitialBottom?: boolean;
   restorationReady?: boolean;
@@ -318,7 +375,8 @@ export function useSessionScroll({
   const [tailReadySessionId, setTailReadySessionId] = useState<
     string | undefined
   >(undefined);
-  const modeRef = useRef<SessionFollowMode>('following');
+  const ownedModeRef = useRef<SessionFollowMode>('following');
+  const modeRef = modeRefProp ?? ownedModeRef;
   const mountedSessionIdRef = useRef<string | undefined>(undefined);
   const bottomFrameRef = useRef<number | undefined>(undefined);
   const bottomWriteMarksReadyRef = useRef(false);
@@ -344,7 +402,7 @@ export function useSessionScroll({
     cancelBottomWrite();
     cancelReadyTimer();
     setTailReadySessionId(id);
-  }, [cancelBottomWrite, cancelReadyTimer, id]);
+  }, [cancelBottomWrite, cancelReadyTimer, id, modeRef]);
 
   const requestBottomWrite = useCallback(
     (markReady: boolean) => {
@@ -378,7 +436,14 @@ export function useSessionScroll({
         }, SESSION_TAIL_SETTLE_MS);
       });
     },
-    [cancelReadyTimer, enabled, id, scrollElementRef, suppressInitialBottom],
+    [
+      cancelReadyTimer,
+      enabled,
+      id,
+      modeRef,
+      scrollElementRef,
+      suppressInitialBottom,
+    ],
   );
 
   useLayoutEffect(() => {
@@ -387,12 +452,12 @@ export function useSessionScroll({
     setTailReadySessionId(enabled ? undefined : id);
     cancelBottomWrite();
     cancelReadyTimer();
-  }, [cancelBottomWrite, cancelReadyTimer, enabled, id, initialMode]);
+  }, [cancelBottomWrite, cancelReadyTimer, enabled, id, initialMode, modeRef]);
 
   useLayoutEffect(() => {
     if (enabled && sessionMounted && restorationReady)
       modeRef.current = initialMode;
-  }, [enabled, initialMode, restorationReady, sessionMounted]);
+  }, [enabled, initialMode, modeRef, restorationReady, sessionMounted]);
 
   useLayoutEffect(() => {
     mountedSessionIdRef.current = enabled && sessionMounted ? id : undefined;
@@ -467,6 +532,7 @@ export function useSessionScroll({
   }, [
     enabled,
     enterManualMode,
+    modeRef,
     scrollElementRef,
     sessionMounted,
     suppressInitialBottom,
@@ -541,7 +607,7 @@ export function useSessionScroll({
       window.visualViewport?.removeEventListener('resize', onResize);
       window.visualViewport?.removeEventListener('scroll', onViewportScroll);
     };
-  }, [enabled, requestBottomWrite, scrollElementRef, sessionMounted]);
+  }, [enabled, modeRef, requestBottomWrite, scrollElementRef, sessionMounted]);
 
   useEffect(
     () => () => {
@@ -557,7 +623,7 @@ export function useSessionScroll({
     setAwayFromLatest(false);
     setTailScrollRequest((current) => current + 1);
     requestBottomWrite(true);
-  }, [enabled, id, requestBottomWrite]);
+  }, [enabled, id, modeRef, requestBottomWrite]);
 
   return {
     awayFromLatest: enabled ? awayFromLatest : false,
@@ -567,5 +633,6 @@ export function useSessionScroll({
     stopFollowing: enterManualMode,
     tailReadySessionId,
     tailScrollRequest,
+    modeRef,
   };
 }
