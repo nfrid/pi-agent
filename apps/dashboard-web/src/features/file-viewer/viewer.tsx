@@ -6,6 +6,7 @@ import {
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { copyText, Markdown } from '../../Markdown';
 import styles from './file-viewer.module.css';
+import { FileLinkContext } from './link-context';
 import type { FileLocation } from './reference';
 
 type ViewerMode = 'source' | 'preview';
@@ -248,7 +249,9 @@ export function FileViewer({
               onEntryChange({ scrollTop: event.currentTarget.scrollTop })
             }
           >
-            <MarkdownWithLocalOptions>{file.content}</MarkdownWithLocalOptions>
+            <MarkdownWithLocalOptions path={file.path}>
+              {file.content}
+            </MarkdownWithLocalOptions>
             {entry.location.heading && headingFound === false && (
               <p className={styles.message} role="status">
                 Heading not found in this file.
@@ -290,11 +293,25 @@ export function FileViewer({
 }
 
 /** Keeps the viewer coupled to the existing renderer while allowing its local safety props to land independently. */
-function MarkdownWithLocalOptions({ children }: { children: string }) {
+function parentDirectory(path: string): string | undefined {
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  if (separator < 0) return undefined;
+  return path.slice(0, separator) || path.slice(0, 1);
+}
+
+function MarkdownWithLocalOptions({
+  path,
+  children,
+}: {
+  path: string;
+  children: string;
+}) {
   return (
-    <MarkdownWithOptions headingIds allowImages={false}>
-      {children}
-    </MarkdownWithOptions>
+    <FileLinkContext.Provider value={{ cwd: parentDirectory(path), path }}>
+      <MarkdownWithOptions headingIds allowImages={false}>
+        {children}
+      </MarkdownWithOptions>
+    </FileLinkContext.Provider>
   );
 }
 
