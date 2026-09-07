@@ -89,7 +89,7 @@ export const Markdown = memo(function Markdown({
   children: string;
 }) {
   return (
-    <div className={`markdown ${styles.markdown}`}>
+    <div className={`markdown ${styles.markdown} ${styles.markdownColors}`}>
       <MarkdownRenderer
         remarkPlugins={remarkPlugins}
         components={markdownComponents}
