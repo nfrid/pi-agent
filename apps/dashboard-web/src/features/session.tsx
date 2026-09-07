@@ -21,11 +21,7 @@ import { runtimePauseStatus } from './extension-surfaces';
 import { dashboardStatus } from './presentation-status';
 import { useOlderSessionHistory } from './session/history';
 import { useSessionHydration } from './session/hydration';
-import {
-  type SessionFollowMode,
-  useSessionScroll,
-  useSessionScrollMemory,
-} from './session/scroll';
+import { useSessionScroll } from './session/scroll';
 import {
   type SessionComposerProps,
   SessionControlLayer,
@@ -95,8 +91,7 @@ export function SessionView({
   const sessionMounted = Boolean(
     data && projection && !waitingForInitialHistory,
   );
-  const tailStateRef = useRef({ ready: false, restoring: true });
-  const modeRef = useRef<SessionFollowMode>('following');
+  const scrollLifecycleRef = useRef({ ready: false, restoring: true });
   const {
     history,
     historyError,
@@ -113,21 +108,28 @@ export function SessionView({
     sessionMounted,
     scrollElementRef: embedded ? undefined : transcriptScrollRef,
     autoloadAtTop: !embedded
-      ? () => tailStateRef.current.ready && !tailStateRef.current.restoring
+      ? () =>
+          scrollLifecycleRef.current.ready &&
+          !scrollLifecycleRef.current.restoring
       : false,
   });
-  const scrollMemory = useSessionScrollMemory({
+  const scroll = useSessionScroll({
     id,
     serverId: snapshot.serverId,
     history,
     historyAvailable: data?.history !== undefined,
-    sessionMounted,
-    modeRef,
-    enabled: !embedded,
-    scrollElementRef: transcriptScrollRef,
     loadThroughOrdinal,
     cancelHistoryRestore: cancelScrollRestore,
+    data,
+    projection,
+    sessionMounted,
+    enabled: !embedded,
+    scrollElementRef: transcriptScrollRef,
   });
+  scrollLifecycleRef.current = {
+    ready: scroll.tailReadySessionId === id,
+    restoring: scroll.restoring,
+  };
   const {
     awayFromLatest,
     controlLayerRef,
@@ -137,22 +139,10 @@ export function SessionView({
     tailReadySessionId,
     tailScrollRequest,
     tailScrollRequestSessionId,
-  } = useSessionScroll({
-    id,
-    data,
-    projection,
-    sessionMounted,
-    enabled: !embedded,
-    scrollElementRef: transcriptScrollRef,
-    modeRef,
-    initialMode: scrollMemory.initialMode,
-    suppressInitialBottom: scrollMemory.restoring,
-    restorationReady: scrollMemory.restorationComplete,
-  });
-  tailStateRef.current = {
-    ready: tailReadySessionId === id,
-    restoring: scrollMemory.restoring,
-  };
+    cancelRestore,
+    completeRestore,
+    restoreRequest,
+  } = scroll;
 
   useEffect(() => {
     if (outlineOpen) outlineWasOpenRef.current = true;
@@ -163,14 +153,14 @@ export function SessionView({
   }, [outlineOpen]);
   const handleJumpToLatest = useCallback(() => {
     cancelScrollRestore();
-    scrollMemory.cancelRestore();
+    cancelRestore();
     jumpToLatest();
-  }, [cancelScrollRestore, jumpToLatest, scrollMemory]);
+  }, [cancelRestore, cancelScrollRestore, jumpToLatest]);
   const handleBeforeTranscriptNavigation = useCallback(() => {
     cancelScrollRestore();
-    scrollMemory.cancelRestore();
+    cancelRestore();
     stopFollowing();
-  }, [cancelScrollRestore, scrollMemory, stopFollowing]);
+  }, [cancelRestore, cancelScrollRestore, stopFollowing]);
   useEffect(() => {
     if (replacementSessionId && replacementSessionId !== id)
       replaceSession(replacementSessionId);
@@ -293,8 +283,8 @@ export function SessionView({
             }
             prependAnchor={prependAnchor}
             onPrependAnchorRestored={completePrependRestore}
-            scrollRestore={embedded ? undefined : scrollMemory.restoreRequest}
-            onScrollRestoreComplete={scrollMemory.completeRestore}
+            scrollRestore={embedded ? undefined : restoreRequest}
+            onScrollRestoreComplete={completeRestore}
             virtualize={!embedded}
           />
         </section>
@@ -315,7 +305,7 @@ export function SessionView({
             checkout={checkout}
             onPromptSubmitted={(text) => {
               cancelScrollRestore();
-              scrollMemory.cancelRestore();
+              cancelRestore();
               store.optimisticallyTitleSession(id, text);
             }}
           />
