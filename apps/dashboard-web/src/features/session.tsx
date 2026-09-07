@@ -243,6 +243,7 @@ export function SessionView({
             key={id}
             projection={projection}
             runtime={runtime}
+            cwd={runtime?.cwd ?? data.metadata.cwd}
             tailScrollRequest={tailScrollRequest}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}

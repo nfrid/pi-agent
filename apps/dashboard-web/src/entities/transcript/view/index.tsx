@@ -6,12 +6,14 @@ import type {
   SessionOutlineLandmark,
 } from '@pi-dashboard/protocol';
 import {
+  type ComponentProps,
   type RefObject,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import { FileLinkContext } from '../../../features/file-viewer/link-context';
 import { useTranscriptPreviewPreference } from '../../../shared/lib/transcript-display';
 import {
   type TranscriptModelItem,
@@ -32,6 +34,21 @@ import { LiveCompactionEvent, LivePauseEvent } from './live-events';
 import { VirtualizedTranscript } from './virtualized';
 
 export function Transcript({
+  cwd,
+  ...props
+}: ComponentProps<typeof TranscriptContent> & { cwd?: string }) {
+  const base = useMemo(
+    () => ({ cwd: cwd ?? props.runtime?.cwd }),
+    [cwd, props.runtime?.cwd],
+  );
+  return (
+    <FileLinkContext.Provider value={base}>
+      <TranscriptContent {...props} />
+    </FileLinkContext.Provider>
+  );
+}
+
+function TranscriptContent({
   entries,
   projection,
   modelItems,
