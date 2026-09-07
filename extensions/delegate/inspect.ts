@@ -56,16 +56,20 @@ function argumentSummary(name: string, args: unknown): string | undefined {
   if (name === 'bash' || name === 'shell') {
     const description = value('description');
     if (description) return `description=${description}`;
-    const command = value('command');
+    const command =
+      typeof record.command === 'string' ? record.command.trim() : '';
     if (!command) return undefined;
-    const executable = command.split(/\s+/)[0] ?? 'shell';
-    const unsafe =
-      /apply_patch|git\s+apply|(?:^|\s)patch(?:\s|$)|<<|[<>]|\b(?:python|python3|node|ruby|perl|bash|sh)\s+-(?:c|e)\b/.test(
+    // Inspect the original command, not its clipped prefix: redirection or an
+    // inline payload may appear after the display limit. Prefer descriptions
+    // for compound commands rather than attempting to parse shell scripts.
+    const executable = command.match(/^[\w./-]+(?=\s|$)/)?.[0] ?? 'shell';
+    const omitDetails =
+      /["'`$<>;|&(){}\\\r\n]|apply_patch|git\s+apply|(?:^|\s)patch(?:\s|$)|\b(?:python|python3|node|ruby|perl|bash|sh)\s+-(?:c|e)\b/.test(
         command,
       );
-    return unsafe
+    return omitDetails
       ? `command=${compact(executable, 80)} (details omitted)`
-      : `command=${command}`;
+      : `command=${compact(command)}`;
   }
   if (name === 'read' || name === 'write' || name === 'edit') {
     const path = value('path') ?? value('filePath');
@@ -150,9 +154,7 @@ export function inspectDelegateTarget(
     states.find(
       (candidate) => candidate !== undefined && isSettled(candidate),
     ) ?? target.state;
-  const settled = states.some(
-    (candidate) => candidate !== undefined && isSettled(candidate),
-  );
+  const settled = isSettled(state);
   const startedAt =
     status?.startedAt ?? target.workflow?.startedAt ?? target.job?.startedAt;
   const finishedAt =
@@ -165,10 +167,11 @@ export function inspectDelegateTarget(
   const lastAt =
     (status ? currentInvocationEntries(status).at(-1)?.at : undefined) ??
     status?.activity?.startedAt;
-  if (lastAt !== undefined)
-    lines.push(`last recorded activity (event start): ${timestamp(lastAt)}`);
+  lines.push(`last recorded activity (event start): ${timestamp(lastAt)}`);
 
+  let activity: InspectDetails['activity'] = 'unavailable';
   if (settled) {
+    activity = 'settled';
     const error = metadataError(target);
     if (error) lines.push(`error: ${error}`);
     lines.push('activity: unavailable (settled; metadata only)');
@@ -184,6 +187,7 @@ export function inspectDelegateTarget(
         'activity: unavailable (no eligible assistant or tool activity; excluded or older activity omitted)',
       );
     } else {
+      activity = 'available';
       lines.push('recent activity:');
       for (const line of entries.slice(-MAX_EVENTS)) lines.push(`- ${line}`);
       if (
@@ -222,7 +226,7 @@ export function inspectDelegateTarget(
         ? { workflowIdentity: target.workflow.identity }
         : {}),
       ...(target.job ? { jobId: target.job.id } : {}),
-      activity: settled ? 'settled' : status ? 'available' : 'unavailable',
+      activity,
     },
   };
 }

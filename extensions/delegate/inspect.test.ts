@@ -185,21 +185,21 @@ describe('delegate activity inspection', () => {
       state: 'running',
       status: status({
         runCount: 1,
-        transcript: [
-          {
-            id: 'unicode-progress',
-            type: 'assistant',
-            label: 'Response',
-            text: '🙂'.repeat(5_000),
-            at: 300,
-            run: 1,
-          },
-        ],
+        transcript: Array.from({ length: 10 }, (_, index) => ({
+          id: `unicode-${index}`,
+          type: 'tool' as const,
+          name: 'grep',
+          label: 'grep',
+          arguments: { pattern: '🙂'.repeat(500), path: '🙂'.repeat(500) },
+          at: 300 + index,
+          run: 1,
+        })),
       }),
     });
     expect(Buffer.byteLength(inspected.text, 'utf8')).toBeLessThanOrEqual(
       DELEGATE_INSPECT_MAX_TEXT,
     );
+    expect(inspected.text).toContain('inspect snapshot truncated');
     for (let index = 0; index < inspected.text.length; index++) {
       const code = inspected.text.charCodeAt(index);
       if (code >= 0xd800 && code <= 0xdbff)
@@ -211,6 +211,50 @@ describe('delegate activity inspection', () => {
           0xd800,
         );
     }
+  });
+
+  test('summarizes shell activity without copying inline payloads or unknown labels', () => {
+    const commands = [
+      { command: 'cat source.ts' },
+      { command: 'python -c "secret script"' },
+      { command: `printf ${'secret'.repeat(100)} > result.txt` },
+      {
+        command: 'apply_patch secret patch',
+        description: 'Update the regression fixture',
+      },
+    ];
+    const inspected = inspectDelegateTarget({
+      reference: 'shell-summary',
+      state: 'running',
+      status: status({
+        runCount: 1,
+        transcript: [
+          ...commands.map((args, index) => ({
+            id: `shell-${index}`,
+            type: 'tool' as const,
+            name: 'bash',
+            label: 'bash',
+            arguments: args,
+            status: 'running' as const,
+            run: 1,
+          })),
+          {
+            id: 'unknown',
+            type: 'tool',
+            label: 'secret unknown payload',
+            run: 1,
+          },
+        ],
+      }),
+    });
+    expect(inspected.text).toContain('command=cat source.ts');
+    expect(inspected.text).toContain('command=python (details omitted)');
+    expect(inspected.text).toContain('command=printf (details omitted)');
+    expect(inspected.text).toContain(
+      'description=Update the regression fixture',
+    );
+    expect(inspected.text).toContain('tool unknown');
+    expect(inspected.text).not.toContain('secret');
   });
 
   test('includes bounded error information without exposing result payloads', () => {
