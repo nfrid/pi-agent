@@ -661,14 +661,16 @@ export class SessionIndex {
     await this.rebuild();
   }
 
+  private isListed(entry: IndexedFile): boolean {
+    return (
+      !this.isAuxiliaryFile(entry.file) ||
+      (entry.sessionKind === 'delegate' && entry.parentSessionId !== undefined)
+    );
+  }
+
   list(): SessionIndexEntry[] {
     return [...this.files.values()]
-      .filter(
-        (file) =>
-          !this.isAuxiliaryFile(file.file) ||
-          (file.sessionKind === 'delegate' &&
-            file.parentSessionId !== undefined),
-      )
+      .filter((file) => this.isListed(file))
       .map((file) => this.publicEntry(file))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
@@ -676,6 +678,11 @@ export class SessionIndex {
   get(id: string): SessionIndexEntry | undefined {
     const entry = this.files.get(id);
     return entry ? this.publicEntry(entry) : undefined;
+  }
+
+  getListed(id: string): SessionIndexEntry | undefined {
+    const entry = this.files.get(id);
+    return entry && this.isListed(entry) ? this.publicEntry(entry) : undefined;
   }
 
   /** Timestamp used to order recent user activity, optionally on a live leaf. */

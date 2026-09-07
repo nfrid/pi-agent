@@ -364,6 +364,7 @@ describe('session index', () => {
       ]),
     );
     expect(index.get('child')).toMatchObject({ id: 'child', file: '' });
+    expect(index.getListed('child')).toMatchObject({ id: 'child', file: '' });
     expect(index.isAuxiliary('child')).toBe(true);
   });
 
@@ -386,6 +387,7 @@ describe('session index', () => {
     const index = new SessionIndex(root, undefined, undefined, auxiliary);
     await index.rebuild();
     expect(index.list()).toEqual([]);
+    expect(index.getListed('unlinked')).toBeUndefined();
   });
 
   it('filters active history to a valid leaf ancestry and rejects ambiguous leaves', async () => {

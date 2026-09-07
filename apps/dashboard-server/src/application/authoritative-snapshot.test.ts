@@ -24,6 +24,7 @@ interface Fixture {
     epoch?: string,
     reconnected?: boolean,
   ): void;
+  setRuntimes(runtimes: readonly RuntimeSnapshot[]): void;
   event(
     runtime: RuntimeSnapshot,
     event: BridgeEvent,
@@ -119,6 +120,9 @@ async function fixture(
         runtimeSeq: 1,
         ...(reconnected ? { reconnected: true } : {}),
       });
+    },
+    setRuntimes(runtimes) {
+      current = [...runtimes];
     },
     event(runtime, event, epoch = 'epoch-1', seq = 2) {
       current = [runtime];
@@ -320,6 +324,40 @@ describe('authoritative application snapshot lifecycle', () => {
       checkoutId: null,
       activeRuntimeId: 'runtime-project-session',
     });
+  });
+
+  it('updates one indexed session without sorting the catalogue', async () => {
+    const value = await fixture();
+    const first = runtime(value.file, {
+      runtimeId: 'runtime-first',
+      session: { id: 'snapshot-session', entries: [], title: 'first' },
+    });
+    const second = runtime(value.file, {
+      runtimeId: 'runtime-second',
+      session: { id: 'snapshot-session', entries: [], title: 'second' },
+    });
+    value.setRuntimes([first, second]);
+    value.app.initializeSessionMetadataBaseline();
+    const list = vi.spyOn(value.sessions, 'list');
+    const changed = {
+      ...first,
+      session: { ...first.session, title: 'first changed' },
+    };
+    value.setRuntimes([changed, second]);
+
+    expect(
+      value.app.sessionMetadataDeltaForSession('snapshot-session'),
+    ).toMatchObject({
+      upsert: [
+        {
+          id: 'snapshot-session',
+          title: 'first changed',
+          activeRuntimeId: 'runtime-first',
+        },
+      ],
+      remove: [],
+    });
+    expect(list).not.toHaveBeenCalled();
   });
 
   it('keeps metadata deltas pending across read-only projections', async () => {

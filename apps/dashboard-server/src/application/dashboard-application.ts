@@ -824,7 +824,7 @@ export class DashboardApplication {
   readonly orchestration: DashboardProjectionRepository;
   private readonly sessionIndex: SessionIndex;
   /** Metadata emitted by the last authoritative snapshot/index publication. */
-  private sessionMetadataBaseline?: ReadonlyMap<string, SessionIndexEntry>;
+  private sessionMetadataBaseline?: Map<string, SessionIndexEntry>;
   /** Bounded, process-local live transcript projection; never persisted. */
   private readonly activeTranscripts = new Map<string, ActiveTranscriptState>();
   /**
@@ -1045,20 +1045,16 @@ export class DashboardApplication {
     const prior = this.sessionMetadataBaseline;
     if (!prior) return undefined;
     this.refreshAssociationCatalogue();
-    const indexed = this.sessionIndex
-      .list()
-      .find((session) => session.id === sessionId);
+    const indexed = this.sessionIndex.getListed(sessionId);
     const runtime = this.registry
       .snapshots()
       .find((item) => item.session.id === sessionId && item.online !== false);
     const current = indexed
       ? this.sessionMetadataEntry(indexed, runtime)
       : undefined;
-    const next = new Map(prior);
-    if (current) next.set(sessionId, current);
-    else next.delete(sessionId);
-    this.sessionMetadataBaseline = next;
     const previous = prior.get(sessionId);
+    if (current) prior.set(sessionId, current);
+    else prior.delete(sessionId);
     if (!current)
       return previous === undefined
         ? undefined
