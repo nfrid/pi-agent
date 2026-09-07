@@ -52,7 +52,7 @@ export interface DelegateCatalogRoute {
   thinking: ThinkingLevel;
   relativeCost: number;
   useFor: string;
-  avoid: string;
+  avoid?: string;
 }
 
 function isThinking(value: unknown): value is ThinkingLevel {
@@ -120,10 +120,10 @@ function parseModelCatalog(raw: unknown): {
       return {
         error: `delegate.modelCatalog.${route}.relativeCost must be a finite number greater than 0 and at most ${MAX_RELATIVE_COST}.`,
       };
-    // Route selection is prose-driven: the orchestrator matches the task
-    // against these, so a route without both is not selectable in practice.
+    // A task shape is required; user-owned catalogs may add an exclusion.
     for (const field of ['useFor', 'avoid'] as const) {
       const text = record[field];
+      if (field === 'avoid' && text === undefined) continue;
       if (typeof text !== 'string' || !text.trim())
         return {
           error: `delegate.modelCatalog.${route}.${field} must be non-empty text describing concrete task shapes.`,
@@ -150,7 +150,9 @@ function parseModelCatalog(raw: unknown): {
       thinking: record.thinking,
       relativeCost: cost,
       useFor: (record.useFor as string).trim().slice(0, 600),
-      avoid: (record.avoid as string).trim().slice(0, 600),
+      ...(typeof record.avoid === 'string'
+        ? { avoid: record.avoid.trim().slice(0, 600) }
+        : {}),
       ...(provider ? { provider } : {}),
     };
   }

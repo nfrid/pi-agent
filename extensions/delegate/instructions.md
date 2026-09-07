@@ -1,7 +1,8 @@
 - Delegate only useful, independently describable work when briefing, verification, and integration cost less than doing it directly.
 - Brief the child with a meaningful kebab-case `id`, a focused task and finish line, relevant constraints, expected evidence, and explicit skill paths when needed. Fresh work defaults to fresh context; continuations keep their existing selection.
-- Choose the cheapest eligible configured route. Its `useFor` must fit and its `avoid` must not apply; do not escalate speculatively.
-- `inputs` waits for prior delegates and supplies compact handoffs plus durable report paths. `base` supplies another delegate’s exact code state and implies that delegate as input.
-- `continue` resumes the same child session and workspace, retaining its capabilities and selected skills; only route and scope can be replaced.
+- Account for wall-clock latency as well as cost when delegating. Give each child a coherent task with an early, useful finish line; split independent work when that shortens the critical path, not when briefing and integration overhead outweigh the benefit.
+- `inputs` waits for prior delegates and supplies compact handoffs plus full-report paths when needed. `base` supplies another delegate’s exact code state and implies that delegate as input. If an upstream result determines whether downstream work should happen, wait for it before scheduling that work.
+- `continue` resumes the same child session and workspace, retaining its capabilities and selected skills; only route and scope can be replaced. If the next task needs different capabilities or skills, start a fresh delegate with `inputs`; use `base` when it also needs the predecessor’s code state.
 - Results arrive eagerly at safe model boundaries. Use a gate only for an intentional `all` fan-in or idle-delayed `any`; never poll for completion.
+- Use `delegate_jobs inspect` only when activity evidence could change a steering, cancellation, or coordination decision—not to wait for completion or routinely supervise every delegate.
 - Keep parent ownership of final scope, integration, and verification. Review retained changes before merging and report evidence and blockers clearly.

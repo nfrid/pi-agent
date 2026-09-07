@@ -79,8 +79,8 @@ export interface DelegateModelCatalogEntry {
   relativeCost: number;
   /** Concrete task shapes this route handles. */
   useFor: string;
-  /** Concrete task shapes to send elsewhere. */
-  avoid: string;
+  /** Optional task shapes to send elsewhere. */
+  avoid?: string;
 }
 
 export interface DelegateRouteState {

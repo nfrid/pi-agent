@@ -19,7 +19,7 @@ function compactPromptText(value: string | undefined): string {
 
 /** Human route-selection policy paired with the generated route catalog. */
 export const DELEGATE_ROUTING_POLICY =
-  'Choose the cheapest route whose stated `useFor` fits and whose `avoid` does not apply. Explicit criteria may justify a cheaper route within that fit; they do not override route exclusions. Continuations reuse their persisted route unless explicitly overridden.';
+  'Choose the cheapest route capable of completing the brief reliably. Match the task shape and respect any configured exclusions. Continuations reuse their persisted route unless explicitly overridden.';
 
 export function formatDelegateRoutingConfig(config: DelegateConfig): string {
   const policy = DELEGATE_ROUTING_POLICY;
@@ -30,7 +30,7 @@ export function formatDelegateRoutingConfig(config: DelegateConfig): string {
     return `<delegate_routing>\n${policy}${guidance}\n\nUnavailable: ${escapeXml(config.error)}\n</delegate_routing>`;
   const catalog = describeDelegateRouting(config).map(
     (route) =>
-      `- ${escapeXml(route.route)}: model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}\n    useFor: ${escapeXml(compactPromptText(route.useFor))}\n    avoid: ${escapeXml(compactPromptText(route.avoid))}`,
+      `- ${escapeXml(route.route)}: ${escapeXml(compactPromptText(route.useFor))}\n    model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}${route.avoid ? `\n    avoid: ${escapeXml(compactPromptText(route.avoid))}` : ''}`,
   );
   return `<delegate_routing>
 ${policy}${guidance}

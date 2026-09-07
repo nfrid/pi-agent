@@ -16,8 +16,8 @@ A fresh child uses a meaningful kebab-case `id`, a focused `task`, and an exact 
 ```json
 {
   "id": "reconnect-race-explore",
-  "task": "Find why reconnect can lose events and recommend the smallest sound fix.",
-  "route": "luna-high"
+  "task": "Trace the reconnect handler's event-loss regression; identify the failure mechanism and recommend the smallest fix. Stop before implementation.",
+  "route": "luna-medium"
 }
 ```
 
@@ -42,9 +42,11 @@ A continuation resumes the same child session and retained workspace:
 
 Continuations inherit route, cwd, write access, isolation, web access, selected skill paths, and latest scope. Do not supply `skills` on a continuation; the original selection cannot be replaced. The parent does not repeat `write: true`. A supplied route may replace the inherited route with another exact configured route; a supplied scope replaces the latest advisory scope.
 
+If the next task needs different capabilities or skills, start a fresh delegate with `inputs`; use `base` when it also needs the predecessor's code state. For example, follow a read-only investigation with a fresh `write: true` delegate that takes the investigation as an input.
+
 ## Knowledge and code flow
 
-`inputs` waits for each referenced node or exact attempt, then gives the downstream child its compact handoff inline and the durable full-report path:
+`inputs` waits for each referenced node or exact attempt to settle, then gives the downstream child its compact handoff inline and a full-report path when needed:
 
 ```json
 {
@@ -58,6 +60,8 @@ Continuations inherit route, cwd, write access, isolation, web access, selected 
 ```
 
 Bare references bind to immutable exact attempts when admitted. There is no separate ordering-only dependency in the model API.
+
+Settlement is not approval: `inputs` does not interpret an upstream recommendation or require a successful outcome. If an investigation determines whether a migration is needed, read its result before scheduling the migration. Pre-schedule downstream tasks only when that decision is already settled.
 
 `base` starts a fresh child in a fresh isolated workspace at another delegate's exact resulting code state. It also implies that node as an input:
 
@@ -109,11 +113,19 @@ Risks: material risks left unresolved
 Blocked: the one question the parent must answer
 ```
 
-Every exact final report is also written to an owner-readable Markdown file under Pi's local cache. Parent delivery and downstream inputs use the bounded handoff plus that path. Large supporting outputs should be ordinary files.
+Reports that fit are delivered inline; oversized reports are written to an owner-readable Markdown file under Pi's local cache and referenced by the bounded handoff. Large supporting outputs should be ordinary files.
 
 ## Operational controls
 
-`delegate_jobs` remains available for one status snapshot when it changes an immediate feedback or cancellation decision, one feedback message to active work, and cancellation. Address work by logical node reference when possible. Never alternate sleeps with `list` or `status` to wait for settlement; this is not a result-retrieval API.
+`delegate_jobs` provides metadata (`list`, `status`), a bounded activity snapshot (`inspect`), corrective `feedback`, and `cancel`. Address work by logical node or exact attempt reference.
+
+```json
+{ "action": "inspect", "id": "reconnect-race-fix" }
+```
+
+Inspection shows state and timing, recent assistant progress messages, and compact tool activity with status and brief errors when available. It excludes thinking, full tool results, file contents, and edit payloads. Missing activity and truncation are explicit; settled attempts return metadata rather than their final report. Inspection does not consume or alter automatic completion delivery.
+
+Inspect only when the evidence could change a steering, cancellation, or coordination decision—not to wait for completion or routinely supervise every delegate. Use `feedback` for a bounded correction. Never loop or alternate sleeps with `list`, `status`, or `inspect` to wait for settlement; these are not result-retrieval APIs.
 
 `/pause` gates the parent and active delegates at provider-safe boundaries. `/continue` releases them and resumes queued delivery.
 
@@ -135,6 +147,21 @@ Use `delegate_changes` with a workflow node:
 
 Fresh tasks choose one exact key from `delegate.modelCatalog`; unknown routes fail. Continuations inherit their route unless explicitly replaced.
 
-The configured catalog uses Luna routes for bounded work and Astra low for work requiring path discovery or maintainer judgement. Choose the cheapest route whose `useFor` matches and whose `avoid` does not. `relativeCost` is benchmark-relative total task cost, not a quality score or token-price ratio.
+Choose the cheapest route capable of completing the brief reliably. Each configured route has a short `useFor` task shape; user-owned catalogs may also specify an optional `avoid` exclusion, which must be respected. `relativeCost` is benchmark-relative total task cost, not a quality score or token-price ratio.
 
-No prompt or active configuration should refer to unavailable route families.
+| Route | Task shape |
+| --- | --- |
+| Luna low | Mechanical execution with an exact verifier |
+| Luna medium | Localized implementation or investigation with a clear question and finish line |
+| Luna high | Substantial bounded work across known files or components |
+| Luna xhigh | Difficult bounded diagnosis, implementation, or verification |
+| Luna max | Exceptional bounded work where unusually deep reasoning is justified |
+| Astra low | Work requiring the child to choose the approach, scope, or evaluation criteria |
+
+Searching unfamiliar code is not, by itself, a reason to choose Astra. Prefer a smaller task over a deeper route when decomposition preserves useful independence. Routing remains the parent's choice; there is no additional model call.
+
+## Task size and latency
+
+Account for wall-clock latency as well as cost. Give each delegate a coherent task with an early, useful finish line; split independent work when that shortens the critical path. Avoid tiny tasks whose briefing and integration overhead outweighs the benefit.
+
+For uncertain work, a useful first task may be to identify the failure mechanism and recommend the smallest fix, stopping before implementation. For a straightforward fix, keeping investigation, implementation, and focused verification together can avoid unnecessary handoffs.

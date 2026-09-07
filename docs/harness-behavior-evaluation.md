@@ -120,7 +120,8 @@ commands.
 and commit it. Use the existing user-owned catalog at the repository's
 absolute `settings.json` path. Read and record the exact
 `delegate.modelCatalog.luna-low` entry, including `relativeCost: 1`, `useFor`,
-and `avoid`; do not modify global configuration or invent a mock catalog.
+and any optional `avoid` exclusion; do not modify global configuration or
+invent a mock catalog.
 This named-file lookup is eligible under that entry; compare other catalog
 entries' exact eligibility and costs.
 

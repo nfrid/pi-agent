@@ -438,6 +438,28 @@ describe('delegate', () => {
     );
   });
 
+  test('accepts task-shape-only routes and validates optional exclusions', () => {
+    const route = {
+      model: 'local',
+      thinking: 'medium',
+      relativeCost: 3,
+      useFor: 'Localized investigation with a clear finish line.',
+    };
+    const config = parseDelegateConfig({ modelCatalog: { local: route } });
+    expect(config.error).toBeUndefined();
+    const prompt = formatDelegateRoutingConfig(config);
+    expect(prompt).toContain(
+      'local: Localized investigation with a clear finish line.',
+    );
+    expect(prompt).not.toContain('avoid:');
+    for (const avoid of ['', ' ', null, 42]) {
+      expect(
+        parseDelegateConfig({ modelCatalog: { local: { ...route, avoid } } })
+          .error,
+      ).toMatch(/avoid must be non-empty text/);
+    }
+  });
+
   test('starts all admitted work by default while keeping a finite ceiling', () => {
     expect(parseDelegateConfig({})).toMatchObject({
       maxParallelTasks: 6,
@@ -1022,7 +1044,13 @@ describe('delegate', () => {
     expect(guidelines).not.toContain('Terra');
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('Luna routes are for bounded background work');
-    expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
+    expect(guidelines).toContain('luna-low: mechanical checks');
+    expect(guidelines).toContain(
+      'Account for wall-clock latency as well as cost',
+    );
+    expect(guidelines).toContain('wait for it before scheduling that work');
+    expect(guidelines).toContain('different capabilities or skills');
+    expect(guidelines).toContain('`delegate_jobs inspect`');
   });
 
   test('owns delegate routing prompt formatting', () => {
@@ -1048,16 +1076,17 @@ describe('delegate', () => {
         },
       }),
     );
-    expect(prompt).toContain('quick-low: model=quick');
-    expect(prompt).toContain('smart-high: model=smart');
-    expect(prompt).toContain('useFor: scoped checks');
+    expect(prompt).toContain('quick-low: scoped checks');
+    expect(prompt).toContain('smart-high: scoped checks');
+    expect(prompt).toContain('model=quick');
+    expect(prompt).toContain('model=smart');
     expect(prompt).toContain('avoid: judgement calls');
     expect(prompt).toContain('Prefer the quick family for checks.');
     expect(prompt).toContain(
-      'Choose the cheapest route whose stated `useFor` fits',
+      'Choose the cheapest route capable of completing the brief reliably',
     );
     expect(prompt).toContain(
-      'Explicit criteria may justify a cheaper route within that fit',
+      'Match the task shape and respect any configured exclusions',
     );
     expect(prompt).toContain(
       'relativeCost is benchmark-relative total task cost',
