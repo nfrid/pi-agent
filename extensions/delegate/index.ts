@@ -780,6 +780,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       delivery.automaticDeliveryState,
       initialRuntime.workflow,
       () => activeRuntime?.workflow,
+      () => activeRuntime?.statuses,
     );
     registerDelegateChangesTool(pi, () => activeRuntime?.workflow);
     // Keep the broker tools registered for stable extension ownership, but do

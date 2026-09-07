@@ -6,20 +6,26 @@ import type {
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import type { AutomaticDeliveryState } from './completion-delivery';
+import { type InspectDetails, inspectDelegateTarget } from './inspect';
 import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
+import type { DelegateStatusStore } from './status';
 import type {
   DelegateWorkflowAttemptSnapshot,
   DelegateWorkflowCoordinator,
 } from './workflow-coordinator';
 
 const Parameters = Type.Object({
-  action: StringEnum(['list', 'status', 'feedback', 'cancel'] as const, {
-    description:
-      'list shows tracked work once; status supports a one-time operational decision; feedback sends one correction to active work; cancel stops work. Never loop, sleep, or repeatedly call list/status to wait for settlement. Results arrive eagerly or through delegate_gate.',
-  }),
+  action: StringEnum(
+    ['list', 'status', 'inspect', 'feedback', 'cancel'] as const,
+    {
+      description:
+        'list shows tracked work once; status supports a one-time operational decision; inspect shows bounded live activity only when it may change steering, cancellation, or coordination; feedback sends one correction to active work; cancel stops work. Never loop, sleep, or repeatedly call list/status/inspect to wait for settlement. Results arrive eagerly or through delegate_gate.',
+    },
+  ),
   id: Type.Optional(
     Type.String({
-      description: 'Logical workflow node or exact attempt for status/feedback',
+      description:
+        'Logical workflow node or exact attempt/job for status, inspect, or feedback',
     }),
   ),
   message: Type.Optional(
@@ -38,7 +44,7 @@ const Parameters = Type.Object({
 });
 
 const DELEGATE_JOBS_DESCRIPTION =
-  'Inspect metadata once for an immediate operational decision, send one bounded correction, or cancel work. Never use list/status repeatedly or pair them with sleeps to wait for settlement. Results arrive eagerly unless held by delegate_gate; this tool never returns result bodies.';
+  'Inspect metadata once for an immediate operational decision; inspect bounded live activity only when it may change steering, cancellation, or coordination; send one bounded correction, or cancel work. Never use list/status repeatedly or pair them with sleeps to wait for settlement, and never repeat inspect to wait. Results arrive eagerly unless held by delegate_gate; this tool never returns result bodies.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -188,15 +194,17 @@ export function registerDelegateJobsTool(
   ) => AutomaticDeliveryState | undefined = () => undefined,
   workflow?: DelegateWorkflowCoordinator,
   getWorkflow?: () => DelegateWorkflowCoordinator | undefined,
+  getStatuses?: () => DelegateStatusStore | undefined,
 ): void {
   pi.registerTool<
     typeof Parameters,
     {
-      action: 'list' | 'status' | 'feedback' | 'cancel' | 'peek';
+      action: 'list' | 'status' | 'inspect' | 'feedback' | 'cancel' | 'peek';
       job?: DelegateJobSnapshot | DelegateJobMetadata;
       jobs?: Array<DelegateJobSnapshot | DelegateJobMetadata>;
       attempt?: DelegateAttemptMetadata;
       attempts?: DelegateAttemptMetadata[];
+      inspect?: InspectDetails;
       delivery?:
         | 'queued'
         | 'settled'
@@ -258,6 +266,55 @@ export function registerDelegateJobsTool(
           return {
             content: [{ type: 'text', text: summary(job) }],
             details: { action: 'status', job: compactJob(job) },
+          };
+        }
+        case 'inspect': {
+          const id = requireText(params.id, 'id');
+          const statuses = getStatuses?.();
+          const attempt = activeWorkflow?.get(id);
+          if (attempt) {
+            const status = statuses
+              ?.list()
+              .find(
+                (candidate) =>
+                  candidate.workflow?.identity === attempt.identity,
+              );
+            const inspected = inspectDelegateTarget({
+              reference: id,
+              state: status?.state ?? attempt.state,
+              workflow: attempt,
+              status,
+              ...(attempt.jobId
+                ? { job: manager.get(attempt.jobId, ctx) }
+                : {}),
+            });
+            return {
+              content: [{ type: 'text', text: inspected.text }],
+              details: { action: 'inspect', inspect: inspected.details },
+            };
+          }
+          const job = manager.get(id, ctx);
+          if (!job) throw new Error(`Unknown delegate attempt or job "${id}".`);
+          const jobAttempt = job.attemptIdentity
+            ? activeWorkflow?.get(job.attemptIdentity)
+            : undefined;
+          if (activeWorkflow && job.attemptIdentity && !jobAttempt)
+            throw new Error(`Unknown delegate attempt or job "${id}".`);
+          const status = statuses?.list().find((candidate) => {
+            if (jobAttempt)
+              return candidate.workflow?.identity === jobAttempt.identity;
+            return candidate.jobId === job.id;
+          });
+          const inspected = inspectDelegateTarget({
+            reference: id,
+            state: status?.state ?? job.state,
+            ...(jobAttempt ? { workflow: jobAttempt } : {}),
+            job,
+            status,
+          });
+          return {
+            content: [{ type: 'text', text: inspected.text }],
+            details: { action: 'inspect', inspect: inspected.details },
           };
         }
         case 'peek': {
@@ -436,6 +493,9 @@ export function registerDelegateJobsTool(
           0,
         );
       }
+      if (action === 'inspect') {
+        return new Text(`${title} ${theme.fg('accent', args.id ?? '?')}`, 0, 0);
+      }
       if (action === 'feedback') {
         return new Text(`${title} ${theme.fg('accent', args.id ?? '?')}`, 0, 0);
       }
@@ -475,6 +535,25 @@ export function registerDelegateJobsTool(
           theme.fg('muted', `• ${listed.length} tracked`) +
             theme.fg(running > 0 ? 'warning' : 'dim', ` · ${running} running`) +
             (failed > 0 ? theme.fg('error', ` · ${failed} failed`) : ''),
+          0,
+          0,
+        );
+      }
+
+      if (details.action === 'inspect' && details.inspect) {
+        const color =
+          details.inspect.state === 'error' ||
+          details.inspect.state === 'blocked' ||
+          details.inspect.state === 'timed-out'
+            ? 'error'
+            : details.inspect.state === 'success'
+              ? 'success'
+              : 'warning';
+        return new Text(
+          theme.fg(
+            color,
+            `● ${details.inspect.reference} ${details.inspect.state}`,
+          ),
           0,
           0,
         );
