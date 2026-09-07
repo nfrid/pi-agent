@@ -59,7 +59,9 @@ Manually started runtimes are associated to registered projects by cwd; unmatche
 runtimes remain explicitly unassigned.
 
 For production build and restart instructions, see
-[dashboard-deployment.md](dashboard-deployment.md).
+[dashboard-deployment.md](dashboard-deployment.md). For isolated profiling,
+benchmarks and measured tradeoffs, see
+[dashboard-performance.md](dashboard-performance.md).
 
 ## Configuration
 
