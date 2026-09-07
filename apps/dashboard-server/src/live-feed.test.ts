@@ -18,7 +18,7 @@ const bounds = {
   subscriberQueueBytes: 10_000,
 };
 
-type Snapshot = { value: number };
+type Snapshot = { value: number | string };
 type Event = { value: number; key?: string };
 
 async function next<T, E>(
@@ -52,11 +52,12 @@ describe('BoundedFeed', () => {
       release = resolve;
     });
     let captured = -1;
+    const snapshotPayload = { value: 'x'.repeat(400) };
     const iterator = feed.subscribe({
       buildSnapshot: async (sequence) => {
         captured = sequence;
         await building;
-        return { value: sequence };
+        return snapshotPayload;
       },
     });
     const pending = iterator.next();
@@ -66,6 +67,7 @@ describe('BoundedFeed', () => {
     expect(feed.metrics()).toMatchObject({
       queuedCount: 1,
       queuedBytes: published.bytes,
+      largestFrameBytes: published.bytes,
     });
     release();
     const snapshot = (await pending).value;
@@ -73,6 +75,9 @@ describe('BoundedFeed', () => {
       kind: 'snapshot',
       sequence: 0,
     });
+    expect(feed.metrics().largestFrameBytes).toBe(
+      new TextEncoder().encode(JSON.stringify(snapshotPayload)).byteLength,
+    );
     const event = await next(iterator);
     expect(event).toMatchObject({ kind: 'event', sequence: 1 });
     const caughtUp = await next(iterator);
@@ -80,12 +85,55 @@ describe('BoundedFeed', () => {
       kind: 'caught-up',
       sequence: 1,
     });
+    expect(feed.metrics()).toMatchObject({
+      queuedCount: 0,
+      queuedBytes: 0,
+    });
     expect(new Set([snapshot.id, event.id, caughtUp.id]).size).toBe(3);
     feed.publish({ value: 2 });
     expect(await next(iterator)).toMatchObject({ kind: 'event', sequence: 2 });
     await pending;
     await iterator.return(undefined);
     expect(feed.metrics().subscribers).toBe(0);
+  });
+
+  it('drains cached queue bytes after normal multi-subscriber fanout', async () => {
+    const feed = new BoundedFeed<Snapshot, Event>(
+      'shell',
+      bounds,
+      'generation',
+    );
+    const iterators = [
+      feed.subscribe({ buildSnapshot: async () => ({ value: 0 }) }),
+      feed.subscribe({ buildSnapshot: async () => ({ value: 0 }) }),
+    ];
+    for (const iterator of iterators) {
+      await next(iterator);
+      await next(iterator);
+    }
+
+    const first = feed.publish({ value: 1 });
+    const second = feed.publish({ value: 2 });
+    expect(feed.metrics()).toMatchObject({
+      queuedCount: 4,
+      queuedBytes: (first.bytes + second.bytes) * iterators.length,
+    });
+
+    for (const iterator of iterators) {
+      expect(await next(iterator)).toMatchObject({
+        kind: 'event',
+        sequence: 1,
+      });
+      expect(await next(iterator)).toMatchObject({
+        kind: 'event',
+        sequence: 2,
+      });
+    }
+    expect(feed.metrics()).toMatchObject({
+      queuedCount: 0,
+      queuedBytes: 0,
+    });
+    for (const iterator of iterators) await iterator.return(undefined);
   });
 
   it('replays only same-generation retained opaque IDs and rebases expired IDs', async () => {

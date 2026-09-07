@@ -13,11 +13,11 @@ interface Event {
   readonly payload: string;
 }
 
-// Baseline before caching (1,000 events, 24KB payload): 1 subscriber 9.17ms,
-// 8 subscribers 35.16ms. Rerun with the same environment for a comparison.
 const eventCount = Number(process.env.FEED_BENCH_EVENTS ?? 1_000);
 const payloadBytes = Number(process.env.FEED_BENCH_PAYLOAD_BYTES ?? 24_000);
 const payload = 'x'.repeat(payloadBytes);
+const warmupCount = 2;
+const sampleCount = 7;
 const bounds = {
   replayCount: 1,
   replayBytes: payloadBytes * 2,
@@ -58,16 +58,27 @@ async function run(subscriberCount: number): Promise<number> {
   return elapsed;
 }
 
+function percentile(samples: readonly number[], fraction: number): number {
+  const rank = Math.max(1, Math.ceil(samples.length * fraction));
+  return [...samples].sort((a, b) => a - b)[rank - 1] as number;
+}
+
 for (const subscriberCount of [1, 8]) {
-  await run(subscriberCount);
-  const elapsed = await run(subscriberCount);
+  for (let index = 0; index < warmupCount; index += 1)
+    await run(subscriberCount);
+  const samples = [];
+  for (let index = 0; index < sampleCount; index += 1)
+    samples.push(await run(subscriberCount));
   console.log(
     JSON.stringify({
+      node: process.version,
       subscribers: subscriberCount,
       events: eventCount,
       payloadBytes,
-      elapsedMs: Number(elapsed.toFixed(2)),
-      publishesPerSecond: Math.round((eventCount / elapsed) * 1_000),
+      warmups: warmupCount,
+      samples: sampleCount,
+      medianMs: Number(percentile(samples, 0.5).toFixed(2)),
+      p95Ms: Number(percentile(samples, 0.95).toFixed(2)),
     }),
   );
 }

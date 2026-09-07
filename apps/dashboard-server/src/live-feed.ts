@@ -562,10 +562,9 @@ export class BoundedFeed<TSnapshot, TEvent> {
   private enqueue(
     subscriber: Subscriber<TSnapshot, TEvent>,
     item: FeedItem<TSnapshot, TEvent>,
-    bytesOverride?: number,
+    itemBytes: number,
   ): void {
     if (subscriber.closed) return;
-    const itemBytes = bytesOverride ?? this.itemBytes(item);
     if (subscriber.waiting) {
       const waiter = subscriber.waiting;
       subscriber.waiting = undefined;
