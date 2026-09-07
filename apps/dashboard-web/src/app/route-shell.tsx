@@ -24,14 +24,6 @@ const LazyUsageAnalyticsPanel = lazy(() =>
   })),
 );
 
-function SurfaceLoading({ label }: { label: string }) {
-  return (
-    <div className="surface-loading" role="status">
-      {label}
-    </div>
-  );
-}
-
 function routeIdentity(pathname: string, prefix: string): string | undefined {
   if (!pathname.startsWith(prefix)) return undefined;
   const value = pathname.slice(prefix.length).split('/')[0];
@@ -125,7 +117,7 @@ function DashboardSurfaceOverlay({
             title: 'Settings',
             eyebrow: 'Dashboard utility',
             children: (
-              <Suspense fallback={<SurfaceLoading label="Loading settings…" />}>
+              <Suspense fallback={<p role="status">Loading settings…</p>}>
                 <LazySettingsView snapshot={snapshot} />
               </Suspense>
             ),
@@ -137,7 +129,7 @@ function DashboardSurfaceOverlay({
             eyebrow: 'Account limits',
             children: (
               <Suspense
-                fallback={<SurfaceLoading label="Loading usage analytics…" />}
+                fallback={<p role="status">Loading usage analytics…</p>}
               >
                 <LazyUsageAnalyticsPanel />
               </Suspense>

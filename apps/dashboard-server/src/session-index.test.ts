@@ -722,6 +722,17 @@ describe('session index', () => {
           message: { role: 'user', content: 'C', timestamp: 4 },
         })}\n`,
       );
+      const updatedPathB = await index.readEntries(
+        'topology-cache-id',
+        undefined,
+        'path-b',
+      );
+      expect(updatedPathB.branchTopology?.points[0]?.paths).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'path-b', current: true }),
+          expect.objectContaining({ id: 'path-c', current: false }),
+        ]),
+      );
       const pathC = await index.readEntries(
         'topology-cache-id',
         undefined,

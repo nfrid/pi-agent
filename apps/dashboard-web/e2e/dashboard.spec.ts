@@ -5504,7 +5504,7 @@ test('keeps virtual row measurements after appending a user message @desktop', a
     .toBeLessThanOrEqual(1);
 });
 
-test('tool details disclose lazily and preserve current results @desktop', async ({
+test('native tool details mount only when disclosed @desktop', async ({
   page,
 }) => {
   const entries = [
