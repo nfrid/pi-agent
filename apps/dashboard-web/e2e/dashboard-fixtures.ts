@@ -11,6 +11,8 @@ export type DashboardFixtureOptions = {
   sessionSnapshots?: Record<string, Record<string, unknown>>;
   sessionSubscribeDelayMs?: number;
   usage?: unknown;
+  /** Reject all API traffic not covered by the fixture routes. */
+  strictApi?: boolean;
 };
 
 export function trpcData(data: unknown): string {
@@ -63,6 +65,10 @@ export async function installDashboardBootstrap(
   await page.addInitScript(() =>
     localStorage.setItem('pi-dashboard-token', 'test-token'),
   );
+  if (options.strictApi) {
+    await page.route('**/api/**', (route) => route.abort('blockedbyclient'));
+    await page.route('**/trpc/**', (route) => route.abort('blockedbyclient'));
+  }
   page.on('request', (request) => {
     const pathname = new URL(request.url()).pathname;
     if (pathname.endsWith('/api/snapshot'))

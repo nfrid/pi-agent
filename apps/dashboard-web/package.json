@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests --exclude 'e2e/**'",
     "test:e2e": "playwright test",
+    "test:e2e:performance": "playwright test --config playwright.performance.config.ts",
+    "test:e2e:performance:diagnostic": "PI_DASHBOARD_PERF_DIAGNOSTIC=1 playwright test --config playwright.performance.config.ts",
     "test:e2e:visual": "playwright test e2e/visual-states.spec.ts"
   },
   "dependencies": {
