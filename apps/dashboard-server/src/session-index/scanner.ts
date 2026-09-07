@@ -389,6 +389,7 @@ export async function scanSessionFile(
       const result = await handle.read(chunk, 0, chunk.length, null);
       if (result.bytesRead === 0) break;
       const bytes = chunk.subarray(0, result.bytesRead);
+      onPendingBytes?.(pendingBytes + result.bytesRead);
       let cursor = 0;
       while (cursor < bytes.length) {
         const newline = bytes.indexOf(0x0a, cursor);
@@ -413,7 +414,6 @@ export async function scanSessionFile(
         }
         cursor = end;
       }
-      onPendingBytes?.(pendingBytes);
       if (pendingBytes > INDEX_MAX_LINE_BYTES)
         throw new Error('Session index line exceeds bounded scan limit.');
     }

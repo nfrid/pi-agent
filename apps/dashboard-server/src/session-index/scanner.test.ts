@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -15,7 +15,11 @@ async function scanBytes(bytes: Buffer, proofOffsets: number[] = []) {
   );
   const file = path.join(directory, 'session.jsonl');
   await writeFile(file, bytes);
-  return scanSessionFile(file, proofOffsets);
+  try {
+    return await scanSessionFile(file, proofOffsets);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 function prefixHash(bytes: Buffer, end: number): string {
@@ -48,9 +52,11 @@ describe('scanSessionFile', () => {
     ]);
     const partial = Buffer.from('{"type":"message","id":"partial"');
     const bytes = Buffer.concat([header, splitLine, malformed, partial]);
+    const interiorProofOffset = INDEX_SCAN_CHUNK_BYTES;
     const proofOffsets = [
       0,
       header.length,
+      interiorProofOffset,
       header.length + splitLine.length,
       bytes.length,
     ];
@@ -67,6 +73,9 @@ describe('scanSessionFile', () => {
     expect(result.prefixHashes.get(header.length)).toBe(
       prefixHash(bytes, header.length),
     );
+    expect(result.prefixHashes.get(interiorProofOffset)).toBe(
+      prefixHash(bytes, interiorProofOffset),
+    );
     expect(result.prefixHashes.get(header.length + splitLine.length)).toBe(
       prefixHash(bytes, header.length + splitLine.length),
     );
@@ -74,6 +83,33 @@ describe('scanSessionFile', () => {
       prefixHash(bytes, bytes.length),
     );
     expect(result.fileHash).toBe(prefixHash(bytes, bytes.length));
+  });
+
+  it('keeps a valid unterminated line at EOF', async () => {
+    const bytes = Buffer.from(
+      `${JSON.stringify({ type: 'session', id: 'eof-session' })}\n${JSON.stringify({ type: 'message', id: 'eof-entry', message: { role: 'user', content: 'complete' } })}`,
+    );
+
+    const result = await scanBytes(bytes);
+
+    expect(result.descriptors.map(({ id }) => id)).toEqual([
+      'eof-session',
+      'eof-entry',
+    ]);
+  });
+
+  it('rejects an unterminated line beyond the existing bound', async () => {
+    const header = Buffer.from(
+      `${JSON.stringify({ type: 'session', id: 'oversized-session' })}\n`,
+    );
+    const bytes = Buffer.concat([
+      header,
+      Buffer.alloc(INDEX_MAX_LINE_BYTES + 1, 0x20),
+    ]);
+
+    await expect(scanBytes(bytes)).rejects.toThrow(
+      'Session index line exceeds bounded scan limit.',
+    );
   });
 
   it('accepts a completed line at the existing bound when its newline is next chunk', async () => {
