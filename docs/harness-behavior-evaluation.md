@@ -274,14 +274,52 @@ and bash parity, not the complete five-case evaluation, which remains pending.
 Candidate commit: `4248d62925626d1e515243f16e86b2226df6b423`.
 Candidate `settings.json` SHA-256: `a25d7f7fb664720b6deb24a329f9f35c2877c0828cf695f4588cc656256dbd28`.
 Baseline comparison commit/config: `dd21d9a59bf55bf5c144004bbf1518df7ebc97d0` / `1ebf08b0c08c3c16f9f3a3026fcf6d2d78740a754faf822ee019deb8f5bcb917`.
-The comparable baseline runs used `gpt-6-astra` with medium thinking. The candidate runner was configured with `EVAL_EXTENSION`, `EVAL_SYSTEM_PROMPT_EXTENSION`, `EVAL_SETTINGS`, and `EVAL_SOURCE_ROOT` pointing to this checkout.
+Both runs used `gpt-6-astra` with medium thinking and the same RPC runner and
+fixtures. Candidate source and settings were pinned with `EVAL_EXTENSION`,
+`EVAL_SYSTEM_PROMPT_EXTENSION`, `EVAL_SETTINGS`, and `EVAL_SOURCE_ROOT`. The
+candidate's first launch attempts lacked built workspace dependencies; after
+building only its extension runtime packages, all seven comparable cases ran.
+No dashboard app was built or service restarted.
 
-| case | baseline semantic result | candidate result | evidence |
+| case / evidence stem | baseline → candidate result | seconds (before → after) | parent tool calls (before → after) |
 |---|---|---|---|
-| Review-only | pass | blocked before launch | `/tmp/prompt-audit-candidate/review.result.json`; missing `@pi-dashboard/extension-contributions/dist/index.js` |
-| Skill delegation | pass | blocked before launch | `/tmp/prompt-audit-candidate/skill.result.json`; same setup error |
-| Failed-test recovery | pass | blocked before launch | `/tmp/prompt-audit-candidate/recovery.result.json`; same setup error |
-| CommonJS helper | pass | blocked before launch | `/tmp/prompt-audit-candidate/helper.result.json`; same setup error |
-| Multi-step repair | pass | blocked before launch | `/tmp/prompt-audit-candidate/multistep.result.json`; same setup error |
+| Review-only / `review` | pass → pass | 26.0 → 24.8 | 3 → 3 |
+| Explicit skill / `skill` | pass → pass | 25.4 → 26.8 | 3 → 3 |
+| Failed-test recovery / `recovery` | pass → pass | 43.9 → 42.2 | 7 → 7 |
+| Cheapest eligible route / `route` | pass → pass | 118.2 → 27.5 | 2 → 3 |
+| Trivial lookup / `trivial` | pass within tested capabilities → same | 10.7 → 11.9 | 1 → 1 |
+| Test-only helper / `helper` | pass → pass | 34.9 → 34.0 | 6 → 10 |
+| Multi-step repair / `multistep` | pass → pass | 56.3 → 49.0 | 10 → 8 |
 
-These are single-trial smoke results, not statistical evidence. Candidate elapsed time was about 3.5 seconds per blocked launch; no child returned, so child-call, delegation, token, and completion comparisons are unavailable. The baseline report’s compaction case is **blocked/not exercised**: its compact response reported `success=false`, `error="Nothing to compact (session too small)"`; it must not be counted as a pass. The trivial lookup observed no delegation and returned the fixture, but this runner has no todo tool, so no-todo behavior was not tested and is not a full pass. The nested-worktree check was deterministic rather than a model smoke run: baseline loaded 2 AGENTS copies and candidate loaded 1, as independently verified by the parent.
+The parent inspected transcripts and diffs and independently reran all three
+repaired fixture tests. Both delegation cases delivered a completed child
+handoff and a parent answer, selected `luna-low`, and made no fixture changes.
+The helper remained test-only and unchanged; multi-step repair observed the
+intermediate failure and finished with a passing rerun.
+
+Local evidence is retained under ignored `artifacts/prompt-audit-2026-09-07/`:
+`baseline/` and `candidate/` contain `<stem>.result.json`, RPC stdout, stderr,
+and session JSONL; `blocked-launches/` retains the initial setup failures.
+`runner.mjs` contains the exact fixtures, which differ in filenames and tiny
+bug examples from cases 6–8 above. Timing includes runner startup/shutdown
+waits. Total parent tool calls increased from 32 to 35. Recorded parent usage
+was input/output/cache-read 50,259/2,602/97,536 before and
+39,186/1,733/78,592 after; child usage is not included.
+
+Limitations:
+
+- These are single trials, not statistical evidence of better behavior or
+  speed. The timing difference is dominated by one delegate lookup.
+- Compaction is **blocked/not exercised**: the baseline compact response was
+  `success=false`, `error="Nothing to compact (session too small)"`. Retaining
+  the decision without successful compaction does not pass case 3.
+- This runner omits the todo tool and ambient skills/project context. The
+  trivial lookup verifies no delegation or unnecessary clarification, not
+  no-todo behavior or full default-runtime parity.
+- Nested-worktree loading was checked deterministically with Pi's real loader:
+  baseline retained 2 AGENTS copies and candidate retained 1. Regression tests
+  also cover diverged content, filename variants, and distinct ancestors.
+- The measured shared-instruction plus delegation/routing prose decreased
+  from 10,094 to 7,042 characters (30.2%); this excludes tool schemas and other
+  context. All non-prose settings, including route keys, models, thinking
+  levels, and costs, were unchanged.
