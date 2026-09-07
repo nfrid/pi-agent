@@ -86,6 +86,7 @@ export function SurfaceStack({
   layerClassName = 'surface-drawer-layer',
   isOpen = true,
   paused = false,
+  browserHistory = true,
 }: {
   pages: readonly SurfacePage[];
   onDepthChange: (depth: number) => void;
@@ -96,6 +97,7 @@ export function SurfaceStack({
   layerClassName?: string;
   isOpen?: boolean;
   paused?: boolean;
+  browserHistory?: boolean;
 }) {
   const generatedId = useId();
   const depth = pages.length;
@@ -112,10 +114,14 @@ export function SurfaceStack({
   const previousDepth = useRef(depth);
   const previousTopId = useRef(topPage?.id);
 
-  useSurfaceHistory(isOpen && depth > 0, depth, (nextDepth) => {
-    if (nextDepth < 1) onClose();
-    else onDepthChange(nextDepth);
-  });
+  useSurfaceHistory(
+    browserHistory && isOpen && depth > 0,
+    depth,
+    (nextDepth) => {
+      if (nextDepth < 1) onClose();
+      else onDepthChange(nextDepth);
+    },
+  );
   useOverlayFocusRestore(isOpen && depth > 0);
 
   useLayoutEffect(() => {

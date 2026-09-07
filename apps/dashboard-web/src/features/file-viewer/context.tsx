@@ -20,13 +20,56 @@ const LazyFileViewer = lazy(() =>
   import('./viewer').then(({ FileViewer }) => ({ default: FileViewer })),
 );
 
-type FileViewerContextValue = { open(location: FileLocation): void };
+const FILE_VIEWER_HISTORY_KEY = '__piDashboardFileViewer';
+let nextViewerId = 0;
+
+type FileViewerHistoryMarker = {
+  id: string;
+  index: number;
+  route: string;
+};
+type HistoryState = Record<string, unknown>;
+
+type History = { entries: readonly ViewerEntry[]; index: number };
+type ViewerSession = {
+  id: string;
+  route: string;
+  entries: ViewerEntry[];
+};
+
+const emptyHistory: History = { entries: [], index: -1 };
+
+function historyState(): HistoryState {
+  const state = window.history.state;
+  return state && typeof state === 'object' && !Array.isArray(state)
+    ? state
+    : {};
+}
+
+function viewerMarker(value: unknown): FileViewerHistoryMarker | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const marker = value as {
+    id?: unknown;
+    index?: unknown;
+    route?: unknown;
+  };
+  return typeof marker.id === 'string' &&
+    typeof marker.index === 'number' &&
+    Number.isInteger(marker.index) &&
+    marker.index >= 0 &&
+    typeof marker.route === 'string'
+    ? { id: marker.id, index: marker.index, route: marker.route }
+    : undefined;
+}
+
+function currentViewerMarker(): FileViewerHistoryMarker | undefined {
+  return viewerMarker(historyState()[FILE_VIEWER_HISTORY_KEY]);
+}
+
+export type FileViewerContextValue = { open(location: FileLocation): void };
 export const FileViewerContext = createContext<
   FileViewerContextValue | undefined
 >(undefined);
-
-type History = { entries: readonly ViewerEntry[]; index: number };
-const emptyHistory: History = { entries: [], index: -1 };
 
 export function FileViewerProvider({
   children,
@@ -36,12 +79,36 @@ export function FileViewerProvider({
   locationKey?: string;
 }) {
   const [history, setHistory] = useState<History>(emptyHistory);
+  const historyRef = useRef(history);
+  const sessionRef = useRef<ViewerSession | undefined>(undefined);
   const launcherRef = useRef<HTMLElement | null>(null);
-  const close = useCallback(() => setHistory(emptyHistory), []);
-  useEffect(() => {
-    void locationKey;
-    close();
-  }, [close, locationKey]);
+  const routeRef = useRef(locationKey ?? '');
+  routeRef.current = locationKey ?? '';
+  historyRef.current = history;
+
+  const commitHistory = useCallback((next: History) => {
+    historyRef.current = next;
+    setHistory(next);
+  }, []);
+
+  const close = useCallback(() => {
+    const current = historyRef.current;
+    const session = sessionRef.current;
+    const marker = currentViewerMarker();
+    if (!session || current.index < 0) return;
+    if (
+      marker?.id !== session.id ||
+      marker.route !== session.route ||
+      marker.index !== current.index
+    ) {
+      commitHistory(emptyHistory);
+      return;
+    }
+    // Jump directly to the underlying route/surface entry. Intermediate
+    // viewer entries remain valid and are restored if the user goes Forward.
+    window.history.go(-(current.index + 1));
+  }, [commitHistory]);
+
   useEffect(() => {
     if (history.entries.length > 0 || !launcherRef.current) return;
     const launcher = launcherRef.current;
@@ -53,46 +120,118 @@ export function FileViewerProvider({
     return () => cancelAnimationFrame(frame);
   }, [history.entries.length]);
 
+  // This listener intentionally remains mounted while the viewer is hidden:
+  // Forward from the underlying entry must be able to restore its trail.
+  useEffect(() => {
+    const onPopState = () => {
+      const marker = currentViewerMarker();
+      const session = sessionRef.current;
+      if (
+        marker &&
+        session &&
+        marker.id === session.id &&
+        marker.route === session.route &&
+        marker.route === routeRef.current &&
+        marker.index < session.entries.length
+      ) {
+        commitHistory({ entries: session.entries, index: marker.index });
+        return;
+      }
+      if (historyRef.current.index >= 0) commitHistory(emptyHistory);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [commitHistory]);
+
+  useEffect(() => {
+    // A route change invalidates the in-memory trail. Old forward markers then
+    // cannot resurrect a file on the unrelated route.
+    routeRef.current = locationKey ?? '';
+    sessionRef.current = undefined;
+    if (historyRef.current.index >= 0) commitHistory(emptyHistory);
+  }, [commitHistory, locationKey]);
+
   const open = useCallback(
     (location: FileLocation) => {
-      if (history.entries.length === 0 && typeof document !== 'undefined')
-        launcherRef.current = document.activeElement as HTMLElement | null;
-      setHistory((current) => {
-        const entry = current.entries[current.index];
-        if (
-          entry &&
-          fileLocationKey(entry.location) === fileLocationKey(location)
-        )
-          return current;
-        const entries = current.entries.slice(0, current.index + 1);
-        const mode =
-          /\.(?:md|markdown)$/i.test(location.path) &&
-          location.startLine === undefined
-            ? 'preview'
-            : 'source';
-        return {
-          entries: [...entries, { location, mode, scrollTop: {} }],
-          index: entries.length,
+      const route = routeRef.current;
+      const current = historyRef.current;
+      const activeSession = sessionRef.current;
+      const currentEntry = current.entries[current.index];
+      if (
+        activeSession &&
+        activeSession.route === route &&
+        current.index >= 0 &&
+        currentEntry &&
+        fileLocationKey(currentEntry.location) === fileLocationKey(location)
+      )
+        return;
+
+      if (
+        current.index < 0 ||
+        !activeSession ||
+        activeSession.route !== route
+      ) {
+        if (typeof document !== 'undefined')
+          launcherRef.current = document.activeElement as HTMLElement | null;
+        nextViewerId += 1;
+        const entry = createViewerEntry(location);
+        const session: ViewerSession = {
+          id: `viewer-${nextViewerId.toString(36)}`,
+          route,
+          entries: [entry],
         };
-      });
+        sessionRef.current = session;
+        window.history.pushState(
+          {
+            ...historyState(),
+            [FILE_VIEWER_HISTORY_KEY]: {
+              id: session.id,
+              index: 0,
+              route,
+            },
+          },
+          '',
+          window.location.href,
+        );
+        commitHistory({ entries: session.entries, index: 0 });
+        return;
+      }
+
+      const entries = activeSession.entries.slice(0, current.index + 1);
+      entries.push(createViewerEntry(location));
+      activeSession.entries = entries;
+      const index = entries.length - 1;
+      // pushState naturally discards native forward entries, including any
+      // viewer markers that were ahead of the current trail position.
+      window.history.pushState(
+        {
+          ...historyState(),
+          [FILE_VIEWER_HISTORY_KEY]: {
+            id: activeSession.id,
+            index,
+            route,
+          },
+        },
+        '',
+        window.location.href,
+      );
+      commitHistory({ entries, index });
     },
-    [history.entries.length],
+    [commitHistory],
   );
-  const go = (direction: number) =>
-    setHistory((current) => ({
-      ...current,
-      index: Math.max(
-        0,
-        Math.min(current.entries.length - 1, current.index + direction),
-      ),
-    }));
-  const setMode = (mode: ViewerMode) =>
-    setHistory((current) => ({
-      ...current,
-      entries: current.entries.map((entry, index) =>
-        index === current.index ? { ...entry, mode } : entry,
-      ),
-    }));
+
+  const setMode = (mode: ViewerMode) => {
+    const current = historyRef.current;
+    const session = sessionRef.current;
+    const entry = current.entries[current.index];
+    if (!session || !entry) return;
+    const entries = current.entries.map((item, index) =>
+      index === current.index ? { ...item, mode } : item,
+    );
+    session.entries = entries.slice();
+    commitHistory({ entries, index: current.index });
+  };
+  const go = (direction: number) => window.history.go(direction);
   const current = history.entries[history.index];
   const value = useMemo(() => ({ open }), [open]);
   return (
@@ -145,11 +284,21 @@ export function FileViewerProvider({
         size="wide"
         className={`surface-drawer file-viewer-surface ${styles.surface}`}
         isOpen={Boolean(current)}
+        browserHistory={false}
         onDepthChange={close}
         onClose={close}
       />
     </FileViewerContext.Provider>
   );
+}
+
+function createViewerEntry(location: FileLocation): ViewerEntry {
+  const mode =
+    /\.(?:md|markdown)$/i.test(location.path) &&
+    location.startLine === undefined
+      ? 'preview'
+      : 'source';
+  return { location, mode, scrollTop: {} };
 }
 
 export function useFileViewer(): FileViewerContextValue | undefined {
