@@ -4,6 +4,8 @@ import {
 } from '@pi-dashboard/protocol';
 import type { Page, Request } from '@playwright/test';
 
+const strictApiViolations = new WeakMap<Page, string[]>();
+
 export type DashboardFixtureOptions = {
   protocolInfo?: Record<string, unknown>;
   shellSnapshot?: Record<string, unknown>;
@@ -40,6 +42,15 @@ function assertSubscriptionRequest(request: Request): void {
     throw new Error('Subscription token must not enter tRPC input.');
 }
 
+/** Fail the test after strict fixture routing has rejected an unknown API call. */
+export function assertNoUnexpectedDashboardApiRequests(page: Page): void {
+  const violations = strictApiViolations.get(page) ?? [];
+  if (violations.length)
+    throw new Error(
+      `Unexpected dashboard API request(s): ${violations.join('; ')}`,
+    );
+}
+
 /** Decode the stock tRPC input from either POST bodies or legacy GET URLs. */
 export function dashboardTrpcInput(request: Request): Record<string, unknown> {
   try {
@@ -66,8 +77,16 @@ export async function installDashboardBootstrap(
     localStorage.setItem('pi-dashboard-token', 'test-token'),
   );
   if (options.strictApi) {
-    await page.route('**/api/**', (route) => route.abort('blockedbyclient'));
-    await page.route('**/trpc/**', (route) => route.abort('blockedbyclient'));
+    const violations: string[] = [];
+    strictApiViolations.set(page, violations);
+    const rejectUnexpectedApi = async (
+      route: import('@playwright/test').Route,
+    ) => {
+      violations.push(`${route.request().method()} ${route.request().url()}`);
+      await route.abort('blockedbyclient');
+    };
+    await page.route('**/api/**', rejectUnexpectedApi);
+    await page.route('**/trpc/**', rejectUnexpectedApi);
   }
   page.on('request', (request) => {
     const pathname = new URL(request.url()).pathname;

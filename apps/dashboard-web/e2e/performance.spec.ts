@@ -1,7 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { type Browser, expect, type Page, test } from '@playwright/test';
-import { installDashboardBootstrap } from './dashboard-fixtures';
+import {
+  assertNoUnexpectedDashboardApiRequests,
+  installDashboardBootstrap,
+} from './dashboard-fixtures';
 
 const WARMUP_RUNS = 1;
 const MEASURED_RUNS = 5;
@@ -14,7 +17,9 @@ type BrowserMetrics = {
   longTaskCount: number;
   longTaskDurationMs: number;
   domNodes: number;
-  jsBytes: number;
+  jsDecodedBytes: number;
+  jsTransferBytes: number;
+  jsRequestCount: number;
 };
 
 type ScenarioReport = {
@@ -27,7 +32,9 @@ type ScenarioReport = {
     longTasks: { median: number; p95: number };
     longTaskDurationMs: { median: number; p95: number };
     domNodes: { median: number; p95: number };
-    jsBytes: { median: number; p95: number };
+    jsDecodedBytes: { median: number; p95: number };
+    jsTransferBytes: { median: number; p95: number };
+    jsRequestCount: { median: number; p95: number };
   };
 };
 
@@ -70,7 +77,9 @@ function summary(samples: BrowserMetrics[]): ScenarioReport['summary'] {
     longTasks: summarize('longTaskCount'),
     longTaskDurationMs: summarize('longTaskDurationMs'),
     domNodes: summarize('domNodes'),
-    jsBytes: summarize('jsBytes'),
+    jsDecodedBytes: summarize('jsDecodedBytes'),
+    jsTransferBytes: summarize('jsTransferBytes'),
+    jsRequestCount: summarize('jsRequestCount'),
   };
 }
 
@@ -79,14 +88,17 @@ async function installMetrics(page: Page) {
     const state = {
       startedAt: performance.now(),
       actionStartedAt: undefined as number | undefined,
-      longTasks: [] as number[],
+      longTasks: [] as Array<{ startTime: number; duration: number }>,
     };
     Object.assign(window, { __piDashboardPerformance: state });
     if ('PerformanceObserver' in window) {
       try {
         new PerformanceObserver((list) => {
           for (const entry of list.getEntries())
-            state.longTasks.push(entry.duration);
+            state.longTasks.push({
+              startTime: entry.startTime,
+              duration: entry.duration,
+            });
         }).observe({ type: 'longtask', buffered: true });
       } catch {
         // Long-task timing is optional in browsers without the entry type.
@@ -102,7 +114,7 @@ async function metrics(page: Page, action = false): Promise<BrowserMetrics> {
         __piDashboardPerformance: {
           startedAt: number;
           actionStartedAt?: number;
-          longTasks: number[];
+          longTasks: Array<{ startTime: number; duration: number }>;
         };
       }
     ).__piDashboardPerformance;
@@ -115,29 +127,33 @@ async function metrics(page: Page, action = false): Promise<BrowserMetrics> {
           resource.initiatorType === 'script' ||
           /\.m?js(?:[?#]|$)/u.test(resource.name)
         );
-      })
-      .map((entry) => {
-        const resource = entry as PerformanceResourceTiming;
-        return (
-          resource.transferSize ||
-          resource.encodedBodySize ||
-          resource.decodedBodySize ||
-          0
-        );
-      });
+      }) as PerformanceResourceTiming[];
+    const navigation = performance.getEntriesByType('navigation')[0];
+    const navigationStart = navigation?.startTime ?? state.startedAt;
     const startedAt =
       measureAction && state.actionStartedAt !== undefined
         ? state.actionStartedAt
-        : state.startedAt;
+        : navigationStart;
+    const actionLongTasks = state.longTasks.filter(
+      (task) => task.startTime >= startedAt && task.startTime <= now,
+    );
     return {
       durationMs: now - startedAt,
-      longTaskCount: state.longTasks.length,
-      longTaskDurationMs: state.longTasks.reduce(
-        (total, duration) => total + duration,
+      longTaskCount: actionLongTasks.length,
+      longTaskDurationMs: actionLongTasks.reduce(
+        (total, task) => total + task.duration,
         0,
       ),
       domNodes: document.querySelectorAll('*').length,
-      jsBytes: resources.reduce((total, bytes) => total + bytes, 0),
+      jsDecodedBytes: resources.reduce(
+        (total, resource) => total + resource.decodedBodySize,
+        0,
+      ),
+      jsTransferBytes: resources.reduce(
+        (total, resource) => total + resource.transferSize,
+        0,
+      ),
+      jsRequestCount: resources.length,
     };
   }, action);
 }
@@ -180,44 +196,52 @@ async function newPage(
     strictApi: true,
     sessionSnapshot,
   });
+  // These legacy reads are still issued by the current shell; fixture them so
+  // the strict catchall never falls through to a daemon.
+  await page.route('**/api/usage', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/session-threads', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/settings', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/threads*', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.route('**/api/sessions/*/delegate-history*', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ version: 2, groups: [] }),
+    }),
+  );
   return { context, page };
 }
 
-async function coldSample(browser: Browser) {
-  const home = await newPage(browser);
+async function coldPageSample(
+  browser: Browser,
+  pathname: '/' | '/sessions/baseline-session',
+) {
+  const state = await newPage(browser);
   try {
-    await home.page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(
-      home.page.getByRole('heading', { name: 'Pick a thread to continue' }),
-    ).toBeVisible();
-    const homeMetrics = await metrics(home.page);
-
-    const direct = await newPage(browser);
-    try {
-      await direct.page.goto('/sessions/baseline-session', {
-        waitUntil: 'domcontentloaded',
-      });
+    await state.page.goto(pathname, { waitUntil: 'domcontentloaded' });
+    if (pathname === '/') {
       await expect(
-        direct.page.getByRole('heading', { name: 'Baseline session' }),
+        state.page.getByRole('heading', { name: 'Pick a thread to continue' }),
+      ).toBeVisible();
+    } else {
+      await expect(
+        state.page.getByRole('heading', { name: 'Baseline session' }),
       ).toBeVisible();
       await expect(
-        direct.page.locator('.session-transcript-scroll'),
+        state.page.locator('.session-transcript-scroll'),
       ).toBeVisible();
-      const directMetrics = await metrics(direct.page);
-      return {
-        ...directMetrics,
-        durationMs: homeMetrics.durationMs + directMetrics.durationMs,
-        longTaskCount: homeMetrics.longTaskCount + directMetrics.longTaskCount,
-        longTaskDurationMs:
-          homeMetrics.longTaskDurationMs + directMetrics.longTaskDurationMs,
-        domNodes: directMetrics.domNodes,
-        jsBytes: homeMetrics.jsBytes + directMetrics.jsBytes,
-      };
-    } finally {
-      await direct.context.close();
     }
+    assertNoUnexpectedDashboardApiRequests(state.page);
+    return await metrics(state.page);
   } finally {
-    await home.context.close();
+    await state.context.close();
   }
 }
 
@@ -281,7 +305,8 @@ async function historySample(browser: Browser) {
         .getByRole('region', { name: 'Transcript' })
         .getByText(targetLabel.replace('Jump to ', ''), { exact: true }),
     ).toBeVisible();
-    return metrics(page, true);
+    assertNoUnexpectedDashboardApiRequests(page);
+    return await metrics(page, true);
   } finally {
     await pageState.context.close();
   }
@@ -328,7 +353,8 @@ async function activitySample(browser: Browser) {
     await firstTool.locator(':scope > summary.tool-step').click();
     await expect(firstTool).toHaveAttribute('open', '');
     await expect(firstTool.locator('.tool-inspector')).toBeVisible();
-    return metrics(page, true);
+    assertNoUnexpectedDashboardApiRequests(page);
+    return await metrics(page, true);
   } finally {
     await pageState.context.close();
   }
@@ -347,6 +373,8 @@ test.afterAll(() => {
           process.env.PI_DASHBOARD_PERF_DIAGNOSTIC === '1'
             ? 'diagnostic'
             : 'off',
+        measurementClock:
+          'navigation-start or action-start to driver-observed semantic UI readiness; not INP',
         pacedStreamSmoke:
           'not-run: existing paced stream setup is local to dashboard.spec.ts and is not a reusable fixture',
         scenarios: reports,
@@ -359,7 +387,12 @@ test.afterAll(() => {
 
 test.describe('production browser performance baseline', () => {
   test('cold home and direct-session initial load', async ({ browser }) => {
-    await recordScenario('cold-home-and-direct-session', browser, coldSample);
+    await recordScenario('cold-home', browser, (currentBrowser) =>
+      coldPageSample(currentBrowser, '/'),
+    );
+    await recordScenario('cold-direct-session', browser, (currentBrowser) =>
+      coldPageSample(currentBrowser, '/sessions/baseline-session'),
+    );
   });
 
   test('1000-entry transcript scroll and outline jump', async ({ browser }) => {
@@ -370,9 +403,9 @@ test.describe('production browser performance baseline', () => {
     );
   });
 
-  test('large activity expansion and one inspector', async ({ browser }) => {
+  test('20-tool activity expansion and one inspector', async ({ browser }) => {
     await recordScenario(
-      'expanded-tool-activity-and-inspector',
+      '20-tool-activity-expansion-and-inspector',
       browser,
       activitySample,
     );

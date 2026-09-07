@@ -5,6 +5,7 @@ const apiPort = Number(process.env.PI_DASHBOARD_E2E_API_PORT ?? 43_173);
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: ['**/performance.spec.ts'],
   timeout: 15_000,
   use: {
     baseURL: `http://127.0.0.1:${port}`,

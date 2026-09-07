@@ -15,7 +15,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     baseURL: `http://127.0.0.1:${webPort}`,
     serviceWorkers: 'block',
-    trace: diagnostic ? 'retain-on-failure' : 'off',
+    trace: diagnostic ? 'on' : 'off',
   },
   webServer: {
     command: `node ../../scripts/dashboard-performance-web.mjs serve --port ${webPort} --api-port ${apiPort}`,
