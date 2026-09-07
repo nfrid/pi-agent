@@ -30,6 +30,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import styles from '../entities/transcript/markdown.module.css';
 import {
   ComposerAutocomplete,
   type ComposerCommandOption,
@@ -278,7 +279,7 @@ export default function MarkdownComposerEditor({
       <MDXEditor
         ref={editorRef}
         className="composer-rich-editor-root dark-theme"
-        contentEditableClassName="composer-rich-editor"
+        contentEditableClassName={`composer-rich-editor ${styles.markdownColors}`}
         markdown={markdown}
         onChange={(next: string, initialMarkdownNormalize: boolean) => {
           if (!initialMarkdownNormalize) onChange(next);

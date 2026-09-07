@@ -1,6 +1,21 @@
 import { expect, test } from '@playwright/test';
 import { installDashboardBootstrap } from './dashboard-fixtures';
 
+const composerMarkdown = `# Heading one
+## Heading two
+### Heading three
+#### Heading four
+##### Heading five
+###### Heading six
+
+*emphasis* **strong** \`inline code\` [link](https://example.com)
+
+> quoted text
+
+| Header | Value |
+| --- | --- |
+| row | cell |`;
+
 const snapshot = {
   serverId: 'markdown-colors-test',
   revision: 1,
@@ -23,6 +38,14 @@ for (const title of [
   'transcript Markdown uses theme colors @desktop',
 ]) {
   test(title, async ({ page }) => {
+    await page.addInitScript(
+      (text) =>
+        localStorage.setItem(
+          'pi-dashboard-composer-draft:markdown-colors-session',
+          JSON.stringify({ version: 1, text, revision: 'colors' }),
+        ),
+      composerMarkdown,
+    );
     await installDashboardBootstrap(page, snapshot, {
       sessionSnapshot: {
         entries: [
@@ -46,6 +69,12 @@ for (const title of [
 ###### Heading six
 
 *emphasis* **strong** \`inline code\` [link](https://example.com)
+
+> quoted text
+
+| Header | Value |
+| --- | --- |
+| row | cell |
 
 \`\`\`text
 fenced code
@@ -93,6 +122,53 @@ fenced code
       'rgb(248, 248, 242)',
     );
     await expect(markdown.locator('a')).toHaveCSS(
+      'color',
+      'rgb(139, 233, 253)',
+    );
+
+    await expect(markdown.locator('blockquote')).toHaveCSS(
+      'border-left-color',
+      'rgb(139, 233, 253)',
+    );
+    await expect(markdown.locator('blockquote')).toHaveCSS(
+      'color',
+      'rgb(165, 173, 210)',
+    );
+    await expect(markdown.locator('th').first()).toHaveCSS(
+      'color',
+      'rgb(139, 233, 253)',
+    );
+
+    const composer = page.locator('.composer-rich-editor');
+    await expect(composer).toBeVisible();
+    for (const [index, color] of expectedHeadingColors.entries()) {
+      await expect(composer.locator(`h${index + 1}`)).toHaveCSS('color', color);
+    }
+    await expect(composer.locator('em')).toHaveCSS(
+      'color',
+      'rgb(241, 250, 140)',
+    );
+    await expect(composer.locator('strong')).toHaveCSS(
+      'color',
+      'rgb(255, 184, 108)',
+    );
+    await expect(composer.locator('code')).toHaveCSS(
+      'color',
+      'rgb(80, 250, 123)',
+    );
+    await expect(composer.locator('a')).toHaveCSS(
+      'color',
+      'rgb(139, 233, 253)',
+    );
+    await expect(composer.locator('blockquote')).toHaveCSS(
+      'border-left-color',
+      'rgb(139, 233, 253)',
+    );
+    await expect(composer.locator('blockquote')).toHaveCSS(
+      'color',
+      'rgb(165, 173, 210)',
+    );
+    await expect(composer.locator('th').first()).toHaveCSS(
       'color',
       'rgb(139, 233, 253)',
     );

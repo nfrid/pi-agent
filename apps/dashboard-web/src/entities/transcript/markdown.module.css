@@ -1,5 +1,4 @@
-/* Transcript Markdown is rendered by a shared leaf entity, so its markup and
-   .markdown semantic hook stay global while this module owns the leaf rules. */
+/* Keep transcript geometry separate from the shared Markdown color contract. */
 .markdown {
   min-width: 0;
   overflow-x: auto;
@@ -39,37 +38,11 @@
 }
 
 .markdown h1 {
-  color: var(--pink);
   font-size: 1.4em;
 }
 
 .markdown h2 {
-  color: var(--purple);
   font-size: 1.25em;
-}
-
-.markdown h3 {
-  color: var(--red);
-}
-
-.markdown h4 {
-  color: var(--green);
-}
-
-.markdown h5 {
-  color: var(--cyan);
-}
-
-.markdown h6 {
-  color: var(--line);
-}
-
-.markdown em {
-  color: var(--yellow);
-}
-
-.markdown strong {
-  color: var(--orange);
 }
 
 .markdown :is(h3, h4) {
@@ -77,16 +50,14 @@
 }
 
 .markdown blockquote {
-  border-left: 2px solid var(--cyan);
+  border-left-style: solid;
+  border-left-width: 2px;
   padding-left: 0.85em;
-  color: var(--muted);
 }
 
 .markdown code {
   border: var(--border-soft);
-  background: var(--bg);
   padding: 0.12em 0.35em;
-  color: var(--green);
   font-size: 0.92em;
 }
 
@@ -94,7 +65,6 @@
   max-width: 100%;
   overflow: auto;
   border: 1px solid var(--line);
-  background: var(--bg);
   padding: 0.8em;
 }
 
@@ -112,7 +82,6 @@
 .markdown pre code {
   border: 0;
   padding: 0;
-  color: var(--fg);
   white-space: pre;
 }
 
@@ -127,13 +96,7 @@
   text-align: left;
 }
 
-.markdown th {
-  background: var(--bg-alt);
-  color: var(--cyan);
-}
-
 .markdown a {
-  color: var(--cyan);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
 }
@@ -141,6 +104,78 @@
 .markdown hr {
   border: 0;
   border-top: 1px solid var(--line);
+}
+
+/* Applied to both react-markdown and MDXEditor content. Keep this class
+   color-only so editor geometry remains owned by the composer contract. */
+.markdownColors h1 {
+  color: var(--pink);
+}
+
+.markdownColors h2 {
+  color: var(--purple);
+}
+
+.markdownColors h3 {
+  color: var(--red);
+}
+
+.markdownColors h4 {
+  color: var(--green);
+}
+
+.markdownColors h5 {
+  color: var(--cyan);
+}
+
+.markdownColors h6 {
+  color: var(--line);
+}
+
+.markdownColors em {
+  color: var(--yellow);
+}
+
+.markdownColors strong {
+  color: var(--orange);
+}
+
+.markdownColors blockquote {
+  border-left-color: var(--cyan);
+  color: var(--muted);
+}
+
+.markdownColors :is(code, pre) {
+  background: var(--bg);
+}
+
+.markdownColors code {
+  color: var(--green);
+}
+
+.markdownColors pre {
+  border-color: var(--line);
+}
+
+.markdownColors pre code {
+  color: var(--fg);
+}
+
+.markdownColors :is(th, td) {
+  border-color: var(--line);
+}
+
+.markdownColors th {
+  background: var(--bg-alt);
+  color: var(--cyan);
+}
+
+.markdownColors a {
+  color: var(--cyan);
+}
+
+.markdownColors hr {
+  border-top-color: var(--line);
 }
 
 .markdown img {
