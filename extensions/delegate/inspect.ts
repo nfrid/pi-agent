@@ -179,8 +179,17 @@ export function inspectDelegateTarget(
   }
 
   let text = lines.join('\n');
-  if (text.length > DELEGATE_INSPECT_MAX_TEXT)
-    text = `${text.slice(0, DELEGATE_INSPECT_MAX_TEXT - 40)}\n… inspect snapshot truncated`;
+  if (Buffer.byteLength(text, 'utf8') > DELEGATE_INSPECT_MAX_TEXT) {
+    const suffix = '\n… inspect snapshot truncated';
+    let end = text.length;
+    while (
+      end > 0 &&
+      Buffer.byteLength(`${text.slice(0, end)}${suffix}`, 'utf8') >
+        DELEGATE_INSPECT_MAX_TEXT
+    )
+      end--;
+    text = `${text.slice(0, end)}${suffix}`;
+  }
   return {
     text,
     details: {
