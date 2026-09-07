@@ -618,6 +618,89 @@ describe('session index', () => {
     expect(JSON.stringify(page.branchTopology)).not.toContain('prior context');
   });
 
+  it('reuses topology safely across leaf switches and appended index versions', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-topology-cache-'),
+    );
+    const file = path.join(root, 'topology-cache.jsonl');
+    const entries = [
+      { type: 'session', id: 'topology-cache-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'root-prompt',
+        parentId: null,
+        message: { role: 'user', content: 'Choose', timestamp: 1 },
+      },
+      {
+        type: 'message',
+        id: 'path-a',
+        parentId: 'root-prompt',
+        message: { role: 'user', content: 'A', timestamp: 2 },
+      },
+      {
+        type: 'message',
+        id: 'path-b',
+        parentId: 'root-prompt',
+        message: { role: 'user', content: 'B', timestamp: 3 },
+      },
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const pathA = await index.readEntries(
+      'topology-cache-id',
+      undefined,
+      'path-a',
+    );
+    const pathB = await index.readEntries(
+      'topology-cache-id',
+      undefined,
+      'path-b',
+    );
+    expect(pathA.branchTopology).toMatchObject({ activeLeafId: 'path-a' });
+    expect(pathB.branchTopology).toMatchObject({ activeLeafId: 'path-b' });
+    expect(pathA.branchTopology?.points[0]?.paths).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'path-a', current: true }),
+        expect.objectContaining({ id: 'path-b', current: false }),
+      ]),
+    );
+    expect(pathB.branchTopology?.points[0]?.paths).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'path-a', current: false }),
+        expect.objectContaining({ id: 'path-b', current: true }),
+      ]),
+    );
+    expect(pathA.branchTopology?.activeLeafId).toBe('path-a');
+
+    await appendFile(
+      file,
+      `${JSON.stringify({
+        type: 'message',
+        id: 'path-c',
+        parentId: 'root-prompt',
+        message: { role: 'user', content: 'C', timestamp: 4 },
+      })}\n`,
+    );
+    const pathC = await index.readEntries(
+      'topology-cache-id',
+      undefined,
+      'path-c',
+    );
+    expect(pathC.branchTopology).toMatchObject({ activeLeafId: 'path-c' });
+    expect(pathC.branchTopology?.points[0]?.paths).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'path-a', current: false }),
+        expect.objectContaining({ id: 'path-b', current: false }),
+        expect.objectContaining({ id: 'path-c', current: true }),
+      ]),
+    );
+  });
+
   it('returns a complete lightweight outline without transcript payloads', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-outline-'));
     await writeFile(

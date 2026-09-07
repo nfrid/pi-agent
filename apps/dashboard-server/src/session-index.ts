@@ -58,6 +58,45 @@ interface SessionHistoryIndex {
   readonly outline: readonly SessionOutlineLandmark[];
 }
 
+type BranchTopologyCache = {
+  activeLeafId: string | undefined;
+  topology: SessionBranchTopology;
+};
+
+const branchTopologyCache = new WeakMap<
+  SessionHistoryIndex,
+  BranchTopologyCache
+>();
+
+function cloneBranchTopology(
+  topology: SessionBranchTopology,
+): SessionBranchTopology {
+  return {
+    ...(topology.activeLeafId === undefined
+      ? {}
+      : { activeLeafId: topology.activeLeafId }),
+    points: topology.points.map((point) => ({
+      id: point.id,
+      paths: point.paths.map((path) => ({ ...path })),
+    })),
+  };
+}
+
+function branchTopologyForIndex(
+  index: SessionHistoryIndex,
+  activeLeafId: string | undefined,
+): SessionBranchTopology {
+  const cached = branchTopologyCache.get(index);
+  if (cached && cached.activeLeafId === activeLeafId)
+    return cloneBranchTopology(cached.topology);
+  const topology = branchTopologyFromDescriptors(
+    index.descriptors,
+    activeLeafId,
+  );
+  branchTopologyCache.set(index, { activeLeafId, topology });
+  return cloneBranchTopology(topology);
+}
+
 interface IndexedFile extends SessionIndexEntry {
   header: Record<string, unknown>;
   lastEntryId?: string;
@@ -938,10 +977,7 @@ export class SessionIndex {
         : buildSessionOutline(descriptors, groups);
     // Resolving the latest leaf preserves transcript selection only; it is
     // not proof that this append-only file's latest entry is the active path.
-    const branchTopology = branchTopologyFromDescriptors(
-      index.descriptors,
-      requestedLeaf,
-    );
+    const branchTopology = branchTopologyForIndex(index, requestedLeaf);
     let end = descriptors.length;
     if (cursor) {
       const boundary = descriptors[cursor.selectedOrdinal];
