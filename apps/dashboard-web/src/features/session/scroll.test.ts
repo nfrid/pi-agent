@@ -6,8 +6,192 @@ import {
   distanceFromScrollEnd,
   FOLLOW_REARM_DISTANCE_PX,
   nextFollowMode,
+  readSessionScrollMemory,
   useSessionScroll,
+  useSessionScrollMemory,
 } from './scroll';
+
+describe('session scroll memory storage', () => {
+  it('isolates server sessions and ignores corrupt values', () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+    try {
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-a:session-1',
+        JSON.stringify({
+          version: 1,
+          mode: 'manual',
+          rowKey: 'message-4',
+          rowOffset: 18,
+          scrollTop: 420,
+          oldestOrdinal: 4,
+        }),
+      );
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-b:session-1',
+        JSON.stringify({ version: 1, mode: 'following', scrollTop: 0 }),
+      );
+      expect(readSessionScrollMemory('session-1', 'server-a')?.rowKey).toBe(
+        'message-4',
+      );
+      expect(readSessionScrollMemory('session-1', 'server-b')?.mode).toBe(
+        'following',
+      );
+      values.set('pi.dashboard.session-scroll.v1:server-a:broken', '{bad');
+      expect(readSessionScrollMemory('broken', 'server-a')).toBeUndefined();
+      values.set(
+        'pi.dashboard.session-scroll.v1:server-a:invalid',
+        JSON.stringify({ version: 1, mode: 'manual', scrollTop: 'bad' }),
+      );
+      expect(readSessionScrollMemory('invalid', 'server-a')).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not fail when session storage is unavailable', () => {
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: () => {
+          throw new Error('blocked');
+        },
+      },
+    });
+    try {
+      expect(readSessionScrollMemory('session-1', 'server-a')).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('loads the saved ordinal before exposing restoration and can cancel it', async () => {
+    const values = new Map<string, string>([
+      [
+        'pi.dashboard.session-scroll.v1:server-a:session-1',
+        JSON.stringify({
+          version: 1,
+          mode: 'manual',
+          scrollTop: 420,
+          oldestOrdinal: 0,
+        }),
+      ],
+    ]);
+    const loadThroughOrdinal = vi.fn().mockResolvedValue(false);
+    const cancelHistoryRestore = vi.fn();
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      },
+      cancelAnimationFrame: () => undefined,
+    });
+    const modeRef = { current: 'manual' as const };
+    let controls!: ReturnType<typeof useSessionScrollMemory>;
+    function Probe() {
+      controls = useSessionScrollMemory({
+        id: 'session-1',
+        serverId: 'server-a',
+        history: { start: 10, hasOlder: true },
+        historyAvailable: true,
+        sessionMounted: true,
+        enabled: true,
+        scrollElementRef: { current: null },
+        modeRef,
+        loadThroughOrdinal,
+        cancelHistoryRestore,
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe));
+      });
+      await vi.waitFor(() =>
+        expect(loadThroughOrdinal).toHaveBeenCalledWith(0),
+      );
+      await act(async () => controls.cancelRestore());
+      expect(cancelHistoryRestore).toHaveBeenCalledTimes(1);
+      expect(controls.restoring).toBe(false);
+    } finally {
+      await act(async () => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('finishes restoration when a multi-page load fails after a rerender', async () => {
+    const values = new Map<string, string>([
+      [
+        'pi.dashboard.session-scroll.v1:server-a:session-1',
+        JSON.stringify({
+          version: 1,
+          mode: 'manual',
+          scrollTop: 420,
+          oldestOrdinal: 0,
+        }),
+      ],
+    ]);
+    let rejectLoad!: (error: Error) => void;
+    const firstLoad = () =>
+      new Promise<boolean>((_resolve, reject) => {
+        rejectLoad = reject;
+      });
+    const secondLoad = vi.fn().mockResolvedValue(false);
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    const modeRef = { current: 'manual' as const };
+    let controls!: ReturnType<typeof useSessionScrollMemory>;
+    function Probe({ load }: { load: (ordinal: number) => Promise<boolean> }) {
+      controls = useSessionScrollMemory({
+        id: 'session-1',
+        serverId: 'server-a',
+        history: { start: 10, hasOlder: true },
+        historyAvailable: true,
+        sessionMounted: true,
+        enabled: true,
+        scrollElementRef: { current: null },
+        modeRef,
+        loadThroughOrdinal: load,
+        cancelHistoryRestore: vi.fn(),
+      });
+      return null;
+    }
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(createElement(Probe, { load: firstLoad }));
+      });
+      await act(async () => {
+        renderer?.update(createElement(Probe, { load: secondLoad }));
+      });
+      rejectLoad(new Error('page two failed'));
+      await vi.waitFor(() =>
+        expect(controls.restoreRequest?.oldestOrdinal).toBe(0),
+      );
+      expect(secondLoad).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe('session follow mode', () => {
   it('rearms only within 40 pixels of the real content end', () => {
@@ -82,9 +266,11 @@ describe('session follow mode', () => {
     function Probe({
       waiting,
       version,
+      restorationReady = false,
     }: {
       waiting: boolean;
       version: number;
+      restorationReady?: boolean;
     }) {
       const data = { entries: [`entry-${version}`] };
       const projection = {} as TranscriptProjection;
@@ -95,6 +281,7 @@ describe('session follow mode', () => {
         sessionMounted: Boolean(data && projection && !waiting),
         enabled: true,
         scrollElementRef,
+        restorationReady,
       });
       return null;
     }
@@ -122,7 +309,13 @@ describe('session follow mode', () => {
       expect(controls.awayFromLatest).toBe(true);
 
       await act(async () => {
-        renderer?.update(createElement(Probe, { waiting: false, version: 2 }));
+        renderer?.update(
+          createElement(Probe, {
+            waiting: false,
+            version: 2,
+            restorationReady: true,
+          }),
+        );
       });
       await act(async () => runFrames());
       expect(transcript.scrollTop).toBe(700);

@@ -53,10 +53,19 @@ function item(index: number): TranscriptModelItem {
   };
 }
 
-function transcript(items: readonly TranscriptModelItem[]) {
+function transcript(
+  items: readonly TranscriptModelItem[],
+  scrollRestore?: {
+    mode: 'following' | 'manual';
+    rowKey?: string;
+    rowOffset?: number;
+    scrollTop: number;
+  },
+) {
   return (
     <VirtualizedTranscript
       items={items}
+      scrollRestore={scrollRestore}
       open={new Set()}
       setOpen={vi.fn()}
       scrollElementRef={{ current: {} } as RefObject<HTMLDivElement>}
@@ -87,5 +96,44 @@ describe('virtualized transcript measurement', () => {
     });
 
     expect(virtualizer.measure).not.toHaveBeenCalled();
+  });
+
+  it('cancels both restoration frames when navigation removes the request', () => {
+    const items = Array.from({ length: 81 }, (_, index) => item(index));
+    const frames = new Map<number, FrameRequestCallback>();
+    const cancelled: number[] = [];
+    vi.stubGlobal('window', {
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        const id = frames.size + 1;
+        frames.set(id, callback);
+        return id;
+      },
+      cancelAnimationFrame: (id: number) => {
+        cancelled.push(id);
+        frames.delete(id);
+      },
+    });
+    let tree!: ReturnType<typeof create>;
+    try {
+      act(() => {
+        tree = create(
+          transcript(items, {
+            mode: 'manual',
+            rowKey: 'message-0',
+            rowOffset: 0,
+            scrollTop: 10,
+          }),
+        );
+      });
+      expect(frames.size).toBe(1);
+      act(() => {
+        tree.update(transcript(items));
+      });
+      expect(cancelled).toEqual([1]);
+      expect(frames.size).toBe(0);
+    } finally {
+      act(() => tree?.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 });
