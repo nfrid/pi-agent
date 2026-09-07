@@ -268,3 +268,20 @@ reported two nonempty fixture lines, and successfully called bash with a
 Elapsed time was 16.8 seconds. The check used `buildChildArgs` and the actual
 Pi CLI, not the parent `delegate` scheduling API. This verifies child loading
 and bash parity, not the complete five-case evaluation, which remains pending.
+
+## Candidate smoke comparison (2026-09-07)
+
+Candidate commit: `4248d62925626d1e515243f16e86b2226df6b423`.
+Candidate `settings.json` SHA-256: `a25d7f7fb664720b6deb24a329f9f35c2877c0828cf695f4588cc656256dbd28`.
+Baseline comparison commit/config: `dd21d9a59bf55bf5c144004bbf1518df7ebc97d0` / `1ebf08b0c08c3c16f9f3a3026fcf6d2d78740a754faf822ee019deb8f5bcb917`.
+The comparable baseline runs used `gpt-6-astra` with medium thinking. The candidate runner was configured with `EVAL_EXTENSION`, `EVAL_SYSTEM_PROMPT_EXTENSION`, `EVAL_SETTINGS`, and `EVAL_SOURCE_ROOT` pointing to this checkout.
+
+| case | baseline semantic result | candidate result | evidence |
+|---|---|---|---|
+| Review-only | pass | blocked before launch | `/tmp/prompt-audit-candidate/review.result.json`; missing `@pi-dashboard/extension-contributions/dist/index.js` |
+| Skill delegation | pass | blocked before launch | `/tmp/prompt-audit-candidate/skill.result.json`; same setup error |
+| Failed-test recovery | pass | blocked before launch | `/tmp/prompt-audit-candidate/recovery.result.json`; same setup error |
+| CommonJS helper | pass | blocked before launch | `/tmp/prompt-audit-candidate/helper.result.json`; same setup error |
+| Multi-step repair | pass | blocked before launch | `/tmp/prompt-audit-candidate/multistep.result.json`; same setup error |
+
+These are single-trial smoke results, not statistical evidence. Candidate elapsed time was about 3.5 seconds per blocked launch; no child returned, so child-call, delegation, token, and completion comparisons are unavailable. The baseline report’s compaction case is **blocked/not exercised**: its compact response reported `success=false`, `error="Nothing to compact (session too small)"`; it must not be counted as a pass. The trivial lookup observed no delegation and returned the fixture, but this runner has no todo tool, so no-todo behavior was not tested and is not a full pass. The nested-worktree check was deterministic rather than a model smoke run: baseline loaded 2 AGENTS copies and candidate loaded 1, as independently verified by the parent.
