@@ -13,8 +13,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useDashboardSurfaces } from './dashboard-surface-context';
 import { shortcutLabel, useModifierShortcut } from './modifier-shortcuts';
-import { UsageSparkline } from './usage-analytics';
 import styles from './usage-indicator.module.css';
+import { UsageSparkline } from './usage-sparkline';
 
 export type UsageWindow = NormalizedUsageWindow & {
   kind: 'primary' | 'secondary';

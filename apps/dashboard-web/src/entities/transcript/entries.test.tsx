@@ -352,6 +352,46 @@ describe('transcript entries', () => {
     act(() => tree.unmount());
   });
 
+  it('mounts tool inspection only while open and follows live results', () => {
+    const item = (result?: string): TranscriptModelItem => ({
+      key: 'tool-live-result',
+      raw: {},
+      entry: { kind: 'tool', name: 'bash', args: { command: 'echo live' } },
+      tool: {
+        kind: 'tool',
+        key: 'tool-live-result',
+        toolCallId: 'live-result',
+        name: 'bash',
+        arguments: { command: 'echo live' },
+        ...(result === undefined ? {} : { result }),
+        status: result === undefined ? 'running' : 'success',
+      },
+    });
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<TranscriptEntry item={item()} />);
+    });
+    expect(
+      tree.root.findAllByProps({ className: 'tool-inspector' }),
+    ).toHaveLength(0);
+
+    const details = tree.root.findByType('details');
+    act(() => details.props.onToggle({ currentTarget: { open: true } }));
+    expect(
+      tree.root.findAllByProps({ className: 'tool-inspector' }),
+    ).toHaveLength(1);
+
+    act(() => tree.update(<TranscriptEntry item={item('live result')} />));
+    expect(JSON.stringify(tree.toJSON())).toContain('live result');
+
+    act(() => details.props.onToggle({ currentTarget: { open: false } }));
+    expect(
+      tree.root.findAllByProps({ className: 'tool-inspector' }),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('renders compact colored line metrics for edit tools', () => {
     const item: TranscriptModelItem = {
       key: 'tool:edit-call',

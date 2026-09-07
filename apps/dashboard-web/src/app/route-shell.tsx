@@ -1,5 +1,5 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { AgentThreadNav } from '../features/agent-thread-nav';
 import { CommandPalette } from '../features/command-palette';
 import {
@@ -7,12 +7,30 @@ import {
   useDashboardSurfaces,
 } from '../features/dashboard-surface-context';
 import { DraftPromotionLifecycle } from '../features/draft-promotion-lifecycle';
+import { Header } from '../features/navigation';
 import { NewThreadProjectChooser } from '../features/new-thread-project-chooser';
 import { SessionNavigationContext } from '../features/session-navigation-context';
 import { type SurfacePage, SurfaceStack } from '../features/surface-stack';
-import { UsageAnalyticsPanel } from '../features/usage-analytics';
-import { Header, SettingsView } from '../routes/dashboard';
 import { useDashboardContext } from './dashboard-context';
+
+const LazySettingsView = lazy(() =>
+  import('../features/settings').then(({ SettingsView }) => ({
+    default: SettingsView,
+  })),
+);
+const LazyUsageAnalyticsPanel = lazy(() =>
+  import('../features/usage-analytics').then(({ UsageAnalyticsPanel }) => ({
+    default: UsageAnalyticsPanel,
+  })),
+);
+
+function SurfaceLoading({ label }: { label: string }) {
+  return (
+    <div className="surface-loading" role="status">
+      {label}
+    </div>
+  );
+}
 
 function routeIdentity(pathname: string, prefix: string): string | undefined {
   if (!pathname.startsWith(prefix)) return undefined;
@@ -106,14 +124,24 @@ function DashboardSurfaceOverlay({
             id: surface.type,
             title: 'Settings',
             eyebrow: 'Dashboard utility',
-            children: <SettingsView snapshot={snapshot} />,
+            children: (
+              <Suspense fallback={<SurfaceLoading label="Loading settings…" />}>
+                <LazySettingsView snapshot={snapshot} />
+              </Suspense>
+            ),
           };
         case 'usage-analytics':
           return {
             id: surface.type,
             title: 'Usage analytics',
             eyebrow: 'Account limits',
-            children: <UsageAnalyticsPanel />,
+            children: (
+              <Suspense
+                fallback={<SurfaceLoading label="Loading usage analytics…" />}
+              >
+                <LazyUsageAnalyticsPanel />
+              </Suspense>
+            ),
           };
         case 'command-palette':
           return {

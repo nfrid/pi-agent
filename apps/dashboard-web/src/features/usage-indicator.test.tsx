@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   analyticsSeries,
   clampUsagePointIndex,
-  UsageSparkline,
   usageProjection,
 } from './usage-analytics';
 import {
@@ -14,6 +13,7 @@ import {
   usageLimitsWithActivity,
   usageTone,
 } from './usage-indicator';
+import { UsageSparkline } from './usage-sparkline';
 
 describe('usage parsing and formatting', () => {
   it('hides limits until historical activity proves they are relevant', () => {

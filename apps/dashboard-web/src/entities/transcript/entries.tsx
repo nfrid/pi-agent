@@ -651,6 +651,57 @@ export function SkillInvocationView({
   );
 }
 
+function ToolDetail({
+  tool,
+  cwd,
+  timestamp,
+}: {
+  tool: NonNullable<TranscriptModelItem['tool']>;
+  cwd?: string;
+  timestamp?: number | string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const action = activityStepParts(
+    {
+      name: tool.name,
+      args: tool.arguments,
+      status: tool.status,
+      isError: tool.isError,
+    },
+    cwd,
+  );
+  const executionMeta = commandStepMeta({
+    name: tool.name,
+    args: tool.arguments,
+    status: tool.status,
+    isError: tool.isError,
+    result: tool.result,
+    data: tool.data,
+  });
+  const argumentProgressMeta =
+    tool.arguments === undefined && typeof tool.argumentLines === 'number'
+      ? `${formatCompactCount(tool.argumentLines)} line${tool.argumentLines === 1 ? '' : 's'} received`
+      : tool.arguments === undefined && typeof tool.argumentChars === 'number'
+        ? `${formatCompactCount(tool.argumentChars)} chars received`
+        : undefined;
+  const meta = executionMeta ?? argumentProgressMeta;
+  return (
+    <details
+      className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary className="tool-step">
+        <ActivityStepContent
+          action={action}
+          meta={meta}
+          timestamp={timestamp}
+        />
+      </summary>
+      {expanded ? <ToolInspector tool={tool} /> : null}
+    </details>
+  );
+}
+
 function TranscriptEntry({
   item,
   cwd,
@@ -757,47 +808,8 @@ function TranscriptEntry({
       </div>
     );
   }
-  if (item.tool) {
-    const tool = item.tool;
-    const action = activityStepParts(
-      {
-        name: tool.name,
-        args: tool.arguments,
-        status: tool.status,
-        isError: tool.isError,
-      },
-      cwd,
-    );
-    const executionMeta = commandStepMeta({
-      name: tool.name,
-      args: tool.arguments,
-      status: tool.status,
-      isError: tool.isError,
-      result: tool.result,
-      data: tool.data,
-    });
-    const argumentProgressMeta =
-      tool.arguments === undefined && typeof tool.argumentLines === 'number'
-        ? `${formatCompactCount(tool.argumentLines)} line${tool.argumentLines === 1 ? '' : 's'} received`
-        : tool.arguments === undefined && typeof tool.argumentChars === 'number'
-          ? `${formatCompactCount(tool.argumentChars)} chars received`
-          : undefined;
-    const meta = executionMeta ?? argumentProgressMeta;
-    return (
-      <details
-        className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
-      >
-        <summary className="tool-step">
-          <ActivityStepContent
-            action={action}
-            meta={meta}
-            timestamp={timestamp}
-          />
-        </summary>
-        <ToolInspector tool={tool} />
-      </details>
-    );
-  }
+  if (item.tool)
+    return <ToolDetail tool={item.tool} cwd={cwd} timestamp={timestamp} />;
   const raw = item.raw;
   return (
     <details className="transcript-entry">

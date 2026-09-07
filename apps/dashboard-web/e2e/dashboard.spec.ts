@@ -5504,6 +5504,51 @@ test('keeps virtual row measurements after appending a user message @desktop', a
     .toBeLessThanOrEqual(1);
 });
 
+test('tool details disclose lazily and preserve current results @desktop', async ({
+  page,
+}) => {
+  const entries = [
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Inspect the live command.' },
+          {
+            type: 'toolCall',
+            id: 'live-tool',
+            name: 'bash',
+            arguments: { command: 'printf live' },
+          },
+        ],
+      },
+    },
+    {
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'live-tool',
+        content: [{ type: 'text', text: 'initial result' }],
+        isError: false,
+      },
+    },
+  ];
+  const mocks = await installPhase6Mocks(page, { entries });
+  await page.goto('/sessions/s1');
+
+  const tool = page.locator('.tool-detail').first();
+  await expect(tool.locator('.tool-inspector')).toHaveCount(0);
+  await tool.locator(':scope > summary.tool-step').click();
+  await expect(tool.locator('.tool-inspector')).toBeVisible();
+  await expect(tool.locator('.tool-inspector')).toContainText('initial result');
+
+  await tool.locator(':scope > summary.tool-step').click();
+  await expect(tool.locator('.tool-inspector')).toHaveCount(0);
+  await tool.locator(':scope > summary.tool-step').click();
+  await expect(tool.locator('.tool-inspector')).toContainText('initial result');
+  await mocks.close();
+});
+
 test('shows structured delegate content while the delegate is running @desktop', async ({
   page,
 }) => {

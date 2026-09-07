@@ -18,7 +18,6 @@ export { Header, runtimeStatusCounts } from '../features/navigation';
 export { ProjectsView, ProjectView } from '../features/project-catalogue';
 export { ProjectNewThreadView } from '../features/project-new-thread';
 export { SessionRow } from '../features/session-row';
-export { SettingsView } from '../features/settings';
 export {
   Back,
   newProjectThreadPath,
