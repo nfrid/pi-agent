@@ -62,12 +62,11 @@ describe('BoundedFeed', () => {
     const pending = iterator.next();
     await Promise.resolve();
     expect(captured).toBe(0);
-    feed.publish({ value: 1 });
+    const published = feed.publish({ value: 1 });
     expect(feed.metrics()).toMatchObject({
       queuedCount: 1,
-      queuedBytes: expect.any(Number),
+      queuedBytes: published.bytes,
     });
-    expect(feed.metrics().queuedBytes).toBeGreaterThan(0);
     release();
     const snapshot = (await pending).value;
     expect(snapshot).toMatchObject({

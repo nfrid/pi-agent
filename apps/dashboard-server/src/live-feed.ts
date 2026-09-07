@@ -118,11 +118,16 @@ interface Cursor {
   readonly frame?: CursorFrame;
 }
 
+interface QueuedFeedItem<TSnapshot, TEvent> {
+  readonly item: FeedItem<TSnapshot, TEvent>;
+  readonly bytes: number;
+}
+
 interface Subscriber<TSnapshot, TEvent> {
-  readonly queue: Array<FeedItem<TSnapshot, TEvent>>;
+  readonly queue: Array<QueuedFeedItem<TSnapshot, TEvent>>;
   queueBytes: number;
   handoff: boolean;
-  deferred: FeedEventRecord<TEvent>[];
+  deferred: Array<QueuedFeedItem<TSnapshot, TEvent>>;
   deferredBytes: number;
   waiting?: {
     resolve: (item: FeedItem<TSnapshot, TEvent>) => void;
@@ -453,7 +458,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
       });
       if (seed !== undefined && this.fits(seed, caughtUpBytes)) {
         for (const record of seed)
-          this.enqueue(subscriber, this.eventItem(record));
+          this.enqueue(subscriber, this.eventItem(record), record.bytes);
         subscriber.handoff = false;
       } else {
         if (seed !== undefined) fallbackReason = 'too-large';
@@ -488,17 +493,19 @@ export class BoundedFeed<TSnapshot, TEvent> {
           throw subscriber.error ?? new FeedOverflowError();
         }
         subscriber.handoff = false;
-        this.enqueue(subscriber, item);
+        this.enqueue(subscriber, item, snapshotBytes);
         for (const deferred of subscriber.deferred)
-          this.enqueue(subscriber, deferred);
+          this.enqueue(subscriber, deferred.item, deferred.bytes);
         subscriber.deferred = [];
         subscriber.deferredBytes = 0;
       }
-      this.enqueue(subscriber, {
+      const caughtUp: FeedCaughtUpRecord = {
         kind: 'caught-up',
         id: this.id(this.sequenceValue, 'caught-up'),
         sequence: this.sequenceValue,
-      });
+      };
+      const caughtUpItemBytes = this.itemBytes(caughtUp);
+      this.enqueue(subscriber, caughtUp, caughtUpItemBytes);
 
       while (!subscriber.closed) {
         const item = await this.next(subscriber);
@@ -555,16 +562,17 @@ export class BoundedFeed<TSnapshot, TEvent> {
   private enqueue(
     subscriber: Subscriber<TSnapshot, TEvent>,
     item: FeedItem<TSnapshot, TEvent>,
+    bytesOverride?: number,
   ): void {
     if (subscriber.closed) return;
-    const itemBytes = this.itemBytes(item);
+    const itemBytes = bytesOverride ?? this.itemBytes(item);
     if (subscriber.waiting) {
       const waiter = subscriber.waiting;
       subscriber.waiting = undefined;
       waiter.resolve(item);
       return;
     }
-    subscriber.queue.push(item);
+    subscriber.queue.push({ item, bytes: itemBytes });
     subscriber.queueBytes += itemBytes;
     if (
       subscriber.queue.length > this.queueCount ||
@@ -584,8 +592,8 @@ export class BoundedFeed<TSnapshot, TEvent> {
     if (subscriber.handoff) {
       // Never coalesce a queued item: replacing it would expose a sequence
       // gap to the client and cannot be repaired without a rebase snapshot.
-      subscriber.deferred.push(item);
-      subscriber.deferredBytes += this.itemBytes(item);
+      subscriber.deferred.push({ item, bytes: record.bytes });
+      subscriber.deferredBytes += record.bytes;
       if (
         subscriber.deferred.length + subscriber.queue.length + 1 >
           this.queueCount ||
@@ -598,16 +606,19 @@ export class BoundedFeed<TSnapshot, TEvent> {
     }
     // Queue every published sequence. Keyed coalescing is replay-only; doing
     // it here would make a connected client observe an unrecoverable gap.
-    this.enqueue(subscriber, item);
+    this.enqueue(subscriber, item, record.bytes);
   }
 
   private next(
     subscriber: Subscriber<TSnapshot, TEvent>,
   ): Promise<FeedItem<TSnapshot, TEvent>> {
     if (subscriber.queue.length > 0) {
-      const item = subscriber.queue.shift() as FeedItem<TSnapshot, TEvent>;
-      subscriber.queueBytes -= this.itemBytes(item);
-      return Promise.resolve(item);
+      const queued = subscriber.queue.shift() as QueuedFeedItem<
+        TSnapshot,
+        TEvent
+      >;
+      subscriber.queueBytes -= queued.bytes;
+      return Promise.resolve(queued.item);
     }
     if (subscriber.closed)
       return Promise.reject(
