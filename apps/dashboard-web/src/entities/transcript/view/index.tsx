@@ -57,6 +57,7 @@ function TranscriptContent({
   branchTopology,
   onJumpToLandmark,
   tailScrollRequest,
+  tailScrollRequestSessionId,
   outlineOpen,
   onOutlineOpenChange,
   onBeforeScroll,
@@ -81,6 +82,7 @@ function TranscriptContent({
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
   tailScrollRequest?: number;
+  tailScrollRequestSessionId?: string;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
@@ -279,6 +281,7 @@ function TranscriptContent({
         setOpen={setOpen}
         runtime={runtime}
         tailScrollRequest={tailScrollRequest}
+        tailScrollRequestSessionId={tailScrollRequestSessionId}
         outlineOpen={outlineOpen}
         onOutlineOpenChange={handleOutlineOpenChange}
         onBeforeScroll={onBeforeScroll}

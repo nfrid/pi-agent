@@ -128,11 +128,13 @@ export function useSessionScrollMemory({
     key: string;
     status: 'pending' | 'complete' | 'cancelled';
   }>({ key: storageKey, status: 'pending' });
-  const loadTargetRef = useRef<string | undefined>(undefined);
+  const historyRequestRef = useRef<
+    { key: string; generation: number } | undefined
+  >(undefined);
+  const historyGenerationRef = useRef(0);
   const activeIdentityRef = useRef(storageKey);
   const activeElementRef = useRef<HTMLDivElement | null>(null);
   const activeOrdinalRef = useRef<number | undefined>(undefined);
-  const activeHasMemoryRef = useRef(false);
   const lastSnapshotRef = useRef<
     { key: string; value: SessionScrollMemory } | undefined
   >(undefined);
@@ -141,8 +143,8 @@ export function useSessionScrollMemory({
       key: string,
       element: HTMLDivElement,
       oldestOrdinal: number | undefined,
+      persist = true,
     ) => {
-      if (activeHasMemoryRef.current) return;
       const anchor = visibleTranscriptAnchor(element);
       const value: SessionScrollMemory = {
         version: SESSION_SCROLL_MEMORY_VERSION,
@@ -152,7 +154,7 @@ export function useSessionScrollMemory({
         ...(oldestOrdinal === undefined ? {} : { oldestOrdinal }),
       };
       lastSnapshotRef.current = { key, value };
-      writeSessionScrollMemory(key, value);
+      if (persist) writeSessionScrollMemory(key, value);
     },
     [modeRef],
   );
@@ -160,23 +162,21 @@ export function useSessionScrollMemory({
 
   useLayoutEffect(() => {
     if (activeIdentityRef.current !== storageKey && enabled) {
+      const previousKey = activeIdentityRef.current;
       const previous = lastSnapshotRef.current;
-      if (previous?.key === activeIdentityRef.current)
+      if (previous?.key === previousKey)
         writeSessionScrollMemory(previous.key, previous.value);
       else {
         const element = activeElementRef.current;
         if (element)
-          saveElement(
-            activeIdentityRef.current,
-            element,
-            activeOrdinalRef.current,
-          );
+          saveElement(previousKey, element, activeOrdinalRef.current);
       }
     }
     activeIdentityRef.current = storageKey;
     setRestoreState({ key: storageKey, status: 'pending' });
     setHistoryLoadFailed(false);
-    loadTargetRef.current = undefined;
+    historyGenerationRef.current += 1;
+    historyRequestRef.current = undefined;
   }, [enabled, saveElement, storageKey]);
 
   const identityReady = restoreState.key === storageKey;
@@ -202,28 +202,37 @@ export function useSessionScrollMemory({
   useEffect(() => {
     if (!needsHistory || !storageMemory || history === undefined) return;
     const target = storageMemory.oldestOrdinal;
-    if (
-      target === undefined ||
-      loadTargetRef.current === `${storageKey}:${target}`
-    )
-      return;
-    loadTargetRef.current = `${storageKey}:${target}`;
-    let active = true;
+    if (target === undefined) return;
+    const key = `${storageKey}:${target}`;
+    const current = historyRequestRef.current;
+    if (current?.key === key) return;
+    const request = { key, generation: historyGenerationRef.current + 1 };
+    historyGenerationRef.current = request.generation;
+    historyRequestRef.current = request;
     void loadThroughOrdinal(target)
       .then((loaded) => {
-        if (active && !loaded) setHistoryLoadFailed(true);
+        if (
+          historyRequestRef.current !== request ||
+          activeIdentityRef.current !== storageKey
+        )
+          return;
+        if (!loaded) setHistoryLoadFailed(true);
       })
       .catch(() => {
-        if (active) setHistoryLoadFailed(true);
+        if (
+          historyRequestRef.current !== request ||
+          activeIdentityRef.current !== storageKey
+        )
+          return;
+        setHistoryLoadFailed(true);
       });
-    return () => {
-      active = false;
-    };
   }, [history, loadThroughOrdinal, needsHistory, storageKey, storageMemory]);
 
   const cancelRestore = useCallback(() => {
     if (!hasMemory) return;
     cancelHistoryRestore();
+    historyGenerationRef.current += 1;
+    historyRequestRef.current = undefined;
     setRestoreState((current) =>
       current.key === storageKey
         ? { ...current, status: 'cancelled' }
@@ -235,13 +244,12 @@ export function useSessionScrollMemory({
       current.key === storageKey ? { ...current, status: 'complete' } : current,
     );
   }, [storageKey]);
-
   useEffect(() => {
     const element = scrollElementRef.current;
     if (!enabled || !sessionMounted || !identityReady || !element) return;
     activeElementRef.current = element;
     activeOrdinalRef.current = history?.start;
-    activeHasMemoryRef.current = hasMemory;
+    if (!hasMemory) saveElement(storageKey, element, history?.start);
     let touchY: number | undefined;
     let saveFrame: number | undefined;
     const save = () => {
@@ -249,6 +257,7 @@ export function useSessionScrollMemory({
       saveElement(storageKey, element, history?.start);
     };
     const onScroll = () => {
+      if (!hasMemory) saveElement(storageKey, element, history?.start, false);
       if (saveFrame !== undefined) window.cancelAnimationFrame(saveFrame);
       saveFrame = window.requestAnimationFrame(() => {
         saveFrame = undefined;
@@ -318,6 +327,10 @@ export function useSessionScrollMemory({
 
   const restorationReady =
     !hasMemory || historyLoadFailed || (!historyPending && !needsHistory);
+  useLayoutEffect(() => {
+    if (hasMemory && restorationReady && storageMemory?.mode === 'following')
+      completeRestore();
+  }, [completeRestore, hasMemory, restorationReady, storageMemory]);
   return {
     initialMode: storageMemory?.mode ?? 'following',
     restoring: hasMemory,
@@ -453,11 +466,6 @@ export function useSessionScroll({
     cancelBottomWrite();
     cancelReadyTimer();
   }, [cancelBottomWrite, cancelReadyTimer, enabled, id, initialMode, modeRef]);
-
-  useLayoutEffect(() => {
-    if (enabled && sessionMounted && restorationReady)
-      modeRef.current = initialMode;
-  }, [enabled, initialMode, modeRef, restorationReady, sessionMounted]);
 
   useLayoutEffect(() => {
     mountedSessionIdRef.current = enabled && sessionMounted ? id : undefined;
@@ -633,6 +641,7 @@ export function useSessionScroll({
     stopFollowing: enterManualMode,
     tailReadySessionId,
     tailScrollRequest,
+    tailScrollRequestSessionId: id,
     modeRef,
   };
 }

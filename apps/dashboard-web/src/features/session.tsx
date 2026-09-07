@@ -136,6 +136,7 @@ export function SessionView({
     stopFollowing,
     tailReadySessionId,
     tailScrollRequest,
+    tailScrollRequestSessionId,
   } = useSessionScroll({
     id,
     data,
@@ -275,6 +276,7 @@ export function SessionView({
             runtime={runtime}
             cwd={runtime?.cwd ?? data.metadata.cwd}
             tailScrollRequest={tailScrollRequest}
+            tailScrollRequestSessionId={tailScrollRequestSessionId}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}
             onBeforeScroll={handleBeforeTranscriptNavigation}

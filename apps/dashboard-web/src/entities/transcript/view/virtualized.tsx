@@ -42,6 +42,7 @@ export function VirtualizedTranscript({
   onBranchPointChange,
   onJumpToLandmark,
   tailScrollRequest,
+  tailScrollRequestSessionId,
   outlineOpen,
   onOutlineOpenChange,
   onBeforeScroll,
@@ -66,6 +67,7 @@ export function VirtualizedTranscript({
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
   tailScrollRequest?: number;
+  tailScrollRequestSessionId?: string;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
@@ -86,6 +88,7 @@ export function VirtualizedTranscript({
   const rows = useMemo(() => buildVirtualTranscriptRows(items), [items]);
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
+  const consumedTailRequestRef = useRef<string | undefined>(undefined);
   const [localPendingJumpKey, setLocalPendingJumpKey] = useState<string>();
   const requestedJumpKey = pendingJumpKey ?? localPendingJumpKey;
   const virtualizer = useVirtualizer({
@@ -98,12 +101,15 @@ export function VirtualizedTranscript({
   });
   useLayoutEffect(() => {
     if (!tailScrollRequest || rows.length === 0) return;
+    const requestKey = `${tailScrollRequestSessionId ?? ''}:${tailScrollRequest}`;
+    if (consumedTailRequestRef.current === requestKey) return;
+    consumedTailRequestRef.current = requestKey;
     virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
     const frame = window.requestAnimationFrame(() => {
       virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [rows.length, tailScrollRequest, virtualizer]);
+  }, [rows.length, tailScrollRequest, tailScrollRequestSessionId, virtualizer]);
   useLayoutEffect(() => {
     void open;
     void rows.length;

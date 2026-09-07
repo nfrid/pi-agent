@@ -68,6 +68,7 @@ test('aborts older history when navigating away from a session', async ({
 }) => {
   let releaseOlder!: () => void;
   let olderStarted!: () => void;
+  let failOlderRequest = false;
   const olderRequestStarted = new Promise<void>((resolve) => {
     olderStarted = resolve;
   });
@@ -124,6 +125,12 @@ test('aborts older history when navigating away from a session', async ({
     if (id === 'session-1' && before) {
       olderStarted();
       await olderRequestRelease;
+      if (failOlderRequest)
+        return route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'history unavailable' }),
+        });
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
@@ -205,6 +212,53 @@ test('aborts older history when navigating away from a session', async ({
       name: /Load earlier history|Retry earlier history/,
     }),
   ).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const key =
+      'pi.dashboard.session-scroll.v1:history-navigation-test:session-1';
+    const saved = JSON.parse(sessionStorage.getItem(key) ?? '{}');
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        ...saved,
+        mode: 'manual',
+        rowKey: 'first-user',
+        rowOffset: 24,
+        scrollTop: 0,
+        oldestOrdinal: 0,
+      }),
+    );
+  });
+  await page.goto('/sessions/session-1');
+  const restoredOlderRow = page.locator('[data-transcript-key="first-user"]');
+  await expect(restoredOlderRow).toBeVisible();
+  await expect
+    .poll(() =>
+      restoredOlderRow.evaluate(
+        (row) =>
+          row.getBoundingClientRect().top -
+          (row.closest('.session-transcript-scroll')?.getBoundingClientRect()
+            .top ?? 0),
+      ),
+    )
+    .toBeGreaterThanOrEqual(16);
+  await expect
+    .poll(() =>
+      restoredOlderRow.evaluate(
+        (row) =>
+          row.getBoundingClientRect().top -
+          (row.closest('.session-transcript-scroll')?.getBoundingClientRect()
+            .top ?? 0),
+      ),
+    )
+    .toBeLessThanOrEqual(32);
+
+  failOlderRequest = true;
+  await page.reload();
+  await expect(page.locator('.session-loading-curtain')).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Retry earlier history' }),
+  ).toBeVisible();
 });
 
 test('switching chats establishes the new transcript tail', async ({
@@ -302,6 +356,7 @@ test('switching chats establishes the new transcript tail', async ({
   await transcriptScroll(page).evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -240 }));
     element.scrollTop = Math.max(0, element.scrollTop - 240);
+    element.dispatchEvent(new Event('scroll'));
   });
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
   const sessionTwoPosition = await transcriptScroll(page).evaluate(
@@ -362,6 +417,34 @@ test('switching chats establishes the new transcript tail', async ({
   );
   expect(savedSessionTwoMemory.mode).toBe('manual');
   expect(savedSessionTwoMemory.rowKey).toBeTruthy();
+  const savedSessionTwoRow = () =>
+    page
+      .locator(
+        `[data-transcript-row="${savedSessionTwoMemory.rowKey}"], [data-transcript-key="${savedSessionTwoMemory.rowKey}"]`,
+      )
+      .first();
+  const savedSessionTwoOffset = Number(savedSessionTwoMemory.rowOffset);
+  await expect(savedSessionTwoRow()).toBeVisible();
+  await expect
+    .poll(() =>
+      savedSessionTwoRow().evaluate(
+        (row) =>
+          row.getBoundingClientRect().top -
+          (row.closest('.session-transcript-scroll')?.getBoundingClientRect()
+            .top ?? 0),
+      ),
+    )
+    .toBeGreaterThanOrEqual(savedSessionTwoOffset - 8);
+  await expect
+    .poll(() =>
+      savedSessionTwoRow().evaluate(
+        (row) =>
+          row.getBoundingClientRect().top -
+          (row.closest('.session-transcript-scroll')?.getBoundingClientRect()
+            .top ?? 0),
+      ),
+    )
+    .toBeLessThanOrEqual(savedSessionTwoOffset + 8);
   await navigateInDashboard(page, '/sessions/session-1');
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
   expect(sessionTwoPosition).toBeGreaterThan(0);
