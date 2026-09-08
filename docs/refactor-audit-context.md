@@ -112,6 +112,35 @@ recognize `session-link-conflict`. These are not a protocol or storage migration
 - This branch has not been merged into the production checkout or deployed.
   Baseline failures remain explicit release caveats, not passing checks.
 
+## September 2026 shutdown and recovery hardening
+
+The audit at `ddc34986` was implemented in the isolated `fix/audit-hardening`
+branch. These constraints apply to the follow-up work:
+
+- `clear_done` retains the transitive prerequisite closure of unfinished tasks.
+  Dropped prerequisites remain unsatisfied; cleanup never rewrites dependency
+  edges or leaves new dangling references.
+- Pinned HTTP requests honor Node's DNS lookup contract. The transport owns
+  compression decoding and cancellation; extraction bounds decoded content.
+- Worktree recovery validates repository, registration, and branch identity
+  before activation or delegate observation. Caller-owned checkout cleanup
+  policies remain distinct. Cleanup errors report the latest durable record.
+- Runtime-host shutdown closes launch admission and drains existing launch
+  locks. Session-index shutdown drains scans, rebuilds, watcher setup, and
+  admitted renames before metadata teardown. Failed HTTP startup can still
+  retry with the same index; final shutdown is terminal.
+- Remote-control scope replacement stages snapshots before changing ownership.
+  Queue snapshots follow session identity. Fresh-turn markers belong to the
+  scoped generation, so old cancellation callbacks cannot consume new markers.
+- Portable delegate compatibility identities have one protocol owner; persisted
+  hashes and the distinct legacy extension run-ID algorithm are unchanged.
+- History pagination uses the explicitly owning client. Finite and feed session
+  snapshots must match the requested session ID. Existing retained-history
+  reconciliation was verified and deliberately left unchanged.
+
+This work does not introduce a lifecycle framework, change storage formats,
+merge into `main`, or deploy/restart production services.
+
 ## Validation baseline
 
 The integrated change is expected to pass `bun run check`, a production dashboard-web build, focused contribution/protocol/delegate/web tests, and the usage Playwright flow. The final commands and counts belong in the implementing change record; do not treat this note as a substitute for rerunning them after later edits.
