@@ -24,7 +24,11 @@ import {
   LiveSurfaceHub,
 } from '../shared/runtime/live-surfaces';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
-import { findScopedServices } from '../shared/runtime/scoped-services';
+import {
+  findScopedServices,
+  getScopedServices,
+  releaseScopedServices,
+} from '../shared/runtime/scoped-services';
 import { registerTasksCapability } from '../tasks/register-capability';
 import {
   BridgeClient,
@@ -99,15 +103,44 @@ describe('remote-control session lifecycle', () => {
     const first = contextFor(`failed-snapshot-first-${Date.now()}`);
     const second = contextFor(`failed-snapshot-second-${Date.now()}`, true);
     runtime.setContext(first);
+    runtime.queueDrafts.add({
+      clientId: 'old-draft',
+      mode: 'followUp',
+      text: 'old draft',
+    });
+    const existingTarget = getScopedServices(
+      second.sessionManager.getSessionId(),
+    );
     runtime.setContext(second);
     expect(runtime.isCurrent(first)).toBe(true);
     expect(runtime.snapshot().session.id).toBe(
       first.sessionManager.getSessionId(),
     );
+    expect(findScopedServices(second.sessionManager.getSessionId())).toBe(
+      existingTarget,
+    );
+    expect(runtime.queueDrafts.list()).toEqual([
+      expect.objectContaining({ clientId: 'old-draft' }),
+    ]);
+
+    const unownedFailed = contextFor(
+      `unowned-failed-snapshot-${Date.now()}`,
+      true,
+    );
+    runtime.setContext(unownedFailed);
     expect(
-      findScopedServices(second.sessionManager.getSessionId()),
+      findScopedServices(unownedFailed.sessionManager.getSessionId()),
     ).toBeUndefined();
-    runtime.clearContext(first);
+    expect(runtime.isCurrent(first)).toBe(true);
+
+    const successful = contextFor(`successful-snapshot-${Date.now()}`);
+    runtime.setContext(successful);
+    expect(runtime.snapshot().queueDrafts).toEqual([]);
+    runtime.clearContext(successful);
+    releaseScopedServices(second.sessionManager.getSessionId(), existingTarget);
+    expect(
+      findScopedServices(first.sessionManager.getSessionId()),
+    ).toBeUndefined();
     expect(
       findScopedServices(first.sessionManager.getSessionId()),
     ).toBeUndefined();

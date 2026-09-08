@@ -15,6 +15,7 @@ import {
 import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
 import { pendingProcessCount } from '../shared/runtime/pending-processes';
 import {
+  findScopedServices,
   getScopedServices,
   releaseScopedServices,
   type ScopedServices,
@@ -99,6 +100,7 @@ export function createRemoteControlRuntime(
     state = liveState(ctx),
     contextTokens?: number,
     services = scopedServices,
+    queuedDrafts = queueDrafts.list(),
   ): RuntimeSnapshotPatch => {
     const currentUsage = ctx.getContextUsage();
     const contextWindow =
@@ -163,7 +165,7 @@ export function createRemoteControlRuntime(
             percent: usage.percent,
           }
         : undefined,
-      queueDrafts: queueDrafts.list(),
+      queueDrafts: queuedDrafts,
       composerCommands: composerCommandsSnapshot(pi),
       capabilities: capabilitiesFor(services),
       extensionSurfaces: services.liveSurfaceHub.snapshot(),
@@ -174,8 +176,15 @@ export function createRemoteControlRuntime(
   const snapshotFrom = (
     ctx: ExtensionContext,
     services = scopedServices,
+    queuedDrafts = queueDrafts.list(),
   ): RuntimeSnapshot => {
-    const patch = runtimePatchFrom(ctx, undefined, undefined, services);
+    const patch = runtimePatchFrom(
+      ctx,
+      undefined,
+      undefined,
+      services,
+      queuedDrafts,
+    );
     return {
       runtimeId,
       ownership,
@@ -241,22 +250,33 @@ export function createRemoteControlRuntime(
     const previousServices = scopedServices;
     const previousScope = contextScope;
     let nextServices: ScopedServices | undefined;
+    let nextServicesWasCreated = false;
+    let attemptedBinding = false;
     try {
       lastError = undefined;
       const nextScope = ctx.sessionManager.getSessionId();
-      nextServices = getScopedServices(nextScope);
-      nextServices.dashboardUsage = usageBroker;
+      const existingServices = findScopedServices(nextScope);
+      nextServices = existingServices ?? getScopedServices(nextScope);
+      nextServicesWasCreated = existingServices === undefined;
       const replacingScope =
         previousScope !== undefined && previousScope !== nextScope;
       // Build the replacement completely before publishing it. In particular,
       // snapshot failures must not destroy the still-current generation.
       const shouldRefresh =
         refreshSnapshot || previousScope === undefined || replacingScope;
-      const next = shouldRefresh ? snapshotFrom(ctx, nextServices) : undefined;
+      const next = shouldRefresh
+        ? snapshotFrom(
+            ctx,
+            nextServices,
+            replacingScope ? [] : queueDrafts.list(),
+          )
+        : undefined;
       if (replacingScope) eventNormalizer.reset();
+      attemptedBinding = nextServices !== previousServices;
+      if (attemptedBinding) client.bindServices(nextServices.liveSurfaceHub);
+      nextServices.dashboardUsage = usageBroker;
       scopedServices = nextServices;
       liveSurfaceHub = nextServices.liveSurfaceHub;
-      client.bindServices(liveSurfaceHub);
       if (replacingScope && previousScope)
         releaseScopedServices(previousScope, previousServices);
       queueDrafts.setSession(nextScope);
@@ -265,7 +285,15 @@ export function createRemoteControlRuntime(
       currentSessionId = nextScope;
       if (next) cachedSnapshot = next;
     } catch (error) {
-      if (nextServices && nextServices !== previousServices)
+      if (attemptedBinding) {
+        try {
+          client.bindServices(previousServices.liveSurfaceHub);
+        } catch {
+          // The bridge is best-effort; retain the old runtime ownership even if
+          // an observer cannot be rebound during rollback.
+        }
+      }
+      if (nextServices && nextServicesWasCreated)
         releaseScopedServices(nextServices.scopeId, nextServices);
       lastError = error instanceof Error ? error.message : String(error);
       if (!context) {
