@@ -56,13 +56,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function cancelResponse(
-  response: Response,
-  reason: string,
-): Promise<void> {
-  await response.body?.cancel(reason);
-}
-
 function titleFromText(text: string, url: string): string {
   const heading = text
     .match(/^#{1,2}\s+(.+)/m)?.[1]
@@ -99,7 +92,7 @@ async function extractWithJina(
         : AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) {
-      await cancelResponse(response, 'Unsupported upstream response');
+      await response.body?.cancel('Unsupported upstream response');
       return null;
     }
     const text = await readResponseTextLimited(response, MAX_RESPONSE_BYTES);
@@ -143,7 +136,7 @@ async function extractViaHttp(
       { allowRanges: loadSsrfAllowRanges(), lookup: options.lookup },
     );
     if (!response.ok) {
-      await cancelResponse(response, 'HTTP error');
+      await response.body?.cancel('HTTP error');
       return {
         url,
         title: '',
@@ -151,14 +144,22 @@ async function extractViaHttp(
         error: `HTTP ${response.status}: ${response.statusText}`,
       };
     }
+    const encoding = response.headers
+      .get('content-encoding')
+      ?.trim()
+      .toLowerCase();
+    if (encoding && !['gzip', 'x-gzip', 'deflate', 'br'].includes(encoding)) {
+      await response.body?.cancel('Unsupported content encoding');
+      return {
+        url,
+        title: '',
+        content: '',
+        error: `Unsupported content encoding: ${encoding}`,
+      };
+    }
     const contentLength = Number(response.headers.get('content-length'));
-    const isEncoded = Boolean(response.headers.get('content-encoding'));
-    if (
-      !isEncoded &&
-      Number.isFinite(contentLength) &&
-      contentLength > MAX_RESPONSE_BYTES
-    ) {
-      await cancelResponse(response, 'Response exceeded size limit');
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+      await response.body?.cancel('Response exceeded size limit');
       return {
         url,
         title: '',
@@ -172,7 +173,7 @@ async function extractViaHttp(
       /^(image|audio|video)\//.test(contentType) ||
       contentType.includes('application/pdf')
     ) {
-      await cancelResponse(response, 'Unsupported content type');
+      await response.body?.cancel('Unsupported content type');
       return {
         url,
         title: '',

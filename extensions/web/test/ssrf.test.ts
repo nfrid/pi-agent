@@ -1,5 +1,10 @@
 import http from 'node:http';
-import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
+import {
+  brotliCompressSync,
+  createGzip,
+  deflateSync,
+  gzipSync,
+} from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { validateRemoteUrl as validatePolicyUrl } from '../ssrf-policy';
 import { fetchRemoteUrl, validateRemoteUrl } from '../ssrf-protection';
@@ -57,7 +62,7 @@ describe('SSRF protection', () => {
         `http://loopback.test:${address.port}/`,
         {},
         {
-          allowRanges: ['127.0.0.0/8'],
+          allowRanges: ['127.0.0.1/32'],
           lookup: async () => [{ address: '127.0.0.1', family: 4 }],
         },
       );
@@ -90,9 +95,82 @@ describe('SSRF protection', () => {
       const response = await fetchRemoteUrl(
         `http://127.0.0.1:${address.port}/`,
         {},
-        { allowRanges: ['127.0.0.0/8'] },
+        { allowRanges: ['127.0.0.1/32'] },
       );
       await expect(response.text()).resolves.toBe(`compressed ${encoding}`);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it.each([
+    ['corrupt', Buffer.from('not gzip')],
+    ['truncated', gzipSync('truncated').subarray(0, 8)],
+  ])('surfaces %s compressed body errors', async (_name, body) => {
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { 'content-encoding': 'gzip' });
+      response.end(body);
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      const response = await fetchRemoteUrl(
+        `http://127.0.0.1:${address.port}/`,
+        {},
+        { allowRanges: ['127.0.0.1/32'] },
+      );
+      await expect(response.text()).rejects.toThrow();
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it('closes an ongoing compressed connection when the body is canceled', async () => {
+    let closedResolve: (() => void) | undefined;
+    const closed = new Promise<void>((resolve) => {
+      closedResolve = resolve;
+    });
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { 'content-encoding': 'gzip' });
+      response.on('close', () => closedResolve?.());
+      const gzip = createGzip();
+      gzip.pipe(response);
+      const interval = setInterval(
+        () => gzip.write('ongoing compressed data\\n'),
+        5,
+      );
+      response.on('close', () => {
+        clearInterval(interval);
+        gzip.destroy();
+      });
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      const response = await fetchRemoteUrl(
+        `http://127.0.0.1:${address.port}/`,
+        {},
+        { allowRanges: ['127.0.0.1/32'] },
+      );
+      await response.body?.cancel('test cancellation');
+      await expect(
+        Promise.race([
+          closed,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('server stayed open')), 1_000),
+          ),
+        ]),
+      ).resolves.toBeUndefined();
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -118,7 +196,7 @@ describe('SSRF protection', () => {
       const response = await fetchRemoteUrl(
         `http://127.0.0.1:${address.port}/`,
         {},
-        { allowRanges: ['127.0.0.0/8'] },
+        { allowRanges: ['127.0.0.1/32'] },
       );
       await expect(
         readResponseTextLimited(response, 5 * 1024 * 1024),
@@ -175,13 +253,17 @@ describe('SSRF protection', () => {
   });
 
   it('cancels a real redirect body when the redirect limit is exceeded', async () => {
-    let closed = false;
+    let closedResolve: (() => void) | undefined;
+    const closed = new Promise<void>((resolve) => {
+      closedResolve = resolve;
+    });
     const server = http.createServer((_request, response) => {
-      response.on('close', () => {
-        closed = true;
-      });
       response.writeHead(302, { location: '/next' });
-      response.end('discard me');
+      const interval = setInterval(() => response.write('discard me\n'), 5);
+      response.on('close', () => {
+        clearInterval(interval);
+        closedResolve?.();
+      });
     });
     await new Promise<void>((resolve) =>
       server.listen(0, '127.0.0.1', resolve),
@@ -193,10 +275,17 @@ describe('SSRF protection', () => {
         fetchRemoteUrl(
           `http://127.0.0.1:${address.port}/`,
           {},
-          { allowRanges: ['127.0.0.0/8'], maxRedirects: 0 },
+          { allowRanges: ['127.0.0.1/32'], maxRedirects: 0 },
         ),
       ).rejects.toThrow('Too many redirects');
-      expect(closed).toBe(true);
+      await expect(
+        Promise.race([
+          closed,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('server stayed open')), 1_000),
+          ),
+        ]),
+      ).resolves.toBeUndefined();
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

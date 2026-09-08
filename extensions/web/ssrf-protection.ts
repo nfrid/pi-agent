@@ -2,7 +2,7 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { Readable } from 'node:stream';
+import { PassThrough, pipeline, Readable } from 'node:stream';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import {
   type AddressPolicyOptions,
@@ -128,22 +128,22 @@ async function pinnedFetch(
               : encoding === 'br'
                 ? createBrotliDecompress()
                 : null;
+        let body: Readable = response;
         if (decoder) {
-          response.pipe(decoder);
+          const output = new PassThrough();
+          pipeline(response, decoder, output, (error) => {
+            if (error && !output.destroyed) output.destroy(error);
+          });
+          body = output;
           headers.delete('content-encoding');
           headers.delete('content-length');
         }
         resolve(
-          new Response(
-            Readable.toWeb(
-              (decoder ?? response) as Readable,
-            ) as ReadableStream<Uint8Array>,
-            {
-              status,
-              statusText: response.statusMessage,
-              headers,
-            },
-          ),
+          new Response(Readable.toWeb(body) as ReadableStream<Uint8Array>, {
+            status,
+            statusText: response.statusMessage,
+            headers,
+          }),
         );
       },
     );
