@@ -141,9 +141,6 @@ describe('remote-control session lifecycle', () => {
     expect(
       findScopedServices(first.sessionManager.getSessionId()),
     ).toBeUndefined();
-    expect(
-      findScopedServices(first.sessionManager.getSessionId()),
-    ).toBeUndefined();
   });
 
   it('keeps raw argument delta updates non-droppable', () => {

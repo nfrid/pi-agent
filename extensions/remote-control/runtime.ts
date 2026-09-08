@@ -100,7 +100,6 @@ export function createRemoteControlRuntime(
     state = liveState(ctx),
     contextTokens?: number,
     services = scopedServices,
-    queuedDrafts = queueDrafts.list(),
   ): RuntimeSnapshotPatch => {
     const currentUsage = ctx.getContextUsage();
     const contextWindow =
@@ -165,7 +164,8 @@ export function createRemoteControlRuntime(
             percent: usage.percent,
           }
         : undefined,
-      queueDrafts: queuedDrafts,
+      queueDrafts:
+        queueDrafts.getSessionId() === sessionId ? queueDrafts.list() : [],
       composerCommands: composerCommandsSnapshot(pi),
       capabilities: capabilitiesFor(services),
       extensionSurfaces: services.liveSurfaceHub.snapshot(),
@@ -176,15 +176,8 @@ export function createRemoteControlRuntime(
   const snapshotFrom = (
     ctx: ExtensionContext,
     services = scopedServices,
-    queuedDrafts = queueDrafts.list(),
   ): RuntimeSnapshot => {
-    const patch = runtimePatchFrom(
-      ctx,
-      undefined,
-      undefined,
-      services,
-      queuedDrafts,
-    );
+    const patch = runtimePatchFrom(ctx, undefined, undefined, services);
     return {
       runtimeId,
       ownership,
@@ -264,13 +257,7 @@ export function createRemoteControlRuntime(
       // snapshot failures must not destroy the still-current generation.
       const shouldRefresh =
         refreshSnapshot || previousScope === undefined || replacingScope;
-      const next = shouldRefresh
-        ? snapshotFrom(
-            ctx,
-            nextServices,
-            replacingScope ? [] : queueDrafts.list(),
-          )
-        : undefined;
+      const next = shouldRefresh ? snapshotFrom(ctx, nextServices) : undefined;
       if (replacingScope) eventNormalizer.reset();
       attemptedBinding = nextServices !== previousServices;
       if (attemptedBinding) client.bindServices(nextServices.liveSurfaceHub);
