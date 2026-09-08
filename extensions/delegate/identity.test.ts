@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { compatibilityHash, deriveCompatibilityLineageId } from './identity';
+import { deriveCompatibilityRunId } from './identity';
 
 describe('delegate compatibility identity', () => {
-  it('keeps the browser-safe lineage compatibility vector stable', () => {
-    expect(compatibilityHash('delegate-lineage:legacy-token')).toBe(
-      'dea8c20f3c21ef45',
-    );
-    expect(deriveCompatibilityLineageId('legacy-token')).toBe(
-      'dl-dea8c20f3c21ef45',
-    );
+  it('preserves the distinct legacy run identity derived from extension run facts', () => {
+    expect(
+      deriveCompatibilityRunId({
+        continuation: 'legacy-token',
+        task: 'review',
+        queuedAt: 123,
+      }),
+    ).toBe('dr-3cb19527a906fa659a3bec3defc28797');
   });
 });

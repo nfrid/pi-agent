@@ -4,6 +4,8 @@ import {
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   DashboardSettingsSchema,
   DelegateWorkflowMetadataSchema,
+  delegateCompatibilityHash,
+  deriveCompatibilityLineageId,
   deriveSessionTitle,
   ExtensionSurfaceSchema,
   FileReadRequestSchema,
@@ -65,6 +67,23 @@ import {
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
 } from './index.js';
+
+describe('delegate compatibility identities', () => {
+  it.each([
+    ['', '811c9dc59e3779b9'],
+    ['delegate-lineage:legacy-token', 'dea8c20f3c21ef45'],
+    ['delegate-lineage:ветка-🌿', '1dedeb33fed8fa4b'],
+    ['delegate-run:session:entry:0', '0318e05098c51fb6'],
+  ])('preserves the persisted hash for %j', (input, expected) => {
+    expect(delegateCompatibilityHash(input)).toBe(expected);
+  });
+
+  it('uses the same lineage identity for live and persisted legacy metadata', () => {
+    expect(deriveCompatibilityLineageId('legacy-token')).toBe(
+      'dl-dea8c20f3c21ef45',
+    );
+  });
+});
 
 describe('dashboard protocol', () => {
   it('defines the bounded host file-read request and result contract', () => {

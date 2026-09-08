@@ -6,6 +6,10 @@ export {
   projectDelegateUsage,
 } from '@pi-dashboard/extension-contributions';
 export {
+  delegateCompatibilityHash,
+  deriveCompatibilityLineageId,
+} from './delegate-history-contracts.js';
+export {
   MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
   MAX_COMPOSER_COMMAND_DESCRIPTION,
   MAX_COMPOSER_COMMAND_NAME,

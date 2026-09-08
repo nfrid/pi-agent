@@ -7,6 +7,7 @@ import type {
   DelegateHistoryRunDetailResponse,
 } from '@pi-dashboard/protocol';
 import {
+  deriveCompatibilityLineageId,
   isCanonicalWorkflowAttemptReference,
   isCanonicalWorkflowLogicalId,
   MAX_DELEGATE_HISTORY_CONTEXT_NOTE,
@@ -23,6 +24,7 @@ import {
   MAX_WORKFLOW_ATTEMPT_ORDINAL,
   MAX_WORKFLOW_DEPENDENCIES,
   projectDelegateUsage,
+  delegateCompatibilityHash as stableHash,
 } from '@pi-dashboard/protocol';
 
 /**
@@ -90,19 +92,6 @@ function entryTimestamp(entry: RecordValue): number | undefined {
     : undefined;
 }
 
-function stableHash(value: string): string {
-  // Two independent FNV-style lanes give a stable, browser-safe compatibility
-  // identity without making the dashboard server depend on Node crypto.
-  let first = 0x811c9dc5;
-  let second = 0x9e3779b9;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    first = Math.imul(first ^ code, 0x01000193);
-    second = Math.imul(second ^ (code + index), 0x85ebca6b);
-  }
-  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
-}
-
 // Legacy extension run IDs were derived from run facts alone. The server
 // additionally has the durable parent entry identity, so old live and
 // persisted run IDs cannot be reconciled safely in every case; use the shared
@@ -113,10 +102,6 @@ function compatibilityRunId(
   runIndex: string,
 ): string {
   return `dr-${stableHash(`delegate-run:${sessionId}:${entryIdentity}:${runIndex}`)}`;
-}
-
-function compatibilityLineageId(continuation: string): string {
-  return `dl-${stableHash(`delegate-lineage:${continuation}`)}`;
 }
 
 function assistantResponse(run: RecordValue): string | undefined {
@@ -2007,7 +1992,7 @@ function invocation(
   const explicitLineageId = stringValue(occurrence.run.lineageId, 256);
   const lineageId =
     explicitLineageId ??
-    (continuation ? compatibilityLineageId(continuation) : runId);
+    (continuation ? deriveCompatibilityLineageId(continuation) : runId);
   const state = occurrenceState(occurrence);
   const childSessionId = stringValue(occurrence.run.sessionId, 256);
   const name =
