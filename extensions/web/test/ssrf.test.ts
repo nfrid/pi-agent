@@ -1,6 +1,9 @@
+import http from 'node:http';
+import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { validateRemoteUrl as validatePolicyUrl } from '../ssrf-policy';
 import { fetchRemoteUrl, validateRemoteUrl } from '../ssrf-protection';
+import { readResponseTextLimited } from '../utils';
 
 describe('SSRF address policy', () => {
   it('rejects a DNS answer set containing any private address', async () => {
@@ -40,6 +43,92 @@ describe('SSRF address policy', () => {
 });
 
 describe('SSRF protection', () => {
+  it('fetches a hostname through the pinned production transport', async () => {
+    const server = http.createServer((_request, response) => {
+      response.end('loopback hostname');
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      const response = await fetchRemoteUrl(
+        `http://loopback.test:${address.port}/`,
+        {},
+        {
+          allowRanges: ['127.0.0.0/8'],
+          lookup: async () => [{ address: '127.0.0.1', family: 4 }],
+        },
+      );
+      await expect(response.text()).resolves.toBe('loopback hostname');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it.each([
+    ['gzip', gzipSync('compressed gzip')],
+    ['deflate', deflateSync('compressed deflate')],
+    ['br', brotliCompressSync('compressed br')],
+  ])('decodes %s responses and enforces the decoded size limit', async (encoding, body) => {
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, {
+        'content-encoding': encoding,
+        'content-length': body.byteLength,
+      });
+      response.end(body);
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      const response = await fetchRemoteUrl(
+        `http://127.0.0.1:${address.port}/`,
+        {},
+        { allowRanges: ['127.0.0.0/8'] },
+      );
+      await expect(response.text()).resolves.toBe(`compressed ${encoding}`);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it('rejects oversized decompressed responses', async () => {
+    const body = gzipSync(Buffer.alloc(5 * 1024 * 1024 + 1, 65));
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, {
+        'content-encoding': 'gzip',
+        'content-length': body.byteLength,
+      });
+      response.end(body);
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      const response = await fetchRemoteUrl(
+        `http://127.0.0.1:${address.port}/`,
+        {},
+        { allowRanges: ['127.0.0.0/8'] },
+      );
+      await expect(
+        readResponseTextLimited(response, 5 * 1024 * 1024),
+      ).rejects.toThrow('Response too large');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
   it('blocks private DNS results', async () => {
     await expect(
       validateRemoteUrl('https://example.test', {
@@ -83,6 +172,56 @@ describe('SSRF protection', () => {
       address: '93.184.216.35',
       family: 4,
     });
+  });
+
+  it('cancels a real redirect body when the redirect limit is exceeded', async () => {
+    let closed = false;
+    const server = http.createServer((_request, response) => {
+      response.on('close', () => {
+        closed = true;
+      });
+      response.writeHead(302, { location: '/next' });
+      response.end('discard me');
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      await expect(
+        fetchRemoteUrl(
+          `http://127.0.0.1:${address.port}/`,
+          {},
+          { allowRanges: ['127.0.0.0/8'], maxRedirects: 0 },
+        ),
+      ).rejects.toThrow('Too many redirects');
+      expect(closed).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it('cancels a redirect body when the redirect limit is exceeded', async () => {
+    const response = new Response('discard me', {
+      status: 302,
+      headers: { location: 'https://next.test/' },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    await expect(
+      fetchRemoteUrl(
+        'https://public.test/',
+        {},
+        {
+          maxRedirects: 0,
+          lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+          fetch: fetchMock,
+        },
+      ),
+    ).rejects.toThrow('Too many redirects');
+    expect(response.bodyUsed).toBe(true);
   });
 
   it('blocks a private redirect before connection establishment', async () => {

@@ -3,6 +3,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import { Readable } from 'node:stream';
+import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import {
   type AddressPolicyOptions,
   type Lookup,
@@ -84,8 +85,10 @@ async function pinnedFetch(
         headers,
         signal: init.signal ?? undefined,
         agent: false,
-        lookup: (_hostname, _options, callback) =>
-          callback(null, pinned.address, pinned.family),
+        lookup: (_hostname, lookupOptions, callback) =>
+          lookupOptions.all
+            ? callback(null, [pinned])
+            : callback(null, pinned.address, pinned.family),
         ...(url.protocol === 'https:' && !net.isIP(url.hostname)
           ? { servername: url.hostname }
           : {}),
@@ -104,11 +107,37 @@ async function pinnedFetch(
           status === 204 ||
           status === 205 ||
           status === 304;
+        if (noBody) {
+          response.resume();
+          resolve(
+            new Response(null, {
+              status,
+              statusText: response.statusMessage,
+              headers,
+            }),
+          );
+          return;
+        }
+
+        const encoding = headers.get('content-encoding')?.trim().toLowerCase();
+        const decoder =
+          encoding === 'gzip' || encoding === 'x-gzip'
+            ? createGunzip()
+            : encoding === 'deflate'
+              ? createInflate()
+              : encoding === 'br'
+                ? createBrotliDecompress()
+                : null;
+        if (decoder) {
+          response.pipe(decoder);
+          headers.delete('content-encoding');
+          headers.delete('content-length');
+        }
         resolve(
           new Response(
-            noBody
-              ? null
-              : (Readable.toWeb(response) as ReadableStream<Uint8Array>),
+            Readable.toWeb(
+              (decoder ?? response) as Readable,
+            ) as ReadableStream<Uint8Array>,
             {
               status,
               statusText: response.statusMessage,
@@ -167,10 +196,12 @@ export async function fetchRemoteUrl(
 
     const location = response.headers.get('location');
     if (!location) return response;
-    if (redirects === maxRedirects)
+    if (redirects === maxRedirects) {
+      await response.body?.cancel('Too many redirects');
       throw new Error(`Too many redirects fetching ${current.toString()}`);
+    }
 
-    await response.body?.cancel();
+    await response.body?.cancel('Following redirect');
     const nextUrl = new URL(location, current);
     if (nextUrl.origin !== current.origin)
       requestInit = {

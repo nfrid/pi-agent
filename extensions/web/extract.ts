@@ -56,6 +56,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function cancelResponse(
+  response: Response,
+  reason: string,
+): Promise<void> {
+  await response.body?.cancel(reason);
+}
+
 function titleFromText(text: string, url: string): string {
   const heading = text
     .match(/^#{1,2}\s+(.+)/m)?.[1]
@@ -91,7 +98,10 @@ async function extractWithJina(
         ? AbortSignal.any([signal, AbortSignal.timeout(DEFAULT_TIMEOUT_MS)])
         : AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      await cancelResponse(response, 'Unsupported upstream response');
+      return null;
+    }
     const text = await readResponseTextLimited(response, MAX_RESPONSE_BYTES);
     const marker = 'Markdown Content:';
     const markerIndex = text.indexOf(marker);
@@ -133,6 +143,7 @@ async function extractViaHttp(
       { allowRanges: loadSsrfAllowRanges(), lookup: options.lookup },
     );
     if (!response.ok) {
+      await cancelResponse(response, 'HTTP error');
       return {
         url,
         title: '',
@@ -141,7 +152,13 @@ async function extractViaHttp(
       };
     }
     const contentLength = Number(response.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+    const isEncoded = Boolean(response.headers.get('content-encoding'));
+    if (
+      !isEncoded &&
+      Number.isFinite(contentLength) &&
+      contentLength > MAX_RESPONSE_BYTES
+    ) {
+      await cancelResponse(response, 'Response exceeded size limit');
       return {
         url,
         title: '',
@@ -155,6 +172,7 @@ async function extractViaHttp(
       /^(image|audio|video)\//.test(contentType) ||
       contentType.includes('application/pdf')
     ) {
+      await cancelResponse(response, 'Unsupported content type');
       return {
         url,
         title: '',
