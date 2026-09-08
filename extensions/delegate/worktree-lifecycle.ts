@@ -90,30 +90,21 @@ function isExpectedRunOutcomeError(
  * Settle the branch once the child exits. The parent integrates it from here,
  * so the only job is to make sure the work is committed and described.
  */
-export interface WorktreeLifecycleDependencies {
-  loadWorktree?: typeof loadWorktree;
-  finishWorktree?: typeof finishWorktree;
-  retireWorktreeSnapshot?: typeof retireWorktreeSnapshot;
-}
-
 export async function finalizeWorktreeRun(
   run: DelegatedRun,
   worktree: PreparedWorktree | undefined,
   taskName: string,
-  dependencies: WorktreeLifecycleDependencies = {},
+  retireSnapshot: typeof retireWorktreeSnapshot = retireWorktreeSnapshot,
 ): Promise<void> {
   if (!worktree) return;
-  const load = dependencies.loadWorktree ?? loadWorktree;
-  const finish = dependencies.finishWorktree ?? finishWorktree;
-  const retire = dependencies.retireWorktreeSnapshot ?? retireWorktreeSnapshot;
   const state = getRunState(run);
   const outcome =
     state === 'success' || state === 'aborted' || state === 'timed-out'
       ? state
       : 'error';
-  const previousError = load(worktree.record.id)?.error;
+  const previousError = loadWorktree(worktree.record.id)?.error;
   try {
-    const record = await finish(worktree.record.id, {
+    const record = await finishWorktree(worktree.record.id, {
       taskName,
       outcome,
       // Harness-created read-only worktrees retain the historical behavior,
@@ -129,7 +120,9 @@ export async function finalizeWorktreeRun(
       !run.allowWrites &&
       !record.error &&
       !worktreeSummary(record).hasWork;
-    const settled = cleanReadOnlySnapshot ? await retire(record.id) : record;
+    const settled = cleanReadOnlySnapshot
+      ? await retireSnapshot(record.id)
+      : record;
     run.worktree = worktreeSummary(settled);
     if (settled.error && !continuationRecoveryNote(run))
       run.warnings = [...(run.warnings ?? []), settled.error];
@@ -149,7 +142,7 @@ export async function finalizeWorktreeRun(
       );
     }
   } catch (error) {
-    const latest = load(worktree.record.id) ?? worktree.record;
+    const latest = loadWorktree(worktree.record.id) ?? worktree.record;
     run.state = 'error';
     run.stopReason = 'error';
     run.exitCode = run.exitCode === 0 ? 1 : run.exitCode;

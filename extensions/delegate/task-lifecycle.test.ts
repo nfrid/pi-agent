@@ -105,15 +105,18 @@ describe('delegate task lifecycle', () => {
     }
   });
 
-  test('rejects an ordinary continuation whose recorded checkout is replaced', async () => {
+  test.each([
+    false,
+    true,
+  ])('rejects a replaced continuation checkout (writable: %s)', async (writeRequested) => {
     const initial = await prepareDelegateTask(
-      plan({ isolation: 'worktree', base: 'head' }),
+      plan({ isolation: 'worktree', base: 'head', writeRequested }),
     );
     if (!initial.worktree) throw new Error('missing initial worktree');
     const record = initial.worktree.record;
     const originalPath = record.worktreePath;
     const run = createRun('retained review', undefined, {
-      allowWrites: false,
+      allowWrites: writeRequested,
     });
     run.state = 'success';
     run.exitCode = 0;
@@ -133,10 +136,10 @@ describe('delegate task lifecycle', () => {
           }),
         ),
       ).rejects.toThrow(/worktree root/);
-      expect(loadWorktree(record.id)).toMatchObject({
-        status: 'finished',
-        snapshot: true,
-      });
+      expect(loadWorktree(record.id)?.status).toBe('finished');
+      expect(loadWorktree(record.id)?.snapshot).toBe(
+        writeRequested ? undefined : true,
+      );
     } finally {
       const latest = loadWorktree(record.id);
       if (latest) {
