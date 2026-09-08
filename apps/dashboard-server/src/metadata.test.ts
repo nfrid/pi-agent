@@ -82,7 +82,7 @@ describe('dashboard metadata wire boundaries', () => {
     }
   });
 
-  it('recovers a managed runtime PID only from a fresh owned snapshot', async () => {
+  it('recovers an authenticated PID from a fresh owned snapshot', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-metadata-pid-'),
     );
@@ -106,6 +106,63 @@ describe('dashboard metadata wire boundaries', () => {
       expect(store.managedLaunches()).toEqual([
         expect.objectContaining({ runtimeId: 'runtime-pid', processId: 4321 }),
       ]);
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['stale timestamp', 'stale'],
+    ['malformed JSON', 'malformed'],
+    ['runtime ID mismatch', 'runtime-id'],
+    ['ownership mismatch', 'ownership'],
+    ['invalid PID', 'pid'],
+  ] as const)('does not recover a PID for %s metadata', async (_name, kind) => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), `pi-dashboard-metadata-negative-${kind}-`),
+    );
+    const store = new MetadataStore(path.join(root, 'dashboard.sqlite'));
+    const runtimeId = `runtime-negative-${kind}`;
+    try {
+      store.recordManagedLaunch(
+        runtimeId,
+        { cwd: '/tmp' },
+        { id: `host:${runtimeId}` },
+        { identityToken: 'identity', launchToken: 'launch' },
+      );
+      const launchRow = store.db
+        .prepare(
+          'SELECT launched_at as launchedAt FROM managed_launch WHERE runtime_id=?',
+        )
+        .get(runtimeId) as { launchedAt: number };
+      const launchedAt = Number(launchRow.launchedAt);
+      store.saveRuntime({
+        runtimeId,
+        ownership: kind === 'ownership' ? 'external' : 'managed',
+        pid: kind === 'pid' ? 0 : 4321,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: `session-${kind}`, entries: [] },
+        lastSeenAt: kind === 'stale' ? launchedAt - 1 : launchedAt + 1,
+      } as never);
+      if (kind === 'malformed')
+        store.db
+          .prepare('UPDATE runtime SET snapshot_json=? WHERE id=?')
+          .run('{', runtimeId);
+      if (kind === 'runtime-id')
+        store.db.prepare('UPDATE runtime SET snapshot_json=? WHERE id=?').run(
+          JSON.stringify({
+            runtimeId: 'different-runtime',
+            ownership: 'managed',
+            pid: 4321,
+          }),
+          runtimeId,
+        );
+      expect(
+        store.managedLaunches().find((record) => record.runtimeId === runtimeId)
+          ?.processId,
+      ).toBeUndefined();
     } finally {
       store.close();
       await rm(root, { recursive: true, force: true });

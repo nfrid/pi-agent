@@ -762,59 +762,61 @@ export class RuntimeHostClient {
       (!Number.isSafeInteger(processId) || processId <= 0)
     )
       throw new Error('Runtime process identity is invalid.');
-    // Reject a supplied identity conflict before asking the host to stop
-    // anything. A retained record is authoritative while the host is alive.
-    const retainedBeforeStop = await this.inspect(runtimeId);
-    if (
-      retainedBeforeStop &&
-      processId !== undefined &&
-      retainedBeforeStop.pid !== processId
-    )
-      throw Object.assign(
-        new Error('Runtime process identity conflicts with the host record.'),
-        { code: 'runtime-conflict' },
-      );
+    // Only a trusted recovered PID needs a pre-stop identity comparison. The
+    // legacy path retains its original stop-then-inspect ordering.
+    if (processId !== undefined) {
+      const retainedBeforeStop = await this.inspect(runtimeId);
+      if (retainedBeforeStop && retainedBeforeStop.runtimeId !== runtimeId)
+        throw Object.assign(
+          new Error('Runtime identity conflicts with the host record.'),
+          { code: 'runtime-conflict' },
+        );
+      if (retainedBeforeStop && retainedBeforeStop.pid !== processId)
+        throw Object.assign(
+          new Error('Runtime process identity conflicts with the host record.'),
+          { code: 'runtime-conflict' },
+        );
+    }
     await this.request({ op: 'stop', runtimeId, force });
     // The long-lived host may predate strict stop ACKs. Independently inspect
     // its retained close evidence and verify local process absence before the
     // daemon writes a durable stopped marker.
     const runtime = await this.inspect(runtimeId);
+    let pid: number;
     if (runtime === undefined) {
       // A restarted host has no retained close history. Probe only the exact,
       // authenticated PID recovered from metadata; kill(pid, 0) never signals.
       if (processId === undefined)
         throw new Error('Runtime termination is not proven by the host.');
-      try {
-        process.kill(processId, 0);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-        throw error;
-      }
-      throw new Error(
-        'Runtime process still exists after stop acknowledgement.',
-      );
+      pid = processId;
+    } else {
+      if (runtime.runtimeId !== runtimeId)
+        throw new Error('Runtime termination is not proven by the host.');
+      if (processId !== undefined && runtime.pid !== processId)
+        throw Object.assign(
+          new Error('Runtime process identity conflicts with the host record.'),
+          { code: 'runtime-conflict' },
+        );
+      if (
+        runtime.status !== 'stopped' ||
+        !Number.isSafeInteger(runtime.pid) ||
+        runtime.pid <= 0
+      )
+        throw new Error('Runtime termination is not proven by the host.');
+      pid = runtime.pid;
     }
-    if (runtime.runtimeId !== runtimeId)
-      throw new Error('Runtime termination is not proven by the host.');
-    if (processId !== undefined && runtime.pid !== processId)
-      throw Object.assign(
-        new Error('Runtime process identity conflicts with the host record.'),
-        { code: 'runtime-conflict' },
-      );
-    if (
-      runtime.status !== 'stopped' ||
-      !Number.isSafeInteger(runtime.pid) ||
-      runtime.pid <= 0
-    )
-      throw new Error('Runtime termination is not proven by the host.');
-    try {
-      process.kill(runtime.pid, 0);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-      throw error;
-    }
-    throw new Error('Runtime process still exists after stop acknowledgement.');
+    assertProcessAbsent(pid);
   }
+}
+
+function assertProcessAbsent(pid: number): void {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+    throw error;
+  }
+  throw new Error('Runtime process still exists after stop acknowledgement.');
 }
 
 function bindingFromSummary(runtime: HostRuntimeSummary): RuntimeBinding {

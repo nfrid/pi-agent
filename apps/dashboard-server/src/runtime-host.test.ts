@@ -84,6 +84,47 @@ describe('runtime host', () => {
     }
   });
 
+  it('rejects an existing saved PID when the restarted host has no record', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'runtime-host-live-'));
+    const socket = path.join(root, 'host.sock');
+    const server = createServer((connection) => {
+      connection.once('data', () => connection.end('{"ok":true}\n'));
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    const kill = vi
+      .spyOn(process, 'kill')
+      .mockImplementation(() => undefined as never);
+    try {
+      await expect(
+        new RuntimeHostClient(socket).stop('live', false, 912345),
+      ).rejects.toThrow('still exists');
+      expect(kill).toHaveBeenCalledWith(912345, 0);
+    } finally {
+      kill.mockRestore();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a host connection failure before probing a saved PID', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'runtime-host-unavailable-'),
+    );
+    try {
+      await expect(
+        new RuntimeHostClient(path.join(root, 'missing.sock')).stop(
+          'unavailable',
+          false,
+          912345,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects an invalid saved PID before contacting the host', async () => {
     await expect(
       new RuntimeHostClient(
@@ -136,6 +177,34 @@ describe('runtime host', () => {
     try {
       await expect(
         new RuntimeHostClient(socket).stop('conflict', false, 456),
+      ).rejects.toMatchObject({ code: 'runtime-conflict' });
+      expect(requests).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a retained runtime ID conflict before stopping', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'runtime-host-id-conflict-'),
+    );
+    const socket = path.join(root, 'host.sock');
+    let requests = 0;
+    const server = createServer((connection) => {
+      connection.once('data', () => {
+        requests += 1;
+        connection.end(
+          '{"ok":true,"runtime":{"runtimeId":"other","status":"running","pid":456}}\n',
+        );
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    try {
+      await expect(
+        new RuntimeHostClient(socket).stop('expected', false, 456),
       ).rejects.toMatchObject({ code: 'runtime-conflict' });
       expect(requests).toBe(1);
     } finally {

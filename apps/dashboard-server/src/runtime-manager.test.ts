@@ -18,7 +18,7 @@ describe('runtime stopping', () => {
     const manager = new RuntimeManager(
       { forget } as never,
       {
-        attach: vi.fn().mockRejectedValue(new Error('runtime absent')),
+        attach: vi.fn().mockResolvedValue(restoredBinding),
         stop,
       } as never,
       {} as never,
@@ -28,7 +28,6 @@ describe('runtime stopping', () => {
             runtimeId: restoredBinding.runtimeId,
             workspaceId: 'workspace-restored',
             location: { id: 'provider:opaque-restored-location' },
-            processId: 4321,
             identityTokenHash: 'identity-hash',
             launchTokenHash: 'launch-hash',
             launchConsumed: true,
@@ -40,13 +39,51 @@ describe('runtime stopping', () => {
       '/tmp/bridge.sock',
     );
     await expect(manager.recover(restoredBinding.runtimeId)).resolves.toBe(
-      false,
+      true,
     );
+    await manager.stopRecovered(restoredBinding.runtimeId);
     expect(stop).toHaveBeenCalledOnce();
-    expect(stop).toHaveBeenCalledWith({ ...restoredBinding, processId: 4321 });
+    expect(stop).toHaveBeenCalledWith(restoredBinding);
     expect(markManagedStopped).toHaveBeenCalledOnce();
     expect(markManagedStopped).toHaveBeenCalledWith(restoredBinding.runtimeId);
-    expect(forget).not.toHaveBeenCalled();
+    expect(forget).toHaveBeenCalledOnce();
+  });
+
+  it('recovers an absent host binding with its trusted saved PID', async () => {
+    const runtimeId = 'runtime-restored-pid';
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const markManagedStopped = vi.fn();
+    const manager = new RuntimeManager(
+      {} as never,
+      {
+        attach: vi.fn().mockRejectedValue(new Error('runtime absent')),
+        stop,
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId,
+            location: { id: `runtime-host:${runtimeId}` },
+            processId: 4321,
+            identityTokenHash: 'identity-hash',
+            launchTokenHash: 'launch-hash',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        markManagedStopped,
+      } as never,
+      '/tmp/bridge.sock',
+    );
+
+    await expect(manager.recover(runtimeId)).resolves.toBe(false);
+    expect(stop).toHaveBeenCalledWith({
+      runtimeId,
+      location: { id: `runtime-host:${runtimeId}` },
+      processId: 4321,
+    });
+    expect(markManagedStopped).toHaveBeenCalledWith(runtimeId);
   });
 
   it('retains recovered evidence when provider cleanup fails and retries it', async () => {
