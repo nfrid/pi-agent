@@ -1800,6 +1800,56 @@ describe('session index', () => {
     expect(mutated).toBe(true);
   });
 
+  it('drains an active scan before closing without persisting after the boundary', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-index-close-'),
+    );
+    const file = path.join(root, 'closing.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'closing-id', cwd: '/tmp' })}\n`,
+    );
+    const saved: Record<string, unknown>[] = [];
+    const index = new SessionIndex(root, {
+      saveSession: (entry: Record<string, unknown>) => saved.push(entry),
+    } as never);
+    await index.rebuild();
+    const originalScan = scanner.scanSessionFile;
+    let releaseScan!: () => void;
+    let scanStarted!: () => void;
+    const scanGate = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    const scanReady = new Promise<void>((resolve) => {
+      scanStarted = resolve;
+    });
+    const scanSpy = vi
+      .spyOn(scanner, 'scanSessionFile')
+      .mockImplementation(async (target, proofOffsets, onPendingBytes) => {
+        const result = await originalScan(target, proofOffsets, onPendingBytes);
+        if (target === file) {
+          scanStarted();
+          await scanGate;
+        }
+        return result;
+      });
+    try {
+      const scan = (
+        index as unknown as { indexFile(file: string): Promise<void> }
+      ).indexFile(file);
+      await scanReady;
+      const close = index.close();
+      expect(close).toBe(index.close());
+      releaseScan();
+      await Promise.all([scan, close]);
+      expect(saved).toHaveLength(1);
+      expect(index.get('closing-id')).toBeDefined();
+    } finally {
+      scanSpy.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('fans file-watcher changes out to live snapshot observers', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-watch-'));
     let changes = 0;

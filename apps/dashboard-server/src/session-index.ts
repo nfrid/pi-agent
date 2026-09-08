@@ -607,6 +607,9 @@ export class SessionIndex {
   private readonly watcherRetries = new Map<string, NodeJS.Timeout>();
   private readonly scheduled = new Map<string, NodeJS.Timeout>();
   private readonly indexing = new Map<string, Promise<void>>();
+  private readonly operations = new Set<Promise<unknown>>();
+  private closed = false;
+  private closePromise?: Promise<void>;
   private historyReadBytesTotal = 0;
   constructor(
     private readonly sessionDir: string,
@@ -630,16 +633,34 @@ export class SessionIndex {
   }
 
   async rebuild(): Promise<void> {
-    const rebuild = this.rebuildQueue.then(() => this.rebuildInternal());
+    this.assertOpen();
+    const rebuild = this.track(
+      this.rebuildQueue.then(() => this.rebuildInternal()),
+    );
     this.rebuildQueue = rebuild.catch(() => undefined);
     return rebuild;
   }
 
+  private track<T>(operation: Promise<T>): Promise<T> {
+    this.operations.add(operation);
+    void operation.then(
+      () => this.operations.delete(operation),
+      () => this.operations.delete(operation),
+    );
+    return operation;
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new Error('Session index is closed.');
+  }
+
   private async rebuildInternal(): Promise<void> {
+    if (this.closed) return;
     // Discovery and indexing can pause for filesystem I/O. Keep the previous
     // catalogue live until the complete replacement is ready, then publish it
     // with one synchronous pointer swap.
     while (true) {
+      if (this.closed) return;
       const live = this.catalogue;
       const epoch = live.epoch;
       const generation = this.liveMutationGeneration;
@@ -662,6 +683,7 @@ export class SessionIndex {
       // A watcher/index refresh may have committed while this replacement was
       // being built. Retry rather than replacing its newer catalogue with a
       // snapshot from before that commit.
+      if (this.closed) return;
       if (
         live !== this.catalogue ||
         epoch !== this.catalogue.epoch ||
@@ -690,6 +712,7 @@ export class SessionIndex {
   }
 
   async start(): Promise<void> {
+    this.assertOpen();
     await this.rebuild();
     await Promise.all(
       this.sessionRoots().map((root) => this.ensureWatcher(root)),
@@ -1705,13 +1728,22 @@ export class SessionIndex {
     return this.publicEntry(renamed);
   }
 
-  close(): void {
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    this.closePromise = this.closeInternal();
+    return this.closePromise;
+  }
+
+  private async closeInternal(): Promise<void> {
     for (const watcher of this.watchers.values()) watcher.close();
     this.watchers.clear();
     for (const retry of this.watcherRetries.values()) clearTimeout(retry);
     this.watcherRetries.clear();
     for (const timer of this.scheduled.values()) clearTimeout(timer);
     this.scheduled.clear();
+    await Promise.allSettled([...this.operations]);
+    this.indexing.clear();
   }
 
   private sessionRoots(): string[] {
@@ -1767,10 +1799,15 @@ export class SessionIndex {
     }
   }
 
-  private async ensureWatcher(root: string): Promise<void> {
-    if (this.watchers.has(root)) return;
+  private ensureWatcher(root: string): Promise<void> {
+    return this.track(this.ensureWatcherInternal(root));
+  }
+
+  private async ensureWatcherInternal(root: string): Promise<void> {
+    if (this.closed || this.watchers.has(root)) return;
     try {
       const fsModule = await import('node:fs');
+      if (this.closed) return;
       const watcher = fsModule.watch(
         root,
         { recursive: true },
@@ -1780,7 +1817,7 @@ export class SessionIndex {
       watcher.on('error', () => {
         watcher.close();
         this.watchers.delete(root);
-        this.scheduleWatcherRetry(root);
+        if (!this.closed) this.scheduleWatcherRetry(root);
       });
     } catch {
       // A root may not exist yet. Retry so later delegate/session creation is observed.
@@ -1813,6 +1850,7 @@ export class SessionIndex {
   }
 
   private notifyChange(sessionId?: string, auxiliary?: boolean): void {
+    if (this.closed) return;
     try {
       this.onChange?.(sessionId, auxiliary);
     } catch {
@@ -1822,20 +1860,22 @@ export class SessionIndex {
   }
 
   private scheduleWatcherRetry(root: string): void {
-    if (this.watcherRetries.has(root)) return;
+    if (this.closed || this.watcherRetries.has(root)) return;
     const retry = setTimeout(() => {
       this.watcherRetries.delete(root);
-      void this.ensureWatcher(root);
+      if (!this.closed) void this.ensureWatcher(root);
     }, 1_000);
     retry.unref?.();
     this.watcherRetries.set(root, retry);
   }
 
   private scheduleIndex(file: string): void {
+    if (this.closed) return;
     const existing = this.scheduled.get(file);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       this.scheduled.delete(file);
+      if (this.closed) return;
       const previous = this.indexing.get(file) ?? Promise.resolve();
       const previousId = this.fileIds.get(path.resolve(file));
       const next = previous
@@ -1888,7 +1928,15 @@ export class SessionIndex {
     return path.basename(file, '.jsonl');
   }
 
-  private async indexFile(
+  private indexFile(
+    file: string,
+    proofOffsets: readonly number[] = [],
+    target?: SessionCatalogue,
+  ): Promise<void> {
+    return this.track(this.indexFileInternal(file, proofOffsets, target));
+  }
+
+  private async indexFileInternal(
     file: string,
     proofOffsets: readonly number[] = [],
     target?: SessionCatalogue,
@@ -1932,7 +1980,7 @@ export class SessionIndex {
         epoch,
         fileRevision,
       );
-      if (result === 'committed') return;
+      if (result === 'committed' || this.closed) return;
     }
   }
 
@@ -1943,6 +1991,7 @@ export class SessionIndex {
     epoch: number,
     fileRevision: number | undefined,
   ): Promise<'committed' | 'discarded'> {
+    if (this.closed) return 'discarded';
     const resolved = path.resolve(file);
     if (
       !resolved.endsWith('.jsonl') ||
@@ -1958,6 +2007,7 @@ export class SessionIndex {
         proofOffsets,
         this.onIndexPendingBytes,
       );
+      if (this.closed) return 'discarded';
       const header = scan.header;
       if (!header || typeof header.cwd !== 'string')
         return this.removeFile(resolved, catalogue, epoch, fileRevision)

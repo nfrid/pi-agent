@@ -93,6 +93,54 @@ describe('runtime host', () => {
     await service.close();
   });
 
+  it('rejects a start crossing the close boundary and drains its child', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'runtime-host-close-'));
+    const socket = path.join(root, 'host.sock');
+    const executable = path.join(root, 'fake-pi.mjs');
+    const started = path.join(root, 'started');
+    await writeFile(
+      executable,
+      `#!/usr/bin/env node\nimport fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(started)}, 'yes'); let buffer=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', value => { buffer += value; let newline; while ((newline=buffer.indexOf('\\n')) >= 0) { const request=JSON.parse(buffer.slice(0,newline)); buffer=buffer.slice(newline+1); if (request.type === 'get_state') process.stdout.write(JSON.stringify({id:request.id,type:'response',command:'get_state',success:true,data:{}})+'\\n'); }}); setInterval(() => {}, 1000);\n`,
+    );
+    await chmod(executable, 0o700);
+    let releaseEnvironment!: () => void;
+    const environmentReady = new Promise<void>((resolve) => {
+      releaseEnvironment = resolve;
+    });
+    let environmentStarted!: () => void;
+    const environmentCalled = new Promise<void>((resolve) => {
+      environmentStarted = resolve;
+    });
+    const service = new RuntimeHostService(socket, async (cwd) => {
+      if (cwd === root) environmentStarted();
+      await environmentReady;
+      return testEnvironment();
+    });
+    await service.listen();
+    try {
+      const start = new RuntimeHostClient(socket).start({
+        runtimeId: 'crossing-close',
+        cwd: root,
+        socketPath: path.join(root, 'bridge.sock'),
+        launchToken: 'launch',
+        identityToken: 'identity',
+        piExecutable: executable,
+      });
+      await environmentCalled;
+      const close = service.close();
+      expect(close).toBe(service.close());
+      releaseEnvironment();
+      await expect(start).rejects.toThrow('closing');
+      expect(await readFile(started, 'utf8')).toBe('yes');
+      await close;
+      expect(service.summaries()).toEqual([]);
+    } finally {
+      releaseEnvironment();
+      await service.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('owns headless RPC children, drains UI requests, and makes start idempotent', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'dashboard-runtime-host-'),
