@@ -423,6 +423,45 @@ describe('DashboardHttpClient command requests', () => {
     });
   });
 
+  it.each([
+    ['latest session reads', false],
+    ['older session reads', true],
+  ])('rejects wrong-session authoritative responses for %s', async (_, older) => {
+    const client = new DashboardHttpClient({
+      fetch: vi.fn(async () =>
+        trpcResponse({
+          metadata: {
+            id: 'other-session',
+            file: '',
+            cwd: '/tmp',
+            updatedAt: 1,
+          },
+          entries: [],
+          history: { version: 1, start: 0, end: 0, hasOlder: false },
+          entriesComplete: true,
+          serverId: 'server-1',
+          cursor: 1,
+          active: {
+            messages: [],
+            tools: [],
+            delegates: [],
+            truncated: false,
+          },
+          completeThroughCursor: true,
+        }),
+      ),
+      tokenStore: tokenStore(),
+    });
+
+    const request = older
+      ? client.sessionBefore('session-1', 'opaque token')
+      : client.session('session-1');
+    await expect(request).rejects.toMatchObject({
+      kind: 'malformed-output',
+      code: 'malformed-output',
+    });
+  });
+
   it('rejects legacy-shaped session responses missing authoritative fields', async () => {
     const client = new DashboardHttpClient({
       fetch: vi.fn(async () =>

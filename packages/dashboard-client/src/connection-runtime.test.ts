@@ -617,9 +617,17 @@ describe('DashboardConnectionRuntime', () => {
         snapshot: sessionSnapshot(1, 'session-b', 'daemon-1'),
       },
     });
-    expect(f.store.getSnapshot().sessionSnapshotsById['session-b']?.cursor).toBe(
-      0,
-    );
+    expect(
+      f.store.getSnapshot().sessionSnapshotsById['session-b']?.cursor,
+    ).toBe(0);
+    expect(f.store.getSnapshot().sessionSyncById['session-a']).toMatchObject({
+      sequence: 0,
+      sequenceKnown: true,
+    });
+    expect(f.store.getSnapshot().sessionSyncById['session-b']).toMatchObject({
+      sequence: 0,
+      sequenceKnown: true,
+    });
     f.session('session-a', {
       id: 'a-gap',
       data: {

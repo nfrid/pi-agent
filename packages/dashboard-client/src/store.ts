@@ -254,8 +254,6 @@ interface PendingSessionHistory {
  * react-store.ts so this store remains framework-neutral.
  */
 export class DashboardLiveStore {
-  /** HTTP client that owns this store's connection, when connected. */
-  client?: DashboardHttpClient;
   private state: DashboardLiveState = emptyState();
   private listeners = new Set<() => void>();
   private generation = 0;
@@ -1769,7 +1767,6 @@ export class DashboardLiveStore {
   }
 
   connect(client: DashboardHttpClient): () => void {
-    this.client = client;
     this.connectionRuntime?.stop();
     this.connectionRuntime = new DashboardConnectionRuntime({
       client,

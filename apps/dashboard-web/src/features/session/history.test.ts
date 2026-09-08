@@ -88,6 +88,7 @@ describe('useOlderSessionHistory', () => {
     const sessionBefore = vi
       .spyOn(owningClient, 'sessionBefore')
       .mockRejectedValue(new Error('stale pagination request'));
+    const globalSessionBefore = vi.spyOn(dashboardHttpClient, 'sessionBefore');
     let controls!: ReturnType<typeof useOlderSessionHistory>;
     function Probe({
       id,
@@ -119,6 +120,11 @@ describe('useOlderSessionHistory', () => {
         );
       });
       expect(controls.history?.nextBefore).toBe('before-session-b');
+      await act(async () => {
+        await controls.loadEarlierHistory();
+      });
+      expect(sessionBefore).toHaveBeenCalledTimes(1);
+      expect(globalSessionBefore).not.toHaveBeenCalled();
 
       await act(async () => {
         renderer?.update(
@@ -130,7 +136,7 @@ describe('useOlderSessionHistory', () => {
         );
       });
 
-      expect(sessionBefore).not.toHaveBeenCalled();
+      expect(globalSessionBefore).not.toHaveBeenCalled();
       expect(controls.history).toBeUndefined();
       expect(controls.historyLoading).toBe(false);
       expect(controls.historyError).toBeUndefined();
@@ -223,6 +229,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data: initial,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
       });
       return null;
@@ -320,6 +327,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data: initial,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
         autoloadAll: true,
       });
@@ -427,6 +435,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data: initial,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
         scrollElementRef: { current: scrollElement },
         autoloadAtTop: true,
@@ -520,6 +529,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data: initial,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
       });
       return null;
@@ -658,6 +668,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data: initial,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
       });
       return null;
@@ -731,6 +742,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data: initial,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
       });
       return null;
@@ -820,6 +832,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data: initial,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
       });
       return null;
@@ -916,6 +929,7 @@ describe('useOlderSessionHistory', () => {
         id: 'session-1',
         data,
         store,
+        client: dashboardHttpClient,
         sessionMounted: true,
       });
       return null;

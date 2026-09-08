@@ -1,7 +1,6 @@
 import {
   type DashboardHttpClient,
   type DashboardLiveStore,
-  dashboardHttpClient,
   SESSION_HISTORY_BUDGET,
   type SessionHistoryCoverage,
   selectSessionHistoryCoverage,
@@ -134,9 +133,9 @@ export function useOlderSessionHistory({
   sessionMounted,
   autoloadAll = false,
   autoloadAtTop = false,
-  client: clientOverride,
+  client,
 }: {
-  client?: DashboardHttpClient;
+  client: DashboardHttpClient;
   id: string;
   data: SessionApiResponse | undefined;
   store: DashboardLiveStore;
@@ -147,7 +146,6 @@ export function useOlderSessionHistory({
   /** Load older pages while the initialized scrollport remains at its top. */
   autoloadAtTop?: boolean | (() => boolean);
 }) {
-  const client = clientOverride ?? store.client ?? dashboardHttpClient;
   const coverage = useDashboardStore(store, selectSessionHistoryCoverage(id));
   const [history, setHistory] = useState<SessionApiResponse['history']>();
   const [historyLoading, setHistoryLoading] = useState(false);

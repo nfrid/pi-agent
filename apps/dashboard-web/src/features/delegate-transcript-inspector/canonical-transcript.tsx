@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useDashboardContext } from '../../app/dashboard-context';
 import { Transcript } from '../../entities/transcript';
 import { toTranscriptEntries } from '../../transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
@@ -82,6 +83,7 @@ function DelegateCanonicalTranscript({
   detail?: DelegateInspectorDetailState;
   onRunSelected?: (run: DelegateInspectorRunOption) => void;
 }) {
+  const { client } = useDashboardContext();
   const projection = useDashboardStore(store, selectTranscript(sessionId));
   const runtime = useDashboardStore(store, selectRuntimeForSession(sessionId));
   const snapshot = useDashboardStore(store, selectSessionSnapshot(sessionId));
@@ -117,6 +119,7 @@ function DelegateCanonicalTranscript({
     id: sessionId,
     data: snapshot,
     store,
+    client,
     sessionMounted: mounted,
     autoloadAll: true,
   });
