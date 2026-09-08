@@ -1,34 +1,11 @@
 import { hasPendingProcesses } from './pending-processes';
-import {
-  DEFAULT_SESSION_SCOPE_ID,
-  type SessionScopeId,
-} from './scoped-services';
+import { getScopedServices, type SessionScopeId } from './scoped-services';
 
-const dashboardFreshTurnsKey = Symbol.for(
-  'pi.dashboard.fresh-extension-user-turns',
-);
-const dashboardFreshTurnsGlobal = globalThis as typeof globalThis & {
-  [dashboardFreshTurnsKey]?: Map<SessionScopeId, number>;
-};
-
-function freshTurns(): Map<SessionScopeId, number> {
-  const existing = dashboardFreshTurnsGlobal[dashboardFreshTurnsKey];
-  if (existing) return existing;
-  const created = new Map<SessionScopeId, number>();
-  dashboardFreshTurnsGlobal[dashboardFreshTurnsKey] = created;
-  return created;
-}
-
-function normalizedScope(scopeId?: SessionScopeId): SessionScopeId {
-  return scopeId?.trim() || DEFAULT_SESSION_SCOPE_ID;
-}
-
-function removeFreshTurn(scope: SessionScopeId): boolean {
-  const turns = freshTurns();
-  const registered = turns.get(scope) ?? 0;
-  if (registered <= 0) return false;
-  if (registered === 1) turns.delete(scope);
-  else turns.set(scope, registered - 1);
+function removeFreshTurn(
+  services: ReturnType<typeof getScopedServices>,
+): boolean {
+  if (services.freshDashboardUserTurns <= 0) return false;
+  services.freshDashboardUserTurns -= 1;
   return true;
 }
 
@@ -36,19 +13,18 @@ function removeFreshTurn(scope: SessionScopeId): boolean {
 export function markDashboardFreshUserTurn(
   scopeId?: SessionScopeId,
 ): () => void {
-  const scope = normalizedScope(scopeId);
-  const turns = freshTurns();
-  turns.set(scope, (turns.get(scope) ?? 0) + 1);
+  const services = getScopedServices(scopeId);
+  services.freshDashboardUserTurns += 1;
   let active = true;
   return () => {
     if (!active) return;
     active = false;
-    removeFreshTurn(scope);
+    removeFreshTurn(services);
   };
 }
 
 function consumeDashboardFreshUserTurn(scopeId?: SessionScopeId): boolean {
-  return removeFreshTurn(normalizedScope(scopeId));
+  return removeFreshTurn(getScopedServices(scopeId));
 }
 
 export interface AgentInputEvent {

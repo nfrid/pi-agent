@@ -78,8 +78,8 @@ export function createRemoteControlRuntime(
   let contextScope: SessionScopeId | undefined;
   let lastError: string | undefined;
   const queueDrafts = new QueueDraftStore();
-  const capabilitiesFor = () =>
-    getRuntimeCapabilities(contextScope ?? scopedServices.scopeId);
+  const capabilitiesFor = (services = scopedServices) =>
+    getRuntimeCapabilities(services.scopeId);
   const unavailableSnapshot = (): RuntimeSnapshot => ({
     runtimeId,
     ownership,
@@ -98,6 +98,7 @@ export function createRemoteControlRuntime(
     ctx: ExtensionContext,
     state = liveState(ctx),
     contextTokens?: number,
+    services = scopedServices,
   ): RuntimeSnapshotPatch => {
     const currentUsage = ctx.getContextUsage();
     const contextWindow =
@@ -164,14 +165,17 @@ export function createRemoteControlRuntime(
         : undefined,
       queueDrafts: queueDrafts.list(),
       composerCommands: composerCommandsSnapshot(pi),
-      capabilities: capabilitiesFor(),
-      extensionSurfaces: liveSurfaceHub.snapshot(),
+      capabilities: capabilitiesFor(services),
+      extensionSurfaces: services.liveSurfaceHub.snapshot(),
       lastError,
       session,
     };
   };
-  const snapshotFrom = (ctx: ExtensionContext): RuntimeSnapshot => {
-    const patch = runtimePatchFrom(ctx);
+  const snapshotFrom = (
+    ctx: ExtensionContext,
+    services = scopedServices,
+  ): RuntimeSnapshot => {
+    const patch = runtimePatchFrom(ctx, undefined, undefined, services);
     return {
       runtimeId,
       ownership,
@@ -234,43 +238,41 @@ export function createRemoteControlRuntime(
   };
 
   const setContext = (ctx: ExtensionContext, refreshSnapshot = true) => {
+    const previousServices = scopedServices;
+    const previousScope = contextScope;
+    let nextServices: ScopedServices | undefined;
     try {
       lastError = undefined;
       const nextScope = ctx.sessionManager.getSessionId();
-      const nextServices = getScopedServices(nextScope);
-      const previousServices = scopedServices;
-      const previousScope = contextScope;
+      nextServices = getScopedServices(nextScope);
+      nextServices.dashboardUsage = usageBroker;
       const replacingScope =
         previousScope !== undefined && previousScope !== nextScope;
+      // Build the replacement completely before publishing it. In particular,
+      // snapshot failures must not destroy the still-current generation.
+      const shouldRefresh =
+        refreshSnapshot || previousScope === undefined || replacingScope;
+      const next = shouldRefresh ? snapshotFrom(ctx, nextServices) : undefined;
       if (replacingScope) eventNormalizer.reset();
       scopedServices = nextServices;
-      scopedServices.dashboardUsage = usageBroker;
       liveSurfaceHub = nextServices.liveSurfaceHub;
-      // Detach old observers before releasing the old hub, so a late cleanup
-      // cannot publish an old session patch into the replacement.
       client.bindServices(liveSurfaceHub);
       if (replacingScope && previousScope)
         releaseScopedServices(previousScope, previousServices);
       queueDrafts.setSession(nextScope);
-      // Same-session transport events only need a bounded patch. A full
-      // snapshot is reserved for the initial/replacement binding and explicit
-      // session metadata/tree events.
-      const shouldRefresh =
-        refreshSnapshot || previousScope === undefined || replacingScope;
-      const next = shouldRefresh ? snapshotFrom(ctx) : undefined;
       context = ctx;
       contextScope = nextScope;
       currentSessionId = nextScope;
       if (next) cachedSnapshot = next;
     } catch (error) {
-      queueDrafts.clear();
-      if (contextScope) releaseScopedServices(contextScope, scopedServices);
-      context = undefined;
-      contextScope = undefined;
-      currentSessionId = undefined;
-      eventNormalizer.reset();
+      if (nextServices && nextServices !== previousServices)
+        releaseScopedServices(nextServices.scopeId, nextServices);
       lastError = error instanceof Error ? error.message : String(error);
-      cachedSnapshot = unavailableSnapshot();
+      if (!context) {
+        queueDrafts.clear();
+        eventNormalizer.reset();
+        cachedSnapshot = unavailableSnapshot();
+      }
     }
   };
   const snapshotPatch = (
@@ -410,13 +412,8 @@ export function emitAgentSettlement(
   ctx: ExtensionContext,
 ): void {
   const scopeId = ctx.sessionManager.getSessionId();
-  const hasIdleApi = typeof ctx.isIdle === 'function';
   const pending = pendingProcessCount(scopeId);
-  if (
-    !(hasIdleApi
-      ? isGenuineAgentSettlement(false, scopeId)
-      : isGenuineAgentSettlement())
-  ) {
+  if (!isGenuineAgentSettlement(false, scopeId)) {
     publishSettledBackground(pending, scopeId);
     emitState(runtime, ctx, 'working');
     return;

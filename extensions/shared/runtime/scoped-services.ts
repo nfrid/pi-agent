@@ -60,6 +60,8 @@ export interface ScopedServices {
   readonly capabilities: CapabilityRegistry;
   /** Existing authenticated runtime bridge used for account-level usage reads. */
   dashboardUsage?: DashboardUsageBroker;
+  /** Number of extension-sourced prompts awaiting the matching input event. */
+  freshDashboardUserTurns: number;
   /** Session-owned delegate workflow identity for extension integrations. */
   delegateWorkflow?: ScopedDelegateWorkflow;
 }
@@ -104,6 +106,7 @@ export function getScopedServices(
     backgroundDeliveries: new BackgroundDeliveryBroker(id),
     liveSurfaceHub: new LiveSurfaceHub(),
     pendingProcesses: new PendingProcessAccounting(),
+    freshDashboardUserTurns: 0,
     capabilities: seedCapabilityRegistry(new CapabilityRegistry()),
   };
   registry().set(id, created);
@@ -130,6 +133,7 @@ export function releaseScopedServices(
   current.backgroundDeliveries.clear();
   current.liveSurfaceHub.clearAll();
   current.pendingProcesses.clear();
+  current.freshDashboardUserTurns = 0;
   registry().delete(id);
   return true;
 }

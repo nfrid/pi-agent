@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
-import { isGenuineAgentSettlement } from './agent-lifecycle';
+import {
+  beginsFreshUserTurn,
+  isGenuineAgentSettlement,
+  markDashboardFreshUserTurn,
+} from './agent-lifecycle';
 import {
   getScopedServices,
   releaseScopedServices,
@@ -40,6 +44,22 @@ describe('scoped runtime services', () => {
     first.pendingProcesses.set(source, 1);
     expect(isGenuineAgentSettlement(false, first.scopeId)).toBe(false);
     expect(isGenuineAgentSettlement(false, second.scopeId)).toBe(true);
+  });
+
+  test('release discards fresh-turn markers and old cancellation cannot affect a replacement', () => {
+    const scope = `markers-${randomUUID()}`;
+    const oldServices = services(scope);
+    const cancelOld = markDashboardFreshUserTurn(scope);
+    expect(oldServices.freshDashboardUserTurns).toBe(1);
+    expect(releaseScopedServices(scope, oldServices)).toBe(true);
+
+    getScopedServices(scope);
+    scopes.add(scope);
+    expect(beginsFreshUserTurn({ source: 'extension' }, scope)).toBe(false);
+    const cancelReplacement = markDashboardFreshUserTurn(scope);
+    cancelOld();
+    expect(beginsFreshUserTurn({ source: 'extension' }, scope)).toBe(true);
+    cancelReplacement();
   });
 
   test('late release of an old generation cannot clear its replacement', () => {

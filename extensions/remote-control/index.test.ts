@@ -24,6 +24,7 @@ import {
   LiveSurfaceHub,
 } from '../shared/runtime/live-surfaces';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
+import { findScopedServices } from '../shared/runtime/scoped-services';
 import { registerTasksCapability } from '../tasks/register-capability';
 import {
   BridgeClient,
@@ -75,6 +76,43 @@ function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('remote-control session lifecycle', () => {
+  it('keeps the current scope when a replacement snapshot fails', () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const contextFor = (id: string, failUsage = false) =>
+      ({
+        cwd: '/tmp/project',
+        isIdle: () => true,
+        getContextUsage: () => {
+          if (failUsage) throw new Error('context unavailable');
+          return undefined;
+        },
+        sessionManager: {
+          getSessionId: () => id,
+          getSessionFile: () => undefined,
+          getSessionName: () => undefined,
+          getCwd: () => '/tmp/project',
+          getLeafId: () => undefined,
+          getBranch: () => [],
+        },
+      }) as unknown as ExtensionContext;
+    const first = contextFor(`failed-snapshot-first-${Date.now()}`);
+    const second = contextFor(`failed-snapshot-second-${Date.now()}`, true);
+    runtime.setContext(first);
+    runtime.setContext(second);
+    expect(runtime.isCurrent(first)).toBe(true);
+    expect(runtime.snapshot().session.id).toBe(
+      first.sessionManager.getSessionId(),
+    );
+    expect(
+      findScopedServices(second.sessionManager.getSessionId()),
+    ).toBeUndefined();
+    runtime.clearContext(first);
+    expect(
+      findScopedServices(first.sessionManager.getSessionId()),
+    ).toBeUndefined();
+  });
+
   it('keeps raw argument delta updates non-droppable', () => {
     expect(
       isDroppableBridgeEvent({
