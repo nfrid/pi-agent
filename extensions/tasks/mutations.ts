@@ -9,6 +9,7 @@ import {
   normalizeId,
   normalizeIds,
   stats,
+  unfinished,
   validateDependencyGraph,
   validateDeps,
 } from './domain';
@@ -240,17 +241,26 @@ function mutateUnsafe(
 
   if (action === 'clear_done') {
     const state = store.state;
-    const before = state.tasks.length;
-    const removed = state.tasks
-      .filter((task) => task.status === 'done' || task.status === 'dropped')
-      .map((task) => task.id);
-    state.tasks = state.tasks.filter(
-      (task) => task.status !== 'done' && task.status !== 'dropped',
+    const byId = new Map(state.tasks.map((task) => [task.id, task]));
+    const retainedIds = new Set(
+      state.tasks.filter(unfinished).map((task) => task.id),
     );
+    // Keep the dependency closure, including completed/dropped prerequisites.
+    // Removing them would turn satisfied edges into missing dependencies.
+    for (const id of retainedIds)
+      for (const dependency of byId.get(id)?.dependsOn ?? [])
+        retainedIds.add(dependency);
+    const removed = state.tasks
+      .filter((task) => !retainedIds.has(task.id))
+      .map((task) => task.id);
+    state.tasks = state.tasks.filter((task) => retainedIds.has(task.id));
     forgetCompletedHide(store, removed);
+    const retainedCompleted = state.tasks.filter(
+      (task) => !unfinished(task),
+    ).length;
     return {
-      changed: before !== state.tasks.length,
-      message: `cleared ${before - state.tasks.length} completed/dropped tasks`,
+      changed: removed.length > 0,
+      message: `cleared ${removed.length} completed/dropped tasks${retainedCompleted ? `; retained ${retainedCompleted} prerequisite tasks` : ''}`,
     };
   }
 

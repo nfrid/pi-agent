@@ -432,6 +432,81 @@ describe('atomic todo mutations', () => {
     );
   });
 
+  it('clears unrelated completed tasks without breaking a ready dependent', () => {
+    mutate(store, 'replace', {
+      action: 'replace',
+      tasks: [
+        { id: 'T1', text: 'prerequisite', status: 'done' },
+        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
+        { id: 'T3', text: 'unrelated', status: 'done' },
+      ],
+    });
+
+    expect(mutate(store, 'clear_done', { action: 'clear_done' })).toMatchObject(
+      {
+        changed: true,
+        message:
+          'cleared 1 completed/dropped tasks; retained 1 prerequisite tasks',
+      },
+    );
+    expect(store.state.tasks.map((task) => task.id)).toEqual(['T1', 'T2']);
+    expect(
+      mutate(store, 'start', { action: 'start', id: 'T2' }).error,
+    ).toBeUndefined();
+    expect(
+      mutate(store, 'add', { action: 'add', text: 'new work' }).changed,
+    ).toBe(true);
+  });
+
+  it('retains transitive dropped prerequisites without satisfying them', () => {
+    mutate(store, 'replace', {
+      action: 'replace',
+      tasks: [
+        { id: 'T1', text: 'completed root', status: 'done' },
+        {
+          id: 'T2',
+          text: 'dropped prerequisite',
+          status: 'dropped',
+          depends_on: ['T1'],
+        },
+        { id: 'T3', text: 'dependent', depends_on: ['T2'] },
+      ],
+    });
+    const before = cloneState(store);
+
+    expect(mutate(store, 'clear_done', { action: 'clear_done' }).changed).toBe(
+      false,
+    );
+    expect(cloneState(store)).toEqual(before);
+    expect(mutate(store, 'start', { action: 'start', id: 'T3' }).error).toBe(
+      'cannot start T3; waiting on T2',
+    );
+    expect(
+      mutate(store, 'add', { action: 'add', text: 'new work' }).changed,
+    ).toBe(true);
+  });
+
+  it('removes an entire completed dependency chain once no unfinished task needs it', () => {
+    mutate(store, 'replace', {
+      action: 'replace',
+      tasks: [
+        { id: 'T1', text: 'prerequisite', status: 'done' },
+        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
+      ],
+    });
+
+    expect(
+      mutateBatch(store, [
+        { action: 'done', id: 'T2' },
+        { action: 'clear_done' },
+      ]).changed,
+    ).toBe(true);
+    expect(store.state.tasks).toEqual([]);
+    expect(mutate(store, 'clear_done', { action: 'clear_done' }).changed).toBe(
+      false,
+    );
+  });
+
   it('starts tasks without dependencies', () => {
     expect(
       mutate(store, 'add', { action: 'add', id: 'T1', text: 'independent' }),

@@ -7,7 +7,7 @@ const prioritySchema = () =>
   StringEnum(['low', 'normal', 'high', 'urgent'] as const);
 
 const NON_BATCH_ACTION_DESCRIPTION =
-  'list current tasks; add a task; update fields; start, done, block, or drop a task; remove a task; clear_done removes done or dropped tasks; replace the complete task set.';
+  'list current tasks; add a task; update fields; start, done, block, or drop a task; remove a task; clear_done removes done or dropped tasks except prerequisites still needed by retained tasks; replace the complete task set.';
 const ACTION_DESCRIPTION = `${NON_BATCH_ACTION_DESCRIPTION} batch applies ordered non-batch operations.`;
 
 const taskSchema = Type.Object(
