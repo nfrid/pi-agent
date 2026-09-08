@@ -468,6 +468,38 @@ export interface ExistingWorktreeValidation {
   headCommit: string;
 }
 
+export interface RecordedWorktreeValidationOptions {
+  /** Finish-time validation may inspect a writable dirty checkout. */
+  requireClean?: boolean;
+  /** Continuations may prove that the previous branch tip remains present. */
+  expectedHead?: string;
+  /** Abort in-flight Git validation when preparation is cancelled. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Validate the checkout recorded for a lifecycle operation. Callers choose
+ * policy-specific cleanliness/head requirements; repository, registration,
+ * ownership, and branch identity stay in one implementation.
+ */
+export async function validateRecordedWorktree(
+  record: WorktreeRecord,
+  options: RecordedWorktreeValidationOptions = {},
+): Promise<ExistingWorktreeValidation> {
+  return validateExistingWorktree({
+    cwd: record.repositoryRoot,
+    worktreePath: record.worktreePath,
+    expectedRepositoryRoot: record.repositoryRoot,
+    expectedBranch: record.branch,
+    expectedHead: options.expectedHead,
+    allowRequestedCheckout:
+      record.ownership === 'caller' &&
+      record.repositoryRoot === record.worktreePath,
+    requireClean: options.requireClean,
+    signal: options.signal,
+  });
+}
+
 /**
  * Validate a caller-selected checkout without changing it. Git's common
  * directory proves repository identity across linked worktrees; the porcelain
@@ -828,14 +860,7 @@ export function createWorktreeCreator<
       // A retry may reuse a settled checkout without recreating its directory,
       // but only after Git proves that it is the registered checkout recorded
       // for this repository and branch. Never activate an arbitrary directory.
-      await validateExistingWorktree({
-        cwd: record.repositoryRoot,
-        worktreePath: record.worktreePath,
-        expectedRepositoryRoot: record.repositoryRoot,
-        expectedBranch: record.branch,
-        allowRequestedCheckout:
-          record.ownership === 'caller' &&
-          record.repositoryRoot === record.worktreePath,
+      await validateRecordedWorktree(record, {
         requireClean: false,
         signal: options.signal,
       });
@@ -854,14 +879,7 @@ export function createWorktreeCreator<
         { signal: options.signal },
       );
       abortIfRequested(options.signal);
-      await validateExistingWorktree({
-        cwd: record.repositoryRoot,
-        worktreePath: record.worktreePath,
-        expectedRepositoryRoot: record.repositoryRoot,
-        expectedBranch: record.branch,
-        allowRequestedCheckout:
-          record.ownership === 'caller' &&
-          record.repositoryRoot === record.worktreePath,
+      await validateRecordedWorktree(record, {
         requireClean: false,
         signal: options.signal,
       });

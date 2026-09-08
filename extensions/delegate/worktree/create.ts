@@ -9,6 +9,7 @@ import {
   createWorktreeCreator,
   isInside,
   validateExistingWorktree,
+  validateRecordedWorktree,
   WORKTREE_DIR,
 } from '@pi-dashboard/worktree-manager';
 import type {
@@ -114,12 +115,7 @@ export async function rehydrateWorktreeSession(
     // Caller-owned checkouts remain caller-lifecycle records across a
     // continuation; validate identity without activating or reclassifying
     // their cleanup state.
-    await validateExistingWorktree({
-      cwd: record.repositoryRoot,
-      worktreePath: record.worktreePath,
-      expectedRepositoryRoot: record.repositoryRoot,
-      expectedBranch: record.branch,
-      allowRequestedCheckout: record.repositoryRoot === record.worktreePath,
+    await validateRecordedWorktree(record, {
       requireClean: false,
       signal,
     });
@@ -128,4 +124,9 @@ export async function rehydrateWorktreeSession(
   return creator.rehydrateWorktree(record, { signal });
 }
 
-export { isInside, validateExistingWorktree, WORKTREE_DIR };
+export {
+  isInside,
+  validateExistingWorktree,
+  validateRecordedWorktree,
+  WORKTREE_DIR,
+};

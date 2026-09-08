@@ -27,7 +27,7 @@ import {
   removeWorktree,
   restoreWorktreeSession,
   touchWorktreeParentSession,
-  validateExistingWorktree,
+  validateRecordedWorktree,
   type WorktreeBase,
   type WorktreeRecord,
   writeWorktreeRecord,
@@ -240,14 +240,9 @@ export async function prepareDelegateTask(
     }
 
     if (plan.resumed && state.worktree?.record.ownership === 'caller') {
-      await validateExistingWorktree({
-        cwd: state.worktree.record.worktreePath,
-        worktreePath: state.worktree.record.worktreePath,
-        expectedRepositoryRoot: state.worktree.record.repositoryRoot,
-        expectedBranch: state.worktree.record.branch,
+      await validateRecordedWorktree(state.worktree.record, {
         expectedHead:
           state.worktree.record.headCommit ?? state.worktree.record.baseHead,
-        allowRequestedCheckout: true,
         signal,
       });
     }

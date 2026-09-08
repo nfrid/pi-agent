@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from 'node:fs';
-import { validateExistingWorktree, withWorktreePathLock } from './create.js';
+import { validateRecordedWorktree, withWorktreePathLock } from './create.js';
 import { git, gitText, splitZ } from './git.js';
 import { type WorktreeRecord, workBase } from './model.js';
 import type { WorktreeStore } from './store.js';
@@ -104,14 +104,7 @@ export function createWorktreeFinisher<
 
     try {
       if (record.ownership === 'caller')
-        await validateExistingWorktree({
-          cwd: record.repositoryRoot,
-          worktreePath: record.worktreePath,
-          expectedRepositoryRoot: record.repositoryRoot,
-          expectedBranch: record.branch,
-          requireClean: false,
-          allowRequestedCheckout: record.repositoryRoot === record.worktreePath,
-        });
+        await validateRecordedWorktree(record, { requireClean: false });
 
       // A continuation is allowed to append commits, but it must not replace
       // the previously recorded branch history. Check before committing pending
@@ -139,15 +132,7 @@ export function createWorktreeFinisher<
         record.ownership === 'caller' && options.commitPending === false;
       if (callerReadOnly) {
         if (record.ownership === 'caller')
-          await validateExistingWorktree({
-            cwd: record.repositoryRoot,
-            worktreePath: record.worktreePath,
-            expectedRepositoryRoot: record.repositoryRoot,
-            expectedBranch: record.branch,
-            requireClean: true,
-            allowRequestedCheckout:
-              record.repositoryRoot === record.worktreePath,
-          });
+          await validateRecordedWorktree(record, { requireClean: true });
         const status = String(
           await git(record.worktreePath, [
             'status',
@@ -178,15 +163,7 @@ export function createWorktreeFinisher<
         // first Git write, preventing another delegate claim in this process.
         const write = async () => {
           if (record.ownership === 'caller')
-            await validateExistingWorktree({
-              cwd: record.repositoryRoot,
-              worktreePath: record.worktreePath,
-              expectedRepositoryRoot: record.repositoryRoot,
-              expectedBranch: record.branch,
-              requireClean: false,
-              allowRequestedCheckout:
-                record.repositoryRoot === record.worktreePath,
-            });
+            await validateRecordedWorktree(record, { requireClean: false });
           await commitPendingWork(record, options.taskName, commitAttribution);
           record.headCommit = await gitText(record.worktreePath, [
             'rev-parse',

@@ -16,6 +16,7 @@ export {
   rehydrateWorktreeSession,
   restoreWorktreeSession,
   validateExistingWorktree,
+  validateRecordedWorktree,
   WORKTREE_DIR,
 } from './create';
 export {

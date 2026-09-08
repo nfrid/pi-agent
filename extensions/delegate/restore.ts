@@ -45,6 +45,8 @@ export interface RestoredDelegateDependencies {
   runDelegate?: typeof runDelegate;
   loadWorktree?: typeof loadWorktree;
   restoreWorktreeSession?: typeof restoreWorktreeSession;
+  /** Validate and activate the persisted checkout immediately before observation. */
+  validateWorktreeSession?: typeof rehydrateWorktreeSession;
   finalizeWorktreeRun?: typeof finalizeWorktreeRun;
   /** Existing output-file and parent-handoff materialization seam. */
   materialize?: (runs: DelegatedRun[]) => Promise<DelegateJobResult>;
@@ -321,6 +323,8 @@ export function restoreHostedDelegateAttempt(
   const dependencies = options.dependencies ?? {};
   const load = dependencies.loadWorktree ?? loadWorktree;
   const restore = dependencies.restoreWorktreeSession ?? restoreWorktreeSession;
+  const validate =
+    dependencies.validateWorktreeSession ?? rehydrateWorktreeSession;
   const finalize = dependencies.finalizeWorktreeRun ?? finalizeWorktreeRun;
   const observe = dependencies.runDelegate ?? runDelegate;
   const label =
@@ -378,14 +382,10 @@ export function restoreHostedDelegateAttempt(
     signal: AbortSignal,
     detachSignal?: AbortSignal,
   ): Promise<DelegateJobResult> => {
-    if (worktree && !dependencies.restoreWorktreeSession) {
+    if (worktree) {
       // Hosted recovery must validate the persisted checkout immediately
       // before observing the child; existence alone is not identity proof.
-      worktree = await rehydrateWorktreeSession(
-        worktree.record,
-        session.token,
-        signal,
-      );
+      worktree = await validate(worktree.record, session.token, signal);
     }
     const runOptions: RunDelegateOptions = {
       runId: link.processJobId,

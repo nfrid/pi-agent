@@ -287,6 +287,7 @@ describe('restored delegate adapter', () => {
       dependencies: {
         loadWorktree: () => record,
         restoreWorktreeSession: () => prepared,
+        validateWorktreeSession: async () => prepared,
         finalizeWorktreeRun: finalize,
         runDelegate: async () => finishedRun('restore'),
         materialize,
@@ -345,6 +346,7 @@ describe('restored delegate adapter', () => {
       dependencies: {
         loadWorktree: () => record,
         restoreWorktreeSession: () => prepared,
+        validateWorktreeSession: async () => prepared,
         finalizeWorktreeRun: finalize,
         runDelegate: async () => finishedRun('restore'),
         materialize,
@@ -671,6 +673,7 @@ describe('restored delegate adapter', () => {
       dependencies: {
         loadWorktree: () => record,
         restoreWorktreeSession: () => prepared,
+        validateWorktreeSession: async () => prepared,
         finalizeWorktreeRun: finalize,
         runDelegate: async (options) => {
           expect(options.worktree).toBe(prepared);

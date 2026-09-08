@@ -801,6 +801,45 @@ describe('finishing a worktree', () => {
     );
   });
 
+  test('reports the latest durable record when snapshot retirement fails', async () => {
+    const worktree = await prepared({ name: 'Retirement failure facts' });
+    const durableBranch = 'durable/latest-branch';
+    const durableHead = 'a'.repeat(40);
+    const retirement = async (id: string) => {
+      const latest = loadWorktree(id);
+      if (!latest) throw new Error('missing durable record');
+      latest.status = 'finished';
+      latest.branch = durableBranch;
+      latest.headCommit = durableHead;
+      writeWorktreeRecord(latest);
+      throw new Error('injected retirement failure');
+    };
+    try {
+      const run = createRun('Retirement failure facts', undefined, {
+        allowWrites: false,
+      });
+      run.state = 'success';
+      run.exitCode = 0;
+      await finalizeWorktreeRun(run, worktree, 'Retirement failure facts', {
+        retireWorktreeSnapshot: retirement,
+      });
+
+      expect(run.worktree).toMatchObject({
+        status: 'finished',
+        branch: durableBranch,
+        headCommit: durableHead,
+      });
+      expect(run.errorMessage).toMatch(/injected retirement failure/);
+    } finally {
+      const latest = loadWorktree(worktree.record.id);
+      if (latest) {
+        latest.branch = worktree.record.branch;
+        writeWorktreeRecord(latest);
+      }
+      await removeWorktree(worktree.record.id);
+    }
+  });
+
   test('retires a successful clean read-only run as a resumable snapshot', async () => {
     writeFileSync(path.join(repository, 'src', 'value.txt'), 'parent WIP\n');
     const worktree = await prepared({ name: 'Snapshot review' });

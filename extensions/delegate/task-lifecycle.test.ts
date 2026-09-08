@@ -22,6 +22,7 @@ import {
   loadWorktree,
   removeWorktree,
 } from './worktree';
+import { writeWorktreeRecord } from './worktree/records';
 import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 const originalRoute: DelegateRouteState = {
@@ -92,6 +93,7 @@ describe('delegate task lifecycle', () => {
       );
       expect(continued.worktree?.record.id).toBe(initial.worktree.record.id);
       expect(continued.cwd).toBe(selected);
+      expect(loadWorktree(initial.worktree.record.id)?.status).toBe('finished');
     } finally {
       if (continued) removeDelegateSession(continued.session);
       if (initial) {
@@ -100,6 +102,49 @@ describe('delegate task lifecycle', () => {
       }
       git(repository, ['worktree', 'remove', '--force', selected]);
       git(repository, ['branch', '-D', 'caller/continuation']);
+    }
+  });
+
+  test('rejects an ordinary continuation whose recorded checkout is replaced', async () => {
+    const initial = await prepareDelegateTask(
+      plan({ isolation: 'worktree', base: 'head' }),
+    );
+    if (!initial.worktree) throw new Error('missing initial worktree');
+    const record = initial.worktree.record;
+    const originalPath = record.worktreePath;
+    const run = createRun('retained review', undefined, {
+      allowWrites: false,
+    });
+    run.state = 'success';
+    run.exitCode = 0;
+    await finalizeWorktreeRun(run, initial.worktree, 'retained review');
+    const retired = loadWorktree(record.id);
+    if (!retired) throw new Error('missing retired record');
+    retired.worktreePath = path.join(repository, 'src');
+    writeWorktreeRecord(retired);
+
+    try {
+      await expect(
+        prepareDelegateTask(
+          plan({
+            context: 'continuation',
+            isolation: 'worktree',
+            resumed: initial.session,
+          }),
+        ),
+      ).rejects.toThrow(/worktree root/);
+      expect(loadWorktree(record.id)).toMatchObject({
+        status: 'finished',
+        snapshot: true,
+      });
+    } finally {
+      const latest = loadWorktree(record.id);
+      if (latest) {
+        latest.worktreePath = originalPath;
+        writeWorktreeRecord(latest);
+      }
+      removeDelegateSession(initial.session);
+      await removeWorktree(record.id, { deleteBranch: true });
     }
   });
 

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -280,9 +280,11 @@ describe('worktree creator rehydration', () => {
       const record = prepared.worktree.record;
 
       const originalPath = record.worktreePath;
-      record.worktreePath = path.join(root, 'tracked.txt');
+      const arbitraryDirectory = path.join(root, 'arbitrary-directory');
+      await mkdir(arbitraryDirectory);
+      record.worktreePath = arbitraryDirectory;
       await expect(creator.rehydrateWorktree(record)).rejects.toThrow(
-        /not a directory|worktree root/,
+        /worktree root/,
       );
 
       await git(foreign, 'init', '-b', 'foreign');
