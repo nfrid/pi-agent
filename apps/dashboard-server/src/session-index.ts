@@ -1708,6 +1708,14 @@ export class SessionIndex {
 
   /** Rename a known dormant session by appending a normal Pi session_info entry. */
   async rename(id: string, name: string): Promise<SessionIndexEntry> {
+    this.assertOpen();
+    return this.track(this.renameInternal(id, name));
+  }
+
+  private async renameInternal(
+    id: string,
+    name: string,
+  ): Promise<SessionIndexEntry> {
     const indexed = this.files.get(id);
     if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
       throw new Error('Unknown session.');
@@ -1721,7 +1729,9 @@ export class SessionIndex {
     };
     // appendFile uses O_APPEND so one JSONL entry is not overwritten by a
     // concurrent Pi append. Re-index from disk so latest-name semantics apply.
+    this.assertOpen();
     await fs.appendFile(indexed.file, `${JSON.stringify(entry)}\n`, 'utf8');
+    this.assertOpen();
     await this.indexFile(indexed.file);
     const renamed = this.files.get(id);
     if (!renamed) throw new Error('Session disappeared while renaming.');
@@ -2136,6 +2146,7 @@ export class SessionIndex {
     epoch = catalogue.epoch,
     fileRevision?: number,
   ): boolean {
+    if (this.closed) return false;
     if (catalogue.kind === 'live') {
       if (
         catalogue !== this.catalogue ||

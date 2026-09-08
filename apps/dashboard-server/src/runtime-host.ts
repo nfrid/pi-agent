@@ -355,7 +355,6 @@ export class RuntimeHostService {
   private server?: Server;
   private closing = false;
   private closePromise?: Promise<void>;
-  private readonly pendingStarts = new Set<Promise<unknown>>();
 
   constructor(
     private readonly socketPath: string,
@@ -407,7 +406,7 @@ export class RuntimeHostService {
 
   private async closeInternal(): Promise<void> {
     const errors: unknown[] = [];
-    await Promise.allSettled([...this.pendingStarts]);
+    await Promise.allSettled([...this.startLocks.values()]);
     await Promise.all(
       [...this.runtimes.values()].map(async (runtime) => {
         try {
@@ -512,19 +511,7 @@ export class RuntimeHostService {
     }
   }
 
-  private startSerialized(input: HostStartInput): Promise<HostRuntime> {
-    const start = this.startSerializedInternal(input);
-    this.pendingStarts.add(start);
-    void start.then(
-      () => this.pendingStarts.delete(start),
-      () => this.pendingStarts.delete(start),
-    );
-    return start;
-  }
-
-  private async startSerializedInternal(
-    input: HostStartInput,
-  ): Promise<HostRuntime> {
+  private async startSerialized(input: HostStartInput): Promise<HostRuntime> {
     if (this.closing) throw new Error('Runtime host is closing.');
     const runtimeId = input.runtimeId;
     const previous = this.startLocks.get(runtimeId) ?? Promise.resolve();

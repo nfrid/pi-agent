@@ -118,19 +118,41 @@ describe('runtime host', () => {
     });
     await service.listen();
     try {
-      const start = new RuntimeHostClient(socket).start({
+      const client = new RuntimeHostClient(socket);
+      const input = {
         runtimeId: 'crossing-close',
         cwd: root,
         socketPath: path.join(root, 'bridge.sock'),
         launchToken: 'launch',
         identityToken: 'identity',
         piExecutable: executable,
-      });
+      };
+      const first = client.start(input);
       await environmentCalled;
+      const firstLock = (
+        service as unknown as {
+          startLocks: Map<string, Promise<void>>;
+        }
+      ).startLocks.get('crossing-close');
+      const second = client.start(input);
+      await eventually(async () => {
+        const lock = (
+          service as unknown as {
+            startLocks: Map<string, Promise<void>>;
+          }
+        ).startLocks.get('crossing-close');
+        return lock !== undefined && lock !== firstLock;
+      });
       const close = service.close();
-      expect(close).toBe(service.close());
+      let closeSettled = false;
+      void close.then(() => {
+        closeSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(closeSettled).toBe(false);
       releaseEnvironment();
-      await expect(start).rejects.toThrow('closing');
+      await expect(first).rejects.toThrow('closing');
+      await expect(second).rejects.toThrow('closing');
       expect(await readFile(started, 'utf8')).toBe('yes');
       await close;
       expect(service.summaries()).toEqual([]);

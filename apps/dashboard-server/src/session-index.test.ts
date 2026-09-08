@@ -1839,13 +1839,47 @@ describe('session index', () => {
       ).indexFile(file);
       await scanReady;
       const close = index.close();
-      expect(close).toBe(index.close());
+      const secondClose = index.close();
+      let closeSettled = false;
+      void close.then(() => {
+        closeSettled = true;
+      });
+      await Promise.resolve();
+      expect(closeSettled).toBe(false);
       releaseScan();
-      await Promise.all([scan, close]);
+      await Promise.all([scan, close, secondClose]);
       expect(saved).toHaveLength(1);
       expect(index.get('closing-id')).toBeDefined();
     } finally {
       scanSpy.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects rebuilds and watcher installs after close', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-index-closed-'),
+    );
+    const index = new SessionIndex(root);
+    try {
+      await index.start();
+      await index.close();
+      await expect(index.rebuild()).rejects.toThrow('closed');
+      await expect(index.start()).rejects.toThrow('closed');
+      const internals = index as unknown as {
+        ensureWatcher(root: string): Promise<void>;
+        watchers: Map<string, unknown>;
+      };
+      await expect(internals.ensureWatcher(root)).resolves.toBeUndefined();
+      expect(internals.watchers.size).toBe(0);
+      await writeFile(
+        path.join(root, 'late.jsonl'),
+        `${JSON.stringify({ type: 'session', id: 'late-id', cwd: '/tmp' })}\n`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      expect(index.get('late-id')).toBeUndefined();
+    } finally {
+      await index.close();
       await fs.rm(root, { recursive: true, force: true });
     }
   });
@@ -1875,6 +1909,54 @@ describe('session index', () => {
     }
   }, 10_000);
 
+  it('drains an in-flight rename before closing', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-rename-close-'),
+    );
+    const file = path.join(root, 'session.jsonl');
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'rename-close-id', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    const originalAppend = fs.appendFile.bind(fs);
+    let releaseAppend!: () => void;
+    let appendStarted!: () => void;
+    const appendGate = new Promise<void>((resolve) => {
+      releaseAppend = resolve;
+    });
+    const appendReady = new Promise<void>((resolve) => {
+      appendStarted = resolve;
+    });
+    const appendSpy = vi
+      .spyOn(fs, 'appendFile')
+      .mockImplementation(async (...args) => {
+        appendStarted();
+        await appendGate;
+        return originalAppend(...args);
+      });
+    try {
+      const rename = index.rename('rename-close-id', 'Closing rename');
+      await appendReady;
+      const close = index.close();
+      let closeSettled = false;
+      void close.then(() => {
+        closeSettled = true;
+      });
+      await Promise.resolve();
+      expect(closeSettled).toBe(false);
+      releaseAppend();
+      await expect(rename).rejects.toThrow('closed');
+      await close;
+    } finally {
+      appendSpy.mockRestore();
+      releaseAppend();
+      await index.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('renames a known dormant session by appending session_info', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-rename-'));
     const file = path.join(root, 'session.jsonl');
@@ -1903,5 +1985,9 @@ describe('session index', () => {
     });
     expect(typeof appended.id).toBe('string');
     expect(typeof appended.timestamp).toBe('string');
+    await index.close();
+    await expect(index.rename('rename-id', 'Too late')).rejects.toThrow(
+      'closed',
+    );
   });
 });
