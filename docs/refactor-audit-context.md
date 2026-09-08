@@ -141,6 +141,25 @@ branch. These constraints apply to the follow-up work:
 This work does not introduce a lifecycle framework, change storage formats,
 merge into `main`, or deploy/restart production services.
 
+### Hardening validation
+
+- `PATH="$PATH:/usr/sbin:/sbin" bun run check`: all typechecks and lint pass;
+  2,382 tests pass and one server file-read boundary test fails resolving `ajv`
+  through Bun's global isolated dependency symlinks. This aggregate command is
+  not green. Native Node resolves the dependency; no missing dependency was
+  added and no shared cache was modified to hide the failure.
+- `bun run --filter @pi-dashboard/server test`: all 413 tests pass independently.
+  The server Vitest config preserves symlinks, which fixes scoped execution but
+  does not eliminate the aggregate runner failure. Its remaining cause is not
+  established; changing the general launcher was deliberately left out of scope.
+- `bun run workspace:build` passes. Five filtered Playwright checks pass across
+  pagination, retained/persisted cached sessions, offline delegate inspection,
+  and incompatible browser-shell handling. Tests used isolated ports 45974 and
+  45973; no deployment or production service restart occurred.
+- The combined change was reviewed, including independent lifecycle review and
+  the standalone delegate-inspector client-ownership regression. The main
+  checkout remains clean at `ddc34986`; changes remain in the audit worktree.
+
 ## Validation baseline
 
 The integrated change is expected to pass `bun run check`, a production dashboard-web build, focused contribution/protocol/delegate/web tests, and the usage Playwright flow. The final commands and counts belong in the implementing change record; do not treat this note as a substitute for rerunning them after later edits.
