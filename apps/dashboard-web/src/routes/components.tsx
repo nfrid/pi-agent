@@ -29,6 +29,7 @@ export function SessionRoute() {
       id={sessionId}
       snapshot={dashboard.snapshot}
       store={dashboard.store}
+      client={dashboard.client}
       Composer={Composer}
     />
   );

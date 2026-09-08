@@ -610,6 +610,17 @@ describe('DashboardConnectionRuntime', () => {
       },
     });
     f.session('session-a', {
+      id: 'a-mismatched-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 1,
+        snapshot: sessionSnapshot(1, 'session-b', 'daemon-1'),
+      },
+    });
+    expect(f.store.getSnapshot().sessionSnapshotsById['session-b']?.cursor).toBe(
+      0,
+    );
+    f.session('session-a', {
       id: 'a-gap',
       data: {
         type: 'session-event',

@@ -1,4 +1,8 @@
-import { DashboardLiveStore, dashboardHttpClient } from '@pi-dashboard/client';
+import {
+  DashboardHttpClient,
+  DashboardLiveStore,
+  dashboardHttpClient,
+} from '@pi-dashboard/client';
 import type {
   AuthoritativeSessionSnapshot,
   SessionApiResponse,
@@ -49,6 +53,7 @@ describe('useOlderSessionHistory', () => {
   it('does not carry paginated history into the next session render', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const store = new DashboardLiveStore();
+    const owningClient = new DashboardHttpClient();
     const paginated = {
       metadata: {
         id: 'session-b',
@@ -81,7 +86,7 @@ describe('useOlderSessionHistory', () => {
       cursor: 1,
     } as SessionApiResponse;
     const sessionBefore = vi
-      .spyOn(dashboardHttpClient, 'sessionBefore')
+      .spyOn(owningClient, 'sessionBefore')
       .mockRejectedValue(new Error('stale pagination request'));
     let controls!: ReturnType<typeof useOlderSessionHistory>;
     function Probe({
@@ -97,6 +102,7 @@ describe('useOlderSessionHistory', () => {
         id,
         data,
         store,
+        client: owningClient,
         sessionMounted,
       });
       return null;

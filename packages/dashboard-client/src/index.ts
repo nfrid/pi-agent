@@ -16,6 +16,7 @@ import { useDashboardStore } from './react-store.js';
 import { DashboardLiveStore, selectSnapshot } from './store.js';
 
 export interface DashboardState {
+  client: DashboardHttpClient;
   snapshot: ReturnType<typeof selectSnapshot>;
   error?: string;
   errorKind?: ReturnType<
@@ -47,6 +48,7 @@ export function useDashboard(
   const state = useDashboardStore(store, (current) => current);
   const snapshot = useDashboardStore(store, selectSnapshot);
   return {
+    client,
     snapshot,
     error: state.connection.error,
     errorKind: state.connection.errorKind,
@@ -76,6 +78,7 @@ export function useDashboardShell(
     (state) => state.connection.status,
   );
   return {
+    client,
     snapshot,
     error,
     errorKind,

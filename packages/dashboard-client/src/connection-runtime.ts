@@ -636,6 +636,7 @@ export class DashboardConnectionRuntime {
           sequence,
           entry.generation,
           true,
+          entry.id,
         )
       )
         return;

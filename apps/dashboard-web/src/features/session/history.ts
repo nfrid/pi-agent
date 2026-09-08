@@ -1,4 +1,5 @@
 import {
+  type DashboardHttpClient,
   type DashboardLiveStore,
   dashboardHttpClient,
   SESSION_HISTORY_BUDGET,
@@ -133,7 +134,9 @@ export function useOlderSessionHistory({
   sessionMounted,
   autoloadAll = false,
   autoloadAtTop = false,
+  client: clientOverride,
 }: {
+  client?: DashboardHttpClient;
   id: string;
   data: SessionApiResponse | undefined;
   store: DashboardLiveStore;
@@ -144,6 +147,7 @@ export function useOlderSessionHistory({
   /** Load older pages while the initialized scrollport remains at its top. */
   autoloadAtTop?: boolean | (() => boolean);
 }) {
+  const client = clientOverride ?? store.client ?? dashboardHttpClient;
   const coverage = useDashboardStore(store, selectSessionHistoryCoverage(id));
   const [history, setHistory] = useState<SessionApiResponse['history']>();
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -435,7 +439,7 @@ export function useOlderSessionHistory({
             const before = expected.nextBefore;
             if (seenBefore.has(before)) failClosed('History cursor cycle.');
             seenBefore.add(before);
-            const page = await dashboardHttpClient.sessionBefore(
+            const page = await client.sessionBefore(
               id,
               before,
               request.controller.signal,
@@ -571,7 +575,7 @@ export function useOlderSessionHistory({
         request.resolveCompletion();
       }
     },
-    [currentHistory, id, scrollElementRef, store],
+    [client, currentHistory, id, scrollElementRef, store],
   );
   const loadThroughOrdinal = useCallback(
     async (ordinal: number) => {

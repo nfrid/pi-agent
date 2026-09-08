@@ -1,4 +1,5 @@
 import {
+  type DashboardHttpClient,
   type DashboardLiveStore,
   selectSessionReplacement,
   useDashboardStore,
@@ -44,12 +45,14 @@ export function SessionView({
   id,
   snapshot,
   store,
+  client,
   Composer,
   embedded = false,
 }: {
   id: string;
   snapshot: BrowserSnapshot;
   store: DashboardLiveStore;
+  client: DashboardHttpClient;
   Composer: ComponentType<SessionComposerProps>;
   /** Render transcript controls without the full-page agent navigation shell. */
   embedded?: boolean;
@@ -105,6 +108,7 @@ export function SessionView({
     id,
     data,
     store,
+    client,
     sessionMounted,
     scrollElementRef: embedded ? undefined : transcriptScrollRef,
     autoloadAtTop: !embedded

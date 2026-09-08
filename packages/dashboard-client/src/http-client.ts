@@ -644,6 +644,11 @@ export class DashboardHttpClient {
         'Dashboard returned invalid authoritative session data.',
         value,
       );
+    if (response.metadata.id !== id)
+      throw malformedOutput(
+        'Dashboard returned authoritative session data for a different session.',
+        value,
+      );
     if (before !== undefined) return response;
     // Keep this enumerable: query caches may structurally clone response
     // objects, while the ordering metadata must survive to the store boundary.
