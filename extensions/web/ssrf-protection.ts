@@ -2,7 +2,7 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { PassThrough, pipeline, Readable } from 'node:stream';
+import { pipeline, Readable } from 'node:stream';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import {
   type AddressPolicyOptions,
@@ -128,22 +128,27 @@ async function pinnedFetch(
               : encoding === 'br'
                 ? createBrotliDecompress()
                 : null;
-        let body: Readable = response;
+        if (encoding && encoding !== 'identity' && !decoder) {
+          response.destroy();
+          reject(new Error(`Unsupported content encoding: ${encoding}`));
+          return;
+        }
         if (decoder) {
-          const output = new PassThrough();
-          pipeline(response, decoder, output, (error) => {
-            if (error && !output.destroyed) output.destroy(error);
-          });
-          body = output;
+          // Pipeline forwards source errors and downstream cancellation in both
+          // directions. The returned body surfaces errors to its reader.
+          pipeline(response, decoder, () => {});
           headers.delete('content-encoding');
           headers.delete('content-length');
         }
         resolve(
-          new Response(Readable.toWeb(body) as ReadableStream<Uint8Array>, {
-            status,
-            statusText: response.statusMessage,
-            headers,
-          }),
+          new Response(
+            Readable.toWeb(decoder ?? response) as ReadableStream<Uint8Array>,
+            {
+              status,
+              statusText: response.statusMessage,
+              headers,
+            },
+          ),
         );
       },
     );

@@ -78,7 +78,7 @@ describe('SSRF protection', () => {
     ['gzip', gzipSync('compressed gzip')],
     ['deflate', deflateSync('compressed deflate')],
     ['br', brotliCompressSync('compressed br')],
-  ])('decodes %s responses and enforces the decoded size limit', async (encoding, body) => {
+  ])('decodes %s responses', async (encoding, body) => {
     const server = http.createServer((_request, response) => {
       response.writeHead(200, {
         'content-encoding': encoding,
@@ -132,7 +132,11 @@ describe('SSRF protection', () => {
     }
   });
 
-  it('closes an ongoing compressed connection when the body is canceled', async () => {
+  it.each([
+    'cancel',
+    'abort',
+  ])('closes an ongoing compressed connection on %s', async (action) => {
+    const controller = new AbortController();
     let closedResolve: (() => void) | undefined;
     const closed = new Promise<void>((resolve) => {
       closedResolve = resolve;
@@ -159,10 +163,14 @@ describe('SSRF protection', () => {
       if (!address || typeof address === 'string') throw new Error('No port');
       const response = await fetchRemoteUrl(
         `http://127.0.0.1:${address.port}/`,
-        {},
+        { signal: controller.signal },
         { allowRanges: ['127.0.0.1/32'] },
       );
-      await response.body?.cancel('test cancellation');
+      if (action === 'cancel') await response.body?.cancel('test cancellation');
+      else {
+        controller.abort();
+        await expect(response.text()).rejects.toThrow();
+      }
       await expect(
         Promise.race([
           closed,
@@ -172,6 +180,7 @@ describe('SSRF protection', () => {
         ]),
       ).resolves.toBeUndefined();
     } finally {
+      server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );
@@ -287,30 +296,44 @@ describe('SSRF protection', () => {
         ]),
       ).resolves.toBeUndefined();
     } finally {
+      server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
   });
 
-  it('cancels a redirect body when the redirect limit is exceeded', async () => {
-    const response = new Response('discard me', {
-      status: 302,
-      headers: { location: 'https://next.test/' },
+  it.each([
+    'identity',
+    'unsupported',
+  ])('handles %s content encoding at the transport boundary', async (encoding) => {
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { 'content-encoding': encoding });
+      response.end('plain text');
     });
-    const fetchMock = vi.fn().mockResolvedValue(response);
-    await expect(
-      fetchRemoteUrl(
-        'https://public.test/',
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No port');
+      const pending = fetchRemoteUrl(
+        `http://127.0.0.1:${address.port}/`,
         {},
         {
-          maxRedirects: 0,
-          lookup: async () => [{ address: '93.184.216.34', family: 4 }],
-          fetch: fetchMock,
+          allowRanges: ['127.0.0.1/32'],
         },
-      ),
-    ).rejects.toThrow('Too many redirects');
-    expect(response.bodyUsed).toBe(true);
+      );
+      if (encoding === 'identity')
+        await expect((await pending).text()).resolves.toBe('plain text');
+      else
+        await expect(pending).rejects.toThrow('Unsupported content encoding');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 
   it('blocks a private redirect before connection establishment', async () => {

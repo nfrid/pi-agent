@@ -144,19 +144,6 @@ async function extractViaHttp(
         error: `HTTP ${response.status}: ${response.statusText}`,
       };
     }
-    const encoding = response.headers
-      .get('content-encoding')
-      ?.trim()
-      .toLowerCase();
-    if (encoding && !['gzip', 'x-gzip', 'deflate', 'br'].includes(encoding)) {
-      await response.body?.cancel('Unsupported content encoding');
-      return {
-        url,
-        title: '',
-        content: '',
-        error: `Unsupported content encoding: ${encoding}`,
-      };
-    }
     const contentLength = Number(response.headers.get('content-length'));
     if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
       await response.body?.cancel('Response exceeded size limit');
