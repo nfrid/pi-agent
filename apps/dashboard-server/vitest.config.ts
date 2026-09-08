@@ -3,6 +3,8 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   resolve: {
+    // Keep Bun's isolated dependency chains intact when resolving CommonJS requires.
+    preserveSymlinks: true,
     alias: {
       '@pi-agent/background-jobs': path.resolve(
         __dirname,
