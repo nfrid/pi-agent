@@ -82,6 +82,36 @@ describe('dashboard metadata wire boundaries', () => {
     }
   });
 
+  it('recovers a managed runtime PID only from a fresh owned snapshot', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-metadata-pid-'),
+    );
+    const store = new MetadataStore(path.join(root, 'dashboard.sqlite'));
+    try {
+      store.recordManagedLaunch(
+        'runtime-pid',
+        { cwd: '/tmp' },
+        { id: 'host:runtime-pid' },
+        { identityToken: 'identity', launchToken: 'launch' },
+      );
+      store.saveRuntime({
+        runtimeId: 'runtime-pid',
+        ownership: 'managed',
+        pid: 4321,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-pid', entries: [] },
+        lastSeenAt: Date.now(),
+      } as never);
+      expect(store.managedLaunches()).toEqual([
+        expect.objectContaining({ runtimeId: 'runtime-pid', processId: 4321 }),
+      ]);
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('omits nullable SQLite notification fields from browser snapshots', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-metadata-'),

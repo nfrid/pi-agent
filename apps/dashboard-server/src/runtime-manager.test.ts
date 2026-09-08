@@ -18,7 +18,7 @@ describe('runtime stopping', () => {
     const manager = new RuntimeManager(
       { forget } as never,
       {
-        attach: vi.fn().mockResolvedValue(restoredBinding),
+        attach: vi.fn().mockRejectedValue(new Error('runtime absent')),
         stop,
       } as never,
       {} as never,
@@ -28,6 +28,7 @@ describe('runtime stopping', () => {
             runtimeId: restoredBinding.runtimeId,
             workspaceId: 'workspace-restored',
             location: { id: 'provider:opaque-restored-location' },
+            processId: 4321,
             identityTokenHash: 'identity-hash',
             launchTokenHash: 'launch-hash',
             launchConsumed: true,
@@ -39,14 +40,13 @@ describe('runtime stopping', () => {
       '/tmp/bridge.sock',
     );
     await expect(manager.recover(restoredBinding.runtimeId)).resolves.toBe(
-      true,
+      false,
     );
-    await manager.stopRecovered(restoredBinding.runtimeId);
     expect(stop).toHaveBeenCalledOnce();
-    expect(stop).toHaveBeenCalledWith(restoredBinding);
+    expect(stop).toHaveBeenCalledWith({ ...restoredBinding, processId: 4321 });
     expect(markManagedStopped).toHaveBeenCalledOnce();
     expect(markManagedStopped).toHaveBeenCalledWith(restoredBinding.runtimeId);
-    expect(forget).toHaveBeenCalledOnce();
+    expect(forget).not.toHaveBeenCalled();
   });
 
   it('retains recovered evidence when provider cleanup fails and retries it', async () => {

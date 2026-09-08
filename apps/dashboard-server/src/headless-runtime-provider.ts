@@ -40,7 +40,7 @@ export class HeadlessRuntimeProvider implements AgentRuntimeProvider {
   }
 
   async stop(binding: RuntimeBinding, force = false): Promise<void> {
-    await this.host.stop(binding.runtimeId, force);
+    await this.host.stop(binding.runtimeId, force, binding.processId);
   }
 
   async send(

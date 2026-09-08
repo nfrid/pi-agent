@@ -752,14 +752,56 @@ export class RuntimeHostClient {
     return bindingFromSummary(response.runtime);
   }
 
-  async stop(runtimeId: string, force = false): Promise<void> {
+  async stop(
+    runtimeId: string,
+    force = false,
+    processId?: number,
+  ): Promise<void> {
+    if (
+      processId !== undefined &&
+      (!Number.isSafeInteger(processId) || processId <= 0)
+    )
+      throw new Error('Runtime process identity is invalid.');
+    // Reject a supplied identity conflict before asking the host to stop
+    // anything. A retained record is authoritative while the host is alive.
+    const retainedBeforeStop = await this.inspect(runtimeId);
+    if (
+      retainedBeforeStop &&
+      processId !== undefined &&
+      retainedBeforeStop.pid !== processId
+    )
+      throw Object.assign(
+        new Error('Runtime process identity conflicts with the host record.'),
+        { code: 'runtime-conflict' },
+      );
     await this.request({ op: 'stop', runtimeId, force });
     // The long-lived host may predate strict stop ACKs. Independently inspect
     // its retained close evidence and verify local process absence before the
-    // daemon writes a durable stopped marker. Missing host history is unknown.
+    // daemon writes a durable stopped marker.
     const runtime = await this.inspect(runtimeId);
+    if (runtime === undefined) {
+      // A restarted host has no retained close history. Probe only the exact,
+      // authenticated PID recovered from metadata; kill(pid, 0) never signals.
+      if (processId === undefined)
+        throw new Error('Runtime termination is not proven by the host.');
+      try {
+        process.kill(processId, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+        throw error;
+      }
+      throw new Error(
+        'Runtime process still exists after stop acknowledgement.',
+      );
+    }
+    if (runtime.runtimeId !== runtimeId)
+      throw new Error('Runtime termination is not proven by the host.');
+    if (processId !== undefined && runtime.pid !== processId)
+      throw Object.assign(
+        new Error('Runtime process identity conflicts with the host record.'),
+        { code: 'runtime-conflict' },
+      );
     if (
-      runtime?.runtimeId !== runtimeId ||
       runtime.status !== 'stopped' ||
       !Number.isSafeInteger(runtime.pid) ||
       runtime.pid <= 0

@@ -9,7 +9,7 @@ import {
 import { createConnection, createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   loadLoginEnvironment,
   RUNTIME_HOST_MAX_LINE_BYTES,
@@ -62,6 +62,90 @@ describe('runtime host', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  it('settles a restarted host with only the exact saved PID and ESRCH proof', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'runtime-host-restart-'));
+    const socket = path.join(root, 'host.sock');
+    const server = createServer((connection) => {
+      connection.once('data', () => connection.end('{"ok":true}\n'));
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+    });
+    try {
+      await new RuntimeHostClient(socket).stop('restarted', false, 912345);
+      expect(kill).toHaveBeenCalledWith(912345, 0);
+    } finally {
+      kill.mockRestore();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an invalid saved PID before contacting the host', async () => {
+    await expect(
+      new RuntimeHostClient(
+        path.join(os.tmpdir(), 'runtime-host-invalid-unused.sock'),
+      ).stop('invalid', false, 0),
+    ).rejects.toThrow('identity is invalid');
+  });
+
+  it('rejects EPERM from the restarted-host PID probe', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'runtime-host-eperm-'));
+    const socket = path.join(root, 'host.sock');
+    const server = createServer((connection) => {
+      connection.once('data', () => connection.end('{"ok":true}\n'));
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('not allowed'), { code: 'EPERM' });
+    });
+    try {
+      await expect(
+        new RuntimeHostClient(socket).stop('restarted', false, 912345),
+      ).rejects.toMatchObject({ code: 'EPERM' });
+    } finally {
+      kill.mockRestore();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a saved PID that conflicts with retained host identity before stopping', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'runtime-host-conflict-'),
+    );
+    const socket = path.join(root, 'host.sock');
+    let requests = 0;
+    const server = createServer((connection) => {
+      connection.once('data', () => {
+        requests += 1;
+        connection.end(
+          `${JSON.stringify({
+            ok: true,
+            runtime: { runtimeId: 'conflict', status: 'running', pid: 123 },
+          })}\n`,
+        );
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    try {
+      await expect(
+        new RuntimeHostClient(socket).stop('conflict', false, 456),
+      ).rejects.toMatchObject({ code: 'runtime-conflict' });
+      expect(requests).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('loads exported variables after shell startup output', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'runtime-shell-env-'));
     const shell = path.join(root, 'login-shell');

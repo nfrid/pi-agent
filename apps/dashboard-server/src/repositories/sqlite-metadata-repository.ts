@@ -11,6 +11,31 @@ import type {
   MetadataRepository,
 } from './types.js';
 
+function recoveredProcessId(row: Record<string, unknown>): number | undefined {
+  if (row.runtimeOwnership !== 'managed') return undefined;
+  const launchedAt = Number(row.launchedAt);
+  const lastSeenAt = Number(row.runtimeLastSeenAt);
+  if (!Number.isFinite(launchedAt) || !Number.isFinite(lastSeenAt))
+    return undefined;
+  if (lastSeenAt < launchedAt || typeof row.snapshotJson !== 'string')
+    return undefined;
+  try {
+    const snapshot: unknown = JSON.parse(row.snapshotJson);
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot))
+      return undefined;
+    const value = snapshot as Record<string, unknown>;
+    const pid = value.pid;
+    return value.runtimeId === row.runtimeId &&
+      value.ownership === 'managed' &&
+      Number.isSafeInteger(pid) &&
+      (pid as number) > 0
+      ? (pid as number)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class SqliteMetadataRepository implements MetadataRepository {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -109,32 +134,38 @@ export class SqliteMetadataRepository implements MetadataRepository {
     return (
       this.db
         .prepare(
-          `SELECT runtime_id as runtimeId,project_id as projectId,checkout_id as checkoutId,cwd,runtime_location_json as locationJson,launched_at as launchedAt,ready_at as readyAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch ${where} runtime_location_json IS NOT NULL`,
+          `SELECT managed_launch.runtime_id as runtimeId,managed_launch.project_id as projectId,managed_launch.checkout_id as checkoutId,managed_launch.cwd,managed_launch.runtime_location_json as locationJson,managed_launch.launched_at as launchedAt,managed_launch.ready_at as readyAt,managed_launch.stopped_at as stoppedAt,managed_launch.identity_token_hash as identityTokenHash,managed_launch.launch_token_hash as launchTokenHash,managed_launch.launch_consumed as launchConsumed,managed_launch.mode,runtime.snapshot_json as snapshotJson,runtime.ownership as runtimeOwnership,runtime.last_seen_at as runtimeLastSeenAt FROM managed_launch LEFT JOIN runtime ON runtime.id=managed_launch.runtime_id ${where} managed_launch.runtime_location_json IS NOT NULL`,
         )
         .all() as Array<Record<string, unknown>>
-    ).map((row) => ({
-      runtimeId: String(row.runtimeId),
-      ...(row.projectId == null ? {} : { projectId: String(row.projectId) }),
-      ...(row.checkoutId == null ? {} : { checkoutId: String(row.checkoutId) }),
-      ...(row.cwd == null ? {} : { cwd: String(row.cwd) }),
-      location: (() => {
-        try {
-          const value: unknown = JSON.parse(String(row.locationJson));
-          if (value && typeof value === 'object' && !Array.isArray(value))
-            return value as RuntimeLocation;
-        } catch {
-          /* malformed legacy rows are not recoverable */
-        }
-        return { id: `unrecoverable:${row.runtimeId}` };
-      })(),
-      identityTokenHash: String(row.identityTokenHash ?? ''),
-      launchTokenHash: String(row.launchTokenHash ?? ''),
-      launchConsumed: Number(row.launchConsumed) === 1,
-      mode: row.mode === 'read' ? 'read' : 'write',
-      launchedAt: Number(row.launchedAt),
-      ...(row.readyAt == null ? {} : { readyAt: Number(row.readyAt) }),
-      ...(row.stoppedAt == null ? {} : { stoppedAt: Number(row.stoppedAt) }),
-    }));
+    ).map((row) => {
+      const processId = recoveredProcessId(row);
+      return {
+        runtimeId: String(row.runtimeId),
+        ...(row.projectId == null ? {} : { projectId: String(row.projectId) }),
+        ...(row.checkoutId == null
+          ? {}
+          : { checkoutId: String(row.checkoutId) }),
+        ...(row.cwd == null ? {} : { cwd: String(row.cwd) }),
+        location: (() => {
+          try {
+            const value: unknown = JSON.parse(String(row.locationJson));
+            if (value && typeof value === 'object' && !Array.isArray(value))
+              return value as RuntimeLocation;
+          } catch {
+            /* malformed legacy rows are not recoverable */
+          }
+          return { id: `unrecoverable:${row.runtimeId}` };
+        })(),
+        ...(processId === undefined ? {} : { processId }),
+        identityTokenHash: String(row.identityTokenHash ?? ''),
+        launchTokenHash: String(row.launchTokenHash ?? ''),
+        launchConsumed: Number(row.launchConsumed) === 1,
+        mode: row.mode === 'read' ? 'read' : 'write',
+        launchedAt: Number(row.launchedAt),
+        ...(row.readyAt == null ? {} : { readyAt: Number(row.readyAt) }),
+        ...(row.stoppedAt == null ? {} : { stoppedAt: Number(row.stoppedAt) }),
+      };
+    });
   }
 
   consumeLaunchCredential(runtimeId: string): void {

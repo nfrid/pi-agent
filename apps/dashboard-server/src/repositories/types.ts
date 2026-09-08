@@ -56,6 +56,8 @@ export interface ManagedLaunchRecord {
   cwd?: string;
   /** Opaque location owned by the runtime provider/host. */
   location: RuntimeLocation;
+  /** Authenticated PID recovered from the durable runtime snapshot, when safe. */
+  processId?: number;
   /** Managed Pi tool capability; old rows are treated as writable. */
   mode: 'read' | 'write';
   identityTokenHash: string;

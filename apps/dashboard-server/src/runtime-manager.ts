@@ -74,8 +74,13 @@ export interface PreparedRuntimeRestart {
 function bindingFromLocation(
   runtimeId: string,
   location: RuntimeLocation,
+  processId?: number,
 ): RuntimeBinding {
-  return { runtimeId, location };
+  return {
+    runtimeId,
+    location,
+    ...(processId === undefined ? {} : { processId }),
+  };
 }
 
 const REGISTRATION_TIMEOUT_MS = 10_000;
@@ -125,6 +130,7 @@ export class RuntimeManager {
       binding: bindingFromLocation(
         record.runtimeId,
         record.location ?? { id: `${record.runtimeId}:unrecoverable` },
+        record.processId,
       ),
       // Older persisted launches have no mode/provider provenance.
       mode: record.mode ?? 'write',
