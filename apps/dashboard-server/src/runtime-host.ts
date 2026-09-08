@@ -375,6 +375,7 @@ export class RuntimeHostService {
   }
 
   async listen(): Promise<void> {
+    if (this.closing) throw new Error('Runtime host is closing.');
     if (this.server) return;
     await mkdir(path.dirname(this.socketPath), {
       recursive: true,
@@ -428,7 +429,8 @@ export class RuntimeHostService {
     await unlink(this.socketPath).catch((error: unknown) => {
       if (!(isRecord(error) && error.code === 'ENOENT')) errors.push(error);
     });
-    if (errors.length > 0) throw errors[0];
+    if (errors.length > 0)
+      throw new AggregateError(errors, 'Runtime host shutdown failed.');
   }
 
   summaries(): HostRuntimeSummary[] {

@@ -818,6 +818,7 @@ export class DashboardServerImpl implements DashboardServer {
     // The daemon owns these local resources. The runtime host and managed
     // runtime processes remain sidecar-owned; only the provider connection is
     // closed above.
+    // Failed startup can retry with this index; final teardown closes admission.
     if (final) await attempt('session index', () => this.sessions.close());
     await attempt('runtime registry', () => this.registry.close());
     await attempt('uploads', () => this.application.uploads.close());

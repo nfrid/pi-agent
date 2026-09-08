@@ -156,6 +156,7 @@ describe('runtime host', () => {
       expect(await readFile(started, 'utf8')).toBe('yes');
       await close;
       expect(service.summaries()).toEqual([]);
+      await expect(service.listen()).rejects.toThrow('closing');
     } finally {
       releaseEnvironment();
       await service.close();
