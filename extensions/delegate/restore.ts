@@ -28,6 +28,7 @@ import { isTerminalWorkflowAttemptState } from './workflow-model';
 import {
   loadWorktree,
   type PreparedWorktree,
+  rehydrateWorktreeSession,
   restoreWorktreeSession,
   type WorktreeRecord,
   worktreeSummary,
@@ -377,6 +378,15 @@ export function restoreHostedDelegateAttempt(
     signal: AbortSignal,
     detachSignal?: AbortSignal,
   ): Promise<DelegateJobResult> => {
+    if (worktree && !dependencies.restoreWorktreeSession) {
+      // Hosted recovery must validate the persisted checkout immediately
+      // before observing the child; existence alone is not identity proof.
+      worktree = await rehydrateWorktreeSession(
+        worktree.record,
+        session.token,
+        signal,
+      );
+    }
     const runOptions: RunDelegateOptions = {
       runId: link.processJobId,
       workflowAttempt: link.attempt,

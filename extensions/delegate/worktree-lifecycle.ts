@@ -141,6 +141,7 @@ export async function finalizeWorktreeRun(
       );
     }
   } catch (error) {
+    const latest = loadWorktree(worktree.record.id) ?? worktree.record;
     run.state = 'error';
     run.stopReason = 'error';
     run.exitCode = run.exitCode === 0 ? 1 : run.exitCode;
@@ -148,8 +149,8 @@ export async function finalizeWorktreeRun(
     setDelegateLifecycle(run, 'lifecycle-cleanup-failure', run.errorMessage);
     run.warnings = [
       ...(run.warnings ?? []),
-      `Could not settle worktree ${worktree.record.branch}: ${error instanceof Error ? error.message : String(error)}`,
+      `Could not settle worktree ${latest.branch}: ${error instanceof Error ? error.message : String(error)}`,
     ];
-    run.worktree = worktreeSummary(worktree.record);
+    run.worktree = worktreeSummary(latest);
   }
 }

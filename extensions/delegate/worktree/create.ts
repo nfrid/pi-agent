@@ -102,9 +102,7 @@ export async function rehydrateWorktreeSession(
   token: string,
   signal?: AbortSignal,
 ): Promise<PreparedWorktree> {
-  if (existsSync(record.worktreePath))
-    return restoreWorktreeSession(record, token);
-  if (record.ownership === 'caller')
+  if (record.ownership === 'caller' && !existsSync(record.worktreePath))
     throw new Error(
       'The caller-owned worktree for this continuation is unavailable; it will not be recreated.',
     );
@@ -112,6 +110,21 @@ export async function rehydrateWorktreeSession(
     throw new Error('This worktree belongs to another delegate session.');
   if (record.status === 'removed')
     throw new Error('This worktree has already been removed.');
+  if (record.ownership === 'caller') {
+    // Caller-owned checkouts remain caller-lifecycle records across a
+    // continuation; validate identity without activating or reclassifying
+    // their cleanup state.
+    await validateExistingWorktree({
+      cwd: record.repositoryRoot,
+      worktreePath: record.worktreePath,
+      expectedRepositoryRoot: record.repositoryRoot,
+      expectedBranch: record.branch,
+      allowRequestedCheckout: record.repositoryRoot === record.worktreePath,
+      requireClean: false,
+      signal,
+    });
+    return { record, env: { PI_DELEGATE_WORKTREE: record.id } };
+  }
   return creator.rehydrateWorktree(record, { signal });
 }
 

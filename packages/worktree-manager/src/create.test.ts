@@ -251,6 +251,68 @@ describe('worktree creator rehydration', () => {
     }
   });
 
+  it('rejects arbitrary, foreign, wrong-branch, and removed recovery records', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-worktree-audit-'));
+    const foreign = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-worktree-foreign-'),
+    );
+    const records = new Map<string, WorktreeRecord>();
+    const store = {
+      loadWorktree: (id: string) => records.get(id),
+      writeWorktreeRecord: (record: WorktreeRecord) =>
+        records.set(record.id, record),
+      deleteWorktreeRecord: (id: string) => records.delete(id),
+    };
+    try {
+      await git(root, 'init', '-b', 'main');
+      await git(root, 'config', 'user.email', 'test@example.test');
+      await git(root, 'config', 'user.name', 'Test');
+      await writeFile(path.join(root, 'tracked.txt'), 'base\n');
+      await git(root, 'add', '.');
+      await git(root, 'commit', '-m', 'base');
+      const creator = createWorktreeCreator(store);
+      const prepared = await creator.prepareWorktree({
+        cwd: root,
+        name: 'audit recovery',
+        base: 'head',
+      });
+      if (!prepared.worktree) throw new Error('worktree was not prepared');
+      const record = prepared.worktree.record;
+
+      const originalPath = record.worktreePath;
+      record.worktreePath = path.join(root, 'tracked.txt');
+      await expect(creator.rehydrateWorktree(record)).rejects.toThrow(
+        /not a directory|worktree root/,
+      );
+
+      await git(foreign, 'init', '-b', 'foreign');
+      await git(foreign, 'config', 'user.email', 'test@example.test');
+      await git(foreign, 'config', 'user.name', 'Test');
+      await writeFile(path.join(foreign, 'foreign.txt'), 'foreign\n');
+      await git(foreign, 'add', '.');
+      await git(foreign, 'commit', '-m', 'foreign');
+      record.worktreePath = foreign;
+      await expect(creator.rehydrateWorktree(record)).rejects.toThrow(
+        /different repository/,
+      );
+
+      record.worktreePath = originalPath;
+      record.branch = 'main';
+      await expect(creator.rehydrateWorktree(record)).rejects.toThrow(
+        /branch metadata is inconsistent|branch changed/,
+      );
+
+      record.status = 'removed';
+      await expect(creator.rehydrateWorktree(record)).rejects.toThrow(
+        /already been removed/,
+      );
+      expect(record.status).toBe('removed');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(foreign, { recursive: true, force: true });
+    }
+  });
+
   it('refreshes active status and updatedAt for extant and recreated checkouts', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-worktree-rehydrate-'),

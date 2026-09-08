@@ -818,19 +818,32 @@ export function createWorktreeCreator<
     options: { signal?: AbortSignal } = {},
   ): Promise<PreparedWorktree<Record>> {
     abortIfRequested(options.signal);
+    if (record.status === 'removed')
+      throw new Error('This worktree has already been removed.');
     if (record.ownership === 'caller' && !existsSync(record.worktreePath))
       throw new Error(
         'This caller-owned worktree is unavailable and will not be recreated by the harness.',
       );
     if (existsSync(record.worktreePath)) {
-      // A retry may reuse a settled checkout without recreating its directory.
-      // Persist the active ownership and a fresh lifecycle timestamp before the
-      // caller launches a new agent against it.
+      // A retry may reuse a settled checkout without recreating its directory,
+      // but only after Git proves that it is the registered checkout recorded
+      // for this repository and branch. Never activate an arbitrary directory.
+      await validateExistingWorktree({
+        cwd: record.repositoryRoot,
+        worktreePath: record.worktreePath,
+        expectedRepositoryRoot: record.repositoryRoot,
+        expectedBranch: record.branch,
+        allowRequestedCheckout:
+          record.ownership === 'caller' &&
+          record.repositoryRoot === record.worktreePath,
+        requireClean: false,
+        signal: options.signal,
+      });
+      // Persist the active ownership and a fresh lifecycle timestamp only after
+      // validation succeeds and before the caller launches a new agent.
       activateRecord(record);
       return { record, env: environment(record.id) };
     }
-    if (record.status === 'removed')
-      throw new Error('This worktree has already been removed.');
     try {
       mkdirSync(path.dirname(record.worktreePath), { recursive: true });
       // Keep native Git worktree semantics for snapshot rehydration too, so the
@@ -841,6 +854,17 @@ export function createWorktreeCreator<
         { signal: options.signal },
       );
       abortIfRequested(options.signal);
+      await validateExistingWorktree({
+        cwd: record.repositoryRoot,
+        worktreePath: record.worktreePath,
+        expectedRepositoryRoot: record.repositoryRoot,
+        expectedBranch: record.branch,
+        allowRequestedCheckout:
+          record.ownership === 'caller' &&
+          record.repositoryRoot === record.worktreePath,
+        requireClean: false,
+        signal: options.signal,
+      });
       activateRecord(record);
       return { record, env: environment(record.id) };
     } catch (error) {

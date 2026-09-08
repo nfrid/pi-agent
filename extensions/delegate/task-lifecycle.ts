@@ -225,6 +225,20 @@ export async function prepareDelegateTask(
         );
     }
 
+    if (plan.resumed && state.worktree && !state.worktree.record.snapshot) {
+      // Existing continuations must use the same Git identity/registration
+      // validation as retired snapshot rehydration before launch.
+      state.worktree = await rehydrateWorktreeSession(
+        state.worktree.record,
+        plan.resumed.token,
+        signal,
+      );
+      state.cwd = path.join(
+        state.worktree.record.worktreePath,
+        state.worktree.record.workingDirectory,
+      );
+    }
+
     if (plan.resumed && state.worktree?.record.ownership === 'caller') {
       await validateExistingWorktree({
         cwd: state.worktree.record.worktreePath,
