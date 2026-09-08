@@ -1,3 +1,4 @@
+import type { DashboardHttpClient } from '@pi-dashboard/client';
 import type {
   DelegateStatus,
   DelegateStatusViewModel,
@@ -232,6 +233,7 @@ export function DelegateSurface({
   onRunSelected,
   detail,
   store,
+  client,
 }: {
   surface: ExtensionSurface;
   pausedAt?: number;
@@ -241,6 +243,7 @@ export function DelegateSurface({
   onRunSelected?: (run: DelegateCompositeRun) => void;
   detail?: DelegateInspectorDetailState;
   store?: import('@pi-dashboard/client').DashboardLiveStore;
+  client?: DashboardHttpClient;
 }) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const liveRows = delegateRows(model);
@@ -392,6 +395,7 @@ export function DelegateSurface({
                   detail={detail}
                   onRunSelected={onRunSelected}
                   store={store}
+                  client={client}
                   isOpen={inspectorOpen}
                 />
               </div>

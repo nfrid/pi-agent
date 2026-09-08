@@ -1,4 +1,5 @@
 import {
+  type DashboardHttpClient,
   type DashboardLiveStore,
   selectRuntimeForSession,
   selectSessionSnapshot,
@@ -13,7 +14,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useDashboardContext } from '../../app/dashboard-context';
 import { Transcript } from '../../entities/transcript';
 import { toTranscriptEntries } from '../../transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
@@ -67,6 +67,7 @@ function DelegateBoundedFallback({
 function DelegateCanonicalTranscript({
   sessionId,
   store,
+  client,
   fallback,
   isOpen,
   scrollElementRef,
@@ -76,6 +77,7 @@ function DelegateCanonicalTranscript({
 }: {
   sessionId: string;
   store: DashboardLiveStore;
+  client: DashboardHttpClient;
   fallback: DelegateInspectionStatus;
   isOpen: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
@@ -83,7 +85,6 @@ function DelegateCanonicalTranscript({
   detail?: DelegateInspectorDetailState;
   onRunSelected?: (run: DelegateInspectorRunOption) => void;
 }) {
-  const { client } = useDashboardContext();
   const projection = useDashboardStore(store, selectTranscript(sessionId));
   const runtime = useDashboardStore(store, selectRuntimeForSession(sessionId));
   const snapshot = useDashboardStore(store, selectSessionSnapshot(sessionId));
@@ -292,6 +293,7 @@ export function DelegateInspectorTranscript(
 function DelegateInspectorTranscriptContent({
   row,
   store,
+  client,
   isOpen,
   scrollElementRef,
   runOptions = [],
@@ -300,17 +302,19 @@ function DelegateInspectorTranscriptContent({
 }: {
   row: DelegateInspectionStatus;
   store?: DashboardLiveStore;
+  client?: DashboardHttpClient;
   isOpen: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   runOptions?: readonly DelegateInspectorRunOption[];
   detail?: DelegateInspectorDetailState;
   onRunSelected?: (run: DelegateInspectorRunOption) => void;
 }) {
-  return isOpen && row.sessionId && store ? (
+  return isOpen && row.sessionId && store && client ? (
     <DelegateCanonicalTranscript
       key={row.sessionId}
       sessionId={row.sessionId}
       store={store}
+      client={client}
       fallback={row}
       isOpen={isOpen}
       scrollElementRef={scrollElementRef}

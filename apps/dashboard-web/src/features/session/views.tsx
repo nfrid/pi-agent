@@ -1,4 +1,7 @@
-import type { DashboardLiveStore } from '@pi-dashboard/client';
+import type {
+  DashboardHttpClient,
+  DashboardLiveStore,
+} from '@pi-dashboard/client';
 import type {
   CheckoutSummary,
   RuntimeSnapshot,
@@ -289,6 +292,7 @@ export function SessionControlLayer({
   runtime,
   sessionChange,
   store,
+  client,
   runtimes,
   session,
   sessionId,
@@ -304,6 +308,7 @@ export function SessionControlLayer({
   runtime: RuntimeSnapshot | undefined;
   sessionChange: number;
   store: DashboardLiveStore;
+  client: DashboardHttpClient;
   runtimes: readonly RuntimeSnapshot[];
   session?: SessionIndexEntry;
   sessionId: string;
@@ -340,6 +345,7 @@ export function SessionControlLayer({
             runtime={runtime}
             sessionChange={sessionChange}
             store={store}
+            client={client}
             slotsOnly
           />
         </RunStatusDisclosure>

@@ -290,6 +290,7 @@ export function SessionView({
             runtime={runtime}
             sessionChange={sessionChange}
             store={store}
+            client={client}
             runtimes={snapshot.runtimes}
             session={data.metadata}
             sessionId={id}

@@ -1,4 +1,7 @@
-import type { DashboardLiveStore } from '@pi-dashboard/client';
+import type {
+  DashboardHttpClient,
+  DashboardLiveStore,
+} from '@pi-dashboard/client';
 import { useRef } from 'react';
 import { useDashboardNavigate } from '../../routes/navigation';
 import { delegateHistoryInvocationToStatus } from '../delegate/history-compose';
@@ -47,6 +50,7 @@ export function DelegateTranscriptInspector({
   detail,
   onRunSelected,
   store,
+  client,
   isOpen,
 }: {
   row: import('../delegate/history-compose').DelegateInspectionStatus;
@@ -55,6 +59,7 @@ export function DelegateTranscriptInspector({
   detail?: DelegateInspectorDetailState;
   onRunSelected?: (run: DelegateInspectorRunOption) => void;
   store?: DashboardLiveStore;
+  client?: DashboardHttpClient;
   isOpen: boolean;
 }) {
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
@@ -102,6 +107,7 @@ export function DelegateTranscriptInspector({
         <DelegateInspectorTranscript
           row={transcriptRow}
           store={store}
+          client={client}
           isOpen={isOpen}
           scrollElementRef={transcriptScrollRef}
           runOptions={runOptions}

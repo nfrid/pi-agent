@@ -1,6 +1,6 @@
 import {
+  type DashboardHttpClient,
   type DashboardLiveStore,
-  dashboardHttpClient,
   dashboardQueryKeys,
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
@@ -36,17 +36,17 @@ export function DelegateHistorySurface({
   runtime,
   sessionChange,
   store,
+  client,
   slotsOnly = false,
 }: {
   id: string;
   runtime: RuntimeSnapshot | undefined;
   sessionChange: number;
   store: DashboardLiveStore;
+  client: DashboardHttpClient;
   slotsOnly?: boolean;
 }) {
-  const historyQuery = useQuery(
-    delegateHistoryQueryOptions(dashboardHttpClient, id),
-  );
+  const historyQuery = useQuery(delegateHistoryQueryOptions(client, id));
   const queryClient = useQueryClient();
   const live = delegateSurface(runtime);
   const liveRows = live?.model.statuses ?? [];
@@ -88,7 +88,7 @@ export function DelegateHistorySurface({
       ? detailSelection
       : undefined;
   const detailOptions = delegateHistoryRunQueryOptions(
-    dashboardHttpClient,
+    client,
     id,
     currentDetailSelection?.lineageId ?? '',
     currentDetailSelection?.runId ?? '',
@@ -225,6 +225,7 @@ export function DelegateHistorySurface({
         historyLoading={historyLoading}
         historyError={historyError ? historyQuery.error : undefined}
         store={store}
+        client={client}
         onRunSelected={(run: DelegateCompositeRun) => {
           setDetailSelection({
             sessionId: id,

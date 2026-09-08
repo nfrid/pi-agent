@@ -1,4 +1,4 @@
-import { DashboardLiveStore } from '@pi-dashboard/client';
+import { DashboardHttpClient, DashboardLiveStore } from '@pi-dashboard/client';
 import type {
   DelegateHistoryResponse,
   RuntimeSnapshot,
@@ -53,6 +53,7 @@ const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
 describe('live extension surface fixtures', () => {
   it('acquires only the explicitly opened child session and releases on selection changes', async () => {
     const store = new DashboardLiveStore();
+    const client = new DashboardHttpClient();
     const releases = new Map<string, ReturnType<typeof vi.fn>>();
     const acquire = vi
       .spyOn(store, 'acquireSession')
@@ -75,14 +76,24 @@ describe('live extension surface fixtures', () => {
     let renderer: ReturnType<typeof create>;
     await act(async () => {
       renderer = create(
-        <DelegateInspectorTranscript row={row} store={store} isOpen={false} />,
+        <DelegateInspectorTranscript
+          row={row}
+          store={store}
+          client={client}
+          isOpen={false}
+        />,
       );
     });
     expect(acquire).not.toHaveBeenCalled();
 
     await act(async () => {
       renderer.update(
-        <DelegateInspectorTranscript row={row} store={store} isOpen />,
+        <DelegateInspectorTranscript
+          row={row}
+          store={store}
+          client={client}
+          isOpen
+        />,
       );
     });
     expect(acquire).toHaveBeenCalledTimes(1);
@@ -93,6 +104,7 @@ describe('live extension surface fixtures', () => {
         <DelegateInspectorTranscript
           row={{ ...row, runId: 'run-2', sessionId: 'child-session-2' }}
           store={store}
+          client={client}
           isOpen
         />,
       );

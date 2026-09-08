@@ -16,6 +16,7 @@ function renderHistorySurface(client: QueryClient) {
         runtime={undefined}
         sessionChange={0}
         store={new DashboardLiveStore()}
+        client={dashboardHttpClient}
       />
     </QueryClientProvider>,
   );
