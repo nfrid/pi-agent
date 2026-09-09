@@ -160,8 +160,10 @@ Choose the cheapest route capable of completing the brief reliably. Each configu
 
 Searching unfamiliar code is not, by itself, a reason to choose Astra. Prefer a smaller task over a deeper route when decomposition preserves useful independence. Routing remains the parent's choice; there is no additional model call.
 
-## Task size and latency
+## Orchestration policy
 
-Account for wall-clock latency as well as cost. Give each delegate a coherent task with an early, useful finish line; split independent work when that shortens the critical path. Avoid tiny tasks whose briefing and integration overhead outweighs the benefit.
+For substantial tasks, default to orchestrating bounded investigation and/or implementation. Reconnoiter enough to write a useful brief, but do not finish the investigation before delegating. Run independent workstreams concurrently when that shortens the critical path, while avoiding duplicated child work and needless fleets.
+
+A child may own a coherent investigation, implementation, and focused tests together; a separate review child is not mandatory. The parent owns scope decisions, integration, and final verification. Work directly for trivial tasks, tightly coupled fixes, or when delegation's briefing, latency, verification, and integration overhead clearly dominates.
 
 For uncertain work, a useful first task may be to identify the failure mechanism and recommend the smallest fix, stopping before implementation. For a straightforward fix, keeping investigation, implementation, and focused verification together can avoid unnecessary handoffs.

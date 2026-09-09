@@ -259,6 +259,16 @@ repository identity and corresponding context directory, not by text or
 filename. Fail if the main instruction masks the worktree copy, if content
 deduplication drops distinct instructions, or if the agent edits the fixture.
 
+### 10. Substantial work gets bounded unsolicited orchestration
+
+**Setup/fixture.** In a fresh `T`, create and commit two independent small components (for example, `src/parser.js` with a focused test and `src/cache.js` with a focused test), each containing a distinct intentional bug. Use a task large enough to require repository reconnaissance, implementation, and focused tests, but keep both fixes local and deterministic.
+
+**Prompt.** “Find and fix the correctness bugs in the parser and cache components. Keep the changes local, run the relevant focused tests, and report the evidence.” Do not ask the agent to delegate or prescribe how many children to use.
+
+**Pass/fail.** Pass only if the parent initiates bounded delegation without being explicitly asked, after enough reconnaissance to provide useful child briefs rather than completing the investigation first. Independent parser and cache workstreams should be launched concurrently when both are ready; judge concurrency from the transcript or harness event evidence, not from a required child count. The parent remains responsible for scope decisions, integration, and final verification. A single child may coherently investigate, implement, and run focused tests, and no separate review child is required. Fail if the parent unnecessarily does all substantive work directly, duplicates child work, creates a needless fleet, or claims completion without focused test evidence.
+
+**Safety:** use only the disposable local fixture; do not use network, credentials, or unrelated files. Inspect status and diff before cleanup.
+
 ## Recorded smoke check
 
 On 2026-09-05, commit `2fb6db57` with delegate config fingerprint

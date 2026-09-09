@@ -1024,7 +1024,10 @@ describe('delegate', () => {
     ).join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
     expect(guidelines).toContain(
-      'Delegate only useful, independently describable work',
+      'For substantial tasks, default to orchestrating bounded investigation and/or implementation',
+    );
+    expect(guidelines).toContain(
+      'Reconnoiter enough to write a useful brief, but do not finish the investigation before delegating',
     );
     expect(guidelines).toContain('Fresh work defaults to fresh context');
     expect(guidelines).toContain('`inputs` waits for prior delegates');
@@ -1037,7 +1040,7 @@ describe('delegate', () => {
     );
     expect(guidelines).toContain('never poll for completion');
     expect(guidelines).toContain(
-      'Keep parent ownership of final scope, integration, and verification',
+      'Keep parent ownership of scope decisions, integration, and final verification',
     );
     expect(guidelines).not.toContain('delegate_wake');
     expect(guidelines).not.toContain('delegate_branches');
@@ -1046,7 +1049,16 @@ describe('delegate', () => {
     expect(guidelines).toContain('Luna routes are for bounded background work');
     expect(guidelines).toContain('luna-low: mechanical checks');
     expect(guidelines).toContain(
-      'Account for wall-clock latency as well as cost',
+      'Run independent workstreams concurrently when that shortens the critical path',
+    );
+    expect(guidelines).toContain(
+      'Do not duplicate child work or create a needless fleet',
+    );
+    expect(guidelines).toContain(
+      'A single child may own coherent investigation, implementation, and focused tests; there is no mandatory review child',
+    );
+    expect(guidelines).toContain(
+      "Work directly for trivial tasks, tightly coupled fixes, or when delegation's briefing, latency, verification, and integration overhead clearly dominates",
     );
     expect(guidelines).toContain('wait for it before scheduling that work');
     expect(guidelines).toContain('different capabilities or skills');
