@@ -259,6 +259,75 @@ describe('BackgroundManager watches', () => {
     }
   });
 
+  it('does not launch after disposal during the capability check', async () => {
+    const client = transport();
+    let resolveInfo!: (value: { outputWatches: boolean }) => void;
+    client.info = () =>
+      new Promise((resolve) => {
+        resolveInfo = resolve;
+      });
+    const start = vi.spyOn(client, 'start');
+    const manager = new BackgroundManager({ client });
+    const pending = manager.start({
+      command: 'server',
+      cwd: '.',
+      watch: [{ contains: 'ready' }],
+    });
+    await settle();
+    await manager.dispose();
+    resolveInfo({ outputWatches: true });
+    await expect(pending).rejects.toThrow('shut down');
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('retries notifications after stop fails', async () => {
+    const delivered = vi.fn();
+    const client = transport(snapshot({ watches: [watch()] }));
+    client.stop = async () => {
+      throw new Error('host unavailable');
+    };
+    const manager = new BackgroundManager({
+      client,
+      onWatchSettled: delivered,
+    });
+    try {
+      await manager.list();
+      await expect(manager.stop([id])).rejects.toThrow('host unavailable');
+      client.setCurrent(snapshot({ watches: [watch({ status: 'matched' })] }));
+      await manager.list();
+      await settle();
+      expect(delivered).toHaveBeenCalledTimes(1);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it('retries notifications after unwatch refresh fails', async () => {
+    const delivered = vi.fn();
+    const client = transport(snapshot({ watches: [watch()] }));
+    const manager = new BackgroundManager({
+      client,
+      onWatchSettled: delivered,
+    });
+    try {
+      await manager.list();
+      const list = client.list;
+      client.list = async () => {
+        throw new Error('host unavailable');
+      };
+      await expect(manager.unwatch(id, ['watch-1'])).rejects.toThrow(
+        'host unavailable',
+      );
+      client.list = list;
+      client.setCurrent(snapshot({ watches: [watch({ status: 'matched' })] }));
+      await manager.list();
+      await settle();
+      expect(delivered).toHaveBeenCalledTimes(1);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
   it('fetches inspect evidence before completion publication', async () => {
     const delivered = vi.fn();
     const client = transport(snapshot({ status: 'done', settledAt: 3 }));

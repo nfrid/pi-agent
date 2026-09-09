@@ -6,7 +6,7 @@ import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackgroundJobHostService } from '../../apps/dashboard-server/src/background-job-host';
 import backgroundTerminals from './index';
-import type { BackgroundParameters } from './schema';
+import type { BackgroundParameters, ProcessDetails } from './schema';
 
 interface Renderable {
   render: (width: number) => string[];
@@ -156,6 +156,83 @@ describe('background terminals extension', () => {
     await handlers.get('session_shutdown')?.({});
   });
 
+  it('delivers and durably ACKs a watch before process exit', async () => {
+    const handlers = new Map<string, Handler>();
+    let tool!: RegisteredTool;
+    const sendMessage = vi.fn();
+    const pi = {
+      on(event: string, handler: Handler) {
+        handlers.set(event, handler);
+      },
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+      registerCommand: vi.fn(),
+      registerMessageRenderer: vi.fn(),
+      sendMessage,
+    } as unknown as ExtensionAPI;
+    backgroundTerminals(pi);
+    const ctx = {
+      cwd: process.cwd(),
+      hasUI: false,
+      mode: 'print',
+      sessionManager: { getSessionId: () => 'watch-integration' },
+    };
+    handlers.get('session_start')?.({}, ctx);
+    const client = new BackgroundJobsClient(
+      host.socketPath,
+      'watch-integration',
+    );
+    let id: string | undefined;
+    try {
+      const result = (await tool.execute(
+        'launch',
+        {
+          action: 'start',
+          command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify('process.stdout.write("READY");setInterval(() => {}, 1000)')}`,
+          watch: [{ contains: 'READY', timeout_seconds: 2 }],
+        },
+        undefined,
+        undefined,
+        ctx,
+      )) as {
+        content: Array<{ type: string; text: string }>;
+        details: { process: ProcessDetails };
+      };
+      id = result.details.process.id;
+      const watchId = result.details.process.watches?.[0]?.id;
+      expect(watchId).toBeDefined();
+      expect(result.content[0].text).toContain(watchId);
+      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+      const control = sendMessage.mock.calls[0][0];
+      expect(control.details).toMatchObject({
+        timing: 'steer',
+        message: {
+          customType: 'background-watch-result',
+          details: { id, watchId, status: 'matched' },
+        },
+      });
+      expect(control.details.message.content).toContain('READY');
+      expect(await client.inspect(id)).toMatchObject({
+        status: 'running',
+        watches: [{ status: 'matched', delivered: false }],
+      });
+      handlers.get('context')?.({ messages: [control.details.message] }, ctx);
+      await vi.waitFor(async () => {
+        expect(
+          (await client.inspect(id as string))?.watches?.[0]?.delivered,
+        ).toBe(true);
+      });
+      await handlers.get('session_shutdown')?.({}, ctx);
+      handlers.get('session_start')?.({}, ctx);
+      await tool.execute('list', { action: 'list' }, undefined, undefined, ctx);
+      expect(sendMessage).toHaveBeenCalledOnce();
+    } finally {
+      if (id) await client.stop([id]);
+      await handlers.get('session_shutdown')?.({}, ctx);
+    }
+  });
+
   it('ignores a late shutdown from a replaced session scope', async () => {
     const handlers = new Map<string, Handler>();
     let tool: RegisteredTool | undefined;
@@ -228,8 +305,9 @@ describe('background terminals extension', () => {
       registerTool: vi.fn(),
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(
-        (_type: string, renderer: typeof completionRenderer) => {
-          completionRenderer = renderer;
+        (type: string, renderer: typeof completionRenderer) => {
+          if (type === 'background-terminal-result')
+            completionRenderer = renderer;
         },
       ),
     } as unknown as ExtensionAPI;

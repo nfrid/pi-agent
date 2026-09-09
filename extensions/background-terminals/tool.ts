@@ -21,16 +21,6 @@ function requireText(value: string | undefined, name: string): string {
   return text;
 }
 
-function deriveTitle(command: string): string {
-  return (
-    command
-      .split(/[\r\n]/u, 1)[0]
-      ?.trim()
-      .replace(/\s+/gu, ' ')
-      .slice(0, 80) || 'process'
-  );
-}
-
 function validateCwd(base: string, requested?: string): string {
   const cwd = resolve(base, requested ?? '.');
   if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
@@ -75,10 +65,8 @@ export function registerBackgroundTool(
           const command = requireText(params.command, 'command');
           const title =
             params.title === undefined
-              ? deriveTitle(command)
-              : requireText(params.title, 'title')
-                  .replace(/\s+/gu, ' ')
-                  .slice(0, 80);
+              ? undefined
+              : requireText(params.title, 'title').replace(/\s+/gu, ' ');
           const cwd = validateCwd(ctx.cwd, params.cwd);
           const snapshot = await active.start({
             command,
@@ -90,7 +78,7 @@ export function registerBackgroundTool(
             content: [
               {
                 type: 'text',
-                text: `Started ${snapshot.id} "${snapshot.title}" (pid ${snapshot.pid ?? '?'}). Completion will be delivered automatically; use background peek to inspect output.`,
+                text: `Started ${formatSummary(snapshot)}.\nCompletion and watch outcomes will be delivered automatically; do not poll.`,
               },
             ],
             details: { action: 'start', process: processDetails(snapshot) },
@@ -151,7 +139,10 @@ export function registerBackgroundTool(
           const snapshot = await active.watch(id, hostWatches(params.watch));
           return {
             content: [
-              { type: 'text', text: `Added watches to ${snapshot.id}.` },
+              {
+                type: 'text',
+                text: `Added watches. ${formatSummary(snapshot)}`,
+              },
             ],
             details: { action: 'watch', process: processDetails(snapshot) },
           };
@@ -165,7 +156,10 @@ export function registerBackgroundTool(
           const snapshot = await active.unwatch(id, watchIds);
           return {
             content: [
-              { type: 'text', text: `Removed watches from ${snapshot.id}.` },
+              {
+                type: 'text',
+                text: `Removed watches. ${formatSummary(snapshot)}`,
+              },
             ],
             details: { action: 'unwatch', process: processDetails(snapshot) },
           };

@@ -140,7 +140,6 @@ export class BackgroundManager {
   private readonly onChange?: () => void;
   private pollTimer?: NodeJS.Timeout;
   private disposed = false;
-  private watchCapability?: boolean;
 
   constructor(options: BackgroundManagerOptions = {}) {
     const ownerSession = options.scopeId ?? 'default';
@@ -168,6 +167,7 @@ export class BackgroundManager {
     this.assertAccepting();
     validateWatches(options.watch);
     if (options.watch?.length) await this.assertWatchSupport();
+    this.assertLive();
     const snapshot = await this.client.start({
       id: newBackgroundJobId(),
       command: options.command,
@@ -292,11 +292,11 @@ export class BackgroundManager {
       this.deliveringWatches.delete(key);
     }
     this.onWatchesRemoved?.(id, unique);
-    await this.refresh(false, generation);
-    if (!this.records.has(id))
-      throw new Error(`Unknown background process "${id}".`);
     let snapshot: BackgroundSnapshot;
     try {
+      await this.refresh(false, generation);
+      if (!this.records.has(id))
+        throw new Error(`Unknown background process "${id}".`);
       snapshot = await this.client.unwatch(id, unique);
     } catch (error) {
       for (const watchId of unique)
@@ -315,16 +315,19 @@ export class BackgroundManager {
   ): Promise<BackgroundSnapshot[]> {
     this.assertLive();
     const generation = this.generation;
-    const preexisting = [...new Set(ids)].filter((id) => this.records.has(id));
-    for (const id of preexisting) {
-      const current = this.records.get(id);
-      if (current) this.cancelWatches(current);
+    const requested = [...new Set(ids)];
+    for (const id of requested) {
+      this.observing.add(id);
+      const watchIds =
+        this.records.get(id)?.watches?.map((watch) => watch.id) ?? [];
+      this.onWatchesRemoved?.(id, watchIds);
+      for (const watchId of watchIds)
+        this.notifiedWatches.delete(watchKey(id, watchId));
     }
-    await this.refresh(false, generation);
-    const unique = [...new Set(ids)].filter((id) => this.records.has(id));
-    if (unique.length === 0) return [];
-    for (const id of unique) this.observing.add(id);
     try {
+      await this.refresh(false, generation);
+      const unique = requested.filter((id) => this.records.has(id));
+      if (unique.length === 0) return [];
       const responses = await withAbort(this.client.stop(unique), signal);
       if (this.disposed || generation !== this.generation)
         throw new Error('Background manager is shut down.');
@@ -350,8 +353,19 @@ export class BackgroundManager {
       }
       this.onChange?.();
       return snapshots.map(displaySnapshot);
+    } catch (error) {
+      // A failed stop or ACK must not permanently silence a still-owned job.
+      for (const id of requested) {
+        this.notified.delete(id);
+        for (const watch of this.records.get(id)?.watches ?? []) {
+          const key = watchKey(id, watch.id);
+          this.cancelledWatches.delete(key);
+          this.notifiedWatches.delete(key);
+        }
+      }
+      throw error;
     } finally {
-      for (const id of unique) this.observing.delete(id);
+      for (const id of requested) this.observing.delete(id);
     }
   }
 
@@ -386,17 +400,11 @@ export class BackgroundManager {
   }
 
   private async assertWatchSupport(): Promise<void> {
-    if (this.watchCapability !== undefined) {
-      if (!this.watchCapability)
-        throw new Error('Background host does not support output watches.');
-      return;
-    }
-    if (!this.client.info)
-      throw new Error('Background host does not support output watches.');
-    const capabilities = await this.client.info();
-    if (capabilities.outputWatches !== true)
-      throw new Error('Background host does not support output watches.');
-    this.watchCapability = true;
+    const capabilities = await this.client.info?.();
+    if (capabilities?.outputWatches !== true)
+      throw new Error(
+        'The running process host does not support output watches. Upgrade it in a quiet window; restarting it terminates active jobs.',
+      );
   }
 
   private async refresh(
@@ -495,6 +503,7 @@ export class BackgroundManager {
           this.disposed ||
           generation !== this.generation ||
           this.cancelledWatches.has(key) ||
+          this.observing.has(snapshot.id) ||
           this.notifiedWatches.has(key) ||
           !latest ||
           !current ||
