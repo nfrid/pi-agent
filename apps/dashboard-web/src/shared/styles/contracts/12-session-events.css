@@ -68,11 +68,13 @@ details.session-event {
   padding: 5px 9px;
 }
 .session-event.event-delegate-result,
-.session-event.event-background-result {
+.session-event.event-background-result,
+.session-event.event-background-watch-result {
   border-left-color: var(--green);
 }
 .session-event.event-delegate-result .session-event-icon,
-.session-event.event-background-result .session-event-icon {
+.session-event.event-background-result .session-event-icon,
+.session-event.event-background-watch-result .session-event-icon {
   color: var(--green);
 }
 .session-event.event-failed {
@@ -80,6 +82,28 @@ details.session-event {
 }
 .session-event.event-failed .session-event-icon {
   color: var(--red);
+}
+.session-event.event-warning {
+  border-left-color: var(--orange);
+}
+.session-event.event-warning .session-event-icon {
+  color: var(--orange);
+}
+.session-event.event-neutral {
+  border-left-color: var(--dim);
+}
+.session-event.event-neutral .session-event-icon {
+  color: var(--dim);
+}
+.background-watch-count {
+  flex-shrink: 0;
+  color: var(--orange);
+}
+.background-event-output {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
 }
 .live-compaction-event {
   border-left-color: var(--purple);

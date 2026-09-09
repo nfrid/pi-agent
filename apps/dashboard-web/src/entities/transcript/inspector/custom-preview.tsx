@@ -362,12 +362,39 @@ function ActionSummary({
 
 function BackgroundSummary({ args }: { args: unknown }) {
   const model = backgroundPresentation(args);
-  const detail = [model.action ?? 'list', model.title ?? model.id]
+  const title =
+    model.action === 'watch'
+      ? 'Watch background output'
+      : model.action === 'unwatch'
+        ? 'Remove background watches'
+        : 'Background';
+  const detail = [
+    model.action ?? 'list',
+    model.title ??
+      model.id ??
+      (model.ids.length ? model.ids.join(', ') : undefined),
+  ]
     .filter(Boolean)
     .join(' · ');
   return (
     <>
-      <Summary detail={detail} title="Background" />
+      <Summary detail={detail} title={title} />
+      {model.watches.length ? (
+        <ul aria-label="Output watches" className="tool-custom-list">
+          {model.watches.map((watch, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: Immutable tool-call definitions have no IDs and may intentionally repeat.
+            <li key={`${index}:${watch.contains}`}>
+              <code>{JSON.stringify(watch.contains)}</code>
+              {` · ${watch.stream ?? 'stdout or stderr'} · once${watch.timeoutSeconds === undefined ? '' : ` · deadline ${watch.timeoutSeconds}s`}`}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {model.watchIds.length ? (
+        <p className="tool-custom-meta">
+          Remove watches: {model.watchIds.join(', ')} · process keeps running
+        </p>
+      ) : null}
       {model.command ? (
         <pre className="tool-code-preview tool-command-preview">
           {model.command}

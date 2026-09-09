@@ -75,6 +75,25 @@ describe('custom tool presentation kinds', () => {
       }),
     ).toMatchObject({ action: 'start', title: 'dev', command: 'pnpm dev' });
     expect(
+      backgroundPresentation({
+        action: 'watch',
+        id: 'bg-1',
+        watch: [
+          { contains: ' ready ', stream: 'stdout', timeout_seconds: 60 },
+          null,
+          { contains: 42 },
+        ],
+      }),
+    ).toMatchObject({
+      id: 'bg-1',
+      watches: [{ contains: ' ready ', stream: 'stdout', timeoutSeconds: 60 }],
+      watchIds: [],
+    });
+    expect(
+      backgroundPresentation({ action: 'unwatch', watch_ids: ['w-1'] })
+        .watchIds,
+    ).toEqual(['w-1']);
+    expect(
       todoPresentation({
         action: 'batch',
         operations: [

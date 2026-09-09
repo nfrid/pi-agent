@@ -941,6 +941,67 @@ describe('tool row views and virtual transcript construction', () => {
     });
   });
 
+  it('presents watch outcomes distinctly and summarizes coalesced completion', () => {
+    const items = toTranscriptEntries([
+      ...['matched', 'timed_out', 'ended'].map((status) => ({
+        type: 'custom_message',
+        customType: 'background-watch-result',
+        display: true,
+        content: `watch evidence: ${status}`,
+        details: { title: 'Dev server', status, contains: 'ready' },
+      })),
+      {
+        type: 'custom_message',
+        customType: 'background-terminal-result',
+        display: true,
+        content: 'Finished; ready and healthy were not observed.',
+        details: {
+          title: 'Build',
+          status: 'done',
+          duration: '1m02s',
+          endedWatches: [
+            { id: 'w1', contains: 'ready' },
+            { id: 'w2', contains: 'healthy' },
+          ],
+        },
+      },
+      {
+        type: 'custom_message',
+        customType: 'background-terminal-result',
+        display: true,
+        details: { title: 'Server', status: 'killed', signal: 'SIGTERM' },
+      },
+    ]);
+    expect(items.map((item) => item.event)).toMatchObject([
+      {
+        kind: 'background-watch-result',
+        status: 'success',
+        label: 'Output matched · Dev server · "ready"',
+      },
+      {
+        kind: 'background-watch-result',
+        status: 'warning',
+        label: 'Watch timed out · Dev server · "ready"',
+      },
+      {
+        kind: 'background-watch-result',
+        status: 'neutral',
+        label: 'Watch ended unmatched · Dev server · "ready"',
+      },
+      {
+        kind: 'background-result',
+        status: 'success',
+        label: 'Background command finished · Build · 1m02s',
+        unmatchedWatchCount: 2,
+      },
+      {
+        kind: 'background-result',
+        status: 'neutral',
+        label: 'Background command stopped · Server',
+      },
+    ]);
+  });
+
   it('projects semantic session events and hides extension persistence noise', () => {
     const todo = (status: string) => ({
       type: 'custom',

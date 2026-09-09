@@ -3,6 +3,7 @@ import {
   type ActivityPhase,
   activityToolDurationMs,
   activityToolLineChanges,
+  backgroundPresentation,
   stringArg,
   TOOL_ACTION_LABEL_MAX,
   type ToolDescriptor,
@@ -245,7 +246,8 @@ export function activityStepParts(
     if (node) argument = node;
   } else if (name === 'background') {
     role = 'command';
-    const operation = stringArg(tool.args, 'action') ?? 'list';
+    const model = backgroundPresentation(tool.args);
+    const operation = model.action ?? 'list';
     action =
       operation === 'start'
         ? 'Starting background command'
@@ -253,8 +255,19 @@ export function activityStepParts(
           ? 'Checking background command'
           : operation === 'stop'
             ? 'Stopping background command'
-            : 'Listing background commands';
-    argument = stringArg(tool.args, 'title') ?? stringArg(tool.args, 'id');
+            : operation === 'watch'
+              ? 'Watching background output'
+              : operation === 'unwatch'
+                ? 'Removing background watches'
+                : 'Listing background commands';
+    argument =
+      model.title ??
+      model.id ??
+      (model.command
+        ? compactActivityArgument(model.command)
+        : model.ids.length
+          ? countLabel(model.ids.length, 'process')
+          : undefined);
   } else if (name === 'todo' || name === 'tasks') {
     const operation =
       stringArg(tool.args, 'action') ?? stringArg(tool.args, 'operation');

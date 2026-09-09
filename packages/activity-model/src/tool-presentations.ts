@@ -148,13 +148,38 @@ export function actionIdPresentation(args: unknown): ActionIdPresentation {
 export type BackgroundPresentation = ActionIdPresentation & {
   title?: string;
   command?: string;
+  watches: readonly {
+    contains: string;
+    stream?: 'stdout' | 'stderr';
+    timeoutSeconds?: number;
+  }[];
+  watchIds: readonly string[];
 };
 
 export function backgroundPresentation(args: unknown): BackgroundPresentation {
+  const watch = recordArgs(args)?.watch;
   return {
     ...actionIdPresentation(args),
     title: stringArg(args, 'title'),
     command: stringArg(args, 'command'),
+    watchIds: stringList(args, 'watch_ids'),
+    watches: Array.isArray(watch)
+      ? watch.flatMap((value) => {
+          const entry = recordArgs(value);
+          if (typeof entry?.contains !== 'string' || !entry.contains) return [];
+          const stream =
+            entry.stream === 'stdout' || entry.stream === 'stderr'
+              ? entry.stream
+              : undefined;
+          const timeoutSeconds =
+            typeof entry.timeout_seconds === 'number' &&
+            Number.isFinite(entry.timeout_seconds) &&
+            entry.timeout_seconds > 0
+              ? entry.timeout_seconds
+              : undefined;
+          return [{ contains: entry.contains, stream, timeoutSeconds }];
+        })
+      : [],
   };
 }
 

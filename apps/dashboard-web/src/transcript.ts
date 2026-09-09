@@ -39,9 +39,10 @@ export type TranscriptEvent =
       tasks: readonly TranscriptTodoTask[];
     }
   | {
-      kind: 'delegate-result' | 'background-result';
+      kind: 'delegate-result' | 'background-result' | 'background-watch-result';
       label: string;
-      status: 'success' | 'error';
+      status: 'success' | 'error' | 'warning' | 'neutral';
+      unmatchedWatchCount?: number;
       content?: string;
       details?: unknown;
     }
@@ -296,10 +297,16 @@ function delegateControlEvent(raw: Record<string, unknown>):
   };
 }
 
-function asyncResultEvent(
-  raw: Record<string, unknown>,
-):
-  | Extract<TranscriptEvent, { kind: 'delegate-result' | 'background-result' }>
+function asyncResultEvent(raw: Record<string, unknown>):
+  | Extract<
+      TranscriptEvent,
+      {
+        kind:
+          | 'delegate-result'
+          | 'background-result'
+          | 'background-watch-result';
+      }
+    >
   | undefined {
   if (raw.type !== 'custom_message' || raw.display !== true) return undefined;
   const customType = stringField(raw, 'customType');
@@ -415,18 +422,63 @@ function asyncResultEvent(
       ...(details ? { details } : {}),
     };
   }
+  if (customType === 'background-watch-result') {
+    const outcome = stringField(details, 'status');
+    if (outcome !== 'matched' && outcome !== 'timed_out' && outcome !== 'ended')
+      return undefined;
+    const status =
+      outcome === 'matched'
+        ? 'success'
+        : outcome === 'timed_out'
+          ? 'warning'
+          : 'neutral';
+    const title = stringField(details, 'title') ?? 'Background command';
+    const condition = stringField(details, 'contains');
+    const label =
+      outcome === 'matched'
+        ? 'Output matched'
+        : outcome === 'timed_out'
+          ? 'Watch timed out'
+          : 'Watch ended unmatched';
+    return {
+      kind: 'background-watch-result',
+      label: `${label} · ${title}${condition ? ` · ${JSON.stringify(condition)}` : ''}`,
+      status,
+      ...(content ? { content } : {}),
+      ...(details ? { details } : {}),
+    };
+  }
   if (customType === 'background-terminal-result') {
     const status =
-      details?.status === 'failed' ||
-      (typeof details?.exitCode === 'number' && details.exitCode !== 0)
-        ? 'error'
-        : 'success';
+      details?.status === 'killed'
+        ? 'neutral'
+        : details?.status === 'failed' ||
+            (typeof details?.exitCode === 'number' && details.exitCode !== 0)
+          ? 'error'
+          : 'success';
     const title = stringField(details, 'title') ?? 'Background command';
-    const duration = numberField(details, 'duration');
+    const milliseconds = numberField(details, 'duration');
+    const duration =
+      stringField(details, 'duration') ??
+      (milliseconds === undefined
+        ? undefined
+        : `${Math.max(0, Math.round(milliseconds / 1000))}s`);
+    const endedCount = Array.isArray(details?.endedWatches)
+      ? details.endedWatches.filter(
+          (watch) => typeof record(watch)?.contains === 'string',
+        ).length
+      : 0;
+    const outcome =
+      status === 'error'
+        ? 'failed'
+        : status === 'neutral'
+          ? 'stopped'
+          : 'finished';
     return {
       kind: 'background-result',
-      label: `${status === 'error' ? 'Background command failed' : 'Background command finished'} · ${title}${duration === undefined ? '' : ` · ${Math.max(0, Math.round(duration / 1000))}s`}`,
+      label: `Background command ${outcome} · ${title}${duration ? ` · ${duration}` : ''}`,
       status,
+      ...(endedCount ? { unmatchedWatchCount: endedCount } : {}),
       ...(content ? { content } : {}),
       ...(details ? { details } : {}),
     };

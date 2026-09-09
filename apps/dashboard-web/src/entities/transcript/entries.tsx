@@ -502,9 +502,11 @@ function TranscriptEventEntry({
   timestamp?: number | string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const failed =
-    (event.kind === 'delegate-result' || event.kind === 'background-result') &&
-    event.status === 'error';
+  const outcome = 'status' in event ? event.status : undefined;
+  const failed = outcome === 'error';
+  const background =
+    event.kind === 'background-result' ||
+    event.kind === 'background-watch-result';
   const icon =
     event.kind === 'compaction' || event.kind === 'branch-summary'
       ? '◇'
@@ -516,11 +518,17 @@ function TranscriptEventEntry({
             ? '↳'
             : failed
               ? '×'
-              : '✓';
+              : outcome === 'warning'
+                ? '!'
+                : outcome === 'neutral'
+                  ? '•'
+                  : '✓';
   const metric =
     event.kind === 'compaction' && event.tokensBefore !== undefined
       ? `${formatCompactCount(event.tokensBefore)} tokens`
-      : undefined;
+      : event.kind === 'background-result' && event.unmatchedWatchCount
+        ? `${event.unmatchedWatchCount} unmatched watch${event.unmatchedWatchCount === 1 ? '' : 'es'}`
+        : undefined;
   const details = expanded ? (
     event.kind === 'compaction' || event.kind === 'branch-summary' ? (
       <div className="session-event-details">
@@ -536,9 +544,13 @@ function TranscriptEventEntry({
           </li>
         ))}
       </ul>
-    ) : event.kind === 'delegate-result' ||
-      event.kind === 'background-result' ||
-      event.kind === 'custom-message' ? (
+    ) : background ? (
+      event.content ? (
+        <pre className="session-event-details background-event-output">
+          {event.content}
+        </pre>
+      ) : null
+    ) : event.kind === 'delegate-result' || event.kind === 'custom-message' ? (
       event.content ? (
         <div className="session-event-details">
           <Markdown>{event.content}</Markdown>
@@ -551,17 +563,21 @@ function TranscriptEventEntry({
     event.kind === 'branch-summary' ||
     event.kind === 'todo' ||
     ((event.kind === 'delegate-result' ||
-      event.kind === 'background-result' ||
+      background ||
       event.kind === 'custom-message') &&
       Boolean(event.content));
-  const className = `session-event event-${event.kind}${failed ? ' event-failed' : ''}`;
+  const className = `session-event event-${event.kind}${failed ? ' event-failed' : outcome === 'warning' ? ' event-warning' : outcome === 'neutral' ? ' event-neutral' : ''}`;
   const heading = (
     <>
       <span className="session-event-icon" aria-hidden="true">
         {icon}
       </span>
       <strong>{event.label}</strong>
-      {metric ? <small>{metric}</small> : null}
+      {metric ? (
+        <small className={background ? 'background-watch-count' : undefined}>
+          {metric}
+        </small>
+      ) : null}
       <DashboardTime className="transcript-time" timestamp={timestamp} />
     </>
   );

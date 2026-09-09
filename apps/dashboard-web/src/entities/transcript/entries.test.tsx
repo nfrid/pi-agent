@@ -14,6 +14,34 @@ import { TranscriptEntry } from './entries';
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
 describe('transcript entries', () => {
+  it('expands background evidence as literal output, not rendered Markdown', () => {
+    const content = '**ready**\n![not an image](https://example.com/log.png)';
+    const item: TranscriptModelItem = {
+      key: 'watch',
+      raw: {},
+      entry: { kind: 'other' },
+      event: {
+        kind: 'background-watch-result',
+        status: 'warning',
+        label: 'Watch timed out · Dev server',
+        content,
+      },
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TranscriptEntry item={item} />);
+    });
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    expect(tree.root.findByType('pre').props.children).toBe(content);
+    expect(tree.root.findAllByType('img')).toHaveLength(0);
+    expect(tree.root.findAllByType('a')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('renders unresolved live assistant text in full instead of a preparing event', () => {
     const item: TranscriptModelItem = {
       key: 'assistant-live',

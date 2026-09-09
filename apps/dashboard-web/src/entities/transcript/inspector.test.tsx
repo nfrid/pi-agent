@@ -12,6 +12,36 @@ import {
 } from './inspector';
 
 describe('transcript payload inspection', () => {
+  it('explains one-shot watch conditions and removal without implying process termination', () => {
+    const watched = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'background',
+          arguments: {
+            action: 'watch',
+            id: 'bg-1',
+            watch: [
+              { contains: ' ready ', stream: 'stdout', timeout_seconds: 60 },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(watched).toContain('Watch background output');
+    expect(watched).toContain('&quot; ready &quot;');
+    expect(watched).toContain('stdout · once · deadline 60s');
+    const removed = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'background',
+          arguments: { action: 'unwatch', id: 'bg-1', watch_ids: ['w-1'] },
+        }}
+      />,
+    );
+    expect(removed).toContain('Remove background watches');
+    expect(removed).toContain('w-1 · process keeps running');
+  });
+
   it('shows provisional argument text before arguments can be parsed', () => {
     const markup = renderToStaticMarkup(
       <ToolInspector
