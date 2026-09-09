@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   chmodSync,
@@ -19,6 +20,8 @@ import type {
   BackgroundJobEventsSnapshot,
   BackgroundJobSnapshot,
   BackgroundJobStatus,
+  BackgroundWatchInput,
+  BackgroundWatchSnapshot,
   OutputSnapshot,
   StartBackgroundJobInput,
 } from '@pi-agent/background-jobs';
@@ -27,7 +30,10 @@ import {
   BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES,
+  BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES,
+  BACKGROUND_JOBS_MAX_WATCHES,
   backgroundJobsLaunchFingerprint,
+  parseBackgroundWatchInput,
 } from '@pi-agent/background-jobs';
 
 const HOST_RESTART_ERROR =
@@ -70,6 +76,67 @@ function boundedUtf8(value: string, maxBytes: number): string {
 }
 
 type StoredEvent = { event: BackgroundJobEvent; endOffset: number };
+
+function storedWatches(value: unknown): BackgroundWatchSnapshot[] | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Corrupt background job watches.');
+  }
+  if (!Array.isArray(parsed) || parsed.length > BACKGROUND_JOBS_MAX_WATCHES)
+    throw new Error('Corrupt background job watches.');
+  const watches: BackgroundWatchSnapshot[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+      throw new Error('Corrupt background job watch.');
+    const raw = item as Record<string, unknown>;
+    const input = parseBackgroundWatchInput(raw);
+    if (
+      typeof raw.id !== 'string' ||
+      !raw.id ||
+      (raw.status !== 'pending' &&
+        raw.status !== 'matched' &&
+        raw.status !== 'timed_out' &&
+        raw.status !== 'ended') ||
+      typeof raw.createdAt !== 'number' ||
+      !Number.isFinite(raw.createdAt) ||
+      (raw.settledAt !== undefined &&
+        (typeof raw.settledAt !== 'number' ||
+          !Number.isFinite(raw.settledAt))) ||
+      (raw.excerpt !== undefined &&
+        (typeof raw.excerpt !== 'string' ||
+          Buffer.byteLength(raw.excerpt) >
+            BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES)) ||
+      (raw.delivered !== undefined && typeof raw.delivered !== 'boolean')
+    )
+      throw new Error('Corrupt background job watch.');
+    watches.push({
+      ...input,
+      id: raw.id,
+      status: raw.status,
+      createdAt: raw.createdAt,
+      ...(raw.settledAt === undefined ? {} : { settledAt: raw.settledAt }),
+      ...(raw.excerpt === undefined ? {} : { excerpt: raw.excerpt }),
+      ...(raw.delivered === undefined ? {} : { delivered: raw.delivered }),
+    });
+  }
+  return watches;
+}
+function encodeWatches(watches: readonly BackgroundWatchSnapshot[]): string {
+  return JSON.stringify(watches);
+}
+function pendingEnded(
+  watches: readonly BackgroundWatchSnapshot[],
+  settledAt: number,
+): BackgroundWatchSnapshot[] {
+  return watches.map((watch) =>
+    watch.status === 'pending'
+      ? { ...watch, status: 'ended', settledAt }
+      : watch,
+  );
+}
 type EventWriteState = { bytes: number; nextOffset: number };
 
 function parseEventRecords(bytes: Buffer): StoredEvent[] {
@@ -206,6 +273,7 @@ function readBoundedEventFile(file: string): Buffer {
 }
 
 function snapshot(row: Record<string, unknown>): BackgroundJobStoreRow {
+  const watches = storedWatches(row.watches_json);
   return {
     id: String(row.id),
     ownerSession: String(row.owner_session),
@@ -240,6 +308,7 @@ function snapshot(row: Record<string, unknown>): BackgroundJobStoreRow {
       totalBytes: Number(row.stderr_total ?? 0),
       droppedBytes: Number(row.stderr_dropped ?? 0),
     },
+    ...(watches === undefined ? {} : { watches }),
     fingerprint: String(row.fingerprint),
   };
 }
@@ -280,7 +349,8 @@ export class BackgroundJobStore {
         stdout_dropped INTEGER NOT NULL DEFAULT 0,
         stderr_text TEXT NOT NULL DEFAULT '',
         stderr_total INTEGER NOT NULL DEFAULT 0,
-        stderr_dropped INTEGER NOT NULL DEFAULT 0
+        stderr_dropped INTEGER NOT NULL DEFAULT 0,
+        watches_json TEXT
       );
       CREATE INDEX IF NOT EXISTS background_jobs_owner_settled
         ON background_jobs(owner_session, settled_at);
@@ -291,6 +361,7 @@ export class BackgroundJobStore {
       'ALTER TABLE background_jobs ADD COLUMN events_enabled INTEGER',
       'ALTER TABLE background_jobs ADD COLUMN exact_env INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE background_jobs ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE background_jobs ADD COLUMN watches_json TEXT',
     ]) {
       try {
         this.db.exec(statement);
@@ -570,6 +641,14 @@ export class BackgroundJobStore {
     `)
       .run(now, HOST_RESTART_ERROR);
     for (const row of this.db
+      .prepare(
+        "SELECT id, watches_json FROM background_jobs WHERE status = 'failed' AND settled_at = ?",
+      )
+      .all(now)) {
+      const watches = storedWatches(row.watches_json);
+      if (watches) this.setWatches(String(row.id), pendingEnded(watches, now));
+    }
+    for (const row of this.db
       .prepare('SELECT DISTINCT owner_session FROM background_jobs')
       .all()) {
       const ownerSession = textValue(row.owner_session);
@@ -631,6 +710,12 @@ export class BackgroundJobStore {
         );
       return existing;
     }
+    const watches = input.watch?.map(parseBackgroundWatchInput);
+    if (
+      watches &&
+      (watches.length < 1 || watches.length > BACKGROUND_JOBS_MAX_WATCHES)
+    )
+      throw new Error('Invalid output watches.');
     this.eventWrites.delete(input.id);
     try {
       unlinkSync(this.eventPath(input.id));
@@ -640,8 +725,8 @@ export class BackgroundJobStore {
     this.db
       .prepare(`
       INSERT INTO background_jobs
-        (id, owner_session, fingerprint, title, command, cwd, timeout_ms, events_enabled, exact_env, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)
+        (id, owner_session, fingerprint, title, command, cwd, timeout_ms, events_enabled, exact_env, status, created_at, watches_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
     `)
       .run(
         input.id,
@@ -654,9 +739,120 @@ export class BackgroundJobStore {
         input.events === undefined ? null : input.events ? 1 : 0,
         input.exactEnv ? 1 : 0,
         createdAt,
+        watches === undefined
+          ? null
+          : encodeWatches(
+              watches.map((watch) => ({
+                ...watch,
+                id: randomUUID(),
+                status: 'pending' as const,
+                createdAt,
+                delivered: false,
+              })),
+            ),
       );
     this.protectFiles();
     return this.get(input.ownerSession, input.id) as BackgroundJobStoreRow;
+  }
+
+  private setWatches(
+    id: string,
+    watches: readonly BackgroundWatchSnapshot[],
+  ): void {
+    this.db
+      .prepare('UPDATE background_jobs SET watches_json = ? WHERE id = ?')
+      .run(encodeWatches(watches), id);
+  }
+
+  addWatches(
+    ownerSession: string,
+    id: string,
+    inputs: readonly BackgroundWatchInput[],
+    createdAt = Date.now(),
+  ): BackgroundJobStoreRow {
+    const row = this.get(ownerSession, id);
+    if (!row) throw new Error(`Unknown background job "${id}".`);
+    if (row.status !== 'running')
+      throw new Error('Output watches may only be added to a running job.');
+    const current = row.watches ?? [];
+    if (current.length + inputs.length > BACKGROUND_JOBS_MAX_WATCHES)
+      throw new Error(
+        `At most ${BACKGROUND_JOBS_MAX_WATCHES} output watches may be attached.`,
+      );
+    const watches = [
+      ...current,
+      ...inputs.map((watch) => ({
+        ...parseBackgroundWatchInput(watch),
+        id: randomUUID(),
+        status: 'pending' as const,
+        createdAt,
+        delivered: false,
+      })),
+    ];
+    this.setWatches(id, watches);
+    return this.get(ownerSession, id) as BackgroundJobStoreRow;
+  }
+
+  removeWatches(
+    ownerSession: string,
+    id: string,
+    ids: readonly string[],
+  ): BackgroundJobStoreRow {
+    const row = this.get(ownerSession, id);
+    if (!row) throw new Error(`Unknown background job "${id}".`);
+    this.setWatches(
+      id,
+      (row.watches ?? []).filter((watch) => !ids.includes(watch.id)),
+    );
+    return this.get(ownerSession, id) as BackgroundJobStoreRow;
+  }
+
+  acknowledgeWatches(
+    ownerSession: string,
+    id: string,
+    ids: readonly string[],
+  ): void {
+    const row = this.get(ownerSession, id);
+    if (!row) throw new Error(`Unknown background job "${id}".`);
+    this.setWatches(
+      id,
+      (row.watches ?? []).map((watch) =>
+        ids.includes(watch.id) && watch.status !== 'pending'
+          ? { ...watch, delivered: true }
+          : watch,
+      ),
+    );
+  }
+
+  settleWatch(
+    id: string,
+    watchId: string,
+    status: Exclude<BackgroundWatchSnapshot['status'], 'pending'>,
+    settledAt = Date.now(),
+    excerpt?: string,
+  ): void {
+    const row = this.getById(id);
+    if (!row?.watches) return;
+    this.setWatches(
+      id,
+      row.watches.map((watch) =>
+        watch.id === watchId && watch.status === 'pending'
+          ? {
+              ...watch,
+              status,
+              settledAt,
+              ...(excerpt === undefined
+                ? {}
+                : {
+                    excerpt: boundedUtf8(
+                      excerpt,
+                      BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES,
+                    ),
+                  }),
+            }
+          : watch,
+      ),
+    );
   }
 
   setPid(id: string, pid: number): void {
@@ -724,6 +920,9 @@ export class BackgroundJobStore {
         stderr.droppedBytes,
         id,
       );
+    const before = this.getById(id);
+    if (before?.watches)
+      this.setWatches(id, pendingEnded(before.watches, settledAt));
     const row = this.getById(id);
     this.eventWrites.delete(id);
     if (row) this.prune(row.ownerSession);

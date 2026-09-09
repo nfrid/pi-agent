@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BACKGROUND_JOBS_MAX_ARGV_COUNT,
   BACKGROUND_JOBS_MAX_COMMAND_BYTES,
+  BACKGROUND_JOBS_MAX_WATCH_CONTAINS_CHARS,
   backgroundJobsLaunchFingerprint,
   OutputTail,
   parseBackgroundJobsRequest,
@@ -171,6 +172,44 @@ describe('background-jobs protocol', () => {
     ).toThrow(/too many arguments/);
   });
 
+  it('validates literal watch bounds and the singular start field', () => {
+    const watch = { contains: '🙂'.repeat(256), timeoutMs: 10 };
+    const parsed = parseBackgroundJobsRequest({
+      v: 1,
+      op: 'start',
+      input: {
+        id,
+        ownerSession: 's',
+        command: 'x',
+        title: 't',
+        cwd: '.',
+        watch: [watch],
+      },
+    });
+    expect(parsed.op === 'start' ? parsed.input.watch : undefined).toEqual([
+      watch,
+    ]);
+    expect(watch.contains).toHaveLength(
+      BACKGROUND_JOBS_MAX_WATCH_CONTAINS_CHARS,
+    );
+    for (const contains of ['a\nb', 'a\rb', 'x'.repeat(513)]) {
+      expect(() =>
+        parseBackgroundJobsRequest({
+          v: 1,
+          op: 'start',
+          input: {
+            id,
+            ownerSession: 's',
+            command: 'x',
+            title: 't',
+            cwd: '.',
+            watch: [{ contains }],
+          },
+        }),
+      ).toThrow();
+    }
+  });
+
   it('fingerprints exact environment mode without including launch values', () => {
     const base = {
       command: 'delegate',
@@ -184,6 +223,26 @@ describe('background-jobs protocol', () => {
     );
     const inherited = backgroundJobsLaunchFingerprint(base);
     expect(inherited).toMatch(/^[a-f0-9]{64}$/u);
+    expect(backgroundJobsLaunchFingerprint({ ...base, watch: [] })).toBe(
+      inherited,
+    );
+    expect(
+      backgroundJobsLaunchFingerprint({
+        ...base,
+        watch: [{ contains: 'one' }],
+      }),
+    ).not.toBe(inherited);
+    expect(
+      backgroundJobsLaunchFingerprint({
+        ...base,
+        watch: [{ contains: 'two' }],
+      }),
+    ).not.toBe(
+      backgroundJobsLaunchFingerprint({
+        ...base,
+        watch: [{ contains: 'one' }],
+      }),
+    );
     expect(inherited).not.toContain('secret');
     expect(
       backgroundJobsLaunchFingerprint({ ...base, exactEnv: true }),

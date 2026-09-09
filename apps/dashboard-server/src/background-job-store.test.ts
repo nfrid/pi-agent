@@ -321,4 +321,122 @@ describe('background job event store', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('persists one-shot watches, terminal transitions, ACKs, removal, and ownership', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-watches-'));
+    const database = path.join(root, 'jobs.sqlite');
+    const store = new BackgroundJobStore(database);
+    try {
+      const row = store.create(
+        { ...input(firstId), watch: [{ contains: 'needle' }] },
+        'watch',
+        10,
+      );
+      expect(row.status).toBe('running');
+      expect(row.watches).toMatchObject([
+        {
+          contains: 'needle',
+          status: 'pending',
+          createdAt: 10,
+          delivered: false,
+        },
+      ]);
+      const watchId = row.watches?.[0]?.id;
+      expect(watchId).toMatch(/^[0-9a-f-]{36}$/u);
+      store.settleWatch(
+        firstId,
+        watchId as string,
+        'timed_out',
+        20,
+        'x'.repeat(2_000),
+      );
+      store.settleWatch(firstId, watchId as string, 'matched', 21, 'ignored');
+      expect(store.get('owner', firstId)?.watches?.[0]).toMatchObject({
+        status: 'timed_out',
+        settledAt: 20,
+      });
+      expect(
+        Buffer.byteLength(
+          store.get('owner', firstId)?.watches?.[0]?.excerpt ?? '',
+        ),
+      ).toBeLessThanOrEqual(1024);
+      expect(() =>
+        store.acknowledgeWatches('other', firstId, [watchId as string]),
+      ).toThrow(/Unknown/);
+      store.acknowledgeWatches('owner', firstId, [watchId as string]);
+      expect(store.get('owner', firstId)?.watches?.[0]?.delivered).toBe(true);
+      expect(() =>
+        store.addWatches('other', firstId, [{ contains: 'x' }]),
+      ).toThrow(/Unknown/);
+      store.removeWatches('owner', firstId, [watchId as string]);
+      expect(store.get('owner', firstId)?.watches).toEqual([]);
+      store.close();
+      const reopened = new BackgroundJobStore(database);
+      expect(reopened.get('owner', firstId)?.watches).toEqual([]);
+      reopened.close();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles pending watches as ended after a host restart', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-watch-restart-'),
+    );
+    const database = path.join(root, 'jobs.sqlite');
+    const first = new BackgroundJobStore(database);
+    first.create(
+      { ...input(firstId), watch: [{ contains: 'restart' }] },
+      'watch',
+    );
+    first.setPid(firstId, 99999);
+    first.close();
+    const reopened = new BackgroundJobStore(database);
+    try {
+      expect(reopened.get('owner', firstId)?.status).toBe('failed');
+      expect(reopened.get('owner', firstId)?.watches?.[0]?.status).toBe(
+        'ended',
+      );
+    } finally {
+      reopened.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('ends pending watches when a job settles without settling the job for watch timeouts', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-watch-end-'));
+    const database = path.join(root, 'jobs.sqlite');
+    const store = new BackgroundJobStore(database);
+    try {
+      const row = store.create(
+        { ...input(firstId), watch: [{ contains: 'timeout' }] },
+        'watch',
+      );
+      const watchId = row.watches?.[0]?.id as string;
+      store.settleWatch(firstId, watchId, 'timed_out');
+      expect(store.get('owner', firstId)?.status).toBe('running');
+      expect(store.get('owner', firstId)?.watches?.[0]?.status).toBe(
+        'timed_out',
+      );
+      const second = store.create(
+        { ...input(secondId), watch: [{ contains: 'exit' }] },
+        'watch',
+      );
+      store.settle(
+        secondId,
+        'done',
+        { exitCode: 0 },
+        second.stdout,
+        second.stderr,
+        50,
+      );
+      expect(store.get('owner', secondId)?.watches?.[0]).toMatchObject({
+        status: 'ended',
+        settledAt: 50,
+      });
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

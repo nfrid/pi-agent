@@ -31,6 +31,9 @@ export const BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES = 64 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_BYTES = 4 * 1024 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES = 256 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES = 64 * 1024;
+export const BACKGROUND_JOBS_MAX_WATCHES = 8;
+export const BACKGROUND_JOBS_MAX_WATCH_CONTAINS_CHARS = 512;
+export const BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES = 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export type BackgroundJobStatus = 'running' | 'done' | 'failed' | 'killed';
@@ -133,6 +136,23 @@ export interface BackgroundJobEventsSnapshot {
 export interface BackgroundJobsCapabilities {
   /** Whether start exactEnv replaces the host environment. */
   readonly exactEnv?: boolean;
+  /** Whether the host supports durable one-shot output watches. */
+  readonly outputWatches?: boolean;
+}
+
+export interface BackgroundWatchInput {
+  readonly contains: string;
+  readonly stream?: BackgroundJobEventStream;
+  readonly timeoutMs?: number;
+}
+
+export interface BackgroundWatchSnapshot extends BackgroundWatchInput {
+  readonly id: string;
+  readonly status: 'pending' | 'matched' | 'timed_out' | 'ended';
+  readonly createdAt: number;
+  readonly settledAt?: number;
+  readonly excerpt?: string;
+  readonly delivered?: boolean;
 }
 
 export interface BackgroundJobSnapshot {
@@ -157,6 +177,8 @@ export interface BackgroundJobSnapshot {
   readonly completionDelivered?: boolean;
   readonly stdout: OutputSnapshot;
   readonly stderr: OutputSnapshot;
+  /** Durable one-shot output watches, omitted by old persisted jobs without watches. */
+  readonly watches?: BackgroundWatchSnapshot[];
 }
 
 export function backgroundJobsLaunchFingerprint(
@@ -170,6 +192,7 @@ export function backgroundJobsLaunchFingerprint(
     | 'timeoutMs'
     | 'events'
     | 'exactEnv'
+    | 'watch'
   >,
 ): string {
   return createHash('sha256')
@@ -190,6 +213,9 @@ export function backgroundJobsLaunchFingerprint(
         timeoutMs: input.timeoutMs ?? null,
         events: input.events === true,
         ...(input.exactEnv === true ? { exactEnv: true } : {}),
+        ...(input.watch && input.watch.length > 0
+          ? { watch: input.watch }
+          : {}),
       }),
     )
     .digest('hex');
@@ -208,11 +234,33 @@ export interface StartBackgroundJobInput {
   readonly events?: boolean;
   /** Replace the host environment instead of inheriting it. */
   readonly exactEnv?: boolean;
+  readonly watch?: readonly BackgroundWatchInput[];
 }
 
 type BackgroundJobsRequest =
   | { v: 1; op: 'info' }
   | { v: 1; op: 'start'; input: StartBackgroundJobInput }
+  | {
+      v: 1;
+      op: 'watch';
+      ownerSession: string;
+      id: string;
+      watches: BackgroundWatchInput[];
+    }
+  | {
+      v: 1;
+      op: 'unwatch';
+      ownerSession: string;
+      id: string;
+      watchIds: string[];
+    }
+  | {
+      v: 1;
+      op: 'ackWatches';
+      ownerSession: string;
+      id: string;
+      watchIds: string[];
+    }
   | { v: 1; op: 'list'; ownerSession: string }
   | { v: 1; op: 'inspect'; ownerSession: string; id: string }
   | { v: 1; op: 'wait'; ownerSession: string; id: string; waitMs: number }
@@ -223,6 +271,14 @@ type BackgroundJobsRequest =
 export type BackgroundJobsRequestPayload =
   | { op: 'info' }
   | { op: 'start'; input: StartBackgroundJobInput }
+  | {
+      op: 'watch';
+      ownerSession: string;
+      id: string;
+      watches: BackgroundWatchInput[];
+    }
+  | { op: 'unwatch'; ownerSession: string; id: string; watchIds: string[] }
+  | { op: 'ackWatches'; ownerSession: string; id: string; watchIds: string[] }
   | { op: 'list'; ownerSession: string }
   | { op: 'inspect'; ownerSession: string; id: string }
   | { op: 'wait'; ownerSession: string; id: string; waitMs: number }
@@ -265,6 +321,53 @@ function uuid(value: unknown): string {
 }
 function owner(value: unknown): string {
   return text(value, 'owner session', BACKGROUND_JOBS_MAX_OWNER_BYTES);
+}
+function watchId(value: unknown): string {
+  return uuid(value);
+}
+export function parseBackgroundWatchInput(
+  value: unknown,
+): BackgroundWatchInput {
+  if (!record(value)) throw new Error('Invalid output watch.');
+  if (
+    typeof value.contains !== 'string' ||
+    !value.contains ||
+    value.contains.includes('\n') ||
+    value.contains.includes('\r') ||
+    value.contains.length > BACKGROUND_JOBS_MAX_WATCH_CONTAINS_CHARS
+  )
+    throw new Error('Invalid or oversized output watch literal.');
+  if (
+    value.stream !== undefined &&
+    value.stream !== 'stdout' &&
+    value.stream !== 'stderr'
+  )
+    throw new Error('Invalid output watch stream.');
+  const timeoutMs = parseTimeout(value.timeoutMs);
+  return {
+    contains: value.contains,
+    ...(value.stream === undefined ? {} : { stream: value.stream }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  };
+}
+function parseWatches(value: unknown): BackgroundWatchInput[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > BACKGROUND_JOBS_MAX_WATCHES
+  )
+    throw new Error('Invalid output watches.');
+  return value.map(parseBackgroundWatchInput);
+}
+function parseWatchIds(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > BACKGROUND_JOBS_MAX_WATCHES
+  )
+    throw new Error('Invalid output watch ids.');
+  return [...new Set(value.map(watchId))];
 }
 
 export function parseBackgroundJobsEnv(
@@ -375,6 +478,7 @@ export function parseBackgroundJobsRequest(
       const timeoutMs = parseTimeout(value.input.timeoutMs);
       const events = parseEvents(value.input.events);
       const exactEnv = parseExactEnv(value.input.exactEnv);
+      const watches = parseWatches(value.input.watch);
       return {
         v: 1,
         op: 'start',
@@ -397,9 +501,37 @@ export function parseBackgroundJobsRequest(
           ...(timeoutMs === undefined ? {} : { timeoutMs }),
           ...(events === undefined ? {} : { events }),
           ...(exactEnv === undefined ? {} : { exactEnv }),
+          ...(watches === undefined ? {} : { watch: watches }),
         },
       };
     }
+    case 'watch': {
+      const watches = parseWatches(value.watches);
+      if (!watches) throw new Error('Invalid output watches.');
+      return {
+        v: 1,
+        op: 'watch',
+        ownerSession: owner(value.ownerSession),
+        id: uuid(value.id),
+        watches,
+      };
+    }
+    case 'unwatch':
+      return {
+        v: 1,
+        op: 'unwatch',
+        ownerSession: owner(value.ownerSession),
+        id: uuid(value.id),
+        watchIds: parseWatchIds(value.watchIds),
+      };
+    case 'ackWatches':
+      return {
+        v: 1,
+        op: 'ackWatches',
+        ownerSession: owner(value.ownerSession),
+        id: uuid(value.id),
+        watchIds: parseWatchIds(value.watchIds),
+      };
     case 'list':
       return { v: 1, op: 'list', ownerSession: owner(value.ownerSession) };
     case 'inspect':
@@ -547,8 +679,58 @@ function parseCapabilities(value: unknown): BackgroundJobsCapabilities {
   if (!record(value)) throw new Error('Invalid background-jobs capabilities.');
   if (value.exactEnv !== undefined && typeof value.exactEnv !== 'boolean')
     throw new Error('Invalid exact environment capability.');
+  if (
+    value.outputWatches !== undefined &&
+    typeof value.outputWatches !== 'boolean'
+  )
+    throw new Error('Invalid output watches capability.');
   return {
     ...(value.exactEnv === undefined ? {} : { exactEnv: value.exactEnv }),
+    ...(value.outputWatches === undefined
+      ? {}
+      : { outputWatches: value.outputWatches }),
+  };
+}
+
+function parseWatchSnapshot(value: unknown): BackgroundWatchSnapshot {
+  if (!record(value)) throw new Error('Invalid output watch snapshot.');
+  const watch = parseBackgroundWatchInput(value);
+  if (
+    typeof value.id !== 'string' ||
+    !value.id ||
+    typeof value.createdAt !== 'number' ||
+    !Number.isFinite(value.createdAt)
+  )
+    throw new Error('Invalid output watch snapshot.');
+  if (
+    value.status !== 'pending' &&
+    value.status !== 'matched' &&
+    value.status !== 'timed_out' &&
+    value.status !== 'ended'
+  )
+    throw new Error('Invalid output watch status.');
+  if (
+    value.settledAt !== undefined &&
+    (typeof value.settledAt !== 'number' || !Number.isFinite(value.settledAt))
+  )
+    throw new Error('Invalid output watch timestamp.');
+  if (
+    value.excerpt !== undefined &&
+    (typeof value.excerpt !== 'string' ||
+      Buffer.byteLength(value.excerpt) >
+        BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES)
+  )
+    throw new Error('Invalid output watch excerpt.');
+  if (value.delivered !== undefined && typeof value.delivered !== 'boolean')
+    throw new Error('Invalid output watch acknowledgement.');
+  return {
+    ...watch,
+    id: value.id,
+    status: value.status,
+    createdAt: value.createdAt,
+    ...(value.settledAt === undefined ? {} : { settledAt: value.settledAt }),
+    ...(value.excerpt === undefined ? {} : { excerpt: value.excerpt }),
+    ...(value.delivered === undefined ? {} : { delivered: value.delivered }),
   };
 }
 
@@ -560,6 +742,14 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
     throw new Error('Invalid exact environment mode.');
   if (value.timedOut !== undefined && typeof value.timedOut !== 'boolean')
     throw new Error('Invalid timeout fact.');
+  if (value.watches !== undefined) {
+    if (
+      !Array.isArray(value.watches) ||
+      value.watches.length > BACKGROUND_JOBS_MAX_WATCHES
+    )
+      throw new Error('Invalid output watches snapshot.');
+    value.watches.map(parseWatchSnapshot);
+  }
   const status = value.status;
   if (
     status !== 'running' &&
@@ -601,6 +791,9 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
       : {}),
     stdout: parseOutput(value.stdout, BACKGROUND_JOBS_MAX_OUTPUT_BYTES),
     stderr: parseOutput(value.stderr, BACKGROUND_JOBS_STDERR_OUTPUT_BYTES),
+    ...(value.watches === undefined
+      ? {}
+      : { watches: value.watches.map(parseWatchSnapshot) }),
   };
 }
 
@@ -714,14 +907,74 @@ export class BackgroundJobsClient {
   start(
     input: Omit<StartBackgroundJobInput, 'ownerSession'>,
   ): Promise<BackgroundJobSnapshot> {
-    return this.request({
-      op: 'start',
-      input: { ...input, ownerSession: this.ownerSession },
-    }).then((response) => {
+    const request = () =>
+      this.request({
+        op: 'start',
+        input: { ...input, ownerSession: this.ownerSession },
+      });
+    const ready = input.watch?.length
+      ? this.requireOutputWatches()
+      : Promise.resolve();
+    return ready.then(request).then((response) => {
       if (!response.job)
         throw new Error('Background-jobs host returned no job.');
       return response.job;
     });
+  }
+  private async requireOutputWatches(): Promise<void> {
+    const capabilities = await this.info();
+    if (capabilities.outputWatches !== true)
+      throw new Error('Background-jobs host does not support output watches.');
+  }
+  watch(
+    id: string,
+    watches: readonly BackgroundWatchInput[],
+  ): Promise<BackgroundJobSnapshot> {
+    return this.requireOutputWatches()
+      .then(() =>
+        this.request({
+          op: 'watch',
+          ownerSession: this.ownerSession,
+          id,
+          watches: [...watches],
+        }),
+      )
+      .then((response) => {
+        if (!response.job)
+          throw new Error('Background-jobs host returned no job.');
+        return response.job;
+      });
+  }
+  unwatch(
+    id: string,
+    watchIds: readonly string[],
+  ): Promise<BackgroundJobSnapshot> {
+    return this.requireOutputWatches()
+      .then(() =>
+        this.request({
+          op: 'unwatch',
+          ownerSession: this.ownerSession,
+          id,
+          watchIds: [...watchIds],
+        }),
+      )
+      .then((response) => {
+        if (!response.job)
+          throw new Error('Background-jobs host returned no job.');
+        return response.job;
+      });
+  }
+  acknowledgeWatches(id: string, watchIds: readonly string[]): Promise<void> {
+    return this.requireOutputWatches()
+      .then(() =>
+        this.request({
+          op: 'ackWatches',
+          ownerSession: this.ownerSession,
+          id,
+          watchIds: [...watchIds],
+        }),
+      )
+      .then(() => undefined);
   }
   list(): Promise<BackgroundJobSnapshot[]> {
     return this.request({ op: 'list', ownerSession: this.ownerSession }).then(
