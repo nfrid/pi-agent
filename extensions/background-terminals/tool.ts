@@ -13,12 +13,22 @@ import {
 } from './schema';
 
 const DESCRIPTION =
-  'Use this tool for non-interactive commands expected to outlive the current turn, such as servers, watchers, dev processes, and long builds; use ordinary bash for short commands that should finish within the current turn. Each process runs `/bin/bash -c` with the command as supplied and has no stdin, so it must not require input; quote shell syntax for Bash and set a working directory when needed. Jobs are owned by the stable dashboard process host, survive parent Pi session shutdown and recreation, and are not stopped when this manager is disposed; use background stop explicitly. Output is retained in bounded tails, so inspect recent output rather than expecting an unbounded log. Completion is delivered automatically. When a process settles, its message resumes the agent turn.';
+  'Use this tool for non-interactive commands expected to outlive the current turn, such as servers, watchers, dev processes, and long builds; use ordinary bash for short commands. Each process runs `/bin/bash -c` with no stdin and survives parent Pi session shutdown; use stop explicitly. Output is retained in bounded tails and completion is delivered automatically. Peek is immediate and never waits. Add one-shot literal output watches with watch, or remove them with unwatch; watches observe future output, notify on match, timeout, or process end, and never kill the process.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
   if (!text) throw new Error(`${name} is required.`);
   return text;
+}
+
+function deriveTitle(command: string): string {
+  return (
+    command
+      .split(/[\r\n]/u, 1)[0]
+      ?.trim()
+      .replace(/\s+/gu, ' ')
+      .slice(0, 80) || 'process'
+  );
 }
 
 function validateCwd(base: string, requested?: string): string {
@@ -27,6 +37,22 @@ function validateCwd(base: string, requested?: string): string {
     throw new Error(`cwd is not a directory: ${cwd}`);
   }
   return cwd;
+}
+
+function hostWatches(
+  watches: readonly {
+    contains: string;
+    stream?: 'stdout' | 'stderr';
+    timeout_seconds?: number;
+  }[],
+) {
+  return watches.map(({ contains, stream, timeout_seconds }) => ({
+    contains,
+    ...(stream ? { stream } : {}),
+    ...(timeout_seconds === undefined
+      ? {}
+      : { timeoutMs: timeout_seconds * 1000 }),
+  }));
 }
 
 export function registerBackgroundTool(
@@ -48,11 +74,18 @@ export function registerBackgroundTool(
         case 'start': {
           const command = requireText(params.command, 'command');
           const title =
-            requireText(params.title, 'title')
-              .replace(/\s+/g, ' ')
-              .slice(0, 80) || 'process';
+            params.title === undefined
+              ? deriveTitle(command)
+              : requireText(params.title, 'title')
+                  .replace(/\s+/gu, ' ')
+                  .slice(0, 80);
           const cwd = validateCwd(ctx.cwd, params.cwd);
-          const snapshot = await active.start({ command, title, cwd });
+          const snapshot = await active.start({
+            command,
+            title,
+            cwd,
+            ...(params.watch ? { watch: hostWatches(params.watch) } : {}),
+          });
           return {
             content: [
               {
@@ -65,8 +98,7 @@ export function registerBackgroundTool(
         }
         case 'peek': {
           const id = requireText(params.id, 'id');
-          const waited = params.wait_seconds ?? 0;
-          const snapshot = await active.peek(id, waited * 1000, signal);
+          const snapshot = await active.peek(id, signal);
           if (snapshot.status !== 'running') cancelCompletion(id);
           return {
             content: [
@@ -75,7 +107,6 @@ export function registerBackgroundTool(
                 text: formatPeek(
                   snapshot,
                   params.tail_lines ?? DEFAULT_TAIL_LINES,
-                  waited,
                 ),
               },
             ],
@@ -101,7 +132,7 @@ export function registerBackgroundTool(
           };
         }
         case 'stop': {
-          const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
+          const ids = params.ids.map((id) => id.trim()).filter(Boolean);
           if (ids.length === 0) throw new Error('ids is required.');
           const snapshots = await active.stop(ids, signal);
           for (const snapshot of snapshots) cancelCompletion(snapshot.id);
@@ -113,6 +144,30 @@ export function registerBackgroundTool(
               action: 'stop',
               processes: snapshots.map(processDetails),
             },
+          };
+        }
+        case 'watch': {
+          const id = requireText(params.id, 'id');
+          const snapshot = await active.watch(id, hostWatches(params.watch));
+          return {
+            content: [
+              { type: 'text', text: `Added watches to ${snapshot.id}.` },
+            ],
+            details: { action: 'watch', process: processDetails(snapshot) },
+          };
+        }
+        case 'unwatch': {
+          const id = requireText(params.id, 'id');
+          const watchIds = params.watch_ids
+            .map((watchId) => watchId.trim())
+            .filter(Boolean);
+          if (watchIds.length === 0) throw new Error('watch_ids is required.');
+          const snapshot = await active.unwatch(id, watchIds);
+          return {
+            content: [
+              { type: 'text', text: `Removed watches from ${snapshot.id}.` },
+            ],
+            details: { action: 'unwatch', process: processDetails(snapshot) },
           };
         }
       }

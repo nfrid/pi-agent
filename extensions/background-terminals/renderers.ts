@@ -5,7 +5,11 @@ import {
   renderBackgroundCompletion,
 } from '../shared/ui/background-completion';
 import type { BackgroundStatus } from './manager';
-import { type BackgroundToolDetails, RESULT_MESSAGE_TYPE } from './schema';
+import {
+  type BackgroundToolDetails,
+  RESULT_MESSAGE_TYPE,
+  WATCH_RESULT_MESSAGE_TYPE,
+} from './schema';
 
 export function resultText(
   content: ReadonlyArray<{ type: string; text?: string }>,
@@ -23,7 +27,7 @@ export function renderBackgroundCall(
     command?: string;
     id?: string;
     ids?: string[];
-    wait_seconds?: number;
+    watch_ids?: string[];
   },
   theme: Theme,
   context?: { expanded?: boolean },
@@ -52,20 +56,13 @@ export function renderBackgroundCall(
         0,
       );
     }
-    case 'peek': {
-      const wait = args.wait_seconds
-        ? theme.fg('dim', ` · wait ${args.wait_seconds}s`)
-        : '';
-      return new Text(
-        `${title} ${theme.fg('accent', args.id ?? '?')}${wait}`,
-        0,
-        0,
-      );
-    }
+    case 'peek':
+      return new Text(`${title} ${theme.fg('accent', args.id ?? '?')}`, 0, 0);
     case 'list':
       return new Text(title, 0, 0);
-    case 'stop': {
-      const ids = args.ids ?? [];
+    case 'stop':
+    case 'unwatch': {
+      const ids = args.ids ?? args.watch_ids ?? [];
       const visible = expanded ? ids : ids.slice(0, 3);
       const suffix =
         !expanded && ids.length > visible.length
@@ -77,6 +74,8 @@ export function renderBackgroundCall(
         0,
       );
     }
+    case 'watch':
+      return new Text(`${title} ${theme.fg('accent', args.id ?? '?')}`, 0, 0);
     default:
       return new Text(title, 0, 0);
   }
@@ -215,6 +214,57 @@ export function registerBackgroundMessageRenderer(pi: ExtensionAPI): void {
       const details = (message.details ?? {}) as BackgroundCompletionDetails;
       return renderBackgroundCompletion(
         completionCard(details),
+        { expanded, outputPad },
+        theme,
+      );
+    },
+  );
+  pi.registerMessageRenderer(
+    WATCH_RESULT_MESSAGE_TYPE,
+    (message, { expanded, outputPad }, theme) => {
+      const details = (message.details ?? {}) as {
+        id?: string;
+        watchId?: string;
+        title?: string;
+        status?: string;
+        contains?: string;
+      };
+      const status =
+        details.status === 'timed_out'
+          ? 'timed out'
+          : (details.status ?? 'settled');
+      return renderBackgroundCompletion(
+        {
+          icon: details.status === 'matched' ? '✓' : '•',
+          color: details.status === 'matched' ? 'success' : 'warning',
+          title: [
+            { text: 'Background watch ', color: 'muted' },
+            { text: details.title ?? details.id ?? 'settled', color: 'text' },
+            { text: ` · ${status}`, color: 'dim' },
+          ],
+          rows: details.watchId
+            ? [
+                {
+                  icon: details.status === 'matched' ? '✓' : '•',
+                  color: details.status === 'matched' ? 'success' : 'warning',
+                  segments: [
+                    {
+                      text: `${details.id ?? '?'}:${details.watchId}`,
+                      color: 'accent',
+                    },
+                    ...(expanded && details.contains
+                      ? ([
+                          {
+                            text: ` · ${JSON.stringify(details.contains)}`,
+                            color: 'dim',
+                          },
+                        ] as const)
+                      : []),
+                  ],
+                },
+              ]
+            : undefined,
+        },
         { expanded, outputPad },
         theme,
       );

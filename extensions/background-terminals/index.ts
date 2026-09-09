@@ -16,7 +16,11 @@ import { registerBackgroundCommands } from './commands';
 import { exitDescription, formatCompletion, formatDuration } from './format';
 import { BackgroundManager, type BackgroundSnapshot } from './manager';
 import { registerBackgroundMessageRenderer } from './renderers';
-import { RESULT_MESSAGE_TYPE, WIDGET_KEY } from './schema';
+import {
+  RESULT_MESSAGE_TYPE,
+  WATCH_RESULT_MESSAGE_TYPE,
+  WIDGET_KEY,
+} from './schema';
 import { registerBackgroundTool } from './tool';
 
 export default defineExtension(
@@ -83,14 +87,56 @@ export default defineExtension(
       }
     };
 
+    const deliverWatch = (
+      snapshot: BackgroundSnapshot,
+      watch: NonNullable<BackgroundSnapshot['watches']>[number],
+      services: ScopedServices,
+    ): boolean => {
+      const excerpt = watch.excerpt?.slice(-1_024);
+      try {
+        services.backgroundDeliveries.publish({
+          key: `background-watch:${snapshot.id}:${watch.id}`,
+          message: {
+            customType: WATCH_RESULT_MESSAGE_TYPE,
+            content: `Background process ${snapshot.id} "${snapshot.title}" watch ${watch.id} ${watch.status}: ${JSON.stringify(watch.contains)}${excerpt ? `\nEvidence: ${excerpt}` : ''}`,
+            display: true,
+            details: {
+              dedupeKey: `${snapshot.id}:${watch.id}`,
+              id: snapshot.id,
+              watchId: watch.id,
+              title: snapshot.title,
+              status: watch.status,
+              contains: watch.contains,
+              stream: watch.stream,
+              excerpt,
+            },
+          },
+        });
+        return true;
+      } catch (error) {
+        console.error(
+          'background-terminals: failed to deliver output watch',
+          error,
+        );
+        return false;
+      }
+    };
+
     const createManager = (scope?: SessionScopeId) => {
       const services = getScopedServices(scope);
       services.backgroundDeliveries.bind(pi);
       scopedServices = services;
       return new BackgroundManager({
         scopeId: services.scopeId,
-        pendingProcesses: services.pendingProcesses,
         onSettled: (snapshot) => deliverCompletion(snapshot, services),
+        onWatchSettled: (snapshot, watch) =>
+          deliverWatch(snapshot, watch, services),
+        onWatchesRemoved: (id, watchIds) => {
+          for (const watchId of watchIds)
+            services.backgroundDeliveries.cancel(
+              `background-watch:${id}:${watchId}`,
+            );
+        },
         onChange: () => widget.sync(),
       });
     };

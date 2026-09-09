@@ -30,8 +30,9 @@ export function registerBackgroundCommands(
         const labels = snapshots.map(formatSummary);
         const selected = await ctx.ui.select('Background processes', labels);
         if (!selected) return;
-        const snapshot = snapshots[labels.indexOf(selected)];
-        if (snapshot) {
+        const listed = snapshots[labels.indexOf(selected)];
+        if (listed) {
+          const snapshot = (await getManager().inspect(listed.id)) ?? listed;
           if (snapshot.status !== 'running') cancelCompletion(snapshot.id);
           ctx.ui.notify(formatPeek(snapshot, PEEK_TAIL_LINES), 'info');
         }
