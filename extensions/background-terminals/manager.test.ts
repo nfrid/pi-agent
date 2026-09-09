@@ -102,6 +102,27 @@ describe('BackgroundManager', () => {
     });
   });
 
+  it('sends the agent PATH to the process host without forwarding other environment variables', async () => {
+    const start = vi.spyOn(BackgroundJobsClient.prototype, 'start');
+    try {
+      await withManager(async (manager) => {
+        const started = await manager.start({
+          command: 'printf %s "$PATH"',
+          cwd: process.cwd(),
+        });
+        expect(start.mock.calls[0]?.[0].env).toEqual({
+          PATH: process.env.PATH,
+        });
+        expect(start.mock.calls[0]?.[0].exactEnv).not.toBe(true);
+        const settled = await inspectUntilSettled(manager, started.id);
+        expect(settled.status).toBe('done');
+        expect(settled.stdout.text).toBe(process.env.PATH);
+      });
+    } finally {
+      start.mockRestore();
+    }
+  });
+
   it('captures stdout and stderr separately and reports a successful exit', async () => {
     await withManager(async (manager) => {
       const started = await manager.start({

@@ -192,6 +192,10 @@ export class BackgroundManager {
       command: options.command,
       title: displayCommand(options.title ?? deriveTitle(options.command)),
       cwd: options.cwd,
+      // Jobs run in a separate host service with its own, often minimal PATH.
+      ...(process.env.PATH !== undefined
+        ? { env: { PATH: process.env.PATH } }
+        : {}),
       ...(options.watch?.length ? { watch: options.watch } : {}),
     });
     if (this.disposed || generation !== this.generation)
