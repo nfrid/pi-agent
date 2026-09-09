@@ -12,6 +12,40 @@ import {
 } from './inspector';
 
 describe('transcript payload inspection', () => {
+  it('uses resolved process titles in the background inspector summary', () => {
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'background',
+          backgroundTitle: 'Dev server',
+          arguments: { action: 'peek', id: 'opaque-process-id' },
+        }}
+      />,
+    );
+    expect(markup).toContain('peek · Dev server');
+    expect(markup).not.toContain('peek · opaque-process-id');
+    const completed = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'background',
+          arguments: { action: 'stop', ids: ['opaque-process-id'] },
+          result: {
+            details: {
+              processes: [
+                {
+                  id: 'opaque-process-id',
+                  title: 'Dev server',
+                  status: 'killed',
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+    expect(completed).toContain('stop · Dev server');
+  });
+
   it('explains one-shot watch conditions and removal without implying process termination', () => {
     const watched = renderToStaticMarkup(
       <ToolInspector
@@ -39,7 +73,8 @@ describe('transcript payload inspection', () => {
       />,
     );
     expect(removed).toContain('Remove background watches');
-    expect(removed).toContain('w-1 · process keeps running');
+    expect(removed).toContain('Remove 1 watch · process keeps running');
+    expect(removed).not.toContain('Remove watches: w-1');
   });
 
   it('shows provisional argument text before arguments can be parsed', () => {

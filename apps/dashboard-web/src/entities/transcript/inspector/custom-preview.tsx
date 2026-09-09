@@ -163,6 +163,9 @@ function ResultBody({
     kind === 'delegate';
   return (
     <>
+      {kind === 'background' ? (
+        <small className="tool-custom-meta">Raw process result</small>
+      ) : null}
       {markdown ? (
         <div className="tool-markdown-result">
           <Markdown>{text}</Markdown>
@@ -360,8 +363,14 @@ function ActionSummary({
   );
 }
 
-function BackgroundSummary({ args }: { args: unknown }) {
-  const model = backgroundPresentation(args);
+function BackgroundSummary({
+  args,
+  tool,
+}: {
+  args: unknown;
+  tool?: ToolRecord;
+}) {
+  const model = backgroundPresentation(args, tool?.result);
   const title =
     model.action === 'watch'
       ? 'Watch background output'
@@ -370,9 +379,9 @@ function BackgroundSummary({ args }: { args: unknown }) {
         : 'Background';
   const detail = [
     model.action ?? 'list',
-    model.title ??
-      model.id ??
-      (model.ids.length ? model.ids.join(', ') : undefined),
+    typeof tool?.backgroundTitle === 'string'
+      ? tool.backgroundTitle
+      : model.target,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -392,7 +401,8 @@ function BackgroundSummary({ args }: { args: unknown }) {
       ) : null}
       {model.watchIds.length ? (
         <p className="tool-custom-meta">
-          Remove watches: {model.watchIds.join(', ')} · process keeps running
+          Remove {model.watchIds.length} watch
+          {model.watchIds.length === 1 ? '' : 'es'} · process keeps running
         </p>
       ) : null}
       {model.command ? (
@@ -500,7 +510,10 @@ function TodoSummary({ args }: { args: unknown }) {
   );
 }
 
-const SUMMARIES: Record<CustomToolKind, (args: unknown) => ReactNode> = {
+const SUMMARIES: Record<
+  CustomToolKind,
+  (args: unknown, tool?: ToolRecord) => ReactNode
+> = {
   web_search: (args) => <WebSearchSummary args={args} />,
   fetch_content: (args) => <FetchSummary args={args} />,
   get_search_content: (args) => <GetSearchContentSummary args={args} />,
@@ -508,7 +521,7 @@ const SUMMARIES: Record<CustomToolKind, (args: unknown) => ReactNode> = {
   delegate_jobs: (args) => <ActionSummary args={args} title="Delegate jobs" />,
   delegate_changes: (args) => <ChangesSummary args={args} />,
   delegate_gate: (args) => <GateSummary args={args} />,
-  background: (args) => <BackgroundSummary args={args} />,
+  background: (args, tool) => <BackgroundSummary args={args} tool={tool} />,
   todo: (args) => <TodoSummary args={args} />,
 };
 
@@ -531,7 +544,7 @@ export function CustomToolInspector({
       className={`payload-section tool-specialized tool-${kind}-presentation`}
       aria-label={`${kind} presentation`}
     >
-      {SUMMARIES[kind](args)}
+      {SUMMARIES[kind](args, tool)}
       <OutcomeFacts kind={kind} result={tool.result} />
       {visibleResult ? (
         <ResultBody

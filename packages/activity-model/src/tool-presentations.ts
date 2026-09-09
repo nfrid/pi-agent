@@ -148,6 +148,8 @@ export function actionIdPresentation(args: unknown): ActionIdPresentation {
 export type BackgroundPresentation = ActionIdPresentation & {
   title?: string;
   command?: string;
+  /** Display-only target; IDs remain in the tool arguments and diagnostics. */
+  target?: string;
   watches: readonly {
     contains: string;
     stream?: 'stdout' | 'stderr';
@@ -156,10 +158,52 @@ export type BackgroundPresentation = ActionIdPresentation & {
   watchIds: readonly string[];
 };
 
-export function backgroundPresentation(args: unknown): BackgroundPresentation {
+export function backgroundProcessTitles(
+  result: unknown,
+): ReadonlyMap<string, string> {
+  const details = recordArgs(recordArgs(result)?.details);
+  const processes = [
+    details?.process,
+    ...(Array.isArray(details?.processes) ? details.processes : []),
+  ];
+  const titles = new Map<string, string>();
+  for (const process of processes) {
+    const id = stringArg(process, 'id');
+    const title = stringArg(process, 'title');
+    if (id && title) titles.set(id, title);
+  }
+  return titles;
+}
+
+export function backgroundPresentation(
+  args: unknown,
+  result?: unknown,
+  knownTitles: ReadonlyMap<string, string> = new Map(),
+): BackgroundPresentation {
   const watch = recordArgs(args)?.watch;
+  const action = actionIdPresentation(args);
+  const titles = new Map([...knownTitles, ...backgroundProcessTitles(result)]);
+  const targetIds = action.id ? [action.id] : action.ids;
+  const fallback = 'Background process';
+  const commandTitle = stringArg(args, 'command')
+    ?.split(/[\r\n]/u, 1)[0]
+    ?.replace(/\s+/gu, ' ')
+    .slice(0, 80);
+  const startedTitle = stringArg(
+    recordArgs(recordArgs(result)?.details)?.process,
+    'title',
+  );
+  const target =
+    action.action === 'start'
+      ? (startedTitle ?? stringArg(args, 'title') ?? commandTitle ?? fallback)
+      : targetIds.length
+        ? targetIds.map((id) => titles.get(id) ?? fallback).join(', ')
+        : action.action === 'list'
+          ? undefined
+          : (stringArg(args, 'title') ?? fallback);
   return {
-    ...actionIdPresentation(args),
+    target,
+    ...action,
     title: stringArg(args, 'title'),
     command: stringArg(args, 'command'),
     watchIds: stringList(args, 'watch_ids'),

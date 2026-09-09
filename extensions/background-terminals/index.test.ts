@@ -202,6 +202,7 @@ describe('background terminals extension', () => {
       id = result.details.process.id;
       const watchId = result.details.process.watches?.[0]?.id;
       expect(watchId).toBeDefined();
+      expect(result.content[0].text).toContain('"READY"');
       expect(result.content[0].text).toContain(watchId);
       await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
       const control = sendMessage.mock.calls[0][0];
@@ -416,7 +417,10 @@ describe('background terminals extension', () => {
       completionRenderer?.(message, { expanded: true, outputPad: 1 }, theme)
         .render(160)
         .join('\n') ?? '';
-    expect(expanded).toContain('<accent>bg-1</accent><dim> · exit 0</dim>');
+    expect(expanded).toContain(
+      '<text>production build</text><dim> · exit 0</dim>',
+    );
+    expect(expanded).not.toContain('bg-1');
     expect(expanded).not.toContain('Use background peek');
   });
 
@@ -521,7 +525,10 @@ describe('background terminals extension', () => {
 
     expect(partial?.render(160).join('\n')).toContain('background');
     expect(call?.render(160).join('\n')).toContain('…');
-    expect(result?.render(160).join('\n')).toContain('<warning>● bg-1 running');
+    expect(result?.render(160).join('\n')).toContain(
+      '<warning>● development server running',
+    );
+    expect(result?.render(160).join('\n')).not.toContain('bg-1');
     expect(result?.render(160).join('\n')).not.toContain('full output');
   });
 });

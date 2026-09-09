@@ -55,6 +55,22 @@ const entries = [
       isError: false,
     },
   },
+  ...['unwatch', 'peek', 'stop'].map((action) => ({
+    type: 'tool',
+    tool: {
+      toolCallId: `${action}-call`,
+      name: 'background',
+      status: 'complete',
+      arguments:
+        action === 'stop'
+          ? { action, ids: ['bg-server'] }
+          : {
+              action,
+              id: 'bg-server',
+              ...(action === 'unwatch' ? { watch_ids: ['w-ready'] } : {}),
+            },
+    },
+  })),
   {
     type: 'custom_message',
     id: 'matched',
@@ -117,6 +133,18 @@ for (const viewport of ['mobile', 'desktop']) {
     await expect(
       page.getByText('Watching background output', { exact: true }),
     ).toBeVisible();
+    await page.getByRole('button', { name: /Show all activity/ }).click();
+    for (const action of [
+      'Watching background output',
+      'Removing background watches',
+      'Checking background command',
+      'Stopping background command',
+    ]) {
+      const row = page.locator('.tool-step').filter({ hasText: action });
+      await expect(row).toContainText('Dev server');
+      await expect(row).not.toContainText('bg-server');
+      await expect(row).not.toContainText('w-ready');
+    }
     const tool = page
       .locator('details.tool-detail')
       .filter({ hasText: 'Watching background output' });

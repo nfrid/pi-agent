@@ -941,6 +941,74 @@ describe('tool row views and virtual transcript construction', () => {
     });
   });
 
+  it('resolves background titles across session history without changing API IDs', () => {
+    const pending = {
+      type: 'tool',
+      tool: {
+        toolCallId: 'watch-call',
+        name: 'background',
+        arguments: { action: 'watch', id: 'bg-uuid' },
+        status: 'running',
+      },
+    };
+    const entries = [
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'start-call',
+          name: 'background',
+          arguments: { action: 'start', command: 'server' },
+          status: 'complete',
+          result: {
+            details: { process: { id: 'bg-uuid', title: 'Dev server' } },
+          },
+        },
+      },
+      pending,
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'stop-call',
+          name: 'background',
+          arguments: { action: 'stop', ids: ['bg-uuid'] },
+          status: 'complete',
+        },
+      },
+    ];
+    const before = JSON.stringify(entries);
+    const items = toTranscriptEntries(entries);
+    expect(items.map((item) => item.tool?.backgroundTitle)).toEqual([
+      'Dev server',
+      'Dev server',
+      'Dev server',
+    ]);
+    expect(items[1].tool?.arguments).toEqual({
+      action: 'watch',
+      id: 'bg-uuid',
+    });
+    expect(JSON.stringify(entries)).toBe(before);
+    expect(toTranscriptEntries([pending])[0].tool?.backgroundTitle).toBe(
+      'Background process',
+    );
+    const withNotification = toTranscriptEntries([
+      pending,
+      {
+        type: 'custom_message',
+        customType: 'background-watch-result',
+        display: true,
+        details: {
+          id: 'bg-uuid',
+          title: 'Notification title',
+          status: 'matched',
+          contains: 'ready',
+        },
+      },
+    ]);
+    expect(withNotification[0].tool?.backgroundTitle).toBe(
+      'Notification title',
+    );
+  });
+
   it('presents watch outcomes distinctly and summarizes coalesced completion', () => {
     const items = toTranscriptEntries([
       ...['matched', 'timed_out', 'ended'].map((status) => ({

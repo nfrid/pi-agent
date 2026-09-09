@@ -546,9 +546,10 @@ function TranscriptEventEntry({
       </ul>
     ) : background ? (
       event.content ? (
-        <pre className="session-event-details background-event-output">
-          {event.content}
-        </pre>
+        <div className="session-event-details">
+          <small className="background-raw-label">Raw notification</small>
+          <pre className="background-event-output">{event.content}</pre>
+        </div>
       ) : null
     ) : event.kind === 'delegate-result' || event.kind === 'custom-message' ? (
       event.content ? (
@@ -683,6 +684,8 @@ function ToolDetail({
       args: tool.arguments,
       status: tool.status,
       isError: tool.isError,
+      result: tool.result,
+      backgroundTitle: tool.backgroundTitle,
     },
     cwd,
   );

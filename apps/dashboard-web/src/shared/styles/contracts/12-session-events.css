@@ -99,6 +99,11 @@ details.session-event {
   flex-shrink: 0;
   color: var(--orange);
 }
+.background-raw-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--dim);
+}
 .background-event-output {
   margin: 0;
   white-space: pre-wrap;

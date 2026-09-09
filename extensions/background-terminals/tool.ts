@@ -3,12 +3,13 @@ import { resolve } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { loadGuidelines } from '../shared/instructions';
 import { formatPeek, formatSummary } from './format';
-import type { BackgroundManager } from './manager';
+import type { BackgroundManager, BackgroundSnapshot } from './manager';
 import { renderBackgroundCall, renderBackgroundResult } from './renderers';
 import {
   type BackgroundToolDetails,
   DEFAULT_TAIL_LINES,
   Parameters,
+  type ProcessDetails,
   processDetails,
 } from './schema';
 
@@ -49,8 +50,14 @@ export function registerBackgroundTool(
   pi: ExtensionAPI,
   getManager: () => BackgroundManager,
   cancelCompletion: (id: string) => boolean = () => false,
+  resolveProcess: (id: string) => BackgroundSnapshot | undefined = () =>
+    undefined,
 ): void {
-  pi.registerTool<typeof Parameters, BackgroundToolDetails>({
+  pi.registerTool<
+    typeof Parameters,
+    BackgroundToolDetails,
+    { processes?: Map<string, ProcessDetails> }
+  >({
     name: 'background',
     label: 'Background Process',
     description: DESCRIPTION,
@@ -110,7 +117,9 @@ export function registerBackgroundTool(
                 text:
                   snapshots.length === 0
                     ? 'No background processes.'
-                    : snapshots.map(formatSummary).join('\n'),
+                    : snapshots
+                        .map((snapshot) => formatSummary(snapshot))
+                        .join('\n'),
               },
             ],
             details: {
@@ -126,7 +135,12 @@ export function registerBackgroundTool(
           for (const snapshot of snapshots) cancelCompletion(snapshot.id);
           return {
             content: [
-              { type: 'text', text: snapshots.map(formatSummary).join('\n') },
+              {
+                type: 'text',
+                text: snapshots
+                  .map((snapshot) => formatSummary(snapshot))
+                  .join('\n'),
+              },
             ],
             details: {
               action: 'stop',
@@ -166,7 +180,30 @@ export function registerBackgroundTool(
         }
       }
     },
-    renderCall: renderBackgroundCall,
-    renderResult: renderBackgroundResult,
+    renderCall: (args, theme, context) =>
+      renderBackgroundCall(
+        args,
+        theme,
+        context,
+        (id) => context?.state?.processes?.get(id) ?? resolveProcess(id),
+      ),
+    renderResult: (result, options, theme, context) => {
+      // Historical tool rows can outlive the manager's retained process cache.
+      // Share their result titles with the call renderer, without host I/O.
+      if (context?.state && result.details) {
+        const processes = result.details.process
+          ? [result.details.process]
+          : (result.details.processes ?? []);
+        context.state.processes ??= new Map();
+        const cached = context.state.processes;
+        let changed = false;
+        for (const process of processes) {
+          if (cached.get(process.id)?.title !== process.title) changed = true;
+          cached.set(process.id, process);
+        }
+        if (changed) context.invalidate();
+      }
+      return renderBackgroundResult(result, options, theme);
+    },
   });
 }

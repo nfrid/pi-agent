@@ -5,7 +5,11 @@ import {
   renderBackgroundCompletion,
 } from '../shared/ui/background-completion';
 import type { BackgroundStatus, EndedWatch } from './manager';
-import { type BackgroundToolDetails, RESULT_MESSAGE_TYPE } from './schema';
+import {
+  type BackgroundToolDetails,
+  RESULT_MESSAGE_TYPE,
+  WATCH_RESULT_MESSAGE_TYPE,
+} from './schema';
 
 export function resultText(
   content: ReadonlyArray<{ type: string; text?: string }>,
@@ -27,6 +31,16 @@ export function renderBackgroundCall(
   },
   theme: Theme,
   context?: { expanded?: boolean },
+  resolveProcess?: (id: string) =>
+    | {
+        title: string;
+        watches?: readonly {
+          id: string;
+          contains: string;
+          stream?: 'stdout' | 'stderr';
+        }[];
+      }
+    | undefined,
 ) {
   // Arguments are partial while a tool call streams. Always return a
   // component, even before `action` has arrived, or the TUI Box receives
@@ -39,10 +53,15 @@ export function renderBackgroundCall(
 
   switch (action) {
     case 'start': {
-      const label = args.title
-        ? ` ${theme.fg('accent', truncateToWidth(args.title, 32, '…'))}`
-        : '';
       const command = args.command?.trim() ?? '';
+      const processTitle =
+        args.title?.trim() ||
+        command
+          .split(/[\r\n]/u, 1)[0]
+          ?.replace(/\s+/gu, ' ')
+          .slice(0, 80) ||
+        'Background process';
+      const label = ` ${theme.fg('accent', truncateToWidth(processTitle, 32, '…'))}`;
       const shown = expanded
         ? command
         : truncateToWidth(command.replace(/\s+/g, ' '), 72, '…');
@@ -53,25 +72,43 @@ export function renderBackgroundCall(
       );
     }
     case 'peek':
-      return new Text(`${title} ${theme.fg('accent', args.id ?? '?')}`, 0, 0);
+    case 'watch': {
+      const process = args.id ? resolveProcess?.(args.id) : undefined;
+      return new Text(
+        `${title} ${theme.fg('accent', process?.title ?? 'Background process')}`,
+        0,
+        0,
+      );
+    }
     case 'list':
       return new Text(title, 0, 0);
-    case 'stop':
-    case 'unwatch': {
-      const ids = args.ids ?? args.watch_ids ?? [];
+    case 'stop': {
+      const ids = args.ids ?? [];
       const visible = expanded ? ids : ids.slice(0, 3);
       const suffix =
         !expanded && ids.length > visible.length
           ? ` ${theme.fg('dim', `+${ids.length - visible.length}`)}`
           : '';
+      const labels = visible.map(
+        (id) => resolveProcess?.(id)?.title ?? 'Background process',
+      );
       return new Text(
-        `${title} ${visible.map((id) => theme.fg('accent', id)).join(', ')}${suffix}`,
+        `${title} ${labels.map((label) => theme.fg('accent', label)).join(', ')}${suffix}`,
         0,
         0,
       );
     }
-    case 'watch':
-      return new Text(`${title} ${theme.fg('accent', args.id ?? '?')}`, 0, 0);
+    case 'unwatch': {
+      const process = args.id ? resolveProcess?.(args.id) : undefined;
+      const conditions = process?.watches
+        ?.filter((watch) => args.watch_ids?.includes(watch.id))
+        .map((watch) => JSON.stringify(watch.contains));
+      return new Text(
+        `${title} ${theme.fg('accent', process?.title ?? 'Background process')}${conditions?.length ? ` · ${conditions.join(', ')}` : ''}`,
+        0,
+        0,
+      );
+    }
     default:
       return new Text(title, 0, 0);
   }
@@ -86,7 +123,8 @@ export function renderBackgroundResult(
   theme: Theme,
 ) {
   const details = result.details;
-  if (expanded) return new Text(resultText(result.content), 0, 0);
+  if (expanded)
+    return new Text(`Raw process result:\n${resultText(result.content)}`, 0, 0);
   if (!details) {
     return new Text(
       theme.fg('error', truncateToWidth(resultText(result.content), 96, '…')),
@@ -120,7 +158,10 @@ export function renderBackgroundResult(
           ? 'warning'
           : 'muted';
     const states = processes
-      .map((process) => `${process.id} ${process.status}`)
+      .map(
+        (process) =>
+          `${process.title || 'Background process'} ${process.status}`,
+      )
       .join(', ');
     return new Text(
       theme.fg(color, '■ stop complete') +
@@ -144,8 +185,10 @@ export function renderBackgroundResult(
       ? `exit ${process.exitCode}`
       : process.status;
   return new Text(
-    theme.fg(color, `${icon} ${process.id} ${process.status}`) +
-      theme.fg('dim', ` · ${process.title}${running ? '' : ` · ${exit}`}`),
+    theme.fg(
+      color,
+      `${icon} ${process.title || 'Background process'} ${process.status}`,
+    ) + (running ? '' : theme.fg('dim', ` · ${exit}`)),
     0,
     0,
   );
@@ -182,48 +225,101 @@ function completionCard(
     color: style.color,
     title: [
       { text: 'Background process ', color: 'muted' },
-      { text: details.title ?? details.id ?? 'finished', color: 'text' },
+      { text: details.title ?? 'Background process', color: 'text' },
       ...(metadata
         ? ([{ text: ` · ${metadata}`, color: 'dim' }] as const)
         : []),
     ],
-    rows: details.id
-      ? [
-          {
-            icon: style.icon,
-            color: style.color,
-            segments: [
-              { text: details.id, color: 'accent' },
-              ...(outcome
-                ? ([{ text: ` · ${outcome}`, color: 'dim' }] as const)
-                : []),
-            ],
-          },
-          ...(details.endedWatches?.length
-            ? [
-                {
-                  icon: '·',
-                  color: 'warning' as const,
-                  segments: [
-                    {
-                      text: `unmatched watches: ${details.endedWatches
-                        .map(
-                          (watch) =>
-                            `${watch.id} ${JSON.stringify(watch.contains)}${watch.stream ? ` (${watch.stream})` : ''}`,
-                        )
-                        .join(', ')}`,
-                      color: 'dim' as const,
-                    },
-                  ],
-                },
-              ]
+    rows: [
+      {
+        icon: style.icon,
+        color: style.color,
+        segments: [
+          { text: details.title ?? 'Background process', color: 'text' },
+          ...(outcome
+            ? ([{ text: ` · ${outcome}`, color: 'dim' }] as const)
             : []),
-        ]
-      : undefined,
+        ],
+      },
+      ...(details.endedWatches?.length
+        ? [
+            {
+              icon: '·',
+              color: 'warning' as const,
+              segments: [
+                {
+                  text: `unmatched watches: ${details.endedWatches
+                    .map(
+                      (watch) =>
+                        `${JSON.stringify(watch.contains)}${watch.stream ? ` (${watch.stream})` : ''}`,
+                    )
+                    .join(', ')}`,
+                  color: 'dim' as const,
+                },
+              ],
+            },
+          ]
+        : []),
+    ],
   };
 }
 
 export function registerBackgroundMessageRenderer(pi: ExtensionAPI): void {
+  pi.registerMessageRenderer(
+    WATCH_RESULT_MESSAGE_TYPE,
+    (message, { expanded, outputPad }, theme) => {
+      const details = (message.details ?? {}) as {
+        title?: string;
+        status?: string;
+        contains?: string;
+        stream?: string;
+        excerpt?: string;
+      };
+      const matched = details.status === 'matched';
+      const color = matched ? ('success' as const) : ('warning' as const);
+      const outcome = matched
+        ? 'matched'
+        : details.status === 'timed_out'
+          ? 'timed out'
+          : 'ended unmatched';
+      return renderBackgroundCompletion(
+        {
+          icon: matched ? '✓' : '•',
+          color,
+          title: [
+            { text: 'Background watch ', color: 'muted' },
+            { text: details.title ?? 'Background process', color: 'text' },
+            { text: ` · ${outcome}`, color: 'dim' },
+          ],
+          rows: [
+            {
+              icon: '·',
+              color,
+              segments: [
+                {
+                  text: `${JSON.stringify(details.contains ?? 'Output condition')}${details.stream ? ` (${details.stream})` : ''}`,
+                  color: 'text',
+                },
+              ],
+            },
+            ...(details.excerpt
+              ? [
+                  {
+                    icon: '·',
+                    color,
+                    segments: [
+                      { text: details.excerpt, color: 'dim' as const },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        },
+        { expanded, outputPad },
+        theme,
+      );
+    },
+  );
   pi.registerMessageRenderer(
     RESULT_MESSAGE_TYPE,
     (message, { expanded, outputPad }, theme) => {

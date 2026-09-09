@@ -93,6 +93,33 @@ describe('custom tool presentation kinds', () => {
       backgroundPresentation({ action: 'unwatch', watch_ids: ['w-1'] })
         .watchIds,
     ).toEqual(['w-1']);
+    const titles = new Map([
+      ['bg-1', 'Dev server'],
+      ['bg-2', 'Build'],
+    ]);
+    for (const action of ['watch', 'unwatch', 'peek']) {
+      expect(
+        backgroundPresentation({ action, id: 'bg-1' }, undefined, titles)
+          .target,
+      ).toBe('Dev server');
+      expect(backgroundPresentation({ action, id: 'unknown' }).target).toBe(
+        'Background process',
+      );
+    }
+    expect(
+      backgroundPresentation(
+        { action: 'stop', ids: ['bg-1', 'bg-2'] },
+        undefined,
+        titles,
+      ).target,
+    ).toBe('Dev server, Build');
+    expect(
+      backgroundPresentation(
+        { action: 'peek', id: 'bg-1' },
+        { details: { process: { id: 'bg-1', title: 'Current title' } } },
+        titles,
+      ).target,
+    ).toBe('Current title');
     expect(
       todoPresentation({
         action: 'batch',

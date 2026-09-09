@@ -1,11 +1,14 @@
 import {
   type TranscriptEntry as ActivityTranscriptEntry,
   activityEntryFromSemantic,
+  backgroundPresentation,
+  backgroundProcessTitles,
   describeTools,
   headersOf,
   isNarration,
   leadingContinuationSpan,
   toolActionSummary,
+  toolBaseName,
 } from '@pi-dashboard/activity-model';
 import {
   hydrateTranscript,
@@ -78,7 +81,7 @@ export interface TranscriptModelItem {
   images?: readonly TranscriptImage[];
   event?: TranscriptEvent;
   /** Canonical domain tool semantics used by the inspector presentation. */
-  tool?: TranscriptRenderToolItem;
+  tool?: TranscriptRenderToolItem & { backgroundTitle?: string };
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
   /** Presentation-ready native assistant failure detail. */
@@ -541,7 +544,28 @@ export function toTranscriptEntries(
   const sessionId = isTranscriptProjection(input) ? input.sessionId : undefined;
   let previousTodo: readonly TranscriptTodoTask[] | undefined;
   let hasConversation = false;
-  for (const item of renderItems(input)) {
+  const rendered = renderItems(input);
+  // A session-local index also names pending and historical calls whose own
+  // result is absent. Never modify the underlying arguments or raw records.
+  const backgroundTitles = new Map<string, string>();
+  for (const item of rendered) {
+    if (item.kind === 'tool' && toolBaseName(item.name) === 'background') {
+      for (const [id, title] of backgroundProcessTitles(item.result))
+        backgroundTitles.set(id, title);
+    } else if (item.kind === 'other') {
+      const raw = record(item.raw);
+      if (
+        raw?.customType !== 'background-terminal-result' &&
+        raw?.customType !== 'background-watch-result'
+      )
+        continue;
+      const details = record(raw.details);
+      const id = stringField(details, 'id');
+      const title = stringField(details, 'title');
+      if (id && title) backgroundTitles.set(id, title);
+    }
+  }
+  for (const item of rendered) {
     if (item.kind === 'other') {
       const raw = record(item.raw);
       if (!raw) {
@@ -660,6 +684,14 @@ export function toTranscriptEntries(
     }
     hasConversation = true;
     if (item.kind === 'tool') {
+      const backgroundTitle =
+        toolBaseName(item.name) === 'background'
+          ? backgroundPresentation(
+              item.arguments,
+              item.result,
+              backgroundTitles,
+            ).target
+          : undefined;
       result.push({
         key: item.key,
         entry: activityEntryFromSemantic({
@@ -672,7 +704,7 @@ export function toTranscriptEntries(
           ...(item.data === undefined ? {} : { data: item.data }),
         }),
         raw: toolRaw(item),
-        tool: item,
+        tool: backgroundTitle ? { ...item, backgroundTitle } : item,
       });
       continue;
     }

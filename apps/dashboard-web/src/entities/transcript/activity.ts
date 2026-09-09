@@ -13,7 +13,7 @@ import {
   toolRole,
 } from '@pi-dashboard/activity-model';
 
-export type ActivityStepTool = ToolDescriptor;
+export type ActivityStepTool = ToolDescriptor & { backgroundTitle?: string };
 
 export type ToolStreamSummary = {
   recentTools: readonly string[];
@@ -246,7 +246,7 @@ export function activityStepParts(
     if (node) argument = node;
   } else if (name === 'background') {
     role = 'command';
-    const model = backgroundPresentation(tool.args);
+    const model = backgroundPresentation(tool.args, tool.result);
     const operation = model.action ?? 'list';
     action =
       operation === 'start'
@@ -260,14 +260,7 @@ export function activityStepParts(
               : operation === 'unwatch'
                 ? 'Removing background watches'
                 : 'Listing background commands';
-    argument =
-      model.title ??
-      model.id ??
-      (model.command
-        ? compactActivityArgument(model.command)
-        : model.ids.length
-          ? countLabel(model.ids.length, 'process')
-          : undefined);
+    argument = tool.backgroundTitle ?? model.target;
   } else if (name === 'todo' || name === 'tasks') {
     const operation =
       stringArg(tool.args, 'action') ?? stringArg(tool.args, 'operation');

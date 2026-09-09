@@ -21,20 +21,31 @@ export function registerBackgroundCommands(
 
       if (ctx.mode !== 'tui') {
         if (ctx.hasUI) {
-          ctx.ui.notify(snapshots.map(formatSummary).join('\n'), 'info');
+          ctx.ui.notify(
+            snapshots
+              .map((snapshot) => formatSummary(snapshot, { human: true }))
+              .join('\n'),
+            'info',
+          );
         }
         return;
       }
 
       try {
-        const labels = snapshots.map(formatSummary);
+        const labels = snapshots.map(
+          (snapshot, index) =>
+            `${index + 1}. ${formatSummary(snapshot, { human: true })}`,
+        );
         const selected = await ctx.ui.select('Background processes', labels);
         if (!selected) return;
         const listed = snapshots[labels.indexOf(selected)];
         if (listed) {
           const snapshot = (await getManager().inspect(listed.id)) ?? listed;
           if (snapshot.status !== 'running') cancelCompletion(snapshot.id);
-          ctx.ui.notify(formatPeek(snapshot, PEEK_TAIL_LINES), 'info');
+          ctx.ui.notify(
+            formatPeek(snapshot, PEEK_TAIL_LINES, { human: true }),
+            'info',
+          );
         }
       } finally {
         // The select dialog can drop the keyed widget; re-assert it.

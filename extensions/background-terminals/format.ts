@@ -86,26 +86,33 @@ export function exitDescription(snapshot: BackgroundSnapshot): string {
   return snapshot.status;
 }
 
-function formatWatches(snapshot: BackgroundSnapshot): string {
+function formatWatches(snapshot: BackgroundSnapshot, human = false): string {
   const watches = snapshot.watches ?? [];
   if (watches.length === 0) return '';
   return ` · watches: ${watches
     .map(
       (watch) =>
-        `${watch.id} ${watch.status} ${JSON.stringify(watch.contains)}${watch.stream ? ` (${watch.stream})` : ''}${watch.timeoutMs ? ` timeout ${Math.ceil(watch.timeoutMs / 1000)}s` : ''}`,
+        `${human ? '' : `${watch.id} `}${watch.status} ${JSON.stringify(watch.contains)}${watch.stream ? ` (${watch.stream})` : ''}${watch.timeoutMs ? ` timeout ${Math.ceil(watch.timeoutMs / 1000)}s` : ''}`,
     )
     .join(', ')}`;
 }
 
-export function formatSummary(snapshot: BackgroundSnapshot): string {
-  return `${snapshot.id} [${snapshot.status}] "${snapshot.title}" · pid ${snapshot.pid ?? '?'} · ${formatDuration(snapshot)} · ${exitDescription(snapshot)}${formatWatches(snapshot)}`;
+export function formatSummary(
+  snapshot: BackgroundSnapshot,
+  options: { human?: boolean } = {},
+): string {
+  const subject = options.human
+    ? `"${snapshot.title}" [${snapshot.status}]`
+    : `${snapshot.id} [${snapshot.status}] "${snapshot.title}"`;
+  return `${subject} · pid ${snapshot.pid ?? '?'} · ${formatDuration(snapshot)} · ${exitDescription(snapshot)}${formatWatches(snapshot, options.human)}`;
 }
 
 export function formatPeek(
   snapshot: BackgroundSnapshot,
   tailLines: number,
+  options: { human?: boolean } = {},
 ): string {
-  let text = `${formatSummary(snapshot)}\n$ ${snapshot.command}\ncwd: ${snapshot.cwd}`;
+  let text = `${formatSummary(snapshot, options)}\n$ ${snapshot.command}\ncwd: ${snapshot.cwd}`;
   if (snapshot.error) text += `\nerror: ${snapshot.error}`;
   text += `\n\nstdout (${formatBytes(snapshot.stdout.totalBytes)} total):\n${outputTail(snapshot.stdout, tailLines, STDOUT_RESULT_BYTES)}`;
   text += `\n\nstderr (${formatBytes(snapshot.stderr.totalBytes)} total):\n${outputTail(snapshot.stderr, tailLines, STDERR_RESULT_BYTES)}`;

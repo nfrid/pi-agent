@@ -2,7 +2,10 @@ import type { SessionBranchPoint } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import type { TranscriptModelItem } from '../../transcript';
+import {
+  type TranscriptModelItem,
+  toTranscriptEntries,
+} from '../../transcript';
 
 const sessionImage = vi.hoisted(() => vi.fn());
 vi.mock('@pi-dashboard/client', () => ({
@@ -14,6 +17,28 @@ import { TranscriptEntry } from './entries';
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
 describe('transcript entries', () => {
+  it('uses a known title rather than an ID in background tool rows', () => {
+    const [item] = toTranscriptEntries([
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'peek',
+          name: 'background',
+          arguments: { action: 'peek', id: 'opaque-process-id' },
+          status: 'complete',
+          result: {
+            details: {
+              process: { id: 'opaque-process-id', title: 'Dev server' },
+            },
+          },
+        },
+      },
+    ]);
+    const markup = renderToStaticMarkup(<TranscriptEntry item={item} />);
+    expect(markup).toContain('Dev server');
+    expect(markup).not.toContain('opaque-process-id');
+  });
+
   it('expands background evidence as literal output, not rendered Markdown', () => {
     const content = '**ready**\n![not an image](https://example.com/log.png)';
     const item: TranscriptModelItem = {

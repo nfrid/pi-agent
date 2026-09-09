@@ -206,7 +206,9 @@ export default defineExtension(
 
     const cancelCompletion = (id: string) =>
       scopedServices?.backgroundDeliveries.cancel(completionKey(id)) ?? false;
-    registerBackgroundTool(pi, getManager, cancelCompletion);
+    registerBackgroundTool(pi, getManager, cancelCompletion, (id) =>
+      manager?.get(id),
+    );
     registerBackgroundMessageRenderer(pi);
     registerBackgroundCommands(pi, getManager, cancelCompletion, () =>
       widget.reassert(),
