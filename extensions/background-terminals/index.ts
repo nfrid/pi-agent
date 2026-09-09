@@ -19,7 +19,11 @@ import {
   formatDuration,
   sanitizeOutput,
 } from './format';
-import { BackgroundManager, type BackgroundSnapshot } from './manager';
+import {
+  BackgroundManager,
+  type BackgroundSnapshot,
+  endedWatches,
+} from './manager';
 import { registerBackgroundMessageRenderer } from './renderers';
 import {
   RESULT_MESSAGE_TYPE,
@@ -63,12 +67,13 @@ export default defineExtension(
       snapshot: BackgroundSnapshot,
       services: ScopedServices,
     ): boolean => {
+      const ended = endedWatches(snapshot);
       try {
         services.backgroundDeliveries.publish({
           key: completionKey(snapshot.id),
           message: {
             customType: RESULT_MESSAGE_TYPE,
-            content: formatCompletion(snapshot),
+            content: formatCompletion(snapshot, ended),
             display: true,
             details: {
               dedupeKey: snapshot.id,
@@ -79,6 +84,7 @@ export default defineExtension(
               signal: snapshot.signal,
               duration: formatDuration(snapshot),
               outcome: exitDescription(snapshot),
+              ...(ended.length ? { endedWatches: ended } : {}),
             },
           },
         });

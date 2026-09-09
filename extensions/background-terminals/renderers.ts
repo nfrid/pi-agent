@@ -159,6 +159,11 @@ interface BackgroundCompletionDetails {
   readonly signal?: string;
   readonly duration?: string;
   readonly outcome?: string;
+  readonly endedWatches?: ReadonlyArray<{
+    readonly id: string;
+    readonly contains: string;
+    readonly stream?: 'stdout' | 'stderr';
+  }>;
 }
 
 function completionCard(
@@ -198,6 +203,25 @@ function completionCard(
                 : []),
             ],
           },
+          ...(details.endedWatches?.length
+            ? [
+                {
+                  icon: '·',
+                  color: 'warning' as const,
+                  segments: [
+                    {
+                      text: `unmatched watches: ${details.endedWatches
+                        .map(
+                          (watch) =>
+                            `${watch.id} ${JSON.stringify(watch.contains)}${watch.stream ? ` (${watch.stream})` : ''}`,
+                        )
+                        .join(', ')}`,
+                      color: 'dim' as const,
+                    },
+                  ],
+                },
+              ]
+            : []),
         ]
       : undefined,
   };

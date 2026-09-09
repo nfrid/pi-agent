@@ -31,7 +31,9 @@ Example launch:
 
 The result supplies the process and watch IDs. Continue other work; if a watched
 condition or completion is the only remaining dependency, end the turn with one
-short waiting notice. Do not repeatedly peek to wait for it.
+short waiting notice. Do not repeatedly peek to wait for it. When the process exits,
+one completion notification includes any watches that ended without observing their
+conditions.
 
 ## Watch semantics
 
@@ -46,7 +48,9 @@ Every watch is **one-shot**:
   reports that the condition was not observed in time; it does **not** kill the
   process.
 - A watch settles as `matched`, `timed_out`, or `ended` (the process ended before
-  a match). Before settlement its status is `pending`.
+  a match). Before settlement its status is `pending`. Match and timeout alerts are
+  delivered independently while the process runs; ended outcomes are coalesced with
+  completion when the process exits.
 - A process retains at most eight watches, including settled watches. Remove
   unneeded watches with `unwatch` before adding more.
 

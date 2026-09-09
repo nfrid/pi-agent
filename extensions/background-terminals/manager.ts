@@ -97,6 +97,23 @@ function watchKey(id: string, watchId: string): string {
   return `${id}:${watchId}`;
 }
 
+export interface EndedWatch {
+  readonly id: string;
+  readonly contains: string;
+  readonly stream?: 'stdout' | 'stderr';
+}
+
+/** Ended watches coalesce into the process completion while it is pending. */
+export function endedWatches(snapshot: BackgroundSnapshot): EndedWatch[] {
+  return (snapshot.watches ?? [])
+    .filter((watch) => watch.status === 'ended' && !watch.delivered)
+    .map(({ id, contains, stream }) => ({
+      id,
+      contains,
+      ...(stream ? { stream } : {}),
+    }));
+}
+
 function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted)
@@ -231,11 +248,19 @@ export class BackgroundManager {
       }
       this.accept(snapshot, false);
       if (snapshot.status !== 'running') {
-        this.notified.add(id);
+        const ended = endedWatches(snapshot);
+        const watchIds = ended.map((watch) => watch.id);
+        for (const watchId of watchIds)
+          this.notifiedWatches.add(watchKey(id, watchId));
         try {
+          if (watchIds.length)
+            await this.client.acknowledgeWatches?.(id, watchIds);
+          this.notified.add(id);
           await this.client.markDelivered?.(id);
         } catch (error) {
           this.notified.delete(id);
+          for (const watchId of watchIds)
+            this.notifiedWatches.delete(watchKey(id, watchId));
           throw error;
         }
         if (this.disposed || generation !== this.generation)
@@ -444,7 +469,12 @@ export class BackgroundManager {
         watch.status !== 'pending' &&
         !watch.delivered &&
         !this.notifiedWatches.has(watchKey(displayed.id, watch.id)) &&
-        !this.observing.has(displayed.id)
+        !this.observing.has(displayed.id) &&
+        !(
+          displayed.status !== 'running' &&
+          watch.status === 'ended' &&
+          !displayed.completionDelivered
+        )
       )
         this.notifyWatch(displayed, watch);
     }
@@ -545,6 +575,7 @@ export class BackgroundManager {
     const generation = this.generation;
     const completions = new Set<string>();
     const watches = new Map<string, Set<string>>();
+    const compositeWatches = new Map<string, Set<string>>();
     for (const message of messages) {
       if (!message || typeof message !== 'object') continue;
       const value = message as { customType?: unknown; details?: unknown };
@@ -554,6 +585,7 @@ export class BackgroundManager {
         watchId?: unknown;
         dedupeKey?: unknown;
         status?: unknown;
+        endedWatches?: unknown;
       };
       if (value.customType === 'background-terminal-result') {
         if (
@@ -564,8 +596,29 @@ export class BackgroundManager {
             details.status === 'killed') &&
           this.records.get(details.id)?.status !== 'running' &&
           this.records.has(details.id)
-        )
+        ) {
           completions.add(details.id);
+          if (Array.isArray(details.endedWatches)) {
+            for (const item of details.endedWatches) {
+              if (!item || typeof item !== 'object') continue;
+              const ended = item as { id?: unknown };
+              if (typeof ended.id !== 'string') continue;
+              const current = this.records.get(details.id);
+              if (
+                current &&
+                current.status !== 'running' &&
+                endedWatches(current).some((watch) => watch.id === ended.id)
+              ) {
+                let ids = compositeWatches.get(details.id);
+                if (!ids) {
+                  ids = new Set();
+                  compositeWatches.set(details.id, ids);
+                }
+                ids.add(ended.id);
+              }
+            }
+          }
+        }
       } else if (
         value.customType === 'background-watch-result' &&
         typeof details.id === 'string' &&
@@ -588,6 +641,18 @@ export class BackgroundManager {
         ids.add(details.watchId);
       }
     }
+    for (const [id, ids] of compositeWatches) {
+      if (this.disposed || generation !== this.generation) return;
+      for (const watchId of ids)
+        this.notifiedWatches.add(watchKey(id, watchId));
+      try {
+        await this.client.acknowledgeWatches?.(id, [...ids]);
+      } catch (error) {
+        for (const watchId of ids)
+          this.notifiedWatches.delete(watchKey(id, watchId));
+        throw error;
+      }
+    }
     for (const id of completions) {
       if (this.disposed || generation !== this.generation) return;
       this.notified.add(id);
@@ -600,16 +665,19 @@ export class BackgroundManager {
     }
     for (const [id, ids] of watches) {
       if (this.disposed || generation !== this.generation) return;
-      for (const watchId of ids)
+      const composite = compositeWatches.get(id);
+      const standalone = [...ids].filter((watchId) => !composite?.has(watchId));
+      if (standalone.length === 0) continue;
+      for (const watchId of standalone)
         this.notifiedWatches.add(watchKey(id, watchId));
       try {
-        await this.client.acknowledgeWatches?.(id, [...ids]);
+        await this.client.acknowledgeWatches?.(id, standalone);
       } catch (error) {
-        for (const watchId of ids)
+        for (const watchId of standalone)
           this.notifiedWatches.delete(watchKey(id, watchId));
         throw error;
       }
-      for (const watchId of ids)
+      for (const watchId of standalone)
         this.notifiedWatches.add(watchKey(id, watchId));
     }
   }

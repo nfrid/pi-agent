@@ -229,6 +229,51 @@ describe('BackgroundManager watches', () => {
     }
   });
 
+  it('coalesces multiple ended watches into completion', async () => {
+    const completion = vi.fn().mockReturnValue(true);
+    const watchDelivery = vi.fn();
+    const client = transport(
+      snapshot({
+        status: 'done',
+        completionDelivered: false,
+        watches: [
+          watch({ id: 'watch-1', status: 'ended' }),
+          watch({ id: 'watch-2', contains: 'finished', status: 'ended' }),
+        ],
+      }),
+    );
+    const manager = new BackgroundManager({
+      client,
+      onSettled: completion,
+      onWatchSettled: watchDelivery,
+      scopeId: 'coalesce',
+    });
+    try {
+      await manager.list();
+      await settle();
+      expect(completion).toHaveBeenCalledTimes(1);
+      expect(completion.mock.calls[0][0]).toMatchObject({ status: 'done' });
+      expect(watchDelivery).not.toHaveBeenCalled();
+      await manager.acknowledgeEntered([
+        {
+          customType: 'background-terminal-result',
+          details: {
+            id,
+            dedupeKey: id,
+            status: 'done',
+            endedWatches: [
+              { id: 'watch-1', contains: 'ready' },
+              { id: 'watch-2', contains: 'finished' },
+            ],
+          },
+        },
+      ]);
+      expect(client.ackWatches).toEqual([[id, ['watch-1', 'watch-2']]]);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
   it('redelivers an unacknowledged watch after manager recreation', async () => {
     const client = transport(
       snapshot({ watches: [watch({ status: 'ended' })] }),
