@@ -1,17 +1,18 @@
 import {
   type BackgroundJobSnapshot,
   type BackgroundJobStatus,
+  type BackgroundJobsCapabilities,
   BackgroundJobsClient,
+  type BackgroundWatchInput,
+  type BackgroundWatchSnapshot,
   defaultProcessHostSocketPath,
   newBackgroundJobId,
 } from '@pi-agent/background-jobs';
-import type {
-  PendingProcessAccounting,
-  SessionScopeId,
-} from '../shared/runtime/scoped-services';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
 
 export const MAX_RUNNING = 8;
 export const MAX_SETTLED = 32;
+export const MAX_WATCHES = 8;
 export const STDOUT_RETAINED_BYTES = 256 * 1024;
 export const STDERR_RETAINED_BYTES = 128 * 1024;
 const DISPLAY_COMMAND_CHARS = 1_000;
@@ -21,8 +22,9 @@ export type BackgroundSnapshot = BackgroundJobSnapshot;
 
 export interface StartOptions {
   readonly command: string;
-  readonly title: string;
+  readonly title?: string;
   readonly cwd: string;
+  readonly watch?: readonly BackgroundWatchInput[];
 }
 
 export interface BackgroundJobsTransport {
@@ -31,18 +33,32 @@ export interface BackgroundJobsTransport {
     command: string;
     title: string;
     cwd: string;
+    watch?: readonly BackgroundWatchInput[];
   }): Promise<BackgroundSnapshot>;
   list(): Promise<BackgroundSnapshot[]>;
   inspect(id: string): Promise<BackgroundSnapshot | undefined>;
-  wait(id: string, waitMs?: number): Promise<BackgroundSnapshot>;
   stop(ids: readonly string[]): Promise<BackgroundSnapshot[]>;
+  info?(): Promise<BackgroundJobsCapabilities>;
+  watch?(
+    id: string,
+    watch: readonly BackgroundWatchInput[],
+  ): Promise<BackgroundSnapshot>;
+  unwatch?(
+    id: string,
+    watchIds: readonly string[],
+  ): Promise<BackgroundSnapshot>;
+  acknowledgeWatches?(id: string, watchIds: readonly string[]): Promise<void>;
   markDelivered?(id: string): Promise<void>;
 }
 
 export interface BackgroundManagerOptions {
   readonly scopeId?: SessionScopeId;
-  readonly pendingProcesses?: PendingProcessAccounting;
   readonly onSettled?: (snapshot: BackgroundSnapshot) => unknown;
+  readonly onWatchSettled?: (
+    snapshot: BackgroundSnapshot,
+    watch: BackgroundWatchSnapshot,
+  ) => unknown;
+  readonly onWatchesRemoved?: (id: string, watchIds: readonly string[]) => void;
   readonly onChange?: () => void;
   readonly client?: BackgroundJobsTransport;
   readonly socketPath?: string;
@@ -54,6 +70,16 @@ function displayCommand(command: string): string {
     : `${command.slice(0, DISPLAY_COMMAND_CHARS)}…`;
 }
 
+function deriveTitle(command: string): string {
+  return (
+    command
+      .split(/[\r\n]/u, 1)[0]
+      ?.trim()
+      .replace(/\s+/gu, ' ')
+      .slice(0, 80) || 'process'
+  );
+}
+
 function displaySnapshot(snapshot: BackgroundSnapshot): BackgroundSnapshot {
   return { ...snapshot, command: displayCommand(snapshot.command) };
 }
@@ -63,6 +89,10 @@ function isBackgroundTerminalSnapshot(snapshot: BackgroundSnapshot): boolean {
   // process host, but must never be adopted, controlled, delivered, or ACKed
   // through the ordinary background-terminal lifecycle.
   return snapshot.exactEnv !== true;
+}
+
+function watchKey(id: string, watchId: string): string {
+  return `${id}:${watchId}`;
 }
 
 function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -90,15 +120,27 @@ function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 /** Session-scoped view of jobs owned by the stable process-host sidecar. */
 export class BackgroundManager {
   private readonly client: BackgroundJobsTransport;
-  private readonly pendingProcesses?: PendingProcessAccounting;
   private readonly records = new Map<string, BackgroundSnapshot>();
   private readonly observing = new Set<string>();
   private readonly notified = new Set<string>();
+  private readonly notifiedWatches = new Set<string>();
+  private readonly delivering = new Set<string>();
+  private readonly deliveringWatches = new Set<string>();
+  private readonly cancelledWatches = new Set<string>();
   private generation = 0;
   private readonly onSettled?: (snapshot: BackgroundSnapshot) => unknown;
+  private readonly onWatchSettled?: (
+    snapshot: BackgroundSnapshot,
+    watch: BackgroundWatchSnapshot,
+  ) => unknown;
+  private readonly onWatchesRemoved?: (
+    id: string,
+    watchIds: readonly string[],
+  ) => void;
   private readonly onChange?: () => void;
   private pollTimer?: NodeJS.Timeout;
   private disposed = false;
+  private watchCapability?: boolean;
 
   constructor(options: BackgroundManagerOptions = {}) {
     const ownerSession = options.scopeId ?? 'default';
@@ -108,8 +150,9 @@ export class BackgroundManager {
         options.socketPath ?? defaultProcessHostSocketPath(),
         ownerSession,
       );
-    this.pendingProcesses = options.pendingProcesses;
     this.onSettled = options.onSettled;
+    this.onWatchSettled = options.onWatchSettled;
+    this.onWatchesRemoved = options.onWatchesRemoved;
     this.onChange = options.onChange;
     void this.refresh(true, this.generation).catch(() => undefined);
     this.pollTimer = setInterval(() => {
@@ -123,11 +166,14 @@ export class BackgroundManager {
     const generation = this.generation;
     await this.refresh(true, generation);
     this.assertAccepting();
+    validateWatches(options.watch);
+    if (options.watch?.length) await this.assertWatchSupport();
     const snapshot = await this.client.start({
       id: newBackgroundJobId(),
       command: options.command,
-      title: displayCommand(options.title),
+      title: displayCommand(options.title ?? deriveTitle(options.command)),
       cwd: options.cwd,
+      ...(options.watch?.length ? { watch: options.watch } : {}),
     });
     if (this.disposed || generation !== this.generation)
       throw new Error('Background manager is shut down.');
@@ -137,7 +183,6 @@ export class BackgroundManager {
     return this.records.get(snapshot.id) ?? snapshot;
   }
 
-  /** Synchronous cache lookup retained for widgets and lightweight callers. */
   get(id: string): BackgroundSnapshot | undefined {
     return this.records.get(id);
   }
@@ -153,7 +198,6 @@ export class BackgroundManager {
     if (!snapshot) return undefined;
     this.accept(snapshot, false);
     if (!isBackgroundTerminalSnapshot(snapshot)) {
-      this.syncPending();
       this.onChange?.();
       return undefined;
     }
@@ -167,11 +211,8 @@ export class BackgroundManager {
     return generation === this.generation ? [...this.records.values()] : [];
   }
 
-  async peek(
-    id: string,
-    waitMs = 0,
-    signal?: AbortSignal,
-  ): Promise<BackgroundSnapshot> {
+  /** Immediate observational snapshot; this operation never waits. */
+  async peek(id: string, signal?: AbortSignal): Promise<BackgroundSnapshot> {
     this.assertLive();
     const generation = this.generation;
     await this.refresh(false, generation);
@@ -179,22 +220,22 @@ export class BackgroundManager {
       throw new Error(`Unknown background process "${id}".`);
     this.observing.add(id);
     try {
-      const snapshot = await withAbort(
-        this.client.wait(id, Math.max(0, Math.floor(waitMs))),
-        signal,
-      );
+      const snapshot = await withAbort(this.client.inspect(id), signal);
       if (this.disposed || generation !== this.generation)
         throw new Error('Background manager is shut down.');
-      if (!isBackgroundTerminalSnapshot(snapshot)) {
-        this.accept(snapshot, false);
-        this.syncPending();
-        this.onChange?.();
+      if (!snapshot || !isBackgroundTerminalSnapshot(snapshot)) {
+        if (snapshot) this.accept(snapshot, false);
         throw new Error(`Unknown background process "${id}".`);
       }
       this.accept(snapshot, false);
       if (snapshot.status !== 'running') {
         this.notified.add(id);
-        await this.client.markDelivered?.(id);
+        try {
+          await this.client.markDelivered?.(id);
+        } catch (error) {
+          this.notified.delete(id);
+          throw error;
+        }
         if (this.disposed || generation !== this.generation)
           throw new Error('Background manager is shut down.');
       }
@@ -204,12 +245,81 @@ export class BackgroundManager {
     }
   }
 
+  async watch(
+    id: string,
+    watches: readonly BackgroundWatchInput[],
+  ): Promise<BackgroundSnapshot> {
+    this.assertLive();
+    validateWatches(watches);
+    if (watches.length === 0) throw new Error('watch is required.');
+    await this.assertWatchSupport();
+    const generation = this.generation;
+    await this.refresh(false, generation);
+    const current = this.records.get(id);
+    if (!current) throw new Error(`Unknown background process "${id}".`);
+    const retained = current.watches?.length ?? 0;
+    if (retained + watches.length > MAX_WATCHES)
+      throw new Error(
+        `At most ${MAX_WATCHES} watches may be retained per process.`,
+      );
+    if (current.status !== 'running')
+      throw new Error(`Background process "${id}" is not running.`);
+    if (!this.client.watch)
+      throw new Error('Background host does not support watches.');
+    const snapshot = await this.client.watch(id, watches);
+    if (this.disposed || generation !== this.generation)
+      throw new Error('Background manager is shut down.');
+    this.accept(snapshot, true);
+    return displaySnapshot(snapshot);
+  }
+
+  async unwatch(
+    id: string,
+    watchIds: readonly string[],
+  ): Promise<BackgroundSnapshot> {
+    this.assertLive();
+    const unique = [...new Set(watchIds)].filter(Boolean);
+    if (unique.length === 0) throw new Error('watch_ids is required.');
+    const generation = this.generation;
+    if (!this.client.unwatch)
+      throw new Error('Background host does not support watches.');
+    // Cancel locally before refresh or the host round trip so a queued
+    // notification cannot win a race with an unwatch request.
+    for (const watchId of unique) {
+      const key = watchKey(id, watchId);
+      this.cancelledWatches.add(key);
+      this.notifiedWatches.delete(key);
+      this.deliveringWatches.delete(key);
+    }
+    this.onWatchesRemoved?.(id, unique);
+    await this.refresh(false, generation);
+    if (!this.records.has(id))
+      throw new Error(`Unknown background process "${id}".`);
+    let snapshot: BackgroundSnapshot;
+    try {
+      snapshot = await this.client.unwatch(id, unique);
+    } catch (error) {
+      for (const watchId of unique)
+        this.cancelledWatches.delete(watchKey(id, watchId));
+      throw error;
+    }
+    if (this.disposed || generation !== this.generation)
+      throw new Error('Background manager is shut down.');
+    this.accept(snapshot, true);
+    return displaySnapshot(snapshot);
+  }
+
   async stop(
     ids: readonly string[],
     signal?: AbortSignal,
   ): Promise<BackgroundSnapshot[]> {
     this.assertLive();
     const generation = this.generation;
+    const preexisting = [...new Set(ids)].filter((id) => this.records.has(id));
+    for (const id of preexisting) {
+      const current = this.records.get(id);
+      if (current) this.cancelWatches(current);
+    }
     await this.refresh(false, generation);
     const unique = [...new Set(ids)].filter((id) => this.records.has(id));
     if (unique.length === 0) return [];
@@ -224,6 +334,13 @@ export class BackgroundManager {
       const snapshots = responses.filter(isBackgroundTerminalSnapshot);
       for (const snapshot of snapshots) {
         this.accept(snapshot, false);
+        this.cancelWatches(snapshot);
+        const watchIds = snapshot.watches?.map((watch) => watch.id) ?? [];
+        if (watchIds.length) {
+          for (const watchId of watchIds)
+            this.notifiedWatches.add(watchKey(snapshot.id, watchId));
+          await this.client.acknowledgeWatches?.(snapshot.id, watchIds);
+        }
         if (snapshot.status !== 'running') {
           this.notified.add(snapshot.id);
           await this.client.markDelivered?.(snapshot.id);
@@ -231,7 +348,6 @@ export class BackgroundManager {
             throw new Error('Background manager is shut down.');
         }
       }
-      this.syncPending();
       this.onChange?.();
       return snapshots.map(displaySnapshot);
     } finally {
@@ -246,9 +362,8 @@ export class BackgroundManager {
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = undefined;
     this.records.clear();
-    this.pendingProcesses?.set(this, 0);
     this.onChange?.();
-    // Detach only. The sidecar remains the owner and jobs are intentionally not stopped.
+    // Detach only. The sidecar remains the owner and jobs and watches persist.
   }
 
   get runningCount(): number {
@@ -270,6 +385,20 @@ export class BackgroundManager {
       );
   }
 
+  private async assertWatchSupport(): Promise<void> {
+    if (this.watchCapability !== undefined) {
+      if (!this.watchCapability)
+        throw new Error('Background host does not support output watches.');
+      return;
+    }
+    if (!this.client.info)
+      throw new Error('Background host does not support output watches.');
+    const capabilities = await this.client.info();
+    if (capabilities.outputWatches !== true)
+      throw new Error('Background host does not support output watches.');
+    this.watchCapability = true;
+  }
+
   private async refresh(
     notify: boolean,
     generation = this.generation,
@@ -286,7 +415,6 @@ export class BackgroundManager {
     const known = new Set(snapshots.map((snapshot) => snapshot.id));
     for (const id of this.records.keys())
       if (!known.has(id)) this.records.delete(id);
-    this.syncPending();
     this.onChange?.();
   }
 
@@ -298,53 +426,205 @@ export class BackgroundManager {
     const displayed = displaySnapshot(snapshot);
     this.records.set(displayed.id, displayed);
     if (displayed.completionDelivered) this.notified.add(displayed.id);
+    for (const watch of displayed.watches ?? []) {
+      if (watch.delivered)
+        this.notifiedWatches.add(watchKey(displayed.id, watch.id));
+      if (
+        notify &&
+        watch.status !== 'pending' &&
+        !watch.delivered &&
+        !this.notifiedWatches.has(watchKey(displayed.id, watch.id)) &&
+        !this.observing.has(displayed.id)
+      )
+        this.notifyWatch(displayed, watch);
+    }
     if (
       notify &&
       displayed.status !== 'running' &&
       !this.notified.has(displayed.id) &&
       !this.observing.has(displayed.id)
-    ) {
-      const delivered = this.onSettled?.(displayed);
-      if (delivered !== false) this.notified.add(displayed.id);
+    )
+      this.notifyCompletion(displayed);
+  }
+
+  private notifyCompletion(snapshot: BackgroundSnapshot): void {
+    if (this.delivering.has(snapshot.id)) return;
+    const generation = this.generation;
+    this.delivering.add(snapshot.id);
+    void this.client
+      .inspect(snapshot.id)
+      .then(async (inspected) => {
+        if (
+          this.disposed ||
+          generation !== this.generation ||
+          this.notified.has(snapshot.id) ||
+          this.observing.has(snapshot.id) ||
+          !inspected ||
+          !isBackgroundTerminalSnapshot(inspected) ||
+          inspected.completionDelivered
+        )
+          return false;
+        const latest = this.records.get(snapshot.id);
+        if (!latest || latest.status === 'running') return false;
+        const detailed = displaySnapshot(inspected);
+        this.records.set(detailed.id, detailed);
+        const delivered = await this.onSettled?.(detailed);
+        return delivered !== false;
+      })
+      .then((delivered) => {
+        if (delivered) this.notified.add(snapshot.id);
+      })
+      .catch(() => undefined)
+      .finally(() => this.delivering.delete(snapshot.id));
+  }
+
+  private notifyWatch(
+    snapshot: BackgroundSnapshot,
+    watch: BackgroundWatchSnapshot,
+  ): void {
+    const key = watchKey(snapshot.id, watch.id);
+    const generation = this.generation;
+    if (this.deliveringWatches.has(key) || this.cancelledWatches.has(key))
+      return;
+    this.deliveringWatches.add(key);
+    void Promise.resolve()
+      .then(() => {
+        const latest = this.records.get(snapshot.id);
+        const current = latest?.watches?.find((item) => item.id === watch.id);
+        if (
+          this.disposed ||
+          generation !== this.generation ||
+          this.cancelledWatches.has(key) ||
+          this.notifiedWatches.has(key) ||
+          !latest ||
+          !current ||
+          current.status === 'pending' ||
+          current.delivered
+        )
+          return false;
+        return this.onWatchSettled?.(latest, current);
+      })
+      .then((delivered) => {
+        if (
+          delivered !== false &&
+          generation === this.generation &&
+          !this.cancelledWatches.has(key) &&
+          !this.disposed
+        )
+          this.notifiedWatches.add(key);
+      })
+      .catch(() => undefined)
+      .finally(() => this.deliveringWatches.delete(key));
+  }
+
+  private cancelWatches(snapshot: BackgroundSnapshot): void {
+    const ids = snapshot.watches?.map((watch) => watch.id) ?? [];
+    if (!ids.length) return;
+    this.onWatchesRemoved?.(snapshot.id, ids);
+    for (const id of ids) {
+      const key = watchKey(snapshot.id, id);
+      this.cancelledWatches.add(key);
+      this.deliveringWatches.delete(key);
+      this.notifiedWatches.add(key);
     }
   }
 
   async acknowledgeEntered(messages: readonly unknown[]): Promise<void> {
     if (this.disposed) return;
     const generation = this.generation;
-    const ids = new Set<string>();
+    const completions = new Set<string>();
+    const watches = new Map<string, Set<string>>();
     for (const message of messages) {
       if (!message || typeof message !== 'object') continue;
-      const value = message as {
-        customType?: unknown;
-        details?: unknown;
-      };
-      if (value.customType !== 'background-terminal-result') continue;
+      const value = message as { customType?: unknown; details?: unknown };
       if (!value.details || typeof value.details !== 'object') continue;
       const details = value.details as {
         id?: unknown;
+        watchId?: unknown;
         dedupeKey?: unknown;
         status?: unknown;
       };
-      if (
-        typeof details.id !== 'string' ||
-        details.dedupeKey !== details.id ||
-        (details.status !== 'done' &&
-          details.status !== 'failed' &&
-          details.status !== 'killed') ||
-        this.records.get(details.id)?.status === 'running' ||
-        !this.records.has(details.id)
-      )
-        continue;
-      ids.add(details.id);
+      if (value.customType === 'background-terminal-result') {
+        if (
+          typeof details.id === 'string' &&
+          details.dedupeKey === details.id &&
+          (details.status === 'done' ||
+            details.status === 'failed' ||
+            details.status === 'killed') &&
+          this.records.get(details.id)?.status !== 'running' &&
+          this.records.has(details.id)
+        )
+          completions.add(details.id);
+      } else if (
+        value.customType === 'background-watch-result' &&
+        typeof details.id === 'string' &&
+        typeof details.watchId === 'string' &&
+        details.dedupeKey === watchKey(details.id, details.watchId) &&
+        this.records
+          .get(details.id)
+          ?.watches?.some(
+            (watch) =>
+              watch.id === details.watchId &&
+              watch.status !== 'pending' &&
+              !watch.delivered,
+          )
+      ) {
+        let ids = watches.get(details.id);
+        if (!ids) {
+          ids = new Set();
+          watches.set(details.id, ids);
+        }
+        ids.add(details.watchId);
+      }
     }
-    for (const id of ids) {
+    for (const id of completions) {
       if (this.disposed || generation !== this.generation) return;
-      await this.client.markDelivered?.(id);
+      this.notified.add(id);
+      try {
+        await this.client.markDelivered?.(id);
+      } catch (error) {
+        this.notified.delete(id);
+        throw error;
+      }
+    }
+    for (const [id, ids] of watches) {
+      if (this.disposed || generation !== this.generation) return;
+      for (const watchId of ids)
+        this.notifiedWatches.add(watchKey(id, watchId));
+      try {
+        await this.client.acknowledgeWatches?.(id, [...ids]);
+      } catch (error) {
+        for (const watchId of ids)
+          this.notifiedWatches.delete(watchKey(id, watchId));
+        throw error;
+      }
+      for (const watchId of ids)
+        this.notifiedWatches.add(watchKey(id, watchId));
     }
   }
+}
 
-  private syncPending(): void {
-    this.pendingProcesses?.set(this, this.runningCount);
+function validateWatches(watches?: readonly BackgroundWatchInput[]): void {
+  if (!watches) return;
+  if (watches.length > MAX_WATCHES)
+    throw new Error(
+      `At most ${MAX_WATCHES} watches may be retained per process.`,
+    );
+  for (const watch of watches) {
+    if (
+      !watch ||
+      typeof watch.contains !== 'string' ||
+      watch.contains.length < 1 ||
+      watch.contains.length > 512 ||
+      /[\r\n]/u.test(watch.contains) ||
+      (watch.stream !== undefined &&
+        watch.stream !== 'stdout' &&
+        watch.stream !== 'stderr') ||
+      (watch.timeoutMs !== undefined &&
+        (!Number.isSafeInteger(watch.timeoutMs) ||
+          watch.timeoutMs < 1_000 ||
+          watch.timeoutMs > 86_400_000))
+    )
+      throw new Error('Invalid output watch.');
   }
 }
