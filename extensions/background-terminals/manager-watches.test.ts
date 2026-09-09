@@ -104,6 +104,15 @@ function transport(initial = snapshot()) {
     },
     async acknowledgeWatches(jobId, watchIds) {
       ackWatches.push([jobId, [...watchIds]]);
+      const watches = current.watches?.map((watch) =>
+        watchIds.includes(watch.id) ? { ...watch, delivered: true } : watch,
+      );
+      current = { ...current, watches };
+      inspected = { ...inspected, watches };
+    },
+    async markDelivered() {
+      current = { ...current, completionDelivered: true };
+      inspected = { ...inspected, completionDelivered: true };
     },
   };
   return transport;
@@ -274,9 +283,142 @@ describe('BackgroundManager watches', () => {
     }
   });
 
+  it('replaces queued completion when an ended watch is removed', async () => {
+    const completion = vi.fn().mockReturnValue(true);
+    const removed = vi.fn();
+    const client = transport(
+      snapshot({
+        status: 'done',
+        watches: [
+          watch({ status: 'ended' }),
+          watch({ id: 'keep', status: 'ended' }),
+        ],
+      }),
+    );
+    const manager = new BackgroundManager({
+      client,
+      onSettled: completion,
+      onWatchesRemoved: removed,
+    });
+    try {
+      await manager.list();
+      await settle();
+      expect(completion).toHaveBeenCalledOnce();
+      await manager.unwatch(id, ['watch-1']);
+      await settle();
+      expect(removed).toHaveBeenCalledWith(id, ['watch-1']);
+      expect(completion).toHaveBeenCalledTimes(2);
+      expect(
+        completion.mock.lastCall?.[0].watches.map(
+          (watch: BackgroundWatchSnapshot) => watch.id,
+        ),
+      ).toEqual(['keep']);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it('does not restore a removed ended watch from a late completion inspection', async () => {
+    const stale = snapshot({
+      status: 'done',
+      watches: [watch({ status: 'ended' })],
+    });
+    const client = transport(stale);
+    let resolveInspect!: (value: BackgroundSnapshot) => void;
+    client.inspect = () =>
+      new Promise((resolve) => {
+        resolveInspect = resolve;
+      });
+    const completion = vi.fn().mockReturnValue(true);
+    const manager = new BackgroundManager({ client, onSettled: completion });
+    try {
+      await manager.list();
+      await settle();
+      await manager.unwatch(id, ['watch-1']);
+      resolveInspect(stale);
+      await settle();
+      expect(completion).toHaveBeenCalledOnce();
+      expect(completion.mock.calls[0][0].watches).toEqual([]);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it('retries a failed composite watch ACK before consuming completion', async () => {
+    const client = transport(
+      snapshot({ status: 'done', watches: [watch({ status: 'ended' })] }),
+    );
+    const ack = vi
+      .spyOn(client, 'acknowledgeWatches')
+      .mockRejectedValueOnce(new Error('ACK unavailable'));
+    const completionAck = vi.spyOn(client, 'markDelivered');
+    const completion = vi.fn().mockReturnValue(true);
+    const standalone = vi.fn();
+    const manager = new BackgroundManager({
+      client,
+      onSettled: completion,
+      onWatchSettled: standalone,
+    });
+    const message = {
+      customType: 'background-terminal-result',
+      details: {
+        id,
+        dedupeKey: id,
+        status: 'done',
+        endedWatches: [{ id: 'watch-1', contains: 'ready' }],
+      },
+    };
+    try {
+      await manager.list();
+      await settle();
+      await expect(manager.acknowledgeEntered([message])).rejects.toThrow(
+        'ACK unavailable',
+      );
+      expect(completionAck).not.toHaveBeenCalled();
+      await manager.list();
+      await settle();
+      expect(completion).toHaveBeenCalledTimes(2);
+      expect(standalone).not.toHaveBeenCalled();
+      await manager.acknowledgeEntered([message]);
+      expect(ack).toHaveBeenCalledTimes(2);
+      expect(completionAck).toHaveBeenCalledOnce();
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it('terminal peek consumes ended watches but not independent match outcomes', async () => {
+    const client = transport(
+      snapshot({
+        status: 'done',
+        watches: [
+          watch({ status: 'ended' }),
+          watch({ id: 'matched', status: 'matched' }),
+        ],
+      }),
+    );
+    const manager = new BackgroundManager({ client });
+    try {
+      await manager.peek(id);
+      expect(client.ackWatches).toEqual([[id, ['watch-1']]]);
+      expect((await client.inspect(id))?.completionDelivered).toBe(true);
+      expect(
+        (await client.inspect(id))?.watches?.find(
+          (watch) => watch.id === 'matched',
+        )?.delivered,
+      ).not.toBe(true);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
   it('redelivers an unacknowledged watch after manager recreation', async () => {
     const client = transport(
-      snapshot({ watches: [watch({ status: 'ended' })] }),
+      snapshot({
+        status: 'done',
+        completionDelivered: true,
+        watches: [watch({ status: 'ended' })],
+      }),
     );
     const first = vi.fn();
     const manager = new BackgroundManager({

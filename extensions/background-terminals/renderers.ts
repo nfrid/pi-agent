@@ -4,7 +4,7 @@ import {
   type BackgroundCompletionCard,
   renderBackgroundCompletion,
 } from '../shared/ui/background-completion';
-import type { BackgroundStatus } from './manager';
+import type { BackgroundStatus, EndedWatch } from './manager';
 import { type BackgroundToolDetails, RESULT_MESSAGE_TYPE } from './schema';
 
 export function resultText(
@@ -159,11 +159,7 @@ interface BackgroundCompletionDetails {
   readonly signal?: string;
   readonly duration?: string;
   readonly outcome?: string;
-  readonly endedWatches?: ReadonlyArray<{
-    readonly id: string;
-    readonly contains: string;
-    readonly stream?: 'stdout' | 'stderr';
-  }>;
+  readonly endedWatches?: readonly EndedWatch[];
 }
 
 function completionCard(

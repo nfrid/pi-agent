@@ -145,6 +145,8 @@ export default defineExtension(
         onWatchSettled: (snapshot, watch) =>
           deliverWatch(snapshot, watch, services),
         onWatchesRemoved: (id, watchIds) => {
+          // A queued completion may also contain the removed ended watches.
+          services.backgroundDeliveries.cancel(completionKey(id));
           for (const watchId of watchIds)
             services.backgroundDeliveries.cancel(
               `background-watch:${id}:${watchId}`,

@@ -318,6 +318,8 @@ export class BackgroundManager {
       this.notifiedWatches.delete(key);
       this.deliveringWatches.delete(key);
     }
+    this.observing.add(id);
+    this.notified.delete(id);
     this.onWatchesRemoved?.(id, unique);
     let snapshot: BackgroundSnapshot;
     try {
@@ -329,6 +331,8 @@ export class BackgroundManager {
       for (const watchId of unique)
         this.cancelledWatches.delete(watchKey(id, watchId));
       throw error;
+    } finally {
+      this.observing.delete(id);
     }
     if (this.disposed || generation !== this.generation)
       throw new Error('Background manager is shut down.');
@@ -506,7 +510,17 @@ export class BackgroundManager {
           return false;
         const latest = this.records.get(snapshot.id);
         if (!latest || latest.status === 'running') return false;
-        const detailed = displaySnapshot(inspected);
+        const detailed = displaySnapshot({
+          ...inspected,
+          ...(inspected.watches
+            ? {
+                watches: inspected.watches.filter(
+                  (watch) =>
+                    !this.cancelledWatches.has(watchKey(snapshot.id, watch.id)),
+                ),
+              }
+            : {}),
+        });
         this.records.set(detailed.id, detailed);
         const delivered = await this.onSettled?.(detailed);
         return delivered !== false;
@@ -575,7 +589,6 @@ export class BackgroundManager {
     const generation = this.generation;
     const completions = new Set<string>();
     const watches = new Map<string, Set<string>>();
-    const compositeWatches = new Map<string, Set<string>>();
     for (const message of messages) {
       if (!message || typeof message !== 'object') continue;
       const value = message as { customType?: unknown; details?: unknown };
@@ -609,10 +622,10 @@ export class BackgroundManager {
                 current.status !== 'running' &&
                 endedWatches(current).some((watch) => watch.id === ended.id)
               ) {
-                let ids = compositeWatches.get(details.id);
+                let ids = watches.get(details.id);
                 if (!ids) {
                   ids = new Set();
-                  compositeWatches.set(details.id, ids);
+                  watches.set(details.id, ids);
                 }
                 ids.add(ended.id);
               }
@@ -641,7 +654,9 @@ export class BackgroundManager {
         ids.add(details.watchId);
       }
     }
-    for (const [id, ids] of compositeWatches) {
+    // Acknowledge included watches first. Never persist completion while an
+    // included watch ACK has failed, which would split recovery into two alerts.
+    for (const [id, ids] of watches) {
       if (this.disposed || generation !== this.generation) return;
       for (const watchId of ids)
         this.notifiedWatches.add(watchKey(id, watchId));
@@ -650,6 +665,7 @@ export class BackgroundManager {
       } catch (error) {
         for (const watchId of ids)
           this.notifiedWatches.delete(watchKey(id, watchId));
+        if (completions.has(id)) this.notified.delete(id);
         throw error;
       }
     }
@@ -662,23 +678,6 @@ export class BackgroundManager {
         this.notified.delete(id);
         throw error;
       }
-    }
-    for (const [id, ids] of watches) {
-      if (this.disposed || generation !== this.generation) return;
-      const composite = compositeWatches.get(id);
-      const standalone = [...ids].filter((watchId) => !composite?.has(watchId));
-      if (standalone.length === 0) continue;
-      for (const watchId of standalone)
-        this.notifiedWatches.add(watchKey(id, watchId));
-      try {
-        await this.client.acknowledgeWatches?.(id, standalone);
-      } catch (error) {
-        for (const watchId of standalone)
-          this.notifiedWatches.delete(watchKey(id, watchId));
-        throw error;
-      }
-      for (const watchId of standalone)
-        this.notifiedWatches.add(watchKey(id, watchId));
     }
   }
 }

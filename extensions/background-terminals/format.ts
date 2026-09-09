@@ -114,7 +114,7 @@ export function formatPeek(
 
 export function formatCompletion(
   snapshot: BackgroundSnapshot,
-  ended: readonly EndedWatch[] = [],
+  ended: readonly EndedWatch[],
 ): string {
   const outcome =
     snapshot.status === 'killed'

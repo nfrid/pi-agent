@@ -233,6 +233,78 @@ describe('background terminals extension', () => {
     }
   });
 
+  it('delivers one completion for multiple unmatched watches and ACKs them across reconnects', async () => {
+    const handlers = new Map<string, Handler>();
+    let tool!: RegisteredTool;
+    const sendMessage = vi.fn();
+    const pi = {
+      on(event: string, handler: Handler) {
+        handlers.set(event, handler);
+      },
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+      registerCommand: vi.fn(),
+      registerMessageRenderer: vi.fn(),
+      sendMessage,
+    } as unknown as ExtensionAPI;
+    backgroundTerminals(pi);
+    const ctx = {
+      cwd: process.cwd(),
+      hasUI: false,
+      mode: 'print',
+      sessionManager: { getSessionId: () => 'ended-integration' },
+    };
+    handlers.get('session_start')?.({}, ctx);
+    const client = new BackgroundJobsClient(
+      host.socketPath,
+      'ended-integration',
+    );
+    try {
+      const started = (await tool.execute(
+        'launch',
+        {
+          action: 'start',
+          command: 'printf "finished\\n"',
+          watch: [
+            { contains: 'ready', stream: 'stdout' },
+            { contains: 'healthy' },
+          ],
+        },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details: { process: ProcessDetails } };
+      const id = started.details.process.id;
+      await client.wait(id, 1000);
+      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+      const message = sendMessage.mock.calls[0][0].details.message;
+      expect(message.customType).toBe('background-terminal-result');
+      expect(message.details.endedWatches).toEqual([
+        { id: expect.any(String), contains: 'ready', stream: 'stdout' },
+        { id: expect.any(String), contains: 'healthy' },
+      ]);
+      expect(message.content).toContain('not observed before process exit');
+      expect(message.content).toContain('finished');
+      expect((await client.inspect(id))?.completionDelivered).toBe(false);
+      expect(
+        (await client.inspect(id))?.watches?.every((watch) => !watch.delivered),
+      ).toBe(true);
+      handlers.get('context')?.({ messages: [message] }, ctx);
+      await vi.waitFor(async () => {
+        const snapshot = await client.inspect(id);
+        expect(snapshot?.completionDelivered).toBe(true);
+        expect(snapshot?.watches?.every((watch) => watch.delivered)).toBe(true);
+      });
+      await handlers.get('session_shutdown')?.({}, ctx);
+      handlers.get('session_start')?.({}, ctx);
+      await tool.execute('list', { action: 'list' }, undefined, undefined, ctx);
+      expect(sendMessage).toHaveBeenCalledOnce();
+    } finally {
+      await handlers.get('session_shutdown')?.({}, ctx);
+    }
+  });
+
   it('ignores a late shutdown from a replaced session scope', async () => {
     const handlers = new Map<string, Handler>();
     let tool: RegisteredTool | undefined;
