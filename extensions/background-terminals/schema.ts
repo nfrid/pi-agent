@@ -137,9 +137,11 @@ const ParameterUnion = Type.Union([
   RemoveWatchParameters,
 ]);
 
-// Keep a compact top-level property index for Pi/tool UIs that inspect object
-// metadata, while validation remains the discriminated action union above.
-export const Parameters = Object.assign(ParameterUnion, {
+// The root is a genuine object schema for Pi validators and UIs. Branches own
+// required fields and closed-property validation; the shared index is only the
+// one top-level property catalogue and never makes action fields optional.
+export const Parameters = Type.Unsafe<Static<typeof ParameterUnion>>({
+  type: 'object',
   properties: {
     action: StringEnum(
       ['start', 'peek', 'list', 'stop', 'watch', 'unwatch'] as const,
@@ -155,7 +157,9 @@ export const Parameters = Object.assign(ParameterUnion, {
     cwd: Type.String({ description: 'Optional working directory for start.' }),
     id: Type.String({ description: 'Required for peek, watch, or unwatch.' }),
     ids: Type.Array(Type.String(), { description: 'Required for stop.' }),
-    watch: Type.Array(Watch, { description: 'Required for start or watch.' }),
+    watch: Type.Array(Watch, {
+      description: 'Optional for start; required for watch.',
+    }),
     watch_ids: Type.Array(Type.String(), {
       description: 'Required for unwatch.',
     }),
@@ -163,6 +167,16 @@ export const Parameters = Object.assign(ParameterUnion, {
       description: 'Optional recent output line count for peek.',
     }),
   },
+  required: ['action'],
+  additionalProperties: false,
+  oneOf: [
+    StartParameters,
+    PeekParameters,
+    ListParameters,
+    StopParameters,
+    AddWatchParameters,
+    RemoveWatchParameters,
+  ],
 });
 
 export type BackgroundParameters = Static<typeof Parameters>;

@@ -111,6 +111,10 @@ describe('background terminals extension', () => {
     );
     expect(tool?.promptGuidelines).toEqual([
       'When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.',
+      'Use `background` for non-interactive commands that should outlive the current turn; use ordinary bash for short commands.',
+      '`start` accepts an optional title (otherwise it is derived from the command) and optional one-shot `watch` entries. A watch is literal, case-sensitive, single-line text observed only in future stdout/stderr; it notifies on match, timeout, or process end and never kills the process. Keep at most 8 watches per process.',
+      'Use `background peek` for an immediate snapshot; it never waits. Use `list` for process and watch status, `watch` to append watches, `unwatch` to remove them, and `stop` to terminate processes.',
+      'Example: start a server with `watch: [{"contains":"ready","stream":"stdout","timeout_seconds":60}]`, then continue without polling. Completion and watch notifications resume the agent turn automatically.',
       'Background jobs survive parent Pi session shutdown and recreation; use `background stop` explicitly when a job should terminate.',
     ]);
 

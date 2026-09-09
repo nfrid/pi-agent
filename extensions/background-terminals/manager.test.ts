@@ -4,7 +4,7 @@ import path from 'node:path';
 import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackgroundJobHostService } from '../../apps/dashboard-server/src/background-job-host';
-import { BackgroundManager } from './manager';
+import { BackgroundManager, type BackgroundSnapshot } from './manager';
 
 function quoteShell(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -33,6 +33,19 @@ async function waitUntil(
       throw new Error('Timed out waiting for condition.');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+async function inspectUntilSettled(
+  manager: BackgroundManager,
+  id: string,
+): Promise<BackgroundSnapshot> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const snapshot = await manager.inspect(id);
+    if (snapshot && snapshot.status !== 'running') return snapshot;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for process settlement.');
 }
 
 let testScope = 0;
@@ -82,7 +95,7 @@ describe('BackgroundManager', () => {
         title: 'shell check',
         cwd: process.cwd(),
       });
-      const settled = await manager.peek(started.id, 2_000);
+      const settled = await inspectUntilSettled(manager, started.id);
 
       expect(settled.status).toBe('done');
       expect(settled.stdout.text).not.toBe('');
@@ -98,7 +111,7 @@ describe('BackgroundManager', () => {
         title: 'capture',
         cwd: process.cwd(),
       });
-      const settled = await manager.peek(started.id, 2_000);
+      const settled = await inspectUntilSettled(manager, started.id);
 
       expect(settled.status).toBe('done');
       expect(settled.exitCode).toBe(0);
@@ -114,7 +127,7 @@ describe('BackgroundManager', () => {
         title: 'server',
         cwd: process.cwd(),
       });
-      const snapshot = await manager.peek(started.id, 20);
+      const snapshot = await manager.peek(started.id);
 
       expect(snapshot.status).toBe('running');
     });
@@ -128,15 +141,15 @@ describe('BackgroundManager', () => {
         cwd: process.cwd(),
       });
       const controller = new AbortController();
-      const pending = manager.peek(started.id, 2_000, controller.signal);
       controller.abort();
+      const pending = manager.peek(started.id, controller.signal);
 
       await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
       expect(manager.get(started.id)?.status).toBe('running');
     });
   });
 
-  it('suppresses asynchronous settlement while peek is observing it', async () => {
+  it('returns an immediate snapshot without waiting for settlement', async () => {
     const onSettled = vi.fn();
     const manager = new BackgroundManager({
       onSettled,
@@ -148,9 +161,9 @@ describe('BackgroundManager', () => {
         title: 'short task',
         cwd: process.cwd(),
       });
-      const settled = await manager.peek(started.id, 2_000);
+      const settled = await manager.peek(started.id);
 
-      expect(settled.status).toBe('done');
+      expect(settled.status).toBe('running');
       expect(onSettled).not.toHaveBeenCalled();
     } finally {
       await manager.dispose();
@@ -218,7 +231,7 @@ describe('BackgroundManager', () => {
           title: 'backgrounding shell',
           cwd: process.cwd(),
         });
-        const settled = await manager.peek(started.id, 2_000);
+        const settled = await inspectUntilSettled(manager, started.id);
         const pid = Number(settled.stdout.text.trim());
 
         expect(settled.status).toBe('done');
@@ -235,7 +248,7 @@ describe('BackgroundManager', () => {
         title: 'large command',
         cwd: process.cwd(),
       });
-      const settled = await manager.peek(started.id, 2_000);
+      const settled = await inspectUntilSettled(manager, started.id);
 
       expect(settled.command.length).toBe(1_001);
       expect(settled.command.endsWith('…')).toBe(true);

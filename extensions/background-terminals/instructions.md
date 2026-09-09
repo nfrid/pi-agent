@@ -1,3 +1,4 @@
+- When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.
 - Use `background` for non-interactive commands that should outlive the current turn; use ordinary bash for short commands.
 - `start` accepts an optional title (otherwise it is derived from the command) and optional one-shot `watch` entries. A watch is literal, case-sensitive, single-line text observed only in future stdout/stderr; it notifies on match, timeout, or process end and never kills the process. Keep at most 8 watches per process.
 - Use `background peek` for an immediate snapshot; it never waits. Use `list` for process and watch status, `watch` to append watches, `unwatch` to remove them, and `stop` to terminate processes.

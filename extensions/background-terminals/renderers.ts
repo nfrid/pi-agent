@@ -5,11 +5,7 @@ import {
   renderBackgroundCompletion,
 } from '../shared/ui/background-completion';
 import type { BackgroundStatus } from './manager';
-import {
-  type BackgroundToolDetails,
-  RESULT_MESSAGE_TYPE,
-  WATCH_RESULT_MESSAGE_TYPE,
-} from './schema';
+import { type BackgroundToolDetails, RESULT_MESSAGE_TYPE } from './schema';
 
 export function resultText(
   content: ReadonlyArray<{ type: string; text?: string }>,
@@ -214,57 +210,6 @@ export function registerBackgroundMessageRenderer(pi: ExtensionAPI): void {
       const details = (message.details ?? {}) as BackgroundCompletionDetails;
       return renderBackgroundCompletion(
         completionCard(details),
-        { expanded, outputPad },
-        theme,
-      );
-    },
-  );
-  pi.registerMessageRenderer(
-    WATCH_RESULT_MESSAGE_TYPE,
-    (message, { expanded, outputPad }, theme) => {
-      const details = (message.details ?? {}) as {
-        id?: string;
-        watchId?: string;
-        title?: string;
-        status?: string;
-        contains?: string;
-      };
-      const status =
-        details.status === 'timed_out'
-          ? 'timed out'
-          : (details.status ?? 'settled');
-      return renderBackgroundCompletion(
-        {
-          icon: details.status === 'matched' ? '✓' : '•',
-          color: details.status === 'matched' ? 'success' : 'warning',
-          title: [
-            { text: 'Background watch ', color: 'muted' },
-            { text: details.title ?? details.id ?? 'settled', color: 'text' },
-            { text: ` · ${status}`, color: 'dim' },
-          ],
-          rows: details.watchId
-            ? [
-                {
-                  icon: details.status === 'matched' ? '✓' : '•',
-                  color: details.status === 'matched' ? 'success' : 'warning',
-                  segments: [
-                    {
-                      text: `${details.id ?? '?'}:${details.watchId}`,
-                      color: 'accent',
-                    },
-                    ...(expanded && details.contains
-                      ? ([
-                          {
-                            text: ` · ${JSON.stringify(details.contains)}`,
-                            color: 'dim',
-                          },
-                        ] as const)
-                      : []),
-                  ],
-                },
-              ]
-            : undefined,
-        },
         { expanded, outputPad },
         theme,
       );

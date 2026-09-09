@@ -40,9 +40,7 @@ function fakeTransport(initial = snapshot()) {
     async inspect() {
       return current;
     },
-    async wait() {
-      return current;
-    },
+
     async stop() {
       return [current];
     },
@@ -117,19 +115,19 @@ describe('BackgroundManager remote lifecycle', () => {
     expect(transport.ackCalls).toEqual([]);
   });
 
-  it('ignores incompatible wait responses that arrive after disposal', async () => {
-    let resolveWait!: (value: BackgroundSnapshot) => void;
+  it('ignores incompatible inspect responses that arrive after disposal', async () => {
+    let resolveInspect!: (value: BackgroundSnapshot) => void;
     const transport = fakeTransport(
       snapshot({ status: 'running', settledAt: undefined }),
     );
-    transport.wait = () =>
+    transport.inspect = () =>
       new Promise((resolve) => {
-        resolveWait = resolve;
+        resolveInspect = resolve;
       });
     const onChange = vi.fn();
     const manager = new BackgroundManager({
       client: transport,
-      scopeId: 'late-wait',
+      scopeId: 'late-inspect',
       onChange,
     });
     await manager.list();
@@ -138,7 +136,7 @@ describe('BackgroundManager remote lifecycle', () => {
     await manager.dispose();
     const changeCallsAfterDispose = onChange.mock.calls.length;
 
-    resolveWait(snapshot({ exactEnv: true }));
+    resolveInspect(snapshot({ exactEnv: true }));
     await expect(pending).rejects.toThrow(/shut down/);
     expect(onChange).toHaveBeenCalledTimes(changeCallsAfterDispose);
   });
@@ -184,7 +182,6 @@ describe('BackgroundManager remote lifecycle', () => {
     const transport = fakeTransport(delegate);
     const onSettled = vi.fn();
     const inspect = vi.spyOn(transport, 'inspect');
-    const wait = vi.spyOn(transport, 'wait');
     const stop = vi.spyOn(transport, 'stop');
     const manager = new BackgroundManager({
       client: transport,
@@ -211,7 +208,6 @@ describe('BackgroundManager remote lifecycle', () => {
 
     expect(onSettled).not.toHaveBeenCalled();
     expect(inspect).not.toHaveBeenCalled();
-    expect(wait).not.toHaveBeenCalled();
     expect(stop).not.toHaveBeenCalled();
     expect(transport.ackCalls).toEqual([]);
     await manager.dispose();

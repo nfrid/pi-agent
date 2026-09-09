@@ -13,7 +13,7 @@ import {
 } from './schema';
 
 const DESCRIPTION =
-  'Use this tool for non-interactive commands expected to outlive the current turn, such as servers, watchers, dev processes, and long builds; use ordinary bash for short commands. Each process runs `/bin/bash -c` with no stdin and survives parent Pi session shutdown; use stop explicitly. Output is retained in bounded tails and completion is delivered automatically. Peek is immediate and never waits. Add one-shot literal output watches with watch, or remove them with unwatch; watches observe future output, notify on match, timeout, or process end, and never kill the process.';
+  'Use this tool for non-interactive commands expected to outlive the current turn, such as servers, watchers, dev processes, and long builds; use ordinary bash for short commands. Each process runs `/bin/bash -c` with no stdin and survives parent Pi session shutdown; use stop explicitly. Output is retained in bounded tails. Completion is delivered automatically. Peek is immediate and never waits. Add one-shot literal output watches with watch, or remove them with unwatch; watches observe future output, notify on match, timeout, or process end, and never kill the process.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
