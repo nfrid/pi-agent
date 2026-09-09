@@ -145,7 +145,7 @@ One row per case is sufficient; attach transcript/command evidence separately.
 
 | model / thinking | harness commit/config fingerprint | case | pass/fail/blocked | evidence | elapsed / usage (when available) |
 |---|---|---|---|---|---|
-| pending | pending | 1–9 | pending | pending | pending |
+| pending | pending | 1–10 | pending | pending | pending |
 
 Do not fill pending cells with invented baselines or results. If execution is
 impossible, mark **blocked**, state the missing local capability, and retain no

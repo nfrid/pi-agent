@@ -1095,7 +1095,10 @@ describe('async delegate extension', () => {
     expect(launch?.content[0]?.text).toContain(
       'Use delegate_jobs feedback for bounded corrective steering',
     );
-    expect(launch?.content[0]?.text).not.toContain('peek to wait');
+    expect(launch?.content[0]?.text).toContain(
+      'inspect for deliberate inspection',
+    );
+    expect(launch?.content[0]?.text).not.toContain('peek');
     expect(launch?.content[0]?.text).toContain('continuation-token');
     expect(sendMessage).not.toHaveBeenCalled();
 
