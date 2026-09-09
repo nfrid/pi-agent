@@ -51,7 +51,10 @@ describe('background process host', () => {
     try {
       const host = await createHost(root);
       const client = new BackgroundJobsClient(host.socketPath, 'session');
-      expect(await client.info()).toEqual({ exactEnv: true });
+      expect(await client.info()).toEqual({
+        exactEnv: true,
+        outputWatches: true,
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

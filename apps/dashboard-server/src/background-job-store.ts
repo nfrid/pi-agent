@@ -34,6 +34,7 @@ import {
   BACKGROUND_JOBS_MAX_WATCHES,
   backgroundJobsLaunchFingerprint,
   parseBackgroundWatchInput,
+  parseBackgroundWatchSnapshot,
 } from '@pi-agent/background-jobs';
 
 const HOST_RESTART_ERROR =
@@ -87,42 +88,7 @@ function storedWatches(value: unknown): BackgroundWatchSnapshot[] | undefined {
   }
   if (!Array.isArray(parsed) || parsed.length > BACKGROUND_JOBS_MAX_WATCHES)
     throw new Error('Corrupt background job watches.');
-  const watches: BackgroundWatchSnapshot[] = [];
-  for (const item of parsed) {
-    if (!item || typeof item !== 'object' || Array.isArray(item))
-      throw new Error('Corrupt background job watch.');
-    const raw = item as Record<string, unknown>;
-    const input = parseBackgroundWatchInput(raw);
-    if (
-      typeof raw.id !== 'string' ||
-      !raw.id ||
-      (raw.status !== 'pending' &&
-        raw.status !== 'matched' &&
-        raw.status !== 'timed_out' &&
-        raw.status !== 'ended') ||
-      typeof raw.createdAt !== 'number' ||
-      !Number.isFinite(raw.createdAt) ||
-      (raw.settledAt !== undefined &&
-        (typeof raw.settledAt !== 'number' ||
-          !Number.isFinite(raw.settledAt))) ||
-      (raw.excerpt !== undefined &&
-        (typeof raw.excerpt !== 'string' ||
-          Buffer.byteLength(raw.excerpt) >
-            BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES)) ||
-      (raw.delivered !== undefined && typeof raw.delivered !== 'boolean')
-    )
-      throw new Error('Corrupt background job watch.');
-    watches.push({
-      ...input,
-      id: raw.id,
-      status: raw.status,
-      createdAt: raw.createdAt,
-      ...(raw.settledAt === undefined ? {} : { settledAt: raw.settledAt }),
-      ...(raw.excerpt === undefined ? {} : { excerpt: raw.excerpt }),
-      ...(raw.delivered === undefined ? {} : { delivered: raw.delivered }),
-    });
-  }
-  return watches;
+  return parsed.map(parseBackgroundWatchSnapshot);
 }
 function encodeWatches(watches: readonly BackgroundWatchSnapshot[]): string {
   return JSON.stringify(watches);

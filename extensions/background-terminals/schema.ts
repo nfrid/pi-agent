@@ -15,7 +15,7 @@ const Watch = Type.Object(
     contains: Type.String({
       minLength: 1,
       maxLength: 512,
-      pattern: '^[^\\r\\n]+$',
+      pattern: '^[^\\r\\n]+$(?![\\s\\S])',
       description: 'Literal, case-sensitive single-line text to match.',
     }),
     stream: Type.Optional(

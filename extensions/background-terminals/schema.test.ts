@@ -102,6 +102,18 @@ describe('background tool parameters', () => {
     ).toBe(false);
   });
 
+  it('rejects trailing line breaks as well as embedded ones', () => {
+    for (const contains of ['ready\n', 'ready\r', 'ready\r\n']) {
+      expect(
+        Value.Check(Parameters, {
+          action: 'watch',
+          id: 'bg-1',
+          watch: [{ contains }],
+        }),
+      ).toBe(false);
+    }
+  });
+
   it('requires only fields relevant to each action', () => {
     expect(Value.Check(Parameters, { action: 'list' })).toBe(true);
     expect(Value.Check(Parameters, { action: 'stop', ids: ['bg-1'] })).toBe(

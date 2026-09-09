@@ -1,4 +1,5 @@
 import {
+  BACKGROUND_JOBS_MAX_WATCHES,
   type BackgroundJobSnapshot,
   type BackgroundJobStatus,
   type BackgroundJobsCapabilities,
@@ -7,12 +8,13 @@ import {
   type BackgroundWatchSnapshot,
   defaultProcessHostSocketPath,
   newBackgroundJobId,
+  parseBackgroundWatchInput,
 } from '@pi-agent/background-jobs';
 import type { SessionScopeId } from '../shared/runtime/scoped-services';
 
 export const MAX_RUNNING = 8;
 export const MAX_SETTLED = 32;
-export const MAX_WATCHES = 8;
+export const MAX_WATCHES = BACKGROUND_JOBS_MAX_WATCHES;
 export const STDOUT_RETAINED_BYTES = 256 * 1024;
 export const STDERR_RETAINED_BYTES = 128 * 1024;
 const DISPLAY_COMMAND_CHARS = 1_000;
@@ -619,21 +621,5 @@ function validateWatches(watches?: readonly BackgroundWatchInput[]): void {
     throw new Error(
       `At most ${MAX_WATCHES} watches may be retained per process.`,
     );
-  for (const watch of watches) {
-    if (
-      !watch ||
-      typeof watch.contains !== 'string' ||
-      watch.contains.length < 1 ||
-      watch.contains.length > 512 ||
-      /[\r\n]/u.test(watch.contains) ||
-      (watch.stream !== undefined &&
-        watch.stream !== 'stdout' &&
-        watch.stream !== 'stderr') ||
-      (watch.timeoutMs !== undefined &&
-        (!Number.isSafeInteger(watch.timeoutMs) ||
-          watch.timeoutMs < 1_000 ||
-          watch.timeoutMs > 86_400_000))
-    )
-      throw new Error('Invalid output watch.');
-  }
+  for (const watch of watches) parseBackgroundWatchInput(watch);
 }

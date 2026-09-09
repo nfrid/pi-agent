@@ -21,6 +21,7 @@ import {
   type BackgroundJobEventsSnapshot,
   type BackgroundJobSnapshot,
   type BackgroundJobStatus,
+  type BackgroundWatchSnapshot,
   backgroundJobsLaunchFingerprint,
   ensureProcessHostDirectory,
   OutputTail,
@@ -36,6 +37,12 @@ const MAX_RUNNING_PER_OWNER = 8;
 const TERM_GRACE_MS = 2_000;
 const KILL_GRACE_MS = 500;
 
+type RunningWatch = {
+  readonly snapshot: BackgroundWatchSnapshot;
+  readonly tails: Record<'stdout' | 'stderr', string>;
+  timer?: NodeJS.Timeout;
+};
+
 type RunningJob = {
   readonly id: string;
   readonly ownerSession: string;
@@ -43,6 +50,7 @@ type RunningJob = {
   readonly stdout: OutputTail;
   readonly stderr: OutputTail;
   readonly captureEvents: boolean;
+  readonly watches: Map<string, RunningWatch>;
   stopRequested: boolean;
   timedOut: boolean;
   timeoutHandle?: NodeJS.Timeout;
@@ -66,7 +74,7 @@ type JobResponse = {
   ok: boolean;
   error?: string;
   code?: string;
-  capabilities?: { exactEnv: boolean };
+  capabilities?: { exactEnv: boolean; outputWatches: boolean };
   job?: BackgroundJobSnapshot;
   jobs?: BackgroundJobSnapshot[];
   events?: BackgroundJobEventsSnapshot;
@@ -266,7 +274,54 @@ export class BackgroundJobHostService {
   ): Promise<JobResponse> {
     switch (request.op) {
       case 'info':
-        return { v: 1, ok: true, capabilities: { exactEnv: true } };
+        return {
+          v: 1,
+          ok: true,
+          capabilities: { exactEnv: true, outputWatches: true },
+        };
+      case 'watch': {
+        await this.startLocks.get(request.id);
+        const stored = this.database().get(request.ownerSession, request.id);
+        if (!stored) throw new Error(`Unknown background job "${request.id}".`);
+        const running = this.jobs.get(request.id);
+        if (!running || running.stopRequested)
+          throw new Error('Output watches may only be added to a running job.');
+        const row = this.database().addWatches(
+          request.ownerSession,
+          request.id,
+          request.watches,
+        );
+        this.installWatches(running, row.watches ?? []);
+        return {
+          v: 1,
+          ok: true,
+          job: snapshot(
+            this.database().get(
+              request.ownerSession,
+              request.id,
+            ) as BackgroundJobStoreRow,
+          ),
+        };
+      }
+      case 'unwatch': {
+        await this.startLocks.get(request.id);
+        const row = this.database().removeWatches(
+          request.ownerSession,
+          request.id,
+          request.watchIds,
+        );
+        const running = this.jobs.get(request.id);
+        if (running)
+          for (const id of request.watchIds) this.clearWatch(running, id);
+        return { v: 1, ok: true, job: snapshot(row) };
+      }
+      case 'ackWatches':
+        this.database().acknowledgeWatches(
+          request.ownerSession,
+          request.id,
+          request.watchIds,
+        );
+        return { v: 1, ok: true };
       case 'start': {
         const job = await this.start(request.input);
         return { v: 1, ok: true, job: snapshot(job) };
@@ -385,6 +440,7 @@ export class BackgroundJobHostService {
       const running = this.makeRunning(input, child);
       this.jobs.set(input.id, running);
       this.database().setPid(input.id, child.pid ?? 0);
+      this.installWatches(running, row.watches ?? []);
       this.attach(running);
       if (input.timeoutMs !== undefined && this.jobs.has(input.id)) {
         running.timeoutHandle = setTimeout(() => {
@@ -421,6 +477,7 @@ export class BackgroundJobHostService {
       stdout: new OutputTail(BACKGROUND_JOBS_MAX_OUTPUT_BYTES),
       stderr: new OutputTail(BACKGROUND_JOBS_STDERR_OUTPUT_BYTES),
       captureEvents: input.events === true,
+      watches: new Map(),
       stopRequested: false,
       timedOut: false,
       stdoutLine: '',
@@ -434,6 +491,91 @@ export class BackgroundJobHostService {
       settled,
       resolveSettled,
     };
+  }
+
+  private installWatches(
+    job: RunningJob,
+    watches: readonly BackgroundWatchSnapshot[],
+  ): void {
+    for (const snapshot of watches) {
+      if (snapshot.status !== 'pending' || job.watches.has(snapshot.id))
+        continue;
+      // Each new subscription starts with empty suffixes: no historical output.
+      const watch: RunningWatch = {
+        snapshot,
+        tails: { stdout: '', stderr: '' },
+      };
+      job.watches.set(snapshot.id, watch);
+      if (snapshot.timeoutMs !== undefined) {
+        const remaining = snapshot.createdAt + snapshot.timeoutMs - Date.now();
+        if (remaining <= 0) this.finishWatch(job, watch, 'timed_out');
+        else {
+          watch.timer = setTimeout(
+            () => this.finishWatch(job, watch, 'timed_out'),
+            remaining,
+          );
+          watch.timer.unref?.();
+        }
+      }
+    }
+  }
+
+  private clearWatch(job: RunningJob, id: string): void {
+    const watch = job.watches.get(id);
+    if (watch?.timer) clearTimeout(watch.timer);
+    job.watches.delete(id);
+  }
+
+  private finishWatch(
+    job: RunningJob,
+    watch: RunningWatch,
+    status: 'matched' | 'timed_out',
+    excerpt?: string,
+  ): void {
+    if (!job.watches.has(watch.snapshot.id)) return;
+    this.database().settleWatch(
+      job.id,
+      watch.snapshot.id,
+      status,
+      Date.now(),
+      excerpt,
+    );
+    this.clearWatch(job, watch.snapshot.id);
+  }
+
+  private matchWatches(
+    job: RunningJob,
+    stream: 'stdout' | 'stderr',
+    chunk: string,
+  ): void {
+    const now = Date.now();
+    for (const watch of job.watches.values()) {
+      const { snapshot, tails } = watch;
+      // A delayed timer must not allow output after the deadline to win.
+      if (
+        snapshot.timeoutMs !== undefined &&
+        now >= snapshot.createdAt + snapshot.timeoutMs
+      ) {
+        this.finishWatch(job, watch, 'timed_out');
+        continue;
+      }
+      if (snapshot.stream !== undefined && snapshot.stream !== stream) continue;
+      const text = tails[stream] + chunk;
+      const index = text.indexOf(snapshot.contains);
+      if (index >= 0) {
+        // Keep the match itself first so bounding a long UTF-8 excerpt cannot
+        // discard the evidence. Raw command output is data, not instructions.
+        this.finishWatch(
+          job,
+          watch,
+          'matched',
+          text.slice(index, index + snapshot.contains.length + 160),
+        );
+      } else {
+        const retained = snapshot.contains.length - 1;
+        tails[stream] = retained > 0 ? text.slice(-retained) : '';
+      }
+    }
   }
 
   private appendLinePart(
@@ -526,11 +668,13 @@ export class BackgroundJobHostService {
     job.child.stderr?.setEncoding('utf8');
     job.child.stdout?.on('data', (chunk: string) => {
       job.stdout.push(chunk);
+      this.matchWatches(job, 'stdout', chunk);
       this.captureLines(job, 'stdout', chunk);
       this.persistOutput(job);
     });
     job.child.stderr?.on('data', (chunk: string) => {
       job.stderr.push(chunk);
+      this.matchWatches(job, 'stderr', chunk);
       this.captureLines(job, 'stderr', chunk);
       this.persistOutput(job);
     });
@@ -573,6 +717,9 @@ export class BackgroundJobHostService {
     if (!this.jobs.has(job.id)) return;
     this.persistOutput(job);
     if (job.timeoutHandle) clearTimeout(job.timeoutHandle);
+    // Expire overdue deadlines before the store ends the remaining watches.
+    this.matchWatches(job, 'stdout', '');
+    for (const id of job.watches.keys()) this.clearWatch(job, id);
     this.database().settle(
       job.id,
       status,

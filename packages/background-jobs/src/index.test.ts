@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BACKGROUND_JOBS_MAX_ARGV_COUNT,
   BACKGROUND_JOBS_MAX_COMMAND_BYTES,
   BACKGROUND_JOBS_MAX_WATCH_CONTAINS_CHARS,
+  BackgroundJobsClient,
   backgroundJobsLaunchFingerprint,
   OutputTail,
   parseBackgroundJobsRequest,
@@ -170,6 +171,23 @@ describe('background-jobs protocol', () => {
         },
       }),
     ).toThrow(/too many arguments/);
+  });
+
+  it('rejects watched launches on older hosts before issuing a start request', async () => {
+    const client = new BackgroundJobsClient(
+      '/nonexistent/output-watch-test.sock',
+      'owner',
+    );
+    vi.spyOn(client, 'info').mockResolvedValue({ exactEnv: true });
+    await expect(
+      client.start({
+        id,
+        command: 'true',
+        title: 'test',
+        cwd: '.',
+        watch: [{ contains: 'ready' }],
+      }),
+    ).rejects.toThrow('does not support output watches');
   });
 
   it('validates literal watch bounds and the singular start field', () => {

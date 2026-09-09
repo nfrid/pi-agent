@@ -322,9 +322,6 @@ function uuid(value: unknown): string {
 function owner(value: unknown): string {
   return text(value, 'owner session', BACKGROUND_JOBS_MAX_OWNER_BYTES);
 }
-function watchId(value: unknown): string {
-  return uuid(value);
-}
 export function parseBackgroundWatchInput(
   value: unknown,
 ): BackgroundWatchInput {
@@ -367,7 +364,7 @@ function parseWatchIds(value: unknown): string[] {
     value.length > BACKGROUND_JOBS_MAX_WATCHES
   )
     throw new Error('Invalid output watch ids.');
-  return [...new Set(value.map(watchId))];
+  return [...new Set(value.map(uuid))];
 }
 
 export function parseBackgroundJobsEnv(
@@ -692,7 +689,9 @@ function parseCapabilities(value: unknown): BackgroundJobsCapabilities {
   };
 }
 
-function parseWatchSnapshot(value: unknown): BackgroundWatchSnapshot {
+export function parseBackgroundWatchSnapshot(
+  value: unknown,
+): BackgroundWatchSnapshot {
   if (!record(value)) throw new Error('Invalid output watch snapshot.');
   const watch = parseBackgroundWatchInput(value);
   if (
@@ -748,7 +747,6 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
       value.watches.length > BACKGROUND_JOBS_MAX_WATCHES
     )
       throw new Error('Invalid output watches snapshot.');
-    value.watches.map(parseWatchSnapshot);
   }
   const status = value.status;
   if (
@@ -793,7 +791,7 @@ function parseSnapshot(value: unknown): BackgroundJobSnapshot {
     stderr: parseOutput(value.stderr, BACKGROUND_JOBS_STDERR_OUTPUT_BYTES),
     ...(value.watches === undefined
       ? {}
-      : { watches: value.watches.map(parseWatchSnapshot) }),
+      : { watches: value.watches.map(parseBackgroundWatchSnapshot) }),
   };
 }
 
