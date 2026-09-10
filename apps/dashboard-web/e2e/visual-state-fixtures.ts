@@ -520,7 +520,8 @@ export function buildActivityPanelScenario(
               ? 'Activity panel visual refinement'
               : `Finished worker ${index + 1}`,
           state: active && index === 0 ? 'running' : 'success',
-          finishedAt: VISUAL_TIMESTAMP,
+          route: index === 0 ? 'luna-high' : 'luna-medium',
+          finishedAt: active && index === 0 ? undefined : VISUAL_TIMESTAMP,
         })),
       },
     },

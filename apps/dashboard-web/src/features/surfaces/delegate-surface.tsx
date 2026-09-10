@@ -500,6 +500,7 @@ export function DelegateSurface({
             <span className="delegate-row-name">
               <strong>{name}</strong>
             </span>
+            {activityPanel && <span className="sr-only">{state}</span>}
             {!activityPanel && (
               <small
                 className={`delegate-row-action ${surfaceStateClass(state)}`}
