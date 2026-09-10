@@ -438,9 +438,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
     gap: 4px;
     margin-bottom: 4px;
   }
-  .run-status-disclosure-content {
-    gap: 4px;
-  }
   .session-page > .session-control-layer .composer {
     border-color: transparent;
     padding: 6px 7px 5px;

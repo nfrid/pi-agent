@@ -19,6 +19,7 @@ import {
   ExtensionSurfaceStack,
   runtimeExtensionSurfaces,
 } from './extension-surfaces';
+import { useModifierShortcut } from './modifier-shortcuts';
 import {
   useOverlayFocusRestore,
   useOverlayFocusTrap,
@@ -144,9 +145,25 @@ export function ActivityPanel({
   onClose: () => void;
   onTogglePinned: () => void;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const { present, exiting } = useOverlayPresence(open);
   const overlay = open && !pinned;
+  const openSection = (label: string) => {
+    onOpen();
+    window.requestAnimationFrame(() => {
+      const section = panelRef.current?.querySelector<HTMLElement>(
+        `section[aria-label="${label}"]`,
+      );
+      section?.focus({ preventScroll: true });
+      section?.scrollIntoView({ block: 'nearest' });
+    });
+  };
+  useModifierShortcut(
+    { code: 'KeyT', alt: true },
+    () => openSection('Tasks'),
+    true,
+  );
+  useModifierShortcut({ code: 'KeyD' }, () => openSection('Delegates'), true);
   useOverlayFocusRestore(overlay, '.session-activity-button');
   useOverlayFocusTrap(overlay, panelRef, { mobile: true });
 
@@ -217,12 +234,11 @@ export function ActivityPanel({
 
   if (!present) return null;
   return (
-    <div
+    <aside
       ref={panelRef}
       className={`activity-panel${open ? ' is-open' : ''}${exiting ? ' is-exiting' : ''}${pinned ? ' is-pinned' : ' is-overlay'}`}
       aria-label="Session activity"
-      aria-modal={overlay || undefined}
-      role="dialog"
+      {...(overlay ? { role: 'dialog', 'aria-modal': true } : {})}
       data-activity-panel=""
     >
       <div className="activity-panel-bar">
@@ -277,6 +293,6 @@ export function ActivityPanel({
           </section>
         )}
       </div>
-    </div>
+    </aside>
   );
 }

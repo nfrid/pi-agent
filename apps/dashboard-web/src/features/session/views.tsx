@@ -5,7 +5,6 @@ import type {
   SessionIndexEntry,
 } from '@pi-dashboard/protocol';
 import type { ComponentType, ReactNode, RefObject } from 'react';
-import { useId, useState } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
 import { useDashboardNavigate } from '../../routes/navigation';
 import type { ActivityHints } from '../activity-panel';
@@ -183,7 +182,6 @@ export function SessionHeader({
   statusLabel,
   outlineTriggerRef,
   onOpenOutline,
-  onOpenAgentNav,
   activityHints,
   activityOpen,
   onOpenActivity,
@@ -200,7 +198,6 @@ export function SessionHeader({
   statusLabel: string;
   outlineTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenOutline: () => void;
-  onOpenAgentNav: () => void;
   activityHints: ActivityHints;
   activityOpen: boolean;
   onOpenActivity: () => void;
@@ -240,6 +237,7 @@ export function SessionHeader({
             type="button"
             className="session-icon-button session-activity-button"
             aria-label="Open session activity"
+            title={`Activity · Tasks ${activityHints.tasks ? 'active' : 'quiet'} · Delegates ${activityHints.delegates ? 'active' : 'quiet'}`}
             aria-expanded={activityOpen}
             onClick={onOpenActivity}
           >
@@ -252,16 +250,6 @@ export function SessionHeader({
                 className="session-activity-hint session-activity-hint-delegates"
                 data-active={activityHints.delegates || undefined}
               />
-            </span>
-          </button>
-          <button
-            type="button"
-            className="session-icon-button session-agent-nav-button"
-            aria-label="Open agent list"
-            onClick={onOpenAgentNav}
-          >
-            <span className="session-icon-glyph" aria-hidden="true">
-              ☰
             </span>
           </button>
           <button
@@ -283,34 +271,6 @@ export function SessionHeader({
 }
 
 export { SessionHistoryControl } from './history-control';
-
-/** Kept for generic callers that render a compact launcher disclosure. */
-export function RunStatusDisclosure({ children }: { children: ReactNode }) {
-  const [expanded, setExpanded] = useState(false);
-  const contentId = useId();
-  return (
-    <div className="run-status-disclosure">
-      <button
-        type="button"
-        className="run-status-disclosure-trigger"
-        aria-controls={contentId}
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-      >
-        <span className="run-status-disclosure-title">Run status</span>
-        <span className="run-status-disclosure-detail">
-          Tasks and delegates
-        </span>
-        <span className="run-status-disclosure-chevron" aria-hidden="true">
-          {expanded ? '⌃' : '⌄'}
-        </span>
-      </button>
-      <div id={contentId} className="run-status-disclosure-content">
-        {children}
-      </div>
-    </div>
-  );
-}
 
 export function SessionControlLayer({
   controlLayerRef,

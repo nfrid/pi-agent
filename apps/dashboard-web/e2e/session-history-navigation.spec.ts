@@ -740,13 +740,7 @@ test('active to paginated to active ignores a delayed stale latest snapshot', as
   await expect(
     page.locator('.tool-detail').filter({ hasText: 'Running read' }),
   ).toHaveCount(1);
-  await page
-    .getByRole('button', { name: 'Run status Tasks and delegates' })
-    .click();
-  await page
-    .getByRole('article', { name: 'Delegates' })
-    .getByRole('button', { name: /Delegates 1 running/ })
-    .click();
+  await page.getByRole('button', { name: 'Open session activity' }).click();
   await expect(page.locator('.delegate-row')).toHaveCount(1);
   await expect(page.locator('.delegate-row').getByText('worker')).toHaveCount(
     1,
