@@ -36,6 +36,25 @@ export function pixelSnappedRailTop(
   return Math.round((center - height / 2) * scale) / scale + height / 2;
 }
 
+export function pixelSnappedTickHeight(devicePixelRatio: number): number {
+  const scale =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? devicePixelRatio
+      : 1;
+  return Math.max(1, Math.round(scale)) / scale;
+}
+
+export function pixelSnappedTickOffset(
+  position: number,
+  devicePixelRatio: number,
+): number {
+  const scale =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? devicePixelRatio
+      : 1;
+  return Math.round(position * scale) / scale - position;
+}
+
 function landmarkType(
   kind: TranscriptLandmark['kind'],
   deliveryMode?: TranscriptLandmark['deliveryMode'],
@@ -109,6 +128,11 @@ export function TranscriptOutline({
   );
   const [activeKey, setActiveKey] = useState(userTurns[0]?.key);
   const [search, setSearch] = useState('');
+  const devicePixelRatio =
+    typeof window === 'undefined' ? 1 : window.devicePixelRatio;
+  const tickHeight = pixelSnappedTickHeight(devicePixelRatio);
+  const railActualTop =
+    railTop === undefined ? undefined : railTop - railHeight / 2;
   const searchRef = useRef<HTMLInputElement>(null);
   const branchPointsById = useMemo(
     () => indexBranchPointsById(branchTopology),
@@ -441,7 +465,22 @@ export function TranscriptOutline({
                 data-meta={`${grouped ? `${cluster.landmarks.length} turns · first shown` : landmarkType('user', representative.deliveryMode, representative.typeLabel)}${landmarkTime(representative.timestamp) ? ` · ${landmarkTime(representative.timestamp)}` : ''}`}
                 aria-hidden="true"
               />
-              <i aria-hidden="true" />
+              <i
+                aria-hidden="true"
+                style={{
+                  height: tickHeight,
+                  top:
+                    railActualTop === undefined
+                      ? '3px'
+                      : `calc(3px + ${pixelSnappedTickOffset(
+                          railActualTop +
+                            RAIL_OPENER_HEIGHT +
+                            3 +
+                            railClusters.indexOf(cluster) * RAIL_MARKER_HEIGHT,
+                          devicePixelRatio,
+                        )}px)`,
+                }}
+              />
             </button>
           );
         })}
