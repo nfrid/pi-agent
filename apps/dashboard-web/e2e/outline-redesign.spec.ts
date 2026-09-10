@@ -5,6 +5,47 @@ import {
   VISUAL_TIMESTAMP,
 } from './visual-state-fixtures';
 
+type SimulatedWcoGeometry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+async function simulateWco(page: Page, values: SimulatedWcoGeometry) {
+  await page.evaluate((values) => {
+    const apply = (rules: CSSRuleList, overlay = false) => {
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSImportRule && rule.styleSheet)
+          apply(rule.styleSheet.cssRules, overlay);
+        if (rule instanceof CSSMediaRule) {
+          const isOverlay = rule.conditionText.includes(
+            'display-mode: window-controls-overlay',
+          );
+          if (isOverlay) rule.media.mediaText = 'all';
+          apply(rule.cssRules, overlay || isOverlay);
+        }
+        if (overlay && rule instanceof CSSStyleRule) {
+          for (const property of Array.from(rule.style)) {
+            const value = rule.style
+              .getPropertyValue(property)
+              .replace(
+                /env\(titlebar-area-(x|y|width|height)(?:,[^)]*)?\)/g,
+                (_, dimension: string) => `${values[dimension]}px`,
+              );
+            rule.style.setProperty(
+              property,
+              value,
+              rule.style.getPropertyPriority(property),
+            );
+          }
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) apply(sheet.cssRules);
+  }, values);
+}
+
 async function openTurns(page: Page, count: number, repliesPerTurn = 1) {
   const base = buildWorkingScenario();
   if (!base.sessionSnapshot) throw new Error('Missing transcript fixture');
@@ -43,7 +84,9 @@ async function openTurns(page: Page, count: number, repliesPerTurn = 1) {
     sessionSnapshot: { ...base.sessionSnapshot, entries },
   });
   await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
-  await expect(page.locator('.transcript-virtual-row').last()).toBeVisible();
+  await expect(
+    page.locator('.transcript-virtual-row, .transcript article').last(),
+  ).toBeVisible();
 }
 
 test('dense outline stays bounded, never scrolls on hover and searches every turn @desktop', async ({
@@ -58,7 +101,9 @@ test('dense outline stays bounded, never scrolls on hover and searches every tur
   const markers = rail.locator('.transcript-minimap-marker');
   expect(await markers.count()).toBeGreaterThan(1);
   expect(await markers.count()).toBeLessThan(300);
-  await expect(markers.last()).toHaveAttribute('aria-current', 'location');
+  await expect(
+    page.locator('.transcript-minimap-marker[aria-current="location"]'),
+  ).toHaveCount(1);
   const bounds = await markers.evaluateAll((elements) =>
     elements.map((element) => {
       const rect = element.getBoundingClientRect();
@@ -76,10 +121,16 @@ test('dense outline stays bounded, never scrolls on hover and searches every tur
   if (!railBox || !scrollBox) throw new Error('Missing outline geometry');
   expect(railBox.height).toBeLessThan(scrollBox.height);
   const before = await scroll.evaluate((element) => element.scrollTop);
+  const tick = markers.first().locator('i');
+  const restingWidth = (await tick.boundingBox())?.width;
+  if (restingWidth === undefined) throw new Error('Missing resting tick');
   await markers.first().hover();
   await expect
     .poll(() => scroll.evaluate((element) => element.scrollTop))
     .toBe(before);
+  await expect
+    .poll(async () => (await tick.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(restingWidth);
   await page
     .getByRole('button', { name: 'Open transcript outline', exact: true })
     .first()
@@ -128,6 +179,71 @@ test('dense outline stays bounded, never scrolls on hover and searches every tur
       .getByRole('button', { name: 'Open transcript outline', exact: true })
       .first(),
   ).toBeFocused();
+});
+
+test('23 desktop turns retain individual compact rail markers @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await openTurns(page, 23);
+  const markers = page.locator('.transcript-minimap-marker');
+  await expect(markers).toHaveCount(23);
+  expect(
+    await markers.evaluateAll((elements) =>
+      elements.every((element) => element.dataset.clusterSize === '1'),
+    ),
+  ).toBe(true);
+  const bounds = await markers.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect()),
+  );
+  for (let index = 1; index < bounds.length; index++) {
+    const current = bounds[index];
+    const previous = bounds[index - 1];
+    if (!current || !previous) throw new Error('Missing marker bounds');
+    expect(current.top - previous.top).toBe(8);
+  }
+});
+
+test('outline popup avoids PWA titlebar clearance while other surfaces retain it @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openTurns(page, 23);
+  await page
+    .getByRole('button', { name: 'Open transcript outline', exact: true })
+    .first()
+    .click();
+  const dialog = page.getByRole('dialog', {
+    name: 'Transcript outline',
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  const outlineHeader = dialog.locator('.surface-drawer-header');
+  await simulateWco(page, { x: 82, y: 0, width: 1240, height: 40 });
+  await expect(outlineHeader).toHaveCSS('min-height', '0px');
+  await expect(outlineHeader).toHaveCSS('padding-top', '16px');
+  await expect(outlineHeader).toHaveCSS('padding-bottom', '13px');
+  await expect(
+    outlineHeader.getByRole('button', { name: 'Close Transcript outline' }),
+  ).toHaveCSS('margin-right', '0px');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  const activityButton = page.getByRole('button', {
+    name: 'Open session activity',
+  });
+  if ((await activityButton.getAttribute('aria-expanded')) !== 'true')
+    await activityButton.click();
+  const activity = page.locator('.activity-panel.is-open');
+  await expect(activity).toBeVisible();
+  await expect(activity.locator('.activity-panel-bar')).toHaveCSS(
+    'min-height',
+    '40px',
+  );
+  await expect(activity.locator('.activity-panel-bar')).toHaveCSS(
+    'padding-right',
+    '132px',
+  );
 });
 
 test('mobile outline searches and jumps without covering the viewport', async ({

@@ -47,23 +47,31 @@
 .transcript-minimap-marker {
   position: relative;
   box-sizing: border-box;
-  flex: 0 0 20px;
-  height: 20px;
-  min-height: 20px;
+  flex: 0 0 8px;
+  height: 8px;
+  min-height: 8px;
   width: 44px;
   border: 0;
   border-radius: 3px;
   background: transparent;
-  padding: 7px 13px;
+  padding: 3px 13px;
   cursor: pointer;
   pointer-events: auto;
 }
 .transcript-minimap-marker i {
   display: block;
-  width: 18px;
-  height: 2px;
+  width: 12px;
+  height: 1px;
   border-radius: 1px;
-  background: var(--line);
+  background: var(--dim);
+  transition:
+    width 120ms ease,
+    background-color 120ms ease;
+}
+.transcript-minimap-marker:hover i,
+.transcript-minimap-marker:focus-visible i {
+  width: 20px;
+  background: var(--muted);
 }
 .transcript-minimap-marker.active i {
   background: var(--fg);

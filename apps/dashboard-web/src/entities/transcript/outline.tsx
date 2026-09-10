@@ -20,7 +20,7 @@ import {
 } from './landmarks';
 
 const MAX_RAIL_HEIGHT = 320;
-const RAIL_MARKER_HEIGHT = 20;
+const RAIL_MARKER_HEIGHT = 8;
 const RAIL_OPENER_HEIGHT = 28;
 
 function landmarkType(

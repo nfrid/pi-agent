@@ -544,3 +544,15 @@ body:has(.session-page) .global-tools > .palette-trigger {
     padding-block: 7px;
   }
 }
+
+@media (display-mode: window-controls-overlay) {
+  /* The outline is a content popover, not a titlebar-aligned drawer. */
+  .surface-drawer.outline-sheet .surface-drawer-header {
+    min-height: 0;
+    padding-block: 16px 13px;
+    -webkit-app-region: no-drag;
+  }
+  .surface-drawer.outline-sheet .surface-drawer-header > .session-icon-button {
+    margin-right: 0;
+  }
+}
