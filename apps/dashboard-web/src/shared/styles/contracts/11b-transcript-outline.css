@@ -439,7 +439,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
     margin-bottom: 4px;
   }
   .session-page > .session-control-layer .composer {
-    border-color: transparent;
     padding: 6px 7px 5px;
   }
   .session-page > .session-control-layer .composer textarea,
