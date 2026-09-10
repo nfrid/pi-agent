@@ -160,12 +160,15 @@ function PickerRow({
 
 export function ThreadLocationIndicator({
   checkout,
+  compact = false,
 }: {
   checkout: CheckoutSummary | undefined;
+  compact?: boolean;
 }) {
   const branch = checkout?.branch ?? checkout?.path.split('/').pop();
-  const prefix =
-    checkout?.kind === 'main'
+  const prefix = compact
+    ? ''
+    : checkout?.kind === 'main'
       ? 'Current checkout'
       : checkout?.kind === 'worktree'
         ? 'wt'
@@ -182,7 +185,13 @@ export function ThreadLocationIndicator({
       >
         <path d="M1.5 3.5h5l1.25 1.5h6.75v7.5h-13z" />
       </svg>
-      <span>{branch ? `${prefix} · ${branch}` : 'Thread checkout'}</span>
+      <span>
+        {branch
+          ? prefix
+            ? `${prefix} · ${branch}`
+            : branch
+          : 'Thread checkout'}
+      </span>
     </span>
   );
 }

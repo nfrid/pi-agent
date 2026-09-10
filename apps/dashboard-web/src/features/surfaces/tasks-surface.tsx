@@ -101,7 +101,7 @@ export function TasksSurface({
   ) : (
     fallbackSummary
   );
-  const renderTaskRows = (items: readonly TaskSurfaceTask[]) =>
+  const renderTaskRows = (items: readonly TaskSurfaceTask[], compact = false) =>
     items.map((row) => {
       const state = surfaceStateLabel(row.status);
       const id = row.id;
@@ -109,7 +109,7 @@ export function TasksSurface({
       const dependencies = taskDependencies(row);
       return (
         <div
-          className={`task-row ${surfaceStateClass(state)}`}
+          className={`task-row ${surfaceStateClass(state)}${compact ? ' activity-task-row-compact' : ''}`}
           key={`${surface.id}-${id}`}
         >
           <span className="surface-state" title={state} aria-hidden="true">
@@ -117,17 +117,19 @@ export function TasksSurface({
           </span>
           <span className="sr-only">{state}</span>
           <span className="task-row-main">
-            <strong>{id}</strong>
+            {!compact && <strong>{id}</strong>}
             {row.text || 'Untitled task'}
           </span>
-          <span className="task-row-meta">
-            {priority && <b className={`priority-${priority}`}>{priority}</b>}
-            {dependencies.length > 0 && (
-              <small title={`Depends on ${dependencies.join(', ')}`}>
-                ↳ {dependencies.join(', ')}
-              </small>
-            )}
-          </span>
+          {!compact && (
+            <span className="task-row-meta">
+              {priority && <b className={`priority-${priority}`}>{priority}</b>}
+              {dependencies.length > 0 && (
+                <small title={`Depends on ${dependencies.join(', ')}`}>
+                  ↳ {dependencies.join(', ')}
+                </small>
+              )}
+            </span>
+          )}
         </div>
       );
     });
@@ -138,29 +140,51 @@ export function TasksSurface({
         aria-label="Tasks"
         tabIndex={-1}
       >
-        <header className="activity-panel-header">
-          <h2>Tasks</h2>
-          <span
-            role="status"
-            aria-label={`${completed} of ${total} tasks complete`}
+        {previewRows.length === 0 && rows.length > 0 ? (
+          <details
+            className="activity-panel-completed activity-panel-task-disclosure"
+            onToggle={(event) => setPanelExpanded(event.currentTarget.open)}
           >
-            {completed}/{total} complete
-          </span>
-        </header>
-        <div className="activity-panel-rows">
-          {renderTaskRows(panelExpanded ? rows : previewRows)}
-        </div>
-        {rows.length > previewRows.length && (
-          <button
-            type="button"
-            className="activity-panel-expand"
-            aria-expanded={panelExpanded}
-            onClick={() => setPanelExpanded((expanded) => !expanded)}
-          >
-            {panelExpanded
-              ? 'Show fewer tasks'
-              : `Show all ${rows.length} tasks`}
-          </button>
+            <summary aria-label={`${completed} of ${total} tasks complete`}>
+              <span>Tasks</span>
+              <span>
+                {completed}/{total}
+              </span>
+            </summary>
+            {panelExpanded && (
+              <div className="activity-panel-rows">{renderTaskRows(rows)}</div>
+            )}
+          </details>
+        ) : (
+          <>
+            <header className="activity-panel-header">
+              <h2>Tasks</h2>
+              <span
+                role="status"
+                aria-label={`${completed} of ${total} tasks complete`}
+              >
+                {completed}/{total} complete
+              </span>
+            </header>
+            <div className="activity-panel-rows">
+              {renderTaskRows(
+                panelExpanded ? rows : previewRows,
+                !panelExpanded,
+              )}
+            </div>
+            {rows.length > previewRows.length && (
+              <button
+                type="button"
+                className="activity-panel-expand"
+                aria-expanded={panelExpanded}
+                onClick={() => setPanelExpanded((expanded) => !expanded)}
+              >
+                {panelExpanded
+                  ? 'Show fewer tasks'
+                  : `Show all ${rows.length} tasks`}
+              </button>
+            )}
+          </>
         )}
       </section>
     );

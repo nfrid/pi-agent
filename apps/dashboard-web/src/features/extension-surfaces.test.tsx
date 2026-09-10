@@ -1643,6 +1643,7 @@ describe('live extension surface fixtures', () => {
       />,
     );
     expect(markup).toContain('Show all 4 tasks');
+    expect(markup).not.toContain('<strong>active</strong>');
     expect(markup).not.toContain('Done</');
 
     let tree!: ReturnType<typeof create>;
@@ -1731,7 +1732,14 @@ describe('live extension surface fixtures', () => {
       );
     });
     expect(JSON.stringify(tree.toJSON())).not.toContain('Done');
-    act(() => tree.root.findByType('button').props.onClick());
+    expect(JSON.stringify(tree.toJSON())).toContain('Tasks');
+    expect(JSON.stringify(tree.toJSON())).toContain('"1","/","2"');
+    expect(JSON.stringify(tree.toJSON())).not.toContain('Show all');
+    act(() =>
+      tree.root.findByType('details').props.onToggle({
+        currentTarget: { open: true },
+      }),
+    );
     expect(JSON.stringify(tree.toJSON())).toContain('Done');
     expect(JSON.stringify(tree.toJSON())).toContain('Dropped');
     act(() => tree.unmount());
@@ -1811,11 +1819,14 @@ describe('live extension surface fixtures', () => {
         ])}
       />,
     );
-    expect(markup).toContain('Active 1');
-    expect(markup).toContain('Waiting 1');
-    expect(markup).toContain('Failed 1');
-    expect(markup).toContain('Finished 1');
-    expect(markup).toContain('<summary>Finished (1)</summary>');
+    expect(markup).toContain('title="Active: 1"');
+    expect(markup).toContain('title="Waiting: 1"');
+    expect(markup).toContain('title="Failed: 1"');
+    expect(markup).toContain('aria-label="1 finished"');
+    expect(markup).toContain('title="Finished: 1"');
+    expect(markup).not.toContain('Finished (1)');
+    expect(markup).not.toContain('read-only');
+    expect(markup).not.toContain('waiting for a slot');
     expect(markup.indexOf('Active</strong>')).toBeLessThan(
       markup.indexOf('Waiting</strong>'),
     );

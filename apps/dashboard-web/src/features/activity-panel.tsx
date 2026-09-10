@@ -305,7 +305,7 @@ export function ActivityPanel({
         {checkout && (
           <section className="activity-panel-location">
             <h2>Checkout</h2>
-            <ThreadLocationIndicator checkout={checkout} />
+            <ThreadLocationIndicator checkout={checkout} compact />
           </section>
         )}
       </div>
