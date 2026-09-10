@@ -140,6 +140,9 @@ test('activity section hit targets span the panel while content stays inset @des
       ),
     )
     .not.toBe('rgba(0, 0, 0, 0)');
+  await expect(panel).toHaveScreenshot('activity-row-edge-hover.png', {
+    animations: 'disabled',
+  });
   await delegateToggle.click({ position: { x: 1, y: delegateBox.height / 2 } });
   await expect(page.locator('.delegate-transcript-drawer')).toBeVisible();
 });

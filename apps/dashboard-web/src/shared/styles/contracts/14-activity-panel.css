@@ -87,6 +87,8 @@
   display: grid;
   min-width: 0;
 }
+/* Opt rows or non-row wrappers into the inherited inset, not their section.
+   Interactive rows keep full-width hit areas; avoid nesting inset wrappers. */
 .activity-panel .activity-panel-inset {
   padding-inline: var(--activity-panel-inset);
 }
