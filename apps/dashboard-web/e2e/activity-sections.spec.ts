@@ -82,3 +82,41 @@ for (const active of [false, true]) {
     }
   });
 }
+
+test('activity section hit targets span the panel while content stays inset @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installVisualStateScenario(page, buildActivityPanelScenario(true));
+  const panel = page.locator('.activity-panel');
+  const panelBox = await panel.boundingBox();
+  if (!panelBox) throw new Error('Activity panel is not laid out.');
+
+  const tasks = panel.getByRole('region', { name: 'Tasks', exact: true });
+  const taskHeader = tasks.getByRole('heading').getByRole('button');
+  const taskHeaderBox = await taskHeader.boundingBox();
+  const taskTextBox = await tasks
+    .locator('.task-row-main')
+    .first()
+    .boundingBox();
+  if (!taskHeaderBox || !taskTextBox)
+    throw new Error('Task geometry is missing.');
+  expect(taskHeaderBox.x).toBe(panelBox.x);
+  expect(taskHeaderBox.width).toBe(panelBox.width);
+  expect(taskTextBox.x).toBeGreaterThan(panelBox.x);
+
+  await taskHeader.click({ position: { x: 1, y: 1 } });
+  await expect(taskHeader).toHaveAttribute('aria-expanded', 'true');
+
+  const delegates = panel.getByRole('region', {
+    name: 'Delegates',
+    exact: true,
+  });
+  const delegateToggle = delegates.locator('.delegate-row-toggle').first();
+  const delegateBox = await delegateToggle.boundingBox();
+  if (!delegateBox) throw new Error('Delegate row geometry is missing.');
+  expect(delegateBox.x).toBe(panelBox.x);
+  expect(delegateBox.width).toBe(panelBox.width);
+  await delegateToggle.click({ position: { x: 1, y: delegateBox.height / 2 } });
+  await expect(page.locator('.delegate-transcript-drawer')).toBeVisible();
+});

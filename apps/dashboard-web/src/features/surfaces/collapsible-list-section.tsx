@@ -29,6 +29,7 @@ export function ActivityCollapsibleSection({
     >
       <h2 className="activity-panel-header activity-panel-header-toggle">
         <button
+          className="activity-panel-inset"
           type="button"
           aria-label={
             expanded ? `Show fewer ${noun}` : `Show all ${totalCount} ${noun}`
