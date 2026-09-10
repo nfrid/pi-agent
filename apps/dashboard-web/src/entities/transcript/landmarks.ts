@@ -218,11 +218,3 @@ export function sampleTranscriptLandmarks(
   const selectedKeys = new Set(selected.map((landmark) => landmark.key));
   return landmarks.filter((landmark) => selectedKeys.has(landmark.key));
 }
-
-/** The minimap has its own smaller, role-neutral density cap. */
-export function sampleTranscriptMinimapLandmarks(
-  landmarks: readonly TranscriptLandmark[],
-  maximum: number,
-): TranscriptLandmark[] {
-  return evenlySampleLandmarks(landmarks, maximum);
-}

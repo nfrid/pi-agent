@@ -20,6 +20,8 @@ import {
 } from './landmarks';
 
 const MAX_RAIL_CLUSTERS = 24;
+const RAIL_MARKER_HEIGHT = 20;
+const RAIL_OPENER_HEIGHT = 28;
 
 function landmarkType(
   kind: TranscriptLandmark['kind'],
@@ -66,9 +68,27 @@ export function TranscriptOutline({
     () => selectTranscriptUserTurns(landmarks),
     [landmarks],
   );
+  const [railViewportHeight, setRailViewportHeight] = useState(520);
+  const railClusterCapacity = Math.max(
+    1,
+    Math.min(
+      MAX_RAIL_CLUSTERS,
+      Math.floor(
+        Math.max(20, railViewportHeight - RAIL_OPENER_HEIGHT) /
+          RAIL_MARKER_HEIGHT,
+      ),
+    ),
+  );
   const railClusters = useMemo(
-    () => clusterTranscriptUserTurns(userTurns, MAX_RAIL_CLUSTERS),
-    [userTurns],
+    () => clusterTranscriptUserTurns(userTurns, railClusterCapacity),
+    [railClusterCapacity, userTurns],
+  );
+  const railHeight = Math.min(
+    520,
+    Math.max(
+      RAIL_OPENER_HEIGHT + RAIL_MARKER_HEIGHT,
+      RAIL_OPENER_HEIGHT + railClusters.length * RAIL_MARKER_HEIGHT,
+    ),
   );
   const [activeKey, setActiveKey] = useState(userTurns[0]?.key);
   const [search, setSearch] = useState('');
@@ -84,6 +104,33 @@ export function TranscriptOutline({
   const selectedBranchPoint = branchPointId
     ? branchPointsById.get(branchPointId)
     : undefined;
+  useEffect(() => {
+    const scrollElement = scrollElementRef?.current;
+    const updateViewportHeight = () => {
+      const controlHeight = scrollElement
+        ? Number.parseFloat(
+            getComputedStyle(scrollElement).getPropertyValue(
+              '--session-control-height',
+            ),
+          ) || 0
+        : 0;
+      const measuredHeight = scrollElement
+        ? scrollElement.clientHeight - controlHeight
+        : window.innerHeight - 100;
+      setRailViewportHeight(Math.max(20, measuredHeight));
+    };
+    updateViewportHeight();
+    const observer =
+      scrollElement && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(updateViewportHeight)
+        : undefined;
+    observer?.observe(scrollElement);
+    window.addEventListener('resize', updateViewportHeight);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateViewportHeight);
+    };
+  }, [scrollElementRef]);
   const userTurnsRef = useRef(userTurns);
   userTurnsRef.current = userTurns;
   const landmarkRevision = useMemo(
@@ -178,6 +225,15 @@ export function TranscriptOutline({
     onJump(landmark);
     onOpenChange?.(false);
   };
+  const focusResult = (current: HTMLElement, direction: 1 | -1) => {
+    const results = Array.from(
+      current
+        .closest('.transcript-outline-list')
+        ?.querySelectorAll<HTMLButtonElement>('.transcript-outline-jump') ?? [],
+    );
+    const index = results.indexOf(current as HTMLButtonElement);
+    results[(index + direction + results.length) % results.length]?.focus();
+  };
   const list = (
     <div className="transcript-outline-list surface-scroll-region">
       <div className="transcript-outline-search-wrap">
@@ -187,6 +243,18 @@ export function TranscriptOutline({
           type="search"
           value={search}
           onChange={(event) => setSearch(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              event.currentTarget
+                .closest('.transcript-outline-list')
+                ?.querySelector<HTMLButtonElement>('.transcript-outline-jump')
+                ?.focus();
+            } else if (event.key === 'Enter' && filteredTurns[0]) {
+              event.preventDefault();
+              jumpAndClose(filteredTurns[0]);
+            }
+          }}
           placeholder="Search prompts"
           aria-label="Search transcript turns"
         />
@@ -209,6 +277,15 @@ export function TranscriptOutline({
                 type="button"
                 className="transcript-outline-jump"
                 onClick={() => jumpAndClose(landmark)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    focusResult(
+                      event.currentTarget,
+                      event.key === 'ArrowDown' ? 1 : -1,
+                    );
+                  }
+                }}
                 aria-current={
                   activeKey === landmark.key ? 'location' : undefined
                 }
@@ -305,7 +382,23 @@ export function TranscriptOutline({
   ];
   return (
     <>
-      <aside className="transcript-minimap" aria-label="Transcript turn map">
+      <aside
+        className="transcript-minimap"
+        aria-label="Transcript turn map"
+        style={{ height: railHeight }}
+      >
+        <button
+          type="button"
+          className="transcript-minimap-open"
+          data-transcript-outline-opener=""
+          aria-label="Open transcript outline"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title="Open transcript outline"
+          onClick={() => onOpenChange?.(true)}
+        >
+          <span aria-hidden="true">⌕</span>
+        </button>
         {railClusters.map((cluster) => {
           const representative = cluster.representative;
           const grouped = cluster.landmarks.length > 1;
@@ -318,6 +411,12 @@ export function TranscriptOutline({
               className={`transcript-minimap-marker${activeKey && cluster.landmarks.some((landmark) => landmark.key === activeKey) ? ' active' : ''}`}
               key={cluster.key}
               aria-label={clusterLabel}
+              aria-current={
+                activeKey &&
+                cluster.landmarks.some((landmark) => landmark.key === activeKey)
+                  ? 'location'
+                  : undefined
+              }
               data-cluster-size={cluster.landmarks.length}
               onClick={() => onJump(representative)}
             >
@@ -337,6 +436,7 @@ export function TranscriptOutline({
         kind="work"
         pages={pages}
         className="surface-drawer work-surface-drawer outline-sheet"
+        layerClassName={`surface-drawer-layer outline-sheet-layer${scrollElementRef ? '' : ' outline-sheet-embedded'}`}
         onDepthChange={(depth) => {
           if (depth < 2 && selectedBranchPoint) {
             onBranchPointChange?.(undefined);

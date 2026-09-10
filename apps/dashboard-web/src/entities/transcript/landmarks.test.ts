@@ -3,7 +3,6 @@ import {
   buildTranscriptLandmarks,
   clusterTranscriptUserTurns,
   sampleTranscriptLandmarks,
-  sampleTranscriptMinimapLandmarks,
   selectTranscriptUserTurns,
   type TranscriptLandmark,
 } from './landmarks';
@@ -103,15 +102,6 @@ describe('transcript landmark sampling', () => {
 
     expect(sampled).toHaveLength(8);
     expect(sampled.every((landmark) => landmark.kind === 'user')).toBe(true);
-    expect(sampled[0]?.itemIndex).toBe(0);
-    expect(sampled.at(-1)?.itemIndex).toBe(299);
-  });
-
-  it('keeps minimap sampling independent from drawer sampling', () => {
-    const input = landmarks(300, [2, 100, 297]);
-    const sampled = sampleTranscriptMinimapLandmarks(input, 4);
-
-    expect(sampled).toHaveLength(4);
     expect(sampled[0]?.itemIndex).toBe(0);
     expect(sampled.at(-1)?.itemIndex).toBe(299);
   });
