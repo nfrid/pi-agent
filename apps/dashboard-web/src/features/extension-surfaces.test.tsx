@@ -51,6 +51,7 @@ import {
   delegatePanelCounters,
   delegatePreviewGroups,
   isParentResumeGate,
+  orderDelegatePanelGroups,
   selectedDelegateCompositeRun,
 } from './surfaces/delegate-surface';
 import { TasksSurface, taskPreviewRows } from './surfaces/tasks-surface';
@@ -1778,6 +1779,17 @@ describe('live extension surface fixtures', () => {
       'finished-6',
       'finished-5',
     ]);
+    expect(orderDelegatePanelGroups(groups).map(({ row }) => row.name)).toEqual(
+      [
+        'active',
+        'finished-6',
+        'finished-5',
+        'finished-4',
+        'finished-3',
+        'finished-2',
+        'finished-1',
+      ],
+    );
     expect(
       delegatePreviewGroups([
         group('active-1', 'running'),
@@ -1966,7 +1978,11 @@ describe('live extension surface fixtures', () => {
     ).toEqual(['1', ' more']);
     act(() => header.props.onClick());
     expect(header.props['aria-expanded']).toBe(true);
-    expect(JSON.stringify(tree.toJSON())).toContain('Finished worker');
+    const expandedMarkup = JSON.stringify(tree.toJSON());
+    expect(expandedMarkup).toContain('Finished worker');
+    expect(expandedMarkup.indexOf('Finished newest worker')).toBeLessThan(
+      expandedMarkup.indexOf('Finished newer worker'),
+    );
     expect(
       tree.root.findAllByProps({ className: 'activity-panel-hidden-chip' }),
     ).toHaveLength(0);

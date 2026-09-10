@@ -93,6 +93,23 @@ export function delegatePanelCounters(
   );
 }
 
+function delegateCompletionTime(group: DelegateCompositeGroup): number {
+  const row = group.row;
+  const timestamps = [
+    row.workflow?.settledAt,
+    row.finishedAt,
+    ...(row.runs ?? []).map((run) => run.finishedAt),
+  ].filter((value): value is number => value !== undefined);
+  return timestamps.length > 0 ? Math.max(...timestamps) : row.createdAt;
+}
+
+function compareDelegateCompletions(
+  left: DelegateCompositeGroup,
+  right: DelegateCompositeGroup,
+): number {
+  return delegateCompletionTime(right) - delegateCompletionTime(left);
+}
+
 export function orderDelegatePanelGroups(
   groups: readonly DelegateCompositeGroup[],
 ): readonly DelegateCompositeGroup[] {
@@ -104,23 +121,19 @@ export function orderDelegatePanelGroups(
   };
   return groups
     .map((group, index) => ({ group, index }))
-    .sort(
-      (left, right) =>
-        order[delegatePanelBucket(left.group.row)] -
-          order[delegatePanelBucket(right.group.row)] ||
-        left.index - right.index,
-    )
+    .sort((left, right) => {
+      const leftBucket = delegatePanelBucket(left.group.row);
+      const bucketOrder =
+        order[leftBucket] - order[delegatePanelBucket(right.group.row)];
+      return (
+        bucketOrder ||
+        (leftBucket === 'finished'
+          ? compareDelegateCompletions(left.group, right.group) ||
+            left.index - right.index
+          : left.index - right.index)
+      );
+    })
     .map(({ group }) => group);
-}
-
-function delegateCompletionTime(group: DelegateCompositeGroup): number {
-  const row = group.row;
-  const timestamps = [
-    row.workflow?.settledAt,
-    row.finishedAt,
-    ...(row.runs ?? []).map((run) => run.finishedAt),
-  ].filter((value): value is number => value !== undefined);
-  return timestamps.length > 0 ? Math.max(...timestamps) : row.createdAt;
 }
 
 /** Keep every unfinished row and fill the three-row minimum with newest finishes. */
@@ -135,8 +148,8 @@ export function delegatePreviewGroups(
     .filter(({ group }) => delegatePanelBucket(group.row) === 'finished')
     .sort(
       (left, right) =>
-        delegateCompletionTime(right.group) -
-          delegateCompletionTime(left.group) || left.index - right.index,
+        compareDelegateCompletions(left.group, right.group) ||
+        left.index - right.index,
     )
     .map(({ group }) => group);
   return [...current, ...finished.slice(0, Math.max(0, 3 - current.length))];

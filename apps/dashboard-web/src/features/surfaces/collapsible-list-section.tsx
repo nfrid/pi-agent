@@ -19,7 +19,7 @@ export function ActivityCollapsibleSection({
   children: ReactNode;
 }) {
   const hiddenCount = Math.max(0, totalCount - visibleCount);
-  const canExpand = totalCount > visibleCount;
+  const canToggle = expanded || totalCount > visibleCount;
   const noun = title.toLowerCase();
   return (
     <section
@@ -34,7 +34,7 @@ export function ActivityCollapsibleSection({
             expanded ? `Show fewer ${noun}` : `Show all ${totalCount} ${noun}`
           }
           aria-expanded={expanded}
-          disabled={!canExpand}
+          disabled={!canToggle}
           onClick={onToggle}
         >
           <span className="activity-panel-heading-title">
