@@ -140,7 +140,7 @@ export function todoStateText(store: TaskStore): string {
   return boundedTodoText(
     store,
     `Current todo state (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).`,
-    'Update this state with the todo tool instead of free-form planning.',
+    'Update this state with todo_update instead of free-form planning.',
   );
 }
 

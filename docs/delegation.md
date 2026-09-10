@@ -11,7 +11,7 @@ gate     = intentionally delay result delivery
 
 ## Delegate API
 
-A fresh child uses a meaningful kebab-case `id`, a focused `task`, and an exact configured `route`:
+`delegate_start` launches a fresh child with a meaningful kebab-case `id`, a focused `task`, and an exact configured `route`:
 
 ```json
 {
@@ -23,15 +23,14 @@ A fresh child uses a meaningful kebab-case `id`, a focused `task`, and an exact 
 
 The normal model-facing fields are:
 
-- exactly one of `id` or `continue`;
-- required `task`;
-- optional `route`, `inputs`, `base`, `scope`, `write`, `cwd`, `web`, and `skills`.
+- required `id`, `task`, and `route`;
+- optional `inputs`, `base`, `scope`, `write`, `cwd`, `web`, and `skills`.
 
 Fresh delegates default to fresh context. `write: true` gives file-editing tools and automatically selects an isolated Git worktree. `web: true` enables the web tool bundle. `scope` is advisory, not a filesystem boundary. Fresh relative cwd values resolve from the parent cwd; continuations retain their original cwd.
 
 Pass `skills: [".agents/skills/pi-docs/SKILL.md"]` when a child needs a specific workflow. Up to 16 explicit skill files or directories can be selected. Paths resolve against the fresh requested cwd before worktree isolation; `~` uses the effective home directory. Children do not discover the parent's normal skill catalog. Selection loads the skill catalog entry, so the delegated task should make its intended use clear. Skill files remain at their resolved source paths, not copied or version-pinned in the child worktree.
 
-A continuation resumes the same child session and retained workspace:
+`delegate_continue` resumes the same child session and retained workspace. It accepts only `continue`, `task`, and optional `route` and `scope`:
 
 ```json
 {
@@ -86,7 +85,8 @@ Batch a fan-in:
 
 ```json
 {
-  "all": ["transport-audit", "persistence-audit"]
+  "mode": "all",
+  "delegates": ["transport-audit", "persistence-audit"]
 }
 ```
 
@@ -94,7 +94,8 @@ Delay a race until the parent would otherwise become idle:
 
 ```json
 {
-  "any": ["hypothesis-a", "hypothesis-b"],
+  "mode": "any",
+  "delegates": ["hypothesis-a", "hypothesis-b"],
   "delivery": "idle"
 }
 ```

@@ -19,8 +19,11 @@ const References = Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
 
 const Parameters = Type.Object(
   {
-    all: Type.Optional(References),
-    any: Type.Optional(References),
+    mode: StringEnum(['all', 'any'] as const, {
+      description:
+        'Whether the gate waits for every delegate or the first one.',
+    }),
+    delegates: References,
     delivery: Type.Optional(
       StringEnum(['safe', 'idle'] as const, {
         description:
@@ -30,10 +33,7 @@ const Parameters = Type.Object(
   },
   {
     additionalProperties: false,
-    oneOf: [
-      { required: ['all'], not: { required: ['any'] } },
-      { required: ['any'], not: { required: ['all'] } },
-    ],
+    required: ['mode', 'delegates'],
   },
 );
 
@@ -46,9 +46,9 @@ export function isExplicitGate(wake: Pick<WakeSnapshot, 'id'>): boolean {
 }
 
 function condition(params: GateToolParams): WakeCondition {
-  if (params.all) return { all: params.all };
-  if (params.any) return { any: params.any };
-  throw new Error('Exactly one of all or any is required.');
+  return params.mode === 'all'
+    ? { all: params.delegates }
+    : { any: params.delegates };
 }
 
 function conditionText(value: WakeCondition): string {
@@ -69,7 +69,7 @@ export function registerDelegateGateTool(
     name: 'delegate_gate',
     label: 'Delegate Gate',
     description:
-      'Override eager result delivery only for an all condition, or for an any condition with delivery=idle. Do not call this for any with safe delivery: delegates already deliver that way by default. Exactly one gate is active per parent branch; a later call replaces it.',
+      'Override eager result delivery for selected delegates. Use mode=all to batch a fan-in, or mode=any with delivery=idle to delay a race. Do not call this for mode=any with safe delivery: delegates already deliver that way by default. Exactly one gate is active per parent branch; a later call replaces it.',
     parameters: Parameters,
     async execute(
       _toolCallId,
@@ -116,8 +116,8 @@ export function registerDelegateGateTool(
       };
     },
     renderCall(args, theme) {
-      const mode = args.all ? 'all' : args.any ? 'any' : '';
-      const count = args.all?.length ?? args.any?.length ?? 0;
+      const mode = args.mode === 'all' || args.mode === 'any' ? args.mode : '';
+      const count = Array.isArray(args.delegates) ? args.delegates.length : 0;
       return new Text(
         `${theme.fg('toolTitle', theme.bold('delegate_gate'))}${mode ? ` ${theme.fg('muted', mode)}` : ''}${count ? ` ${theme.fg('accent', String(count))}` : ''}`,
         0,

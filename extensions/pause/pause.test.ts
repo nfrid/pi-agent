@@ -147,7 +147,10 @@ describe('pause extension', () => {
     handlers.get('session_shutdown')?.({}, ctx);
   });
 
-  test('treats fully paused foreground delegation as a main boundary', async () => {
+  test.each([
+    'delegate_start',
+    'delegate_continue',
+  ])('treats fully paused %s as a main boundary', async (toolName) => {
     const handlers = new Map<
       string,
       (event: unknown, ctx: ExtensionContext) => unknown
@@ -200,7 +203,7 @@ describe('pause extension', () => {
     pauseExtension(pi);
     handlers.get('session_start')?.({}, ctx);
     handlers.get('tool_execution_start')?.(
-      { toolCallId: 'delegate-call', toolName: 'delegate' },
+      { toolCallId: 'delegate-call', toolName },
       ctx,
     );
     await commands.get('pause')?.handler('', ctx);
@@ -224,7 +227,7 @@ describe('pause extension', () => {
 
     resumeRuntimePause(pi, ctx);
     handlers.get('tool_execution_end')?.(
-      { toolCallId: 'delegate-call', toolName: 'delegate' },
+      { toolCallId: 'delegate-call', toolName },
       ctx,
     );
     handlers.get('session_shutdown')?.({}, ctx);
@@ -265,7 +268,7 @@ describe('pause extension', () => {
     pauseExtension(pi);
     handlers.get('session_start')?.({}, ctx);
     handlers.get('tool_execution_start')?.(
-      { toolCallId: 'delegate-call', toolName: 'delegate' },
+      { toolCallId: 'delegate-call', toolName: 'delegate_start' },
       ctx,
     );
     handlers.get('tool_execution_start')?.(
@@ -323,7 +326,7 @@ describe('pause extension', () => {
     const coordinator = getPauseCoordinator('tool-scope-new');
     coordinator.request();
     handlers.get('tool_execution_end')?.(
-      { toolCallId: 'reused', toolName: 'delegate' },
+      { toolCallId: 'reused', toolName: 'delegate_start' },
       old,
     );
     expect(coordinator.snapshot()?.mainReached).toBe(false);

@@ -1278,7 +1278,10 @@ describe('delegate history adapter', () => {
     expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);
   });
 
-  it('joins persisted delegate call metadata to workflow-only settled runs', () => {
+  it.each([
+    'delegate',
+    'delegate_start',
+  ])('joins persisted %s call metadata to workflow-only settled runs', (toolName) => {
     const call = {
       type: 'message',
       id: 'delegate-call',
@@ -1287,7 +1290,7 @@ describe('delegate history adapter', () => {
         content: [
           {
             type: 'toolCall',
-            name: 'delegate',
+            name: toolName,
             arguments: {
               id: 'review-ui',
               name: 'Review UI',
@@ -1367,7 +1370,10 @@ describe('delegate history adapter', () => {
     expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);
   });
 
-  it('targets exact continuations at the new workflow attempt', () => {
+  it.each([
+    'delegate',
+    'delegate_continue',
+  ])('targets exact %s continuations at the new workflow attempt', (toolName) => {
     const call = projectDelegateHistoryEntry(
       {
         type: 'message',
@@ -1377,7 +1383,7 @@ describe('delegate history adapter', () => {
           content: [
             {
               type: 'toolCall',
-              name: 'delegate',
+              name: toolName,
               arguments: {
                 continue: 'review@1',
                 task: 'Fix the review findings.',

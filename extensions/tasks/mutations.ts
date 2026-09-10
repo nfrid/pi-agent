@@ -2,23 +2,14 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import {
-  findTask,
-  missingDeps,
-  newId,
-  normalizeId,
-  normalizeIds,
-  stats,
-  unfinished,
-  validateDependencyGraph,
-  validateDeps,
-} from './domain';
+import { normalizeId, normalizeIds, validateDependencyGraph } from './domain';
 import { dashboard } from './format';
 import {
-  type Action,
   MAX_TODO_RESULT_CHARS,
-  type Params,
+  type MutationParams,
   type Task,
+  type TaskChange,
+  type ToolName,
 } from './model';
 import {
   bumpNextIdFromTasks,
@@ -44,15 +35,12 @@ export interface MutationEffects {
 
 export function executeMutation(
   store: TaskStore,
-  action: Action,
-  params: Params,
+  tool: ToolName,
+  params: MutationParams,
   effects?: MutationEffects,
 ): MutationResult {
   const snapshot = captureMutationSnapshot(store);
-  const result =
-    action === 'batch'
-      ? mutateBatchUnsafe(store, params.operations ?? [])
-      : mutateUnsafe(store, action, params);
+  const result = mutateUnsafe(store, tool, params);
   if (result.error) restoreMutationSnapshot(store, snapshot);
   if (!effects || (result.error && !effects.updateOnError)) {
     if (!result.error && result.changed) store.onChange();
@@ -79,249 +67,189 @@ export function executeMutation(
 
 export function mutate(
   store: TaskStore,
-  action: Action,
-  params: Params,
+  tool: ToolName,
+  params: MutationParams,
 ): MutationResult {
-  return executeMutation(store, action, params);
-}
-
-export function mutateBatch(
-  store: TaskStore,
-  operations: NonNullable<Params['operations']>,
-): MutationResult {
-  return executeMutation(store, 'batch', { action: 'batch', operations });
+  return executeMutation(store, tool, params);
 }
 
 export function applyMutation(
   store: TaskStore,
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  action: Action,
-  params: Params,
+  tool: ToolName,
+  params: MutationParams,
   options: { updateOnError?: boolean } = {},
 ): MutationResult {
-  return executeMutation(store, action, params, {
+  return executeMutation(store, tool, params, {
     updateUi: () => updateUi(store, ctx),
     persist: () => persist(store, pi),
     updateOnError: options.updateOnError ?? true,
   });
 }
 
-function mutateBatchUnsafe(
-  store: TaskStore,
-  operations: NonNullable<Params['operations']>,
-): MutationResult {
-  if (!operations.length)
-    return {
-      changed: false,
-      message: 'operations are required for batch',
-      error: 'operations are required for batch',
-    };
-
-  const messages: string[] = [];
-  let changed = false;
-  for (const operation of operations) {
-    const step = mutateUnsafe(store, operation.action, operation);
-    const message =
-      operation.action === 'list' && !step.error
-        ? `listed ${operation.include_done ? stats(store).total : stats(store).active} tasks`
-        : step.message;
-    messages.push(step.error ? `error: ${message}` : message);
-    if (step.error)
-      return {
-        changed: false,
-        message: messages.join('; '),
-        error: step.error,
-      };
-    changed ||= step.changed;
-  }
-  return { changed, message: messages.join('; ') };
-}
-
 function mutateUnsafe(
   store: TaskStore,
-  action: Action,
-  params: Params,
+  tool: ToolName,
+  params: MutationParams,
 ): MutationResult {
-  const now = Date.now();
-  const id = normalizeId(params.id);
-  if (action === 'list')
+  if (tool === 'todo_list') {
+    const listParams = params as Extract<
+      MutationParams,
+      { include_done?: boolean }
+    >;
     return {
       changed: false,
       message: dashboard(
         store,
-        Boolean(params.include_done),
+        Boolean(listParams.include_done),
         80,
         MAX_TODO_RESULT_CHARS,
       ),
     };
-  if (action === 'batch')
+  }
+  if (tool === 'todo_update')
+    return updateTasks(store, (params as { changes?: TaskChange[] }).changes);
+  return removeTasks(store, (params as { ids?: string[] }).ids);
+}
+
+function updateTasks(
+  store: TaskStore,
+  changes: TaskChange[] | undefined,
+): MutationResult {
+  if (!changes?.length) {
     return {
       changed: false,
-      message: 'batch operations cannot be nested',
-      error: 'batch operations cannot be nested',
+      message: 'changes are required',
+      error: 'changes are required',
     };
-
-  if (action === 'add') {
-    if (!params.text?.trim())
-      return {
-        changed: false,
-        message: 'text is required',
-        error: 'text is required',
-      };
-    const task: Task = {
-      id: normalizeId(params.id) ?? newId(store),
-      text: params.text.trim(),
-      status: params.status ?? 'todo',
-      dependsOn: normalizeIds(params.depends_on),
-      priority: params.priority ?? 'normal',
-      notes: params.notes,
-      createdAt: now,
-      updatedAt: now,
-    };
-    if (store.state.tasks.some((existing) => existing.id === task.id))
-      return {
-        changed: false,
-        message: `${task.id} already exists`,
-        error: `${task.id} already exists`,
-      };
-    const depError = validateDeps(store, task.id, task.dependsOn);
-    if (depError) return { changed: false, message: depError, error: depError };
-    store.state.tasks.push(task);
-    return { changed: true, message: `added ${task.id}` };
   }
 
-  if (action === 'replace') {
-    const incoming = params.tasks ?? [];
-    const seen = new Set<string>();
-    const tasks: Task[] = [];
-    for (const raw of incoming) {
-      const taskId = normalizeId(raw.id);
-      if (!taskId)
-        return {
-          changed: false,
-          message: 'every task needs an id',
-          error: 'every task needs an id',
-        };
-      if (seen.has(taskId))
-        return {
-          changed: false,
-          message: `duplicate id ${taskId}`,
-          error: `duplicate id ${taskId}`,
-        };
-      seen.add(taskId);
-      tasks.push({
-        id: taskId,
-        text: raw.text,
-        status: raw.status ?? 'todo',
-        dependsOn: normalizeIds(raw.depends_on),
-        priority: raw.priority ?? 'normal',
-        notes: raw.notes,
-        createdAt: now,
-        updatedAt: now,
-      });
+  const now = Date.now();
+  const existing = new Map(store.state.tasks.map((task) => [task.id, task]));
+  const seen = new Set<string>();
+  const nextById = new Map(existing);
+  const changedIds: string[] = [];
+  const statusChangedIds: string[] = [];
+
+  for (const change of changes) {
+    const id = normalizeId(change.id);
+    if (!id) {
+      return {
+        changed: false,
+        message: 'every change needs an id',
+        error: 'every change needs an id',
+      };
     }
-    const dependencyError = validateDependencyGraph(tasks);
-    if (dependencyError)
-      return {
-        changed: false,
-        message: dependencyError,
-        error: dependencyError,
-      };
-    const state = store.state;
-    forgetCompletedHide(
-      store,
-      tasks.map((task) => task.id),
-    );
-    state.tasks = tasks;
-    state.nextId = 1;
-    bumpNextIdFromTasks(state);
-    return { changed: true, message: `replaced with ${tasks.length} tasks` };
+    if (seen.has(id)) {
+      const error = `duplicate id ${id}`;
+      return { changed: false, message: error, error };
+    }
+    seen.add(id);
+
+    const previous = existing.get(id);
+    const text = change.text?.trim();
+    if (!previous && !text) {
+      const error = `${id} requires text when creating a task`;
+      return { changed: false, message: error, error };
+    }
+
+    const next: Task = previous
+      ? {
+          ...previous,
+          ...(change.text === undefined ? {} : { text: change.text.trim() }),
+          ...(change.status === undefined ? {} : { status: change.status }),
+          ...(change.depends_on === undefined
+            ? {}
+            : { dependsOn: normalizeIds(change.depends_on) }),
+          ...(change.priority === undefined
+            ? {}
+            : { priority: change.priority }),
+          ...(change.notes === undefined ? {} : { notes: change.notes }),
+          updatedAt: now,
+        }
+      : {
+          id,
+          text: text ?? '',
+          status: change.status ?? 'todo',
+          dependsOn: normalizeIds(change.depends_on),
+          priority: change.priority ?? 'normal',
+          notes: change.notes,
+          createdAt: now,
+          updatedAt: now,
+        };
+    nextById.set(id, next);
+    changedIds.push(id);
+    if (change.status !== undefined) statusChangedIds.push(id);
   }
 
-  if (action === 'clear_done') {
-    const state = store.state;
-    const byId = new Map(state.tasks.map((task) => [task.id, task]));
-    const retainedIds = new Set(
-      state.tasks.filter(unfinished).map((task) => task.id),
-    );
-    // Keep the dependency closure, including completed/dropped prerequisites.
-    // Removing them would turn satisfied edges into missing dependencies.
-    for (const id of retainedIds)
-      for (const dependency of byId.get(id)?.dependsOn ?? [])
-        retainedIds.add(dependency);
-    const removed = state.tasks
-      .filter((task) => !retainedIds.has(task.id))
-      .map((task) => task.id);
-    state.tasks = state.tasks.filter((task) => retainedIds.has(task.id));
-    forgetCompletedHide(store, removed);
-    const retainedCompleted = state.tasks.filter(
-      (task) => !unfinished(task),
-    ).length;
-    return {
-      changed: removed.length > 0,
-      message: `cleared ${removed.length} completed/dropped tasks${retainedCompleted ? `; retained ${retainedCompleted} prerequisite tasks` : ''}`,
-    };
-  }
-
-  const task = findTask(store, id);
-  if (!task)
+  // Validate the complete candidate graph once, so forward references between
+  // changes work and no partially applied request can leak into state.
+  const dependencyError = validateDependencyGraph([...nextById.values()]);
+  if (dependencyError)
     return {
       changed: false,
-      message: `unknown task ${id ?? ''}`.trim(),
-      error: `unknown task ${id ?? ''}`.trim(),
+      message: dependencyError,
+      error: dependencyError,
     };
 
-  if (action === 'remove') {
-    const dependents = store.state.tasks
-      .filter((candidate) => candidate.dependsOn.includes(task.id))
-      .map((candidate) => candidate.id);
-    if (dependents.length)
-      return {
-        changed: false,
-        message: `${task.id} is depended on by ${dependents.join(', ')}; drop it instead or update dependents first`,
-        error: 'task has dependents',
-      };
-    store.state.tasks = store.state.tasks.filter(
-      (candidate) => candidate.id !== task.id,
-    );
-    forgetCompletedHide(store, [task.id]);
-    return { changed: true, message: `removed ${task.id}` };
+  const newTasks = changes
+    .map((change) => normalizeId(change.id))
+    .filter((id): id is string => id !== undefined && !existing.has(id))
+    .map((id) => nextById.get(id) as Task);
+  store.state.tasks = [
+    ...store.state.tasks.map((task) => nextById.get(task.id) ?? task),
+    ...newTasks,
+  ];
+  bumpNextIdFromTasks(store.state);
+  forgetCompletedHide(store, statusChangedIds);
+  return {
+    changed: true,
+    message: `updated ${changedIds.length} task${changedIds.length === 1 ? '' : 's'}`,
+  };
+}
+
+function removeTasks(
+  store: TaskStore,
+  rawIds: string[] | undefined,
+): MutationResult {
+  if (!rawIds?.length) {
+    return {
+      changed: false,
+      message: 'ids are required',
+      error: 'ids are required',
+    };
+  }
+  const ids = normalizeIds(rawIds);
+  if (!ids.length) {
+    return {
+      changed: false,
+      message: 'ids are required',
+      error: 'ids are required',
+    };
   }
 
-  if (action === 'drop') {
-    forgetCompletedHide(store, [task.id]);
-    task.status = 'dropped';
-  } else if (action === 'done') {
-    forgetCompletedHide(store, [task.id]);
-    task.status = 'done';
-  } else if (action === 'start') {
-    const blockers = missingDeps(store, task);
-    if (blockers.length) {
-      const message = `cannot start ${task.id}; waiting on ${blockers.join(', ')}`;
-      return { changed: false, message, error: message };
-    }
-    forgetCompletedHide(store, [task.id]);
-    task.status = 'doing';
-  } else if (action === 'block') {
-    task.status = 'blocked';
-    if (params.notes) task.notes = params.notes;
-  } else if (action === 'update') {
-    if (params.text !== undefined) task.text = params.text;
-    if (params.status !== undefined) {
-      forgetCompletedHide(store, [task.id]);
-      task.status = params.status;
-    }
-    if (params.priority !== undefined) task.priority = params.priority;
-    if (params.notes !== undefined) task.notes = params.notes;
-    if (params.depends_on !== undefined) {
-      const deps = normalizeIds(params.depends_on);
-      const depError = validateDeps(store, task.id, deps);
-      if (depError)
-        return { changed: false, message: depError, error: depError };
-      task.dependsOn = deps;
-    }
+  const known = new Set(store.state.tasks.map((task) => task.id));
+  const unknown = ids.filter((id) => !known.has(id));
+  if (unknown.length) {
+    const error = `unknown task${unknown.length === 1 ? '' : 's'} ${unknown.join(', ')}`;
+    return { changed: false, message: error, error };
   }
-  task.updatedAt = now;
-  return { changed: true, message: `${action} ${task.id}` };
+
+  const removed = new Set(ids);
+  const dependents = store.state.tasks
+    .filter((task) => !removed.has(task.id))
+    .filter((task) => task.dependsOn.some((id) => removed.has(id)))
+    .map((task) => task.id);
+  if (dependents.length) {
+    const error = `task is depended on by retained task${dependents.length === 1 ? '' : 's'} ${dependents.join(', ')}`;
+    return { changed: false, message: error, error };
+  }
+
+  store.state.tasks = store.state.tasks.filter((task) => !removed.has(task.id));
+  forgetCompletedHide(store, ids);
+  return {
+    changed: true,
+    message: `removed ${ids.length} task${ids.length === 1 ? '' : 's'}`,
+  };
 }

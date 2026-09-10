@@ -144,7 +144,7 @@ function delegateFixture(exchanges) {
             {
               type: 'toolCall',
               id: `delegate-${index}`,
-              name: 'delegate',
+              name: exchange.name ?? 'delegate',
               arguments: exchange.arguments ?? { task: 'PRIVATE TASK' },
             },
           ],
@@ -161,7 +161,7 @@ function delegateFixture(exchanges) {
         message: {
           role: 'toolResult',
           toolCallId: exchange.toolCallId ?? `delegate-${index}`,
-          toolName: exchange.toolName ?? 'delegate',
+          toolName: exchange.toolName ?? exchange.name ?? 'delegate',
           content: [{ type: 'text', text: exchange.text ?? 'HANDOFF' }],
           details: exchange.details,
           isError: exchange.isError ?? false,
@@ -176,6 +176,48 @@ function delegateFixture(exchanges) {
 const singleRun = { mode: 'single', runs: [{ allowWrites: false }] };
 
 describe('parseSessionJsonl', () => {
+  it('recognizes the split todo tools and their result metrics', () => {
+    const values = [
+      { type: 'session', id: 's' },
+      {
+        type: 'message',
+        id: 'a',
+        parentId: 's',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 'l', name: 'todo_list', arguments: {} },
+            {
+              type: 'toolCall',
+              id: 'u',
+              name: 'todo_update',
+              arguments: { changes: [{ id: 'T1', text: 'x' }] },
+            },
+            {
+              type: 'toolCall',
+              id: 'r',
+              name: 'todo_remove',
+              arguments: { ids: ['T1'] },
+            },
+          ],
+        },
+      },
+      ...['todo_list', 'todo_update', 'todo_remove'].map((toolName, index) => ({
+        type: 'message',
+        id: `r${index}`,
+        parentId: index === 0 ? 'a' : `r${index - 1}`,
+        message: {
+          role: 'toolResult',
+          toolName,
+          toolCallId: ['l', 'u', 'r'][index],
+        },
+      })),
+    ];
+    expect(parseSessionJsonl(values.map(line).join('\n'))).toMatchObject({
+      todoToolCalls: 3,
+      todoToolResults: 3,
+    });
+  });
   it('measures only the active leaf ancestry and request usage', () => {
     const result = parseSessionJsonl(fixture());
     expect(result).toMatchObject({
@@ -214,6 +256,26 @@ describe('parseSessionJsonl', () => {
 });
 
 describe('delegate measurements', () => {
+  it('recognizes fresh and continue delegate tools while retaining legacy delegate metrics', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        { name: 'delegate_start', text: 'fresh', details: singleRun },
+        {
+          name: 'delegate_continue',
+          text: 'continued',
+          arguments: { continue: 'token', task: 'next' },
+          details: singleRun,
+        },
+        { name: 'delegate', text: 'legacy', details: singleRun },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateToolCalls: 3,
+      delegatedTasks: 3,
+      delegateContinuationCalls: 1,
+    });
+  });
+
   it('counts tasks, parent-visible bytes, and task shape from the runs that ran', () => {
     const result = parseSessionJsonl(
       delegateFixture([

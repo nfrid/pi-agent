@@ -46,7 +46,7 @@ describe('delegate_gate tool', () => {
     const tool = registeredTool(coordinator);
     const result = (await tool.execute(
       'call',
-      { all: ['first', 'second'] },
+      { mode: 'all', delegates: ['first', 'second'] },
       undefined,
       undefined,
       {} as ExtensionContext,
@@ -56,7 +56,7 @@ describe('delegate_gate tool', () => {
     };
 
     expect(tool.description).toContain(
-      'Do not call this for any with safe delivery',
+      'Do not call this for mode=any with safe delivery',
     );
     expect(result.content[0]?.text).toContain('all(first, second)');
     expect(result.details).toMatchObject({
@@ -81,11 +81,23 @@ describe('delegate_gate tool', () => {
     const coordinator = new WakeCoordinator({ workflow });
     const cancelled: string[] = [];
     const tool = registeredTool(coordinator, cancelled);
-    await tool.execute('call', { all: ['first'] }, undefined, undefined, {});
+    await tool.execute(
+      'call',
+      { mode: 'all', delegates: ['first'] },
+      undefined,
+      undefined,
+      {},
+    );
     const original = coordinator.list()[0];
 
     await expect(
-      tool.execute('call', { all: ['missing'] }, undefined, undefined, {}),
+      tool.execute(
+        'call',
+        { mode: 'all', delegates: ['missing'] },
+        undefined,
+        undefined,
+        {},
+      ),
     ).rejects.toThrow('Unknown logical ID "missing"');
     expect(cancelled).toEqual([]);
     expect(coordinator.list()).toHaveLength(1);
@@ -106,14 +118,14 @@ describe('delegate_gate tool', () => {
     const tool = registeredTool(coordinator, cancelled);
     await tool.execute(
       'call',
-      { all: ['first', 'second'] },
+      { mode: 'all', delegates: ['first', 'second'] },
       undefined,
       undefined,
       {},
     );
     await tool.execute(
       'call',
-      { any: ['first', 'second'], delivery: 'idle' },
+      { mode: 'any', delegates: ['first', 'second'], delivery: 'idle' },
       undefined,
       undefined,
       {},

@@ -7,11 +7,14 @@ describe('tasks live surface', () => {
   it('projects current task state and derived stats', () => {
     const store = createTaskStore();
     applySnapshot(store, initialState());
-    mutate(store, 'add', {
-      action: 'add',
-      id: 'T1',
-      text: 'Implement live surfaces',
-      priority: 'high',
+    mutate(store, 'todo_update', {
+      changes: [
+        {
+          id: 'T1',
+          text: 'Implement live surfaces',
+          priority: 'high',
+        },
+      ],
     });
 
     expect(taskSurface(store)).toMatchObject({
@@ -38,12 +41,12 @@ describe('tasks live surface', () => {
     const store = createTaskStore();
     applySnapshot(store, initialState());
     for (let index = 1; index <= 129; index += 1)
-      mutate(store, 'add', {
-        action: 'add',
-        id: `T${index}`,
-        text: `Task ${index}`,
+      mutate(store, 'todo_update', {
+        changes: [{ id: `T${index}`, text: `Task ${index}` }],
       });
-    mutate(store, 'start', { action: 'start', id: 'T129' });
+    mutate(store, 'todo_update', {
+      changes: [{ id: 'T129', status: 'doing' }],
+    });
 
     const surface = taskSurface(store);
     const viewModel = surface.viewModel as {

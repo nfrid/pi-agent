@@ -216,7 +216,7 @@ async function createAsyncHarness(
 
   const handlers = new Map<string, Handler>();
   const tools = new Map<string, RegisteredTool>();
-  const activeTools = new Set(['delegate']);
+  const activeTools = new Set(['delegate_start', 'delegate_continue']);
   const sendMessage = vi.fn();
   const eventListeners = new Map<string, Set<(value: unknown) => void>>();
   const entries: Array<{
@@ -359,7 +359,7 @@ describe('async delegate extension', () => {
       },
     );
 
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'skill-call',
       {
         id: 'skill-write',
@@ -394,9 +394,11 @@ describe('async delegate extension', () => {
   test('state-gates broker tools until their state is actionable', async () => {
     const { ctx, finish, handlers, sendMessage, tools, activeTools } =
       await createAsyncHarness();
-    expect(activeTools).toEqual(new Set(['delegate']));
+    expect(activeTools).toEqual(
+      new Set(['delegate_start', 'delegate_continue']),
+    );
 
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-gated-background',
       {
         name: 'Gated background task',
@@ -458,7 +460,7 @@ describe('async delegate extension', () => {
     );
 
     await tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'gate-call',
         { id: 'gate', task: 'gate', route: 'quick' },
@@ -467,7 +469,7 @@ describe('async delegate extension', () => {
         ctx,
       );
     await vi.waitFor(() => expect(hasFinish('gate')).toBe(true));
-    const receipt = await tools.get('delegate')?.execute(
+    const receipt = await tools.get('delegate_start')?.execute(
       'child-call',
       {
         id: 'child',
@@ -516,7 +518,7 @@ describe('async delegate extension', () => {
       successfulRun(),
     );
 
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'head-call',
       {
         id: 'head-source',
@@ -547,7 +549,7 @@ describe('async delegate extension', () => {
     });
 
     await expect(
-      tools.get('delegate')?.execute(
+      tools.get('delegate_start')?.execute(
         'invalid-call',
         {
           id: 'invalid',
@@ -590,7 +592,7 @@ describe('async delegate extension', () => {
 
   test('advances two delegate rows from pausing to paused and clears them on resume', async () => {
     const { ctx, finish, handlers, pi, tools } = await createAsyncHarness();
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-two-paused',
       {
         tasks: [
@@ -689,7 +691,7 @@ describe('async delegate extension', () => {
 
   test('binds foreground delegate controls to live pause rows', async () => {
     const { ctx, finish, handlers, pi, tools } = await createAsyncHarness();
-    const execution = tools.get('delegate')?.execute(
+    const execution = tools.get('delegate_start')?.execute(
       'call-foreground-paused',
       {
         tasks: [
@@ -836,7 +838,7 @@ describe('async delegate extension', () => {
     };
     await handlers.get('session_start')?.({}, replacementContext);
 
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-replacement',
       {
         name: 'Replacement status',
@@ -859,7 +861,7 @@ describe('async delegate extension', () => {
   test('refreshes terminal live status after lifecycle output-file materialization', async () => {
     const { ctx, finish, handlers, sendMessage, tools } =
       await createAsyncHarness();
-    const launch = await tools.get('delegate')?.execute(
+    const launch = await tools.get('delegate_start')?.execute(
       'call-lifecycle-status',
       {
         name: 'Lifecycle status',
@@ -1070,7 +1072,7 @@ describe('async delegate extension', () => {
     expect(timedOutCompletion).toContain('timed out');
 
     await handlers.get('session_start')?.({}, ctx);
-    const delegateTool = tools.get('delegate');
+    const delegateTool = tools.get('delegate_start');
     expect(delegateTool).toBeDefined();
     expect(tools.has('delegate_jobs')).toBe(true);
 
@@ -1187,7 +1189,7 @@ describe('async delegate extension', () => {
     vi.useFakeTimers();
     const { ctx, finish, handlers, sendMessage, tools } =
       await createAsyncHarness();
-    const launch = await tools.get('delegate')?.execute(
+    const launch = await tools.get('delegate_start')?.execute(
       'call-batch',
       {
         tasks: [
@@ -1310,7 +1312,7 @@ describe('async delegate extension', () => {
     sendMessage.mockImplementation(() => {
       throw new Error('send failed');
     });
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-failed-send',
       {
         name: 'First agent',
@@ -1345,7 +1347,7 @@ describe('async delegate extension', () => {
   test('restores explicit inspection when an accepted steer never enters context', async () => {
     vi.useFakeTimers();
     const { ctx, finish, handlers, tools } = await createAsyncHarness();
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-lost-steer',
       {
         name: 'First agent',
@@ -1382,7 +1384,7 @@ describe('async delegate extension', () => {
     vi.useFakeTimers();
     const { ctx, finish, handlers, sendMessage, tools } =
       await createAsyncHarness();
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-first',
       {
         name: 'First agent',
@@ -1413,7 +1415,7 @@ describe('async delegate extension', () => {
       sendMessage.mock.calls[0]?.[0].details?.message?.details,
     ).toMatchObject({ jobs: [{ id: 'dj-1' }] });
 
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-second',
       {
         name: 'Second agent',
@@ -1495,7 +1497,7 @@ describe('async delegate extension', () => {
 
     delegate(pi);
     await handlers.get('session_start')?.({}, ctx);
-    const launch = await tools.get('delegate')?.execute(
+    const launch = await tools.get('delegate_start')?.execute(
       'call-batch',
       {
         tasks: [
@@ -1604,7 +1606,7 @@ describe('async delegate extension', () => {
 
     handlers.get('session_tree')?.({ oldLeafId: null, newLeafId: 'left' }, ctx);
     const leftReceipt = await tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'left-call',
         { id: 'impl', task: 'left task', route: 'quick' },
@@ -1640,7 +1642,7 @@ describe('async delegate extension', () => {
       ctx,
     );
     const rightReceipt = await tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'right-call',
         { id: 'impl', task: 'right task', route: 'quick' },
@@ -1726,7 +1728,7 @@ describe('async delegate extension', () => {
       { oldLeafId: 'right', newLeafId: 'descendant' },
       ctx,
     );
-    const continued = await tools.get('delegate')?.execute(
+    const continued = await tools.get('delegate_start')?.execute(
       'descendant-call',
       {
         id: 'review',
@@ -1749,7 +1751,7 @@ describe('async delegate extension', () => {
     const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
       await createAsyncHarness('eager-delivery-parent');
     await tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'eager-call',
         { id: 'eager-worker', task: 'eager task', route: 'quick' },
@@ -1776,7 +1778,7 @@ describe('async delegate extension', () => {
     const { ctx, finish, hasFinish, handlers, sendMessage, tools } =
       await createAsyncHarness('eager-error-parent');
     await tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'eager-error-call',
         { id: 'eager-error', task: 'eager error task', route: 'quick' },
@@ -1803,7 +1805,7 @@ describe('async delegate extension', () => {
       ['eager-second', 'eager second task'],
     ] as const)
       await tools
-        .get('delegate')
+        .get('delegate_start')
         ?.execute(
           `${id}-call`,
           { id, task, route: 'quick' },
@@ -1839,7 +1841,7 @@ describe('async delegate extension', () => {
       ['second-worker', 'second task'],
     ] as const)
       await tools
-        .get('delegate')
+        .get('delegate_start')
         ?.execute(
           `${id}-call`,
           { id, task, route: 'quick' },
@@ -1855,7 +1857,7 @@ describe('async delegate extension', () => {
       .get('delegate_gate')
       ?.execute(
         'all-gate',
-        { all: ['first-worker', 'second-worker'] },
+        { mode: 'all', delegates: ['first-worker', 'second-worker'] },
         undefined,
         undefined,
         ctx,
@@ -1912,7 +1914,7 @@ describe('async delegate extension', () => {
 
     handlers.get('session_tree')?.({ oldLeafId: null, newLeafId: 'root' }, ctx);
     await tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'stable-call',
         { id: 'stable', task: 'stable task', route: 'quick' },
@@ -1978,7 +1980,7 @@ describe('async delegate extension', () => {
   test('admits one persisted queued wake after runtime recreation', async () => {
     const first = await createAsyncHarness('reload-parent');
     await first.tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'reload-source-call',
         { id: 'reload-source', task: 'reload source task', route: 'quick' },
@@ -1993,7 +1995,7 @@ describe('async delegate extension', () => {
       .get('delegate_gate')
       ?.execute(
         'reload-gate-call',
-        { all: ['reload-source@1'] },
+        { mode: 'all', delegates: ['reload-source@1'] },
         undefined,
         undefined,
         first.ctx,
@@ -2036,7 +2038,7 @@ describe('async delegate extension', () => {
   test('delivers a persisted wake when its restored attempt becomes blocked', async () => {
     const first = await createAsyncHarness('reload-pending');
     await first.tools
-      .get('delegate')
+      .get('delegate_start')
       ?.execute(
         'reload-running-call',
         { id: 'reload-running', task: 'reload running task', route: 'quick' },
@@ -2051,7 +2053,7 @@ describe('async delegate extension', () => {
       .get('delegate_gate')
       ?.execute(
         'reload-pending-gate-call',
-        { all: ['reload-running@1'] },
+        { mode: 'all', delegates: ['reload-running@1'] },
         undefined,
         undefined,
         first.ctx,
@@ -2259,7 +2261,7 @@ describe('async delegate extension', () => {
     );
     notify.mockClear();
     configLoader.mockReturnValue(config);
-    await tools.get('delegate')?.execute(
+    await tools.get('delegate_start')?.execute(
       'call-1',
       {
         name: 'Independent inspection',
@@ -2329,7 +2331,7 @@ describe('async delegate extension', () => {
 
     sessionId = 'parent';
     await commands.get('delegates')?.handler('', ctx);
-    const foreground = tools.get('delegate')?.execute(
+    const foreground = tools.get('delegate_start')?.execute(
       'call-foreground',
       {
         name: 'Foreground audit',
@@ -2449,7 +2451,7 @@ describe('async delegate extension', () => {
     vi.spyOn(taskLifecycle, 'runPreparedDelegateTask').mockRejectedValueOnce(
       new Error('unexpected delegate failure'),
     );
-    const failedForeground = await tools.get('delegate')?.execute(
+    const failedForeground = await tools.get('delegate_start')?.execute(
       'call-failing-foreground',
       {
         name: 'Failing foreground audit',

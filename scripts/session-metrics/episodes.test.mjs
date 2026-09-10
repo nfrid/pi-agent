@@ -29,7 +29,11 @@ function transcript(build) {
     });
     parentId = id;
   };
-  const tool = (name, argumentsValue, { error = false } = {}) => {
+  const tool = (
+    name,
+    argumentsValue,
+    { error = false, resultDetails } = {},
+  ) => {
     const assistantId = `a-${sequence}`;
     const resultId = `r-${sequence}`;
     const toolCallId = `c-${sequence}`;
@@ -58,7 +62,9 @@ function transcript(build) {
         content: error ? 'failed' : 'ok',
         ...(name === 'delegate'
           ? { details: argumentsValue.details ?? { runs: [] } }
-          : {}),
+          : resultDetails !== undefined
+            ? { details: resultDetails }
+            : {}),
       },
     });
     parentId = resultId;
@@ -202,6 +208,73 @@ describe('deterministic bilingual disposition classification', () => {
 });
 
 describe('retry-aware session episode facets', () => {
+  it('reconstructs plans from split todo list mutations and preserves fields', () => {
+    const source = transcript(({ user, tool, answer }) => {
+      user('Use the new task tools');
+      tool('todo_update', {
+        changes: [
+          {
+            id: 'T1',
+            text: 'work',
+            priority: 'high',
+            depends_on: [],
+            status: 'todo',
+          },
+        ],
+      });
+      tool('todo_update', {
+        changes: [{ id: 'T1', status: 'done', notes: 'finished' }],
+      });
+      answer('Done.');
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      plan: 'all-done',
+    });
+  });
+
+  it('uses authoritative todo list state and applies id removals', () => {
+    const source = transcript(({ user, tool, answer }) => {
+      user('Inspect tasks');
+      tool(
+        'todo_list',
+        {},
+        {
+          resultDetails: {
+            state: {
+              tasks: [
+                { id: 'T1', text: 'work', status: 'todo', priority: 'urgent' },
+              ],
+            },
+          },
+        },
+      );
+      tool('todo_remove', { ids: ['T1'] });
+      answer('Removed.');
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      plan: 'removed',
+    });
+  });
+
+  it('ignores a failed todo list result', () => {
+    const source = transcript(({ user, tool }) => {
+      user('Inspect tasks');
+      tool(
+        'todo_list',
+        {},
+        { error: true, resultDetails: { state: { tasks: [] } } },
+      );
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      plan: 'unavailable',
+    });
+  });
   it('uses exact and corrected intent identity like activity groups', () => {
     let nextId = 0;
     const tool = (name, args, isError, status = 'complete') => ({

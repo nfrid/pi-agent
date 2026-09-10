@@ -16,22 +16,6 @@ export function normalizeIds(values: readonly unknown[] | undefined): string[] {
   ];
 }
 
-export function newId(store: TaskStore): string {
-  while (store.state.tasks.some((task) => task.id === `T${store.state.nextId}`))
-    store.state.nextId++;
-  return `T${store.state.nextId++}`;
-}
-
-export function findTask(
-  store: TaskStore,
-  id: string | undefined,
-): Task | undefined {
-  const normalized = normalizeId(id);
-  return normalized
-    ? store.state.tasks.find((task) => task.id === normalized)
-    : undefined;
-}
-
 export function validateDependencyGraph(tasks: Task[]): string | undefined {
   const byId = new Map(tasks.map((task) => [task.id, task]));
   for (const task of tasks) {
@@ -67,27 +51,6 @@ export function validateDependencyGraph(tasks: Task[]): string | undefined {
     if (error) return error;
   }
   return undefined;
-}
-
-export function validateDeps(
-  store: TaskStore,
-  id: string,
-  deps: string[],
-): string | undefined {
-  const unique = normalizeIds(deps);
-  const tasks = [
-    ...store.state.tasks.filter((task) => task.id !== id),
-    {
-      id,
-      text: '',
-      status: 'todo' as const,
-      dependsOn: unique,
-      priority: 'normal' as const,
-      createdAt: 0,
-      updatedAt: 0,
-    },
-  ];
-  return validateDependencyGraph(tasks);
 }
 
 export function unfinished(task: Task): boolean {

@@ -18,8 +18,19 @@ export const CUSTOM_TOOL_KIND_BY_NAME = {
   delegate_changes: 'delegate_changes',
   delegate_gate: 'delegate_gate',
   background: 'background',
+  background_start: 'background',
+  background_peek: 'background',
+  background_list: 'background',
+  background_stop: 'background',
+  background_watch: 'background',
+  background_unwatch: 'background',
   todo: 'todo',
   tasks: 'todo',
+  todo_list: 'todo',
+  todo_update: 'todo',
+  todo_remove: 'todo',
+  delegate_start: 'delegate',
+  delegate_continue: 'delegate',
 } as const;
 
 export type CustomToolName = keyof typeof CUSTOM_TOOL_KIND_BY_NAME;
@@ -77,6 +88,9 @@ export function fetchContentPresentation(
 }
 
 export type GetSearchContentPresentation = {
+  contentId?: string;
+  offset?: number;
+  maxChars?: number;
   responseId?: string;
   view?: string;
   query?: string;
@@ -93,7 +107,18 @@ export function getSearchContentPresentation(
   const record = recordArgs(args);
   const queryIndex = record?.queryIndex;
   const urlIndex = record?.urlIndex;
+  const offset = record?.offset;
+  const maxChars = record?.maxChars;
   return {
+    contentId: stringArg(args, 'contentId'),
+    offset:
+      typeof offset === 'number' && Number.isFinite(offset) && offset >= 0
+        ? offset
+        : undefined,
+    maxChars:
+      typeof maxChars === 'number' && Number.isFinite(maxChars) && maxChars > 0
+        ? maxChars
+        : undefined,
     responseId: stringArg(args, 'responseId'),
     view: stringArg(args, 'view'),
     query: stringArg(args, 'query'),
@@ -115,6 +140,7 @@ export type DelegatePresentation = {
   name?: string;
   task?: string;
   route?: string;
+  scope?: readonly string[];
   continuation?: string;
   taskCount: number;
 };
@@ -125,6 +151,9 @@ export function delegatePresentation(args: unknown): DelegatePresentation {
     name: stringArg(args, 'id') ?? stringArg(args, 'name'),
     task: stringArg(args, 'task'),
     route: stringArg(args, 'route'),
+    ...(stringList(args, 'scope').length
+      ? { scope: stringList(args, 'scope') }
+      : {}),
     continuation:
       stringArg(args, 'continue') ?? stringArg(args, 'continuation'),
     taskCount: Array.isArray(tasks) ? tasks.length : 0,
@@ -179,9 +208,17 @@ export function backgroundPresentation(
   args: unknown,
   result?: unknown,
   knownTitles: ReadonlyMap<string, string> = new Map(),
+  toolName?: string,
 ): BackgroundPresentation {
   const watch = recordArgs(args)?.watch;
-  const action = actionIdPresentation(args);
+  const baseName = toolName ? toolBaseName(toolName).toLowerCase() : '';
+  const namedAction = baseName.startsWith('background_')
+    ? baseName.slice('background_'.length)
+    : undefined;
+  const action = {
+    ...actionIdPresentation(args),
+    action: stringArg(args, 'action') ?? namedAction,
+  };
   const titles = new Map([...knownTitles, ...backgroundProcessTitles(result)]);
   const targetIds = action.id ? [action.id] : action.ids;
   const fallback = 'Background process';
@@ -239,6 +276,7 @@ export type TodoOperationPresentation = {
 };
 
 export type TodoPresentation = TodoOperationPresentation & {
+  includeDone?: boolean;
   operations: readonly TodoOperationPresentation[];
   operationCount: number;
 };
@@ -246,10 +284,14 @@ export type TodoPresentation = TodoOperationPresentation & {
 function todoItemPresentation(
   args: unknown,
   nested = false,
+  defaultAction?: string,
 ): TodoOperationPresentation {
   const record = recordArgs(args);
   return {
-    action: stringArg(args, 'action') ?? stringArg(args, 'operation'),
+    action:
+      stringArg(args, 'action') ??
+      stringArg(args, 'operation') ??
+      (defaultAction && !nested ? defaultAction : undefined),
     id: stringArg(args, 'id') ?? stringArg(args, 'taskId'),
     text: stringArg(args, 'text'),
     notes: stringArg(args, 'notes'),
@@ -274,13 +316,44 @@ function todoReplacedResult(taskCount: number): string {
   return `replaced with ${taskCount} tasks`;
 }
 
-export function todoPresentation(args: unknown): TodoPresentation {
-  const operationsRaw = recordArgs(args)?.operations;
-  const operations = Array.isArray(operationsRaw)
-    ? operationsRaw.map((operation) => todoItemPresentation(operation))
+export function todoPresentation(
+  args: unknown,
+  toolName?: string,
+): TodoPresentation {
+  const record = recordArgs(args);
+  const baseName = toolName ? toolBaseName(toolName).toLowerCase() : '';
+  const namedAction = baseName.startsWith('todo_')
+    ? baseName.slice('todo_'.length)
+    : undefined;
+  const action =
+    stringArg(args, 'action') ?? stringArg(args, 'operation') ?? namedAction;
+  const changes = Array.isArray(record?.changes)
+    ? record.changes.filter((change) => recordArgs(change))
     : [];
+  const ids = stringList(args, 'ids');
+  const operationsRaw = Array.isArray(record?.operations)
+    ? record.operations
+    : changes.length
+      ? changes
+      : action === 'remove'
+        ? ids.map((id) => ({ id }))
+        : [];
+  const operations = operationsRaw.map((operation) =>
+    todoItemPresentation(
+      operation,
+      false,
+      action === 'remove'
+        ? 'remove'
+        : action === 'update'
+          ? 'upsert'
+          : undefined,
+    ),
+  );
   return {
-    ...todoItemPresentation(args),
+    ...todoItemPresentation(args, false, action),
+    ...(typeof record?.include_done === 'boolean'
+      ? { includeDone: record.include_done }
+      : {}),
     operations,
     operationCount: operations.length,
   };
@@ -340,9 +413,18 @@ export function delegateGatePresentation(
 ): DelegateGatePresentation {
   const all = stringList(args, 'all');
   const any = stringList(args, 'any');
+  const mode = stringArg(args, 'mode');
+  const delegates = stringList(args, 'delegates');
   return {
-    mode: all.length ? 'all' : any.length ? 'any' : undefined,
-    references: all.length ? all : any,
+    mode:
+      mode === 'all' || mode === 'any'
+        ? mode
+        : all.length
+          ? 'all'
+          : any.length
+            ? 'any'
+            : undefined,
+    references: delegates.length ? delegates : all.length ? all : any,
     delivery: stringArg(args, 'delivery'),
   };
 }

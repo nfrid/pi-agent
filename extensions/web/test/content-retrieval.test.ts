@@ -30,18 +30,6 @@ describe('bounded exact content retrieval', () => {
     expect(bounded.text.length).toBeLessThanOrEqual(MAX_CONTENT_CHARS);
   });
 
-  it('selects heading sections and literal matching lines', () => {
-    const source =
-      '# Intro\nfirst\n## Details\nneedle 42\n### Child\nchild\n# End\nlast';
-    expect(pageContent(source, { heading: 'Details' }).text).toBe(
-      '## Details\nneedle 42\n### Child\nchild\n',
-    );
-    expect(pageContent(source, { literal: 'needle' }).text).toBe('needle 42');
-    expect(() =>
-      pageContent(source, { literal: 'needle', heading: 'Details' }),
-    ).toThrow('only one');
-  });
-
   it('reports stable paging metadata and a selection hash', () => {
     const first = pageContent('abcdef', { maxChars: 2 });
     const second = pageContent('abcdef', {

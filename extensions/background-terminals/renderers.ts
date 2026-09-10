@@ -47,9 +47,10 @@ export function renderBackgroundCall(
   // an undefined child and crashes during rendering.
   const action = args.action ?? '';
   const expanded = context?.expanded === true;
-  const title =
-    theme.fg('toolTitle', theme.bold('background')) +
-    (action ? ` ${theme.fg('muted', action)}` : '');
+  const title = theme.fg(
+    'toolTitle',
+    theme.bold(action ? `background_${action}` : 'background'),
+  );
 
   switch (action) {
     case 'start': {

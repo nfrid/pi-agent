@@ -8,6 +8,7 @@ import {
   EXT,
   LEGACY_TODO_REPLAY_TYPE,
   LEGACY_TODO_SNAPSHOT_TYPE,
+  TODO_TOOL_NAMES,
   TOOL,
 } from './model';
 import type { TaskStore } from './store';
@@ -92,7 +93,11 @@ export function transformTodoContext(
   const transformed = input
     .map((message, index) => {
       if (isLegacyReplay(message)) return undefined;
-      if (message.role !== 'toolResult' || message.toolName !== TOOL)
+      if (
+        message.role !== 'toolResult' ||
+        (message.toolName !== TOOL &&
+          !(TODO_TOOL_NAMES as readonly string[]).includes(message.toolName))
+      )
         return message;
       todoResultsSeen++;
       const afterNewestSnapshot = index > newestSnapshotIndex;
@@ -165,7 +170,11 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
       event.messages.some(
         (message) =>
           isTodoSnapshot(message) ||
-          (message.role === 'toolResult' && message.toolName === TOOL),
+          (message.role === 'toolResult' &&
+            (message.toolName === TOOL ||
+              (TODO_TOOL_NAMES as readonly string[]).includes(
+                message.toolName,
+              ))),
       )
     )
       hasTodoHistory = true;

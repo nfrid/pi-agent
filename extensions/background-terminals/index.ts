@@ -30,7 +30,7 @@ import {
   WATCH_RESULT_MESSAGE_TYPE,
   WIDGET_KEY,
 } from './schema';
-import { registerBackgroundTool } from './tool';
+import { registerBackgroundTools } from './tool';
 
 export default defineExtension(
   'background-terminals',
@@ -206,7 +206,7 @@ export default defineExtension(
 
     const cancelCompletion = (id: string) =>
       scopedServices?.backgroundDeliveries.cancel(completionKey(id)) ?? false;
-    registerBackgroundTool(pi, getManager, cancelCompletion, (id) =>
+    registerBackgroundTools(pi, getManager, cancelCompletion, (id) =>
       manager?.get(id),
     );
     registerBackgroundMessageRenderer(pi);

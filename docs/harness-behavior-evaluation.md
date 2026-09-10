@@ -61,7 +61,7 @@ git add check.txt SKILL.md && git commit -qm fixture
 
 **Prompt/tool call.** “Delegate a read-only inspection of `check.txt` and return
 the child's answer using the skill file at `<absolute T>/SKILL.md`.” The parent
-passes `skills:["<absolute T>/SKILL.md"]` to `delegate`, substituting the real
+passes `skills:["<absolute T>/SKILL.md"]` to `delegate_start`, substituting the real
 absolute path rather than shell syntax. Do not repeat the skill instruction.
 
 **Pass/fail.** Pass only if the delegated run preserves that requirement and

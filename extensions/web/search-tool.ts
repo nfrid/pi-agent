@@ -9,13 +9,16 @@ import { renderSearchCall, renderWebResult } from './render';
 import {
   appendCacheFileNotice,
   boundedPreview,
+  compactManifest,
   persistenceDetails,
   persistWebResult,
+  stripContentIdLines,
 } from './result-support';
 import { search } from './search';
 import {
   generateId,
   type QueryResultData,
+  type StoredContent,
   type WebResultStore,
 } from './storage';
 import { throwIfAborted } from './utils';
@@ -31,19 +34,12 @@ const recencySchema = Type.Union(
 );
 
 const parameters = Type.Object({
-  query: Type.Optional(
-    Type.String({
-      description: 'One focused search query',
-      maxLength: 2_000,
-    }),
-  ),
-  queries: Type.Optional(
-    Type.Array(Type.String({ maxLength: 2_000 }), {
-      description:
-        'Independent queries to run in one call; use varied angles for broader research',
-      maxItems: 8,
-    }),
-  ),
+  queries: Type.Array(Type.String({ maxLength: 2_000 }), {
+    description:
+      'Independent queries to run in one call; use varied angles for broader research',
+    minItems: 1,
+    maxItems: 8,
+  }),
   numResults: Type.Optional(
     Type.Integer({
       description: 'Maximum source links to return per query',
@@ -66,12 +62,8 @@ const parameters = Type.Object({
   ),
 });
 
-function queryList(
-  query: string | undefined,
-  queries: string[] | undefined,
-): string[] {
-  const input = queries?.length ? queries : query ? [query] : [];
-  return [...new Set(input.map((item) => item.trim()).filter(Boolean))];
+function queryList(queries: string[]): string[] {
+  return [...new Set(queries.map((item) => item.trim()).filter(Boolean))];
 }
 
 export function createWebSearchTool(options: {
@@ -83,14 +75,14 @@ export function createWebSearchTool(options: {
     name: 'web_search',
     label: 'Web Search',
     description:
-      'Search the public web for current information and source links. Use query for one search or queries for several independent searches. Set includeContent when you need the readable text of result pages.',
+      'Search the public web for current information and source links. Provide one or more independent queries. Set includeContent when you need the readable text of result pages.',
     promptSnippet:
       'Search the public web for current information and cited sources',
     parameters,
     async execute(_callId, params, signal, onUpdate, ctx) {
       const assertCurrent = operationGuard(signal);
-      const queries = queryList(params.query, params.queries);
-      if (queries.length === 0) throw new Error('Provide query or queries.');
+      const queries = queryList(params.queries);
+      if (queries.length === 0) throw new Error('Provide at least one query.');
       const id = generateId();
       const queryResults = new Array<QueryResultData>(queries.length);
       const limit = pLimit(3);
@@ -168,25 +160,80 @@ export function createWebSearchTool(options: {
         ),
       );
       throwIfAborted(signal);
-      const output = queryResults
-        .map((item) => {
-          if (item.error) return `## ${item.query}\n\nError: ${item.error}`;
-          const sources = item.results
-            .map(
-              (result, index) =>
-                `${index + 1}. [${result.title}](${result.url})${result.snippet ? ` — ${result.snippet}` : ''}`,
-            )
-            .join('\n');
-          return `## ${item.query}\n\n${item.answer}\n\n### Sources\n${sources}`;
-        })
-        .join('\n\n---\n\n');
+      const summaryId = `${id}:summary`;
+      const queryViews = queryResults.map((item, index) => {
+        const contentId = `${id}:query:${index}`;
+        if (item.error)
+          return {
+            contentId,
+            text: `## Query: ${item.query}\n\nError: ${item.error}`,
+            pages: [],
+          };
+        const sources = item.results
+          .map(
+            (result, resultIndex) =>
+              `${resultIndex + 1}. [${result.title}](${result.url})${result.snippet ? ` — ${result.snippet}` : ''}`,
+          )
+          .join('\n');
+        const pages = (item.content ?? []).flatMap((page, pageIndex) =>
+          page.error
+            ? []
+            : [
+                {
+                  id: `${id}:query:${index}:page:${pageIndex}`,
+                  title: page.title || page.url,
+                  url: page.url,
+                },
+              ],
+        );
+        const readablePages = pages.length
+          ? `\n\n### Readable pages\n${pages
+              .map(
+                (page) =>
+                  `- ${page.title} — ${page.url} — Content ID: ${page.id}`,
+              )
+              .join('\n')}`
+          : '';
+        return {
+          contentId,
+          text: `## Query: ${item.query}\nContent ID: ${contentId}\n\n${item.answer}\n\n### Sources\n${sources}${readablePages}`,
+          pages,
+        };
+      });
+      const manifest = [
+        'Content ID manifest:',
+        `- Summary: ${summaryId}`,
+        ...queryViews.flatMap((view, index) => [
+          `- Query ${index}: ${view.contentId} — ${queryResults[index]?.query ?? ''}`,
+          ...view.pages.map(
+            (page) => `  - Page: ${page.id} — ${page.title} — ${page.url}`,
+          ),
+        ]),
+      ].join('\n');
+      const output = queryViews.map((view) => view.text).join('\n\n---\n\n');
       const failed = queryResults.filter((item) => item.error).length;
       if (failed === queryResults.length)
         throw new Error(
           `All web searches failed: ${queryResults.map((item) => item.error).join('; ')}`,
         );
-      const summary = `${output}\n\nResponse ID: ${id}`;
-      const cacheFile = await persistWebResult(
+      const summary = `${output}\n\n${manifest}`;
+      const contents: StoredContent[] = [
+        { id: summaryId, text: summary },
+        ...queryViews.map((view) => ({ id: view.contentId, text: view.text })),
+        ...queryResults.flatMap((item, queryIndex) =>
+          (item.content ?? []).flatMap((page, pageIndex) =>
+            page.error
+              ? []
+              : [
+                  {
+                    id: `${id}:query:${queryIndex}:page:${pageIndex}`,
+                    text: page.content,
+                  },
+                ],
+          ),
+        ),
+      ];
+      const payload = await persistWebResult(
         resultStore,
         {
           id,
@@ -194,22 +241,37 @@ export function createWebSearchTool(options: {
           timestamp: Date.now(),
           queries: queryResults,
           summary,
+          contents,
         },
         assertCurrent,
       );
-      const initial = boundedPreview(summary, id, 'view: "summary"', true);
+      const previewContent = payload.continuationAvailable
+        ? summary
+        : stripContentIdLines(output);
+      const initial = boundedPreview(
+        previewContent,
+        summaryId,
+        payload.continuationAvailable,
+        payload.continuationAvailable ? compactManifest(manifest) : undefined,
+      );
       return {
         content: [
           {
             type: 'text',
-            text: appendCacheFileNotice(initial.rendered, cacheFile),
+            text: appendCacheFileNotice(initial.rendered, payload),
           },
         ],
         details: {
-          responseId: id,
           queryCount: queries.length,
           failed,
-          ...persistenceDetails(cacheFile),
+          contentIds: {
+            summary: summaryId,
+            queries: queryViews.map((view) => ({
+              id: view.contentId,
+              pages: view.pages.map((page) => page.id),
+            })),
+          },
+          ...persistenceDetails(payload),
           ...initial.details,
         },
       };

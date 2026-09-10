@@ -63,7 +63,7 @@ import {
 import { serializeDelegateRunForPublic } from './serialize';
 import { archiveOldSessionFiles, pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
-import { registerDelegateTool } from './tool';
+import { registerDelegateTools } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import { buildOutputFileHandoff } from './tool-result';
 import { registerDelegateTranscriptCommand } from './transcript';
@@ -741,7 +741,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       getWorkflow: () => workflow,
     });
     scopedServices.delegateWorkflow = initialRuntime.workflow;
-    registerDelegateTool(
+    registerDelegateTools(
       pi,
       ctx.cwd,
       {
@@ -978,7 +978,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   pi.on('agent_start', syncWidget);
   pi.on('tool_call', (event) => {
     if (
-      event.toolName === 'delegate' &&
+      (event.toolName === 'delegate_start' ||
+        event.toolName === 'delegate_continue') &&
       getPauseCoordinator(scopeId).isActive()
     )
       return {

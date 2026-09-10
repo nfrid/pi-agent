@@ -370,6 +370,31 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
+  it('labels approved background and todo operation names', () => {
+    const component = createActivityGroupRenderer()(
+      {
+        id: 'approved-extension-actions',
+        cwd: process.cwd(),
+        startedAt: 1000,
+        completedAt: 2000,
+        failed: false,
+        items: [
+          preambleItem('Organizing the extension work'),
+          toolItem('background-1', 'background_start', { id: 'bg-1' }, false),
+          toolItem('todo-1', 'todo_update', { changes: [{ id: 'T3' }] }, false),
+        ],
+      },
+      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+      theme,
+      context(),
+    );
+    if (!component) throw new Error('renderer returned no component');
+    const output = component.render(100).join('\\n');
+    expect(output).toContain('Background start bg-1');
+    expect(output).toContain('Tasks update 1 change');
+    (component as unknown as { dispose(): void }).dispose();
+  });
+
   it('keeps the last steps legible and counts away the rest', () => {
     const renderer = createActivityGroupRenderer();
     const ctx = context();

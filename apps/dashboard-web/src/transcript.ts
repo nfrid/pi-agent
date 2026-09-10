@@ -549,7 +549,11 @@ export function toTranscriptEntries(
   // result is absent. Never modify the underlying arguments or raw records.
   const backgroundTitles = new Map<string, string>();
   for (const item of rendered) {
-    if (item.kind === 'tool' && toolBaseName(item.name) === 'background') {
+    if (
+      item.kind === 'tool' &&
+      (toolBaseName(item.name) === 'background' ||
+        toolBaseName(item.name).startsWith('background_'))
+    ) {
       for (const [id, title] of backgroundProcessTitles(item.result))
         backgroundTitles.set(id, title);
     } else if (item.kind === 'other') {
@@ -685,11 +689,13 @@ export function toTranscriptEntries(
     hasConversation = true;
     if (item.kind === 'tool') {
       const backgroundTitle =
-        toolBaseName(item.name) === 'background'
+        toolBaseName(item.name) === 'background' ||
+        toolBaseName(item.name).startsWith('background_')
           ? backgroundPresentation(
               item.arguments,
               item.result,
               backgroundTitles,
+              item.name,
             ).target
           : undefined;
       result.push({

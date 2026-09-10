@@ -4,6 +4,7 @@ import {
   activityToolDurationMs,
   activityToolLineChanges,
   backgroundPresentation,
+  delegateGatePresentation,
   stringArg,
   TOOL_ACTION_LABEL_MAX,
   type ToolDescriptor,
@@ -207,10 +208,21 @@ export function activityStepParts(
     action = 'Checking';
     const command = stringArg(tool.args, 'command');
     if (command) argument = compactActivityArgument(command);
-  } else if (name === 'delegate' || name === 'delegates') {
+  } else if (
+    name === 'delegate' ||
+    name === 'delegates' ||
+    name === 'delegate_start' ||
+    name === 'delegate_continue'
+  ) {
     role = 'command';
     const operation =
-      stringArg(tool.args, 'action') ?? stringArg(tool.args, 'operation');
+      stringArg(tool.args, 'action') ??
+      stringArg(tool.args, 'operation') ??
+      (name === 'delegate_start'
+        ? 'start'
+        : name === 'delegate_continue'
+          ? 'continue'
+          : undefined);
     action = operation ? `Delegate ${operation}` : 'Delegating';
     argument = stringArg(tool.args, 'name') ?? stringArg(tool.args, 'task');
     const tasks = arrayArg(tool.args, 'tasks');
@@ -244,9 +256,14 @@ export function activityStepParts(
             : 'Listing delegate changes';
     const node = stringArg(tool.args, 'node');
     if (node) argument = node;
-  } else if (name === 'background') {
+  } else if (name === 'background' || name.startsWith('background_')) {
     role = 'command';
-    const model = backgroundPresentation(tool.args, tool.result);
+    const model = backgroundPresentation(
+      tool.args,
+      tool.result,
+      new Map(),
+      name,
+    );
     const operation = model.action ?? 'list';
     action =
       operation === 'start'
@@ -261,16 +278,39 @@ export function activityStepParts(
                 ? 'Removing background watches'
                 : 'Listing background commands';
     argument = tool.backgroundTitle ?? model.target;
-  } else if (name === 'todo' || name === 'tasks') {
+  } else if (
+    name === 'todo' ||
+    name === 'tasks' ||
+    name === 'todo_list' ||
+    name === 'todo_update' ||
+    name === 'todo_remove'
+  ) {
     const operation =
-      stringArg(tool.args, 'action') ?? stringArg(tool.args, 'operation');
+      stringArg(tool.args, 'action') ??
+      stringArg(tool.args, 'operation') ??
+      (name.startsWith('todo_') ? name.slice('todo_'.length) : undefined);
     action = operation ? `Tasks ${operation}` : 'Updating tasks';
     argument = stringArg(tool.args, 'id') ?? stringArg(tool.args, 'taskId');
     if (!argument && tool.args && typeof tool.args === 'object') {
       const operations = (tool.args as { operations?: unknown }).operations;
       if (Array.isArray(operations))
         argument = `${operations.length} operation${operations.length === 1 ? '' : 's'}`;
+      else {
+        const changes = (tool.args as { changes?: unknown }).changes;
+        const ids = (tool.args as { ids?: unknown }).ids;
+        if (Array.isArray(changes))
+          argument = `${changes.length} change${changes.length === 1 ? '' : 's'}`;
+        else if (Array.isArray(ids))
+          argument = `${ids.length} id${ids.length === 1 ? '' : 's'}`;
+      }
     }
+  } else if (name === 'delegate_gate') {
+    role = 'command';
+    const model = delegateGatePresentation(tool.args);
+    action = 'Gating delegates';
+    argument = model.mode
+      ? `${model.mode} ${model.references.length} delegate${model.references.length === 1 ? '' : 's'}`
+      : undefined;
   } else if (name === 'grep' || name === 'find' || name === 'glob') {
     action = 'Searching for';
     const pattern =
@@ -299,6 +339,7 @@ export function activityStepParts(
     role = 'read';
     action = 'Reading search result';
     argument =
+      stringArg(tool.args, 'contentId') ??
       stringArg(tool.args, 'heading') ??
       stringArg(tool.args, 'literal') ??
       stringArg(tool.args, 'query');
@@ -306,6 +347,12 @@ export function activityStepParts(
       const page =
         numberArg(tool.args, 'urlIndex') ?? numberArg(tool.args, 'queryIndex');
       if (page !== undefined) argument = `result ${page + 1}`;
+      else {
+        const offset = numberArg(tool.args, 'offset');
+        const maxChars = numberArg(tool.args, 'maxChars');
+        if (offset !== undefined || maxChars !== undefined)
+          argument = `offset ${offset ?? 0}${maxChars === undefined ? '' : ` · ${maxChars} chars`}`;
+      }
     }
   } else if (path) {
     const edits = arrayArg(tool.args, 'edits');

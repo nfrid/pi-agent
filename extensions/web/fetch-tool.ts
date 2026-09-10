@@ -5,30 +5,24 @@ import { renderFetchCall, renderWebResult } from './render';
 import {
   appendCacheFileNotice,
   boundedPreview,
+  compactManifest,
   persistenceDetails,
   persistWebResult,
+  stripContentIdLines,
 } from './result-support';
-import { generateId, type WebResultStore } from './storage';
+import { generateId, type StoredContent, type WebResultStore } from './storage';
 import { throwIfAborted } from './utils';
 
 const parameters = Type.Object({
-  url: Type.Optional(
-    Type.String({ description: 'One page URL', maxLength: 4_096 }),
-  ),
-  urls: Type.Optional(
-    Type.Array(Type.String({ maxLength: 4_096 }), {
-      description: 'Page URLs to retrieve in parallel',
-      maxItems: 10,
-    }),
-  ),
+  urls: Type.Array(Type.String({ maxLength: 4_096 }), {
+    description: 'Page URLs to retrieve in parallel',
+    minItems: 1,
+    maxItems: 10,
+  }),
 });
 
-function urlList(
-  url: string | undefined,
-  urls: string[] | undefined,
-): string[] {
-  const input = urls?.length ? urls : url ? [url] : [];
-  return [...new Set(input.map((item) => item.trim()).filter(Boolean))];
+function urlList(urls: string[]): string[] {
+  return [...new Set(urls.map((item) => item.trim()).filter(Boolean))];
 }
 
 export function createFetchContentTool(options: {
@@ -45,8 +39,8 @@ export function createFetchContentTool(options: {
     parameters,
     async execute(_callId, params, signal, onUpdate) {
       const assertCurrent = operationGuard(signal);
-      const urls = urlList(params.url, params.urls);
-      if (urls.length === 0) throw new Error('Provide url or urls.');
+      const urls = urlList(params.urls);
+      if (urls.length === 0) throw new Error('Provide at least one URL.');
       onUpdate?.({
         content: [{ type: 'text', text: `Fetching ${urls.length} URL(s)…` }],
         details: { phase: 'fetch' },
@@ -57,13 +51,16 @@ export function createFetchContentTool(options: {
       if (results.length === 1) {
         const result = results[0];
         if (result.error) throw new Error(result.error);
-        const cacheFile = await persistWebResult(
+        const contentId = `${id}:page:0`;
+        const manifest = `Content ID: ${contentId} — ${result.title || result.url} — ${result.url}`;
+        const payload = await persistWebResult(
           resultStore,
           {
             id,
             type: 'fetch',
             timestamp: Date.now(),
             urls: results,
+            contents: [{ id: contentId, text: result.content }],
           },
           assertCurrent,
         );
@@ -72,17 +69,23 @@ export function createFetchContentTool(options: {
             {
               type: 'text',
               text: appendCacheFileNotice(
-                boundedPreview(result.content, id, 'urlIndex: 0', true)
-                  .rendered,
-                cacheFile,
+                boundedPreview(
+                  result.content,
+                  contentId,
+                  payload.continuationAvailable,
+                  payload.continuationAvailable
+                    ? compactManifest(manifest)
+                    : undefined,
+                ).rendered,
+                payload,
               ),
             },
           ],
           details: {
-            responseId: id,
+            contentId,
             title: result.title,
             totalChars: result.content.length,
-            ...persistenceDetails(cacheFile),
+            ...persistenceDetails(payload),
           },
         };
       }
@@ -91,15 +94,43 @@ export function createFetchContentTool(options: {
         throw new Error(
           `All content fetches failed: ${results.map((item) => item.error).join('; ')}`,
         );
+      const summaryId = `${id}:summary`;
+      const pageEntries = results.flatMap((result, index) =>
+        result.error
+          ? []
+          : [
+              {
+                id: `${id}:page:${index}`,
+                title: result.title || result.url,
+                url: result.url,
+              },
+            ],
+      );
       const summary = results
         .map((result, index) =>
           result.error
             ? `${index}. ${result.url} — Error: ${result.error}`
-            : `${index}. ${result.title || result.url} — ${result.content.length} characters`,
+            : `${index}. ${result.title || result.url} — ${result.content.length} characters\n   Content ID: ${id}:page:${index}`,
         )
         .join('\n');
-      const renderedSummary = `${summary}\n\nResponse ID: ${id}`;
-      const cacheFile = await persistWebResult(
+      const manifest = [
+        'Content ID manifest:',
+        `- Summary: ${summaryId}`,
+        ...pageEntries.map(
+          (page) => `- Page: ${page.id} — ${page.title} — ${page.url}`,
+        ),
+      ].join('\n');
+      const renderedSummary = `${summary}\n\n${manifest}`;
+      const pageIds = pageEntries.map((page) => page.id);
+      const contents: StoredContent[] = [
+        { id: summaryId, text: renderedSummary },
+        ...results.flatMap((result, index) =>
+          result.error
+            ? []
+            : [{ id: `${id}:page:${index}`, text: result.content }],
+        ),
+      ];
+      const payload = await persistWebResult(
         resultStore,
         {
           id,
@@ -107,27 +138,36 @@ export function createFetchContentTool(options: {
           timestamp: Date.now(),
           urls: results,
           summary: renderedSummary,
+          contents,
         },
         assertCurrent,
       );
+      const previewContent = payload.continuationAvailable
+        ? renderedSummary
+        : stripContentIdLines(summary);
       const initial = boundedPreview(
-        renderedSummary,
-        id,
-        'view: "summary"',
-        true,
+        previewContent,
+        summaryId,
+        payload.continuationAvailable,
+        payload.continuationAvailable ? compactManifest(manifest) : undefined,
       );
       return {
         content: [
           {
             type: 'text',
-            text: appendCacheFileNotice(initial.rendered, cacheFile),
+            text: appendCacheFileNotice(initial.rendered, payload),
           },
         ],
         details: {
-          responseId: id,
+          contentIds: {
+            summary: summaryId,
+            pages: pageIds.filter(
+              (pageId): pageId is string => pageId !== null,
+            ),
+          },
           urlCount: urls.length,
           successful,
-          ...persistenceDetails(cacheFile),
+          ...persistenceDetails(payload),
           ...initial.details,
         },
       };

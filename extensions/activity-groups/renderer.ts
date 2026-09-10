@@ -55,8 +55,18 @@ function toolSubject(
       argument: shortCommand(command, MAX_COMMAND_WIDTH),
     };
   }
-  if (name === 'delegate') {
-    const action = stringArg(tool.args, 'action');
+  if (
+    name === 'delegate' ||
+    name === 'delegate_start' ||
+    name === 'delegate_continue'
+  ) {
+    const action =
+      stringArg(tool.args, 'action') ??
+      (name === 'delegate_start'
+        ? 'start'
+        : name === 'delegate_continue'
+          ? 'continue'
+          : undefined);
     const agentName = stringArg(tool.args, 'name');
     const args =
       tool.args && typeof tool.args === 'object' && !Array.isArray(tool.args)
@@ -72,8 +82,28 @@ function toolSubject(
           : undefined),
     };
   }
-  if (name === 'todo' || name === 'tasks') {
-    const action = stringArg(tool.args, 'action');
+  if (name === 'background' || name.startsWith('background_')) {
+    const action =
+      stringArg(tool.args, 'action') ??
+      (name.startsWith('background_')
+        ? name.slice('background_'.length)
+        : undefined);
+    const id = stringArg(tool.args, 'id');
+    return {
+      action: action ? `Background ${action}` : 'Background',
+      argument: id,
+    };
+  }
+  if (
+    name === 'todo' ||
+    name === 'tasks' ||
+    name === 'todo_list' ||
+    name === 'todo_update' ||
+    name === 'todo_remove'
+  ) {
+    const action =
+      stringArg(tool.args, 'action') ??
+      (name.startsWith('todo_') ? name.slice('todo_'.length) : undefined);
     const id = stringArg(tool.args, 'id');
     const args =
       tool.args && typeof tool.args === 'object' && !Array.isArray(tool.args)
@@ -81,13 +111,17 @@ function toolSubject(
         : undefined;
     const operationCount = Array.isArray(args?.operations)
       ? args.operations.length
-      : 0;
+      : Array.isArray(args?.changes)
+        ? args.changes.length
+        : Array.isArray(args?.ids)
+          ? args.ids.length
+          : 0;
     return {
       action: action ? `Tasks ${action}` : 'Updating tasks',
       argument:
         id ??
         (operationCount > 0
-          ? `${operationCount} operation${operationCount === 1 ? '' : 's'}`
+          ? `${operationCount} ${Array.isArray(args?.changes) ? 'change' : Array.isArray(args?.ids) ? 'id' : 'operation'}${operationCount === 1 ? '' : 's'}`
           : undefined),
     };
   }

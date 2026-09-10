@@ -10,8 +10,13 @@ import {
   transformTodoContext,
 } from './context';
 import { turnSnapshotText } from './format';
-import { MAX_TODO_RESULT_CHARS, operationSchema, paramsSchema } from './model';
-import { applyMutation, mutate, mutateBatch } from './mutations';
+import {
+  MAX_TODO_RESULT_CHARS,
+  todoListParamsSchema,
+  todoRemoveParamsSchema,
+  todoUpdateParamsSchema,
+} from './model';
+import { applyMutation, mutate } from './mutations';
 import {
   applySnapshot,
   cloneState,
@@ -31,22 +36,21 @@ function user(text: string, timestamp = 1): TodoContextMessages[number] {
   } as TodoContextMessages[number];
 }
 
-function result(id: number): TodoContextMessages[number] {
+function legacyReplay(
+  content: string,
+  timestamp: number,
+): TodoContextMessages[number] {
   return {
-    role: 'toolResult',
-    toolCallId: `call-${id}`,
-    toolName: 'todo',
-    content: [{ type: 'text', text: `exact-${id}` }],
-    isError: false,
-    timestamp: id,
-  } as TodoContextMessages[number];
+    role: 'custom',
+    customType: 'lean-todo-replay',
+    content,
+    display: false,
+    timestamp,
+  };
 }
 
-function text(message: TodoContextMessages[number]): string | undefined {
-  if (!('content' in message) || !Array.isArray(message.content))
-    return undefined;
-  const part = message.content[0];
-  return part?.type === 'text' ? part.text : undefined;
+function isSnapshot(message: TodoContextMessages[number]): boolean {
+  return message.role === 'custom' && message.customType === TODO_SNAPSHOT_TYPE;
 }
 
 function snapshot(
@@ -62,21 +66,27 @@ function snapshot(
   };
 }
 
-function isSnapshot(message: TodoContextMessages[number]): boolean {
-  return message.role === 'custom' && message.customType === TODO_SNAPSHOT_TYPE;
-}
-
-function legacyReplay(
-  content: string,
-  timestamp: number,
+function result(
+  id: number,
+  toolName = 'todo_update',
 ): TodoContextMessages[number] {
   return {
-    role: 'custom',
-    customType: 'lean-todo-replay',
-    content,
-    display: false,
-    timestamp,
-  };
+    role: 'toolResult',
+    toolCallId: `call-${id}`,
+    toolName,
+    content: [{ type: 'text', text: `exact-${id}` }],
+    isError: false,
+    timestamp: id,
+  } as TodoContextMessages[number];
+}
+
+function text(
+  message: TodoContextMessages[number] | undefined,
+): string | undefined {
+  if (!message || !('content' in message) || !Array.isArray(message.content))
+    return undefined;
+  const part = message.content[0];
+  return part?.type === 'text' ? part.text : undefined;
 }
 
 describe('immutable todo turn snapshots', () => {
@@ -246,7 +256,9 @@ describe('registerTodoContext', () => {
 
   it('injects active state at turn start', () => {
     store = createTaskStore();
-    mutate(store, 'add', { action: 'add', text: 'active task' });
+    mutate(store, 'todo_update', {
+      changes: [{ id: 'T1', text: 'active task' }],
+    });
     const handlers = registeredContext();
     const turnStart = handlers.get('before_agent_start')?.() as {
       message: { customType: string; content: string };
@@ -257,7 +269,9 @@ describe('registerTodoContext', () => {
 
   it('persists one empty reset across subsequent empty turns', () => {
     store = createTaskStore();
-    mutate(store, 'add', { action: 'add', text: 'stale task' });
+    mutate(store, 'todo_update', {
+      changes: [{ id: 'T1', text: 'stale task' }],
+    });
     const handlers = registeredContext();
     const activeStart = handlers.get('before_agent_start')?.() as {
       message: { customType: string; content: string };
@@ -305,7 +319,9 @@ describe('registerTodoContext', () => {
 
   it('persists a replacement reset when inactive state changes', () => {
     store = createTaskStore();
-    mutate(store, 'add', { action: 'add', id: 'T1', text: 'finish me' });
+    mutate(store, 'todo_update', {
+      changes: [{ id: 'T1', text: 'finish me' }],
+    });
     const handlers = registeredContext();
     const activeStart = handlers.get('before_agent_start')?.() as {
       message: { content: string };
@@ -314,14 +330,14 @@ describe('registerTodoContext', () => {
       snapshot(activeStart.message.content, 1),
     ];
 
-    mutate(store, 'done', { action: 'done', id: 'T1' });
+    mutate(store, 'todo_update', { changes: [{ id: 'T1', status: 'done' }] });
     const completedReset = handlers.get('before_agent_start')?.() as {
       message: { content: string };
     };
     history = [...history, snapshot(completedReset.message.content, 2)];
     handlers.get('context')?.({ messages: history });
 
-    mutate(store, 'remove', { action: 'remove', id: 'T1' });
+    mutate(store, 'todo_remove', { ids: ['T1'] });
     const emptyReset = handlers.get('before_agent_start')?.() as {
       message: { content: string };
     };
@@ -340,7 +356,9 @@ describe('registerTodoContext', () => {
 
   it('recovers active state after compaction/tree recovery', () => {
     store = createTaskStore();
-    mutate(store, 'add', { action: 'add', text: 'recover me' });
+    mutate(store, 'todo_update', {
+      changes: [{ id: 'T1', text: 'recover me' }],
+    });
     const handlers = registeredContext();
     handlers.get('session_compact')?.();
     const contextualized = handlers.get('context')?.({
@@ -356,7 +374,7 @@ describe('registerTodoContext', () => {
   });
 });
 
-describe('atomic todo mutations', () => {
+describe('restored task regressions', () => {
   beforeEach(() => {
     store = createTaskStore();
     applySnapshot(store, initialState());
@@ -365,196 +383,35 @@ describe('atomic todo mutations', () => {
   it('isolates mutable state between extension-owned stores', () => {
     const other = createTaskStore();
     expect(
-      mutate(store, 'add', { action: 'add', id: 'T1', text: 'first' }),
+      mutate(store, 'todo_update', { changes: [{ id: 'T1', text: 'first' }] }),
     ).toMatchObject({ changed: true });
     expect(
-      mutate(other, 'add', { action: 'add', id: 'T1', text: 'second' }),
+      mutate(other, 'todo_update', { changes: [{ id: 'T1', text: 'second' }] }),
     ).toMatchObject({ changed: true });
     expect(store.state.tasks[0]?.text).toBe('first');
     expect(other.state.tasks[0]?.text).toBe('second');
   });
 
-  it('rejects a direct start with every unfinished dependency named', () => {
-    expect(
-      mutate(store, 'replace', {
-        action: 'replace',
-        tasks: [
-          { id: 'T1', text: 'first', status: 'doing' },
-          { id: 'T2', text: 'second', status: 'todo' },
-          { id: 'T3', text: 'third', depends_on: ['T1', 'T2'] },
-        ],
-      }),
-    ).toMatchObject({ changed: true });
-    const before = cloneState(store);
-
-    const result = mutate(store, 'start', { action: 'start', id: 'T3' });
-
-    expect(result).toEqual({
-      changed: false,
-      message: 'cannot start T3; waiting on T1, T2',
-      error: 'cannot start T3; waiting on T1, T2',
-    });
-    expect(cloneState(store)).toEqual(before);
-  });
-
-  it('starts a task after every dependency is done', () => {
-    mutate(store, 'replace', {
-      action: 'replace',
-      tasks: [
-        { id: 'T1', text: 'prerequisite', status: 'done' },
-        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
-      ],
-    });
-
-    expect(mutate(store, 'start', { action: 'start', id: 'T2' })).toEqual({
-      changed: true,
-      message: 'start T2',
-    });
-    expect(store.state.tasks.find((task) => task.id === 'T2')?.status).toBe(
-      'doing',
-    );
-  });
-
-  it('keeps a dropped dependency from satisfying start', () => {
-    mutate(store, 'replace', {
-      action: 'replace',
-      tasks: [
-        { id: 'T1', text: 'dropped', status: 'dropped' },
-        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
-      ],
-    });
-
-    const result = mutate(store, 'start', { action: 'start', id: 'T2' });
-
-    expect(result.error).toBe('cannot start T2; waiting on T1');
-    expect(store.state.tasks.find((task) => task.id === 'T2')?.status).toBe(
-      'todo',
-    );
-  });
-
-  it('clears unrelated completed tasks without breaking a ready dependent', () => {
-    mutate(store, 'replace', {
-      action: 'replace',
-      tasks: [
-        { id: 'T1', text: 'prerequisite', status: 'done' },
-        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
-        { id: 'T3', text: 'unrelated', status: 'done' },
-      ],
-    });
-
-    expect(mutate(store, 'clear_done', { action: 'clear_done' })).toMatchObject(
-      {
-        changed: true,
-        message:
-          'cleared 1 completed/dropped tasks; retained 1 prerequisite tasks',
-      },
-    );
-    expect(store.state.tasks.map((task) => task.id)).toEqual(['T1', 'T2']);
-    expect(
-      mutate(store, 'start', { action: 'start', id: 'T2' }).error,
-    ).toBeUndefined();
-    expect(
-      mutate(store, 'add', { action: 'add', text: 'new work' }).changed,
-    ).toBe(true);
-  });
-
-  it('retains transitive dropped prerequisites without satisfying them', () => {
-    mutate(store, 'replace', {
-      action: 'replace',
-      tasks: [
-        { id: 'T1', text: 'completed root', status: 'done' },
-        {
-          id: 'T2',
-          text: 'dropped prerequisite',
-          status: 'dropped',
-          depends_on: ['T1'],
-        },
-        { id: 'T3', text: 'dependent', depends_on: ['T2'] },
-      ],
-    });
-    const before = cloneState(store);
-
-    expect(mutate(store, 'clear_done', { action: 'clear_done' }).changed).toBe(
-      false,
-    );
-    expect(cloneState(store)).toEqual(before);
-    expect(mutate(store, 'start', { action: 'start', id: 'T3' }).error).toBe(
-      'cannot start T3; waiting on T2',
-    );
-    expect(
-      mutate(store, 'add', { action: 'add', text: 'new work' }).changed,
-    ).toBe(true);
-  });
-
-  it('removes an entire completed dependency chain once no unfinished task needs it', () => {
-    mutate(store, 'replace', {
-      action: 'replace',
-      tasks: [
-        { id: 'T1', text: 'prerequisite', status: 'done' },
-        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
-      ],
-    });
-
-    expect(
-      mutateBatch(store, [
-        { action: 'done', id: 'T2' },
-        { action: 'clear_done' },
-      ]).changed,
-    ).toBe(true);
-    expect(store.state.tasks).toEqual([]);
-    expect(mutate(store, 'clear_done', { action: 'clear_done' }).changed).toBe(
-      false,
-    );
-  });
-
-  it('starts tasks without dependencies', () => {
-    expect(
-      mutate(store, 'add', { action: 'add', id: 'T1', text: 'independent' }),
-    ).toMatchObject({ changed: true });
-
-    expect(mutate(store, 'start', { action: 'start', id: 'T1' })).toEqual({
-      changed: true,
-      message: 'start T1',
-    });
-  });
-
-  it('rolls back earlier batch operations when start has blockers', () => {
-    mutate(store, 'replace', {
-      action: 'replace',
-      tasks: [
-        { id: 'T1', text: 'prerequisite' },
-        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
-      ],
-    });
-    const before = cloneState(store);
-
-    const result = mutateBatch(store, [
-      { action: 'update', id: 'T1', text: 'changed before failure' },
-      { action: 'start', id: 'T2' },
-    ]);
-
-    expect(result).toMatchObject({
-      changed: false,
-      error: 'cannot start T2; waiting on T1',
-    });
-    expect(cloneState(store)).toEqual(before);
-  });
-
   it('rolls back fields changed before invalid dependency validation', () => {
     expect(
-      mutate(store, 'add', { action: 'add', id: 'T1', text: 'original' }),
+      mutate(store, 'todo_update', {
+        changes: [{ id: 'T1', text: 'original' }],
+      }),
     ).toMatchObject({
       changed: true,
     });
     const before = cloneState(store);
     const stateReference = store.state;
 
-    const result = mutate(store, 'update', {
-      action: 'update',
-      id: 'T1',
-      text: 'leaked change',
-      status: 'doing',
-      depends_on: ['missing'],
+    const result = mutate(store, 'todo_update', {
+      changes: [
+        {
+          id: 'T1',
+          text: 'leaked change',
+          status: 'doing',
+          depends_on: ['missing'],
+        },
+      ],
     });
 
     expect(result).toMatchObject({
@@ -563,56 +420,6 @@ describe('atomic todo mutations', () => {
     });
     expect(cloneState(store)).toEqual(before);
     expect(store.state).toBe(stateReference);
-  });
-
-  it('rejects cycles from update, replace, and transactional batches', () => {
-    expect(
-      mutate(store, 'replace', {
-        action: 'replace',
-        tasks: [
-          { id: 'T1', text: 'one', depends_on: [] },
-          { id: 'T2', text: 'two', depends_on: ['T1'] },
-        ],
-      }),
-    ).toMatchObject({ changed: true });
-    const before = cloneState(store);
-
-    expect(
-      mutate(store, 'update', {
-        action: 'update',
-        id: 'T1',
-        depends_on: ['T2'],
-      }),
-    ).toMatchObject({
-      changed: false,
-      error: expect.stringContaining('dependency cycle:'),
-    });
-    expect(cloneState(store)).toEqual(before);
-
-    expect(
-      mutate(store, 'replace', {
-        action: 'replace',
-        tasks: [
-          { id: 'T1', text: 'one', depends_on: ['T2'] },
-          { id: 'T2', text: 'two', depends_on: ['T1'] },
-        ],
-      }),
-    ).toMatchObject({
-      changed: false,
-      error: expect.stringContaining('cycle'),
-    });
-    expect(cloneState(store)).toEqual(before);
-
-    expect(
-      mutateBatch(store, [
-        { action: 'add', id: 'T3', text: 'three', depends_on: ['T2'] },
-        { action: 'update', id: 'T1', depends_on: ['T3'] },
-      ]),
-    ).toMatchObject({
-      changed: false,
-      error: expect.stringContaining('cycle'),
-    });
-    expect(cloneState(store)).toEqual(before);
   });
 
   it('throws failed tool executions so Pi records an error result', async () => {
@@ -630,7 +437,7 @@ describe('atomic todo mutations', () => {
     registerTodoTool(
       {
         registerTool(value: typeof tool) {
-          tool = value;
+          if ((value as { name?: string }).name === 'todo_remove') tool = value;
         },
         appendEntry() {},
       } as unknown as ExtensionAPI,
@@ -640,7 +447,7 @@ describe('atomic todo mutations', () => {
     await expect(
       tool?.execute(
         'invalid',
-        { action: 'update', id: 'missing', text: 'nope' },
+        { ids: ['missing'] },
         new AbortController().signal,
         undefined,
         { hasUI: false },
@@ -663,7 +470,7 @@ describe('atomic todo mutations', () => {
     registerTodoTool(
       {
         registerTool(value: typeof tool) {
-          tool = value;
+          if ((value as { name?: string }).name === 'todo_update') tool = value;
         },
         appendEntry() {
           throw new Error('persistence failed');
@@ -676,7 +483,7 @@ describe('atomic todo mutations', () => {
     await expect(
       tool?.execute(
         'add',
-        { action: 'add', text: 'must roll back' },
+        { changes: [{ id: 'T1', text: 'must roll back' }] },
         new AbortController().signal,
         undefined,
         { hasUI: false },
@@ -695,8 +502,8 @@ describe('atomic todo mutations', () => {
           },
         } as never,
         { hasUI: false } as never,
-        'add',
-        { action: 'add', text: 'must not leak' },
+        'todo_update',
+        { changes: [{ id: 'T1', text: 'must not leak' }] },
       ),
     ).toThrow('interactive persistence failed');
     expect(store.state).toEqual(initialState());
@@ -726,9 +533,8 @@ describe('atomic todo mutations', () => {
     } as never;
 
     expect(() =>
-      applyMutation(store, pi, ctx, 'add', {
-        action: 'add',
-        text: 'must be compensated',
+      applyMutation(store, pi, ctx, 'todo_update', {
+        changes: [{ id: 'T1', text: 'must be compensated' }],
       }),
     ).toThrow('UI failed');
     expect(store.state).toEqual(initialState());
@@ -751,7 +557,7 @@ describe('atomic todo mutations', () => {
     registerTodoTool(
       {
         registerTool(value: typeof tool) {
-          tool = value;
+          if ((value as { name?: string }).name === 'todo_update') tool = value;
         },
         appendEntry(
           _type: string,
@@ -777,8 +583,8 @@ describe('atomic todo mutations', () => {
 
     await expect(
       tool?.execute(
-        'add',
-        { action: 'add', text: 'must be compensated' },
+        'todo_update',
+        { changes: [{ id: 'T1', text: 'must be compensated' }] },
         new AbortController().signal,
         undefined,
         ctx,
@@ -786,22 +592,6 @@ describe('atomic todo mutations', () => {
     ).rejects.toThrow('tool UI failed');
     expect(store.state).toEqual(initialState());
     expect(persisted).toEqual([]);
-  });
-
-  it('rolls back every operation and id allocation when a batch fails', () => {
-    const before = cloneState(store);
-
-    const result = mutateBatch(store, [
-      { action: 'add', text: 'temporary' },
-      { action: 'update', id: 'T1', depends_on: ['missing'] },
-    ]);
-
-    expect(result.changed).toBe(false);
-    expect(result.error).toBe('unknown dependencies: missing');
-    expect(cloneState(store)).toEqual(before);
-    expect(mutate(store, 'add', { action: 'add', text: 'real' }).message).toBe(
-      'added T1',
-    );
   });
 });
 
@@ -812,9 +602,8 @@ describe('todo widget lifecycle', () => {
   });
 
   it('records every completion outside render and renders without mutation', () => {
-    mutate(store, 'replace', {
-      action: 'replace',
-      tasks: Array.from({ length: 15 }, (_, index) => ({
+    mutate(store, 'todo_update', {
+      changes: Array.from({ length: 15 }, (_, index) => ({
         id: `T${index + 1}`,
         text: `done ${index + 1}`,
         status: 'done' as const,
@@ -852,8 +641,20 @@ describe('todo widget lifecycle', () => {
 });
 
 describe('bounded todo tool results', () => {
-  it('keeps replace and batch results concise while list remains exact', async () => {
+  it('caps large task rows and marks omitted state', async () => {
     const localStore = createTaskStore();
+    for (let index = 0; index < 100; index += 1) {
+      mutate(localStore, 'todo_update', {
+        changes: [
+          {
+            id: `T${index + 1}`,
+            text: `task-${index} ${'detail '.repeat(200)}`,
+            notes: 'note '.repeat(200),
+          },
+        ],
+      });
+    }
+
     let tool:
       | {
           execute: (
@@ -868,78 +669,7 @@ describe('bounded todo tool results', () => {
     registerTodoTool(
       {
         registerTool(value: typeof tool) {
-          tool = value;
-        },
-        appendEntry() {},
-      } as never,
-      localStore,
-    );
-
-    const replaced = await tool?.execute(
-      'call-replace',
-      {
-        action: 'replace',
-        tasks: [
-          { id: 'T1', text: 'submitted task one' },
-          { id: 'T2', text: 'submitted task two' },
-        ],
-      },
-      undefined,
-      undefined,
-      { hasUI: false } as never,
-    );
-    expect(replaced?.content[0]?.text).toBe('replaced with 2 tasks');
-    expect(replaced?.content[0]?.text).not.toContain('submitted task one');
-
-    const batched = await tool?.execute(
-      'call-batch',
-      {
-        action: 'batch',
-        operations: [{ action: 'done', id: 'T1' }],
-      },
-      undefined,
-      undefined,
-      { hasUI: false } as never,
-    );
-    expect(batched?.content[0]?.text).toBe('done T1');
-    expect(batched?.content[0]?.text).not.toContain('submitted task');
-
-    const batchedList = await tool?.execute(
-      'call-batch-list',
-      { action: 'batch', operations: [{ action: 'list' }] },
-      undefined,
-      undefined,
-      { hasUI: false } as never,
-    );
-    expect(batchedList?.content[0]?.text).toBe('listed 1 tasks');
-    expect(batchedList?.content[0]?.text).not.toContain('submitted task');
-  });
-
-  it('caps large task rows and marks omitted state', async () => {
-    const localStore = createTaskStore();
-    for (let index = 0; index < 100; index += 1) {
-      mutate(localStore, 'add', {
-        action: 'add',
-        text: `task-${index} ${'detail '.repeat(200)}`,
-        notes: 'note '.repeat(200),
-      });
-    }
-
-    let tool:
-      | {
-          execute: (
-            id: string,
-            params: { action: 'list' },
-            signal: AbortSignal | undefined,
-            onUpdate: undefined,
-            ctx: unknown,
-          ) => Promise<{ content: Array<{ text: string }> }>;
-        }
-      | undefined;
-    registerTodoTool(
-      {
-        registerTool(value: typeof tool) {
-          tool = value;
+          if ((value as { name?: string }).name === 'todo_list') tool = value;
         },
         appendEntry() {},
       } as never,
@@ -948,7 +678,7 @@ describe('bounded todo tool results', () => {
 
     const response = await tool?.execute(
       'call-list',
-      { action: 'list' },
+      {},
       undefined,
       undefined,
       { hasUI: false } as never,
@@ -960,43 +690,179 @@ describe('bounded todo tool results', () => {
   });
 });
 
-describe('batch operation schema', () => {
-  const schemaDescription = (schema: unknown) =>
-    (schema as { description?: string }).description;
-
-  it('describes every action in the action schema', () => {
-    expect(schemaDescription(paramsSchema.properties.action)).toContain(
-      'list current tasks',
-    );
-    expect(schemaDescription(paramsSchema.properties.action)).toContain(
-      'batch applies ordered non-batch operations',
-    );
-    expect(schemaDescription(operationSchema.properties.action)).toContain(
-      'replace the complete task set',
-    );
+describe('todo mutations', () => {
+  beforeEach(() => {
+    store = createTaskStore();
+    applySnapshot(store, initialState());
   });
 
-  it('accepts current non-batch operations and rejects malformed/nested calls', () => {
+  it('upserts stable ids and defaults new tasks', () => {
     expect(
-      Value.Check(paramsSchema, {
-        action: 'batch',
-        operations: [
-          { action: 'done', id: 'T1' },
-          { action: 'add', text: 'next', priority: 'high' },
+      mutate(store, 'todo_update', {
+        changes: [{ id: 'caller-1', text: ' first ', priority: 'high' }],
+      }),
+    ).toMatchObject({ changed: true });
+    expect(store.state.tasks[0]).toMatchObject({
+      id: 'caller-1',
+      text: 'first',
+      status: 'todo',
+      dependsOn: [],
+      priority: 'high',
+    });
+
+    mutate(store, 'todo_update', {
+      changes: [{ id: 'caller-1', notes: 'context', status: 'doing' }],
+    });
+    expect(store.state.tasks).toHaveLength(1);
+    expect(store.state.tasks[0]).toMatchObject({
+      text: 'first',
+      status: 'doing',
+      priority: 'high',
+      notes: 'context',
+    });
+  });
+
+  it('allows forward references and validates the complete request atomically', () => {
+    expect(
+      mutate(store, 'todo_update', {
+        changes: [
+          { id: 'T1', text: 'first', depends_on: ['T2'] },
+          { id: 'T2', text: 'second' },
         ],
       }),
-    ).toBe(true);
-    expect(Value.Check(operationSchema, { id: 'T1' })).toBe(false);
+    ).toMatchObject({ changed: true });
+    const before = cloneState(store);
+    const result = mutate(store, 'todo_update', {
+      changes: [
+        { id: 'T1', text: 'changed', depends_on: ['T2'] },
+        { id: 'T2', depends_on: ['T1'] },
+      ],
+    });
+    expect(result.error).toContain('dependency cycle:');
+    expect(cloneState(store)).toEqual(before);
+  });
+
+  it('rejects missing new text and invalid dependencies without partial updates', () => {
+    mutate(store, 'todo_update', { changes: [{ id: 'T1', text: 'original' }] });
+    const before = cloneState(store);
+    const result = mutate(store, 'todo_update', {
+      changes: [
+        { id: 'T1', text: 'leaked' },
+        { id: 'T2', depends_on: ['missing'] },
+      ],
+    });
+    expect(result.error).toBe('T2 requires text when creating a task');
+    expect(cloneState(store)).toEqual(before);
+
+    const missingText = mutate(store, 'todo_update', {
+      changes: [{ id: 'T3' }],
+    });
+    expect(missingText.error).toBe('T3 requires text when creating a task');
+  });
+
+  it('removes multiple ids atomically and permits removing a dependency with its dependent', () => {
+    mutate(store, 'todo_update', {
+      changes: [
+        { id: 'T1', text: 'root' },
+        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
+        { id: 'T3', text: 'unrelated' },
+      ],
+    });
+    const blocked = mutate(store, 'todo_remove', { ids: ['T1'] });
+    expect(blocked.error).toContain('T2');
+    expect(store.state.tasks).toHaveLength(3);
+
+    expect(mutate(store, 'todo_remove', { ids: ['T1', 'T2'] })).toMatchObject({
+      changed: true,
+    });
+    expect(store.state.tasks.map((task) => task.id)).toEqual(['T3']);
+  });
+
+  it('rolls back state when persistence fails', () => {
+    expect(() =>
+      applyMutation(
+        store,
+        {
+          appendEntry: () => {
+            throw new Error('persistence failed');
+          },
+        } as never,
+        { hasUI: false } as never,
+        'todo_update',
+        { changes: [{ id: 'T1', text: 'work' }] },
+      ),
+    ).toThrow('persistence failed');
+    expect(store.state).toEqual(initialState());
+  });
+});
+
+describe('todo tool registration', () => {
+  it('registers exactly the three model-facing tools', () => {
+    const definitions: Array<{ name: string }> = [];
+    registerTodoTool(
+      {
+        registerTool(definition: { name: string }) {
+          definitions.push(definition);
+        },
+        appendEntry() {},
+      } as never,
+      createTaskStore(),
+    );
+    expect(definitions.map((definition) => definition.name)).toEqual([
+      'todo_list',
+      'todo_update',
+      'todo_remove',
+    ]);
+  });
+
+  it('keeps schemas strict and excludes the old action API', () => {
+    expect(Value.Check(todoListParamsSchema, {})).toBe(true);
+    expect(Value.Check(todoListParamsSchema, { action: 'list' })).toBe(false);
     expect(
-      Value.Check(operationSchema, { action: 'batch', operations: [] }),
-    ).toBe(false);
-    expect(Value.Check(operationSchema, { action: 'done', id: 1 })).toBe(false);
-    expect(
-      Value.Check(operationSchema, {
-        action: 'done',
-        id: 'T1',
-        surprise: true,
+      Value.Check(todoUpdateParamsSchema, {
+        changes: [{ id: 'T1', text: 'work', depends_on: ['T2'] }],
       }),
-    ).toBe(false);
+    ).toBe(true);
+    expect(Value.Check(todoUpdateParamsSchema, { changes: [] })).toBe(false);
+    expect(Value.Check(todoRemoveParamsSchema, { ids: ['T1'] })).toBe(true);
+    expect(Value.Check(todoRemoveParamsSchema, { ids: [] })).toBe(false);
+  });
+
+  it('bounds list output', async () => {
+    const localStore = createTaskStore();
+    for (let index = 0; index < 100; index++)
+      mutate(localStore, 'todo_update', {
+        changes: [
+          {
+            id: `T${index + 1}`,
+            text: `task-${index} ${'detail '.repeat(200)}`,
+          },
+        ],
+      });
+    let listTool:
+      | { execute: (...args: unknown[]) => Promise<unknown> }
+      | undefined;
+    registerTodoTool(
+      {
+        registerTool(definition: {
+          name: string;
+          execute: (...args: unknown[]) => Promise<unknown>;
+        }) {
+          if (definition.name === 'todo_list') listTool = definition;
+        },
+        appendEntry() {},
+      } as never,
+      localStore,
+    );
+    const response = (await listTool?.execute(
+      'list',
+      {},
+      undefined,
+      undefined,
+      { hasUI: false },
+    )) as { content?: Array<{ text?: string }> } | undefined;
+    const output = response?.content?.[0]?.text ?? '';
+    expect(output.length).toBeLessThanOrEqual(MAX_TODO_RESULT_CHARS);
+    expect(output).toContain('more tasks omitted');
   });
 });

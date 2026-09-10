@@ -32,7 +32,12 @@ function toolResultDetails(entry: unknown): DelegateDetails | undefined {
     toolName?: unknown;
     details?: unknown;
   };
-  if (value.role !== 'toolResult' || value.toolName !== 'delegate')
+  if (
+    value.role !== 'toolResult' ||
+    (value.toolName !== 'delegate' &&
+      value.toolName !== 'delegate_start' &&
+      value.toolName !== 'delegate_continue')
+  )
     return undefined;
   if (!value.details || typeof value.details !== 'object') return undefined;
   return getDetails({ details: value.details as never });

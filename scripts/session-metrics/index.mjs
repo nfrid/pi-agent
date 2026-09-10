@@ -94,11 +94,19 @@ function finiteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
-function toolCalls(message, name) {
+const TODO_TOOLS = new Set(['todo', 'todo_list', 'todo_update', 'todo_remove']);
+const DELEGATE_TOOLS = new Set([
+  'delegate',
+  'delegate_start',
+  'delegate_continue',
+]);
+
+function toolCalls(message, names) {
   if (message?.role !== 'assistant' || !Array.isArray(message.content))
     return [];
+  const accepted = names instanceof Set ? names : new Set([names]);
   return message.content.filter(
-    (part) => part?.type === 'toolCall' && part.name === name,
+    (part) => part?.type === 'toolCall' && accepted.has(part.name),
   );
 }
 
@@ -445,6 +453,13 @@ function recordRouting(state, runs, ids) {
 /** Continuation tokens paired with their result position, single or parallel. */
 function continuationEntries(call) {
   const args = toolArguments(call);
+  if (call?.name === 'delegate_continue')
+    return [
+      {
+        token: typeof args.continue === 'string' ? args.continue : '',
+        index: 0,
+      },
+    ];
   const tasks = Array.isArray(args.tasks) ? args.tasks : [];
   if (tasks.length)
     return tasks.flatMap((task, index) =>
@@ -459,6 +474,7 @@ function continuationEntries(call) {
 
 function lifecycleEntries(call) {
   const args = toolArguments(call);
+  if (call?.name === 'delegate_continue') return [{ continuation: true }];
   const tasks =
     Array.isArray(args.tasks) && args.tasks.length ? args.tasks : [args];
   return tasks.map((task) => ({
@@ -608,8 +624,8 @@ export function parseSessionJsonl(source, options = {}) {
     if (message?.role === 'user') metrics.userTurns += 1;
     if (message?.role === 'assistant') {
       metrics.assistantTurns += 1;
-      metrics.todoToolCalls += toolCalls(message, 'todo').length;
-      const delegated = toolCalls(message, 'delegate');
+      metrics.todoToolCalls += toolCalls(message, TODO_TOOLS).length;
+      const delegated = toolCalls(message, DELEGATE_TOOLS);
       metrics.delegateToolCalls += delegated.length;
       for (const call of delegated)
         if (typeof call.id === 'string')
@@ -629,11 +645,14 @@ export function parseSessionJsonl(source, options = {}) {
           finiteNumber(usage.cacheWrite),
       );
     }
-    if (message?.role === 'toolResult' && message.toolName === 'todo')
+    if (message?.role === 'toolResult' && TODO_TOOLS.has(message.toolName))
       metrics.todoToolResults += 1;
     if (message?.role === 'toolResult' && isUnknownToolArgumentBlock(message))
       metrics.unknownToolArgumentBlocks += 1;
-    if (message?.role === 'toolResult' && message.toolName === 'delegate') {
+    if (
+      message?.role === 'toolResult' &&
+      DELEGATE_TOOLS.has(message.toolName)
+    ) {
       const result = recordDelegateResult(
         state,
         message,

@@ -77,7 +77,8 @@ export default defineExtension('pause', (pi: ExtensionAPI) => {
       [...activeTools.values()].some(
         (tool) =>
           tool.scopeId === getSessionScopeId(ctx) &&
-          tool.toolName !== 'delegate',
+          tool.toolName !== 'delegate_start' &&
+          tool.toolName !== 'delegate_continue',
       )
     )
       return;
@@ -90,7 +91,11 @@ export default defineExtension('pause', (pi: ExtensionAPI) => {
       scopeId: toolScopeId,
       toolName: event.toolName,
     });
-    if (event.toolName === 'delegate') return;
+    if (
+      event.toolName === 'delegate_start' ||
+      event.toolName === 'delegate_continue'
+    )
+      return;
     const coordinator = getPauseCoordinator(toolScopeId);
     const snapshot = coordinator.snapshot();
     if (
@@ -116,7 +121,9 @@ export default defineExtension('pause', (pi: ExtensionAPI) => {
       snapshot?.generation === event.generation &&
       ![...activeTools.values()].some(
         (tool) =>
-          tool.scopeId === event.scopeId && tool.toolName !== 'delegate',
+          tool.scopeId === event.scopeId &&
+          tool.toolName !== 'delegate_start' &&
+          tool.toolName !== 'delegate_continue',
       )
     )
       coordinator.markMainReached(event.generation);

@@ -41,7 +41,11 @@ import {
   SESSION_MAX_AGE_MS,
   updateDelegateSessionRouting,
 } from './session';
-import { delegatePromptGuidelines, registerDelegateTool } from './tool';
+import {
+  delegatePromptGuidelines,
+  registerDelegateStartTool,
+  registerDelegateTools,
+} from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import {
   createRun,
@@ -160,7 +164,7 @@ describe('delegate', () => {
       | undefined;
     const schedule = vi.fn();
     const ensureBranchOwner = vi.fn();
-    registerDelegateTool(
+    registerDelegateStartTool(
       {
         registerTool(definition: { execute: typeof execute }) {
           execute = definition.execute;
@@ -223,7 +227,7 @@ describe('delegate', () => {
         state: 'scheduled',
       };
     });
-    registerDelegateTool(
+    registerDelegateStartTool(
       {
         registerTool(definition: { execute: typeof execute }) {
           execute = definition.execute;
@@ -278,7 +282,7 @@ describe('delegate', () => {
 
   test('keeps the serialized delegate schema compact', () => {
     let parameters: unknown;
-    registerDelegateTool(
+    registerDelegateStartTool(
       {
         registerTool(definition: { parameters: unknown }) {
           parameters = definition.parameters;
@@ -301,7 +305,6 @@ describe('delegate', () => {
     expect(properties).toEqual(
       [
         'id',
-        'continue',
         'task',
         'route',
         'inputs',
@@ -322,18 +325,26 @@ describe('delegate', () => {
       'from',
       'refresh',
       'worktreePath',
-      'capabilities',
       'selectors',
     ])
       expect(properties).not.toContain(removed);
-    expect(Value.Check(schema, { id: 'impl', task: 'implement' })).toBe(true);
     expect(
       Value.Check(schema, {
         id: 'impl',
         task: 'implement',
+        route: 'quick',
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(schema, {
+        id: 'impl',
+        task: 'implement',
+        route: 'quick',
         inputs: ['prepare'],
         base: 'prepare',
+        scope: ['packages/core'],
         write: true,
+        cwd: 'packages/core',
         web: true,
         skills: ['skills/review'],
       }),
@@ -345,16 +356,68 @@ describe('delegate', () => {
         inputs: [{ node: 'prepare' }],
       }),
     ).toBe(false);
-    expect(Value.Check(schema, { continue: 'impl', task: 'fix' })).toBe(true);
     expect(Value.Check(schema, { task: 'missing identity' })).toBe(false);
-    expect(
-      Value.Check(schema, { id: 'impl', continue: 'impl', task: 'ambiguous' }),
-    ).toBe(false);
-    for (const legacy of ['background', 'tasks', 'continuation']) {
+    expect(Value.Check(schema, { id: 'impl', task: 'missing route' })).toBe(
+      false,
+    );
+    for (const removed of ['continue', 'background', 'tasks', 'continuation'])
       expect(
-        Value.Check(schema, { id: 'impl', task: 'work', [legacy]: true }),
+        Value.Check(schema, {
+          id: 'impl',
+          task: 'work',
+          route: 'quick',
+          [removed]: true,
+        }),
       ).toBe(false);
-    }
+  });
+
+  test('registers separate fresh and continuation model interfaces', () => {
+    const tools = new Map<string, { parameters: unknown }>();
+    registerDelegateTools(
+      {
+        registerTool(definition: { name: string; parameters: unknown }) {
+          tools.set(definition.name, definition);
+        },
+      } as never,
+      '/tmp/project',
+    );
+    expect([...tools.keys()].sort()).toEqual([
+      'delegate_continue',
+      'delegate_start',
+    ]);
+    const start = tools.get('delegate_start')?.parameters;
+    const continuation = tools.get('delegate_continue')?.parameters;
+    expect(start).toBeDefined();
+    expect(continuation).toBeDefined();
+    expect(
+      Value.Check(start as Parameters<typeof Value.Check>[0], {
+        id: 'impl',
+        task: 'implement',
+        route: 'quick',
+        scope: ['extensions/delegate'],
+        write: true,
+        cwd: 'packages/core',
+        web: true,
+        skills: ['skills/review'],
+        inputs: ['audit'],
+        base: 'prepare',
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(continuation as Parameters<typeof Value.Check>[0], {
+        continue: 'impl',
+        task: 'fix',
+        route: 'quick',
+        scope: ['extensions/delegate'],
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(continuation as Parameters<typeof Value.Check>[0], {
+        continue: 'impl',
+        task: 'fix',
+        write: true,
+      }),
+    ).toBe(false);
   });
 
   test('protects recorded branch history in writable continuations', () => {
@@ -1029,16 +1092,18 @@ describe('delegate', () => {
     expect(guidelines).toContain(
       'Reconnoiter enough to write a useful brief, but do not finish the investigation before delegating',
     );
-    expect(guidelines).toContain('Fresh work defaults to fresh context');
+    expect(guidelines).toContain('`delegate_start`');
+    expect(guidelines).toContain('`delegate_continue`');
+    expect(guidelines).toContain('`write`');
     expect(guidelines).toContain('`inputs` waits for prior delegates');
     expect(guidelines).toContain(
       '`base` supplies another delegate’s exact code state',
     );
     expect(guidelines).toContain('Results arrive eagerly');
     expect(guidelines).toContain(
-      'Use a gate only for an intentional `all` fan-in or idle-delayed `any`',
+      "`mode: 'all' | 'any'`, `delegates`, and optional `delivery`",
     );
-    expect(guidelines).toContain('never poll for completion');
+    expect(guidelines).toContain('Never poll for completion');
     expect(guidelines).toContain(
       'Keep parent ownership of scope decisions, integration, and final verification',
     );
@@ -1061,7 +1126,7 @@ describe('delegate', () => {
       "Work directly for trivial tasks, tightly coupled fixes, or when delegation's briefing, latency, verification, and integration overhead clearly dominates",
     );
     expect(guidelines).toContain('wait for it before scheduling that work');
-    expect(guidelines).toContain('different capabilities or skills');
+    expect(guidelines).toContain('if either must change');
     expect(guidelines).toContain('`delegate_jobs inspect`');
   });
 

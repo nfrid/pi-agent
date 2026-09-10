@@ -253,10 +253,14 @@ function GetSearchContentSummary({ args }: { args: unknown }) {
     model.urlIndex !== undefined ? `page ${model.urlIndex + 1}` : undefined,
     model.heading ? compact(model.heading, 80) : undefined,
     model.literal ? compact(model.literal, 80) : undefined,
+    model.offset !== undefined ? `offset ${model.offset}` : undefined,
+    model.maxChars !== undefined ? `${model.maxChars} chars max` : undefined,
   ].filter(Boolean);
   return (
     <Summary
-      detail={[model.responseId, ...selectors].filter(Boolean).join(' · ')}
+      detail={[model.contentId ?? model.responseId, ...selectors]
+        .filter(Boolean)
+        .join(' · ')}
       title="Search content"
     />
   );
@@ -268,6 +272,7 @@ function DelegateSummary({ args }: { args: unknown }) {
     model.name,
     model.route,
     model.continuation ? 'continuation' : undefined,
+    model.scope?.length ? `${model.scope.length} paths` : undefined,
     !model.name && model.taskCount
       ? `${model.taskCount} task${model.taskCount === 1 ? '' : 's'}`
       : undefined,
@@ -370,7 +375,12 @@ function BackgroundSummary({
   args: unknown;
   tool?: ToolRecord;
 }) {
-  const model = backgroundPresentation(args, tool?.result);
+  const model = backgroundPresentation(
+    args,
+    tool?.result,
+    new Map(),
+    typeof tool?.name === 'string' ? tool.name : undefined,
+  );
   const title =
     model.action === 'watch'
       ? 'Watch background output'
@@ -482,8 +492,11 @@ function TodoItemList({
   );
 }
 
-function TodoSummary({ args }: { args: unknown }) {
-  const model = todoPresentation(args);
+function TodoSummary({ args, tool }: { args: unknown; tool?: ToolRecord }) {
+  const model = todoPresentation(
+    args,
+    typeof tool?.name === 'string' ? tool.name : undefined,
+  );
   const items = model.operations.length ? model.operations : model.tasks;
   const noun = model.operations.length ? 'operation' : 'task';
   const listed = items.length > 0;
@@ -522,7 +535,7 @@ const SUMMARIES: Record<
   delegate_changes: (args) => <ChangesSummary args={args} />,
   delegate_gate: (args) => <GateSummary args={args} />,
   background: (args, tool) => <BackgroundSummary args={args} tool={tool} />,
-  todo: (args) => <TodoSummary args={args} />,
+  todo: (args, tool) => <TodoSummary args={args} tool={tool} />,
 };
 
 export function CustomToolInspector({

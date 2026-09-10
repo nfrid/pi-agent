@@ -6,16 +6,13 @@ const statusSchema = () =>
 const prioritySchema = () =>
   StringEnum(['low', 'normal', 'high', 'urgent'] as const);
 
-const NON_BATCH_ACTION_DESCRIPTION =
-  'list current tasks; add a task; update fields; start, done, block, or drop a task; remove a task; clear_done removes done or dropped tasks except prerequisites still needed by retained tasks; replace the complete task set.';
-const ACTION_DESCRIPTION = `${NON_BATCH_ACTION_DESCRIPTION} batch applies ordered non-batch operations.`;
-
-const taskSchema = Type.Object(
+export const taskChangeSchema = Type.Object(
   {
     id: Type.String({
-      description: 'Stable task id, e.g. T1. Required for replace.',
+      minLength: 1,
+      description: 'Stable caller-supplied task id, e.g. T1.',
     }),
-    text: Type.String(),
+    text: Type.Optional(Type.String()),
     status: Type.Optional(statusSchema()),
     depends_on: Type.Optional(Type.Array(Type.String())),
     priority: Type.Optional(prioritySchema()),
@@ -24,87 +21,35 @@ const taskSchema = Type.Object(
   { additionalProperties: false },
 );
 
-const operationProperties = {
-  action: StringEnum(
-    [
-      'list',
-      'add',
-      'update',
-      'start',
-      'done',
-      'block',
-      'drop',
-      'remove',
-      'clear_done',
-      'replace',
-    ] as const,
-    { description: NON_BATCH_ACTION_DESCRIPTION },
-  ),
-  id: Type.Optional(Type.String()),
-  text: Type.Optional(Type.String()),
-  status: Type.Optional(statusSchema()),
-  depends_on: Type.Optional(Type.Array(Type.String())),
-  priority: Type.Optional(prioritySchema()),
-  notes: Type.Optional(Type.String()),
-  include_done: Type.Optional(Type.Boolean()),
-  tasks: Type.Optional(Type.Array(taskSchema)),
-};
+export const todoListParamsSchema = Type.Object(
+  {
+    include_done: Type.Optional(
+      Type.Boolean({ description: 'Include done and dropped tasks.' }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-/** Compact validated batch member; nested batch and unknown fields are invalid. */
-export const operationSchema = Type.Object(operationProperties, {
-  additionalProperties: false,
-});
-
-export const paramsSchema = Type.Object({
-  action: StringEnum(
-    [
-      'list',
-      'add',
-      'update',
-      'start',
-      'done',
-      'block',
-      'drop',
-      'remove',
-      'clear_done',
-      'replace',
-      'batch',
-    ] as const,
-    { description: ACTION_DESCRIPTION },
-  ),
-  id: Type.Optional(
-    Type.String({
-      description: 'Task id for update/start/done/block/drop/remove.',
-    }),
-  ),
-  text: Type.Optional(
-    Type.String({ description: 'Task text for add/update.' }),
-  ),
-  status: Type.Optional(statusSchema()),
-  depends_on: Type.Optional(
-    Type.Array(Type.String(), {
-      description: 'Task ids this task depends on.',
-    }),
-  ),
-  priority: Type.Optional(prioritySchema()),
-  notes: Type.Optional(
-    Type.String({ description: 'Extra context or block reason.' }),
-  ),
-  include_done: Type.Optional(
-    Type.Boolean({ description: 'For list: include done/dropped tasks.' }),
-  ),
-  tasks: Type.Optional(
-    Type.Array(taskSchema, {
-      description: 'For replace: complete desired task set.',
-    }),
-  ),
-  operations: Type.Optional(
-    Type.Array(operationSchema, {
+export const todoUpdateParamsSchema = Type.Object(
+  {
+    changes: Type.Array(taskChangeSchema, {
+      minItems: 1,
       description:
-        'For batch: ordered non-batch todo operations. Example: [{"action":"done","id":"T1"},{"action":"start","id":"T2"}].',
+        'Tasks to create or update. Each change needs a stable id; new tasks also need text. Forward dependency references are allowed within this request.',
     }),
-  ),
-});
+  },
+  { additionalProperties: false },
+);
+
+export const todoRemoveParamsSchema = Type.Object(
+  {
+    ids: Type.Array(Type.String({ minLength: 1 }), {
+      minItems: 1,
+      description: 'Stable task ids to remove.',
+    }),
+  },
+  { additionalProperties: false },
+);
 
 export type Status = 'todo' | 'doing' | 'blocked' | 'done' | 'dropped';
 
@@ -130,8 +75,15 @@ export type SnapshotEntry = {
   state: State;
 };
 
-export type Params = Static<typeof paramsSchema>;
-export type Action = Params['action'];
+export type TodoListParams = Static<typeof todoListParamsSchema>;
+export type TodoUpdateParams = Static<typeof todoUpdateParamsSchema>;
+export type TodoRemoveParams = Static<typeof todoRemoveParamsSchema>;
+export type TaskChange = Static<typeof taskChangeSchema>;
+export type ToolName = 'todo_list' | 'todo_update' | 'todo_remove';
+export type MutationParams =
+  | TodoListParams
+  | TodoUpdateParams
+  | TodoRemoveParams;
 
 export type TaskStats = {
   total: number;
@@ -142,7 +94,7 @@ export type TaskStats = {
 };
 
 export type ToolDetails = {
-  action: Action;
+  tool: ToolName;
   changed: boolean;
   message: string;
   stats: TaskStats;
@@ -150,7 +102,13 @@ export type ToolDetails = {
 };
 
 export const EXT = 'lean-todo';
+/** Legacy tool name retained so old conversation results remain contextualized. */
 export const TOOL = 'todo';
+export const TODO_TOOL_NAMES = [
+  'todo_list',
+  'todo_update',
+  'todo_remove',
+] as const;
 export const LEGACY_TODO_SNAPSHOT_TYPE = 'lean-todo-replay-v2';
 export const LEGACY_TODO_REPLAY_TYPE = 'lean-todo-replay';
 export const MAX_TODO_CONTEXT_CHARS = 12_000;
@@ -169,16 +127,8 @@ export const STATUS_GLYPH: Record<Status, string> = {
   dropped: '⊘',
 };
 
-export const ACTION_GLYPH: Record<Action, string> = {
-  list: '☰',
-  add: '+',
-  update: '→',
-  start: '◐',
-  done: '✓',
-  block: '!',
-  drop: '⊘',
-  remove: '×',
-  clear_done: '∅',
-  replace: '⇄',
-  batch: '⋯',
+export const TOOL_GLYPH: Record<ToolName, string> = {
+  todo_list: '☰',
+  todo_update: '→',
+  todo_remove: '×',
 };

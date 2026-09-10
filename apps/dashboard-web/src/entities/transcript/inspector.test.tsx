@@ -637,6 +637,13 @@ describe('transcript payload inspection', () => {
     expect(toolPresentationKind({ name: 'get_search_content' })).toBe(
       'get_search_content',
     );
+    expect(toolPresentationKind({ name: 'background_start' })).toBe(
+      'background',
+    );
+    expect(toolPresentationKind({ name: 'todo_update' })).toBe('todo');
+    expect(toolPresentationKind({ name: 'delegate_continue' })).toBe(
+      'delegate',
+    );
     expect(toolPresentationKind({ name: 'delegate' })).toBe('delegate');
     expect(toolPresentationKind({ name: 'delegate_jobs' })).toBe(
       'delegate_jobs',
@@ -716,7 +723,7 @@ describe('transcript payload inspection', () => {
       <ToolInspector
         tool={{
           name: 'get_search_content',
-          arguments: { responseId: 'web_1', view: 'summary' },
+          arguments: { contentId: 'content-1', offset: 20, maxChars: 200 },
           result: {
             content: [{ type: 'text', text: 'selected content' }],
             details: {
@@ -736,8 +743,8 @@ describe('transcript payload inspection', () => {
     const backgroundOutcome = renderToStaticMarkup(
       <ToolInspector
         tool={{
-          name: 'background',
-          arguments: { action: 'peek', id: 'bg-1' },
+          name: 'background_peek',
+          arguments: { id: 'bg-1' },
           result: {
             content: [{ type: 'text', text: 'running output' }],
             details: {

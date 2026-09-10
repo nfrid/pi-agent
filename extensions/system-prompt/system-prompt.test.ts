@@ -657,7 +657,7 @@ describe('prompt diagnostics', () => {
       customPrompt: 'custom',
       appendSystemPrompt: 'append',
       promptGuidelines: ['direct'],
-      selectedTools: ['read', 'delegate'],
+      selectedTools: ['read', 'delegate_start', 'delegate_continue'],
     });
     const info = formatPromptInfo(
       promptOptions,

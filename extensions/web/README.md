@@ -20,16 +20,17 @@ Brave, Parallel, Tavily, Perplexity, videos/YouTube, PDFs, or GitHub cloning.
 
 ### `web_search`
 
-Search one query or several queries. The extension uses an available
-OpenAI/Codex login first and falls back to Exa automatically. Optional parameters
-are `numResults` (1–20), `recencyFilter`, `domainFilter`, and `includeContent`.
-Prefix excluded domains with `-`.
+Search one or several queries. The extension uses an available OpenAI/Codex
+login first and falls back to Exa automatically. `queries` is required and may
+contain up to eight independent strings. Optional parameters are `numResults`
+(1–20), `recencyFilter`, `domainFilter`, and `includeContent`. Prefix excluded
+domains with `-`.
 
 Provider selection is intentionally internal: callers ask for web results rather
 than coupling themselves to provider availability or implementation details.
 
 ```ts
-web_search({ query: 'Pi coding agent SDK' });
+web_search({ queries: ['Pi coding agent SDK'] });
 web_search({
   queries: ['TypeScript 5.8 release notes', 'TypeScript 5.8 migration issues'],
   includeContent: true,
@@ -38,36 +39,37 @@ web_search({
 
 ### `fetch_content`
 
-Fetch one URL or several URLs in parallel and extract readable Markdown.
-Binary media and PDFs are deliberately unsupported.
+Fetch one or several URLs in parallel and extract readable Markdown. `urls` is
+required. Binary media and PDFs are deliberately unsupported.
 
 ```ts
-fetch_content({ url: 'https://example.com/article' });
+fetch_content({ urls: ['https://example.com/article'] });
 fetch_content({ urls: ['https://example.com/a', 'https://example.com/b'] });
 ```
 
 ### `get_search_content`
 
 Results are stored in memory for the current process and written to the cache
-file path returned by `web_search` or `fetch_content`. Retrieve bounded views by
-`responseId`, selecting a query/page by index or exact query/URL. Page content
-from a search is available when that search used `includeContent: true`.
+file path returned by `web_search` or `fetch_content`. Tool responses include a
+visible Content ID manifest: a summary ID, per-query aggregate IDs, and readable
+page IDs alongside their URL/title. Retrieve one of those IDs with a bounded
+range. The same full manifest is retained in the stored aggregate view.
 
 ```ts
-get_search_content({ responseId: 'abc123', view: 'summary', offset: 30000 });
-get_search_content({ responseId: 'abc123', queryIndex: 0 });
-get_search_content({ responseId: 'abc123', queryIndex: 0, urlIndex: 0 });
-get_search_content({ responseId: 'abc123', urlIndex: 0, offset: 12000 });
-get_search_content({ responseId: 'abc123', urlIndex: 0, heading: 'Details' });
-get_search_content({ responseId: 'abc123', urlIndex: 0, literal: 'needle' });
+get_search_content({
+  contentId: 'abc123:summary',
+  offset: 30000,
+});
+get_search_content({
+  contentId: 'abc123:query:0:page:0',
+  offset: 12000,
+});
 ```
 
 Retrieval returns at most 12,000 characters by default. Its metadata includes a
 SHA-256 hash, exact UTF-16 offsets, selected/remaining counts, and `nextOffset`
-for lossless paging. Use `view: 'summary'` to continue the exact aggregate
-`web_search` output or multi-URL `fetch_content` summary. `maxChars` can raise
-the bound up to 100,000; heading and literal selectors narrow page text. Tool
-responses inline at most 30,000 characters; stored content remains full and
+for lossless paging. `maxChars` can raise the bound up to 100,000. Tool
+responses inline at most 12,000 characters; stored content remains full and
 unchanged.
 In Pi's TUI, results are rendered as Markdown with a compact preview. Use the
 normal tool-expansion keybinding to show the full rendered result.

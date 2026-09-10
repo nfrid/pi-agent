@@ -6,7 +6,7 @@ import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackgroundJobHostService } from '../../apps/dashboard-server/src/background-job-host';
 import backgroundTerminals from './index';
-import type { BackgroundParameters, ProcessDetails } from './schema';
+import type { ProcessDetails } from './schema';
 
 interface Renderable {
   render: (width: number) => string[];
@@ -24,7 +24,7 @@ interface RegisteredTool {
   promptGuidelines?: string[];
   execute: (
     id: string,
-    params: BackgroundParameters,
+    params: Record<string, unknown>,
     signal: AbortSignal | undefined,
     onUpdate: undefined,
     ctx: { cwd: string },
@@ -81,14 +81,14 @@ afterAll(async () => {
 describe('background terminals extension', () => {
   it('steers completion while busy and triggers a turn while idle', async () => {
     const handlers = new Map<string, Handler>();
-    let tool: RegisteredTool | undefined;
+    const tools = new Map<string, RegisteredTool>();
     const sendMessage = vi.fn();
     const pi = {
       on(event: string, handler: Handler) {
         handlers.set(event, handler);
       },
       registerTool(definition: RegisteredTool) {
-        tool = definition;
+        tools.set(definition.name, definition);
       },
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(),
@@ -96,9 +96,18 @@ describe('background terminals extension', () => {
     } as unknown as ExtensionAPI;
 
     backgroundTerminals(pi);
-    expect(tool?.name).toBe('background');
+    const tool = tools.get('background_start');
+    expect([...tools.keys()]).toEqual([
+      'background_start',
+      'background_peek',
+      'background_list',
+      'background_stop',
+      'background_watch',
+      'background_unwatch',
+    ]);
+    expect(tool?.name).toBe('background_start');
     expect(tool?.description).toContain(
-      'Completion is delivered automatically.',
+      'completion is delivered automatically',
     );
     expect(tool?.description).not.toContain(
       'waiting for the background process',
@@ -107,15 +116,15 @@ describe('background terminals extension', () => {
     expect(tool?.description).toContain('no stdin');
     expect(tool?.description).not.toContain('do not block waiting here');
     expect(tool?.promptSnippet).toBe(
-      'Run and manage long-running non-interactive Bash commands',
+      'Start a long-running non-interactive Bash command',
     );
     expect(tool?.promptGuidelines).toEqual([
       'When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.',
-      'Use `background` for non-interactive commands that should outlive the current turn; use ordinary bash for short commands.',
-      '`start` accepts an optional title (otherwise it is derived from the command) and optional one-shot `watch` entries. A watch is literal, case-sensitive, single-line text observed only in future stdout/stderr; it notifies on match, timeout, or process end and never kills the process. Keep at most 8 watches per process.',
-      'Use `background peek` for an immediate snapshot; it never waits. Use `list` for process and watch status, `watch` to append watches, `unwatch` to remove them, and `stop` to terminate processes.',
-      'Example: start a server with `watch: [{"contains":"ready","stream":"stdout","timeout_seconds":60}]`, then continue without polling. Completion and watch notifications resume the agent turn automatically.',
-      'Background jobs survive parent Pi session shutdown and recreation; use `background stop` explicitly when a job should terminate.',
+      'Use `background_start` for non-interactive commands that should outlive the current turn; use ordinary bash for short commands.',
+      '`background_start` accepts an optional title (otherwise it is derived from the command), cwd, and one-shot `watch` entries. A watch is literal, case-sensitive, single-line text observed only in future stdout/stderr; it notifies on match, timeout, or process end and never kills the process. Keep at most 8 watches per process.',
+      'Use `background_peek` for an immediate snapshot; it never waits. Use `background_list` for process and watch status, `background_watch` to append watches, `background_unwatch` to remove them, and `background_stop` to terminate processes.',
+      'Example: start a server with `background_start` and `watch: [{"contains":"ready","stream":"stdout","timeout_seconds":60}]`, then continue without polling. Completion and watch notifications resume the agent turn automatically.',
+      'Background jobs survive parent Pi session shutdown and recreation; use `background_stop` explicitly when a job should terminate.',
     ]);
 
     handlers.get('session_start')?.(
@@ -129,7 +138,6 @@ describe('background terminals extension', () => {
     await tool?.execute(
       'call-1',
       {
-        action: 'start',
         command: `${JSON.stringify(process.execPath)} -e "process.exit(0)"`,
         title: 'quick task',
       },
@@ -158,6 +166,7 @@ describe('background terminals extension', () => {
 
   it('delivers and durably ACKs a watch before process exit', async () => {
     const handlers = new Map<string, Handler>();
+    const tools = new Map<string, RegisteredTool>();
     let tool!: RegisteredTool;
     const sendMessage = vi.fn();
     const pi = {
@@ -165,13 +174,14 @@ describe('background terminals extension', () => {
         handlers.set(event, handler);
       },
       registerTool(definition: RegisteredTool) {
-        tool = definition;
+        tools.set(definition.name, definition);
       },
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(),
       sendMessage,
     } as unknown as ExtensionAPI;
     backgroundTerminals(pi);
+    tool = tools.get('background_start') as RegisteredTool;
     const ctx = {
       cwd: process.cwd(),
       hasUI: false,
@@ -188,7 +198,6 @@ describe('background terminals extension', () => {
       const result = (await tool.execute(
         'launch',
         {
-          action: 'start',
           command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify('process.stdout.write("READY");setInterval(() => {}, 1000)')}`,
           watch: [{ contains: 'READY', timeout_seconds: 2 }],
         },
@@ -226,7 +235,13 @@ describe('background terminals extension', () => {
       });
       await handlers.get('session_shutdown')?.({}, ctx);
       handlers.get('session_start')?.({}, ctx);
-      await tool.execute('list', { action: 'list' }, undefined, undefined, ctx);
+      await (tools.get('background_list') as RegisteredTool).execute(
+        'list',
+        {},
+        undefined,
+        undefined,
+        ctx,
+      );
       expect(sendMessage).toHaveBeenCalledOnce();
     } finally {
       if (id) await client.stop([id]);
@@ -236,6 +251,7 @@ describe('background terminals extension', () => {
 
   it('delivers one completion for multiple unmatched watches and ACKs them across reconnects', async () => {
     const handlers = new Map<string, Handler>();
+    const tools = new Map<string, RegisteredTool>();
     let tool!: RegisteredTool;
     const sendMessage = vi.fn();
     const pi = {
@@ -243,13 +259,14 @@ describe('background terminals extension', () => {
         handlers.set(event, handler);
       },
       registerTool(definition: RegisteredTool) {
-        tool = definition;
+        tools.set(definition.name, definition);
       },
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(),
       sendMessage,
     } as unknown as ExtensionAPI;
     backgroundTerminals(pi);
+    tool = tools.get('background_start') as RegisteredTool;
     const ctx = {
       cwd: process.cwd(),
       hasUI: false,
@@ -265,7 +282,6 @@ describe('background terminals extension', () => {
       const started = (await tool.execute(
         'launch',
         {
-          action: 'start',
           command: 'printf "finished\\n"',
           watch: [
             { contains: 'ready', stream: 'stdout' },
@@ -299,7 +315,13 @@ describe('background terminals extension', () => {
       });
       await handlers.get('session_shutdown')?.({}, ctx);
       handlers.get('session_start')?.({}, ctx);
-      await tool.execute('list', { action: 'list' }, undefined, undefined, ctx);
+      await (tools.get('background_list') as RegisteredTool).execute(
+        'list',
+        {},
+        undefined,
+        undefined,
+        ctx,
+      );
       expect(sendMessage).toHaveBeenCalledOnce();
     } finally {
       await handlers.get('session_shutdown')?.({}, ctx);
@@ -308,19 +330,21 @@ describe('background terminals extension', () => {
 
   it('ignores a late shutdown from a replaced session scope', async () => {
     const handlers = new Map<string, Handler>();
+    const tools = new Map<string, RegisteredTool>();
     let tool: RegisteredTool | undefined;
     const pi = {
       on(event: string, handler: Handler) {
         handlers.set(event, handler);
       },
       registerTool(definition: RegisteredTool) {
-        tool = definition;
+        tools.set(definition.name, definition);
       },
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(),
       sendMessage: vi.fn(),
     } as unknown as ExtensionAPI;
     backgroundTerminals(pi);
+    tool = tools.get('background_start');
     const context = (scope: string) => ({
       cwd: process.cwd(),
       hasUI: false,
@@ -335,7 +359,6 @@ describe('background terminals extension', () => {
       const result = await tool?.execute(
         'call-1',
         {
-          action: 'start',
           command: 'while true; do sleep 1; done',
           title: 'scope B server',
         },
@@ -348,13 +371,9 @@ describe('background terminals extension', () => {
       expect(processId).toBeDefined();
 
       await shutdown?.({}, context('scope-A'));
-      const listed = await tool?.execute(
-        'call-2',
-        { action: 'list' },
-        undefined,
-        undefined,
-        { cwd: process.cwd() },
-      );
+      const listed = await tools
+        .get('background_list')
+        ?.execute('call-2', {}, undefined, undefined, { cwd: process.cwd() });
       expect(
         (listed as { details?: { processes?: unknown[] } }).details?.processes,
       ).toEqual(
@@ -392,7 +411,7 @@ describe('background terminals extension', () => {
     backgroundTerminals(pi);
     const message = {
       content:
-        'Background process bg-1 completed. Use background peek to inspect it.',
+        'Background process bg-1 completed. Use background_peek to inspect it.',
       details: {
         id: 'bg-1',
         title: 'production build',
@@ -410,7 +429,7 @@ describe('background terminals extension', () => {
       '<success>✓</success> <muted>Background process </muted><text>production build</text><dim> · finished · 4s</dim>',
     );
     expect(compact.startsWith(' ')).toBe(true);
-    expect(compact).not.toContain('Use background peek');
+    expect(compact).not.toContain('Use background_peek');
     expect(compact).not.toContain('bg-1');
 
     const expanded =
@@ -421,19 +440,19 @@ describe('background terminals extension', () => {
       '<text>production build</text><dim> · exit 0</dim>',
     );
     expect(expanded).not.toContain('bg-1');
-    expect(expanded).not.toContain('Use background peek');
+    expect(expanded).not.toContain('Use background_peek');
   });
 
   it('reasserts a colored widget at agent boundaries', async () => {
     const handlers = new Map<string, Handler>();
-    let tool: RegisteredTool | undefined;
+    const tools = new Map<string, RegisteredTool>();
     const setWidget = vi.fn();
     const pi = {
       on(event: string, handler: Handler) {
         handlers.set(event, handler);
       },
       registerTool(definition: RegisteredTool) {
-        tool = definition;
+        tools.set(definition.name, definition);
       },
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(),
@@ -441,6 +460,7 @@ describe('background terminals extension', () => {
     } as unknown as ExtensionAPI;
 
     backgroundTerminals(pi);
+    const tool = tools.get('background_start');
     handlers.get('session_start')?.(
       {},
       {
@@ -453,7 +473,6 @@ describe('background terminals extension', () => {
     await tool?.execute(
       'call-1',
       {
-        action: 'start',
         command: 'while true; do sleep 1; done',
         title: 'server',
       },
@@ -480,11 +499,11 @@ describe('background terminals extension', () => {
   });
 
   it('renders compact colored calls and results', () => {
-    let tool: RegisteredTool | undefined;
+    const tools = new Map<string, RegisteredTool>();
     const pi = {
       on: vi.fn(),
       registerTool(definition: RegisteredTool) {
-        tool = definition;
+        tools.set(definition.name, definition);
       },
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(),
@@ -495,10 +514,10 @@ describe('background terminals extension', () => {
     };
 
     backgroundTerminals(pi);
+    const tool = tools.get('background_start');
     const partial = tool?.renderCall?.({}, theme, { expanded: false });
     const call = tool?.renderCall?.(
       {
-        action: 'start',
         title: 'development server',
         command: `printf %s ${'x'.repeat(200)}`,
       },

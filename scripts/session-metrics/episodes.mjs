@@ -9,6 +9,12 @@ const TODO_CUSTOM_TYPES = new Set([
   'lean-todo-replay-v2',
   'lean-todo-replay',
 ]);
+const TODO_TOOLS = new Set(['todo', 'todo_list', 'todo_update', 'todo_remove']);
+const DELEGATE_TOOLS = new Set([
+  'delegate',
+  'delegate_start',
+  'delegate_continue',
+]);
 
 const TOOL_BASE = (name) =>
   String(name ?? '')
@@ -376,6 +382,11 @@ function stateFromValue(value) {
   return { tasks, details, available: true };
 }
 
+function stateFromResult(result) {
+  if (!successfulResult(result)) return undefined;
+  return stateFromValue(result?.message?.details?.state);
+}
+
 function stateFromCustomEntry(entry) {
   if (!TODO_CUSTOM_TYPES.has(entry?.customType)) return undefined;
   const candidates = [entry?.data, entry?.data?.state, entry?.content];
@@ -438,6 +449,15 @@ function normalizeTaskId(value, fallback) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+function taskFields(task) {
+  return {
+    text: task.text,
+    notes: task.notes,
+    dependsOn: task.depends_on ?? task.dependsOn,
+    priority: task.priority,
+  };
+}
+
 function applyTodoAction(state, action, args, nextId) {
   const next = cloneState(state);
   const id = normalizeTaskId(args.id, `episode-task-${nextId.value++}`);
@@ -463,15 +483,7 @@ function applyTodoAction(state, action, args, nextId) {
         ? args.status
         : 'todo',
     );
-    next.details.set(
-      id,
-      JSON.stringify({
-        text: args.text,
-        notes: args.notes,
-        dependsOn: args.depends_on,
-        priority: args.priority,
-      }),
-    );
+    next.details.set(id, JSON.stringify(taskFields(args)));
     return next;
   }
   if (action === 'replace') {
@@ -486,15 +498,7 @@ function applyTodoAction(state, action, args, nextId) {
           ? task.status
           : 'todo',
       );
-      next.details.set(
-        taskId,
-        JSON.stringify({
-          text: task.text,
-          notes: task.notes,
-          dependsOn: task.depends_on,
-          priority: task.priority,
-        }),
-      );
+      next.details.set(taskId, JSON.stringify(taskFields(task)));
     }
     return next;
   }
@@ -521,25 +525,54 @@ function applyTodoAction(state, action, args, nextId) {
     if (next.tasks.has(id)) next.tasks.set(id, status);
     return next;
   }
-  if (action === 'update' && next.tasks.has(id)) {
+  if (action === 'upsert') {
+    let existing = {};
+    if (next.details.has(id)) {
+      try {
+        existing = JSON.parse(next.details.get(id));
+      } catch {
+        existing = {};
+      }
+    }
+    if (!next.tasks.has(id)) next.tasks.set(id, 'todo');
     if (['todo', 'doing', 'blocked', 'done', 'dropped'].includes(args.status))
       next.tasks.set(id, args.status);
     next.details.set(
       id,
       JSON.stringify({
-        text: args.text,
-        notes: args.notes,
-        dependsOn: args.depends_on,
-        priority: args.priority,
+        ...existing,
+        ...Object.fromEntries(
+          Object.entries(taskFields(args)).filter(
+            ([, value]) => value !== undefined,
+          ),
+        ),
       }),
     );
+    return next;
+  }
+  if (action === 'update' && next.tasks.has(id)) {
+    if (['todo', 'doing', 'blocked', 'done', 'dropped'].includes(args.status))
+      next.tasks.set(id, args.status);
+    next.details.set(id, JSON.stringify(taskFields(args)));
   }
   return next;
 }
 
 function todoOperations(call, result) {
   if (!successfulResult(result)) return [];
+  const name = TOOL_BASE(call.name);
   const args = call.args;
+  if (name === 'todo_update')
+    return Array.isArray(args.changes)
+      ? args.changes
+          .filter((change) => change && typeof change === 'object')
+          .map((change) => ({ action: 'upsert', ...change }))
+      : [];
+  if (name === 'todo_remove')
+    return Array.isArray(args.ids)
+      ? args.ids.map((id) => ({ action: 'remove', id }))
+      : [];
+  if (name === 'todo_list') return [{ action: 'list' }];
   if (args.action === 'batch')
     return Array.isArray(args.operations)
       ? args.operations.filter(
@@ -646,9 +679,14 @@ function deriveTodo(entries, callResults) {
       todoSeen = true;
     }
     for (const call of toolCalls(entry)) {
-      if (TOOL_BASE(call.name) !== 'todo') continue;
+      if (!TODO_TOOLS.has(TOOL_BASE(call.name))) continue;
       todoSeen = true;
       const result = callResults.get(call.id);
+      const listed =
+        TOOL_BASE(call.name) === 'todo_list'
+          ? stateFromResult(result)
+          : undefined;
+      if (listed) observe(listed, index, 'list', undefined, call);
       for (const operation of todoOperations(call, result)) {
         const action = operation.action;
         if (
@@ -656,6 +694,7 @@ function deriveTodo(entries, callResults) {
             'list',
             'add',
             'update',
+            'upsert',
             'start',
             'done',
             'block',
@@ -1074,7 +1113,7 @@ function delegateFacet(entries, calls, results) {
   const failures = [];
   const seen = new Set();
   for (const call of calls) {
-    if (TOOL_BASE(call.name) !== 'delegate') continue;
+    if (!DELEGATE_TOOLS.has(TOOL_BASE(call.name))) continue;
     const result = results.get(call.id);
     const runs = Array.isArray(result?.message?.details?.runs)
       ? result.message.details.runs
@@ -1239,8 +1278,8 @@ function deriveEpisodeRecord(entries, epoch, context) {
   const successfulParentToolCalls = firstFailure
     ? calls.filter((call) => {
         if (
-          TOOL_BASE(call.name) === 'delegate' ||
-          TOOL_BASE(call.name) === 'todo'
+          DELEGATE_TOOLS.has(TOOL_BASE(call.name)) ||
+          TODO_TOOLS.has(TOOL_BASE(call.name))
         )
           return false;
         if (
@@ -1291,7 +1330,7 @@ function deriveEpisodeRecord(entries, epoch, context) {
     validation,
     successfulMutations.length,
     delivery.commitAttempts + delivery.mergeAttempts + delivery.pushAttempts,
-    calls.filter((call) => TOOL_BASE(call.name) === 'delegate').length,
+    calls.filter((call) => DELEGATE_TOOLS.has(TOOL_BASE(call.name))).length,
   );
   const recovery = {
     delegateProviderFailures: delegate.failures.length,
@@ -1305,7 +1344,7 @@ function deriveEpisodeRecord(entries, epoch, context) {
     ? classifyDispositionDetail(reaction.text)
     : { disposition: 'unknown', language: 'unknown' };
   const intervalHasTodo =
-    calls.some((call) => TOOL_BASE(call.name) === 'todo') ||
+    calls.some((call) => TODO_TOOLS.has(TOOL_BASE(call.name))) ||
     scopedEntries.some((entry) => TODO_CUSTOM_TYPES.has(entry.customType));
   const plan =
     epoch.kind === 'fallback' && !intervalHasTodo

@@ -32,9 +32,8 @@ const entries = [
         {
           type: 'toolCall',
           id: 'watch-call',
-          name: 'background',
+          name: 'background_watch',
           arguments: {
-            action: 'watch',
             id: 'bg-server',
             watch: [
               { contains: 'ready', stream: 'stdout', timeout_seconds: 60 },
@@ -50,25 +49,35 @@ const entries = [
     message: {
       role: 'toolResult',
       toolCallId: 'watch-call',
-      toolName: 'background',
+      toolName: 'background_watch',
       content: [{ type: 'text', text: 'Added watch w-ready to bg-server.' }],
       isError: false,
     },
   },
-  ...['unwatch', 'peek', 'stop'].map((action) => ({
+  {
+    type: 'tool',
+    tool: {
+      toolCallId: 'start-call',
+      name: 'background_start',
+      status: 'complete',
+      arguments: { title: 'Dev server', command: 'bun dev' },
+    },
+  },
+  ...['unwatch', 'peek', 'stop', 'list'].map((action) => ({
     type: 'tool',
     tool: {
       toolCallId: `${action}-call`,
-      name: 'background',
+      name: `background_${action}`,
       status: 'complete',
       arguments:
         action === 'stop'
-          ? { action, ids: ['bg-server'] }
-          : {
-              action,
-              id: 'bg-server',
-              ...(action === 'unwatch' ? { watch_ids: ['w-ready'] } : {}),
-            },
+          ? { ids: ['bg-server'] }
+          : action === 'list'
+            ? {}
+            : {
+                id: 'bg-server',
+                ...(action === 'unwatch' ? { watch_ids: ['w-ready'] } : {}),
+              },
     },
   })),
   {
@@ -139,6 +148,7 @@ for (const viewport of ['mobile', 'desktop']) {
       'Removing background watches',
       'Checking background command',
       'Stopping background command',
+      'Starting background command',
     ]) {
       const row = page.locator('.tool-step').filter({ hasText: action });
       await expect(row).toContainText('Dev server');

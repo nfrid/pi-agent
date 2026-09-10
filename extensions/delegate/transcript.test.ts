@@ -10,7 +10,11 @@ import {
 import { createRun } from './types';
 
 describe('delegate transcript viewer data', () => {
-  it('selects the latest matching delegate result from the active branch', () => {
+  it.each([
+    'delegate',
+    'delegate_start',
+    'delegate_continue',
+  ])('selects the latest matching %s result from the active branch', (toolName) => {
     const first = createRun('old task', undefined, { name: 'Old' });
     const latest = createRun('inspect cache', undefined, {
       name: 'Cache review',
@@ -28,7 +32,7 @@ describe('delegate transcript viewer data', () => {
         type: 'message',
         message: {
           role: 'toolResult',
-          toolName: 'delegate',
+          toolName,
           details: { mode: 'single', runs: [latest] },
         },
       },

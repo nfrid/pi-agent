@@ -14,11 +14,11 @@ import {
 } from './renderers';
 import {
   type BackgroundToolDetails,
-  type Parameters,
+  type PeekParameters,
   type ProcessDetails,
   processDetails,
 } from './schema';
-import { registerBackgroundTool } from './tool';
+import { registerBackgroundTools } from './tool';
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -44,20 +44,24 @@ const text = (value: { render(width: number): string[] }) =>
 describe('background title presentation', () => {
   it('reuses historical result titles without accessing the host during render', () => {
     type State = { processes?: Map<string, ProcessDetails> };
-    let tool!: ToolDefinition<typeof Parameters, BackgroundToolDetails, State>;
+    let tool!: ToolDefinition<
+      typeof PeekParameters,
+      BackgroundToolDetails,
+      State
+    >;
     const getManager = vi.fn(() => {
       throw new Error('Rendering must not access the manager');
     });
-    registerBackgroundTool(
+    registerBackgroundTools(
       {
         registerTool: (definition: typeof tool) => {
-          tool = definition;
+          if (definition.name === 'background_peek') tool = definition;
         },
       } as unknown as ExtensionAPI,
       getManager,
     );
     const context: Parameters<NonNullable<typeof tool.renderCall>>[2] = {
-      args: { action: 'peek', id: 'process-opaque' },
+      args: { id: 'process-opaque' },
       toolCallId: 'historical',
       invalidate: vi.fn(),
       lastComponent: undefined,
@@ -83,7 +87,7 @@ describe('background title presentation', () => {
       context,
     );
     const rendered = tool.renderCall?.(
-      { action: 'peek', id: 'process-opaque' },
+      { id: 'process-opaque' },
       theme,
       context,
     );

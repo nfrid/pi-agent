@@ -333,6 +333,36 @@ describe('tool row views and virtual transcript construction', () => {
       action: 'Fetching',
       argument: 'https://example.com/docs',
     });
+    expect(
+      activityStepParts({
+        name: 'background_start',
+        args: { title: 'dev', command: 'bun dev' },
+      }),
+    ).toMatchObject({ action: 'Starting background command', argument: 'dev' });
+    expect(
+      activityStepParts({
+        name: 'todo_update',
+        args: { changes: [{ id: 'T1' }, { id: 'T2' }] },
+      }),
+    ).toMatchObject({ action: 'Tasks update', argument: '2 changes' });
+    expect(
+      activityStepParts({
+        name: 'delegate_continue',
+        args: { continue: 'review@2', task: 'Address feedback' },
+      }),
+    ).toMatchObject({
+      action: 'Delegate continue',
+      argument: 'Address feedback',
+    });
+    expect(
+      activityStepParts({
+        name: 'get_search_content',
+        args: { contentId: 'content-1', offset: 120, maxChars: 4000 },
+      }),
+    ).toMatchObject({
+      action: 'Reading search result',
+      argument: 'content-1',
+    });
   });
 
   it('summarizes delegation, fetches, and file ranges usefully', () => {

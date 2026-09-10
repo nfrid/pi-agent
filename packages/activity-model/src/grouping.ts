@@ -52,12 +52,24 @@ const VALIDATION_COMMAND =
 
 const COORDINATION_TOOLS = new Set([
   'background',
+  'background_start',
+  'background_peek',
+  'background_list',
+  'background_stop',
+  'background_watch',
+  'background_unwatch',
   'delegate',
   'delegates',
+  'delegate_start',
+  'delegate_continue',
   'delegate_changes',
   'delegate_jobs',
+  'delegate_gate',
   'tasks',
   'todo',
+  'todo_list',
+  'todo_update',
+  'todo_remove',
 ]);
 
 /**
@@ -257,8 +269,19 @@ export function toolActionSummary(tool: ToolDescriptor): string {
     const command = actionValue(tool.args, 'command', 'cmd', 'script');
     return command ? `${base} ${command}` : base;
   }
-  if (base === 'delegate' || base === 'delegates') {
-    const action = actionValue(tool.args, 'action', 'operation');
+  if (
+    base === 'delegate' ||
+    base === 'delegates' ||
+    base === 'delegate_start' ||
+    base === 'delegate_continue'
+  ) {
+    const action =
+      actionValue(tool.args, 'action', 'operation') ??
+      (base === 'delegate_start'
+        ? 'start'
+        : base === 'delegate_continue'
+          ? 'continue'
+          : undefined);
     const name = actionValue(
       tool.args,
       'name',
@@ -272,8 +295,16 @@ export function toolActionSummary(tool: ToolDescriptor): string {
       return `${base}: ${args.tasks.length} task${args.tasks.length === 1 ? '' : 's'}`;
     return action ? `${base} ${action}` : base;
   }
-  if (base === 'todo' || base === 'tasks') {
-    const action = actionValue(tool.args, 'action', 'operation');
+  if (
+    base === 'todo' ||
+    base === 'tasks' ||
+    base === 'todo_list' ||
+    base === 'todo_update' ||
+    base === 'todo_remove'
+  ) {
+    const action =
+      actionValue(tool.args, 'action', 'operation') ??
+      (base.startsWith('todo_') ? base.slice('todo_'.length) : undefined);
     const id = actionValue(tool.args, 'id', 'taskId');
     if (action && id) return `${base} ${action} ${id}`;
     if (action) return `${base} ${action}`;
@@ -289,6 +320,11 @@ export function toolActionSummary(tool: ToolDescriptor): string {
   ) {
     const query = actionValue(tool.args, 'query', 'q', 'url', 'href');
     return query ? `${base}: ${query}` : base;
+  }
+  if (base.startsWith('background_')) {
+    const action = base.slice('background_'.length);
+    const id = actionValue(tool.args, 'id');
+    return `${base}${id ? `: ${id}` : ` (${action})`}`;
   }
   if (path) return `${base} ${compactAction(path, 120)}`;
   const value = actionValue(tool.args, 'pattern', 'query', 'url', 'text');

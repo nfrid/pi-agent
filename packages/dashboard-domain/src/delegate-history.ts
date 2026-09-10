@@ -1207,6 +1207,14 @@ function projectWorkflowStoreEntry(
   };
 }
 
+function isDelegateTool(name: unknown): boolean {
+  return (
+    name === 'delegate' ||
+    name === 'delegate_start' ||
+    name === 'delegate_continue'
+  );
+}
+
 function delegateCallArguments(entry: RecordValue): RecordValue[] {
   const message = isRecord(entry.message) ? entry.message : undefined;
   if (message?.role !== 'assistant' || !Array.isArray(message.content))
@@ -1214,7 +1222,7 @@ function delegateCallArguments(entry: RecordValue): RecordValue[] {
   return message.content.flatMap((part) =>
     isRecord(part) &&
     part.type === 'toolCall' &&
-    part.name === 'delegate' &&
+    isDelegateTool(part.name) &&
     isRecord(part.arguments)
       ? [part.arguments]
       : [],
@@ -1349,7 +1357,7 @@ export function projectDelegateHistoryEntry(
   const sourceMessage = isRecord(value.message) ? value.message : value;
   if (
     sourceMessage.role === 'toolResult' &&
-    sourceMessage.toolName === 'delegate' &&
+    isDelegateTool(sourceMessage.toolName) &&
     isRecord(sourceMessage.details) &&
     Array.isArray(sourceMessage.details.runs)
   ) {
@@ -1375,7 +1383,7 @@ export function projectDelegateHistoryEntry(
     }
     result.message = {
       role: 'toolResult',
-      toolName: 'delegate',
+      toolName: sourceMessage.toolName,
       details: { runs },
     };
     return {
@@ -1468,7 +1476,7 @@ function foregroundDetails(
   const message = entry.message;
   if (
     message.role !== 'toolResult' ||
-    message.toolName !== 'delegate' ||
+    !isDelegateTool(message.toolName) ||
     !isRecord(message.details) ||
     !Array.isArray(message.details.runs)
   )

@@ -7,9 +7,6 @@ export const RESULT_MESSAGE_TYPE = 'background-terminal-result';
 export const WATCH_RESULT_MESSAGE_TYPE = 'background-watch-result';
 export const DEFAULT_TAIL_LINES = 40;
 
-const Action = <T extends string>(action: T, description: string) =>
-  Type.Literal(action, { description });
-
 const Watch = Type.Object(
   {
     contains: Type.String({
@@ -36,9 +33,8 @@ const Watch = Type.Object(
   { additionalProperties: false },
 );
 
-const StartParameters = Type.Object(
+export const StartParameters = Type.Object(
   {
-    action: Action('start', 'Launch a new background process.'),
     command: Type.String({
       minLength: 1,
       description: 'Shell command run with /bin/bash -c.',
@@ -66,9 +62,8 @@ const StartParameters = Type.Object(
   { additionalProperties: false },
 );
 
-const PeekParameters = Type.Object(
+export const PeekParameters = Type.Object(
   {
-    action: Action('peek', 'Inspect one process immediately; never waits.'),
     id: Type.String({ minLength: 1, description: 'Process id to inspect.' }),
     tail_lines: Type.Optional(
       Type.Integer({
@@ -81,16 +76,10 @@ const PeekParameters = Type.Object(
   { additionalProperties: false },
 );
 
-const ListParameters = Type.Object(
-  {
-    action: Action('list', 'List retained processes and watch status.'),
-  },
-  { additionalProperties: false },
-);
+export const ListParameters = Type.Object({}, { additionalProperties: false });
 
-const StopParameters = Type.Object(
+export const StopParameters = Type.Object(
   {
-    action: Action('stop', 'Terminate one or more processes.'),
     ids: Type.Array(Type.String({ minLength: 1 }), {
       minItems: 1,
       description: 'Process ids to terminate.',
@@ -99,12 +88,8 @@ const StopParameters = Type.Object(
   { additionalProperties: false },
 );
 
-const AddWatchParameters = Type.Object(
+export const WatchParameters = Type.Object(
   {
-    action: Action(
-      'watch',
-      'Add one-shot future-output watches to a running process.',
-    ),
     id: Type.String({ minLength: 1, description: 'Running process id.' }),
     watch: Type.Array(Watch, {
       minItems: 1,
@@ -115,9 +100,8 @@ const AddWatchParameters = Type.Object(
   { additionalProperties: false },
 );
 
-const RemoveWatchParameters = Type.Object(
+export const UnwatchParameters = Type.Object(
   {
-    action: Action('unwatch', 'Remove watches without stopping the process.'),
     id: Type.String({ minLength: 1, description: 'Process id.' }),
     watch_ids: Type.Array(Type.String({ minLength: 1 }), {
       minItems: 1,
@@ -128,59 +112,20 @@ const RemoveWatchParameters = Type.Object(
   { additionalProperties: false },
 );
 
-const ParameterUnion = Type.Union([
-  StartParameters,
-  PeekParameters,
-  ListParameters,
-  StopParameters,
-  AddWatchParameters,
-  RemoveWatchParameters,
-]);
-
-// The root is a genuine object schema for Pi validators and UIs. Branches own
-// required fields and closed-property validation; the shared index is only the
-// one top-level property catalogue and never makes action fields optional.
-export const Parameters = Type.Unsafe<Static<typeof ParameterUnion>>({
-  type: 'object',
-  properties: {
-    action: StringEnum(
-      ['start', 'peek', 'list', 'stop', 'watch', 'unwatch'] as const,
-      {
-        description:
-          'start launches a process; peek inspects immediately; list shows processes and watches; stop terminates; watch adds future-output watches; unwatch removes them.',
-      },
-    ),
-    command: Type.String({ description: 'Required for start.' }),
-    title: Type.String({
-      description: 'Optional for start; derived from command when omitted.',
-    }),
-    cwd: Type.String({ description: 'Optional working directory for start.' }),
-    id: Type.String({ description: 'Required for peek, watch, or unwatch.' }),
-    ids: Type.Array(Type.String(), { description: 'Required for stop.' }),
-    watch: Type.Array(Watch, {
-      description: 'Optional for start; required for watch.',
-    }),
-    watch_ids: Type.Array(Type.String(), {
-      description: 'Required for unwatch.',
-    }),
-    tail_lines: Type.Integer({
-      description: 'Optional recent output line count for peek.',
-    }),
-  },
-  required: ['action'],
-  additionalProperties: false,
-  oneOf: [
-    StartParameters,
-    PeekParameters,
-    ListParameters,
-    StopParameters,
-    AddWatchParameters,
-    RemoveWatchParameters,
-  ],
-});
-
-export type BackgroundParameters = Static<typeof Parameters>;
-export type WatchParameters = Static<typeof Watch>;
+export type StartParams = Static<typeof StartParameters>;
+export type PeekParams = Static<typeof PeekParameters>;
+export type ListParams = Static<typeof ListParameters>;
+export type StopParams = Static<typeof StopParameters>;
+export type WatchParams = Static<typeof WatchParameters>;
+export type UnwatchParams = Static<typeof UnwatchParameters>;
+export type WatchInput = Static<typeof Watch>;
+export type BackgroundAction =
+  | 'start'
+  | 'peek'
+  | 'list'
+  | 'stop'
+  | 'watch'
+  | 'unwatch';
 
 export interface ProcessDetails {
   readonly id: string;
@@ -195,7 +140,7 @@ export interface ProcessDetails {
 }
 
 export interface BackgroundToolDetails {
-  readonly action: BackgroundParameters['action'];
+  readonly action: BackgroundAction;
   readonly process?: ProcessDetails;
   readonly processes?: ProcessDetails[];
 }

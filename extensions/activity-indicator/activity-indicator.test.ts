@@ -63,6 +63,12 @@ describe('activity indicator', () => {
     ['fetch_content', 'Fetching pages...'],
     ['get_search_content', 'Retrieving search results...'],
     ['todo', 'Updating tasks...'],
+    ['todo_list', 'Listing tasks...'],
+    ['todo_update', 'Updating tasks...'],
+    ['todo_remove', 'Removing tasks...'],
+    ['background_start', 'Starting background process...'],
+    ['delegate_start', 'Starting delegate...'],
+    ['delegate_continue', 'Continuing delegate...'],
     ['delegate', 'Delegating...'],
   ])('uses an action label for %s', (name, expected) => {
     const batch = createToolBatch();

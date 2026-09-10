@@ -2,7 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { type Static, Type } from 'typebox';
+import { Type } from 'typebox';
 import { codexServiceTier } from '../shared/codex-service-tier';
 import { loadGuidelines } from '../shared/instructions';
 import {
@@ -41,8 +41,10 @@ import type {
 import { parseWorkflowReference } from './workflow-model';
 import { captureWorkInProgress } from './worktree';
 
-const DELEGATE_TOOL_DESCRIPTION =
-  'Schedule one focused child agent asynchronously. Use a stable id or continue reference, inputs to wait for reports, base to start from an upstream code state, and write, web, or explicit skills when needed.';
+const DELEGATE_START_DESCRIPTION =
+  'Start one focused child agent asynchronously with a stable id, configured route, optional inputs, base, scope, write, cwd, web, and skills.';
+const DELEGATE_CONTINUE_DESCRIPTION =
+  'Continue one settled child agent asynchronously with follow-up feedback. The child keeps its original capabilities and workspace; only route and advisory scope may change.';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -69,7 +71,11 @@ const WebSchema = Type.Boolean({
   description:
     'Enable web_search, fetch_content, and get_search_content for this delegate. Continuations inherit the original capability.',
 });
-
+const CwdSchema = Type.String({
+  maxLength: 4096,
+  description:
+    'Fresh delegates inherit ctx.cwd when omitted. Relative paths resolve against ctx.cwd; ~ and ~/ paths expand using the effective home directory; absolute paths are supported. Continuations retain their original cwd and must omit this field.',
+});
 const SkillsSchema = Type.Array(
   Type.String({ minLength: 1, maxLength: 4096 }),
   {
@@ -95,12 +101,6 @@ const TaskSchema = Type.String({
   maxLength: 32 * 1024,
   description: 'Focused task or continuation feedback',
 });
-const CwdSchema = Type.String({
-  maxLength: 4096,
-  description:
-    'Fresh delegates inherit ctx.cwd when omitted. Relative paths resolve against ctx.cwd; ~ and ~/ paths expand using the effective home directory; absolute paths are supported. Continuations retain their persisted cwd and must omit this field.',
-});
-
 type LegacyWorkflowInput = {
   node: string;
   include?: Array<'report' | 'handoff' | 'branch' | 'metadata'>;
@@ -127,25 +127,11 @@ type DelegateCommonParams = Omit<LegacyTaskInput, 'continuation'> & {
   after?: string[];
   inputs?: LegacyWorkflowInput[];
 };
-type ModelDelegateParams = {
-  task: Static<typeof TaskSchema>;
-  route?: Static<typeof RouteSchema>;
-  inputs?: string[];
-  base?: Static<typeof BaseSchema>;
-  scope?: Static<typeof ScopeSchema>;
-  write?: Static<typeof WriteSchema>;
-  cwd?: Static<typeof CwdSchema>;
-  web?: Static<typeof WebSchema>;
-  skills?: Static<typeof SkillsSchema>;
-} & ({ id: string; continue?: never } | { continue: string; id?: never });
-
-const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
-  type: 'object',
-  properties: {
+const DelegateStartParamsSchema = Type.Object(
+  {
     id: LogicalIdSchema,
-    continue: ContinueSchema,
     task: TaskSchema,
-    route: Type.Optional(RouteSchema),
+    route: RouteSchema,
     inputs: Type.Optional(
       Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
         maxItems: 4,
@@ -158,13 +144,18 @@ const DelegateParamsSchema = Type.Unsafe<ModelDelegateParams>({
     web: Type.Optional(WebSchema),
     skills: Type.Optional(SkillsSchema),
   },
-  required: ['task'],
-  additionalProperties: false,
-  oneOf: [
-    { required: ['id'], not: { required: ['continue'] } },
-    { required: ['continue'], not: { required: ['id'] } },
-  ],
-});
+  { additionalProperties: false },
+);
+
+const DelegateContinueParamsSchema = Type.Object(
+  {
+    continue: ContinueSchema,
+    task: TaskSchema,
+    route: Type.Optional(RouteSchema),
+    scope: Type.Optional(ScopeSchema),
+  },
+  { additionalProperties: false },
+);
 
 /** Internal compatibility shape used below the closed model-facing schema. */
 export type DelegateParams = Partial<DelegateCommonParams> & {
@@ -176,7 +167,10 @@ export type DelegateParams = Partial<DelegateCommonParams> & {
 };
 
 /** Translate the small model contract into the durable execution shape. */
-function normalizeModelParams(rawParams: unknown): DelegateParams {
+function normalizeModelParams(
+  rawParams: unknown,
+  surface: 'start' | 'continue',
+): DelegateParams {
   const raw = (rawParams ?? {}) as Record<string, unknown>;
   // Legacy batch calls are not model-facing, so leave their established shape
   // untouched for background and internal callers.
@@ -194,22 +188,22 @@ function normalizeModelParams(rawParams: unknown): DelegateParams {
       : continuation
         ? parseWorkflowReference(continuation).logicalId
         : undefined;
-  if (!logicalId) throw new Error('Fresh delegate calls require a stable id.');
+  if (surface === 'start' && !logicalId)
+    throw new Error('Fresh delegate calls require a stable id.');
+  if (surface === 'continue' && !continuation)
+    throw new Error('Delegate continuation calls require a reference.');
 
   const selectors: LegacyWorkflowInput[] = [];
   const base = typeof raw.base === 'string' ? raw.base.trim() : undefined;
   if (base) selectors.push({ node: base, include: ['branch', 'report'] });
   if (Array.isArray(raw.inputs))
     for (const input of raw.inputs) {
-      // Object selectors are retained only for direct internal/test callers;
-      // the registered schema admits strings exclusively.
       if (typeof input === 'string') {
         const node = input.trim();
         if (node !== base) selectors.push({ node });
       } else if (input && typeof input === 'object')
         selectors.push(input as LegacyWorkflowInput);
     }
-
   return {
     ...(typeof raw.task === 'string' ? { task: raw.task } : {}),
     ...(typeof raw.route === 'string' ? { route: raw.route } : {}),
@@ -230,8 +224,6 @@ function normalizeModelParams(rawParams: unknown): DelegateParams {
         ? { capabilities: raw.capabilities as 'web'[] }
         : {}),
     ...(Array.isArray(raw.skills) ? { skills: raw.skills as string[] } : {}),
-    // These fields are accepted only for direct legacy/runtime callers, never
-    // by the registered model schema.
     ...(raw.context === 'branch' || raw.context === 'fresh'
       ? { context: raw.context }
       : {}),
@@ -316,25 +308,32 @@ export interface DelegateBackgroundRuntime {
   activateBranches?: () => void;
 }
 
-export function registerDelegateTool(
+function registerDelegateSurface(
   pi: ExtensionAPI,
   cwd: string,
+  surface: 'start' | 'continue',
   backgroundRuntime?: DelegateBackgroundRuntime,
   promptConfig?: DelegateConfig,
 ): void {
+  const isStart = surface === 'start';
   pi.registerTool({
-    name: 'delegate',
-    label: 'Delegate',
-    description: DELEGATE_TOOL_DESCRIPTION,
-    promptSnippet:
-      'Schedule one focused async delegate with a stable id; compose with inputs or base. Results arrive as any at a safe boundary by default; use delegate_gate only for all fan-in or any-at-idle delivery.',
+    name: isStart ? 'delegate_start' : 'delegate_continue',
+    label: isStart ? 'Delegate Start' : 'Delegate Continue',
+    description: isStart
+      ? DELEGATE_START_DESCRIPTION
+      : DELEGATE_CONTINUE_DESCRIPTION,
+    promptSnippet: isStart
+      ? 'Start one focused async delegate with a stable id, configured route, and optional inputs, base, scope, write, cwd, web, or skills. Results arrive eagerly; use delegate_gate only for intentional mode=all fan-in or mode=any idle delivery.'
+      : 'Continue a settled async delegate with a follow-up task. Only route and advisory scope can change; results arrive eagerly unless held by delegate_gate.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
-    parameters: DelegateParamsSchema,
+    parameters: isStart
+      ? DelegateStartParamsSchema
+      : DelegateContinueParamsSchema,
     renderCall: renderDelegateCall,
     renderResult: renderDelegateResult,
 
     async execute(toolCallId, rawParams, signal, onUpdate, ctx) {
-      const params = normalizeModelParams(rawParams);
+      const params = normalizeModelParams(rawParams, surface);
       const config = loadDelegateConfig(ctx.cwd);
       const snapshots = new Map<string, string | null>();
       const getSnapshot = (targetCwd: string) => {
@@ -782,4 +781,25 @@ export function registerDelegateTool(
       return result;
     },
   });
+}
+
+/** Register the fresh model-facing workflow entry point. */
+export function registerDelegateStartTool(
+  pi: ExtensionAPI,
+  cwd: string,
+  backgroundRuntime?: DelegateBackgroundRuntime,
+  promptConfig?: DelegateConfig,
+): void {
+  registerDelegateSurface(pi, cwd, 'start', backgroundRuntime, promptConfig);
+}
+
+/** Register both model-facing workflow entry points. */
+export function registerDelegateTools(
+  pi: ExtensionAPI,
+  cwd: string,
+  backgroundRuntime?: DelegateBackgroundRuntime,
+  promptConfig?: DelegateConfig,
+): void {
+  registerDelegateStartTool(pi, cwd, backgroundRuntime, promptConfig);
+  registerDelegateSurface(pi, cwd, 'continue', backgroundRuntime, promptConfig);
 }

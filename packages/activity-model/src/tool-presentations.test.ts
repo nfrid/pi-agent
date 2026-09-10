@@ -24,8 +24,22 @@ describe('custom tool presentation kinds', () => {
     expect(customToolKind('delegate_changes')).toBe('delegate_changes');
     expect(customToolKind('delegate_gate')).toBe('delegate_gate');
     expect(customToolKind('background')).toBe('background');
+    for (const name of [
+      'background_start',
+      'background_peek',
+      'background_list',
+      'background_stop',
+      'background_watch',
+      'background_unwatch',
+    ])
+      expect(customToolKind(name)).toBe('background');
     expect(customToolKind('todo')).toBe('todo');
     expect(customToolKind('tasks')).toBe('todo');
+    expect(customToolKind('todo_list')).toBe('todo');
+    expect(customToolKind('todo_update')).toBe('todo');
+    expect(customToolKind('todo_remove')).toBe('todo');
+    expect(customToolKind('delegate_start')).toBe('delegate');
+    expect(customToolKind('delegate_continue')).toBe('delegate');
     expect(customToolKind('read')).toBeUndefined();
     expect(customToolKind('bash')).toBeUndefined();
   });
@@ -44,35 +58,52 @@ describe('custom tool presentation kinds', () => {
       domainCount: 1,
       includeContent: true,
     });
-    expect(fetchContentPresentation({ url: 'https://example.com' })).toEqual({
-      urls: ['https://example.com'],
-    });
+    expect(fetchContentPresentation({ urls: ['https://example.com'] })).toEqual(
+      {
+        urls: ['https://example.com'],
+      },
+    );
     expect(
       getSearchContentPresentation({
-        responseId: 'ws_1',
-        heading: 'Results',
-        queryIndex: 0,
+        contentId: 'content-1',
+        offset: 120,
+        maxChars: 4000,
       }),
-    ).toMatchObject({ responseId: 'ws_1', heading: 'Results', queryIndex: 0 });
+    ).toMatchObject({ contentId: 'content-1', offset: 120, maxChars: 4000 });
     expect(
       delegatePresentation({
         id: 'review-queue',
         task: 'Inspect the queue',
         route: 'quick',
+        scope: ['packages/activity-model'],
       }),
     ).toEqual({
       name: 'review-queue',
       task: 'Inspect the queue',
       route: 'quick',
+      scope: ['packages/activity-model'],
       continuation: undefined,
       taskCount: 0,
     });
     expect(
-      backgroundPresentation({
-        action: 'start',
-        title: 'dev',
-        command: 'pnpm dev',
+      delegatePresentation({
+        continue: 'review-queue@2',
+        task: 'Address feedback',
+        route: 'quick',
+        scope: ['src'],
       }),
+    ).toMatchObject({
+      continuation: 'review-queue@2',
+      task: 'Address feedback',
+      scope: ['src'],
+    });
+    expect(
+      backgroundPresentation(
+        { title: 'dev', command: 'pnpm dev' },
+        undefined,
+        new Map(),
+        'background_start',
+      ),
     ).toMatchObject({ action: 'start', title: 'dev', command: 'pnpm dev' });
     expect(
       backgroundPresentation({
@@ -198,15 +229,48 @@ describe('custom tool presentation kinds', () => {
       ),
     ).toBe(true);
     expect(
-      todoPresentation({
-        action: 'done',
-        id: 'H4',
-        notes: 'Focused coordinator suite passed.',
-      }),
+      todoPresentation(
+        {
+          changes: [
+            {
+              id: 'H4',
+              text: 'Ship presenters',
+              status: 'doing',
+              priority: 'high',
+              notes: 'Focused coordinator suite passed.',
+              depends_on: ['H3'],
+            },
+          ],
+        },
+        'todo_update',
+      ),
     ).toMatchObject({
-      action: 'done',
-      id: 'H4',
-      notes: 'Focused coordinator suite passed.',
+      action: 'update',
+      operationCount: 1,
+      operations: [
+        {
+          action: 'upsert',
+          id: 'H4',
+          text: 'Ship presenters',
+          status: 'doing',
+          priority: 'high',
+          notes: 'Focused coordinator suite passed.',
+          dependsOn: ['H3'],
+        },
+      ],
+    });
+    expect(todoPresentation({ include_done: true }, 'todo_list')).toMatchObject(
+      { action: 'list', includeDone: true },
+    );
+    expect(
+      todoPresentation({ ids: ['H4', 'H5'] }, 'todo_remove'),
+    ).toMatchObject({
+      action: 'remove',
+      operationCount: 2,
+      operations: [
+        { action: 'remove', id: 'H4' },
+        { action: 'remove', id: 'H5' },
+      ],
     });
     expect(todoResultIsRedundant({ action: 'done', id: 'H4' }, 'done H4')).toBe(
       true,
@@ -234,7 +298,8 @@ describe('custom tool presentation kinds', () => {
     });
     expect(
       delegateGatePresentation({
-        all: ['audit-a', 'audit-b'],
+        mode: 'all',
+        delegates: ['audit-a', 'audit-b'],
         delivery: 'idle',
       }),
     ).toEqual({

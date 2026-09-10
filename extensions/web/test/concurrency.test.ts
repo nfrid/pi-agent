@@ -63,8 +63,8 @@ describe('query batching', () => {
       {},
     );
     expect(state.peak).toBe(3);
-    expect(result.content[0].text.indexOf('## first')).toBeLessThan(
-      result.content[0].text.indexOf('## second'),
+    expect(result.content[0].text.indexOf('## Query: first')).toBeLessThan(
+      result.content[0].text.indexOf('## Query: second'),
     );
     expect(
       (

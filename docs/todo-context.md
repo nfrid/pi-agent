@@ -20,4 +20,6 @@ This layout preserves task recall across normal turns, compaction, and forks whi
 - `/todump` inserts the current todo state into the editor.
 - `/tostats` shows aggregate task counts.
 
-Use the `todo` tool for state changes so snapshots and later tool results remain authoritative.
+Use `todo_list` to read current tasks, `todo_update` to apply an atomic array of changes, and `todo_remove` to remove tasks by ID so snapshots and later tool results remain authoritative.
+
+`todo_update` creates tasks for new caller-supplied IDs (requiring `text`, defaulting to `todo`) and updates only supplied fields for existing IDs. Changes may reference tasks created in the same request. Set `status` directly to start, complete, block, or drop a task. `todo_remove` rejects removal when a retained task depends on a removed task. Completed tasks remain available with `todo_list({"include_done":true})`.

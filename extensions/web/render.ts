@@ -37,7 +37,6 @@ type RenderContext = {
 };
 
 type SearchCallArgs = {
-  query?: string;
   queries?: string[];
   recencyFilter?: string;
   domainFilter?: string[];
@@ -45,17 +44,11 @@ type SearchCallArgs = {
 };
 
 type FetchCallArgs = {
-  url?: string;
   urls?: string[];
 };
 
 type GetContentCallArgs = {
-  responseId?: string;
-  view?: 'summary';
-  query?: string;
-  queryIndex?: number;
-  url?: string;
-  urlIndex?: number;
+  contentId?: string;
 };
 
 function sanitizeDisplay(text: string): string {
@@ -150,11 +143,7 @@ export function renderSearchCall(
   args: SearchCallArgs,
   theme: ThemeLike,
 ): Component {
-  const queries = args.queries?.length
-    ? args.queries
-    : args.query
-      ? [args.query]
-      : [];
+  const queries = args.queries ?? [];
   const target =
     queries.length === 1
       ? `“${preview(queries[0])}”`
@@ -175,7 +164,7 @@ export function renderFetchCall(
   args: FetchCallArgs,
   theme: ThemeLike,
 ): Component {
-  const urls = args.urls?.length ? args.urls : args.url ? [args.url] : [];
+  const urls = args.urls ?? [];
   const target = urls.length === 1 ? preview(urls[0]) : `${urls.length} URLs`;
   return new Text(
     `${theme.fg('toolTitle', theme.bold('fetch_content '))}${theme.fg('accent', target)}`,
@@ -188,15 +177,9 @@ export function renderGetContentCall(
   args: GetContentCallArgs,
   theme: ThemeLike,
 ): Component {
-  const selectors: string[] = [];
-  if (args.view) selectors.push(args.view);
-  if (args.query) selectors.push(`query “${preview(args.query, 60)}”`);
-  else if (args.queryIndex !== undefined)
-    selectors.push(`query ${args.queryIndex}`);
-  if (args.url) selectors.push(preview(args.url, 80));
-  else if (args.urlIndex !== undefined) selectors.push(`page ${args.urlIndex}`);
+  const contentId = args.contentId ? preview(args.contentId, 120) : '';
   return new Text(
-    `${theme.fg('toolTitle', theme.bold('get_search_content '))}${theme.fg('accent', preview(args.responseId, 40))}${selectors.length ? theme.fg('dim', ` · ${selectors.join(' · ')}`) : ''}`,
+    `${theme.fg('toolTitle', theme.bold('get_search_content '))}${theme.fg('accent', contentId)}`,
     0,
     0,
   );

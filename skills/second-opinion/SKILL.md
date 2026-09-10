@@ -1,7 +1,7 @@
 ---
 name: second-opinion
 description: Explicitly consult Claude Code with Opus as a slow, independent external reviewer in the background. Use only when invoked with /skill:second-opinion.
-compatibility: Requires an authenticated Claude Code CLI and Pi's background tool.
+compatibility: Requires an authenticated Claude Code CLI and Pi's background_start tool.
 disable-model-invocation: true
 ---
 
@@ -34,7 +34,7 @@ Preserve independence: provide requirements and evidence, not Pi's conclusion or
 1. Resolve this skill's directory from the path used to read this `SKILL.md`; its launcher is `scripts/run.sh` relative to that directory.
 2. Use `bash` only to create a unique temporary prompt path with `mktemp`.
 3. Use Pi's `write` tool to write the packet exactly to that path. Do not interpolate the packet into a shell command.
-4. Use the `background` tool with action `start`, a short title such as `Opus second opinion`, and the user's project as `cwd`. Run the launcher with stdin redirected from the prompt file and clean the file on shell exit:
+4. Use `background_start` with a short title such as `Opus second opinion`, and the user's project as `cwd`. Run the launcher with stdin redirected from the prompt file and clean the file on shell exit:
 
 ```bash
 prompt_file='<shell-escaped temporary path>'
