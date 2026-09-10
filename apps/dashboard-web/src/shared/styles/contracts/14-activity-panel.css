@@ -87,16 +87,13 @@
   display: grid;
   min-width: 0;
 }
-.activity-panel-inset {
+.activity-panel .activity-panel-inset {
   padding-inline: var(--activity-panel-inset);
 }
 .activity-panel-section {
   min-width: 0;
   border-bottom: 1px solid var(--line-soft);
   padding: 8px 0;
-}
-.activity-panel-section .activity-panel-inset {
-  padding-inline: var(--activity-panel-inset);
 }
 .activity-panel-location {
   display: flex;

@@ -91,19 +91,29 @@ test('activity section hit targets span the panel while content stays inset @des
   const panel = page.locator('.activity-panel');
   const panelBox = await panel.boundingBox();
   if (!panelBox) throw new Error('Activity panel is not laid out.');
+  const inset = await panel.evaluate((element) =>
+    Number.parseFloat(
+      getComputedStyle(element).getPropertyValue('--activity-panel-inset'),
+    ),
+  );
+  expect(inset).toBe(12);
 
   const tasks = panel.getByRole('region', { name: 'Tasks', exact: true });
   const taskHeader = tasks.getByRole('heading').getByRole('button');
   const taskHeaderBox = await taskHeader.boundingBox();
+  const taskTitleBox = await tasks
+    .locator('.activity-panel-heading-title')
+    .boundingBox();
   const taskTextBox = await tasks
     .locator('.task-row-main')
     .first()
     .boundingBox();
-  if (!taskHeaderBox || !taskTextBox)
+  if (!taskHeaderBox || !taskTitleBox || !taskTextBox)
     throw new Error('Task geometry is missing.');
   expect(taskHeaderBox.x).toBe(panelBox.x);
   expect(taskHeaderBox.width).toBe(panelBox.width);
-  expect(taskTextBox.x).toBeGreaterThan(panelBox.x);
+  expect(taskTitleBox.x).toBe(taskHeaderBox.x + inset);
+  expect(taskTextBox.x).toBeGreaterThan(panelBox.x + inset);
 
   await taskHeader.click({ position: { x: 1, y: 1 } });
   await expect(taskHeader).toHaveAttribute('aria-expanded', 'true');
@@ -115,8 +125,21 @@ test('activity section hit targets span the panel while content stays inset @des
   const delegateToggle = delegates.locator('.delegate-row-toggle').first();
   const delegateBox = await delegateToggle.boundingBox();
   if (!delegateBox) throw new Error('Delegate row geometry is missing.');
+  const delegateGlyphBox = await delegateToggle
+    .locator('.surface-state')
+    .boundingBox();
+  if (!delegateGlyphBox) throw new Error('Delegate glyph geometry is missing.');
   expect(delegateBox.x).toBe(panelBox.x);
   expect(delegateBox.width).toBe(panelBox.width);
+  expect(delegateGlyphBox.x).toBe(delegateBox.x + inset);
+  await delegateToggle.hover({ position: { x: 1, y: delegateBox.height / 2 } });
+  await expect
+    .poll(() =>
+      delegateToggle.evaluate(
+        (element) => getComputedStyle(element).backgroundColor,
+      ),
+    )
+    .not.toBe('rgba(0, 0, 0, 0)');
   await delegateToggle.click({ position: { x: 1, y: delegateBox.height / 2 } });
   await expect(page.locator('.delegate-transcript-drawer')).toBeVisible();
 });

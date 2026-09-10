@@ -532,7 +532,7 @@ export function DelegateSurface({
       >
         <AriaButton
           type="button"
-          className="delegate-row-toggle activity-panel-inset"
+          className={`delegate-row-toggle${activityPanel ? ' activity-panel-inset' : ''}`}
           aria-haspopup="dialog"
           onPress={() => openDelegateInspector(group)}
         >
@@ -786,24 +786,18 @@ export function DelegateSurface({
     >
       <div className="delegate-scroll surface-scroll-region">
         {historyLoading && (
-          <p
-            className="delegate-history-status activity-panel-inset"
-            role="status"
-          >
+          <p className="delegate-history-status" role="status">
             Loading delegate history…
           </p>
         )}
         {historyError !== undefined && !historyLoading && (
-          <p
-            className="delegate-history-status activity-panel-inset"
-            role="status"
-          >
+          <p className="delegate-history-status" role="status">
             No delegate history.
           </p>
         )}
         {wakeConditions.length > 0 && (
           <section
-            className="delegate-wake-conditions activity-panel-inset"
+            className="delegate-wake-conditions"
             aria-label="Resume conditions"
           >
             {wakeConditions.map((wake) => {
