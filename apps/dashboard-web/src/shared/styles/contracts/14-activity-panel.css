@@ -37,8 +37,7 @@
   min-width: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  border-left: 1px solid var(--line-soft);
-  background: color-mix(in srgb, var(--bg-alt) 96%, var(--bg));
+  background: color-mix(in srgb, var(--bg-alt) 72%, var(--bg));
   color: var(--fg);
 }
 .activity-panel.is-open {
