@@ -4,10 +4,15 @@ import type {
 } from '@pi-dashboard/client';
 import {
   DELEGATE_RENDERER_ID,
+  type DelegateStatusViewModel,
+  DelegateStatusViewModelSchema,
   TASKS_RENDERER_ID,
+  type TaskStateViewModel,
+  TaskStateViewModelSchema,
 } from '@pi-dashboard/extension-contributions';
 import type { CheckoutSummary, RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
+import { Value } from 'typebox/value';
 import { ThreadLocationIndicator } from './composer/draft-pickers';
 import {
   DelegateHistorySurface,
@@ -32,22 +37,52 @@ function mediaMatches(query: string) {
   return typeof window !== 'undefined' && window.matchMedia(query).matches;
 }
 
-function readPinned() {
+function readPinnedPreference() {
   if (typeof window === 'undefined') return true;
   try {
     const saved = window.localStorage.getItem(PIN_KEY);
     if (saved !== null) return saved === 'true';
   } catch {
-    // Storage is optional; wide sessions remain pinned by default.
+    // Storage is optional.
   }
-  return mediaMatches(WIDE_QUERY);
+  return true;
+}
+
+function activityHints(runtime: RuntimeSnapshot | undefined): ActivityHints {
+  let tasks = false;
+  let delegates = false;
+  for (const surface of runtimeExtensionSurfaces(runtime)) {
+    if (
+      !tasks &&
+      surface.rendererId === TASKS_RENDERER_ID &&
+      Value.Check(TaskStateViewModelSchema, surface.viewModel)
+    ) {
+      const model = surface.viewModel as TaskStateViewModel;
+      tasks = model.tasks.some(
+        (task) => task.status !== 'done' && task.status !== 'dropped',
+      );
+    }
+    if (
+      !delegates &&
+      surface.rendererId === DELEGATE_RENDERER_ID &&
+      Value.Check(DelegateStatusViewModelSchema, surface.viewModel)
+    ) {
+      const model = surface.viewModel as DelegateStatusViewModel;
+      delegates = model.statuses.some(
+        (status) => status.state === 'queued' || status.state === 'running',
+      );
+    }
+    if (tasks && delegates) break;
+  }
+  return { tasks, delegates };
 }
 
 export function useActivityPanelState(runtime: RuntimeSnapshot | undefined) {
   const [isWide, setIsWide] = useState(() => mediaMatches(WIDE_QUERY));
-  const [pinned, setPinned] = useState(readPinned);
+  const [pinnedPreference, setPinnedPreference] =
+    useState(readPinnedPreference);
   const [open, setOpen] = useState(
-    () => mediaMatches(WIDE_QUERY) && readPinned(),
+    () => mediaMatches(WIDE_QUERY) && readPinnedPreference(),
   );
 
   useEffect(() => {
@@ -59,32 +94,26 @@ export function useActivityPanelState(runtime: RuntimeSnapshot | undefined) {
   }, []);
 
   useEffect(() => {
-    setOpen(isWide && pinned);
-  }, [isWide, pinned]);
+    setOpen(isWide && pinnedPreference);
+  }, [isWide, pinnedPreference]);
 
-  useEffect(() => {
-    if (!isWide) return;
-    try {
-      window.localStorage.setItem(PIN_KEY, String(pinned));
-    } catch {
-      // Storage is optional.
-    }
-  }, [isWide, pinned]);
-
-  const surfaces = runtimeExtensionSurfaces(runtime);
-  const hints: ActivityHints = {
-    tasks: surfaces.some((surface) => surface.rendererId === TASKS_RENDERER_ID),
-    delegates: surfaces.some(
-      (surface) => surface.rendererId === DELEGATE_RENDERER_ID,
-    ),
-  };
+  const pinned = isWide && pinnedPreference;
   return {
     isWide,
     pinned,
     open,
-    hints,
+    hints: activityHints(runtime),
     setOpen,
-    togglePinned: () => setPinned((value) => !value),
+    togglePinned: () =>
+      setPinnedPreference((value) => {
+        const next = !value;
+        try {
+          window.localStorage.setItem(PIN_KEY, String(next));
+        } catch {
+          // Storage is optional.
+        }
+        return next;
+      }),
   };
 }
 
@@ -119,15 +148,17 @@ export function ActivityPanel({
   const { present, exiting } = useOverlayPresence(open);
   const overlay = open && !pinned;
   useOverlayFocusRestore(overlay, '.session-activity-button');
-  useOverlayFocusTrap(overlay, panelRef, { mobile: !isWide });
+  useOverlayFocusTrap(overlay, panelRef, { mobile: true });
 
   useEffect(() => {
     if (isWide) return;
     let start: { x: number; y: number } | undefined;
     const touchStart = (event: TouchEvent) => {
       const touch = event.changedTouches[0];
-      if (touch && touch.clientX >= window.innerWidth - 28)
-        start = { x: touch.clientX, y: touch.clientY };
+      start =
+        touch && touch.clientX >= window.innerWidth - 28
+          ? { x: touch.clientX, y: touch.clientY }
+          : undefined;
     };
     const touchEnd = (event: TouchEvent) => {
       const initial = start;
@@ -138,33 +169,42 @@ export function ActivityPanel({
       const dy = Math.abs(initial.y - touch.clientY);
       if (dx > 52 && dx > dy * 1.25) onOpen();
     };
+    const touchCancel = () => {
+      start = undefined;
+    };
     window.addEventListener('touchstart', touchStart, { passive: true });
     window.addEventListener('touchend', touchEnd, { passive: true });
+    window.addEventListener('touchcancel', touchCancel, { passive: true });
     return () => {
+      start = undefined;
       window.removeEventListener('touchstart', touchStart);
       window.removeEventListener('touchend', touchEnd);
+      window.removeEventListener('touchcancel', touchCancel);
     };
   }, [isWide, onOpen]);
 
   useEffect(() => {
     if (!overlay) return;
+    const activityRoot = panelRef.current?.closest('body > *');
+    const isNestedPortal = (target: Element) => {
+      if (target.closest('[data-surface-portal-root], .surface-drawer-layer'))
+        return true;
+      const targetRoot = target.closest('body > *');
+      return Boolean(activityRoot && targetRoot && targetRoot !== activityRoot);
+    };
     const outside = (event: PointerEvent) => {
       const target = event.target;
-      if (!(target instanceof Element)) return;
       if (
+        !(target instanceof Element) ||
         panelRef.current?.contains(target) ||
-        target.closest('[data-surface-portal-root]')
+        isNestedPortal(target)
       )
         return;
       onClose();
     };
     const onEscape = (event: KeyboardEvent) => {
       const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest('[data-surface-portal-root]')
-      )
-        return;
+      if (target instanceof Element && isNestedPortal(target)) return;
       if (event.key === 'Escape') onClose();
     };
     document.addEventListener('pointerdown', outside);
