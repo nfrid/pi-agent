@@ -17,7 +17,7 @@ import { installDashboardBootstrap } from './dashboard-fixtures';
 export const VISUAL_DESKTOP_VIEWPORT = { width: 1440, height: 900 } as const;
 export const VISUAL_PIXEL_VIEWPORT = { width: 393, height: 851 } as const;
 
-const VISUAL_TIMESTAMP = Date.parse('2026-08-30T12:00:00.000Z');
+export const VISUAL_TIMESTAMP = Date.parse('2026-08-30T12:00:00.000Z');
 const VISUAL_SERVER_ID = 'visual-state-fixture';
 const VISUAL_CWD = '/workspace/dashboard';
 

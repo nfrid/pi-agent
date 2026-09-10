@@ -256,6 +256,10 @@ test('activity header clears simulated PWA window controls @desktop', async ({
     .boundingBox();
   if (!collapsedActions) throw new Error('collapsed session actions missing');
   expect(collapsedActions.x + collapsedActions.width).toBeLessThanOrEqual(1322);
+  await expect(page).toHaveScreenshot('activity-pwa-unpinned-simulated.png', {
+    animations: 'disabled',
+    clip: { x: 0, y: 0, width: 1440, height: 180 },
+  });
 
   const smallerWco = { x: 160, y: 0, width: 1160, height: 32 };
   await page.evaluate((key) => localStorage.setItem(key, 'true'), PIN_KEY);

@@ -185,6 +185,7 @@ h2.activity-panel-header,
 }
 .activity-panel-section .delegate-row-toggle {
   grid-template-columns: 12px minmax(0, 1fr) 14px;
+  row-gap: 2px;
   padding: 4px 0;
 }
 .activity-panel-section .delegate-row-meta {
@@ -201,6 +202,8 @@ h2.activity-panel-header,
 .activity-panel-section .delegate-row-chevron {
   grid-column: 3;
   grid-row: 1;
+  font-size: 12px;
+  line-height: 1;
 }
 .activity-panel-section .delegate-row-main strong {
   overflow: visible;

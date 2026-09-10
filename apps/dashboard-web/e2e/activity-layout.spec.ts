@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import {
   buildWorkingScenario,
   installVisualStateScenario,
+  VISUAL_TIMESTAMP,
 } from './visual-state-fixtures';
 
 const PIN_KEY = 'pi-dashboard-activity-panel-pinned-v1';
@@ -23,7 +24,7 @@ async function openWorkingSession(
     id: `layout-message-${index}`,
     message: {
       role: index % 2 ? 'assistant' : 'user',
-      timestamp: Date.now() - (100 - index) * 1_000,
+      timestamp: VISUAL_TIMESTAMP - (100 - index) * 1_000,
       content: [
         {
           type: 'text',
@@ -182,6 +183,7 @@ test('live events use the persisted content edges without changing virtual rows 
   page,
 }) => {
   await openWorkingSession(page, 1440, 900, 100, 'compacting');
+  await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
   const geometry = await page.evaluate(() => {
     const live = document.querySelector('.live-compaction-event');
     const row = document.querySelector('.transcript-virtual-row');
@@ -201,6 +203,10 @@ test('live events use the persisted content edges without changing virtual rows 
   expect(geometry.live.left).toBe(geometry.row.left);
   expect(geometry.live.right).toBe(geometry.row.right);
   expect(geometry.live.width).toBe(geometry.row.width);
+  await expect(page.locator('.session-transcript-scroll')).toHaveScreenshot(
+    'live-compaction-aligned.png',
+    { animations: 'disabled' },
+  );
 });
 
 for (const rowCount of [20, 100]) {
