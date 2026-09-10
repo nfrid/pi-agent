@@ -230,6 +230,19 @@ describe('per-visit scroll controller', () => {
     controller.disconnect();
   });
 
+  it('reschedules observation after a read cancels pending observation', () => {
+    const controller = new SessionScrollController(manual, 'session-memory');
+    const port = element();
+    controller.connect(port);
+    controller.updateHistory(undefined, false);
+    controller.snapshot().command?.complete();
+    controller.onScroll();
+    controller.read();
+    controller.onScroll();
+    expect(frames.size).toBe(1);
+    controller.disconnect();
+  });
+
   it('persists captured old viewport, not changed DOM on disconnect, and never saves transient restoration', () => {
     const key = 'session-memory';
     const controller = new SessionScrollController(manual, key);

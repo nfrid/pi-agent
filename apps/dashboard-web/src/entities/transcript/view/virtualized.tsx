@@ -97,7 +97,10 @@ export function VirtualizedTranscript({
   });
   const measureTranscriptElement = useCallback(
     (element: HTMLDivElement | null) => {
-      if (!element) return;
+      if (!element) {
+        virtualizer.measureElement(null);
+        return;
+      }
       const scrollElement = scrollElementRef.current;
       const viewportTop = scrollElement?.getBoundingClientRect().top;
       const anchor =

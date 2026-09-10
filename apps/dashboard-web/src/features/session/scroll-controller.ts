@@ -85,6 +85,7 @@ export class SessionScrollController {
       window.cancelAnimationFrame(this.observationFrame);
     if (this.readyTimer !== undefined) window.clearTimeout(this.readyTimer);
     this.frame = undefined;
+    this.observationFrame = undefined;
     this.readyTimer = undefined;
     this.commandAbort?.abort();
     this.commandAbort = undefined;
