@@ -1094,15 +1094,14 @@ describe('delegate', () => {
     );
     expect(guidelines).toContain('`delegate_start`');
     expect(guidelines).toContain('`delegate_continue`');
-    expect(guidelines).toContain('`write`');
+    expect(guidelines).toContain('relevant constraints, expected evidence');
     expect(guidelines).toContain('`inputs` waits for prior delegates');
     expect(guidelines).toContain(
       '`base` supplies another delegate’s exact code state',
     );
-    expect(guidelines).toContain('Results arrive eagerly');
-    expect(guidelines).toContain(
-      "`mode: 'all' | 'any'`, `delegates`, and optional `delivery`",
-    );
+    expect(guidelines).toContain('results arrive automatically');
+    expect(guidelines).toContain('`delegate_gate`');
+    expect(guidelines).toContain('delay the first available result until idle');
     expect(guidelines).toContain('Never poll for completion');
     expect(guidelines).toContain(
       'Keep parent ownership of scope decisions, integration, and final verification',
@@ -1126,7 +1125,9 @@ describe('delegate', () => {
       "Work directly for trivial tasks, tightly coupled fixes, or when delegation's briefing, latency, verification, and integration overhead clearly dominates",
     );
     expect(guidelines).toContain('wait for it before scheduling that work');
-    expect(guidelines).toContain('if either must change');
+    expect(guidelines).toContain(
+      'If capabilities, cwd, or selected skills must change',
+    );
     expect(guidelines).toContain('`delegate_jobs inspect`');
   });
 

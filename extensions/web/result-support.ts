@@ -93,7 +93,7 @@ export function appendCacheFileNotice(
   return payload.warning ? `${text}\n\n${payload.warning}` : text;
 }
 
-function truncatedPreviewNotice(
+export function truncatedPreviewNotice(
   contentLength: number,
   contentId: string,
   selectedChars: number,

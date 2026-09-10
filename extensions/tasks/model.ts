@@ -35,7 +35,7 @@ export const todoUpdateParamsSchema = Type.Object(
     changes: Type.Array(taskChangeSchema, {
       minItems: 1,
       description:
-        'Tasks to create or update. Each change needs a stable id; new tasks also need text. Forward dependency references are allowed within this request.',
+        'Tasks to create or update, with one change per task ID. Duplicate IDs reject the whole request.',
     }),
   },
   { additionalProperties: false },

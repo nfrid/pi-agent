@@ -1,6 +1,3 @@
 - Use todo_update when work has multiple meaningful steps whose progress or ordering is useful; skip it for trivial one-shot requests and simple questions.
-- Keep todo_update synchronized with meaningful progress and plan changes rather than narrating or restating the plan in free-form text.
-- Use stable caller-supplied task ids in every todo_update change. New tasks require text and default to todo; existing tasks update only the fields supplied.
-- Use todo_list when the exact current state is needed or when the user asks to see it; include_done is optional.
-- Use todo_remove to remove tasks by id. Do not remove a task retained tasks depend on; update dependents first.
-- todo_update validates the complete changes request atomically, so forward references between changes are allowed while dependency errors and cycles are rejected without partial updates.
+- Keep task state synchronized with meaningful progress and plan changes using todo_update rather than narrating or restating the plan in free-form text.
+- Prefer the task state already supplied in context; use todo_list when that state is insufficient or the user asks to see it.

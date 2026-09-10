@@ -42,7 +42,7 @@ import { parseWorkflowReference } from './workflow-model';
 import { captureWorkInProgress } from './worktree';
 
 const DELEGATE_START_DESCRIPTION =
-  'Start one focused child agent asynchronously with a stable id, configured route, optional inputs, base, scope, write, cwd, web, and skills.';
+  'Start a focused child agent asynchronously. Use inputs to wait for prior reports and base to inherit an upstream code state.';
 const DELEGATE_CONTINUE_DESCRIPTION =
   'Continue one settled child agent asynchronously with follow-up feedback. The child keeps its original capabilities and workspace; only route and advisory scope may change.';
 
@@ -64,24 +64,23 @@ const BaseSchema = Type.String({
     'Logical node or exact attempt whose recorded code state becomes the fresh isolated workspace base.',
 });
 const WriteSchema = Type.Boolean({
-  description:
-    'Let a task edit files. Continuations inherit the original write capability and cannot change it.',
+  description: 'Let the child edit files in an isolated Git worktree.',
 });
 const WebSchema = Type.Boolean({
   description:
-    'Enable web_search, fetch_content, and get_search_content for this delegate. Continuations inherit the original capability.',
+    'Enable web_search, fetch_content, and get_search_content for the child.',
 });
 const CwdSchema = Type.String({
   maxLength: 4096,
   description:
-    'Fresh delegates inherit ctx.cwd when omitted. Relative paths resolve against ctx.cwd; ~ and ~/ paths expand using the effective home directory; absolute paths are supported. Continuations retain their original cwd and must omit this field.',
+    'Working directory; defaults to the parent cwd. Relative paths resolve against the parent cwd; ~ and ~/ expand using the effective home directory.',
 });
 const SkillsSchema = Type.Array(
   Type.String({ minLength: 1, maxLength: 4096 }),
   {
     maxItems: 16,
     description:
-      'Explicit skill file or directory paths to load; no skills are discovered by default. Paths resolve against cwd for fresh delegates. Continuations inherit the original selection and cannot replace it.',
+      'Explicit skill file or directory paths to load; none are discovered by default. Paths resolve against the requested cwd.',
   },
 );
 
@@ -323,8 +322,8 @@ function registerDelegateSurface(
       ? DELEGATE_START_DESCRIPTION
       : DELEGATE_CONTINUE_DESCRIPTION,
     promptSnippet: isStart
-      ? 'Start one focused async delegate with a stable id, configured route, and optional inputs, base, scope, write, cwd, web, or skills. Results arrive eagerly; use delegate_gate only for intentional mode=all fan-in or mode=any idle delivery.'
-      : 'Continue a settled async delegate with a follow-up task. Only route and advisory scope can change; results arrive eagerly unless held by delegate_gate.',
+      ? 'Start a focused child agent asynchronously'
+      : 'Resume a settled child agent with a follow-up task',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
     parameters: isStart
       ? DelegateStartParamsSchema

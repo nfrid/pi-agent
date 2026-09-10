@@ -1,6 +1,4 @@
-- When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.
 - Use `background_start` for non-interactive commands that should outlive the current turn; use ordinary bash for short commands.
-- `background_start` accepts an optional title (otherwise it is derived from the command), cwd, and one-shot `watch` entries. A watch is literal, case-sensitive, single-line text observed only in future stdout/stderr; it notifies on match, timeout, or process end and never kills the process. Keep at most 8 watches per process.
-- Use `background_peek` for an immediate snapshot; it never waits. Use `background_list` for process and watch status, `background_watch` to append watches, `background_unwatch` to remove them, and `background_stop` to terminate processes.
-- Example: start a server with `background_start` and `watch: [{"contains":"ready","stream":"stdout","timeout_seconds":60}]`, then continue without polling. Completion and watch notifications resume the agent turn automatically.
+- When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.
+- Watches supplied to `background_start` or added with `background_watch` observe future output only and never kill the process. The eight-watch limit includes retained settled watches; use `background_unwatch` to remove unneeded watches before adding more.
 - Background jobs survive parent Pi session shutdown and recreation; use `background_stop` explicitly when a job should terminate.
