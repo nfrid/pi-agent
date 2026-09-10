@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useRef } from 'react';
+import { type MouseEvent, useCallback, useEffect, useRef } from 'react';
 import { type SwipeEventData, useSwipeable } from 'react-swipeable';
 
 const EDGE_SWIPE_THRESHOLD = 52;
@@ -42,6 +42,8 @@ function isIgnoredSwipeTarget(
   owner: HTMLElement | null,
 ): boolean {
   if (!(target instanceof Element)) return true;
+  const dialog = target.closest('[role="dialog"], [role="alertdialog"]');
+  if (owner && dialog && dialog !== owner) return true;
   const portal = target.closest(
     '[data-surface-portal-root], [data-surface-layer]',
   );
@@ -62,6 +64,7 @@ function isIgnoredSwipeTarget(
       )
         return true;
     }
+    if (element === owner) break;
     element = element.parentElement;
   }
   return false;
@@ -117,12 +120,17 @@ export function useSwipeToDismiss(
     trackTouch: true,
     touchEventOptions: { passive: true },
   });
+  const attachSwipe = handlers.ref;
+  const ref = useCallback(
+    (element: HTMLElement | null) => {
+      ownerRef.current = element;
+      attachSwipe(element);
+    },
+    [attachSwipe],
+  );
   return {
     ...handlers,
-    ref: (element: HTMLElement | null) => {
-      ownerRef.current = element;
-      handlers.ref(element);
-    },
+    ref,
     onClickCapture: (event: MouseEvent) => {
       if (!suppressClick.current) return;
       suppressClick.current = false;
@@ -162,7 +170,8 @@ export function useSidePanelEdgeSwipe({
         return;
       if (
         event.target instanceof Element &&
-        isIgnoredSwipeTarget(event.target, null)
+        (event.target.closest('button, a, [role="button"]') ||
+          isIgnoredSwipeTarget(event.target, null))
       )
         return;
       const touch = event.changedTouches[0];

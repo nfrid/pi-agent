@@ -463,8 +463,10 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
       name: 'A deliberately long session title that must wrap safely offline',
     }),
   ).toBeVisible();
-  await page.locator('.agent-nav-backdrop').click();
-  await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
+  await page.locator('.side-panel-left').click({
+    position: { x: (page.viewportSize()?.width ?? 393) - 8, y: 430 },
+  });
+  await expect(page.locator('.side-panel-left')).toHaveCount(0);
   const paletteTrigger = page.getByRole('button', {
     name: 'Open command palette',
   });
@@ -763,9 +765,7 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   await page.keyboard.press('Escape');
   await expect(chooser).toHaveCount(0);
   await expect(newThread).toBeFocused();
-  await expect(
-    page.getByRole('button', { name: 'Close agent list' }),
-  ).toBeVisible();
+  await expect(page.locator('.side-panel-left')).toBeVisible();
 
   await newThread.click();
   await chooser.getByRole('button', { name: 'Close Choose a project' }).click();
@@ -773,7 +773,7 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   await expect(newThread).toBeFocused();
   await newThread.click();
   await page
-    .locator('.surface-drawer-layer')
+    .locator('.surface-drawer-layer:not(.side-panel-layer)')
     .click({ position: { x: 2, y: 2 } });
   await expect(chooser).toHaveCount(0);
   await expect(newThread).toBeFocused();
@@ -781,7 +781,7 @@ test('mobile project picker dismisses without closing the agent drawer', async (
   await newThread.click();
   await chooser.getByRole('option', { name: /Two/ }).click();
   await expect(page).toHaveURL(/\/drafts\/[^/]+$/u);
-  await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
+  await expect(page.locator('.side-panel-left')).toHaveCount(0);
 });
 
 test('draft composer completes slash commands before a runtime starts', async ({
@@ -2906,7 +2906,9 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     agentNav.locator('.agent-thread-row.status-dormant .agent-thread-glyph'),
   ).toHaveText('◌');
   await expect(agentNav.locator('.agent-thread-time')).toHaveCount(2);
-  await page.locator('.agent-nav-backdrop').click();
+  await page
+    .locator('.side-panel-left')
+    .click({ position: { x: 380, y: 430 } });
 
   const composer = page.getByLabel('Message Pi');
   await expect(composer).toBeVisible();
@@ -5897,7 +5899,7 @@ test('opens delegate details directly over the preserved activity panel @desktop
 
   await delegateRow.click();
   await page
-    .locator('.surface-drawer-layer')
+    .locator('.surface-drawer-layer:not(.side-panel-layer)')
     .click({ position: { x: 8, y: 8 } });
   await expect(dialog).toHaveCount(0);
   await expect(activity).toBeVisible();

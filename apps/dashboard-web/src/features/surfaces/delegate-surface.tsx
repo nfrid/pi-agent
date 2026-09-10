@@ -528,7 +528,7 @@ export function DelegateSurface({
     return (
       <div
         className={`delegate-row ${surfaceStateClass(state)}`}
-        key={`${surface.id}-${row.id}`}
+        key={`${surface.id}-${row.lineageId}`}
       >
         <AriaButton
           type="button"

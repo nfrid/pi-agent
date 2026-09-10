@@ -316,7 +316,9 @@ test('offline thread drawer and command palette fit a Pixel viewport', async ({
     caret: 'hide',
   });
 
-  await page.locator('.agent-nav-backdrop').click();
+  await page
+    .locator('.side-panel-left')
+    .click({ position: { x: 385, y: 430 } });
   await page.keyboard.press('Control+k');
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   await expect(palette).toBeVisible();

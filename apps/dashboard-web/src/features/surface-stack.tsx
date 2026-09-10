@@ -84,18 +84,29 @@ export function SidePanelSurface({
         if (!nextOpen) dismiss();
       }}
     >
-      <AriaDialog
-        ref={swipeHandlers.ref}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: delegates Escape and gesture cancellation for the contained dialog. */}
+      <div
+        data-surface-portal-root=""
         onClickCapture={swipeHandlers.onClickCapture}
-        className={`side-panel-dialog${className ? ` ${className}` : ''}`}
-        aria-label={ariaLabel}
-        aria-modal="true"
-        data-side-panel-root=""
-        data-side-panel-side={side}
-        data-side-panel-exiting={exiting ? '' : undefined}
+        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          event.stopPropagation();
+          dismiss();
+        }}
       >
-        {children}
-      </AriaDialog>
+        <AriaDialog
+          ref={swipeHandlers.ref}
+          className={`side-panel-dialog${className ? ` ${className}` : ''}`}
+          aria-label={ariaLabel}
+          aria-modal="true"
+          data-side-panel-root=""
+          data-side-panel-side={side}
+          data-side-panel-exiting={exiting ? '' : undefined}
+        >
+          {children}
+        </AriaDialog>
+      </div>
     </ModalOverlay>
   );
 }
@@ -191,7 +202,6 @@ export function SurfaceStack({
       else onDepthChange(nextDepth);
     },
   );
-  useOverlayFocusRestore(isOpen && depth > 0);
 
   useLayoutEffect(() => {
     const priorDepth = previousDepth.current;
@@ -239,6 +249,7 @@ export function SurfaceStack({
     >
       <div
         data-surface-portal-root=""
+        onClickCapture={swipeHandlers.onClickCapture}
         aria-hidden={exiting || undefined}
         inert={exiting || undefined}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
@@ -250,7 +261,6 @@ export function SurfaceStack({
       >
         <AriaDialog
           ref={swipeHandlers.ref}
-          onClickCapture={swipeHandlers.onClickCapture}
           className={className}
           aria-label={topPage.title}
           aria-modal="true"

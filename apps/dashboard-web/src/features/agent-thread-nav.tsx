@@ -1347,7 +1347,9 @@ export function AgentThreadNav({
       </footer>
     </aside>
   );
-  if (mode === 'home' || !isMobile) return nav;
+  if (mode === 'home') return nav;
+  if (!isMobile)
+    return <div className={`agent-nav-drawer ${styles.drawer}`}>{nav}</div>;
   return (
     <>
       <button
