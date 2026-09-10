@@ -196,6 +196,20 @@ test('23 desktop turns retain individual compact rail markers @desktop', async (
   const bounds = await markers.evaluateAll((elements) =>
     elements.map((element) => element.getBoundingClientRect()),
   );
+  const ticks = await markers.locator('i').evaluateAll((elements) =>
+    elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, height: rect.height };
+    }),
+  );
+  const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio);
+  expect(new Set(ticks.map((tick) => tick.height)).size).toBe(1);
+  for (const tick of ticks)
+    expect(
+      Math.abs(
+        tick.top * devicePixelRatio - Math.round(tick.top * devicePixelRatio),
+      ),
+    ).toBeLessThan(0.01);
   for (let index = 1; index < bounds.length; index++) {
     const current = bounds[index];
     const previous = bounds[index - 1];

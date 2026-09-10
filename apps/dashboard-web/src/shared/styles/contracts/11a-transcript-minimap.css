@@ -59,6 +59,9 @@
   pointer-events: auto;
 }
 .transcript-minimap-marker i {
+  position: absolute;
+  top: 3px;
+  left: 13px;
   display: block;
   width: 12px;
   height: 1px;
