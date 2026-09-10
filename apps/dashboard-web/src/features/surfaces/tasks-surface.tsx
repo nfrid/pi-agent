@@ -3,6 +3,7 @@ import type {
   TaskStateViewModel,
   TaskSurfaceTask,
 } from '@pi-dashboard/extension-contributions';
+import { useState } from 'react';
 import {
   surfaceStateClass,
   surfaceStateLabel,
@@ -15,6 +16,30 @@ function taskRows(model: TaskStateViewModel): readonly TaskSurfaceTask[] {
   return model.tasks;
 }
 
+function taskPriority(row: TaskSurfaceTask): number {
+  const state = surfaceStateLabel(row.status);
+  if (state === 'running') return 0;
+  if (state === 'queued') return 1;
+  if (state === 'blocked') return 2;
+  return 3;
+}
+
+/** Keep the compact panel useful without changing the authoritative task order. */
+export function taskPreviewRows(
+  rows: readonly TaskSurfaceTask[],
+): readonly TaskSurfaceTask[] {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => taskPriority(row) < 3)
+    .sort(
+      (left, right) =>
+        taskPriority(left.row) - taskPriority(right.row) ||
+        left.index - right.index,
+    )
+    .slice(0, 3)
+    .map(({ row }) => row);
+}
+
 function taskDependencies(row: TaskSurfaceTask): readonly string[] {
   return row.dependsOn.slice(0, 6);
 }
@@ -22,9 +47,11 @@ function taskDependencies(row: TaskSurfaceTask): readonly string[] {
 export function TasksSurface({
   surface,
   paused,
+  activityPanel = false,
 }: {
   surface: ExtensionSurface;
   paused?: boolean;
+  activityPanel?: boolean;
 }) {
   const model = surface.viewModel as TaskStateViewModel;
   const rows = taskRows(model);
@@ -43,6 +70,8 @@ export function TasksSurface({
     running[0] ??
     rows.find((row) => surfaceStateLabel(row.status) === 'queued');
   const launcherTasks = running.length > 0 ? running : current ? [current] : [];
+  const previewRows = taskPreviewRows(rows);
+  const [panelExpanded, setPanelExpanded] = useState(false);
   const fallbackSummary =
     completed === total
       ? 'All tasks complete'
@@ -72,6 +101,65 @@ export function TasksSurface({
   ) : (
     fallbackSummary
   );
+  const renderTaskRows = (items: readonly TaskSurfaceTask[]) =>
+    items.map((row) => {
+      const state = surfaceStateLabel(row.status);
+      const id = row.id;
+      const priority = row.priority;
+      const dependencies = taskDependencies(row);
+      return (
+        <div
+          className={`task-row ${surfaceStateClass(state)}`}
+          key={`${surface.id}-${id}`}
+        >
+          <span className="surface-state" title={state} aria-hidden="true">
+            {stateGlyph(state)}
+          </span>
+          <span className="sr-only">{state}</span>
+          <span className="task-row-main">
+            <strong>{id}</strong>
+            {row.text || 'Untitled task'}
+          </span>
+          <span className="task-row-meta">
+            {priority && <b className={`priority-${priority}`}>{priority}</b>}
+            {dependencies.length > 0 && (
+              <small title={`Depends on ${dependencies.join(', ')}`}>
+                ↳ {dependencies.join(', ')}
+              </small>
+            )}
+          </span>
+        </div>
+      );
+    });
+  if (activityPanel)
+    return (
+      <section className="activity-panel-section" aria-label="Tasks">
+        <header className="activity-panel-header">
+          <h2>Tasks</h2>
+          <span
+            role="status"
+            aria-label={`${completed} of ${total} tasks complete`}
+          >
+            {completed}/{total} complete
+          </span>
+        </header>
+        <div className="activity-panel-rows">
+          {renderTaskRows(panelExpanded ? rows : previewRows)}
+        </div>
+        {rows.length > previewRows.length && (
+          <button
+            type="button"
+            className="activity-panel-expand"
+            aria-expanded={panelExpanded}
+            onClick={() => setPanelExpanded((expanded) => !expanded)}
+          >
+            {panelExpanded
+              ? 'Show fewer tasks'
+              : `Show all ${rows.length} tasks`}
+          </button>
+        )}
+      </section>
+    );
   return (
     <WorkSurface
       title={title}
@@ -111,37 +199,7 @@ export function TasksSurface({
         </span>
       </div>
       <div className="task-rows surface-detail-list surface-scroll-region">
-        {rows.map((row) => {
-          const state = surfaceStateLabel(row.status);
-          const id = row.id;
-          const priority = row.priority;
-          const dependencies = taskDependencies(row);
-          return (
-            <div
-              className={`task-row ${surfaceStateClass(state)}`}
-              key={`${surface.id}-${id}`}
-            >
-              <span className="surface-state" title={state} aria-hidden="true">
-                {stateGlyph(state)}
-              </span>
-              <span className="sr-only">{state}</span>
-              <span className="task-row-main">
-                <strong>{id}</strong>
-                {row.text || 'Untitled task'}
-              </span>
-              <span className="task-row-meta">
-                {priority && (
-                  <b className={`priority-${priority}`}>{priority}</b>
-                )}
-                {dependencies.length > 0 && (
-                  <small title={`Depends on ${dependencies.join(', ')}`}>
-                    ↳ {dependencies.join(', ')}
-                  </small>
-                )}
-              </span>
-            </div>
-          );
-        })}
+        {renderTaskRows(rows)}
       </div>
     </WorkSurface>
   );

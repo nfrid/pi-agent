@@ -31,6 +31,7 @@ export function renderDelegateSurface(
     <DelegateSurface
       surface={surfaceForRenderer(input, context, DELEGATE_RENDERER_ID)}
       pausedAt={context?.pausedAt}
+      activityPanel={context?.activityPanel}
     />
   );
 }
@@ -43,6 +44,7 @@ export function renderTasksSurface(
     <TasksSurface
       surface={surfaceForRenderer(input, context, TASKS_RENDERER_ID)}
       paused={context?.pausedAt !== undefined}
+      activityPanel={context?.activityPanel}
     />
   );
 }

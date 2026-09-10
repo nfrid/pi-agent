@@ -28,11 +28,13 @@ import {
   type DelegateInspectorRunOption,
   DelegateTranscriptInspector,
 } from '../delegate-transcript-inspector';
-import { SurfaceStats } from '../surface-stack';
+import { SurfaceStack, SurfaceStats } from '../surface-stack';
 import { short, stateGlyph } from './state-glyphs';
 import { WorkSurface } from './work-surface';
 
-function workflowState(row: DelegateInspectionStatus): string {
+function workflowState(
+  row: Pick<DelegateInspectionStatus, 'workflow' | 'state'>,
+): string {
   // A wake describes a follow-up effect, never the node's execution state.
   return row.workflow?.state ?? row.state;
 }
@@ -60,6 +62,54 @@ function delegateStats(rows: readonly DelegateStatus[]) {
       (row) => surfaceStateLabel(workflowState(row)) === 'aborted',
     ).length,
   };
+}
+
+export type DelegatePanelBucket = 'active' | 'waiting' | 'failed' | 'finished';
+
+export function delegatePanelBucket(
+  row: Pick<DelegateInspectionStatus, 'state' | 'pauseState' | 'workflow'>,
+): DelegatePanelBucket {
+  const state = row.pauseState ?? surfaceStateLabel(workflowState(row));
+  if (state === 'running' || state === 'pausing' || state === 'paused')
+    return 'active';
+  if (state === 'queued') return 'waiting';
+  if (state === 'failed' || state === 'blocked') return 'failed';
+  return 'finished';
+}
+
+export function delegatePanelCounters(
+  rows: readonly Pick<
+    DelegateInspectionStatus,
+    'state' | 'pauseState' | 'workflow'
+  >[],
+): Record<DelegatePanelBucket, number> {
+  return rows.reduce(
+    (counts, row) => {
+      counts[delegatePanelBucket(row)] += 1;
+      return counts;
+    },
+    { active: 0, waiting: 0, failed: 0, finished: 0 },
+  );
+}
+
+export function orderDelegatePanelGroups(
+  groups: readonly DelegateCompositeGroup[],
+): readonly DelegateCompositeGroup[] {
+  const order: Record<DelegatePanelBucket, number> = {
+    active: 0,
+    waiting: 1,
+    failed: 2,
+    finished: 3,
+  };
+  return groups
+    .map((group, index) => ({ group, index }))
+    .sort(
+      (left, right) =>
+        order[delegatePanelBucket(left.group.row)] -
+          order[delegatePanelBucket(right.group.row)] ||
+        left.index - right.index,
+    )
+    .map(({ group }) => group);
 }
 
 export function isParentResumeGate(wake: {
@@ -234,6 +284,7 @@ export function DelegateSurface({
   detail,
   store,
   client,
+  activityPanel = false,
 }: {
   surface: ExtensionSurface;
   pausedAt?: number;
@@ -244,6 +295,7 @@ export function DelegateSurface({
   detail?: DelegateInspectorDetailState;
   store?: import('@pi-dashboard/client').DashboardLiveStore;
   client?: DashboardHttpClient;
+  activityPanel?: boolean;
 }) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const liveRows = delegateRows(model);
@@ -403,6 +455,193 @@ export function DelegateSurface({
           },
         ]
       : [];
+  const renderDelegateRow = (group: DelegateCompositeGroup) => {
+    const row = group.row;
+    const rawState = workflowState(row);
+    const runState = surfaceStateLabel(rawState);
+    const pauseState = row.pauseState;
+    const state = pauseState ?? runState;
+    const activityLabel = short(
+      delegateRowActivityLabel(row, wakes, runState, pauseState, rows),
+      140,
+    );
+    const name = delegateDisplayName(row);
+    const route = row.route ?? row.workflow?.route ?? '';
+    const context = delegateConsurfaceText(row) ?? '';
+    const access = row.allowWrites === true ? 'read/write' : 'read-only';
+    const elapsedText = surfaceElapsed(
+      row.workflow?.startedAt ?? row.startedAt ?? row.createdAt,
+      row.workflow?.settledAt ?? row.finishedAt,
+      row.pausedAt ?? now,
+    );
+    return (
+      <div
+        className={`delegate-row ${surfaceStateClass(state)}`}
+        key={`${surface.id}-${row.id}`}
+      >
+        <AriaButton
+          type="button"
+          className="delegate-row-toggle"
+          aria-haspopup="dialog"
+          onPress={() => {
+            onRunSelected?.(selectedDelegateCompositeRun(group));
+            setSelectedLineageId(row.lineageId);
+            setLastInspectorRow(row);
+            setInspectorOpen(true);
+          }}
+        >
+          <span className="surface-state" aria-hidden="true">
+            {stateGlyph(state)}
+          </span>
+          <span className="delegate-row-main">
+            <span className="delegate-row-name">
+              <strong>{name}</strong>
+            </span>
+            <small
+              className={`delegate-row-action ${surfaceStateClass(state)}`}
+            >
+              {activityLabel}
+            </small>
+          </span>
+          <span className="delegate-row-meta">
+            <span className={`delegate-row-status ${surfaceStateClass(state)}`}>
+              {state}
+              {elapsedText ? ` · ${elapsedText}` : ''}
+            </span>
+            <span className="delegate-row-properties">
+              {context && (
+                <span className="delegate-row-context">{context}</span>
+              )}
+              {context && access ? ' · ' : null}
+              {access && (
+                <span
+                  className={
+                    row.allowWrites === true
+                      ? 'delegate-row-access-rw'
+                      : 'delegate-row-access-ro'
+                  }
+                >
+                  {access}
+                </span>
+              )}
+              {(context || access) && route ? ' · ' : null}
+              {route && <span className="delegate-row-route">{route}</span>}
+            </span>
+          </span>
+          <span className="delegate-row-chevron" aria-hidden="true">
+            ›
+          </span>
+        </AriaButton>
+      </div>
+    );
+  };
+  const panelGroups = orderDelegatePanelGroups(
+    composite?.groups ??
+      rows.map((row) => ({
+        lineageId: row.lineageId,
+        row,
+        runs: [],
+        section: 'active' as const,
+      })),
+  );
+  const panelCounters = delegatePanelCounters(rows);
+  const closeInspector = () => {
+    setInspectorOpen(false);
+    setSelectedLineageId(undefined);
+    setLastInspectorRow(undefined);
+  };
+  if (activityPanel)
+    return (
+      <>
+        <section className="activity-panel-section" aria-label="Delegates">
+          <header className="activity-panel-header">
+            <h2>Delegates</h2>
+            <div
+              className="activity-panel-counters"
+              role="status"
+              aria-label={`${panelCounters.active} active, ${panelCounters.waiting} waiting, ${panelCounters.failed} failed, ${panelCounters.finished} finished`}
+            >
+              <span>Active {panelCounters.active}</span>
+              <span>Waiting {panelCounters.waiting}</span>
+              <span>Failed {panelCounters.failed}</span>
+              <span>Finished {panelCounters.finished}</span>
+            </div>
+          </header>
+          {historyLoading && (
+            <p className="delegate-history-status" role="status">
+              Loading delegate history…
+            </p>
+          )}
+          {historyError !== undefined && !historyLoading && (
+            <p className="delegate-history-status" role="status">
+              No delegate history.
+            </p>
+          )}
+          {historyIncomplete && (
+            <p className="delegate-history-status" role="status">
+              History incomplete · some work omitted
+            </p>
+          )}
+          {wakeConditions.length > 0 && (
+            <section
+              className="delegate-wake-conditions"
+              aria-label="Resume conditions"
+            >
+              {wakeConditions.map((wake) => {
+                const waitingFor =
+                  'waitingFor' in wake && wake.waitingFor
+                    ? wake.waitingFor
+                    : wake.references;
+                const ready = Math.max(
+                  0,
+                  wake.references.length - waitingFor.length,
+                );
+                return (
+                  <aside className="delegate-wake-condition" key={wake.id}>
+                    <strong>Parent resume gate</strong>
+                    <span>
+                      {ready}/{wake.references.length} ready · waiting for{' '}
+                      {waitingFor
+                        .map((reference) =>
+                          delegateReferenceLabel(reference, rows),
+                        )
+                        .join(', ')}
+                    </span>
+                  </aside>
+                );
+              })}
+            </section>
+          )}
+          <div className="activity-panel-rows">
+            {panelGroups
+              .filter((group) => delegatePanelBucket(group.row) !== 'finished')
+              .map(renderDelegateRow)}
+          </div>
+          {panelCounters.finished > 0 && (
+            <details className="activity-panel-completed">
+              <summary>Finished ({panelCounters.finished})</summary>
+              <div className="activity-panel-rows">
+                {panelGroups
+                  .filter(
+                    (group) => delegatePanelBucket(group.row) === 'finished',
+                  )
+                  .map(renderDelegateRow)}
+              </div>
+            </details>
+          )}
+        </section>
+        <SurfaceStack
+          pages={inspectorPages}
+          kind="inspector"
+          size="wide"
+          className="surface-drawer work-surface-drawer delegate-surface-drawer delegate-transcript-drawer"
+          onDepthChange={(depth) => {
+            if (depth < 1) closeInspector();
+          }}
+          onClose={closeInspector}
+        />
+      </>
+    );
   return (
     <WorkSurface
       title={title}
@@ -501,106 +740,7 @@ export function DelegateSurface({
                   {section.label && (
                     <h3 className="delegate-section-title">{section.label}</h3>
                   )}
-                  {section.groups.map((group: DelegateCompositeGroup) => {
-                    const row = group.row;
-                    const rawState = workflowState(row);
-                    const runState = surfaceStateLabel(rawState);
-                    const pauseState = row.pauseState;
-                    const state = pauseState ?? runState;
-                    const activityLabel = short(
-                      delegateRowActivityLabel(
-                        row,
-                        wakes,
-                        runState,
-                        pauseState,
-                        rows,
-                      ),
-                      140,
-                    );
-                    const name = delegateDisplayName(row);
-                    const route = row.route ?? row.workflow?.route ?? '';
-                    const context = delegateConsurfaceText(row) ?? '';
-                    const access =
-                      row.allowWrites === true ? 'read/write' : 'read-only';
-                    const elapsedText = surfaceElapsed(
-                      row.workflow?.startedAt ?? row.startedAt ?? row.createdAt,
-                      row.workflow?.settledAt ?? row.finishedAt,
-                      row.pausedAt ?? now,
-                    );
-                    return (
-                      <div
-                        className={`delegate-row ${surfaceStateClass(state)}`}
-                        key={`${surface.id}-${row.id}`}
-                      >
-                        <AriaButton
-                          type="button"
-                          className="delegate-row-toggle"
-                          aria-haspopup="dialog"
-                          onPress={() => {
-                            onRunSelected?.(
-                              selectedDelegateCompositeRun(group),
-                            );
-                            setSelectedLineageId(row.lineageId);
-                            setLastInspectorRow(row);
-                            setInspectorOpen(true);
-                          }}
-                        >
-                          <span className="surface-state" aria-hidden="true">
-                            {stateGlyph(state)}
-                          </span>
-                          <span className="delegate-row-main">
-                            <span className="delegate-row-name">
-                              <strong>{name}</strong>
-                            </span>
-                            <small
-                              className={`delegate-row-action ${surfaceStateClass(state)}`}
-                            >
-                              {activityLabel}
-                            </small>
-                          </span>
-                          <span className="delegate-row-meta">
-                            <span
-                              className={`delegate-row-status ${surfaceStateClass(state)}`}
-                            >
-                              {state}
-                              {elapsedText ? ` · ${elapsedText}` : ''}
-                            </span>
-                            <span className="delegate-row-properties">
-                              {context && (
-                                <span className="delegate-row-context">
-                                  {context}
-                                </span>
-                              )}
-                              {context && access ? ' · ' : null}
-                              {access && (
-                                <span
-                                  className={
-                                    row.allowWrites === true
-                                      ? 'delegate-row-access-rw'
-                                      : 'delegate-row-access-ro'
-                                  }
-                                >
-                                  {access}
-                                </span>
-                              )}
-                              {(context || access) && route ? ' · ' : null}
-                              {route && (
-                                <span className="delegate-row-route">
-                                  {route}
-                                </span>
-                              )}
-                            </span>
-                          </span>
-                          <span
-                            className="delegate-row-chevron"
-                            aria-hidden="true"
-                          >
-                            ›
-                          </span>
-                        </AriaButton>
-                      </div>
-                    );
-                  })}
+                  {section.groups.map(renderDelegateRow)}
                 </section>
               ),
           )}
