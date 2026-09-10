@@ -23,6 +23,38 @@ const MAX_RAIL_HEIGHT = 320;
 const RAIL_MARKER_HEIGHT = 8;
 const RAIL_OPENER_HEIGHT = 28;
 
+/** Snap the actual top edge of the centered rail, not its transform origin. */
+export function pixelSnappedRailTop(
+  center: number,
+  height: number,
+  devicePixelRatio: number,
+): number {
+  const scale =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? devicePixelRatio
+      : 1;
+  return Math.round((center - height / 2) * scale) / scale + height / 2;
+}
+
+export function pixelSnappedTickHeight(devicePixelRatio: number): number {
+  const scale =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? devicePixelRatio
+      : 1;
+  return Math.max(1, Math.round(scale)) / scale;
+}
+
+export function pixelSnappedTickOffset(
+  position: number,
+  devicePixelRatio: number,
+): number {
+  const scale =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? devicePixelRatio
+      : 1;
+  return Math.round(position * scale) / scale - position;
+}
+
 function landmarkType(
   kind: TranscriptLandmark['kind'],
   deliveryMode?: TranscriptLandmark['deliveryMode'],
@@ -50,7 +82,7 @@ export function TranscriptOutline({
   onBranchPointChange,
   onJump,
   scrollElementRef,
-  currentItemIndex,
+  currentUserTurnKey,
 }: {
   landmarks: readonly TranscriptLandmark[];
   branchTopology?: SessionBranchTopology;
@@ -61,8 +93,8 @@ export function TranscriptOutline({
   onBranchPointChange?: (pointId: string | undefined) => void;
   onJump: (landmark: TranscriptLandmark) => void;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
-  /** The first visible model item, supplied by the virtual renderer. */
-  currentItemIndex?: number;
+  /** The user turn represented by the first visible model item. */
+  currentUserTurnKey?: string;
 }) {
   const [localOpen, setLocalOpen] = useState(false);
   const open = controlledOpen ?? localOpen;
@@ -96,6 +128,11 @@ export function TranscriptOutline({
   );
   const [activeKey, setActiveKey] = useState(userTurns[0]?.key);
   const [search, setSearch] = useState('');
+  const devicePixelRatio =
+    typeof window === 'undefined' ? 1 : window.devicePixelRatio;
+  const tickHeight = pixelSnappedTickHeight(devicePixelRatio);
+  const railActualTop =
+    railTop === undefined ? undefined : railTop - railHeight / 2;
   const searchRef = useRef<HTMLInputElement>(null);
   const branchPointsById = useMemo(
     () => indexBranchPointsById(branchTopology),
@@ -126,11 +163,12 @@ export function TranscriptOutline({
       setRailViewportHeight(
         Math.min(MAX_RAIL_HEIGHT, Math.max(20, measuredHeight)),
       );
+      const center = scrollElement
+        ? scrollElement.getBoundingClientRect().top +
+          Math.max(0, measuredHeight) / 2
+        : window.innerHeight / 2;
       setRailTop(
-        scrollElement
-          ? scrollElement.getBoundingClientRect().top +
-              Math.max(0, measuredHeight) / 2
-          : window.innerHeight / 2,
+        pixelSnappedRailTop(center, railHeight, window.devicePixelRatio),
       );
     };
     updateViewportHeight();
@@ -144,7 +182,7 @@ export function TranscriptOutline({
       observer?.disconnect();
       window.removeEventListener('resize', updateViewportHeight);
     };
-  }, [scrollElementRef]);
+  }, [railHeight, scrollElementRef]);
   const userTurnsRef = useRef(userTurns);
   userTurnsRef.current = userTurns;
   const landmarkRevision = useMemo(
@@ -169,12 +207,8 @@ export function TranscriptOutline({
         frame = undefined;
         const currentTurns = userTurnsRef.current;
         if (!currentTurns.length) return;
-        if (currentItemIndex !== undefined) {
-          setActiveKey(
-            currentTurns
-              .filter((landmark) => landmark.itemIndex <= currentItemIndex)
-              .at(-1)?.key ?? currentTurns[0]?.key,
-          );
+        if (currentUserTurnKey !== undefined) {
+          setActiveKey(currentUserTurnKey);
           return;
         }
         const scrollElement = scrollElementRef?.current;
@@ -213,7 +247,7 @@ export function TranscriptOutline({
       else window.removeEventListener('scroll', updateActive);
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [currentItemIndex, landmarkRevision, scrollElementRef]);
+  }, [currentUserTurnKey, landmarkRevision, scrollElementRef]);
 
   useEffect(() => {
     if (!open || selectedBranchPoint) return;
@@ -431,7 +465,22 @@ export function TranscriptOutline({
                 data-meta={`${grouped ? `${cluster.landmarks.length} turns · first shown` : landmarkType('user', representative.deliveryMode, representative.typeLabel)}${landmarkTime(representative.timestamp) ? ` · ${landmarkTime(representative.timestamp)}` : ''}`}
                 aria-hidden="true"
               />
-              <i aria-hidden="true" />
+              <i
+                aria-hidden="true"
+                style={{
+                  height: tickHeight,
+                  top:
+                    railActualTop === undefined
+                      ? '3px'
+                      : `calc(3px + ${pixelSnappedTickOffset(
+                          railActualTop +
+                            RAIL_OPENER_HEIGHT +
+                            3 +
+                            railClusters.indexOf(cluster) * RAIL_MARKER_HEIGHT,
+                          devicePixelRatio,
+                        )}px)`,
+                }}
+              />
             </button>
           );
         })}

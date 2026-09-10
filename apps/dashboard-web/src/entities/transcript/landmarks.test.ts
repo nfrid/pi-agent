@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTranscriptLandmarks,
   clusterTranscriptUserTurns,
+  currentTranscriptUserTurnKey,
+  mergeTranscriptLandmarks,
   selectTranscriptUserTurns,
   type TranscriptLandmark,
 } from './landmarks';
@@ -71,6 +73,73 @@ describe('transcript user-turn landmarks', () => {
       typeLabel: 'Parent request',
       variant: 'delegate-request',
     });
+  });
+
+  it('resolves a visible loaded turn by identity, not its local offset', () => {
+    const loaded: TranscriptLandmark[] = [
+      {
+        key: 'loaded-user',
+        label: 'Loaded user',
+        kind: 'user',
+        itemIndex: 0,
+      },
+      {
+        key: 'loaded-agent',
+        label: 'Loaded agent',
+        kind: 'assistant',
+        itemIndex: 1,
+      },
+    ];
+    const merged = mergeTranscriptLandmarks(loaded, [
+      {
+        id: 'old-user',
+        kind: 'user',
+        label: 'Old user',
+        ordinal: 4,
+      },
+      {
+        id: 'loaded-user',
+        kind: 'user',
+        label: 'Loaded user',
+        ordinal: 5,
+      },
+    ]);
+
+    expect(currentTranscriptUserTurnKey(merged, loaded, 'loaded-user', 0)).toBe(
+      'loaded-user',
+    );
+    expect(
+      currentTranscriptUserTurnKey(merged, loaded, 'loaded-agent', 1),
+    ).toBe('loaded-user');
+  });
+
+  it('uses the complete outline for an unloaded turn preceding a visible landmark', () => {
+    const loaded: TranscriptLandmark[] = [
+      {
+        key: 'loaded-agent',
+        label: 'Loaded agent',
+        kind: 'assistant',
+        itemIndex: 0,
+      },
+    ];
+    const merged = mergeTranscriptLandmarks(loaded, [
+      {
+        id: 'old-user',
+        kind: 'user',
+        label: 'Old user',
+        ordinal: 4,
+      },
+      {
+        id: 'loaded-agent',
+        kind: 'activity',
+        label: 'Loaded agent',
+        ordinal: 5,
+      },
+    ]);
+
+    expect(
+      currentTranscriptUserTurnKey(merged, loaded, 'loaded-agent', 0),
+    ).toBe('old-user');
   });
 
   it('preserves every user turn even beyond the old drawer cap', () => {

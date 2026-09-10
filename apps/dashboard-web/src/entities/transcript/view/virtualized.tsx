@@ -20,6 +20,7 @@ import { indexBranchPointsByMessageId } from '../branching';
 import { TranscriptEntry } from '../entries';
 import {
   buildTranscriptLandmarks,
+  currentTranscriptUserTurnKey,
   mergeTranscriptLandmarks,
   type TranscriptLandmark,
   transcriptItemTimestamp,
@@ -290,6 +291,14 @@ export function VirtualizedTranscript({
       : viewportRowData?.kind === 'entry'
         ? viewportRowData.index
         : undefined;
+  const currentItemKey =
+    currentItemIndex === undefined ? undefined : items[currentItemIndex]?.key;
+  const currentUserTurnKey = currentTranscriptUserTurnKey(
+    landmarks,
+    loadedLandmarks,
+    currentItemKey,
+    currentItemIndex,
+  );
 
   const renderToolStream = (start: number, end: number, streamKey: string) => (
     <TranscriptToolStream
@@ -325,7 +334,7 @@ export function VirtualizedTranscript({
         onOpenChange={onOutlineOpenChange}
         onJump={jumpToLandmark}
         scrollElementRef={scrollElementRef}
-        currentItemIndex={currentItemIndex}
+        currentUserTurnKey={currentUserTurnKey}
       />
       <div
         ref={virtualizerRef}

@@ -105,6 +105,38 @@ export function selectTranscriptUserTurns(
   return landmarks.filter((landmark) => landmark.kind === 'user');
 }
 
+/**
+ * Resolve the user turn represented by the first visible model item.
+ *
+ * `currentItemIndex` is local to `loadedLandmarks`; the complete outline's
+ * ordinal is a raw-history position. Use the loaded key/index relation first,
+ * then use the complete outline only when the visible item is itself an
+ * outline landmark (for example an assistant preamble). This keeps the two
+ * index spaces from being compared.
+ */
+export function currentTranscriptUserTurnKey(
+  landmarks: readonly TranscriptLandmark[],
+  loadedLandmarks: readonly TranscriptLandmark[],
+  currentItemKey?: string,
+  currentItemIndex?: number,
+): string | undefined {
+  if (currentItemIndex !== undefined) {
+    const loadedTurn = selectTranscriptUserTurns(loadedLandmarks)
+      .filter((landmark) => landmark.itemIndex <= currentItemIndex)
+      .at(-1);
+    if (loadedTurn) return loadedTurn.key;
+  }
+  if (currentItemKey === undefined) return undefined;
+  const landmarkIndex = landmarks.findIndex(
+    (landmark) =>
+      landmark.key === currentItemKey ||
+      landmark.key === `group-${currentItemKey}`,
+  );
+  if (landmarkIndex < 0) return undefined;
+  return selectTranscriptUserTurns(landmarks.slice(0, landmarkIndex + 1)).at(-1)
+    ?.key;
+}
+
 export type TranscriptLandmarkCluster = {
   key: string;
   landmarks: readonly TranscriptLandmark[];
