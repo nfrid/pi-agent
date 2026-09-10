@@ -7,7 +7,7 @@
 .transcript-minimap {
   position: fixed;
   top: 50%;
-  left: max(13px, calc((100vw - 1240px) / 2 + 272px));
+  right: 13px;
   z-index: 31;
   display: none;
   max-height: calc(100vh - 96px);

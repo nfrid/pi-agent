@@ -17,7 +17,7 @@ import {
 } from 'react';
 import { Transcript } from '../entities/transcript';
 import { useDashboardNavigate } from '../routes/navigation';
-import { ActivityPanel } from './activity-panel';
+import { ActivityPanel, useActivityPanelState } from './activity-panel';
 import { AgentThreadNav, projectNameForSession } from './agent-thread-nav';
 import { runtimePauseStatus } from './extension-surfaces';
 import { dashboardStatus } from './presentation-status';
@@ -142,6 +142,7 @@ export function SessionView({
     ready: tailReadySessionId === id,
     restoring,
   };
+  const activityState = useActivityPanelState(runtime);
 
   useEffect(() => {
     if (outlineOpen) outlineWasOpenRef.current = true;
@@ -171,7 +172,7 @@ export function SessionView({
   if (!data || !projection || waitingForInitialHistory) {
     return (
       <div
-        className={`${sessionNavigation ? 'session-route-content' : 'session-layout'}${embedded ? ' embedded-session-layout' : ''}`}
+        className={`${sessionNavigation ? 'session-route-content activity-session-content' : 'session-layout'}${embedded ? ' embedded-session-layout' : ''}`}
       >
         {!embedded && !sessionNavigation && (
           <AgentThreadNav
@@ -213,7 +214,7 @@ export function SessionView({
   );
   return (
     <div
-      className={`${sessionNavigation ? 'session-route-content' : 'session-layout'}${embedded ? ' embedded-session-layout' : ''}`}
+      className={`${sessionNavigation ? 'session-route-content activity-session-content' : 'session-layout'}${embedded ? ' embedded-session-layout' : ''}`}
     >
       {!embedded && !sessionNavigation && (
         <AgentThreadNav
@@ -243,6 +244,9 @@ export function SessionView({
           outlineTriggerRef={outlineTriggerRef}
           onOpenOutline={() => setOutlineOpen(true)}
           onOpenAgentNav={() => setAgentNavOpen(true)}
+          activityHints={activityState.hints}
+          activityOpen={activityState.open}
+          onOpenActivity={() => activityState.setOpen(true)}
           store={store}
           sessions={snapshot.sessions}
         />
@@ -313,6 +317,12 @@ export function SessionView({
           client={client}
           sessionId={id}
           checkout={checkout}
+          isWide={activityState.isWide}
+          pinned={activityState.pinned}
+          open={activityState.open}
+          onOpen={() => activityState.setOpen(true)}
+          onClose={() => activityState.setOpen(false)}
+          onTogglePinned={activityState.togglePinned}
         />
       )}
       {!embedded && tailReadySessionId !== id && (

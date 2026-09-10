@@ -277,6 +277,14 @@ export function AgentNavDrawerShell({
 }) {
   return (
     <>
+      <button
+        type="button"
+        className="agent-nav-trigger"
+        aria-label="Open agent list"
+        onClick={() => onOpenChange?.(true)}
+      >
+        ☰
+      </button>
       {drawerPresent && (
         <button
           type="button"

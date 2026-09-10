@@ -38,6 +38,7 @@ export function DelegateHistorySurface({
   store,
   client,
   slotsOnly = false,
+  activityPanel = false,
 }: {
   id: string;
   runtime: RuntimeSnapshot | undefined;
@@ -45,6 +46,7 @@ export function DelegateHistorySurface({
   store: DashboardLiveStore;
   client: DashboardHttpClient;
   slotsOnly?: boolean;
+  activityPanel?: boolean;
 }) {
   const historyQuery = useQuery(delegateHistoryQueryOptions(client, id));
   const queryClient = useQueryClient();
@@ -204,7 +206,8 @@ export function DelegateHistorySurface({
   if (
     !historyQuery.data?.groups.length &&
     !historyQuery.data?.truncated &&
-    liveRows.length === 0
+    liveRows.length === 0 &&
+    (!activityPanel || !historyError)
   )
     return null;
   const surface =
@@ -215,39 +218,43 @@ export function DelegateHistorySurface({
       viewModel: { version: 1, statuses: [] },
     } satisfies ExtensionSurface);
   const renderedSurface = surface;
-  const slot = (
-    <div className="extension-surface-slot">
-      <DelegateSurface
-        key={id}
-        surface={renderedSurface}
-        pausedAt={runtimePauseStatus(runtime)?.pausedAt}
-        history={historyQuery.data}
-        historyLoading={historyLoading}
-        historyError={historyError ? historyQuery.error : undefined}
-        store={store}
-        client={client}
-        onRunSelected={(run: DelegateCompositeRun) => {
-          setDetailSelection({
-            sessionId: id,
-            lineageId: run.row.lineageId,
-            runId: run.id,
-            liveRunId: run.row.runId,
-            shouldFetch: shouldFetchDelegateDetail(run),
-          });
-        }}
-        detail={
-          currentDetailSelection?.shouldFetch
-            ? {
-                run: detailQuery.data,
-                loading: detailQuery.isPending,
-                error: detailQuery.isError ? detailQuery.error : undefined,
-              }
-            : undefined
-        }
-      />
-    </div>
+  const delegateSurfaceElement = (
+    <DelegateSurface
+      key={id}
+      surface={renderedSurface}
+      pausedAt={runtimePauseStatus(runtime)?.pausedAt}
+      history={historyQuery.data}
+      historyLoading={historyLoading}
+      historyError={historyError ? historyQuery.error : undefined}
+      store={store}
+      client={client}
+      activityPanel={activityPanel}
+      onRunSelected={(run: DelegateCompositeRun) => {
+        setDetailSelection({
+          sessionId: id,
+          lineageId: run.row.lineageId,
+          runId: run.id,
+          liveRunId: run.row.runId,
+          shouldFetch: shouldFetchDelegateDetail(run),
+        });
+      }}
+      detail={
+        currentDetailSelection?.shouldFetch
+          ? {
+              run: detailQuery.data,
+              loading: detailQuery.isPending,
+              error: detailQuery.isError ? detailQuery.error : undefined,
+            }
+          : undefined
+      }
+    />
   );
-  return slotsOnly ? (
+  const slot = activityPanel ? (
+    delegateSurfaceElement
+  ) : (
+    <div className="extension-surface-slot">{delegateSurfaceElement}</div>
+  );
+  return slotsOnly || activityPanel ? (
     slot
   ) : (
     <section

@@ -181,10 +181,15 @@ export function useSessionScroll({
       );
     };
     const measureControls = () => {
-      const height = controls?.getBoundingClientRect().height ?? 0;
+      const controlRect = controls?.getBoundingClientRect();
+      const pageRect = page.getBoundingClientRect();
+      const height = controlRect?.height ?? 0;
+      const bottomOffset = controlRect
+        ? Math.max(0, pageRect.bottom - controlRect.bottom)
+        : 0;
       element.style.setProperty(
         '--session-control-height',
-        `${Math.ceil(height)}px`,
+        `${Math.ceil(height + bottomOffset)}px`,
       );
     };
     const resize = () => {

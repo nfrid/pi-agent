@@ -6,9 +6,9 @@ import type {
 } from '@pi-dashboard/protocol';
 import type { ComponentType, ReactNode, RefObject } from 'react';
 import { useId, useState } from 'react';
-
 import { sessionDisplayTitle } from '../../app-helpers';
 import { useDashboardNavigate } from '../../routes/navigation';
+import type { ActivityHints } from '../activity-panel';
 import { InlineSessionRename } from '../session-rename';
 
 export type SessionComposerProps = {
@@ -184,6 +184,9 @@ export function SessionHeader({
   outlineTriggerRef,
   onOpenOutline,
   onOpenAgentNav,
+  activityHints,
+  activityOpen,
+  onOpenActivity,
   store,
   sessions,
 }: {
@@ -198,6 +201,9 @@ export function SessionHeader({
   outlineTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenOutline: () => void;
   onOpenAgentNav: () => void;
+  activityHints: ActivityHints;
+  activityOpen: boolean;
+  onOpenActivity: () => void;
   store: DashboardLiveStore;
   sessions: readonly SessionIndexEntry[];
 }) {
@@ -230,6 +236,24 @@ export function SessionHeader({
       statusLabel={statusLabel}
       actions={
         <>
+          <button
+            type="button"
+            className="session-icon-button session-activity-button"
+            aria-label="Open session activity"
+            aria-expanded={activityOpen}
+            onClick={onOpenActivity}
+          >
+            <span className="session-activity-hints" aria-hidden="true">
+              <i
+                className="session-activity-hint session-activity-hint-tasks"
+                data-active={activityHints.tasks || undefined}
+              />
+              <i
+                className="session-activity-hint session-activity-hint-delegates"
+                data-active={activityHints.delegates || undefined}
+              />
+            </span>
+          </button>
           <button
             type="button"
             className="session-icon-button session-agent-nav-button"

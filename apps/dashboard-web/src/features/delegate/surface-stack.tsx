@@ -6,7 +6,7 @@ import {
   TASKS_RENDERER_ID,
 } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import type { DashboardRendererContext } from '../../renderer-contract';
 import { renderDashboardContribution } from '../../renderer-registry';
 import {
@@ -27,11 +27,13 @@ export function ExtensionSurfaceStack({
   placement = 'main',
   excludeDelegate = false,
   slotsOnly = false,
+  activityPanel = false,
 }: {
   runtime: RuntimeSnapshot | undefined;
   placement?: SurfacePlacement;
   excludeDelegate?: boolean;
   slotsOnly?: boolean;
+  activityPanel?: boolean;
 }) {
   const surfaces = useMemo(
     () =>
@@ -61,18 +63,22 @@ export function ExtensionSurfaceStack({
       rendererId: surface.rendererId,
       placement: surface.placement,
       pausedAt: runtimePauseStatus(runtime)?.pausedAt,
+      activityPanel,
     };
-    return (
+    const rendered = renderDashboardContribution(
+      surface.rendererId,
+      surface.viewModel,
+      context,
+    );
+    return activityPanel ? (
+      <Fragment key={surface.id}>{rendered}</Fragment>
+    ) : (
       <div className="extension-surface-slot" key={surface.id}>
-        {renderDashboardContribution(
-          surface.rendererId,
-          surface.viewModel,
-          context,
-        )}
+        {rendered}
       </div>
     );
   });
-  return slotsOnly ? (
+  return slotsOnly || activityPanel ? (
     slots
   ) : (
     <section
