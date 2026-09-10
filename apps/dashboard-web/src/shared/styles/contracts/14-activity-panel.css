@@ -118,6 +118,7 @@
   width: 100%;
   gap: 10px;
   border: 0;
+  padding: 0;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -131,7 +132,7 @@
 .activity-panel-header-toggle > button:disabled {
   cursor: default;
 }
-.activity-panel-header h2,
+h2.activity-panel-header,
 .activity-panel-location h2 {
   margin: 0;
   color: var(--fg);
@@ -146,12 +147,14 @@
   gap: 7px;
   color: var(--muted);
   font-size: 9px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .activity-panel-summary-toggle {
   color: var(--muted);
   font-size: 10px;
+  font-weight: 400;
 }
 .activity-panel-rows {
   display: grid;
