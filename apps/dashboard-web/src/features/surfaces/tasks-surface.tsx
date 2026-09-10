@@ -9,6 +9,7 @@ import {
   surfaceStateLabel,
   surfaceText,
 } from '../delegate/surface-state';
+import { ActivityCollapsibleSection } from './collapsible-list-section';
 import { stateGlyph } from './state-glyphs';
 import { WorkSurface } from './work-surface';
 
@@ -133,37 +134,29 @@ export function TasksSurface({
         </div>
       );
     });
-  if (activityPanel)
+  if (activityPanel) {
+    const panelRows = panelExpanded ? rows : previewRows;
     return (
-      <section
-        className="activity-panel-section"
-        aria-label="Tasks"
-        tabIndex={-1}
-      >
-        <h2 className="activity-panel-header activity-panel-header-toggle">
-          <button
-            type="button"
+      <ActivityCollapsibleSection
+        title="Tasks"
+        expanded={panelExpanded}
+        onToggle={() => setPanelExpanded((value) => !value)}
+        totalCount={rows.length}
+        visibleCount={panelRows.length}
+        summary={
+          <span
+            className="activity-panel-summary-toggle"
             title={`${completed} of ${total} complete`}
-            aria-label={
-              panelExpanded
-                ? 'Show fewer tasks'
-                : `Show all ${rows.length} tasks`
-            }
-            aria-expanded={panelExpanded}
-            disabled={rows.length === 0}
-            onClick={() => setPanelExpanded((value) => !value)}
+            aria-hidden="true"
           >
-            <span>Tasks</span>
-            <span className="activity-panel-summary-toggle" aria-hidden="true">
-              {completed}/{total} {panelExpanded ? '▴' : '▾'}
-            </span>
-          </button>
-        </h2>
-        <div className="activity-panel-rows">
-          {renderTaskRows(panelExpanded ? rows : previewRows, !panelExpanded)}
-        </div>
-      </section>
+            {completed}/{total} {panelExpanded ? '▴' : '▾'}
+          </span>
+        }
+      >
+        {renderTaskRows(panelRows, !panelExpanded)}
+      </ActivityCollapsibleSection>
     );
+  }
   return (
     <WorkSurface
       title={title}
