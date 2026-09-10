@@ -140,22 +140,25 @@ export function TasksSurface({
         aria-label="Tasks"
         tabIndex={-1}
       >
-        <button
-          type="button"
-          className="activity-panel-header activity-panel-header-toggle"
-          title={`${completed} of ${total} complete`}
-          aria-label={
-            panelExpanded ? 'Show fewer tasks' : `Show all ${rows.length} tasks`
-          }
-          aria-expanded={panelExpanded}
-          disabled={rows.length === 0}
-          onClick={() => setPanelExpanded((value) => !value)}
-        >
-          <h2>Tasks</h2>
-          <span className="activity-panel-summary-toggle" aria-hidden="true">
-            {completed}/{total} {panelExpanded ? '▴' : '▾'}
-          </span>
-        </button>
+        <h2 className="activity-panel-header activity-panel-header-toggle">
+          <button
+            type="button"
+            title={`${completed} of ${total} complete`}
+            aria-label={
+              panelExpanded
+                ? 'Show fewer tasks'
+                : `Show all ${rows.length} tasks`
+            }
+            aria-expanded={panelExpanded}
+            disabled={rows.length === 0}
+            onClick={() => setPanelExpanded((value) => !value)}
+          >
+            <span>Tasks</span>
+            <span className="activity-panel-summary-toggle" aria-hidden="true">
+              {completed}/{total} {panelExpanded ? '▴' : '▾'}
+            </span>
+          </button>
+        </h2>
         <div className="activity-panel-rows">
           {renderTaskRows(panelExpanded ? rows : previewRows, !panelExpanded)}
         </div>

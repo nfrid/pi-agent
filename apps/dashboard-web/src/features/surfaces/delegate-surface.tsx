@@ -500,36 +500,66 @@ export function DelegateSurface({
             <span className="delegate-row-name">
               <strong>{name}</strong>
             </span>
-            <small
-              className={`delegate-row-action ${surfaceStateClass(state)}`}
-            >
-              {activityLabel}
-            </small>
+            {!activityPanel && (
+              <small
+                className={`delegate-row-action ${surfaceStateClass(state)}`}
+              >
+                {activityLabel}
+              </small>
+            )}
           </span>
           <span className="delegate-row-meta">
-            <span className={`delegate-row-status ${surfaceStateClass(state)}`}>
-              {state}
-              {elapsedText ? ` · ${elapsedText}` : ''}
-            </span>
-            <span className="delegate-row-properties">
-              {context && (
-                <span className="delegate-row-context">{context}</span>
-              )}
-              {context && access ? ' · ' : null}
-              {access && (
+            {activityPanel ? (
+              <span className="delegate-row-properties">
+                {context && (
+                  <span className="delegate-row-context">{context}</span>
+                )}
+                {context && access ? ' · ' : null}
+                {access && (
+                  <span
+                    className={
+                      row.allowWrites === true
+                        ? 'delegate-row-access-rw'
+                        : 'delegate-row-access-ro'
+                    }
+                  >
+                    {access}
+                  </span>
+                )}
+                {(context || access) && route ? ' · ' : null}
+                {route && <span className="delegate-row-route">{route}</span>}
+                {(context || access || route) && elapsedText ? ' · ' : null}
+                {elapsedText && <span>{elapsedText}</span>}
+              </span>
+            ) : (
+              <>
                 <span
-                  className={
-                    row.allowWrites === true
-                      ? 'delegate-row-access-rw'
-                      : 'delegate-row-access-ro'
-                  }
+                  className={`delegate-row-status ${surfaceStateClass(state)}`}
                 >
-                  {access}
+                  {state}
+                  {elapsedText ? ` · ${elapsedText}` : ''}
                 </span>
-              )}
-              {(context || access) && route ? ' · ' : null}
-              {route && <span className="delegate-row-route">{route}</span>}
-            </span>
+                <span className="delegate-row-properties">
+                  {context && (
+                    <span className="delegate-row-context">{context}</span>
+                  )}
+                  {context && access ? ' · ' : null}
+                  {access && (
+                    <span
+                      className={
+                        row.allowWrites === true
+                          ? 'delegate-row-access-rw'
+                          : 'delegate-row-access-ro'
+                      }
+                    >
+                      {access}
+                    </span>
+                  )}
+                  {(context || access) && route ? ' · ' : null}
+                  {route && <span className="delegate-row-route">{route}</span>}
+                </span>
+              </>
+            )}
           </span>
           <span className="delegate-row-chevron" aria-hidden="true">
             ›
@@ -538,8 +568,6 @@ export function DelegateSurface({
       </div>
     );
   };
-  const renderActivityDelegateRow = (group: DelegateCompositeGroup) =>
-    renderDelegateRow(group);
   const panelGroups = orderDelegatePanelGroups(
     composite?.groups ??
       rows.map((row) => ({
@@ -563,49 +591,50 @@ export function DelegateSurface({
           aria-label="Delegates"
           tabIndex={-1}
         >
-          <button
-            type="button"
-            className="activity-panel-header activity-panel-header-toggle"
-            aria-label={
-              panelExpanded
-                ? 'Show fewer delegates'
-                : 'Show all delegates, including finished work'
-            }
-            aria-expanded={panelExpanded}
-            onClick={() => setPanelExpanded((value) => !value)}
-          >
-            <h2>Delegates</h2>
-            <span
-              className="activity-panel-counters"
-              role="status"
-              aria-label={`${panelCounters.active} active, ${panelCounters.waiting} waiting, ${panelCounters.failed} failed, ${panelCounters.finished} finished`}
+          <h2 className="activity-panel-header activity-panel-header-toggle">
+            <button
+              type="button"
+              aria-label={
+                panelExpanded
+                  ? 'Show fewer delegates'
+                  : 'Show all delegates, including finished work'
+              }
+              aria-expanded={panelExpanded}
+              onClick={() => setPanelExpanded((value) => !value)}
             >
+              <span>Delegates</span>
               <span
-                className="activity-panel-counter-active"
-                title={`Active: ${panelCounters.active}`}
+                className="activity-panel-counters"
+                role="status"
+                aria-label={`${panelCounters.active} active, ${panelCounters.waiting} waiting, ${panelCounters.failed} failed, ${panelCounters.finished} finished`}
               >
-                <span aria-hidden="true">●</span> {panelCounters.active}
+                <span
+                  className="activity-panel-counter-active"
+                  title={`Active: ${panelCounters.active}`}
+                >
+                  <span aria-hidden="true">●</span> {panelCounters.active}
+                </span>
+                <span
+                  className="activity-panel-counter-waiting"
+                  title={`Waiting: ${panelCounters.waiting}`}
+                >
+                  <span aria-hidden="true">○</span> {panelCounters.waiting}
+                </span>
+                <span
+                  className="activity-panel-counter-failed"
+                  title={`Failed: ${panelCounters.failed}`}
+                >
+                  <span aria-hidden="true">!</span> {panelCounters.failed}
+                </span>
+                <span
+                  className="activity-panel-counter-finished"
+                  title={`Finished: ${panelCounters.finished}`}
+                >
+                  <span aria-hidden="true">✓</span> {panelCounters.finished}
+                </span>
               </span>
-              <span
-                className="activity-panel-counter-waiting"
-                title={`Waiting: ${panelCounters.waiting}`}
-              >
-                <span aria-hidden="true">○</span> {panelCounters.waiting}
-              </span>
-              <span
-                className="activity-panel-counter-failed"
-                title={`Failed: ${panelCounters.failed}`}
-              >
-                <span aria-hidden="true">!</span> {panelCounters.failed}
-              </span>
-              <span
-                className="activity-panel-counter-finished"
-                title={`Finished: ${panelCounters.finished}`}
-              >
-                <span aria-hidden="true">✓</span> {panelCounters.finished}
-              </span>
-            </span>
-          </button>
+            </button>
+          </h2>
           {historyLoading && (
             <p className="delegate-history-status" role="status">
               Loading delegate history…
@@ -654,13 +683,13 @@ export function DelegateSurface({
           <div className="activity-panel-rows">
             {panelGroups
               .filter((group) => delegatePanelBucket(group.row) !== 'finished')
-              .map(renderActivityDelegateRow)}
+              .map(renderDelegateRow)}
             {panelExpanded &&
               panelGroups
                 .filter(
                   (group) => delegatePanelBucket(group.row) === 'finished',
                 )
-                .map(renderActivityDelegateRow)}
+                .map(renderDelegateRow)}
           </div>
         </section>
         <SurfaceStack
