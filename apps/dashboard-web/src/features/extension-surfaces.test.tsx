@@ -7,7 +7,10 @@ import type {
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import { composeDelegateHistory } from './delegate/history-compose';
+import {
+  composeDelegateHistory,
+  type DelegateCompositeGroup,
+} from './delegate/history-compose';
 import {
   delegateHistoryInvocationToStatus,
   delegateHistorySettledRunIds,
@@ -46,7 +49,9 @@ import {
 import { SurfaceStack } from './surface-stack';
 import {
   delegatePanelCounters,
+  delegatePreviewGroups,
   isParentResumeGate,
+  orderDelegatePanelGroups,
   selectedDelegateCompositeRun,
 } from './surfaces/delegate-surface';
 import { TasksSurface, taskPreviewRows } from './surfaces/tasks-surface';
@@ -1741,6 +1746,64 @@ describe('live extension surface fixtures', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps active delegates and fills the preview with newest completions', () => {
+    const group = (
+      name: string,
+      state: DelegateCompositeGroup['row']['state'],
+      finishedAt?: number,
+    ) =>
+      ({
+        lineageId: name,
+        row: {
+          id: name,
+          runId: name,
+          lineageId: name,
+          name,
+          kind: 'background',
+          state,
+          createdAt: 1,
+          ...(finishedAt === undefined ? {} : { finishedAt }),
+          allowWrites: false,
+        },
+        runs: [],
+        section: state === 'running' ? 'active' : 'history',
+      }) as DelegateCompositeGroup;
+    const groups = [
+      group('active', 'running'),
+      ...Array.from({ length: 6 }, (_, index) =>
+        group(`finished-${index + 1}`, 'success', index + 1),
+      ),
+    ];
+    expect(delegatePreviewGroups(groups).map(({ row }) => row.name)).toEqual([
+      'active',
+      'finished-6',
+      'finished-5',
+    ]);
+    expect(orderDelegatePanelGroups(groups).map(({ row }) => row.name)).toEqual(
+      [
+        'active',
+        'finished-6',
+        'finished-5',
+        'finished-4',
+        'finished-3',
+        'finished-2',
+        'finished-1',
+      ],
+    );
+    expect(
+      delegatePreviewGroups([
+        group('active-1', 'running'),
+        group('active-2', 'running'),
+        group('active-3', 'running'),
+        group('active-4', 'running'),
+        group('finished', 'success', 10),
+      ]).map(({ row }) => row.name),
+    ).toEqual(['active-1', 'active-2', 'active-3', 'active-4']);
+    expect(
+      delegatePreviewGroups(groups.slice(1)).map(({ row }) => row.name),
+    ).toEqual(['finished-6', 'finished-5', 'finished-4']);
+  });
+
   it('presents delegate counters neutrally, with active rows before collapsed finished rows', () => {
     const rows = [
       { state: 'success', pauseState: undefined, workflow: undefined },
@@ -1819,9 +1882,7 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('title="Active: 1"');
     expect(markup).toContain('title="Waiting: 1"');
     expect(markup).toContain('title="Failed: 1"');
-    expect(markup).toContain(
-      'aria-label="Show all delegates, including finished work"',
-    );
+    expect(markup).toContain('aria-label="Show all 4 delegates"');
     expect(markup).toContain('title="Finished: 1"');
     expect(markup).not.toContain('Finished (1)');
     expect(markup).toContain('read-only');
@@ -1876,6 +1937,28 @@ describe('live extension surface fixtures', () => {
                   finishedAt: 2,
                   allowWrites: false,
                 },
+                {
+                  id: 'finished-newer',
+                  runId: 'finished-newer-run',
+                  lineageId: 'finished-newer-lineage',
+                  name: 'Finished newer worker',
+                  kind: 'background',
+                  state: 'success',
+                  createdAt: 1,
+                  finishedAt: 3,
+                  allowWrites: false,
+                },
+                {
+                  id: 'finished-newest',
+                  runId: 'finished-newest-run',
+                  lineageId: 'finished-newest-lineage',
+                  name: 'Finished newest worker',
+                  kind: 'background',
+                  state: 'success',
+                  createdAt: 1,
+                  finishedAt: 4,
+                  allowWrites: false,
+                },
               ],
             },
           }}
@@ -1883,13 +1966,26 @@ describe('live extension surface fixtures', () => {
       );
     });
     const header = tree.root.findByProps({
-      'aria-label': 'Show all delegates, including finished work',
+      'aria-label': 'Show all 4 delegates',
     });
     expect(header.props['aria-expanded']).toBe(false);
     expect(JSON.stringify(tree.toJSON())).not.toContain('Finished worker');
+    expect(JSON.stringify(tree.toJSON())).toContain('Finished newer worker');
+    expect(JSON.stringify(tree.toJSON())).toContain('Finished newest worker');
+    expect(
+      tree.root.findByProps({ className: 'activity-panel-hidden-chip' })
+        .children,
+    ).toEqual(['1', ' more']);
     act(() => header.props.onClick());
     expect(header.props['aria-expanded']).toBe(true);
-    expect(JSON.stringify(tree.toJSON())).toContain('Finished worker');
+    const expandedMarkup = JSON.stringify(tree.toJSON());
+    expect(expandedMarkup).toContain('Finished worker');
+    expect(expandedMarkup.indexOf('Finished newest worker')).toBeLessThan(
+      expandedMarkup.indexOf('Finished newer worker'),
+    );
+    expect(
+      tree.root.findAllByProps({ className: 'activity-panel-hidden-chip' }),
+    ).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain('read/write');
     expect(JSON.stringify(tree.toJSON())).toContain('review');
     expect(JSON.stringify(tree.toJSON())).toContain('2s');
@@ -1915,15 +2011,6 @@ describe('live extension surface fixtures', () => {
           />,
         );
       });
-      if (history) {
-        act(() =>
-          tree.root
-            .findByProps({
-              'aria-label': 'Show all delegates, including finished work',
-            })
-            .props.onClick(),
-        );
-      }
       act(() => {
         tree.root
           .findByProps({ className: 'delegate-row-toggle' })
