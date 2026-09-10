@@ -19,8 +19,22 @@ for (const active of [false, true]) {
     const taskHeader = tasks.getByRole('heading').getByRole('button');
     const delegateHeader = delegates.getByRole('heading').getByRole('button');
     await expect(taskHeader).toHaveAttribute('aria-expanded', 'false');
+    await expect(taskHeader.getByText('3 more', { exact: true })).toBeVisible();
+    await expect(
+      delegateHeader.getByText('3 more', { exact: true }),
+    ).toBeVisible();
+    await expect(delegates.locator('.delegate-row')).toHaveCount(3);
+    await expect(
+      delegates.getByText('Finished worker 6', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      delegates.getByText('Finished worker 5', { exact: true }),
+    ).toBeVisible();
     await tasks.getByText('Tasks', { exact: true }).click();
     await expect(taskHeader).toHaveAttribute('aria-expanded', 'true');
+    await expect(taskHeader.getByText('3 more', { exact: true })).toHaveCount(
+      0,
+    );
     await expect(
       tasks.getByText('Deploy client bundle', { exact: false }),
     ).toBeVisible();
@@ -31,6 +45,10 @@ for (const active of [false, true]) {
     ).toHaveCount(0);
     await delegates.getByText('Delegates', { exact: true }).click();
     await expect(delegateHeader).toHaveAttribute('aria-expanded', 'true');
+    await expect(
+      delegateHeader.getByText('3 more', { exact: true }),
+    ).toHaveCount(0);
+    await expect(delegates.locator('.delegate-row')).toHaveCount(6);
     const finished = delegates
       .locator('.delegate-row')
       .filter({ hasText: 'Finished worker 6' });
@@ -46,14 +64,21 @@ for (const active of [false, true]) {
     );
     await delegateHeader.press('Space');
     await expect(delegateHeader).toHaveAttribute('aria-expanded', 'false');
-    await expect(finished).toHaveCount(0);
-    await expect(delegates.locator('.delegate-row')).toHaveCount(
-      active ? 1 : 0,
-    );
+    await expect(finished).toBeVisible();
+    await expect(
+      delegateHeader.getByText('3 more', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      delegates.getByText('Finished worker 2', { exact: true }),
+    ).toHaveCount(0);
+    await expect(delegates.locator('.delegate-row')).toHaveCount(3);
     if (active) {
-      await expect(delegates.locator('.delegate-row-properties')).toContainText(
-        'luna-high',
-      );
+      await expect(
+        delegates
+          .locator('.delegate-row')
+          .filter({ hasText: 'Activity panel visual refinement' })
+          .locator('.delegate-row-properties'),
+      ).toContainText('luna-high');
     }
   });
 }

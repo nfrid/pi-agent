@@ -240,7 +240,6 @@ async function inspectPersistedDelegate(
   const activity = page.locator('.activity-panel');
   if (!(await activity.isVisible()))
     await page.getByRole('button', { name: 'Open session activity' }).click();
-  await activity.getByText('Delegates', { exact: true }).click();
   await activity
     .getByRole('button', { name: /Offline historical worker/ })
     .click();

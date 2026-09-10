@@ -521,7 +521,10 @@ export function buildActivityPanelScenario(
               : `Finished worker ${index + 1}`,
           state: active && index === 0 ? 'running' : 'success',
           route: index === 0 ? 'luna-high' : 'luna-medium',
-          finishedAt: active && index === 0 ? undefined : VISUAL_TIMESTAMP,
+          finishedAt:
+            active && index === 0
+              ? undefined
+              : VISUAL_TIMESTAMP - (5 - index) * 1_000,
         })),
       },
     },
