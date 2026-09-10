@@ -248,6 +248,7 @@
     var(--transcript-content-offset-left) -
     var(--transcript-content-offset-right)
   );
+  --composer-width-offset: 32px;
   width: 100%;
   height: 100dvh;
   overflow: hidden;
@@ -356,7 +357,7 @@
 }
 .session-page > .session-control-layer > :is(.composer, .queue-panel) {
   box-sizing: border-box;
-  width: min(820px, calc(100% - 32px));
+  width: min(820px, calc(100% - var(--composer-width-offset)));
 }
 .session-page.session-page-embedded > .session-control-layer {
   position: relative;
@@ -397,6 +398,7 @@
     --session-nav-width: 0px;
     --transcript-content-offset-left: 13px;
     --transcript-content-offset-right: 13px;
+    --composer-width-offset: 24px;
   }
   .shell.session-shell .agent-thread-nav-session {
     width: 100%;
