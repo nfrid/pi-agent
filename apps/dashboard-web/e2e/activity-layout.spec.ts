@@ -252,7 +252,10 @@ test('mobile uses header activity button, close action, and right-edge gesture w
       clientY: 400,
     });
     window.dispatchEvent(
-      new TouchEvent('touchstart', { changedTouches: [start] }),
+      new TouchEvent('touchstart', {
+        touches: [start],
+        changedTouches: [start],
+      }),
     );
     window.dispatchEvent(new TouchEvent('touchend', { changedTouches: [end] }));
   });

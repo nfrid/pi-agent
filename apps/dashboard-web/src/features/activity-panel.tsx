@@ -167,15 +167,31 @@ export function ActivityPanel({
   useOverlayFocusRestore(overlay, '.session-activity-button');
   useOverlayFocusTrap(overlay, panelRef, { mobile: true });
 
+  const openFromSwipe = useRef(onOpen);
+  openFromSwipe.current = onOpen;
   useEffect(() => {
     if (isWide) return;
     let start: { x: number; y: number } | undefined;
     const touchStart = (event: TouchEvent) => {
       const touch = event.changedTouches[0];
-      start =
-        touch && touch.clientX >= window.innerWidth - 28
-          ? { x: touch.clientX, y: touch.clientY }
-          : undefined;
+      start = undefined;
+      if (
+        event.target instanceof Element &&
+        event.target.closest(
+          '.activity-panel, [data-surface-portal-root], .surface-drawer-layer',
+        )
+      )
+        return;
+      if (
+        touch &&
+        event.touches.length === 1 &&
+        touch.clientX >= window.innerWidth - 32
+      ) {
+        // Like the left navigation edge, claim this narrow strip before the
+        // browser takes over panning and cancels delivery of the touch end.
+        if (event.cancelable) event.preventDefault();
+        start = { x: touch.clientX, y: touch.clientY };
+      }
     };
     const touchEnd = (event: TouchEvent) => {
       const initial = start;
@@ -184,12 +200,12 @@ export function ActivityPanel({
       if (!initial || !touch) return;
       const dx = initial.x - touch.clientX;
       const dy = Math.abs(initial.y - touch.clientY);
-      if (dx > 52 && dx > dy * 1.25) onOpen();
+      if (dx > 52 && dx > dy * 1.25) openFromSwipe.current();
     };
     const touchCancel = () => {
       start = undefined;
     };
-    window.addEventListener('touchstart', touchStart, { passive: true });
+    window.addEventListener('touchstart', touchStart, { passive: false });
     window.addEventListener('touchend', touchEnd, { passive: true });
     window.addEventListener('touchcancel', touchCancel, { passive: true });
     return () => {
@@ -198,7 +214,7 @@ export function ActivityPanel({
       window.removeEventListener('touchend', touchEnd);
       window.removeEventListener('touchcancel', touchCancel);
     };
-  }, [isWide, onOpen]);
+  }, [isWide]);
 
   useEffect(() => {
     if (!overlay) return;
