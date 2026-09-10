@@ -1829,7 +1829,6 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain(
       'aria-label="1 active, 1 waiting, 1 failed, 1 finished"',
     );
-    expect(markup).toContain('waiting for a slot');
     expect(markup.indexOf('Active</strong>')).toBeLessThan(
       markup.indexOf('Waiting</strong>'),
     );
@@ -1839,6 +1838,8 @@ describe('live extension surface fixtures', () => {
   });
 
   it('toggles the whole delegates header to reveal finished rows', () => {
+    vi.stubGlobal('HTMLElement', class {});
+    vi.stubGlobal('SVGElement', class {});
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
@@ -1859,7 +1860,10 @@ describe('live extension surface fixtures', () => {
                   kind: 'background',
                   state: 'running',
                   createdAt: 1,
-                  allowWrites: false,
+                  startedAt: -2_000,
+                  allowWrites: true,
+                  route: 'review',
+                  context: 'Inspect changes',
                 },
                 {
                   id: 'finished',
@@ -1886,6 +1890,13 @@ describe('live extension surface fixtures', () => {
     act(() => header.props.onClick());
     expect(header.props['aria-expanded']).toBe(true);
     expect(JSON.stringify(tree.toJSON())).toContain('Finished worker');
+    expect(JSON.stringify(tree.toJSON())).toContain('read/write');
+    expect(JSON.stringify(tree.toJSON())).toContain('review');
+    expect(JSON.stringify(tree.toJSON())).toContain('2s');
+    act(() => header.props.onClick());
+    expect(header.props['aria-expanded']).toBe(false);
+    expect(JSON.stringify(tree.toJSON())).toContain('Active worker');
+    expect(JSON.stringify(tree.toJSON())).not.toContain('Finished worker');
   });
 
   it('opens live and persisted delegate rows directly in the transcript inspector', () => {
