@@ -315,7 +315,7 @@ export function DelegateSurface({
   const [lastInspectorRow, setLastInspectorRow] =
     useState<DelegateInspectionStatus>();
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [finishedExpanded, setFinishedExpanded] = useState(false);
+  const [panelExpanded, setPanelExpanded] = useState(false);
   const hasLiveElapsed = stats.running + stats.queued > 0;
   const [now, setNow] = useState(() => pausedAt ?? Date.now());
   useEffect(() => {
@@ -538,31 +538,8 @@ export function DelegateSurface({
       </div>
     );
   };
-  const renderActivityDelegateRow = (group: DelegateCompositeGroup) => {
-    const row = group.row;
-    const state = row.pauseState ?? surfaceStateLabel(workflowState(row));
-    return (
-      <div
-        className={`delegate-row ${surfaceStateClass(state)}`}
-        key={`${surface.id}-${row.id}`}
-      >
-        <AriaButton
-          type="button"
-          className="delegate-row-toggle"
-          aria-haspopup="dialog"
-          onPress={() => openDelegateInspector(group)}
-        >
-          <span className="surface-state" aria-hidden="true">
-            {stateGlyph(state)}
-          </span>
-          <span className="delegate-row-main">
-            <strong>{delegateDisplayName(row)}</strong>
-            <span className="sr-only">{state}</span>
-          </span>
-        </AriaButton>
-      </div>
-    );
-  };
+  const renderActivityDelegateRow = (group: DelegateCompositeGroup) =>
+    renderDelegateRow(group);
   const panelGroups = orderDelegatePanelGroups(
     composite?.groups ??
       rows.map((row) => ({
@@ -586,9 +563,19 @@ export function DelegateSurface({
           aria-label="Delegates"
           tabIndex={-1}
         >
-          <header className="activity-panel-header">
+          <button
+            type="button"
+            className="activity-panel-header activity-panel-header-toggle"
+            aria-label={
+              panelExpanded
+                ? 'Show fewer delegates'
+                : 'Show all delegates, including finished work'
+            }
+            aria-expanded={panelExpanded}
+            onClick={() => setPanelExpanded((value) => !value)}
+          >
             <h2>Delegates</h2>
-            <div
+            <span
               className="activity-panel-counters"
               role="status"
               aria-label={`${panelCounters.active} active, ${panelCounters.waiting} waiting, ${panelCounters.failed} failed, ${panelCounters.finished} finished`}
@@ -611,19 +598,14 @@ export function DelegateSurface({
               >
                 <span aria-hidden="true">!</span> {panelCounters.failed}
               </span>
-              <button
-                type="button"
-                className="activity-panel-summary-toggle"
+              <span
+                className="activity-panel-counter-finished"
                 title={`Finished: ${panelCounters.finished}`}
-                aria-label={`${panelCounters.finished} finished`}
-                aria-expanded={finishedExpanded}
-                disabled={panelCounters.finished === 0}
-                onClick={() => setFinishedExpanded((value) => !value)}
               >
                 <span aria-hidden="true">✓</span> {panelCounters.finished}
-              </button>
-            </div>
-          </header>
+              </span>
+            </span>
+          </button>
           {historyLoading && (
             <p className="delegate-history-status" role="status">
               Loading delegate history…
@@ -673,7 +655,7 @@ export function DelegateSurface({
             {panelGroups
               .filter((group) => delegatePanelBucket(group.row) !== 'finished')
               .map(renderActivityDelegateRow)}
-            {finishedExpanded &&
+            {panelExpanded &&
               panelGroups
                 .filter(
                   (group) => delegatePanelBucket(group.row) === 'finished',
