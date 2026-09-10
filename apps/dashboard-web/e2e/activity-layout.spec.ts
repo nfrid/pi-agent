@@ -86,6 +86,7 @@ test('wide session reserves activity rail, preserves reading gutters, and reopen
       composer: composerRect,
       panel: panelRect,
       reserve: Number.parseFloat(getComputedStyle(scroll).paddingBottom),
+      scrollbarWidth: scroll.getBoundingClientRect().width - scroll.clientWidth,
     };
   });
   expect(layout.columns.split(' ').length).toBe(3);
@@ -94,9 +95,11 @@ test('wide session reserves activity rail, preserves reading gutters, and reopen
   expect(layout.panel.right).toBe(1440);
   expect(layout.panel.left).toBe(layout.scroll.right);
   expect(layout.scroll.left).toBe(276);
-  expect(layout.row.width).toBeLessThan(layout.scroll.width - 40);
-  expect(layout.row.left).toBeGreaterThan(layout.scroll.left + 20);
-  expect(layout.row.right).toBeLessThan(layout.scroll.right - 20);
+  expect(layout.row.width).toBeLessThanOrEqual(820);
+  expect(layout.row.left).toBeGreaterThanOrEqual(layout.scroll.left + 48 - 1);
+  expect(
+    Math.abs(layout.row.right - layout.composer.right),
+  ).toBeLessThanOrEqual(layout.scrollbarWidth + 1);
   expect(layout.composer.width).toBeLessThan(layout.scroll.width);
   expect(layout.reserve).toBeGreaterThan(0);
 
@@ -131,6 +134,25 @@ test('wide session reserves activity rail, preserves reading gutters, and reopen
 
   await page.getByRole('button', { name: 'Unpin activity panel' }).click();
   await expect(page.locator('.activity-panel.is-open')).toHaveCount(0);
+  const unpinnedGeometry = await page.evaluate(() => {
+    const scroll = document.querySelector('.session-transcript-scroll');
+    const row = document.querySelector('.transcript-virtual-row');
+    const composer = document.querySelector('.composer');
+    if (!scroll || !row || !composer)
+      throw new Error('unpinned geometry missing');
+    return {
+      scroll: scroll.getBoundingClientRect(),
+      row: row.getBoundingClientRect(),
+      composer: composer.getBoundingClientRect(),
+      scrollbarWidth: scroll.getBoundingClientRect().width - scroll.clientWidth,
+    };
+  });
+  expect(unpinnedGeometry.row.left).toBeGreaterThanOrEqual(
+    unpinnedGeometry.scroll.left + 48 - 1,
+  );
+  expect(
+    Math.abs(unpinnedGeometry.row.right - unpinnedGeometry.composer.right),
+  ).toBeLessThanOrEqual(unpinnedGeometry.scrollbarWidth + 1);
   await expect
     .poll(() =>
       page
@@ -191,6 +213,10 @@ test('live events use the persisted content edges without changing virtual rows 
       throw new Error('live and persisted transcript rows missing');
     const liveRect = live.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
+    const composer = document.querySelector('.composer');
+    const scroll = document.querySelector('.session-transcript-scroll');
+    if (!composer || !scroll) throw new Error('composer or scroll missing');
+    const composerRect = composer.getBoundingClientRect();
     return {
       live: {
         left: liveRect.left,
@@ -198,11 +224,17 @@ test('live events use the persisted content edges without changing virtual rows 
         width: liveRect.width,
       },
       row: { left: rowRect.left, right: rowRect.right, width: rowRect.width },
+      composer: { right: composerRect.right },
+      scrollbarWidth: scroll.getBoundingClientRect().width - scroll.clientWidth,
     };
   });
   expect(geometry.live.left).toBe(geometry.row.left);
   expect(geometry.live.right).toBe(geometry.row.right);
   expect(geometry.live.width).toBe(geometry.row.width);
+  expect(
+    Math.abs(geometry.live.right - geometry.composer.right),
+  ).toBeLessThanOrEqual(geometry.scrollbarWidth + 1);
+  expect(geometry.live.left).toBeGreaterThanOrEqual(48);
   await expect(page.locator('.session-transcript-scroll')).toHaveScreenshot(
     'live-compaction-aligned.png',
     { animations: 'disabled' },
@@ -230,8 +262,26 @@ for (const rowCount of [20, 100]) {
         return last ? composerRect.y - (last.y + last.height) : -1;
       })
       .toBeGreaterThanOrEqual(0);
-    const lastBox = await rows.last().boundingBox();
-    expect(lastBox?.width).toBeLessThanOrEqual(820);
+    const rowGeometry = await rows.last().evaluate((element) => {
+      const row = element.getBoundingClientRect();
+      const scroll = element.closest('.session-transcript-scroll');
+      const composer = document.querySelector('.composer');
+      if (!scroll || !composer) throw new Error('row geometry missing');
+      return {
+        row,
+        scroll: scroll.getBoundingClientRect(),
+        composer: composer.getBoundingClientRect(),
+        scrollbarWidth:
+          scroll.getBoundingClientRect().width - scroll.clientWidth,
+      };
+    });
+    expect(rowGeometry.row.width).toBeLessThanOrEqual(820);
+    expect(rowGeometry.row.left).toBeGreaterThanOrEqual(
+      rowGeometry.scroll.left + 48 - 1,
+    );
+    expect(
+      Math.abs(rowGeometry.row.right - rowGeometry.composer.right),
+    ).toBeLessThanOrEqual(rowGeometry.scrollbarWidth + 1);
     for (const x of [geometry.x + 8, geometry.x + geometry.width - 12]) {
       await scroll.evaluate((element) => {
         element.scrollTop = element.scrollHeight;
@@ -252,10 +302,59 @@ for (const rowCount of [20, 100]) {
   });
 }
 
+for (const viewportWidth of [1402, 1440, 1468]) {
+  test(`transcript right edge tracks composer at width transition ${viewportWidth} @desktop`, async ({
+    page,
+  }) => {
+    await openWorkingSession(page, viewportWidth, 900, 20, 'compacting');
+    const geometry = await page.evaluate(() => {
+      const scroll = document.querySelector('.session-transcript-scroll');
+      const composer = document.querySelector('.composer');
+      const row = document.querySelector('.transcript [data-transcript-key]');
+      const live = document.querySelector('.live-compaction-event');
+      if (!scroll || !composer || !row || !live)
+        throw new Error('transition geometry missing');
+      const scrollRect = scroll.getBoundingClientRect();
+      const composerRect = composer.getBoundingClientRect();
+      return {
+        left: row.getBoundingClientRect().left,
+        rowRight: row.getBoundingClientRect().right,
+        liveRight: live.getBoundingClientRect().right,
+        scrollLeft: scrollRect.left,
+        composerRight: composerRect.right,
+        scrollbarWidth: scrollRect.width - scroll.clientWidth,
+      };
+    });
+    const tolerance = geometry.scrollbarWidth + 1;
+    expect(geometry.left).toBeGreaterThanOrEqual(geometry.scrollLeft + 48 - 1);
+    expect(
+      Math.abs(geometry.rowRight - geometry.composerRight),
+    ).toBeLessThanOrEqual(tolerance);
+    expect(
+      Math.abs(geometry.liveRight - geometry.composerRight),
+    ).toBeLessThanOrEqual(tolerance);
+  });
+}
+
 test('mobile uses header activity button, close action, and right-edge gesture without a mid-edge handle', async ({
   page,
 }) => {
   await openWorkingSession(page, 390, 844);
+  const mobileGeometry = await page
+    .locator('.transcript-virtual-row')
+    .first()
+    .evaluate((element) => {
+      const row = element.getBoundingClientRect();
+      const scroll = element.closest('.session-transcript-scroll');
+      if (!scroll) throw new Error('mobile scroll missing');
+      const scrollRect = scroll.getBoundingClientRect();
+      return {
+        leftGap: row.left - scrollRect.left,
+        rightGap: scrollRect.right - row.right,
+      };
+    });
+  expect(mobileGeometry.leftGap).toBeCloseTo(13, 0);
+  expect(mobileGeometry.rightGap).toBeGreaterThanOrEqual(12);
   await expect(page.locator('.agent-nav-handle')).toHaveCount(0);
   const activityButton = page.getByRole('button', {
     name: 'Open session activity',

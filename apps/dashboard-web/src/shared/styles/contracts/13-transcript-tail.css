@@ -241,10 +241,12 @@
    reserves the transcript tail. Embedded surfaces keep their host sizing. */
 .shell.session-shell {
   --session-nav-width: var(--session-sidebar-width);
-  --transcript-content-gutter: 48px;
-  --transcript-content-width: min(
-    820px,
-    calc(100% - (2 * var(--transcript-content-gutter)))
+  --transcript-content-offset-left: max(48px, calc((100% - 820px) / 2));
+  --transcript-content-offset-right: max(16px, calc((100% - 820px) / 2));
+  --transcript-content-width: calc(
+    100% -
+    var(--transcript-content-offset-left) -
+    var(--transcript-content-offset-right)
   );
   width: 100%;
   height: 100dvh;
@@ -299,21 +301,23 @@
   width: 100%;
 }
 .session-page:not(.session-page-embedded) .transcript-virtual-row {
-  left: 50%;
+  left: var(--transcript-content-offset-left);
   width: var(--transcript-content-width);
-  transform: translateX(-50%);
+  transform: none;
 }
 .session-page:not(.session-page-embedded)
   .transcript:not(.transcript-virtualized)
   > :not(.transcript-minimap) {
   width: var(--transcript-content-width);
-  margin-inline: auto;
+  margin-left: var(--transcript-content-offset-left);
+  margin-right: 0;
 }
 .session-page:not(.session-page-embedded)
   .transcript-virtualized
   > .session-event {
   width: var(--transcript-content-width);
-  margin-inline: auto;
+  margin-left: var(--transcript-content-offset-left);
+  margin-right: 0;
 }
 .draft-empty-transcript {
   position: absolute;
@@ -391,7 +395,8 @@
 @media (max-width: 820px) {
   .shell.session-shell {
     --session-nav-width: 0px;
-    --transcript-content-gutter: 13px;
+    --transcript-content-offset-left: 13px;
+    --transcript-content-offset-right: 13px;
   }
   .shell.session-shell .agent-thread-nav-session {
     width: 100%;
@@ -406,7 +411,8 @@
     .transcript-virtualized
     > .session-event {
     width: var(--transcript-content-width);
-    margin-inline: auto;
+    margin-left: var(--transcript-content-offset-left);
+    margin-right: 0;
   }
   .session-page:not(.session-page-embedded) .session-context {
     min-height: 46px;
