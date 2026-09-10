@@ -1734,12 +1734,8 @@ describe('live extension surface fixtures', () => {
     expect(JSON.stringify(tree.toJSON())).not.toContain('Done');
     expect(JSON.stringify(tree.toJSON())).toContain('Tasks');
     expect(JSON.stringify(tree.toJSON())).toContain('"1","/","2"');
-    expect(JSON.stringify(tree.toJSON())).not.toContain('Show all');
-    act(() =>
-      tree.root.findByType('details').props.onToggle({
-        currentTarget: { open: true },
-      }),
-    );
+    expect(tree.root.findByType('button').props['aria-expanded']).toBe(false);
+    act(() => tree.root.findByType('button').props.onClick());
     expect(JSON.stringify(tree.toJSON())).toContain('Done');
     expect(JSON.stringify(tree.toJSON())).toContain('Dropped');
     act(() => tree.unmount());
@@ -1851,6 +1847,11 @@ describe('live extension surface fixtures', () => {
           />,
         );
       });
+      if (history) {
+        act(() =>
+          tree.root.findByProps({ 'aria-label': '1 finished' }).props.onClick(),
+        );
+      }
       act(() => {
         tree.root
           .findByProps({ className: 'delegate-row-toggle' })

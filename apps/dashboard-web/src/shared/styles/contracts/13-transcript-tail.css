@@ -339,7 +339,8 @@
 .session-page > .session-control-layer > * {
   pointer-events: auto;
 }
-.session-page > .session-control-layer > .composer {
+.session-page > .session-control-layer > :is(.composer, .queue-panel) {
+  box-sizing: border-box;
   width: min(820px, calc(100% - 32px));
 }
 .session-page.session-page-embedded > .session-control-layer {
@@ -348,7 +349,9 @@
   bottom: auto;
   left: auto;
 }
-.session-page.session-page-embedded > .session-control-layer > .composer {
+.session-page.session-page-embedded
+  > .session-control-layer
+  > :is(.composer, .queue-panel) {
   width: 100%;
 }
 .session-page.session-page-embedded {

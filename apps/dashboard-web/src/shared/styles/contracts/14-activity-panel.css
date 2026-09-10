@@ -94,8 +94,11 @@
   padding: 8px var(--activity-panel-inset);
 }
 .activity-panel-location {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
-  border-bottom: 1px solid var(--line-soft);
   padding: 8px var(--activity-panel-inset);
 }
 .activity-panel-header {
@@ -105,7 +108,8 @@
   gap: 10px;
   padding-bottom: 5px;
 }
-.activity-panel-header h2 {
+.activity-panel-header h2,
+.activity-panel-location h2 {
   margin: 0;
   color: var(--fg);
   font-size: 11px;
@@ -122,12 +126,21 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.activity-panel-counters > span,
-.activity-panel-finished-disclosure summary {
+.activity-panel-summary-toggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
   color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
 }
-.activity-panel-counter-failed {
-  color: var(--muted);
+.activity-panel-summary-toggle:disabled {
+  cursor: default;
+}
+.activity-panel-summary-toggle:hover,
+.activity-panel-summary-toggle[aria-expanded="true"] {
+  color: var(--fg);
 }
 .activity-panel-rows {
   display: grid;
@@ -141,7 +154,11 @@
   padding: 4px 0;
 }
 .activity-panel-section .task-row.activity-task-row-compact {
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 12px minmax(0, 1fr);
+}
+.activity-panel-section .surface-state {
+  width: 12px;
+  font-size: 9px;
 }
 .activity-panel-section .task-row-main {
   min-width: 0;
@@ -153,7 +170,7 @@
   color: var(--cyan);
 }
 .activity-panel-section .delegate-row-toggle {
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 12px minmax(0, 1fr);
   padding: 4px 0;
 }
 .activity-panel-section .delegate-row-main strong {
@@ -163,56 +180,6 @@
 }
 .activity-panel-section .surface-failed .surface-state {
   color: var(--muted);
-}
-.activity-panel-expand,
-.activity-panel-completed summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  padding: 5px 0 1px;
-  color: var(--purple);
-  font: inherit;
-  font-size: 10px;
-  text-align: left;
-  cursor: pointer;
-}
-.activity-panel-expand:hover,
-.activity-panel-completed summary:hover {
-  background: var(--purple-5);
-}
-.activity-panel-completed summary {
-  list-style-position: inside;
-}
-.activity-panel-completed[open] summary {
-  color: var(--fg);
-}
-.activity-panel-task-disclosure {
-  margin: -2px 0;
-}
-.activity-panel-task-disclosure summary {
-  padding: 3px 0;
-}
-.activity-panel-finished-disclosure {
-  position: relative;
-}
-.activity-panel-finished-disclosure summary {
-  display: inline-flex;
-  width: auto;
-  padding: 0;
-}
-.activity-panel-finished-disclosure .activity-panel-rows {
-  min-width: 240px;
-  margin-top: 7px;
-}
-.activity-panel-location h2 {
-  margin: 0 0 6px;
-  color: var(--dim);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 .activity-panel-location .draft-picker-trigger {
   max-width: 100%;
@@ -225,7 +192,7 @@
     background: var(--bg);
     padding-top: 14px;
     padding-bottom: 9px;
-    padding-left: max(var(--activity-panel-inset), env(titlebar-area-x, 14px));
+    padding-left: var(--activity-panel-inset);
     padding-right: max(
       var(--activity-panel-inset),
       calc(
@@ -237,7 +204,18 @@
     );
     -webkit-app-region: drag;
   }
-  .activity-panel-actions {
+  .activity-panel-bar::after {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    height: 18px;
+    background: linear-gradient(to bottom, var(--bg), transparent);
+    content: "";
+    pointer-events: none;
+  }
+  .activity-panel-actions,
+  .activity-panel-actions button {
     -webkit-app-region: no-drag;
   }
 }

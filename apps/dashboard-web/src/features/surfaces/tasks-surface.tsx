@@ -140,52 +140,28 @@ export function TasksSurface({
         aria-label="Tasks"
         tabIndex={-1}
       >
-        {previewRows.length === 0 && rows.length > 0 ? (
-          <details
-            className="activity-panel-completed activity-panel-task-disclosure"
-            onToggle={(event) => setPanelExpanded(event.currentTarget.open)}
+        <header className="activity-panel-header">
+          <h2>Tasks</h2>
+          <button
+            type="button"
+            className="activity-panel-summary-toggle"
+            title={`${completed} of ${total} complete`}
+            aria-label={
+              panelExpanded
+                ? 'Show fewer tasks'
+                : `Show all ${rows.length} tasks`
+            }
+            aria-expanded={panelExpanded}
+            disabled={rows.length === 0}
+            onClick={() => setPanelExpanded((value) => !value)}
           >
-            <summary aria-label={`${completed} of ${total} tasks complete`}>
-              <span>Tasks</span>
-              <span>
-                {completed}/{total}
-              </span>
-            </summary>
-            {panelExpanded && (
-              <div className="activity-panel-rows">{renderTaskRows(rows)}</div>
-            )}
-          </details>
-        ) : (
-          <>
-            <header className="activity-panel-header">
-              <h2>Tasks</h2>
-              <span
-                role="status"
-                aria-label={`${completed} of ${total} tasks complete`}
-              >
-                {completed}/{total} complete
-              </span>
-            </header>
-            <div className="activity-panel-rows">
-              {renderTaskRows(
-                panelExpanded ? rows : previewRows,
-                !panelExpanded,
-              )}
-            </div>
-            {rows.length > previewRows.length && (
-              <button
-                type="button"
-                className="activity-panel-expand"
-                aria-expanded={panelExpanded}
-                onClick={() => setPanelExpanded((expanded) => !expanded)}
-              >
-                {panelExpanded
-                  ? 'Show fewer tasks'
-                  : `Show all ${rows.length} tasks`}
-              </button>
-            )}
-          </>
-        )}
+            {completed}/{total}{' '}
+            <span aria-hidden="true">{panelExpanded ? '▴' : '▾'}</span>
+          </button>
+        </header>
+        <div className="activity-panel-rows">
+          {renderTaskRows(panelExpanded ? rows : previewRows, !panelExpanded)}
+        </div>
       </section>
     );
   return (

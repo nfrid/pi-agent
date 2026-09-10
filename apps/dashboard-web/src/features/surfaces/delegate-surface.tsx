@@ -315,6 +315,7 @@ export function DelegateSurface({
   const [lastInspectorRow, setLastInspectorRow] =
     useState<DelegateInspectionStatus>();
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [finishedExpanded, setFinishedExpanded] = useState(false);
   const hasLiveElapsed = stats.running + stats.queued > 0;
   const [now, setNow] = useState(() => pausedAt ?? Date.now());
   useEffect(() => {
@@ -556,6 +557,7 @@ export function DelegateSurface({
           </span>
           <span className="delegate-row-main">
             <strong>{delegateDisplayName(row)}</strong>
+            <span className="sr-only">{state}</span>
           </span>
         </AriaButton>
       </div>
@@ -609,24 +611,17 @@ export function DelegateSurface({
               >
                 <span aria-hidden="true">!</span> {panelCounters.failed}
               </span>
-              {panelCounters.finished > 0 && (
-                <details className="activity-panel-completed activity-panel-finished-disclosure">
-                  <summary
-                    title={`Finished: ${panelCounters.finished}`}
-                    aria-label={`${panelCounters.finished} finished`}
-                  >
-                    <span aria-hidden="true">✓</span> {panelCounters.finished}
-                  </summary>
-                  <div className="activity-panel-rows">
-                    {panelGroups
-                      .filter(
-                        (group) =>
-                          delegatePanelBucket(group.row) === 'finished',
-                      )
-                      .map(renderActivityDelegateRow)}
-                  </div>
-                </details>
-              )}
+              <button
+                type="button"
+                className="activity-panel-summary-toggle"
+                title={`Finished: ${panelCounters.finished}`}
+                aria-label={`${panelCounters.finished} finished`}
+                aria-expanded={finishedExpanded}
+                disabled={panelCounters.finished === 0}
+                onClick={() => setFinishedExpanded((value) => !value)}
+              >
+                <span aria-hidden="true">✓</span> {panelCounters.finished}
+              </button>
             </div>
           </header>
           {historyLoading && (
@@ -678,6 +673,12 @@ export function DelegateSurface({
             {panelGroups
               .filter((group) => delegatePanelBucket(group.row) !== 'finished')
               .map(renderActivityDelegateRow)}
+            {finishedExpanded &&
+              panelGroups
+                .filter(
+                  (group) => delegatePanelBucket(group.row) === 'finished',
+                )
+                .map(renderActivityDelegateRow)}
           </div>
         </section>
         <SurfaceStack

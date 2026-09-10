@@ -2911,7 +2911,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await page.getByRole('button', { name: 'Open session activity' }).click();
   await expect(
     page.locator('.activity-panel .draft-picker-trigger-locked'),
-  ).toContainText('Current checkout · main');
+  ).toHaveText('main');
   await page.keyboard.press('Escape');
   await expect(
     activeComposer.getByRole('button', { name: 'Agent and thinking' }),
@@ -2938,7 +2938,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await page.getByRole('button', { name: 'Open session activity' }).click();
   await expect(
     page.locator('.activity-panel .draft-picker-trigger-locked'),
-  ).toContainText('Current checkout · main');
+  ).toHaveText('main');
   await page.keyboard.press('Escape');
   const dormantAgent = dormantComposer.getByRole('button', {
     name: 'Agent and thinking',
@@ -6181,7 +6181,7 @@ test('started session keeps location fixed and agent controls editable', async (
   await page.getByRole('button', { name: 'Open session activity' }).click();
   await expect(
     page.locator('.activity-panel .draft-picker-trigger-locked'),
-  ).toContainText('Current checkout · main');
+  ).toHaveText('main');
   await page.keyboard.press('Escape');
   const agent = composer.getByRole('button', { name: 'Agent and thinking' });
   await expect(agent).toContainText('Vision· medium');

@@ -434,6 +434,99 @@ export function buildWorkingScenario(): VisualStateScenario {
   };
 }
 
+export function buildActivityPanelScenario(
+  active: boolean,
+): VisualStateScenario {
+  const base = buildWorkingScenario();
+  const hydrated = base.sessionSnapshot;
+  const sourceDelegate = hydrated?.active?.delegates[0];
+  if (!hydrated?.active || !sourceDelegate)
+    throw new Error('Working activity is missing.');
+  const tasks: TaskStateViewModel = {
+    version: 1,
+    tasks: Array.from({ length: active ? 5 : 3 }, (_, index) => ({
+      id: ['layout', 'surfaces', 'verify', 'refine', 'visual'][index] ?? '',
+      text:
+        [
+          'Review the layout',
+          'Verify browser behavior',
+          'Deploy client bundle',
+          'Fix PWA title-bar clearance and simplify activity panel summaries/spacing',
+          'Review active and completed panel screenshots, run checks, deploy client update',
+        ][index] ?? '',
+      status: index === 3 ? 'doing' : index === 4 ? 'todo' : 'done',
+      dependsOn: [],
+      createdAt: VISUAL_TIMESTAMP,
+      updatedAt: VISUAL_TIMESTAMP,
+    })),
+    stats: {
+      total: active ? 5 : 3,
+      active: active ? 2 : 0,
+      done: 3,
+      blocked: 0,
+      ready: active ? 1 : 0,
+    },
+  };
+  return {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      runtimes: base.snapshot.runtimes.map((runtime) => ({
+        ...runtime,
+        liveState: active ? 'working' : 'idle',
+        queueDrafts: active
+          ? [
+              {
+                clientId: 'queued-followup',
+                mode: 'steer',
+                text: 'Keep the queue aligned with the composer.',
+                imageCount: 0,
+              },
+            ]
+          : [],
+        checkoutId: 'visual-checkout',
+        extensionSurfaces: [
+          {
+            id: 'tasks.current',
+            rendererId: TASKS_RENDERER_ID,
+            placement: 'composer',
+            viewModel: tasks,
+          },
+        ],
+      })),
+      checkouts: [
+        {
+          id: 'visual-checkout',
+          projectId: 'visual-project',
+          kind: 'main',
+          path: VISUAL_CWD,
+          branch: 'main',
+          status: 'ready',
+          updatedAt: VISUAL_TIMESTAMP,
+        },
+      ],
+    },
+    sessionSnapshot: {
+      ...hydrated,
+      active: {
+        ...hydrated.active,
+        liveState: active ? 'working' : 'idle',
+        delegates: Array.from({ length: 6 }, (_, index) => ({
+          ...sourceDelegate,
+          runId: `finished-run-${index}`,
+          lineageId: `finished-lineage-${index}`,
+          name:
+            active && index === 0
+              ? 'Activity panel visual refinement'
+              : `Finished worker ${index + 1}`,
+          state: active && index === 0 ? 'running' : 'success',
+          finishedAt: VISUAL_TIMESTAMP,
+        })),
+      },
+    },
+  };
+}
+
 export function buildWaitingScenario(): VisualStateScenario {
   return scenario({
     name: 'waiting',
