@@ -1,0 +1,186 @@
+/* Session activity rail: one quiet panel, never a stack of status cards. */
+.session-agent-nav-button {
+  display: none;
+}
+.activity-panel {
+  position: fixed;
+  z-index: 38;
+  top: var(--session-header-height);
+  right: 0;
+  bottom: 0;
+  display: none;
+  width: min(300px, 88vw);
+  overflow: auto;
+  border-left: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--bg-alt) 96%, var(--bg));
+  box-shadow: -10px 0 30px #0003;
+  color: var(--fg);
+}
+.activity-panel.is-open {
+  display: block;
+}
+.activity-panel-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--bg-alt) 96%, var(--bg));
+  padding: 11px 13px;
+}
+.activity-panel-bar strong {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+.activity-panel-actions {
+  display: flex;
+  gap: 3px;
+}
+.activity-panel-pin,
+.activity-panel-close,
+.activity-panel-trigger,
+.activity-panel-categories button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+}
+.activity-panel-pin,
+.activity-panel-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  font-size: 17px;
+}
+.activity-panel-pin:hover,
+.activity-panel-close:hover,
+.activity-panel-pin:focus-visible,
+.activity-panel-close:focus-visible {
+  border-color: var(--line);
+  color: var(--fg);
+}
+.activity-panel-categories {
+  display: flex;
+  gap: 5px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 8px 12px;
+}
+.activity-panel-categories button {
+  min-width: 82px;
+  height: 28px;
+  border-color: var(--line-soft);
+  border-radius: 4px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.activity-panel-categories button:hover,
+.activity-panel-categories button:focus-visible {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.activity-panel-sections {
+  display: grid;
+}
+.activity-panel-section {
+  min-width: 0;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 12px;
+}
+.activity-panel-section h2 {
+  margin: 0 0 8px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.activity-panel-section .extension-surfaces {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  margin: 0;
+}
+.activity-panel-section .extension-surface {
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.activity-panel-section .draft-picker-trigger {
+  max-width: 100%;
+  margin: 0;
+}
+.activity-panel-trigger {
+  position: fixed;
+  z-index: 39;
+  top: calc(var(--session-header-height) + 10px);
+  right: 10px;
+  display: flex;
+  width: 34px;
+  height: 68px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-color: var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  box-shadow: 0 4px 14px #0004;
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.activity-panel-trigger:focus-visible,
+.activity-panel-trigger[aria-expanded="true"] {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+@media (min-width: 821px) {
+  .activity-panel-trigger {
+    display: none;
+  }
+  .activity-panel.is-pinned {
+    display: block;
+  }
+  .activity-panel.is-overlay {
+    display: none;
+  }
+  .activity-panel.is-overlay.is-open {
+    display: block;
+  }
+}
+@media (max-width: 820px) {
+  .session-agent-nav-button {
+    display: inline-grid;
+  }
+  .activity-panel {
+    top: 0;
+    width: min(320px, calc(100vw - 22px));
+    box-shadow: -14px 0 34px #0008;
+  }
+  .activity-panel-trigger {
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+  }
+  .activity-panel.is-pinned {
+    display: none;
+  }
+  .activity-panel.is-overlay.is-open {
+    display: block;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-panel,
+  .activity-panel-trigger {
+    transition: none;
+  }
+}

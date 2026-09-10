@@ -20,7 +20,6 @@ export function useAgentThreadDrawer({
   onOpenChange,
 }: AgentThreadDrawerOptions) {
   const drawerRef = useRef<HTMLElement>(null);
-  const handleRef = useRef<HTMLButtonElement>(null);
   const [isMobile, setIsMobile] = useState(
     () =>
       typeof window !== 'undefined' &&
@@ -30,11 +29,8 @@ export function useAgentThreadDrawer({
   const { present: drawerPresent, exiting: drawerExiting } = useOverlayPresence(
     enabled && open,
   );
-  useOverlayFocusRestore(enabled && open, '.agent-nav-handle');
-  useOverlayFocusTrap(enabled && open, drawerRef, {
-    mobile: isMobile,
-    restoreFocusRef: handleRef,
-  });
+  useOverlayFocusRestore(enabled && open, '.global-new-agent, main button');
+  useOverlayFocusTrap(enabled && open, drawerRef, { mobile: isMobile });
   const { onTouchStart, onTouchEnd } = useAgentNavSwipe({
     enabled,
     open,
@@ -64,7 +60,6 @@ export function useAgentThreadDrawer({
 
   return {
     drawerRef,
-    handleRef,
     drawerPresent,
     drawerExiting,
     isMobile,

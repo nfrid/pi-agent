@@ -541,7 +541,6 @@ export function AgentThreadNav({
   } = useAgentThreadUnread(currentSessionId);
   const {
     drawerRef,
-    handleRef,
     drawerPresent,
     drawerExiting,
     isMobile,
@@ -1357,10 +1356,7 @@ export function AgentThreadNav({
       isMobile={isMobile}
       drawerPresent={drawerPresent}
       drawerExiting={drawerExiting}
-      handleRef={handleRef}
       drawerClassName={styles.drawer}
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
     >
       {nav}
     </AgentNavDrawerShell>

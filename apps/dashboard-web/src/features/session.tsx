@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { Transcript } from '../entities/transcript';
 import { useDashboardNavigate } from '../routes/navigation';
+import { ActivityPanel } from './activity-panel';
 import { AgentThreadNav, projectNameForSession } from './agent-thread-nav';
 import { runtimePauseStatus } from './extension-surfaces';
 import { dashboardStatus } from './presentation-status';
@@ -241,6 +242,7 @@ export function SessionView({
           statusLabel={statusLabel}
           outlineTriggerRef={outlineTriggerRef}
           onOpenOutline={() => setOutlineOpen(true)}
+          onOpenAgentNav={() => setAgentNavOpen(true)}
           store={store}
           sessions={snapshot.sessions}
         />
@@ -288,9 +290,7 @@ export function SessionView({
             onJumpToLatest={handleJumpToLatest}
             Composer={Composer}
             runtime={runtime}
-            sessionChange={sessionChange}
             store={store}
-            client={client}
             runtimes={snapshot.runtimes}
             session={data.metadata}
             sessionId={id}
@@ -305,6 +305,16 @@ export function SessionView({
           />
         )}
       </section>
+      {!embedded && (
+        <ActivityPanel
+          runtime={runtime}
+          sessionChange={sessionChange}
+          store={store}
+          client={client}
+          sessionId={id}
+          checkout={checkout}
+        />
+      )}
       {!embedded && tailReadySessionId !== id && (
         <SessionLoadingCurtain
           error={error}
