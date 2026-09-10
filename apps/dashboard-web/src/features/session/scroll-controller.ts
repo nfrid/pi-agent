@@ -21,6 +21,7 @@ export class SessionScrollController {
   private element?: HTMLDivElement;
   private generation = 0;
   private frame?: number;
+  private observationFrame?: number;
   private readyTimer?: number;
   private commandAbort?: AbortController;
   private historyRequest?: object;
@@ -80,8 +81,11 @@ export class SessionScrollController {
   private cancelWork() {
     this.generation += 1;
     if (this.frame !== undefined) window.cancelAnimationFrame(this.frame);
+    if (this.observationFrame !== undefined)
+      window.cancelAnimationFrame(this.observationFrame);
     if (this.readyTimer !== undefined) window.clearTimeout(this.readyTimer);
     this.frame = undefined;
+    this.observationFrame = undefined;
     this.readyTimer = undefined;
     this.commandAbort?.abort();
     this.commandAbort = undefined;
@@ -104,6 +108,18 @@ export class SessionScrollController {
     };
     this.lastSnapshot = value;
     writeSessionScrollMemory(this.storageKey, value);
+  }
+
+  /** Let virtual row measurement and native scroll anchoring settle first. */
+  private scheduleObservation() {
+    if (this.observationFrame !== undefined) return;
+    const generation = this.generation;
+    this.observationFrame = window.requestAnimationFrame(() => {
+      this.observationFrame = window.requestAnimationFrame(() => {
+        this.observationFrame = undefined;
+        if (generation === this.generation) this.observe();
+      });
+    });
   }
 
   private gap() {
@@ -131,6 +147,7 @@ export class SessionScrollController {
       this.latest();
     }
     this.observe();
+    this.scheduleObservation();
   };
 
   read = () => {
@@ -194,6 +211,7 @@ export class SessionScrollController {
       // Row measurements can change an anchor's offset without moving the
       // scrollport. Remember the measured viewport, but never write to it.
       this.observe();
+      this.scheduleObservation();
       return;
     }
     if (

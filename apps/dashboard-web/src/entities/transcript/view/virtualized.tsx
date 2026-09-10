@@ -32,7 +32,10 @@ import {
   useTranscriptScrollCommand,
 } from '../use-scroll-command';
 import { buildVirtualTranscriptRows } from '../virtual-rows';
-import { useVirtualTranscriptScrollRestoration } from '../virtual-scroll';
+import {
+  isNearPageBottom,
+  useVirtualTranscriptScrollRestoration,
+} from '../virtual-scroll';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
 
 export function VirtualizedTranscript({
@@ -92,6 +95,49 @@ export function VirtualizedTranscript({
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
     measureElement: (element) => element.getBoundingClientRect().height,
   });
+  const measureTranscriptElement = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element) {
+        virtualizer.measureElement(null);
+        return;
+      }
+      const scrollElement = scrollElementRef.current;
+      const viewportTop = scrollElement?.getBoundingClientRect().top;
+      const anchor =
+        scrollElement && viewportTop !== undefined
+          ? isNearPageBottom(
+              scrollElement.scrollHeight,
+              scrollElement.scrollTop,
+              scrollElement.clientHeight,
+            )
+            ? undefined
+            : Array.from(
+                scrollElement.querySelectorAll<HTMLElement>(
+                  '[data-transcript-row]',
+                ),
+              )
+                .map((candidate) => ({
+                  element: candidate,
+                  top: candidate.getBoundingClientRect().top - viewportTop,
+                }))
+                .find(({ element: candidate }) => {
+                  const rect = candidate.getBoundingClientRect();
+                  return (
+                    rect.bottom > viewportTop &&
+                    rect.top < viewportTop + scrollElement.clientHeight
+                  );
+                })
+          : undefined;
+      virtualizer.measureElement(element);
+      if (anchor && scrollElement) {
+        const nextTop =
+          anchor.element.getBoundingClientRect().top -
+          scrollElement.getBoundingClientRect().top;
+        scrollElement.scrollTop += nextTop - anchor.top;
+      }
+    },
+    [scrollElementRef, virtualizer],
+  );
   // During restoration our measured anchor, not estimated-row compensation,
   // owns the offset. Otherwise asynchronous size adjustments race the command
   // against the virtualizer's last observed (pre-command) scroll position.
@@ -106,20 +152,22 @@ export function VirtualizedTranscript({
     affectedRowKeyRef.current = undefined;
     if (!rowKey) return;
     const row = Array.from(
-      virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
-        [],
+      virtualizerRef.current?.querySelectorAll<HTMLDivElement>(
+        '[data-index]',
+      ) ?? [],
     ).find((element) => element.dataset.transcriptRow === rowKey);
     if (!row) return;
-    virtualizer.measureElement(row);
+    measureTranscriptElement(row);
     const frame = window.requestAnimationFrame(() => {
       const settledRow = Array.from(
-        virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
-          [],
+        virtualizerRef.current?.querySelectorAll<HTMLDivElement>(
+          '[data-index]',
+        ) ?? [],
       ).find((element) => element.dataset.transcriptRow === rowKey);
-      if (settledRow) virtualizer.measureElement(settledRow);
+      if (settledRow) measureTranscriptElement(settledRow);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open, rows.length, virtualizer]);
+  }, [measureTranscriptElement, open, rows.length]);
   useLayoutEffect(() => {
     void previewStartCount;
     void previewEndCount;
@@ -276,7 +324,7 @@ export function VirtualizedTranscript({
               key={virtualRow.key}
               data-index={virtualRow.index}
               data-transcript-row={row.key}
-              ref={virtualizer.measureElement}
+              ref={measureTranscriptElement}
               className="transcript-virtual-row"
               style={{
                 position: 'absolute',

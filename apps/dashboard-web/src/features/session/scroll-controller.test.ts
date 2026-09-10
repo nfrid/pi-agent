@@ -200,6 +200,49 @@ describe('per-visit scroll controller', () => {
     controller.disconnect();
   });
 
+  it('settles the persisted anchor after virtual row measurement', () => {
+    const key = 'session-memory';
+    let rowTop = 12;
+    const row = {
+      dataset: { transcriptKey: 'message-1' },
+      getBoundingClientRect: () => ({ top: rowTop, bottom: rowTop + 20 }),
+    } as unknown as HTMLElement;
+    const port = element();
+    port.querySelectorAll = (() => [
+      row,
+    ]) as unknown as typeof port.querySelectorAll;
+    const controller = new SessionScrollController(manual, key);
+    controller.connect(port);
+    controller.updateHistory(undefined, false);
+    controller.snapshot().command?.complete();
+    controller.onScroll();
+
+    port.scrollTop = 650;
+    rowTop = 70;
+    flush();
+    flush();
+
+    expect(
+      JSON.parse(
+        vi.mocked(window.sessionStorage.setItem).mock.lastCall?.[1] ?? '{}',
+      ),
+    ).toMatchObject({ scrollTop: 650, rowKey: 'message-1', rowOffset: 70 });
+    controller.disconnect();
+  });
+
+  it('reschedules observation after a read cancels pending observation', () => {
+    const controller = new SessionScrollController(manual, 'session-memory');
+    const port = element();
+    controller.connect(port);
+    controller.updateHistory(undefined, false);
+    controller.snapshot().command?.complete();
+    controller.onScroll();
+    controller.read();
+    controller.onScroll();
+    expect(frames.size).toBe(1);
+    controller.disconnect();
+  });
+
   it('persists captured old viewport, not changed DOM on disconnect, and never saves transient restoration', () => {
     const key = 'session-memory';
     const controller = new SessionScrollController(manual, key);
