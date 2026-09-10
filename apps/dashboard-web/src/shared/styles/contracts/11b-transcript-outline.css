@@ -518,6 +518,7 @@ body:has(.session-page) .global-tools > .palette-trigger {
   .surface-launcher,
   .transcript-outline-item,
   .transcript-minimap-marker,
+  .transcript-minimap-marker i,
   .agent-nav-drawer,
   .surface-drawer,
   .outline-sheet {
@@ -545,7 +546,9 @@ body:has(.session-page) .global-tools > .palette-trigger {
   }
 }
 
-@media (display-mode: window-controls-overlay) {
+@media (display-mode: window-controls-overlay) and (pointer: fine) and (
+    min-width: 821px
+  ) {
   /* The outline is a content popover, not a titlebar-aligned drawer. */
   .surface-drawer.outline-sheet .surface-drawer-header {
     min-height: 0;
