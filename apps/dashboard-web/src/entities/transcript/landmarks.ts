@@ -98,6 +98,47 @@ export function buildTranscriptLandmarks(
   return result;
 }
 
+/** The outline is intentionally user-turn-only; other consumers retain all raw landmarks. */
+export function selectTranscriptUserTurns(
+  landmarks: readonly TranscriptLandmark[],
+): TranscriptLandmark[] {
+  return landmarks.filter((landmark) => landmark.kind === 'user');
+}
+
+export type TranscriptLandmarkCluster = {
+  key: string;
+  landmarks: readonly TranscriptLandmark[];
+  representative: TranscriptLandmark;
+};
+
+/** Group contiguous user turns when the bounded rail cannot show each anchor. */
+export function clusterTranscriptUserTurns(
+  landmarks: readonly TranscriptLandmark[],
+  maximum: number,
+): TranscriptLandmarkCluster[] {
+  const turns = selectTranscriptUserTurns(landmarks);
+  if (maximum <= 0 || turns.length === 0) return [];
+  if (turns.length <= maximum)
+    return turns.map((landmark) => ({
+      key: landmark.key,
+      landmarks: [landmark],
+      representative: landmark,
+    }));
+  const size = Math.ceil(turns.length / maximum);
+  const clusters: TranscriptLandmarkCluster[] = [];
+  for (let start = 0; start < turns.length; start += size) {
+    const group = turns.slice(start, start + size);
+    const first = group[0];
+    if (!first) continue;
+    clusters.push({
+      key: `turn-cluster-${first.key}`,
+      landmarks: group,
+      representative: first,
+    });
+  }
+  return clusters;
+}
+
 export function mergeTranscriptLandmarks(
   loadedLandmarks: readonly TranscriptLandmark[],
   outline: readonly SessionOutlineLandmark[] | undefined,

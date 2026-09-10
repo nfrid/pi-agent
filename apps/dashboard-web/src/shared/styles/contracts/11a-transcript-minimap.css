@@ -1,5 +1,4 @@
-/* Global geometry contract: minimap, dialog geometry, and rich-editor integration. */
-/* Quiet desktop minimap; coarse pointers get the same content in the sheet. */
+/* Global geometry contract: quiet transcript turn rail and rich-editor integration. */
 .transcript {
   position: relative;
   padding: 8px 0;
@@ -7,69 +6,101 @@
 .transcript-minimap {
   position: fixed;
   top: 50%;
-  right: 13px;
+  left: var(--session-nav-width, 0px);
   z-index: 31;
   display: none;
-  max-height: calc(100vh - 96px);
+  box-sizing: border-box;
+  height: min(calc(100dvh - 120px), 520px);
+  width: 52px;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  overflow: hidden;
+  align-items: center;
+  justify-content: space-around;
+  gap: 0;
+  overflow: visible;
   transform: translateY(-50%);
-}
-.transcript-minimap-label {
-  margin-bottom: 4px;
-  color: var(--dim);
-  font-size: 8px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  writing-mode: vertical-rl;
+  pointer-events: none;
 }
 .transcript-minimap-marker {
-  width: 18px;
-  height: 9px;
+  position: relative;
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-height: 18px;
+  width: 44px;
   border: 0;
-  border-radius: 2px;
+  border-radius: 3px;
   background: transparent;
-  padding: 2px 0;
+  padding: 7px 13px;
   cursor: pointer;
-  transition:
-    width 150ms ease,
-    background 150ms ease;
-}
-.transcript-minimap-preview {
-  display: none;
+  pointer-events: auto;
 }
 .transcript-minimap-marker i {
   display: block;
-  width: 100%;
+  width: 18px;
   height: 2px;
-  border-radius: 2px;
+  border-radius: 1px;
   background: var(--line);
 }
-.transcript-minimap-marker:hover,
-.transcript-minimap-marker:focus-visible {
-  width: 29px;
-}
-.transcript-minimap-marker:hover i,
-.transcript-minimap-marker:focus-visible i,
 .transcript-minimap-marker.active i {
-  background: var(--purple);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--purple) 55%, transparent);
+  background: var(--fg);
 }
-.transcript-minimap-marker.outline-user i {
-  background: var(--pink);
+.transcript-minimap-marker:focus-visible {
+  outline: 1px solid var(--dim);
+  outline-offset: -1px;
 }
-.transcript-minimap-marker.outline-delegate-request i {
-  border-radius: 1px;
-  background: var(--purple);
+.transcript-minimap-preview {
+  position: absolute;
+  top: 50%;
+  left: 48px;
+  z-index: 1;
+  display: flex;
+  width: min(260px, calc(100vw - 110px));
+  max-height: 92px;
+  overflow: hidden;
+  flex-direction: column;
+  gap: 3px;
+  border: var(--border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-alt) 97%, transparent);
+  box-shadow: 0 7px 24px #0008;
+  color: var(--fg);
+  opacity: 0;
+  padding: 7px 9px 8px;
+  transform: translate(-8px, -50%);
+  pointer-events: none;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+  transition: opacity 120ms ease;
 }
-.transcript-minimap-marker.outline-steering i {
-  background: var(--orange);
+.transcript-minimap-preview::before {
+  content: attr(data-meta);
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
-.transcript-minimap-marker.outline-assistant i {
-  background: var(--purple);
+.transcript-minimap-preview::after {
+  content: attr(data-label);
+  white-space: normal;
 }
-.transcript-minimap-marker.outline-activity i {
-  background: var(--cyan);
+.transcript-minimap-marker:hover .transcript-minimap-preview,
+.transcript-minimap-marker:focus-visible .transcript-minimap-preview {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+@media (pointer: fine) and (min-width: 821px) {
+  .transcript-minimap {
+    display: flex;
+  }
+  .session-page:not(.session-page-embedded) .transcript-minimap {
+    left: var(--session-nav-width, var(--session-sidebar-width));
+  }
+}
+@media (max-width: 820px) {
+  .transcript-minimap {
+    display: none;
+  }
 }
