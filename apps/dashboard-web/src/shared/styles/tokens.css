@@ -19,6 +19,7 @@
 
   /* Shell geometry */
   --session-header-height: 48px;
+  --session-sidebar-width: 276px;
 
   /* Spacing scale */
   --space-1: 4px;

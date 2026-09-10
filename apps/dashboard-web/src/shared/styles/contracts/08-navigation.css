@@ -75,6 +75,19 @@
   .session-context input {
     -webkit-app-region: no-drag;
   }
+  .session-layout:not(:has(.activity-panel.is-pinned))
+    .session-page:not(.session-page-embedded)
+    .session-context {
+    padding-right: max(
+      12px,
+      calc(
+        100vw -
+        env(titlebar-area-x, 0px) -
+        env(titlebar-area-width, 100vw) +
+        12px
+      )
+    );
+  }
 }
 .shell {
   width: min(1240px, 100%);
@@ -84,7 +97,7 @@
 }
 .session-layout {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: var(--session-sidebar-width) minmax(0, 1fr);
   align-items: start;
   gap: 24px;
   min-width: 0;

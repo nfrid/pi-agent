@@ -12,6 +12,7 @@ async function openWorkingSession(
   width: number,
   height: number,
   rowCount = 100,
+  liveState: 'working' | 'compacting' = 'working',
 ) {
   await page.setViewportSize({ width, height });
   const base = buildWorkingScenario();
@@ -33,7 +34,20 @@ async function openWorkingSession(
   }));
   await installVisualStateScenario(page, {
     ...base,
-    sessionSnapshot: { ...sessionSnapshot, entries },
+    snapshot: {
+      ...base.snapshot,
+      runtimes: base.snapshot.runtimes.map((runtime) => ({
+        ...runtime,
+        liveState,
+      })),
+    },
+    sessionSnapshot: {
+      ...sessionSnapshot,
+      entries,
+      active: sessionSnapshot.active
+        ? { ...sessionSnapshot.active, liveState }
+        : sessionSnapshot.active,
+    },
   });
   await expect(page.locator('.session-transcript-scroll')).toBeVisible();
   await expect(
@@ -74,11 +88,11 @@ test('wide session reserves activity rail, preserves reading gutters, and reopen
     };
   });
   expect(layout.columns.split(' ').length).toBe(3);
-  expect(layout.panel.width).toBeGreaterThanOrEqual(290);
+  expect(layout.panel.width).toBe(276);
   expect(layout.panel.top).toBe(0);
   expect(layout.panel.right).toBe(1440);
   expect(layout.panel.left).toBe(layout.scroll.right);
-  expect(layout.scroll.left).toBe(248);
+  expect(layout.scroll.left).toBe(276);
   expect(layout.row.width).toBeLessThan(layout.scroll.width - 40);
   expect(layout.row.left).toBeGreaterThan(layout.scroll.left + 20);
   expect(layout.row.right).toBeLessThan(layout.scroll.right - 20);
@@ -162,6 +176,31 @@ test('wide session reserves activity rail, preserves reading gutters, and reopen
   await page.getByRole('button', { name: 'Close activity panel' }).click();
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(page.locator('.activity-panel')).toHaveClass(/is-pinned/);
+});
+
+test('live events use the persisted content edges without changing virtual rows @desktop', async ({
+  page,
+}) => {
+  await openWorkingSession(page, 1440, 900, 100, 'compacting');
+  const geometry = await page.evaluate(() => {
+    const live = document.querySelector('.live-compaction-event');
+    const row = document.querySelector('.transcript-virtual-row');
+    if (!live || !row)
+      throw new Error('live and persisted transcript rows missing');
+    const liveRect = live.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    return {
+      live: {
+        left: liveRect.left,
+        right: liveRect.right,
+        width: liveRect.width,
+      },
+      row: { left: rowRect.left, right: rowRect.right, width: rowRect.width },
+    };
+  });
+  expect(geometry.live.left).toBe(geometry.row.left);
+  expect(geometry.live.right).toBe(geometry.row.right);
+  expect(geometry.live.width).toBe(geometry.row.width);
 });
 
 for (const rowCount of [20, 100]) {
