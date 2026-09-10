@@ -1783,6 +1783,7 @@ describe('live extension surface fixtures', () => {
                   state: 'running',
                   createdAt: 1,
                   allowWrites: false,
+                  route: 'tasks',
                 },
                 {
                   id: 'waiting',
@@ -1818,17 +1819,73 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('title="Active: 1"');
     expect(markup).toContain('title="Waiting: 1"');
     expect(markup).toContain('title="Failed: 1"');
-    expect(markup).toContain('aria-label="1 finished"');
+    expect(markup).toContain(
+      'aria-label="Show all delegates, including finished work"',
+    );
     expect(markup).toContain('title="Finished: 1"');
     expect(markup).not.toContain('Finished (1)');
-    expect(markup).not.toContain('read-only');
-    expect(markup).not.toContain('waiting for a slot');
+    expect(markup).toContain('read-only');
+    expect(markup).toContain('tasks');
+    expect(markup).toContain(
+      'aria-label="1 active, 1 waiting, 1 failed, 1 finished"',
+    );
+    expect(markup).toContain('waiting for a slot');
     expect(markup.indexOf('Active</strong>')).toBeLessThan(
       markup.indexOf('Waiting</strong>'),
     );
     expect(markup).not.toContain('need attention');
     expect(markup).toContain('aria-haspopup="dialog"');
     expect(markup).toContain('Unsupported renderer: unsupported.panel');
+  });
+
+  it('toggles the whole delegates header to reveal finished rows', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <DelegateSurface
+          activityPanel
+          pausedAt={123}
+          surface={{
+            id: 'delegate-toggle',
+            rendererId: 'delegate.status',
+            viewModel: {
+              version: 1,
+              statuses: [
+                {
+                  id: 'active',
+                  runId: 'active-run',
+                  lineageId: 'active-lineage',
+                  name: 'Active worker',
+                  kind: 'background',
+                  state: 'running',
+                  createdAt: 1,
+                  allowWrites: false,
+                },
+                {
+                  id: 'finished',
+                  runId: 'finished-run',
+                  lineageId: 'finished-lineage',
+                  name: 'Finished worker',
+                  kind: 'background',
+                  state: 'success',
+                  createdAt: 1,
+                  finishedAt: 2,
+                  allowWrites: false,
+                },
+              ],
+            },
+          }}
+        />,
+      );
+    });
+    const header = tree.root.findByProps({
+      'aria-label': 'Show all delegates, including finished work',
+    });
+    expect(header.props['aria-expanded']).toBe(false);
+    expect(JSON.stringify(tree.toJSON())).not.toContain('Finished worker');
+    act(() => header.props.onClick());
+    expect(header.props['aria-expanded']).toBe(true);
+    expect(JSON.stringify(tree.toJSON())).toContain('Finished worker');
   });
 
   it('opens live and persisted delegate rows directly in the transcript inspector', () => {
@@ -1849,7 +1906,11 @@ describe('live extension surface fixtures', () => {
       });
       if (history) {
         act(() =>
-          tree.root.findByProps({ 'aria-label': '1 finished' }).props.onClick(),
+          tree.root
+            .findByProps({
+              'aria-label': 'Show all delegates, including finished work',
+            })
+            .props.onClick(),
         );
       }
       act(() => {
