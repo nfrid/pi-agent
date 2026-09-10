@@ -18,9 +18,10 @@ function taskRows(model: TaskStateViewModel): readonly TaskSurfaceTask[] {
 
 function taskPriority(row: TaskSurfaceTask): number {
   const state = surfaceStateLabel(row.status);
-  if (state === 'running' || state === 'blocked') return 0;
+  if (state === 'running') return 0;
   if (state === 'queued') return 1;
-  return 2;
+  if (state === 'blocked') return 2;
+  return 3;
 }
 
 /** Keep the compact panel useful without changing the authoritative task order. */
@@ -29,6 +30,7 @@ export function taskPreviewRows(
 ): readonly TaskSurfaceTask[] {
   return rows
     .map((row, index) => ({ row, index }))
+    .filter(({ row }) => taskPriority(row) < 3)
     .sort(
       (left, right) =>
         taskPriority(left.row) - taskPriority(right.row) ||

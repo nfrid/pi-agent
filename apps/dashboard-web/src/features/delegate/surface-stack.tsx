@@ -53,14 +53,8 @@ export function ExtensionSurfaceStack({
               (surface.rendererId === TASKS_RENDERER_ID ||
                 surface.rendererId === DELEGATE_RENDERER_ID)),
         )
-        .filter(
-          (surface) =>
-            !activityPanel ||
-            surface.rendererId === TASKS_RENDERER_ID ||
-            surface.rendererId === DELEGATE_RENDERER_ID,
-        )
         .sort((left, right) => surfaceOrder(left) - surfaceOrder(right)),
-    [activityPanel, excludeDelegate, runtime, placement],
+    [excludeDelegate, runtime, placement],
   );
   if (!surfaces.length) return null;
   const slots = surfaces.map((surface) => {

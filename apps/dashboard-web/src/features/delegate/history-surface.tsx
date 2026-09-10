@@ -206,7 +206,8 @@ export function DelegateHistorySurface({
   if (
     !historyQuery.data?.groups.length &&
     !historyQuery.data?.truncated &&
-    liveRows.length === 0
+    liveRows.length === 0 &&
+    (!activityPanel || !historyError)
   )
     return null;
   const surface =

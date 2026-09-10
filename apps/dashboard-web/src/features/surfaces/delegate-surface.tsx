@@ -572,6 +572,46 @@ export function DelegateSurface({
               Loading delegate history…
             </p>
           )}
+          {historyError !== undefined && !historyLoading && (
+            <p className="delegate-history-status" role="status">
+              No delegate history.
+            </p>
+          )}
+          {historyIncomplete && (
+            <p className="delegate-history-status" role="status">
+              History incomplete · some work omitted
+            </p>
+          )}
+          {wakeConditions.length > 0 && (
+            <section
+              className="delegate-wake-conditions"
+              aria-label="Resume conditions"
+            >
+              {wakeConditions.map((wake) => {
+                const waitingFor =
+                  'waitingFor' in wake && wake.waitingFor
+                    ? wake.waitingFor
+                    : wake.references;
+                const ready = Math.max(
+                  0,
+                  wake.references.length - waitingFor.length,
+                );
+                return (
+                  <aside className="delegate-wake-condition" key={wake.id}>
+                    <strong>Parent resume gate</strong>
+                    <span>
+                      {ready}/{wake.references.length} ready · waiting for{' '}
+                      {waitingFor
+                        .map((reference) =>
+                          delegateReferenceLabel(reference, rows),
+                        )
+                        .join(', ')}
+                    </span>
+                  </aside>
+                );
+              })}
+            </section>
+          )}
           <div className="activity-panel-rows">
             {panelGroups
               .filter((group) => delegatePanelBucket(group.row) !== 'finished')
