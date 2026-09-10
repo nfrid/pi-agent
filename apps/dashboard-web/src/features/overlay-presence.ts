@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePrefersReducedMotion } from '../shared/hooks/use-prefers-reduced-motion';
 
 export const DASHBOARD_MOTION_MS = 160;
@@ -61,61 +61,4 @@ export function useOverlayPresence(open: boolean): {
   }, [open, retained, reducedMotion]);
 
   return { present, exiting };
-}
-
-/** Trap Tab focus inside an overlay container on mobile viewports. */
-export function useOverlayFocusTrap(
-  open: boolean,
-  containerRef: RefObject<HTMLElement | null>,
-  options?: {
-    mobile?: boolean;
-    restoreFocusRef?: RefObject<HTMLElement | null>;
-    skipRestoreSelector?: string;
-  },
-) {
-  useEffect(() => {
-    if (!open || !options?.mobile) return;
-    const container = containerRef.current;
-    const frame = window.requestAnimationFrame(() => {
-      container
-        ?.querySelector<HTMLElement>('input, button:not(:disabled), [href]')
-        ?.focus();
-    });
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab' || !containerRef.current) return;
-      const focusable = Array.from(
-        containerRef.current.querySelectorAll<HTMLElement>(
-          'input, button:not(:disabled), [href]',
-        ),
-      );
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener('keydown', onKeyDown);
-      if (
-        options.restoreFocusRef?.current &&
-        (!options.skipRestoreSelector ||
-          !document.querySelector(options.skipRestoreSelector))
-      ) {
-        options.restoreFocusRef.current.focus({ preventScroll: true });
-      }
-    };
-  }, [
-    containerRef,
-    open,
-    options?.mobile,
-    options?.restoreFocusRef,
-    options?.skipRestoreSelector,
-  ]);
 }

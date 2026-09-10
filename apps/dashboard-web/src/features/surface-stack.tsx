@@ -86,6 +86,7 @@ export function SidePanelSurface({
     >
       <AriaDialog
         ref={swipeHandlers.ref}
+        onClickCapture={swipeHandlers.onClickCapture}
         className={`side-panel-dialog${className ? ` ${className}` : ''}`}
         aria-label={ariaLabel}
         aria-modal="true"
@@ -249,6 +250,7 @@ export function SurfaceStack({
       >
         <AriaDialog
           ref={swipeHandlers.ref}
+          onClickCapture={swipeHandlers.onClickCapture}
           className={className}
           aria-label={topPage.title}
           aria-modal="true"
@@ -324,53 +326,5 @@ export function SurfaceStack({
         </AriaDialog>
       </div>
     </ModalOverlay>
-  );
-}
-
-/** Session-mode agent nav overlay shell remains a specialized navigation rail. */
-export function AgentNavDrawerShell({
-  open,
-  onOpenChange,
-  isMobile,
-  drawerPresent,
-  drawerExiting,
-  drawerClassName,
-  children,
-}: {
-  open: boolean;
-  onOpenChange?: (open: boolean) => void;
-  isMobile: boolean;
-  drawerPresent: boolean;
-  drawerExiting: boolean;
-  drawerClassName?: string;
-  children: ReactNode;
-}) {
-  return (
-    <>
-      <button
-        type="button"
-        className="agent-nav-trigger"
-        aria-label="Open agent list"
-        onClick={() => onOpenChange?.(true)}
-      >
-        ☰
-      </button>
-      {drawerPresent && (
-        <button
-          type="button"
-          className={`agent-nav-backdrop${drawerExiting ? ' is-exiting' : ''}`}
-          aria-label="Close agent list"
-          onClick={() => onOpenChange?.(false)}
-        />
-      )}
-      {(!isMobile || drawerPresent) && (
-        <div
-          className={`agent-nav-drawer ${drawerClassName ?? ''} ${open ? 'open' : ''}${drawerExiting ? ' is-exiting' : ''}`}
-          aria-hidden={isMobile && !open ? true : undefined}
-        >
-          {children}
-        </div>
-      )}
-    </>
   );
 }

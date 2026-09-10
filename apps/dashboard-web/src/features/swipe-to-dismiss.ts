@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { type MouseEvent, useEffect, useRef } from 'react';
 import { type SwipeEventData, useSwipeable } from 'react-swipeable';
 
 const EDGE_SWIPE_THRESHOLD = 52;
@@ -37,13 +37,18 @@ export function isIntentionalLeftSwipe(
   return isIntentionalSwipe(event, 'left');
 }
 
-function isIgnoredSwipeTarget(target: EventTarget | null): boolean {
+function isIgnoredSwipeTarget(
+  target: EventTarget | null,
+  owner: HTMLElement | null,
+): boolean {
   if (!(target instanceof Element)) return true;
-  if (target.closest('[data-surface-portal-root], [data-surface-layer]'))
-    return true;
+  const portal = target.closest(
+    '[data-surface-portal-root], [data-surface-layer]',
+  );
+  if (portal && !owner?.contains(target)) return true;
   if (
     target.closest(
-      'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [data-horizontal-scroller]',
+      'input, textarea, select, [contenteditable="true"], [data-horizontal-scroller]',
     )
   )
     return true;
@@ -68,10 +73,27 @@ export function useSwipeToDismiss(
   side: SwipeSide = 'right',
 ) {
   const eligible = useRef(false);
-  return useSwipeable({
+  const suppressClick = useRef(false);
+  const ownerRef = useRef<HTMLElement | null>(null);
+  const handlers = useSwipeable({
     delta: MIN_HORIZONTAL_DISTANCE,
-    onTouchStart: (event) => {
-      eligible.current = !isIgnoredSwipeTarget(event.target);
+    onTouchStartOrOnMouseDown: ({ event }) => {
+      suppressClick.current = false;
+      eligible.current = !isIgnoredSwipeTarget(event.target, ownerRef.current);
+    },
+    onSwiping: (event) => {
+      if (
+        eligible.current &&
+        event.absX >= MIN_HORIZONTAL_DISTANCE &&
+        event.absX >= event.absY * HORIZONTAL_DOMINANCE_RATIO
+      )
+        suppressClick.current = true;
+    },
+    onTouchEndOrOnMouseUp: () => {
+      if (suppressClick.current)
+        window.setTimeout(() => {
+          suppressClick.current = false;
+        }, 0);
     },
     onSwipedRight: (event) => {
       if (
@@ -95,6 +117,19 @@ export function useSwipeToDismiss(
     trackTouch: true,
     touchEventOptions: { passive: true },
   });
+  return {
+    ...handlers,
+    ref: (element: HTMLElement | null) => {
+      ownerRef.current = element;
+      handlers.ref(element);
+    },
+    onClickCapture: (event: MouseEvent) => {
+      if (!suppressClick.current) return;
+      suppressClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+  };
 }
 
 /** Shared edge-open gesture for side panels. The listener remains stable while callbacks update. */
@@ -118,27 +153,28 @@ export function useSidePanelEdgeSwipe({
     if (!enabled) return;
     let start: { x: number; y: number } | undefined;
     const onStart = (event: globalThis.TouchEvent) => {
+      start = undefined;
+      const touchCount = event.touches.length || event.changedTouches.length;
       if (
-        event.touches.length !== 1 ||
-        (event.target instanceof Element &&
-          (isIgnoredSwipeTarget(event.target) ||
-            Boolean(
-              event.target.closest(
-                '[data-side-panel-root], .surface-drawer-layer',
-              ),
-            )))
-      ) {
-        start = undefined;
+        touchCount !== 1 ||
+        document.querySelector('[data-side-panel-root], .surface-drawer-layer')
+      )
         return;
-      }
+      if (
+        event.target instanceof Element &&
+        isIgnoredSwipeTarget(event.target, null)
+      )
+        return;
       const touch = event.changedTouches[0];
       if (!touch) return;
       const atEdge =
         side === 'left'
           ? touch.clientX <= EDGE_SWIPE_ZONE
           : touch.clientX >= window.innerWidth - EDGE_SWIPE_ZONE;
-      if (atEdge && !openRef.current)
+      if (atEdge && !openRef.current) {
+        if (event.cancelable) event.preventDefault();
         start = { x: touch.clientX, y: touch.clientY };
+      }
     };
     const onEnd = (event: globalThis.TouchEvent) => {
       const initial = start;
@@ -159,7 +195,7 @@ export function useSidePanelEdgeSwipe({
     const onCancel = () => {
       start = undefined;
     };
-    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchstart', onStart, { passive: false });
     window.addEventListener('touchend', onEnd, { passive: true });
     window.addEventListener('touchcancel', onCancel, { passive: true });
     return () => {

@@ -330,13 +330,6 @@
     animation: drawer-slide-out 160ms ease-in both;
     pointer-events: none;
   }
-  .agent-nav-backdrop {
-    animation: overlay-in 160ms ease-out both;
-  }
-  .agent-nav-backdrop.is-exiting {
-    animation: overlay-out 160ms ease-in both;
-    pointer-events: none;
-  }
   .agent-nav-drawer > .agent-thread-nav {
     position: static;
     width: 100%;
@@ -345,16 +338,6 @@
     border-width: 0 1px 0 0;
     border-radius: 0;
     box-shadow: 12px 0 34px #0009;
-  }
-  .agent-nav-backdrop {
-    position: fixed;
-    z-index: 34;
-    inset: 0 0 0 min(310px, calc(100vw - 34px));
-    display: block;
-    width: auto;
-    height: 100%;
-    border: 0;
-    background: var(--scrim-dark);
   }
   .session-context-slot {
     height: 34px;
@@ -524,7 +507,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .agent-nav-backdrop,
   .agent-nav-drawer,
   .surface-drawer-layer,
   .surface-drawer,
