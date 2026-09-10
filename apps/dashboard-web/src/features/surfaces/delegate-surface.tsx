@@ -553,7 +553,11 @@ export function DelegateSurface({
   if (activityPanel)
     return (
       <>
-        <section className="activity-panel-section" aria-label="Delegates">
+        <section
+          className="activity-panel-section"
+          aria-label="Delegates"
+          tabIndex={-1}
+        >
           <header className="activity-panel-header">
             <h2>Delegates</h2>
             <div

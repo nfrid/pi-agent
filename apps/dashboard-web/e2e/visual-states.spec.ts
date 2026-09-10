@@ -158,24 +158,20 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   expect(
     Math.abs(userPresentation.timeRight - streamGeometry.toolTimeRight),
   ).toBeLessThan(1);
+  const activity = page.locator('.activity-panel');
   await expect(
-    page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
+    activity.getByRole('region', { name: 'Tasks', exact: true }),
   ).toBeVisible();
   await page.locator('[contenteditable="true"]').first().focus();
   await page.keyboard.press('Meta+Alt+t');
-  const tasksDialog = page.getByRole('dialog', { name: 'Tasks' });
-  await expect(tasksDialog).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(tasksDialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /Delegates/ })).toBeVisible();
-  await page.keyboard.press('Meta+d');
-  const delegatesDialog = page.getByRole('dialog', { name: 'Delegates' });
-  await expect(delegatesDialog).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(delegatesDialog).toHaveCount(0);
   await expect(
-    page.getByRole('region', { name: 'Current tasks and delegates' }),
-  ).toBeVisible();
+    activity.getByRole('region', { name: 'Tasks', exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press('Meta+d');
+  await expect(
+    activity.getByRole('region', { name: 'Delegates', exact: true }),
+  ).toBeFocused();
+  await page.locator('[contenteditable="true"]').first().focus();
   await expect(page.getByText('Review worker', { exact: true })).toBeVisible();
   await expect(page).toHaveScreenshot('working-transcript-desktop.png', {
     animations: 'disabled',
@@ -225,26 +221,28 @@ test('working transcript shows flat tools, tasks, and delegates @desktop', async
   );
 });
 
-test('working transcript keeps run status compact on Pixel', async ({
+test('working transcript keeps activity behind a header button on Pixel', async ({
   page,
 }) => {
   await page.setViewportSize(VISUAL_PIXEL_VIEWPORT);
   await installVisualStateScenario(page, buildWorkingScenario());
 
-  const runStatus = page.getByRole('button', { name: /Run status/ });
-  await expect(runStatus).toHaveAttribute('aria-expanded', 'false');
-  await expect(
-    page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
-  ).not.toBeVisible();
+  const activityButton = page.getByRole('button', {
+    name: 'Open session activity',
+  });
+  await expect(activityButton).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.activity-panel')).toHaveCount(0);
   await expect(page).toHaveScreenshot('working-transcript-pixel.png', {
     animations: 'disabled',
     caret: 'hide',
   });
 
-  await runStatus.click();
-  await expect(runStatus).toHaveAttribute('aria-expanded', 'true');
+  await activityButton.click();
+  await expect(activityButton).toHaveAttribute('aria-expanded', 'true');
   await expect(
-    page.getByRole('button', { name: /Tasks 0 of 2 tasks complete/ }),
+    page
+      .locator('.activity-panel')
+      .getByRole('region', { name: 'Tasks', exact: true }),
   ).toBeVisible();
   await expect(page).toHaveScreenshot('working-run-status-expanded-pixel.png', {
     animations: 'disabled',

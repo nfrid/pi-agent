@@ -7,13 +7,17 @@ import {
 
 const PIN_KEY = 'pi-dashboard-activity-panel-pinned-v1';
 
-async function openWorkingSession(page: Page, width: number, height: number) {
+async function openWorkingSession(
+  page: Page,
+  width: number,
+  height: number,
+  rowCount = 100,
+) {
   await page.setViewportSize({ width, height });
-  await page.addInitScript((key) => localStorage.removeItem(key), PIN_KEY);
   const base = buildWorkingScenario();
   const sessionSnapshot = base.sessionSnapshot;
   if (!sessionSnapshot) throw new Error('working scenario has no session');
-  const entries = Array.from({ length: 100 }, (_, index) => ({
+  const entries = Array.from({ length: rowCount }, (_, index) => ({
     type: 'message',
     id: `layout-message-${index}`,
     message: {
@@ -32,7 +36,15 @@ async function openWorkingSession(page: Page, width: number, height: number) {
     sessionSnapshot: { ...sessionSnapshot, entries },
   });
   await expect(page.locator('.session-transcript-scroll')).toBeVisible();
-  await expect(page.locator('.transcript-virtual-row').last()).toBeVisible();
+  await expect(
+    page
+      .locator(
+        rowCount > 80
+          ? '.transcript-virtual-row'
+          : '.transcript [data-transcript-key]',
+      )
+      .last(),
+  ).toBeVisible();
 }
 
 test('wide session reserves activity rail, preserves reading gutters, and reopens after unpin @desktop', async ({
@@ -63,6 +75,10 @@ test('wide session reserves activity rail, preserves reading gutters, and reopen
   });
   expect(layout.columns.split(' ').length).toBe(3);
   expect(layout.panel.width).toBeGreaterThanOrEqual(290);
+  expect(layout.panel.top).toBe(0);
+  expect(layout.panel.right).toBe(1440);
+  expect(layout.panel.left).toBe(layout.scroll.right);
+  expect(layout.scroll.left).toBe(248);
   expect(layout.row.width).toBeLessThan(layout.scroll.width - 40);
   expect(layout.row.left).toBeGreaterThan(layout.scroll.left + 20);
   expect(layout.row.right).toBeLessThan(layout.scroll.right - 20);
@@ -115,30 +131,81 @@ test('wide session reserves activity rail, preserves reading gutters, and reopen
   const delegate = page.getByRole('button', { name: /Review worker/ }).last();
   await expect(delegate).toBeVisible();
   await delegate.click();
-  const activePortal = page.locator('[data-surface-portal-root]');
-  const hasVisiblePortal = await activePortal.evaluateAll((nodes) =>
-    nodes.some((node) => {
-      const element = node as HTMLElement;
-      const style = getComputedStyle(element);
-      return (
-        element.getClientRects().length > 0 &&
-        style.display !== 'none' &&
-        style.visibility !== 'hidden'
-      );
-    }),
-  );
-  if (hasVisiblePortal) {
-    await page.keyboard.press('Escape');
-    await expect(page.locator('.activity-panel.is-open')).toHaveCount(1);
-  }
+  await expect(
+    page.getByRole('dialog', { name: 'Delegate · Review worker' }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.activity-panel.is-open')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(page.locator('.activity-panel.is-open')).toHaveCount(0);
 
+  expect(await page.evaluate((key) => localStorage.getItem(key), PIN_KEY)).toBe(
+    'false',
+  );
   await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Open session activity' }),
+  ).toBeVisible();
   await expect(page.locator('.activity-panel.is-open')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open session activity' }).click();
   await expect(page.locator('.activity-panel')).toHaveClass(/is-open/);
+  await page
+    .getByRole('button', { name: 'Pin activity panel', exact: true })
+    .click();
+  await expect(page.locator('.activity-panel')).toHaveClass(/is-pinned/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Open session activity' }).click();
+  await expect(page.locator('.activity-panel')).toHaveClass(/is-overlay/);
+  await expect(
+    page.getByRole('button', { name: 'Close activity panel' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Close activity panel' }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.locator('.activity-panel')).toHaveClass(/is-pinned/);
 });
+
+for (const rowCount of [20, 100]) {
+  test(`transcript gutters scroll natively and keep the tail clear (${rowCount} rows) @desktop`, async ({
+    page,
+  }) => {
+    await openWorkingSession(page, 1600, 900, rowCount);
+    const scroll = page.locator('.session-transcript-scroll');
+    const rows = page.locator(
+      rowCount > 80
+        ? '.transcript-virtual-row'
+        : '.transcript [data-transcript-key]',
+    );
+    const composer = page.locator('form.composer');
+    const geometry = await scroll.boundingBox();
+    const composerRect = await composer.boundingBox();
+    if (!geometry || !composerRect) throw new Error('scroll/composer missing');
+    await expect
+      .poll(async () => {
+        const last = await rows.last().boundingBox();
+        return last ? composerRect.y - (last.y + last.height) : -1;
+      })
+      .toBeGreaterThanOrEqual(0);
+    const lastBox = await rows.last().boundingBox();
+    expect(lastBox?.width).toBeLessThanOrEqual(820);
+    for (const x of [geometry.x + 8, geometry.x + geometry.width - 12]) {
+      await scroll.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      const before = await scroll.evaluate((element) => element.scrollTop);
+      // Beside the composer, not just in the transcript's upper gutters.
+      await page.mouse.move(x, composerRect.y + 20);
+      await page.mouse.wheel(0, -240);
+      await expect
+        .poll(() => scroll.evaluate((element) => element.scrollTop))
+        .toBeLessThan(before - 50);
+    }
+    // Sidebar scrolling must not bubble through to the transcript.
+    const beforePanel = await scroll.evaluate((element) => element.scrollTop);
+    await page.mouse.move(1450, 200);
+    await page.mouse.wheel(0, 240);
+    await expect(scroll).toHaveJSProperty('scrollTop', beforePanel);
+  });
+}
 
 test('mobile uses header activity button, close action, and right-edge gesture without a mid-edge handle', async ({
   page,
@@ -157,6 +224,17 @@ test('mobile uses header activity button, close action, and right-edge gesture w
   await expect(
     page.getByRole('button', { name: 'Unpin activity panel' }),
   ).toHaveCount(0);
+  await page
+    .locator('.activity-panel')
+    .getByRole('button', { name: /Review worker/ })
+    .click();
+  const inspector = page.getByRole('dialog', {
+    name: 'Delegate · Review worker',
+  });
+  await expect(inspector).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(inspector).toHaveCount(0);
+  await expect(page.locator('.activity-panel')).toBeVisible();
   await page.getByRole('button', { name: 'Close activity panel' }).click();
   await expect(page.locator('.activity-panel.is-open')).toHaveCount(0);
 

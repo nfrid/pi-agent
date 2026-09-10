@@ -243,7 +243,6 @@ export function SessionView({
           statusLabel={statusLabel}
           outlineTriggerRef={outlineTriggerRef}
           onOpenOutline={() => setOutlineOpen(true)}
-          onOpenAgentNav={() => setAgentNavOpen(true)}
           activityHints={activityState.hints}
           activityOpen={activityState.open}
           onOpenActivity={() => activityState.setOpen(true)}

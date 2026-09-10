@@ -237,17 +237,13 @@ async function inspectPersistedDelegate(
   );
 
   await page.goto('/sessions/historical-session');
-  if (compactContext) {
-    const runStatus = page.locator('.run-status-disclosure-trigger');
-    await expect(runStatus).toBeVisible();
-    await runStatus.click();
-  }
-  const delegateLauncher = page.locator(
-    'article.extension-surface[aria-label="Delegates"] button.surface-launcher',
-  );
-  await expect(delegateLauncher).toBeVisible();
-  await delegateLauncher.click();
-  await page.getByRole('button', { name: /Offline historical worker/ }).click();
+  const activity = page.locator('.activity-panel');
+  if (!(await activity.isVisible()))
+    await page.getByRole('button', { name: 'Open session activity' }).click();
+  await activity.getByText('Finished (1)', { exact: true }).click();
+  await activity
+    .getByRole('button', { name: /Offline historical worker/ })
+    .click();
   const inspector = page.getByRole('dialog', {
     name: 'Delegate · Offline historical worker',
   });
@@ -271,7 +267,10 @@ async function inspectPersistedDelegate(
   await inspector.getByText('Details', { exact: true }).click();
   await expect(inspector.getByText('Keep the review concise.')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(
+    page.getByRole('dialog', { name: 'Delegates', exact: true }),
+  ).toHaveCount(0);
+  await expect(activity).toBeVisible();
   await expect(
     page.getByRole('button', { name: /Offline historical worker/ }),
   ).toBeVisible();

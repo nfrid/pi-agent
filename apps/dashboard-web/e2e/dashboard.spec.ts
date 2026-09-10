@@ -2908,9 +2908,11 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const composer = page.getByLabel('Message Pi');
   await expect(composer).toBeVisible();
   const activeComposer = page.locator('form.composer');
+  await page.getByRole('button', { name: 'Open session activity' }).click();
   await expect(
-    activeComposer.locator('.draft-picker-trigger-locked'),
+    page.locator('.activity-panel .draft-picker-trigger-locked'),
   ).toContainText('Current checkout · main');
+  await page.keyboard.press('Escape');
   await expect(
     activeComposer.getByRole('button', { name: 'Agent and thinking' }),
   ).toContainText('Careful· high');
@@ -2933,9 +2935,11 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page).toHaveURL(/\/sessions\/session-dormant$/u);
   const dormantComposer = page.locator('form.composer');
   await expect(dormantComposer).toBeVisible();
+  await page.getByRole('button', { name: 'Open session activity' }).click();
   await expect(
-    dormantComposer.locator('.draft-picker-trigger-locked'),
+    page.locator('.activity-panel .draft-picker-trigger-locked'),
   ).toContainText('Current checkout · main');
+  await page.keyboard.press('Escape');
   const dormantAgent = dormantComposer.getByRole('button', {
     name: 'Agent and thinking',
   });
@@ -3863,12 +3867,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
       composer: composer.getBoundingClientRect().width,
     };
   });
-  expect(
-    Math.abs(fullWidthGeometry.message - fullWidthGeometry.transcript),
-  ).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs(fullWidthGeometry.composer - fullWidthGeometry.transcript),
-  ).toBeLessThanOrEqual(1);
+  expect(fullWidthGeometry.transcript).toBe(320);
+  expect(fullWidthGeometry.transcript - fullWidthGeometry.message).toBe(26);
+  expect(fullWidthGeometry.transcript - fullWidthGeometry.composer).toBe(32);
   const finalAssistantParagraphs = page
     .locator('.message-assistant')
     .filter({ hasText: 'Deployment resumes automatically.' })
@@ -3948,8 +3949,8 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(page.getByText('Compaction checkpoint')).toBeVisible();
   await page.evaluate(() => {
     const target = document;
-    if (!document.querySelector('.agent-nav-handle'))
-      throw new Error('agent drawer handle missing');
+    if (document.querySelector('.agent-nav-handle'))
+      throw new Error('obsolete agent drawer handle remains');
     const touch = (type: string, x: number) =>
       target.dispatchEvent(
         new TouchEvent(type, {
@@ -4137,6 +4138,11 @@ test('dense mobile session keeps conversation and activity readable', async ({
   ).toBeVisible();
   const imageInput = page.getByLabel('Choose images');
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
+  // Returning to latest must carry user intent; a programmatic scroll alone
+  // intentionally does not re-enable following after inspecting older tools.
+  await transcriptScroll(page).evaluate((element) =>
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: 100 })),
+  );
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   const composerHeightBeforeAttachment = await page
     .locator('.composer')
@@ -4175,6 +4181,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
       controlHeight: controlLayer.getBoundingClientRect().height,
       controlTop: controlLayer.getBoundingClientRect().top,
       transcriptBottom: transcriptScrollElement.getBoundingClientRect().bottom,
+      transcriptTailReserve: Number.parseFloat(
+        getComputedStyle(transcriptScrollElement).paddingBottom,
+      ),
       pagePaddingBottom: Number.parseFloat(
         getComputedStyle(sessionPage).paddingBottom,
       ),
@@ -4190,12 +4199,12 @@ test('dense mobile session keeps conversation and activity readable', async ({
     attachmentLayout.composerBottom,
   );
   expect(attachmentLayout.pagePaddingBottom).toBe(0);
-  expect(attachmentLayout.transcriptBottom).toBeLessThanOrEqual(
-    attachmentLayout.controlTop + 1,
-  );
   expect(
-    attachmentLayout.controlTop - attachmentLayout.transcriptBottom,
-  ).toBeLessThanOrEqual(1);
+    attachmentLayout.transcriptBottom - attachmentLayout.transcriptTailReserve,
+  ).toBeLessThanOrEqual(attachmentLayout.controlTop + 1);
+  expect(attachmentLayout.transcriptTailReserve).toBeGreaterThanOrEqual(
+    attachmentLayout.controlHeight,
+  );
   await page.getByRole('button', { name: 'Remove picker.png' }).click();
   await page.evaluate(() => {
     const transfer = new DataTransfer();
@@ -5756,15 +5765,10 @@ test('shows structured delegate content while the delegate is running @desktop',
   );
   await page.goto('/sessions/s1');
 
-  const launcher = page.getByRole('button', {
-    name: /Delegates.*1 running/u,
-  });
-  await expect(launcher).toBeVisible();
-  await launcher.click();
-  await page
-    .getByRole('dialog', { name: 'Delegates' })
-    .getByRole('button', { name: /Live review/u })
-    .click();
+  const activity = page.locator('.activity-panel');
+  if (!(await activity.isVisible()))
+    await page.getByRole('button', { name: 'Open session activity' }).click();
+  await activity.getByRole('button', { name: /Live review/u }).click();
 
   const inspector = page.getByRole('dialog', {
     name: 'Delegate · Live review',
@@ -5806,7 +5810,7 @@ test('shows structured delegate content while the delegate is running @desktop',
   await mocks.close();
 });
 
-test('layers delegate details over the preserved list @desktop', async ({
+test('opens delegate details directly over the preserved activity panel @desktop', async ({
   page,
 }) => {
   const mocks = await installPhase6Mocks(page, {
@@ -5852,13 +5856,10 @@ test('layers delegate details over the preserved list @desktop', async ({
   await page.setViewportSize({ width: 960, height: 760 });
   await page.goto('/sessions/s1');
 
-  const launcher = page.getByRole('button', {
-    name: /Delegates.*1 running/u,
-  });
+  const launcher = page.getByRole('button', { name: 'Open session activity' });
   await launcher.click();
-  const delegateRow = page
-    .getByRole('dialog', { name: 'Delegates' })
-    .getByRole('button', { name: /Live review/u });
+  const activity = page.locator('.activity-panel');
+  const delegateRow = activity.getByRole('button', { name: /Live review/u });
   await delegateRow.focus();
   await delegateRow.click();
 
@@ -5866,46 +5867,40 @@ test('layers delegate details over the preserved list @desktop', async ({
     name: 'Delegate · Live review',
   });
   const surfacePages = page.locator('.surface-stack-page');
-  const delegateListPage = surfacePages.first();
-  await expect(dialog).toHaveAttribute('data-surface-depth', '2');
-  await expect(surfacePages).toHaveCount(2);
-  await expect(delegateListPage).toHaveAttribute('aria-hidden', 'true');
-  await expect(delegateListPage).toHaveAttribute('inert', '');
+  await expect(dialog).toHaveAttribute('data-surface-depth', '1');
+  await expect(surfacePages).toHaveCount(1);
+  await expect(
+    page.getByRole('dialog', { name: 'Delegates', exact: true }),
+  ).toHaveCount(0);
   await expect(
     page.locator('.delegate-transcript-inspector-body'),
   ).toBeVisible();
 
-  await page.getByRole('button', { name: 'Back to delegates' }).click();
-  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
-  await expect(delegateRow).toBeVisible();
-  await expect(delegateRow).toBeFocused();
-
-  await delegateRow.click();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(activity).toBeVisible();
   await expect(delegateRow).toBeFocused();
 
   await delegateRow.click();
   await page.goBack();
-  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(activity).toBeVisible();
   await expect(page).toHaveURL(/\/sessions\/s1$/u);
-  await page.goBack();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(launcher).toBeFocused();
 
-  await launcher.click();
   await delegateRow.click();
   await swipe(page.locator('.surface-drawer'), { dx: 104, dy: 8 });
-  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(activity).toBeVisible();
 
   await delegateRow.click();
   await page
     .locator('.surface-drawer-layer')
     .click({ position: { x: 8, y: 8 } });
-  await expect(page.getByRole('dialog', { name: 'Delegates' })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await expect(activity).toBeVisible();
 
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(activity).toBeHidden();
   await expect(launcher).toBeFocused();
   await mocks.close();
 });
@@ -6182,9 +6177,12 @@ test('started session keeps location fixed and agent controls editable', async (
   await mocks.emit({ type: 'snapshot', snapshot });
   const composer = page.locator('form.composer');
   await expect(composer.getByText('Mode:', { exact: true })).toHaveCount(0);
-  await expect(composer.locator('.draft-picker-trigger-locked')).toContainText(
-    'Current checkout · main',
-  );
+  await expect(composer.locator('.draft-picker-trigger-locked')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open session activity' }).click();
+  await expect(
+    page.locator('.activity-panel .draft-picker-trigger-locked'),
+  ).toContainText('Current checkout · main');
+  await page.keyboard.press('Escape');
   const agent = composer.getByRole('button', { name: 'Agent and thinking' });
   await expect(agent).toContainText('Vision· medium');
   await agent.click();

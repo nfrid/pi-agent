@@ -133,7 +133,11 @@ export function TasksSurface({
     });
   if (activityPanel)
     return (
-      <section className="activity-panel-section" aria-label="Tasks">
+      <section
+        className="activity-panel-section"
+        aria-label="Tasks"
+        tabIndex={-1}
+      >
         <header className="activity-panel-header">
           <h2>Tasks</h2>
           <span
