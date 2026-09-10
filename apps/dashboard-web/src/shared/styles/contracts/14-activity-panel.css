@@ -87,10 +87,13 @@
   display: grid;
   min-width: 0;
 }
+.activity-panel .activity-panel-inset {
+  padding-inline: var(--activity-panel-inset);
+}
 .activity-panel-section {
   min-width: 0;
   border-bottom: 1px solid var(--line-soft);
-  padding: 8px var(--activity-panel-inset);
+  padding: 8px 0;
 }
 .activity-panel-location {
   display: flex;
@@ -180,7 +183,7 @@ h2.activity-panel-header,
   border-top: 0;
 }
 .activity-panel-section .task-row {
-  padding: 4px 0;
+  padding-block: 4px;
 }
 .activity-panel-section .task-row.activity-task-row-compact {
   grid-template-columns: 12px minmax(0, 1fr);
@@ -201,7 +204,7 @@ h2.activity-panel-header,
 .activity-panel-section .delegate-row-toggle {
   grid-template-columns: 12px minmax(0, 1fr) 14px;
   row-gap: 2px;
-  padding: 4px 0;
+  padding-block: 4px;
 }
 .activity-panel-section .delegate-row-meta {
   grid-column: 2;

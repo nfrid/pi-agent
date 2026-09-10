@@ -110,7 +110,7 @@ export function TasksSurface({
       const dependencies = taskDependencies(row);
       return (
         <div
-          className={`task-row ${surfaceStateClass(state)}${compact ? ' activity-task-row-compact' : ''}`}
+          className={`task-row${activityPanel ? ' activity-panel-inset' : ''} ${surfaceStateClass(state)}${compact ? ' activity-task-row-compact' : ''}`}
           key={`${surface.id}-${id}`}
         >
           <span className="surface-state" title={state} aria-hidden="true">

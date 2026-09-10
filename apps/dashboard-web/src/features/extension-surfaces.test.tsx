@@ -2011,10 +2011,14 @@ describe('live extension surface fixtures', () => {
           />,
         );
       });
+      const toggle = tree.root.findAll(
+        (node) =>
+          typeof node.props.className === 'string' &&
+          node.props.className.split(/\s+/u).includes('delegate-row-toggle'),
+      )[0];
+      if (!toggle) throw new Error('Delegate row toggle is missing.');
       act(() => {
-        tree.root
-          .findByProps({ className: 'delegate-row-toggle' })
-          .props.onPress();
+        toggle.props.onPress();
       });
       const stack = tree.root.findByType(SurfaceStack);
       expect(stack.props.pages).toHaveLength(1);
