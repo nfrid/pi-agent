@@ -289,7 +289,7 @@ async function historySample(browser: Browser) {
     await expect
       .poll(() => scroll.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
-    await page.getByRole('button', { name: 'Open transcript outline' }).click();
+    await page.locator('.outline-trigger').click();
     const outline = page.getByRole('dialog', { name: 'Transcript outline' });
     await expect(outline).toBeVisible();
     const target = outline

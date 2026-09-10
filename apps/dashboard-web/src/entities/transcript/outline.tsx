@@ -19,7 +19,7 @@ import {
   type TranscriptLandmark,
 } from './landmarks';
 
-const MAX_RAIL_CLUSTERS = 24;
+const MAX_RAIL_HEIGHT = 320;
 const RAIL_MARKER_HEIGHT = 20;
 const RAIL_OPENER_HEIGHT = 28;
 
@@ -44,8 +44,8 @@ export function TranscriptOutline({
   landmarks,
   branchTopology,
   branchPointId,
-  open = false,
-  onOpenChange,
+  open: controlledOpen,
+  onOpenChange: onControlledOpenChange,
   onOpenBranchPaths,
   onBranchPointChange,
   onJump,
@@ -64,19 +64,23 @@ export function TranscriptOutline({
   /** The first visible model item, supplied by the virtual renderer. */
   currentItemIndex?: number;
 }) {
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = controlledOpen ?? localOpen;
+  const onOpenChange = (nextOpen: boolean) => {
+    if (controlledOpen === undefined) setLocalOpen(nextOpen);
+    onControlledOpenChange?.(nextOpen);
+  };
   const userTurns = useMemo(
     () => selectTranscriptUserTurns(landmarks),
     [landmarks],
   );
-  const [railViewportHeight, setRailViewportHeight] = useState(520);
+  const [railViewportHeight, setRailViewportHeight] = useState(MAX_RAIL_HEIGHT);
+  const [railTop, setRailTop] = useState<number>();
   const railClusterCapacity = Math.max(
     1,
-    Math.min(
-      MAX_RAIL_CLUSTERS,
-      Math.floor(
-        Math.max(20, railViewportHeight - RAIL_OPENER_HEIGHT) /
-          RAIL_MARKER_HEIGHT,
-      ),
+    Math.floor(
+      Math.max(20, railViewportHeight - RAIL_OPENER_HEIGHT) /
+        RAIL_MARKER_HEIGHT,
     ),
   );
   const railClusters = useMemo(
@@ -84,7 +88,7 @@ export function TranscriptOutline({
     [railClusterCapacity, userTurns],
   );
   const railHeight = Math.min(
-    520,
+    MAX_RAIL_HEIGHT,
     Math.max(
       RAIL_OPENER_HEIGHT + RAIL_MARKER_HEIGHT,
       RAIL_OPENER_HEIGHT + railClusters.length * RAIL_MARKER_HEIGHT,
@@ -107,7 +111,9 @@ export function TranscriptOutline({
   useEffect(() => {
     const scrollElement = scrollElementRef?.current;
     const updateViewportHeight = () => {
-      const controlHeight = scrollElement
+      const controlHeight = scrollElement?.classList.contains(
+        'session-transcript-scroll',
+      )
         ? Number.parseFloat(
             getComputedStyle(scrollElement).getPropertyValue(
               '--session-control-height',
@@ -117,14 +123,22 @@ export function TranscriptOutline({
       const measuredHeight = scrollElement
         ? scrollElement.clientHeight - controlHeight
         : window.innerHeight - 100;
-      setRailViewportHeight(Math.max(20, measuredHeight));
+      setRailViewportHeight(
+        Math.min(MAX_RAIL_HEIGHT, Math.max(20, measuredHeight)),
+      );
+      setRailTop(
+        scrollElement
+          ? scrollElement.getBoundingClientRect().top +
+              Math.max(0, measuredHeight) / 2
+          : window.innerHeight / 2,
+      );
     };
     updateViewportHeight();
     const observer =
       scrollElement && typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(updateViewportHeight)
         : undefined;
-    observer?.observe(scrollElement);
+    if (scrollElement) observer?.observe(scrollElement);
     window.addEventListener('resize', updateViewportHeight);
     return () => {
       observer?.disconnect();
@@ -329,16 +343,7 @@ export function TranscriptOutline({
     {
       id: 'transcript-outline',
       title: 'Transcript outline',
-      eyebrow: 'Transcript outline',
-      hideTitle: true,
-      headerSummary: 'Search and navigate user turns',
-      headerContent: (
-        <SurfaceStats
-          className="work-header-stats"
-          showZero
-          stats={[{ label: 'turns', value: userTurns.length }]}
-        />
-      ),
+      eyebrow: null,
       initialFocus: '.transcript-outline-search',
       children: <div className="work-surface-content">{list}</div>,
     },
@@ -385,7 +390,7 @@ export function TranscriptOutline({
       <aside
         className="transcript-minimap"
         aria-label="Transcript turn map"
-        style={{ height: railHeight }}
+        style={{ height: railHeight, top: railTop }}
       >
         <button
           type="button"
@@ -436,7 +441,7 @@ export function TranscriptOutline({
         kind="work"
         pages={pages}
         className="surface-drawer work-surface-drawer outline-sheet"
-        layerClassName={`surface-drawer-layer outline-sheet-layer${scrollElementRef ? '' : ' outline-sheet-embedded'}`}
+        layerClassName={`surface-drawer-layer outline-sheet-layer${scrollElementRef?.current?.closest('.session-page:not(.session-page-embedded)') ? '' : ' outline-sheet-embedded'}`}
         onDepthChange={(depth) => {
           if (depth < 2 && selectedBranchPoint) {
             onBranchPointChange?.(undefined);

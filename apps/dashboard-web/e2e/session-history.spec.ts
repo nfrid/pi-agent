@@ -195,7 +195,7 @@ async function verifyEarlierHistoryAnchor(
   // The selected feed supplies the initial baseline; only the older page is finite.
   await expect.poll(() => initialReads).toBe(0);
   if (options.jumpFromOutline) {
-    await page.getByRole('button', { name: 'Open transcript outline' }).click();
+    await page.locator('.outline-trigger').click();
     const outline = page.getByRole('dialog', { name: 'Transcript outline' });
     await expect(
       outline.getByRole('button', { name: /first request/i }),

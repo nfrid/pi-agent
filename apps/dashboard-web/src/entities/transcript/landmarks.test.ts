@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTranscriptLandmarks,
   clusterTranscriptUserTurns,
-  sampleTranscriptLandmarks,
   selectTranscriptUserTurns,
   type TranscriptLandmark,
 } from './landmarks';
@@ -48,7 +47,7 @@ describe('transcript landmark selection', () => {
   });
 });
 
-describe('transcript landmark sampling', () => {
+describe('transcript user-turn landmarks', () => {
   it('retains custom labels for feature-owned user landmarks', () => {
     const [landmark] = buildTranscriptLandmarks([
       {
@@ -74,35 +73,18 @@ describe('transcript landmark sampling', () => {
     });
   });
 
-  it('retains every user landmark before sampling assistant landmarks', () => {
-    const input = landmarks(300, [2, 100, 297]);
-    const sampled = sampleTranscriptLandmarks(input, 8);
-
-    expect(sampled).toHaveLength(8);
-    expect(
-      sampled
-        .filter((landmark) => landmark.kind === 'user')
-        .map((landmark) => landmark.itemIndex),
-    ).toEqual([2, 100, 297]);
-    expect(sampled.map((landmark) => landmark.itemIndex)).toEqual(
-      [...sampled]
-        .sort((left, right) => left.itemIndex - right.itemIndex)
-        .map((landmark) => landmark.itemIndex),
-    );
-  });
-
-  it('samples users themselves when they exceed the drawer cap', () => {
-    const sampled = sampleTranscriptLandmarks(
+  it('preserves every user turn even beyond the old drawer cap', () => {
+    const turns = selectTranscriptUserTurns(
       landmarks(
         300,
         Array.from({ length: 300 }, (_, index) => index),
       ),
-      8,
     );
-
-    expect(sampled).toHaveLength(8);
-    expect(sampled.every((landmark) => landmark.kind === 'user')).toBe(true);
-    expect(sampled[0]?.itemIndex).toBe(0);
-    expect(sampled.at(-1)?.itemIndex).toBe(299);
+    expect(turns).toHaveLength(300);
+    expect(turns[0]?.itemIndex).toBe(0);
+    expect(turns.at(-1)?.itemIndex).toBe(299);
+    const clusters = clusterTranscriptUserTurns(turns, 14);
+    expect(clusters.length).toBeLessThanOrEqual(14);
+    expect(clusters.flatMap((cluster) => cluster.landmarks)).toEqual(turns);
   });
 });

@@ -2835,12 +2835,15 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   });
   expect(outlineMotion.transforms).toContain('translateX(100%)');
   await expect(outline).toHaveClass(/work-surface-drawer/);
-  await expect(outline.locator('h2')).toHaveCount(0);
-  await expect(outline.locator('.eyebrow')).toHaveText('Transcript outline');
-  await expect(outline.locator('.surface-drawer-summary')).toContainText(
-    'Navigate transcript landmarks',
-  );
-  await expect(outline.locator('.surface-stats')).toContainText('landmarks');
+  await expect(
+    outline.getByRole('heading', { name: 'Transcript outline' }),
+  ).toBeVisible();
+  await expect(
+    outline.getByRole('searchbox', { name: 'Search transcript turns' }),
+  ).toBeFocused();
+  await expect(
+    outline.locator('.transcript-outline-result-count'),
+  ).toContainText('turns');
   expect(
     await outline
       .locator('.surface-drawer-body')
@@ -3869,7 +3872,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   });
   expect(fullWidthGeometry.transcript).toBe(320);
   expect(fullWidthGeometry.transcript - fullWidthGeometry.message).toBe(26);
-  expect(fullWidthGeometry.transcript - fullWidthGeometry.composer).toBe(32);
+  expect(fullWidthGeometry.transcript - fullWidthGeometry.composer).toBe(24);
   const finalAssistantParagraphs = page
     .locator('.message-assistant')
     .filter({ hasText: 'Deployment resumes automatically.' })
@@ -6209,13 +6212,18 @@ test('outline preview stays above the composer @desktop', async ({ page }) => {
   await page.goto('/sessions/s1');
   await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
 
-  const marker = page.locator(
-    '.transcript-minimap-marker[data-preview="Earlier history 1"]',
-  );
+  const marker = page.locator('.transcript-minimap-marker').filter({
+    has: page.locator(
+      '.transcript-minimap-preview[data-label="Earlier history 1"]',
+    ),
+  });
   await marker.hover();
   const preview = marker.locator('.transcript-minimap-preview');
   await expect(preview).toBeVisible();
-  await expect(preview).toHaveAttribute('data-meta', /User message · .+/u);
+  await expect(preview).toHaveAttribute(
+    'data-meta',
+    /User turn|turns.*first shown/u,
+  );
   await expect(preview).toHaveAttribute('data-label', 'Earlier history 1');
   const geometry = await marker.evaluate((element) => {
     const previewElement = element.querySelector<HTMLElement>(
@@ -6241,7 +6249,7 @@ test('outline preview stays above the composer @desktop', async ({ page }) => {
     };
   });
   expect(geometry).toMatchObject({
-    markerWidth: 64,
+    markerWidth: 44,
     previewDoesNotCapturePointer: true,
     minimapStackLevel: 31,
     composerStackLevel: 30,
@@ -6301,11 +6309,13 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   ).toBeVisible();
   await page.keyboard.press('Escape');
 
-  const dockMarker = page.locator(
-    '.transcript-minimap-marker[data-preview="Earlier history 1"]',
-  );
+  const dockMarker = page.locator('.transcript-minimap-marker').filter({
+    has: page.locator(
+      '.transcript-minimap-preview[data-label="Earlier history 1"]',
+    ),
+  });
   await expect(dockMarker).toHaveCount(1);
-  await expect(dockMarker).toHaveAttribute('aria-label', 'Earlier history 1');
+  await expect(dockMarker).toHaveAttribute('aria-label', /Earlier history 1/);
   await expect(dockMarker).not.toHaveAttribute('title', 'Earlier history 1');
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   const assistant = page

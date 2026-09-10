@@ -32,7 +32,7 @@ import {
 } from './App';
 import {
   buildTranscriptLandmarks,
-  sampleTranscriptLandmarks,
+  selectTranscriptUserTurns,
 } from './entities/transcript';
 import {
   activeThreadDetails,
@@ -1050,10 +1050,10 @@ describe('transcript outline and metadata', () => {
       kind: 'user' as const,
       itemIndex: index,
     }));
-    const sampled = sampleTranscriptLandmarks(many, 48);
-    expect(sampled).toHaveLength(48);
-    expect(sampled[0]?.key).toBe('turn-0');
-    expect(sampled.at(-1)?.key).toBe('turn-499');
+    const turns = selectTranscriptUserTurns(many);
+    expect(turns).toHaveLength(500);
+    expect(turns[0]?.key).toBe('turn-0');
+    expect(turns.at(-1)?.key).toBe('turn-499');
   });
 });
 

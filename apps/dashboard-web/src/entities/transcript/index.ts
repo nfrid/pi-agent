@@ -20,7 +20,6 @@ export {
   buildTranscriptLandmarks,
   clusterTranscriptUserTurns,
   mergeTranscriptLandmarks,
-  sampleTranscriptLandmarks,
   selectTranscriptUserTurns,
   transcriptItemTimestamp,
   transcriptRoleLabel,

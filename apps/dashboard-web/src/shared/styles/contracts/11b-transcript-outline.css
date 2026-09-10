@@ -86,21 +86,11 @@
   background: var(--line);
   vertical-align: middle;
 }
-.transcript-outline-item.outline-user i {
-  background: var(--pink);
+.transcript-outline-jump[aria-current] {
+  color: var(--fg);
 }
-.transcript-outline-item.outline-delegate-request i {
-  border-radius: 1px;
-  background: var(--purple);
-}
-.transcript-outline-item.outline-steering i {
-  background: var(--orange);
-}
-.transcript-outline-item.outline-assistant i {
-  background: var(--purple);
-}
-.transcript-outline-item.outline-activity i {
-  background: var(--cyan);
+.transcript-outline-jump[aria-current] i {
+  background: var(--fg);
 }
 .transcript-outline-item span {
   overflow-wrap: anywhere;
@@ -161,17 +151,20 @@
     background: transparent;
   }
   :where(.outline-sheet-layer) .outline-sheet {
-    top: 50%;
+    top: calc(var(--session-header-height, 48px) + 8px);
     right: auto;
     bottom: auto;
-    left: calc(var(--session-nav-width, 0px) + 58px);
-    width: min(440px, calc(100vw - var(--session-nav-width, 0px) - 76px));
-    height: min(650px, calc(100dvh - 48px));
-    max-height: none;
+    left: calc(var(--session-sidebar-width) + 52px);
+    width: min(380px, calc(100vw - var(--session-sidebar-width) - 76px));
+    height: auto;
+    max-height: min(
+      480px,
+      calc(100dvh - var(--session-header-height, 48px) - 24px)
+    );
     border: 1px solid var(--line);
     border-radius: 8px;
     box-shadow: 0 18px 54px #000a;
-    transform: translateY(-50%);
+    transform: none;
     animation: outline-popover-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
   .outline-sheet-layer.is-exiting .outline-sheet {
@@ -181,6 +174,9 @@
     right: 58px;
     left: auto;
   }
+  .outline-sheet .surface-stack-pages {
+    flex: 0 1 auto;
+  }
   .outline-sheet .surface-drawer-body {
     padding: 0;
   }
@@ -188,21 +184,21 @@
 @keyframes outline-popover-in {
   from {
     opacity: 0;
-    transform: translateY(calc(-50% + 8px)) scale(0.99);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(-50%) scale(1);
+    transform: none;
   }
 }
 @keyframes outline-popover-out {
   from {
     opacity: 1;
-    transform: translateY(-50%) scale(1);
+    transform: none;
   }
   to {
     opacity: 0;
-    transform: translateY(calc(-50% + 8px)) scale(0.99);
+    transform: translateY(8px);
   }
 }
 @keyframes overlay-in {

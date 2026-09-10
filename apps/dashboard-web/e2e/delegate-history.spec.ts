@@ -288,16 +288,46 @@ async function inspectPersistedDelegate(
       name: 'Delegate · Offline historical worker',
     });
     const body = page.locator('.delegate-transcript-inspector-body');
-    const requestMarker = drawer
-      .locator('.transcript-minimap-marker.outline-delegate-request')
-      .first();
+    const requestMarker = drawer.locator('.transcript-minimap-marker').filter({
+      has: page.locator(
+        '.transcript-minimap-preview[data-label="Inspect the historical fixture"]',
+      ),
+    });
     await expect(requestMarker).toHaveAttribute(
       'aria-label',
-      'Inspect the historical fixture',
+      /Inspect the historical fixture/,
     );
     await expect(
       requestMarker.locator('.transcript-minimap-preview'),
-    ).toHaveAttribute('data-meta', /Parent request/);
+    ).toHaveAttribute('data-meta', /Parent request|turns.*first shown/);
+    await requestMarker.hover();
+    const previewBox = await requestMarker
+      .locator('.transcript-minimap-preview')
+      .boundingBox();
+    const drawerBox = await drawer.boundingBox();
+    if (!previewBox || !drawerBox)
+      throw new Error('Missing embedded preview geometry');
+    expect(previewBox.x).toBeGreaterThanOrEqual(drawerBox.x);
+    expect(previewBox.x + previewBox.width).toBeLessThanOrEqual(
+      drawerBox.x + drawerBox.width,
+    );
+    await drawer
+      .getByRole('button', { name: 'Open transcript outline', exact: true })
+      .click();
+    const turnList = page.getByRole('dialog', {
+      name: 'Transcript outline',
+      exact: true,
+    });
+    await expect(turnList.getByRole('searchbox')).toBeFocused();
+    await expect(
+      turnList.getByRole('button', {
+        name: 'Jump to Inspect the historical fixture',
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(turnList).toHaveCount(0);
+    await expect(drawer).toBeVisible();
     const layout = await drawer.evaluate((element) => {
       const body = element.querySelector<HTMLElement>(
         '.delegate-transcript-inspector-body',
