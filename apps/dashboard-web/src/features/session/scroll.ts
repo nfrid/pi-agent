@@ -180,7 +180,20 @@ export function useSessionScroll({
         `${Math.ceil(Math.max(0, bottom - page.getBoundingClientRect().top))}px`,
       );
     };
+    const measureControls = () => {
+      const controlRect = controls?.getBoundingClientRect();
+      const pageRect = page.getBoundingClientRect();
+      const height = controlRect?.height ?? 0;
+      const bottomOffset = controlRect
+        ? Math.max(0, pageRect.bottom - controlRect.bottom)
+        : 0;
+      element.style.setProperty(
+        '--session-control-height',
+        `${Math.ceil(height + bottomOffset)}px`,
+      );
+    };
     const resize = () => {
+      measureControls();
       updateViewport();
       controller.contentChanged();
     };

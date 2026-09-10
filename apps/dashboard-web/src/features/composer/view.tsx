@@ -19,7 +19,7 @@ import { draftRuntimeOptions, modelOptionValue } from '../model-option';
 import { hasSettledBackground } from '../presentation-status';
 import { useImageAttachments } from './attachments';
 import { useComposerDraft } from './draft';
-import { AgentPicker, ThreadLocationIndicator } from './draft-pickers';
+import { AgentPicker } from './draft-pickers';
 import {
   newQueueId,
   QueuePanel,
@@ -460,13 +460,9 @@ export function Composer({
                 dormantContextUsage(session, resumeModel, runtimes)
               }
             />
-            {checkout ? (
-              <ThreadLocationIndicator checkout={checkout} />
-            ) : (
-              (!runtime ||
-                runtime.liveState === 'idle' ||
-                settledBackground) && <span>Prompt</span>
-            )}
+            {(!runtime ||
+              runtime.liveState === 'idle' ||
+              settledBackground) && <span>Prompt</span>}
             {runtime?.liveState === 'waiting' && <span>Answer above</span>}
           </>
         }

@@ -3,8 +3,6 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
-  type RefObject,
-  type TouchEvent,
   useId,
   useLayoutEffect,
   useRef,
@@ -266,10 +264,7 @@ export function AgentNavDrawerShell({
   isMobile,
   drawerPresent,
   drawerExiting,
-  handleRef,
   drawerClassName,
-  onTouchStart,
-  onTouchEnd,
   children,
 }: {
   open: boolean;
@@ -277,24 +272,18 @@ export function AgentNavDrawerShell({
   isMobile: boolean;
   drawerPresent: boolean;
   drawerExiting: boolean;
-  handleRef: RefObject<HTMLButtonElement | null>;
   drawerClassName?: string;
-  onTouchStart?: (event: TouchEvent) => void;
-  onTouchEnd?: (event: TouchEvent) => void;
   children: ReactNode;
 }) {
   return (
     <>
       <button
-        ref={handleRef}
         type="button"
-        className="agent-nav-handle"
+        className="agent-nav-trigger"
         aria-label="Open agent list"
         onClick={() => onOpenChange?.(true)}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
       >
-        ‹
+        ☰
       </button>
       {drawerPresent && (
         <button

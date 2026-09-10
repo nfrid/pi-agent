@@ -1,0 +1,194 @@
+/* Session activity rail: one panel with a reserved wide-screen column. */
+.activity-session-content {
+  display: contents;
+}
+.session-activity-button {
+  display: inline-grid;
+}
+.session-agent-nav-button {
+  display: none;
+}
+.session-activity-hints {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.session-activity-hint {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.session-activity-hint-tasks[data-active] {
+  background: var(--cyan);
+}
+.session-activity-hint-delegates {
+  border-radius: 2px;
+  background: var(--line);
+}
+.session-activity-hint-delegates[data-active] {
+  background: var(--purple);
+}
+.agent-nav-trigger {
+  display: none;
+}
+.activity-panel {
+  display: none;
+  min-width: 0;
+  overflow: auto;
+  border-left: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--bg-alt) 96%, var(--bg));
+  color: var(--fg);
+}
+.activity-panel.is-open {
+  display: block;
+}
+.activity-panel.is-exiting {
+  pointer-events: none;
+}
+.activity-panel-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--bg-alt) 96%, var(--bg));
+  padding: 11px 13px;
+}
+.activity-panel-bar strong {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+.activity-panel-actions {
+  display: flex;
+  gap: 3px;
+}
+.activity-panel-pin,
+.activity-panel-close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 17px;
+}
+.activity-panel-pin:hover,
+.activity-panel-close:hover,
+.activity-panel-pin:focus-visible,
+.activity-panel-close:focus-visible {
+  border-color: var(--line);
+  color: var(--fg);
+}
+.activity-panel-content {
+  display: grid;
+  min-width: 0;
+}
+.activity-panel-section {
+  min-width: 0;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 12px;
+}
+.activity-panel-section h2,
+.activity-panel-location h2 {
+  margin: 0 0 8px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.activity-panel-location {
+  min-width: 0;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 12px;
+}
+.activity-panel-location .draft-picker-trigger {
+  max-width: 100%;
+  margin: 0;
+}
+@media (min-width: 1200px) {
+  .session-layout:has(.activity-panel.is-pinned) {
+    grid-template-columns: 248px minmax(0, 1fr) 300px;
+  }
+  .activity-panel.is-pinned {
+    position: relative;
+    grid-column: 3;
+    grid-row: 1;
+    width: auto;
+    height: 100%;
+    max-height: 100%;
+    box-shadow: none;
+  }
+  .activity-panel.is-overlay.is-open {
+    position: fixed;
+    z-index: 38;
+    top: var(--session-header-height);
+    right: 0;
+    bottom: 0;
+    width: min(300px, 88vw);
+    border-left: 1px solid var(--line-soft);
+    box-shadow: -10px 0 30px #0003;
+  }
+}
+@media (min-width: 821px) and (max-width: 1199px) {
+  .activity-panel.is-overlay.is-open {
+    position: fixed;
+    z-index: 38;
+    top: var(--session-header-height);
+    right: 0;
+    bottom: 0;
+    width: min(320px, 88vw);
+    border-left: 1px solid var(--line-soft);
+    box-shadow: -10px 0 30px #0003;
+  }
+  .session-activity-button,
+  .session-agent-nav-button {
+    display: inline-grid;
+  }
+}
+@media (max-width: 820px) {
+  .session-activity-button,
+  .session-agent-nav-button {
+    display: inline-grid;
+  }
+  .activity-panel.is-overlay.is-open {
+    position: fixed;
+    z-index: 38;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(320px, calc(100vw - 22px));
+    border-left: 1px solid var(--line-soft);
+    box-shadow: -14px 0 34px #0008;
+  }
+  .agent-nav-trigger {
+    position: fixed;
+    top: 8px;
+    left: 10px;
+    z-index: 45;
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border: 1px solid var(--line-soft);
+    border-radius: 5px;
+    background: var(--bg-alt);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 15px;
+  }
+  body:has(.session-activity-button) .agent-nav-trigger {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-panel,
+  .agent-nav-trigger {
+    transition: none;
+  }
+}

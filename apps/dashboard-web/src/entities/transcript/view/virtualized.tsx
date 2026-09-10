@@ -281,8 +281,6 @@ export function VirtualizedTranscript({
               style={{
                 position: 'absolute',
                 top: virtualRow.start,
-                left: 0,
-                width: '100%',
               }}
             >
               {row.kind === 'tool-stream' ? (

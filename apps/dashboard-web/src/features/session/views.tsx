@@ -1,7 +1,4 @@
-import type {
-  DashboardHttpClient,
-  DashboardLiveStore,
-} from '@pi-dashboard/client';
+import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type {
   CheckoutSummary,
   RuntimeSnapshot,
@@ -11,10 +8,7 @@ import type { ComponentType, ReactNode, RefObject } from 'react';
 import { useId, useState } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
 import { useDashboardNavigate } from '../../routes/navigation';
-import {
-  DelegateHistorySurface,
-  ExtensionSurfaceStack,
-} from '../extension-surfaces';
+import type { ActivityHints } from '../activity-panel';
 import { InlineSessionRename } from '../session-rename';
 
 export type SessionComposerProps = {
@@ -189,6 +183,10 @@ export function SessionHeader({
   statusLabel,
   outlineTriggerRef,
   onOpenOutline,
+  onOpenAgentNav,
+  activityHints,
+  activityOpen,
+  onOpenActivity,
   store,
   sessions,
 }: {
@@ -202,6 +200,10 @@ export function SessionHeader({
   statusLabel: string;
   outlineTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenOutline: () => void;
+  onOpenAgentNav: () => void;
+  activityHints: ActivityHints;
+  activityOpen: boolean;
+  onOpenActivity: () => void;
   store: DashboardLiveStore;
   sessions: readonly SessionIndexEntry[];
 }) {
@@ -233,18 +235,48 @@ export function SessionHeader({
       status={status}
       statusLabel={statusLabel}
       actions={
-        <button
-          type="button"
-          ref={outlineTriggerRef}
-          className="session-icon-button outline-trigger"
-          aria-label="Open transcript outline"
-          aria-haspopup="dialog"
-          onClick={onOpenOutline}
-        >
-          <span className="session-icon-glyph" aria-hidden="true">
-            ≡
-          </span>
-        </button>
+        <>
+          <button
+            type="button"
+            className="session-icon-button session-activity-button"
+            aria-label="Open session activity"
+            aria-expanded={activityOpen}
+            onClick={onOpenActivity}
+          >
+            <span className="session-activity-hints" aria-hidden="true">
+              <i
+                className="session-activity-hint session-activity-hint-tasks"
+                data-active={activityHints.tasks || undefined}
+              />
+              <i
+                className="session-activity-hint session-activity-hint-delegates"
+                data-active={activityHints.delegates || undefined}
+              />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="session-icon-button session-agent-nav-button"
+            aria-label="Open agent list"
+            onClick={onOpenAgentNav}
+          >
+            <span className="session-icon-glyph" aria-hidden="true">
+              ☰
+            </span>
+          </button>
+          <button
+            type="button"
+            ref={outlineTriggerRef}
+            className="session-icon-button outline-trigger"
+            aria-label="Open transcript outline"
+            aria-haspopup="dialog"
+            onClick={onOpenOutline}
+          >
+            <span className="session-icon-glyph" aria-hidden="true">
+              ≡
+            </span>
+          </button>
+        </>
       }
     />
   );
@@ -252,11 +284,7 @@ export function SessionHeader({
 
 export { SessionHistoryControl } from './history-control';
 
-/**
- * Keep task and delegate launchers available without spending a full row on
- * narrow screens. The launcher components remain mounted so their own drawer,
- * focus, and history state stays authoritative.
- */
+/** Kept for generic callers that render a compact launcher disclosure. */
 export function RunStatusDisclosure({ children }: { children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const contentId = useId();
@@ -290,9 +318,7 @@ export function SessionControlLayer({
   onJumpToLatest,
   Composer,
   runtime,
-  sessionChange,
   store,
-  client,
   runtimes,
   session,
   sessionId,
@@ -306,9 +332,7 @@ export function SessionControlLayer({
   onJumpToLatest: () => void;
   Composer: ComponentType<SessionComposerProps>;
   runtime: RuntimeSnapshot | undefined;
-  sessionChange: number;
   store: DashboardLiveStore;
-  client: DashboardHttpClient;
   runtimes: readonly RuntimeSnapshot[];
   session?: SessionIndexEntry;
   sessionId: string;
@@ -329,27 +353,6 @@ export function SessionControlLayer({
           Jump to latest
         </button>
       )}
-      <section
-        className="extension-surfaces session-extension-surfaces"
-        aria-label="Current tasks and delegates"
-      >
-        <RunStatusDisclosure>
-          <ExtensionSurfaceStack
-            runtime={runtime}
-            placement="composer"
-            excludeDelegate
-            slotsOnly
-          />
-          <DelegateHistorySurface
-            id={sessionId}
-            runtime={runtime}
-            sessionChange={sessionChange}
-            store={store}
-            client={client}
-            slotsOnly
-          />
-        </RunStatusDisclosure>
-      </section>
       <Composer
         key={sessionId}
         runtime={runtime}

@@ -6,7 +6,6 @@
   width: 310px;
   max-height: calc(100vh);
 }
-.agent-nav-handle,
 .agent-nav-backdrop {
   display: none;
 }
