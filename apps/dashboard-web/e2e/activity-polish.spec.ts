@@ -42,15 +42,11 @@ for (const active of [false, true]) {
       `activity-${active ? 'active' : 'completed'}.png`,
       { animations: 'disabled' },
     );
-    await panel
-      .getByRole('button', { name: `Show all ${active ? 5 : 3} tasks` })
-      .click();
+    await panel.getByRole('button', { name: 'Tasks', exact: true }).click();
     await expect(
       panel.getByText('Deploy client bundle', { exact: false }),
     ).toBeVisible();
-    await panel
-      .getByRole('button', { name: `${active ? 5 : 6} finished` })
-      .click();
+    await panel.getByRole('button', { name: 'Delegates', exact: true }).click();
     await expect(
       panel.getByText('Finished worker 6', { exact: true }),
     ).toBeVisible();
@@ -181,6 +177,30 @@ test('activity header clears simulated PWA window controls @desktop', async ({
   const pinBox = await pin.boundingBox();
   if (!pinBox) throw new Error('pin missing');
   expect(pinBox.x + pinBox.width).toBeLessThanOrEqual(1322);
+  const expandedGeometry = await page.evaluate(() => {
+    const leftHeader = document.querySelector('.agent-thread-nav > div');
+    const activityHeader = document.querySelector('.activity-panel-bar');
+    const sessionActions = document.querySelector('.session-heading-actions');
+    const panel = document.querySelector('.activity-panel');
+    if (!leftHeader || !activityHeader || !sessionActions || !panel)
+      throw new Error('WCO header geometry missing');
+    const effectiveHeight = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return (
+        rect.height + Number.parseFloat(getComputedStyle(element).marginBottom)
+      );
+    };
+    return {
+      left: effectiveHeight(leftHeader),
+      activity: effectiveHeight(activityHeader),
+      sessionActionsRight: sessionActions.getBoundingClientRect().right,
+      panelLeft: panel.getBoundingClientRect().left,
+    };
+  });
+  expect(expandedGeometry.activity).toBe(expandedGeometry.left);
+  expect(expandedGeometry.sessionActionsRight).toBeLessThanOrEqual(
+    expandedGeometry.panelLeft,
+  );
   await expect(page.locator('.activity-panel-bar')).toHaveCSS(
     '-webkit-app-region',
     'drag',
@@ -192,4 +212,9 @@ test('activity header clears simulated PWA window controls @desktop', async ({
   });
   await pin.click();
   await expect(page.locator('.activity-panel.is-pinned')).toHaveCount(0);
+  const collapsedActions = await page
+    .locator('.session-heading-actions')
+    .boundingBox();
+  if (!collapsedActions) throw new Error('collapsed session actions missing');
+  expect(collapsedActions.x + collapsedActions.width).toBeLessThanOrEqual(1322);
 });

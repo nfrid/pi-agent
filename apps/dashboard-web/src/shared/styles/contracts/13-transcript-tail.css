@@ -209,7 +209,7 @@
 @media (pointer: fine) and (min-width: 821px) {
   .session-page:not(.session-page-embedded) .transcript-minimap {
     right: auto;
-    left: var(--session-nav-width, 248px);
+    left: var(--session-nav-width, var(--session-sidebar-width));
   }
   .session-page:not(.session-page-embedded) .transcript-minimap-label {
     align-self: flex-start;
@@ -240,7 +240,12 @@
 /* One full-pane scrollport, with a floating composer whose measured height
    reserves the transcript tail. Embedded surfaces keep their host sizing. */
 .shell.session-shell {
-  --session-nav-width: 248px;
+  --session-nav-width: var(--session-sidebar-width);
+  --transcript-content-gutter: 48px;
+  --transcript-content-width: min(
+    820px,
+    calc(100% - (2 * var(--transcript-content-gutter)))
+  );
   width: 100%;
   height: 100dvh;
   overflow: hidden;
@@ -295,13 +300,19 @@
 }
 .session-page:not(.session-page-embedded) .transcript-virtual-row {
   left: 50%;
-  width: min(820px, calc(100% - 96px));
+  width: var(--transcript-content-width);
   transform: translateX(-50%);
 }
 .session-page:not(.session-page-embedded)
   .transcript:not(.transcript-virtualized)
   > :not(.transcript-minimap) {
-  width: min(820px, calc(100% - 96px));
+  width: var(--transcript-content-width);
+  margin-inline: auto;
+}
+.session-page:not(.session-page-embedded)
+  .transcript-virtualized
+  > .session-event {
+  width: var(--transcript-content-width);
   margin-inline: auto;
 }
 .draft-empty-transcript {
@@ -380,6 +391,7 @@
 @media (max-width: 820px) {
   .shell.session-shell {
     --session-nav-width: 0px;
+    --transcript-content-gutter: 13px;
   }
   .shell.session-shell .agent-thread-nav-session {
     width: 100%;
@@ -388,7 +400,13 @@
   .session-page:not(.session-page-embedded)
     .transcript:not(.transcript-virtualized)
     > :not(.transcript-minimap) {
-    width: calc(100% - 26px);
+    width: var(--transcript-content-width);
+  }
+  .session-page:not(.session-page-embedded)
+    .transcript-virtualized
+    > .session-event {
+    width: var(--transcript-content-width);
+    margin-inline: auto;
   }
   .session-page:not(.session-page-embedded) .session-context {
     min-height: 46px;

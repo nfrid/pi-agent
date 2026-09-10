@@ -190,16 +190,16 @@
     min-height: env(titlebar-area-height, 40px);
     margin-bottom: 12px;
     background: var(--bg);
-    padding-top: 14px;
-    padding-bottom: 9px;
-    padding-left: var(--activity-panel-inset);
+    padding-top: 6px;
+    padding-bottom: 6px;
+    padding-left: max(14px, env(titlebar-area-x, 14px));
     padding-right: max(
-      var(--activity-panel-inset),
+      18px,
       calc(
         100vw -
         env(titlebar-area-x, 0px) -
         env(titlebar-area-width, 100vw) +
-        var(--activity-panel-inset)
+        18px
       )
     );
     -webkit-app-region: drag;
@@ -214,14 +214,20 @@
     content: "";
     pointer-events: none;
   }
-  .activity-panel-actions,
+  .activity-panel-actions {
+    position: relative;
+    right: 18px;
+    -webkit-app-region: no-drag;
+  }
   .activity-panel-actions button {
     -webkit-app-region: no-drag;
   }
 }
 @media (min-width: 1200px) {
   .session-layout:has(.activity-panel.is-pinned) {
-    grid-template-columns: 248px minmax(0, 1fr) 300px;
+    grid-template-columns: var(--session-sidebar-width) minmax(0, 1fr) var(
+        --session-sidebar-width
+      );
   }
   .activity-panel.is-pinned {
     position: relative;
@@ -238,7 +244,7 @@
     top: var(--session-header-height);
     right: 0;
     bottom: 0;
-    width: min(300px, 88vw);
+    width: min(var(--session-sidebar-width), 88vw);
     border-left: 1px solid var(--line-soft);
     box-shadow: -10px 0 30px #0003;
   }
@@ -250,7 +256,7 @@
     top: var(--session-header-height);
     right: 0;
     bottom: 0;
-    width: min(320px, 88vw);
+    width: min(var(--session-sidebar-width), 88vw);
     border-left: 1px solid var(--line-soft);
     box-shadow: -10px 0 30px #0003;
   }
