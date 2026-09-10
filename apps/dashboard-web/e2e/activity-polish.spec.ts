@@ -4,6 +4,97 @@ import {
   installVisualStateScenario,
 } from './visual-state-fixtures';
 
+const PIN_KEY = 'pi-dashboard-activity-panel-pinned-v1';
+
+type SimulatedWcoGeometry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+async function simulateWco(
+  page: import('@playwright/test').Page,
+  values: SimulatedWcoGeometry,
+) {
+  await page.evaluate((values) => {
+    const apply = (rules: CSSRuleList, overlay = false) => {
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSImportRule && rule.styleSheet)
+          apply(rule.styleSheet.cssRules, overlay);
+        if (rule instanceof CSSMediaRule) {
+          const isOverlay = rule.conditionText.includes(
+            'display-mode: window-controls-overlay',
+          );
+          if (isOverlay) rule.media.mediaText = 'all';
+          apply(rule.cssRules, overlay || isOverlay);
+        }
+        if (overlay && rule instanceof CSSStyleRule) {
+          for (const property of Array.from(rule.style)) {
+            const value = rule.style
+              .getPropertyValue(property)
+              .replace(
+                /env\(titlebar-area-(x|y|width|height)(?:,[^)]*)?\)/g,
+                (_, dimension: string) => `${values[dimension]}px`,
+              );
+            rule.style.setProperty(
+              property,
+              value,
+              rule.style.getPropertyPriority(property),
+            );
+          }
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) apply(sheet.cssRules);
+    document.querySelector('[data-wco-native-controls]')?.remove();
+    const nativeControls = document.createElement('div');
+    nativeControls.dataset.wcoNativeControls = '';
+    nativeControls.textContent = 'Window controls';
+    nativeControls.style.cssText = `position:fixed;left:${values.x + values.width}px;top:${values.y}px;width:${window.innerWidth - values.x - values.width}px;height:${values.height}px;z-index:1000;background:#252733;color:#aaa;font:10px sans-serif;display:grid;place-items:center`;
+    document.body.append(nativeControls);
+  }, values);
+}
+
+async function headerGeometry(page: import('@playwright/test').Page) {
+  return page.evaluate(() => {
+    const leftHeader = document.querySelector('.agent-thread-nav > div');
+    const activityHeader = document.querySelector('.activity-panel-bar');
+    const activityHeading = document.querySelector(
+      '.activity-panel-bar strong',
+    );
+    const pin = document.querySelector('.activity-panel-pin');
+    const sessionActions = document.querySelector('.session-heading-actions');
+    const panel = document.querySelector('.activity-panel');
+    const nativeControls = document.querySelector('[data-wco-native-controls]');
+    if (
+      !leftHeader ||
+      !activityHeader ||
+      !activityHeading ||
+      !pin ||
+      !sessionActions ||
+      !panel ||
+      !nativeControls
+    )
+      throw new Error('WCO header geometry missing');
+    const effectiveHeight = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return (
+        rect.height + Number.parseFloat(getComputedStyle(element).marginBottom)
+      );
+    };
+    return {
+      leftHeight: effectiveHeight(leftHeader),
+      activityHeight: effectiveHeight(activityHeader),
+      activityHeading: activityHeading.getBoundingClientRect().toJSON(),
+      pin: pin.getBoundingClientRect().toJSON(),
+      sessionActions: sessionActions.getBoundingClientRect().toJSON(),
+      panel: panel.getBoundingClientRect().toJSON(),
+      nativeControls: nativeControls.getBoundingClientRect().toJSON(),
+    };
+  });
+}
+
 for (const active of [false, true]) {
   test(`activity panel stays compact with ${active ? 'active' : 'completed'} work @desktop`, async ({
     page,
@@ -42,11 +133,11 @@ for (const active of [false, true]) {
       `activity-${active ? 'active' : 'completed'}.png`,
       { animations: 'disabled' },
     );
-    await panel.getByRole('button', { name: 'Tasks', exact: true }).click();
+    await panel.getByText('Tasks', { exact: true }).click();
     await expect(
       panel.getByText('Deploy client bundle', { exact: false }),
     ).toBeVisible();
-    await panel.getByRole('button', { name: 'Delegates', exact: true }).click();
+    await panel.getByText('Delegates', { exact: true }).click();
     await expect(
       panel.getByText('Finished worker 6', { exact: true }),
     ).toBeVisible();
@@ -129,77 +220,25 @@ test('activity header clears simulated PWA window controls @desktop', async ({
   await page.setViewportSize({ width: 1440, height: 900 });
   await installVisualStateScenario(page, buildActivityPanelScenario(false));
   // Chromium cannot emulate display-mode:window-controls-overlay via CDP.
-  // Exercise the shipped rules with only media/env inputs substituted, not
-  // a separately maintained approximation of the header styling.
-  await page.evaluate(() => {
-    const values: Record<string, number> = {
-      x: 82,
-      y: 0,
-      width: 1240,
-      height: 40,
-    };
-    const apply = (rules: CSSRuleList, overlay = false) => {
-      for (const rule of Array.from(rules)) {
-        if (rule instanceof CSSImportRule && rule.styleSheet)
-          apply(rule.styleSheet.cssRules, overlay);
-        if (rule instanceof CSSMediaRule) {
-          const isOverlay = rule.conditionText.includes(
-            'display-mode: window-controls-overlay',
-          );
-          if (isOverlay) rule.media.mediaText = 'all';
-          apply(rule.cssRules, overlay || isOverlay);
-        }
-        if (overlay && rule instanceof CSSStyleRule) {
-          for (const property of Array.from(rule.style)) {
-            const value = rule.style
-              .getPropertyValue(property)
-              .replace(
-                /env\(titlebar-area-(x|y|width|height)(?:,[^)]*)?\)/g,
-                (_, dimension: string) => `${values[dimension]}px`,
-              );
-            rule.style.setProperty(
-              property,
-              value,
-              rule.style.getPropertyPriority(property),
-            );
-          }
-        }
-      }
-    };
-    for (const sheet of Array.from(document.styleSheets)) apply(sheet.cssRules);
-    const nativeControls = document.createElement('div');
-    nativeControls.textContent = 'Window controls';
-    nativeControls.style.cssText =
-      'position:fixed;right:0;top:0;width:118px;height:40px;z-index:1000;background:#252733;color:#aaa;font:10px sans-serif;display:grid;place-items:center';
-    document.body.append(nativeControls);
-  });
+  // Keep conventional chrome as a baseline, then exercise the shipped WCO
+  // rules with CSSOM media/env substitutions rather than an approximation.
+  const conventionalHeight = await page
+    .locator('.activity-panel-bar')
+    .evaluate((element) => element.getBoundingClientRect().height);
+  const fullWco = { x: 82, y: 0, width: 1240, height: 40 };
+  await simulateWco(page, fullWco);
   const pin = page.getByRole('button', { name: 'Unpin activity panel' });
-  const pinBox = await pin.boundingBox();
-  if (!pinBox) throw new Error('pin missing');
-  expect(pinBox.x + pinBox.width).toBeLessThanOrEqual(1322);
-  const expandedGeometry = await page.evaluate(() => {
-    const leftHeader = document.querySelector('.agent-thread-nav > div');
-    const activityHeader = document.querySelector('.activity-panel-bar');
-    const sessionActions = document.querySelector('.session-heading-actions');
-    const panel = document.querySelector('.activity-panel');
-    if (!leftHeader || !activityHeader || !sessionActions || !panel)
-      throw new Error('WCO header geometry missing');
-    const effectiveHeight = (element: Element) => {
-      const rect = element.getBoundingClientRect();
-      return (
-        rect.height + Number.parseFloat(getComputedStyle(element).marginBottom)
-      );
-    };
-    return {
-      left: effectiveHeight(leftHeader),
-      activity: effectiveHeight(activityHeader),
-      sessionActionsRight: sessionActions.getBoundingClientRect().right,
-      panelLeft: panel.getBoundingClientRect().left,
-    };
-  });
-  expect(expandedGeometry.activity).toBe(expandedGeometry.left);
-  expect(expandedGeometry.sessionActionsRight).toBeLessThanOrEqual(
-    expandedGeometry.panelLeft,
+  const expandedGeometry = await headerGeometry(page);
+  expect(expandedGeometry.activityHeight).toBe(expandedGeometry.leftHeight);
+  expect(conventionalHeight).toBeLessThanOrEqual(50);
+  expect(expandedGeometry.activityHeading.right).toBeLessThanOrEqual(
+    expandedGeometry.pin.left,
+  );
+  expect(expandedGeometry.pin.right).toBeLessThanOrEqual(
+    expandedGeometry.nativeControls.left,
+  );
+  expect(expandedGeometry.sessionActions.right).toBeLessThanOrEqual(
+    expandedGeometry.panel.left,
   );
   await expect(page.locator('.activity-panel-bar')).toHaveCSS(
     '-webkit-app-region',
@@ -217,4 +256,33 @@ test('activity header clears simulated PWA window controls @desktop', async ({
     .boundingBox();
   if (!collapsedActions) throw new Error('collapsed session actions missing');
   expect(collapsedActions.x + collapsedActions.width).toBeLessThanOrEqual(1322);
+
+  const smallerWco = { x: 160, y: 0, width: 1160, height: 32 };
+  await page.evaluate((key) => localStorage.setItem(key, 'true'), PIN_KEY);
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Unpin activity panel' }),
+  ).toBeVisible();
+  await simulateWco(page, smallerWco);
+  const smallerExpanded = await headerGeometry(page);
+  expect(smallerExpanded.activityHeight).toBe(smallerExpanded.leftHeight);
+  expect(smallerExpanded.activityHeading.right).toBeLessThanOrEqual(
+    smallerExpanded.pin.left,
+  );
+  expect(smallerExpanded.pin.right).toBeLessThanOrEqual(
+    smallerExpanded.nativeControls.left,
+  );
+  expect(smallerExpanded.sessionActions.right).toBeLessThanOrEqual(
+    smallerExpanded.panel.left,
+  );
+  await page.getByRole('button', { name: 'Unpin activity panel' }).click();
+  await expect(page.locator('.activity-panel.is-pinned')).toHaveCount(0);
+  const smallerCollapsed = await page
+    .locator('.session-heading-actions')
+    .boundingBox();
+  if (!smallerCollapsed)
+    throw new Error('smaller collapsed session actions missing');
+  expect(smallerCollapsed.x + smallerCollapsed.width).toBeLessThanOrEqual(
+    smallerWco.x + smallerWco.width,
+  );
 });

@@ -192,14 +192,14 @@
     background: var(--bg);
     padding-top: 6px;
     padding-bottom: 6px;
-    padding-left: max(14px, env(titlebar-area-x, 14px));
+    padding-left: 14px;
     padding-right: max(
-      18px,
+      14px,
       calc(
         100vw -
         env(titlebar-area-x, 0px) -
         env(titlebar-area-width, 100vw) +
-        18px
+        14px
       )
     );
     -webkit-app-region: drag;
@@ -215,8 +215,6 @@
     pointer-events: none;
   }
   .activity-panel-actions {
-    position: relative;
-    right: 18px;
     -webkit-app-region: no-drag;
   }
   .activity-panel-actions button {
