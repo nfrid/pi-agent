@@ -6,10 +6,6 @@
   width: 310px;
   max-height: calc(100vh);
 }
-.agent-nav-backdrop {
-  display: none;
-}
-
 /* Compact, one-line session context. */
 .shell.session-shell {
   padding-bottom: 0;

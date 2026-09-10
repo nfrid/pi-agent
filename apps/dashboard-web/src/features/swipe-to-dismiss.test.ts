@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { isIntentionalRightSwipe } from './swipe-to-dismiss';
+import {
+  isIntentionalLeftSwipe,
+  isIntentionalRightSwipe,
+} from './swipe-to-dismiss';
 
 describe('isIntentionalRightSwipe', () => {
   it('accepts a deliberate horizontal swipe to the right', () => {
@@ -17,6 +20,17 @@ describe('isIntentionalRightSwipe', () => {
     ).toBe(false);
     expect(
       isIntentionalRightSwipe({ absX: 96, absY: 8, vxvy: [0.08, 0.01] }),
+    ).toBe(false);
+  });
+});
+
+describe('isIntentionalLeftSwipe', () => {
+  it('accepts a deliberate horizontal swipe to the left', () => {
+    expect(
+      isIntentionalLeftSwipe({ absX: 96, absY: 18, vxvy: [-0.48, 0.09] }),
+    ).toBe(true);
+    expect(
+      isIntentionalLeftSwipe({ absX: 96, absY: 18, vxvy: [0.48, 0.09] }),
     ).toBe(false);
   });
 });

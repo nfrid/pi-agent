@@ -20,11 +20,7 @@ import {
   runtimeExtensionSurfaces,
 } from './extension-surfaces';
 import { useModifierShortcut } from './modifier-shortcuts';
-import {
-  useOverlayFocusRestore,
-  useOverlayFocusTrap,
-  useOverlayPresence,
-} from './overlay-presence';
+import { SidePanelSurface } from './surface-stack';
 
 const PIN_KEY = 'pi-dashboard-activity-panel-pinned-v1';
 const WIDE_QUERY = '(min-width: 1200px)';
@@ -146,8 +142,7 @@ export function ActivityPanel({
   onTogglePinned: () => void;
 }) {
   const panelRef = useRef<HTMLElement>(null);
-  const { present, exiting } = useOverlayPresence(open);
-  const overlay = open && !pinned;
+  const overlay = !pinned;
   const openSection = (label: string) => {
     onOpen();
     window.requestAnimationFrame(() => {
@@ -164,97 +159,11 @@ export function ActivityPanel({
     true,
   );
   useModifierShortcut({ code: 'KeyD' }, () => openSection('Delegates'), true);
-  useOverlayFocusRestore(overlay, '.session-activity-button');
-  useOverlayFocusTrap(overlay, panelRef, { mobile: true });
-
-  const openFromSwipe = useRef(onOpen);
-  openFromSwipe.current = onOpen;
-  useEffect(() => {
-    if (isWide) return;
-    let start: { x: number; y: number } | undefined;
-    const touchStart = (event: TouchEvent) => {
-      const touch = event.changedTouches[0];
-      start = undefined;
-      if (
-        event.target instanceof Element &&
-        event.target.closest(
-          '.activity-panel, [data-surface-portal-root], .surface-drawer-layer',
-        )
-      )
-        return;
-      if (
-        touch &&
-        event.touches.length === 1 &&
-        touch.clientX >= window.innerWidth - 32
-      ) {
-        // Like the left navigation edge, claim this narrow strip before the
-        // browser takes over panning and cancels delivery of the touch end.
-        if (event.cancelable) event.preventDefault();
-        start = { x: touch.clientX, y: touch.clientY };
-      }
-    };
-    const touchEnd = (event: TouchEvent) => {
-      const initial = start;
-      const touch = event.changedTouches[0];
-      start = undefined;
-      if (!initial || !touch) return;
-      const dx = initial.x - touch.clientX;
-      const dy = Math.abs(initial.y - touch.clientY);
-      if (dx > 52 && dx > dy * 1.25) openFromSwipe.current();
-    };
-    const touchCancel = () => {
-      start = undefined;
-    };
-    window.addEventListener('touchstart', touchStart, { passive: false });
-    window.addEventListener('touchend', touchEnd, { passive: true });
-    window.addEventListener('touchcancel', touchCancel, { passive: true });
-    return () => {
-      start = undefined;
-      window.removeEventListener('touchstart', touchStart);
-      window.removeEventListener('touchend', touchEnd);
-      window.removeEventListener('touchcancel', touchCancel);
-    };
-  }, [isWide]);
-
-  useEffect(() => {
-    if (!overlay) return;
-    const activityRoot = panelRef.current?.closest('body > *');
-    const isNestedPortal = (target: Element) => {
-      if (target.closest('[data-surface-portal-root], .surface-drawer-layer'))
-        return true;
-      const targetRoot = target.closest('body > *');
-      return Boolean(activityRoot && targetRoot && targetRoot !== activityRoot);
-    };
-    const outside = (event: PointerEvent) => {
-      const target = event.target;
-      if (
-        !(target instanceof Element) ||
-        panelRef.current?.contains(target) ||
-        isNestedPortal(target)
-      )
-        return;
-      onClose();
-    };
-    const onEscape = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (target instanceof Element && isNestedPortal(target)) return;
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('pointerdown', outside);
-    window.addEventListener('keydown', onEscape);
-    return () => {
-      document.removeEventListener('pointerdown', outside);
-      window.removeEventListener('keydown', onEscape);
-    };
-  }, [onClose, overlay]);
-
-  if (!present) return null;
-  return (
+  const panel = (
     <aside
       ref={panelRef}
-      className={`activity-panel${open ? ' is-open' : ''}${exiting ? ' is-exiting' : ''}${pinned ? ' is-pinned' : ' is-overlay'}`}
+      className={`activity-panel${open ? ' is-open' : ''}${!open ? ' is-exiting' : ''}${pinned ? ' is-pinned' : ' is-overlay'}`}
       aria-label="Session activity"
-      {...(overlay ? { role: 'dialog', 'aria-modal': true } : {})}
       data-activity-panel=""
     >
       <div className="activity-panel-bar">
@@ -310,5 +219,17 @@ export function ActivityPanel({
         )}
       </div>
     </aside>
+  );
+  if (!overlay) return panel;
+  return (
+    <SidePanelSurface
+      open={open}
+      onOpenChange={(nextOpen) => (nextOpen ? onOpen() : onClose())}
+      side="right"
+      ariaLabel="Session activity"
+      edgeOpen={!isWide}
+    >
+      {panel}
+    </SidePanelSurface>
   );
 }
