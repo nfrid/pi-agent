@@ -1,4 +1,5 @@
 import { DashboardHttpClient, DashboardLiveStore } from '@pi-dashboard/client';
+import type { TaskSurfaceTask } from '@pi-dashboard/extension-contributions';
 import type {
   DelegateHistoryResponse,
   RuntimeSnapshot,
@@ -43,9 +44,11 @@ import {
   selectedDelegateInspectionRow,
 } from './live-surface-renderers';
 import {
+  delegatePanelCounters,
   isParentResumeGate,
   selectedDelegateCompositeRun,
 } from './surfaces/delegate-surface';
+import { TasksSurface, taskPreviewRows } from './surfaces/tasks-surface';
 
 const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
@@ -1529,6 +1532,171 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('<summary>Exact prompt</summary>');
     expect(markup).toContain('<h2>Child prompt</h2>');
     expect(markup).not.toContain('<pre>');
+  });
+
+  it('previews active tasks before pending tasks and caps the panel at three rows', () => {
+    const rows: TaskSurfaceTask[] = [
+      {
+        id: 'done',
+        text: 'Done',
+        status: 'done',
+        dependsOn: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'pending',
+        text: 'Pending',
+        status: 'todo',
+        dependsOn: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'active',
+        text: 'Active',
+        status: 'doing',
+        dependsOn: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: 'second-active',
+        text: 'Active two',
+        status: 'doing',
+        dependsOn: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    expect(taskPreviewRows(rows).map((row) => row.id)).toEqual([
+      'active',
+      'second-active',
+      'pending',
+    ]);
+    const markup = renderToStaticMarkup(
+      <ExtensionSurfaceStack
+        activityPanel
+        runtime={runtimeFixture([
+          {
+            id: 'tasks-panel',
+            rendererId: 'tasks.current',
+            viewModel: {
+              version: 1,
+              tasks: rows,
+              stats: { total: 4, active: 3, done: 1, blocked: 0, ready: 1 },
+            },
+          },
+        ])}
+      />,
+    );
+    expect(markup).toContain('Show all 4 tasks');
+    expect(markup).not.toContain('Done</');
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <TasksSurface
+          activityPanel
+          surface={{
+            id: 'tasks-panel',
+            rendererId: 'tasks.current',
+            viewModel: {
+              version: 1,
+              tasks: rows,
+              stats: { total: 4, active: 3, done: 1, blocked: 0, ready: 1 },
+            },
+          }}
+        />,
+      );
+    });
+    expect(JSON.stringify(tree.toJSON())).not.toContain('Done');
+    act(() => {
+      tree.root.findByType('button').props.onClick();
+    });
+    expect(JSON.stringify(tree.toJSON())).toContain('Done');
+    act(() => tree.unmount());
+  });
+
+  it('presents delegate counters neutrally, with active rows before collapsed finished rows', () => {
+    const rows = [
+      { state: 'success', pauseState: undefined, workflow: undefined },
+      { state: 'running', pauseState: undefined, workflow: undefined },
+      { state: 'queued', pauseState: undefined, workflow: undefined },
+      { state: 'error', pauseState: undefined, workflow: undefined },
+    ] as const;
+    expect(delegatePanelCounters(rows)).toEqual({
+      active: 1,
+      waiting: 1,
+      failed: 1,
+      finished: 1,
+    });
+    const markup = renderToStaticMarkup(
+      <ExtensionSurfaceStack
+        activityPanel
+        runtime={runtimeFixture([
+          {
+            id: 'delegates-panel',
+            rendererId: 'delegate.status',
+            viewModel: {
+              version: 1,
+              statuses: [
+                {
+                  id: 'done',
+                  runId: 'done',
+                  lineageId: 'done',
+                  name: 'Done',
+                  kind: 'background',
+                  state: 'success',
+                  createdAt: 1,
+                  allowWrites: false,
+                },
+                {
+                  id: 'active',
+                  runId: 'active',
+                  lineageId: 'active',
+                  name: 'Active',
+                  kind: 'background',
+                  state: 'running',
+                  createdAt: 1,
+                  allowWrites: false,
+                },
+                {
+                  id: 'waiting',
+                  runId: 'waiting',
+                  lineageId: 'waiting',
+                  name: 'Waiting',
+                  kind: 'background',
+                  state: 'queued',
+                  createdAt: 1,
+                  allowWrites: false,
+                },
+                {
+                  id: 'failed',
+                  runId: 'failed',
+                  lineageId: 'failed',
+                  name: 'Failed',
+                  kind: 'background',
+                  state: 'error',
+                  createdAt: 1,
+                  allowWrites: false,
+                },
+              ],
+            },
+          },
+        ])}
+      />,
+    );
+    expect(markup).toContain('Active 1');
+    expect(markup).toContain('Waiting 1');
+    expect(markup).toContain('Failed 1');
+    expect(markup).toContain('Finished 1');
+    expect(markup).toContain('<summary>Finished (1)</summary>');
+    expect(markup.indexOf('Active</strong>')).toBeLessThan(
+      markup.indexOf('Waiting</strong>'),
+    );
+    expect(markup).not.toContain('need attention');
+    expect(markup).toContain('aria-haspopup="dialog"');
   });
 
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {

@@ -10,6 +10,8 @@ export interface DashboardRendererContext {
   readonly placement?: ExtensionSurfacePlacement;
   /** Freeze live elapsed-time renderers at the reached pause boundary. */
   readonly pausedAt?: number;
+  /** Render the compact activity-panel presentation instead of a launcher card. */
+  readonly activityPanel?: boolean;
 }
 
 export interface DashboardRenderer {
