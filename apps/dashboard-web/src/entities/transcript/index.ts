@@ -18,8 +18,10 @@ export { boundedInspectorText, toolInspectorRows } from './inspector';
 export type { TranscriptLandmark } from './landmarks';
 export {
   buildTranscriptLandmarks,
+  clusterTranscriptUserTurns,
   mergeTranscriptLandmarks,
   sampleTranscriptLandmarks,
+  selectTranscriptUserTurns,
   transcriptItemTimestamp,
   transcriptRoleLabel,
 } from './landmarks';

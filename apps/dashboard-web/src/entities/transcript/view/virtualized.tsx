@@ -275,6 +275,21 @@ export function VirtualizedTranscript({
   };
   const captureScrollAnchor =
     useVirtualTranscriptScrollRestoration(scrollElementRef);
+  const virtualItems = virtualizer.getVirtualItems();
+  const viewportRow = [...virtualItems]
+    .reverse()
+    .find(
+      (virtualItem) =>
+        virtualItem.start <= (scrollElementRef.current?.scrollTop ?? 0),
+    );
+  const viewportRowData =
+    viewportRow === undefined ? undefined : rows[viewportRow.index];
+  const currentItemIndex =
+    viewportRowData?.kind === 'tool-stream'
+      ? viewportRowData.start
+      : viewportRowData?.kind === 'entry'
+        ? viewportRowData.index
+        : undefined;
 
   const renderToolStream = (start: number, end: number, streamKey: string) => (
     <TranscriptToolStream
@@ -310,13 +325,14 @@ export function VirtualizedTranscript({
         onOpenChange={onOutlineOpenChange}
         onJump={jumpToLandmark}
         scrollElementRef={scrollElementRef}
+        currentItemIndex={currentItemIndex}
       />
       <div
         ref={virtualizerRef}
         className="transcript-virtualizer"
         style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
       >
-        {virtualizer.getVirtualItems().map((virtualRow) => {
+        {virtualItems.map((virtualRow) => {
           const row = rows[virtualRow.index];
           if (!row) return null;
           return (
