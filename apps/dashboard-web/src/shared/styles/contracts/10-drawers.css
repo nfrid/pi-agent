@@ -7,8 +7,35 @@
   pointer-events: auto;
   background: var(--scrim-dark);
 }
-[data-swipe-dismiss="right"] {
+[data-swipe-dismiss="right"],
+[data-side-panel-root] {
   touch-action: pan-y;
+}
+.side-panel-dialog {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.side-panel-dialog > .activity-panel,
+.side-panel-dialog > .agent-nav-drawer {
+  pointer-events: auto;
+  animation: side-panel-right-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.side-panel-left .side-panel-dialog > .agent-nav-drawer {
+  animation-name: side-panel-left-in;
+}
+.surface-drawer-layer.is-exiting .side-panel-dialog > .activity-panel,
+.surface-drawer-layer.is-exiting .side-panel-dialog > .agent-nav-drawer {
+  pointer-events: none;
+  animation-name: side-panel-right-out;
+}
+.surface-drawer-layer.is-exiting.side-panel-left
+  .side-panel-dialog
+  > .agent-nav-drawer {
+  animation-name: side-panel-left-out;
+}
+.surface-drawer-layer.is-exiting .side-panel-dialog > .activity-panel {
+  display: block;
 }
 .surface-drawer {
   position: absolute;

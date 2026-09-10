@@ -10,7 +10,7 @@ import {
 import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
 import { useSurfaceHistory } from './drawer-history';
 import { useOverlayFocusRestore, useOverlayPresence } from './overlay-presence';
-import { useSwipeToDismiss } from './swipe-to-dismiss';
+import { useSidePanelEdgeSwipe, useSwipeToDismiss } from './swipe-to-dismiss';
 
 export type SurfaceKind = 'utility' | 'work' | 'inspector';
 export type SurfaceSize = 'compact' | 'wide';
@@ -28,6 +28,76 @@ export type SurfacePage = {
   closeLabel?: string;
   initialFocus?: string;
 };
+
+type SidePanelSide = 'left' | 'right';
+
+/** Shared modal shell for the two session sidebars. */
+export function SidePanelSurface({
+  open,
+  onOpenChange,
+  side,
+  ariaLabel,
+  className,
+  children,
+  edgeOpen = false,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  side: SidePanelSide;
+  ariaLabel: string;
+  className?: string;
+  children: ReactNode;
+  edgeOpen?: boolean;
+}) {
+  const { present, exiting } = useOverlayPresence(open);
+  useOverlayFocusRestore(
+    open,
+    side === 'right' ? '.session-activity-button' : '.agent-nav-trigger',
+  );
+  const dismiss = () => onOpenChange(false);
+  const swipeHandlers = useSwipeToDismiss(dismiss, side);
+  useSidePanelEdgeSwipe({
+    enabled: edgeOpen,
+    open,
+    side,
+    onOpen: () => onOpenChange(true),
+  });
+
+  if (!present) return null;
+  return (
+    <ModalOverlay
+      isOpen
+      isExiting={exiting}
+      isDismissable
+      aria-hidden={exiting || undefined}
+      inert={exiting || undefined}
+      className={({ isExiting }: { isExiting: boolean }) =>
+        `surface-drawer-layer side-panel-layer side-panel-${side}${isExiting || exiting ? ' is-exiting' : ''}`
+      }
+      onClick={(event: MouseEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dismiss();
+      }}
+      onOpenChange={(nextOpen: boolean) => {
+        if (!nextOpen) dismiss();
+      }}
+    >
+      <AriaDialog
+        ref={swipeHandlers.ref}
+        className={`side-panel-dialog${className ? ` ${className}` : ''}`}
+        aria-label={ariaLabel}
+        aria-modal="true"
+        data-side-panel-root=""
+        data-side-panel-side={side}
+        data-side-panel-exiting={exiting ? '' : undefined}
+      >
+        {children}
+      </AriaDialog>
+    </ModalOverlay>
+  );
+}
 
 /** Shared status summary used by work surfaces and future utility panels. */
 export function SurfaceStats({

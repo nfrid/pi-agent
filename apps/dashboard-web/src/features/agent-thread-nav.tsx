@@ -54,10 +54,6 @@ import {
   isThreadUnread,
   useAgentThreadUnread,
 } from './agent-thread-nav/unread';
-import {
-  type AgentThreadNavMode,
-  useAgentThreadDrawer,
-} from './agent-thread-nav/use-agent-thread-drawer';
 import styles from './agent-thread-nav.module.css';
 import { dormantResumeMetadata } from './composer/runtime';
 import { useDashboardSurfaces } from './dashboard-surface-context';
@@ -92,9 +88,11 @@ import {
   refreshDurableThreadMetadata,
 } from './runtime-actions';
 import { ServiceTierIcon } from './service-tier-icon';
-import { AgentNavDrawerShell } from './surface-stack';
+import { SidePanelSurface } from './surface-stack';
 import { DashboardTime } from './timestamp';
 import { UsageCapsule } from './usage-indicator';
+
+export type AgentThreadNavMode = 'home' | 'session';
 
 export type { AgentThreadRow } from './agent-thread-nav/model';
 export {
@@ -505,6 +503,18 @@ export function AgentThreadNav({
     unsettleThreadMutationOptions(dashboardHttpClient),
   );
   const [query, setQuery] = useState('');
+  const [isMobile, setIsMobile] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia('(max-width: 820px)').matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 820px)');
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
   const [shortcutTargetIds, setShortcutTargetIds] = useState<readonly string[]>(
     [],
   );
@@ -539,14 +549,6 @@ export function AgentThreadNav({
     visitCurrent,
     markUnread,
   } = useAgentThreadUnread(currentSessionId);
-  const {
-    drawerRef,
-    drawerPresent,
-    drawerExiting,
-    isMobile,
-    onTouchStart,
-    onTouchEnd,
-  } = useAgentThreadDrawer({ mode, open, onOpenChange });
   const durableThreadsQuery = useQuery(
     threadsQueryOptions(dashboardHttpClient),
   );
@@ -1139,11 +1141,8 @@ export function AgentThreadNav({
   };
   const nav = (
     <aside
-      ref={mode === 'session' ? drawerRef : undefined}
       className={`agent-thread-nav agent-thread-nav-${mode} ${styles.threadNav}`}
       aria-label="Agents and threads"
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
     >
       <div className={styles.header}>
         <div>
@@ -1348,17 +1347,31 @@ export function AgentThreadNav({
       </footer>
     </aside>
   );
-  if (mode === 'home') return nav;
+  if (mode === 'home' || !isMobile) return nav;
   return (
-    <AgentNavDrawerShell
-      open={open}
-      onOpenChange={onOpenChange}
-      isMobile={isMobile}
-      drawerPresent={drawerPresent}
-      drawerExiting={drawerExiting}
-      drawerClassName={styles.drawer}
-    >
-      {nav}
-    </AgentNavDrawerShell>
+    <>
+      <button
+        type="button"
+        className="agent-nav-trigger"
+        aria-label="Open agent list"
+        onClick={() => onOpenChange?.(true)}
+      >
+        ☰
+      </button>
+      <SidePanelSurface
+        open={open}
+        onOpenChange={(nextOpen) => onOpenChange?.(nextOpen)}
+        side="left"
+        ariaLabel="Agents and threads"
+        className={styles.drawer}
+        edgeOpen
+      >
+        <div
+          className={`agent-nav-drawer ${styles.drawer}${open ? ' open' : ''}${!open ? ' is-exiting' : ''}`}
+        >
+          {nav}
+        </div>
+      </SidePanelSurface>
+    </>
   );
 }
