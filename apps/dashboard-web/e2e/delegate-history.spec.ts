@@ -311,22 +311,15 @@ async function inspectPersistedDelegate(
     expect(previewBox.x + previewBox.width).toBeLessThanOrEqual(
       drawerBox.x + drawerBox.width,
     );
-    await drawer
-      .getByRole('button', { name: 'Open transcript outline', exact: true })
-      .click();
-    const turnList = page.getByRole('dialog', {
-      name: 'Transcript outline',
-      exact: true,
-    });
-    await expect(turnList.getByRole('searchbox')).toBeFocused();
     await expect(
-      turnList.getByRole('button', {
-        name: 'Jump to Inspect the historical fixture',
+      drawer.getByRole('button', {
+        name: 'Open transcript outline',
         exact: true,
       }),
-    ).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(turnList).toHaveCount(0);
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('dialog', { name: 'Transcript outline' }),
+    ).toHaveCount(0);
     await expect(drawer).toBeVisible();
     const layout = await drawer.evaluate((element) => {
       const body = element.querySelector<HTMLElement>(

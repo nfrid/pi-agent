@@ -77,22 +77,6 @@ async function swipe(
   );
 }
 
-async function sharedDrawerMotion(drawer: Locator) {
-  return drawer.evaluate((element) => {
-    const style = getComputedStyle(element);
-    const transforms = element
-      .getAnimations()
-      .flatMap((animation) => animation.effect?.getKeyframes() ?? [])
-      .map((keyframe) => String(keyframe.transform ?? ''));
-    return {
-      animationName: style.animationName,
-      animationDuration: style.animationDuration,
-      animationTimingFunction: style.animationTimingFunction,
-      transforms,
-    };
-  });
-}
-
 test('mobile transcript image gallery loads, navigates, and swipes away', async ({
   page,
 }) => {
@@ -2825,34 +2809,12 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       .filter({ hasText: 'Prior history' })
       .getByRole('time'),
   ).toHaveAttribute('datetime', '2026-08-05T18:42:00.000Z');
-  await page.getByRole('button', { name: 'Open transcript outline' }).click();
-  const outline = page.getByRole('dialog', { name: 'Transcript outline' });
-  const outlineMotion = await sharedDrawerMotion(outline);
-  expect(outlineMotion).toMatchObject({
-    animationName: 'drawer-in',
-    animationDuration: '0.16s',
-    animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
-  });
-  expect(outlineMotion.transforms).toContain('translateX(100%)');
-  await expect(outline).toHaveClass(/work-surface-drawer/);
   await expect(
-    outline.getByRole('heading', { name: 'Transcript outline' }),
-  ).toBeVisible();
+    page.getByRole('button', { name: 'Open transcript outline' }),
+  ).toHaveCount(0);
   await expect(
-    outline.getByRole('searchbox', { name: 'Search transcript turns' }),
-  ).toBeFocused();
-  await expect(
-    outline.locator('.transcript-outline-result-count'),
-  ).toContainText('turns');
-  expect(
-    await outline
-      .locator('.surface-drawer-body')
-      .evaluate((element) => getComputedStyle(element).padding),
-  ).toBe('0px');
-  await expect(
-    outline.locator('.transcript-outline-time').first(),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Close Transcript outline' }).click();
+    page.getByRole('dialog', { name: 'Transcript outline' }),
+  ).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open agent list' }).click();
   const agentNav = page.getByRole('complementary', {
@@ -3998,47 +3960,12 @@ test('dense mobile session keeps conversation and activity readable', async ({
   );
   await threadRow.click();
   await expect(page.locator('.agent-nav-drawer.open')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Open transcript outline' }).click();
-  const outline = page.getByRole('dialog', { name: 'Transcript outline' });
-  await expect(outline).toBeVisible();
-  await swipe(outline, { dx: 44 });
-  await expect(outline).toBeVisible();
-  await swipe(outline, { dx: 104, dy: 8 });
-  await expect(outline).toHaveCount(0);
-  await page.getByRole('button', { name: 'Open transcript outline' }).click();
-  const reopenedOutline = page.getByRole('dialog', {
-    name: 'Transcript outline',
-  });
-  const steeringOutlineItem = reopenedOutline.locator(
-    '.transcript-outline-item.outline-steering',
-  );
-  await expect(steeringOutlineItem).toBeVisible();
-  const outlineItemLayout = await steeringOutlineItem.evaluate((item) => {
-    const label = item.querySelector('span');
-    const time = item.querySelector('.transcript-outline-time');
-    const body = item.closest('.surface-drawer-body');
-    if (!label || !time || !body)
-      throw new Error('Transcript outline item layout missing');
-    const labelStyle = getComputedStyle(label);
-    return {
-      bodyFlexGrow: getComputedStyle(body).flexGrow,
-      labelOverflow: labelStyle.overflow,
-      labelWhiteSpace: labelStyle.whiteSpace,
-      timeFloat: getComputedStyle(time).cssFloat,
-    };
-  });
-  expect(outlineItemLayout).toEqual({
-    bodyFlexGrow: '0',
-    labelOverflow: 'visible',
-    labelWhiteSpace: 'normal',
-    timeFloat: 'inline-end',
-  });
-  await reopenedOutline
-    .locator('.transcript-outline-jump')
-    .filter({ hasText: 'Earlier message' })
-    .first()
-    .click();
-  await expect(reopenedOutline).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Open transcript outline' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('dialog', { name: 'Transcript outline' }),
+  ).toHaveCount(0);
   await transcriptScroll(page).evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     element.scrollTop = 0;

@@ -62,8 +62,6 @@ function TranscriptContent({
   outline,
   branchTopology,
   onJumpToLandmark,
-  outlineOpen,
-  onOutlineOpenChange,
   onBeforeScroll,
   scrollElementRef,
   leadingContinuation,
@@ -84,8 +82,6 @@ function TranscriptContent({
   onJumpToLandmark?: (
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
-  outlineOpen?: boolean;
-  onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
   /** Session routes opt into virtualization only with an attached scrollport. */
   virtualize?: boolean;
@@ -196,11 +192,6 @@ function TranscriptContent({
   const [branchPointId, setBranchPointId] = useState<string>();
   const openBranchPaths = (point: SessionBranchPoint) => {
     setBranchPointId(point.id);
-    onOutlineOpenChange?.(true);
-  };
-  const handleOutlineOpenChange = (open: boolean) => {
-    if (!open) setBranchPointId(undefined);
-    onOutlineOpenChange?.(open);
   };
   useLayoutEffect(() => {
     // Re-run after a pending ordinal load commits its rendered items.
@@ -254,8 +245,6 @@ function TranscriptContent({
         open={open}
         setOpen={setOpen}
         runtime={runtime}
-        outlineOpen={outlineOpen}
-        onOutlineOpenChange={handleOutlineOpenChange}
         onBeforeScroll={onBeforeScroll}
         pendingJumpKey={pendingJumpKey}
         onPendingJumpHandled={() => setPendingJumpKey(undefined)}
@@ -271,10 +260,7 @@ function TranscriptContent({
         landmarks={landmarks}
         branchTopology={branchTopology}
         branchPointId={branchPointId}
-        onOpenBranchPaths={openBranchPaths}
         onBranchPointChange={setBranchPointId}
-        open={outlineOpen}
-        onOpenChange={handleOutlineOpenChange}
         onJump={jumpToLandmark}
         scrollElementRef={transcriptScrollElementRef}
       />

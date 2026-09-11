@@ -103,27 +103,11 @@ test('mobile branch marker opens paths, returns, closes, and stays reachable', a
   ).toBeVisible();
 
   await pathsDialog
-    .getByRole('button', { name: 'Back to Transcript outline' })
+    .getByRole('button', { name: 'Close Immediate paths' })
     .click();
-  const outlineDialog = page.getByRole('dialog', {
-    name: 'Transcript outline',
-  });
-  await expect(outlineDialog).toBeVisible();
-  const outlineMarker = outlineDialog
-    .locator('.transcript-outline-item')
-    .filter({ hasText: 'Try A' })
-    .locator('.transcript-outline-branch-indicator');
-  await expect(outlineMarker).toHaveCount(1);
-  await expect(outlineMarker).toHaveAttribute(
-    'data-branch-count',
-    bubbleCount ?? '',
-  );
-  const outlineBox = await outlineMarker.boundingBox();
-  expect(outlineBox?.width ?? 0).toBeGreaterThanOrEqual(36);
-  expect(outlineBox?.height ?? 0).toBeGreaterThanOrEqual(36);
-
-  await outlineDialog
-    .getByRole('button', { name: 'Close Transcript outline' })
-    .click();
-  await expect(outlineDialog).toHaveCount(0);
+  await expect(pathsDialog).toHaveCount(0);
+  await expect(bubbleMarker).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Open transcript outline', exact: true }),
+  ).toHaveCount(0);
 });
