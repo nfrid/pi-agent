@@ -50,8 +50,6 @@ export function VirtualizedTranscript({
   onOpenBranchPaths,
   onBranchPointChange,
   onJumpToLandmark,
-  outlineOpen,
-  onOutlineOpenChange,
   onBeforeScroll,
   pendingJumpKey,
   onPendingJumpHandled,
@@ -72,8 +70,6 @@ export function VirtualizedTranscript({
   onJumpToLandmark?: (
     landmark: SessionOutlineLandmark,
   ) => Promise<boolean> | boolean;
-  outlineOpen?: boolean;
-  onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
   /** A jump requested before a regular-to-virtualized renderer transition. */
   pendingJumpKey?: string;
@@ -328,10 +324,7 @@ export function VirtualizedTranscript({
         landmarks={landmarks}
         branchTopology={branchTopology}
         branchPointId={branchPointId}
-        onOpenBranchPaths={onOpenBranchPaths}
         onBranchPointChange={onBranchPointChange}
-        open={outlineOpen}
-        onOpenChange={onOutlineOpenChange}
         onJump={jumpToLandmark}
         scrollElementRef={scrollElementRef}
         currentUserTurnKey={currentUserTurnKey}

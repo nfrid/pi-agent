@@ -180,8 +180,6 @@ export function SessionHeader({
   entries,
   status,
   statusLabel,
-  outlineTriggerRef,
-  onOpenOutline,
   activityHints,
   activityOpen,
   onOpenActivity,
@@ -196,8 +194,6 @@ export function SessionHeader({
   entries: readonly unknown[];
   status: string;
   statusLabel: string;
-  outlineTriggerRef: RefObject<HTMLButtonElement | null>;
-  onOpenOutline: () => void;
   activityHints: ActivityHints;
   activityOpen: boolean;
   onOpenActivity: () => void;
@@ -232,39 +228,25 @@ export function SessionHeader({
       status={status}
       statusLabel={statusLabel}
       actions={
-        <>
-          <button
-            type="button"
-            className="session-icon-button session-activity-button"
-            aria-label="Open session activity"
-            title={`Activity · Tasks ${activityHints.tasks ? 'active' : 'quiet'} · Delegates ${activityHints.delegates ? 'active' : 'quiet'}`}
-            aria-expanded={activityOpen}
-            onClick={onOpenActivity}
-          >
-            <span className="session-activity-hints" aria-hidden="true">
-              <i
-                className="session-activity-hint session-activity-hint-tasks"
-                data-active={activityHints.tasks || undefined}
-              />
-              <i
-                className="session-activity-hint session-activity-hint-delegates"
-                data-active={activityHints.delegates || undefined}
-              />
-            </span>
-          </button>
-          <button
-            type="button"
-            ref={outlineTriggerRef}
-            className="session-icon-button outline-trigger"
-            aria-label="Open transcript outline"
-            aria-haspopup="dialog"
-            onClick={onOpenOutline}
-          >
-            <span className="session-icon-glyph" aria-hidden="true">
-              ≡
-            </span>
-          </button>
-        </>
+        <button
+          type="button"
+          className="session-icon-button session-activity-button"
+          aria-label="Open session activity"
+          title={`Activity · Tasks ${activityHints.tasks ? 'active' : 'quiet'} · Delegates ${activityHints.delegates ? 'active' : 'quiet'}`}
+          aria-expanded={activityOpen}
+          onClick={onOpenActivity}
+        >
+          <span className="session-activity-hints" aria-hidden="true">
+            <i
+              className="session-activity-hint session-activity-hint-tasks"
+              data-active={activityHints.tasks || undefined}
+            />
+            <i
+              className="session-activity-hint session-activity-hint-delegates"
+              data-active={activityHints.delegates || undefined}
+            />
+          </span>
+        </button>
       }
     />
   );

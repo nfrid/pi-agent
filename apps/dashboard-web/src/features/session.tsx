@@ -73,11 +73,7 @@ export function SessionView({
   const [localAgentNavOpen, setLocalAgentNavOpen] = useState(false);
   const agentNavOpen = sessionNavigation?.open ?? localAgentNavOpen;
   const setAgentNavOpen = sessionNavigation?.setOpen ?? setLocalAgentNavOpen;
-  const [outlineOpen, setOutlineOpen] = useState(false);
-  const outlineTriggerRef = useRef<HTMLButtonElement>(null);
-  const outlineOriginRef = useRef<HTMLElement | null>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
-  const outlineWasOpenRef = useRef(false);
   const {
     data,
     error,
@@ -145,24 +141,6 @@ export function SessionView({
   };
   const activityState = useActivityPanelState(runtime);
 
-  useEffect(() => {
-    if (outlineOpen) {
-      outlineWasOpenRef.current = true;
-      const activeElement = document.activeElement;
-      if (
-        activeElement instanceof HTMLElement &&
-        activeElement !== document.body
-      )
-        outlineOriginRef.current = activeElement;
-    } else if (outlineWasOpenRef.current) {
-      outlineWasOpenRef.current = false;
-      const origin = outlineOriginRef.current;
-      outlineOriginRef.current = null;
-      (origin?.isConnected ? origin : outlineTriggerRef.current)?.focus({
-        preventScroll: true,
-      });
-    }
-  }, [outlineOpen]);
   const handleJumpToLatest = useCallback(() => {
     cancelScrollRestore();
     jumpToLatest();
@@ -253,8 +231,6 @@ export function SessionView({
           entries={data.entries}
           status={status}
           statusLabel={statusLabel}
-          outlineTriggerRef={outlineTriggerRef}
-          onOpenOutline={() => setOutlineOpen(true)}
           activityHints={activityState.hints}
           activityOpen={activityState.open}
           onOpenActivity={() => activityState.setOpen(true)}
@@ -278,8 +254,6 @@ export function SessionView({
             projection={projection}
             runtime={runtime}
             cwd={runtime?.cwd ?? data.metadata.cwd}
-            outlineOpen={outlineOpen}
-            onOutlineOpenChange={setOutlineOpen}
             onBeforeScroll={handleBeforeTranscriptNavigation}
             scrollElementRef={embedded ? undefined : transcriptScrollRef}
             outline={data.outline}

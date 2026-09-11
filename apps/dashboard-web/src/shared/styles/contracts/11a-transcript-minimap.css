@@ -21,29 +21,6 @@
   transform: translateY(-50%);
   pointer-events: none;
 }
-.transcript-minimap-open {
-  flex: 0 0 28px;
-  box-sizing: border-box;
-  width: 44px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--dim);
-  padding: 4px 13px;
-  cursor: pointer;
-  pointer-events: auto;
-  font-size: 15px;
-  line-height: 1;
-}
-.transcript-minimap-open:hover,
-.transcript-minimap-open:focus-visible {
-  background: color-mix(in srgb, var(--purple) 10%, transparent);
-  color: var(--fg);
-}
-.transcript-minimap-open:focus-visible {
-  outline: 1px solid var(--dim);
-  outline-offset: -1px;
-}
 .transcript-minimap-marker {
   position: relative;
   box-sizing: border-box;
@@ -66,7 +43,7 @@
   width: 12px;
   height: 1px;
   border-radius: 1px;
-  background: var(--dim);
+  background: color-mix(in srgb, var(--dim) 50%, transparent);
   transition:
     width 120ms ease,
     background-color 120ms ease;
@@ -146,7 +123,6 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .transcript-minimap-open,
   .transcript-minimap-marker,
   .transcript-minimap-preview {
     transition: none;
