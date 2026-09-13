@@ -8,22 +8,7 @@ import {
 
 export const OPENAI_CONFIG_PATH = getWebSearchConfigPath();
 
-const AUTH_MODEL_CANDIDATES = [
-  {
-    provider: 'openai-codex',
-    models: [
-      'gpt-5.4',
-      'gpt-5.3-codex',
-      'gpt-5.3-codex-spark',
-      'gpt-5.2',
-      'gpt-5.2-codex',
-    ],
-  },
-  {
-    provider: 'openai',
-    models: ['gpt-5.4', 'gpt-5.2', 'gpt-4.1-mini', 'gpt-4o'],
-  },
-] as const;
+const SEARCH_MODEL = 'gpt-5.6-luna';
 
 export interface OpenAIAuth {
   provider: 'openai-codex' | 'openai';
@@ -67,25 +52,23 @@ export async function resolveOpenAIAuth(
 ): Promise<OpenAIAuth | undefined> {
   if (ctx) {
     const models = ctx.modelRegistry.getAll();
-    for (const candidate of AUTH_MODEL_CANDIDATES) {
-      for (const modelId of candidate.models) {
-        const model = models.find(
-          (item) => item.provider === candidate.provider && item.id === modelId,
-        );
-        if (!model) continue;
-        try {
-          const resolved = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-          if (resolved.ok && resolved.apiKey) {
-            return {
-              provider: candidate.provider,
-              apiKey: resolved.apiKey,
-              model: modelId,
-              headers: fetchHeaders(resolved.headers),
-            };
-          }
-        } catch {
-          // Try the next authenticated model.
+    for (const provider of ['openai-codex', 'openai'] as const) {
+      const model = models.find(
+        (item) => item.provider === provider && item.id === SEARCH_MODEL,
+      );
+      if (!model) continue;
+      try {
+        const resolved = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+        if (resolved.ok && resolved.apiKey) {
+          return {
+            provider,
+            apiKey: resolved.apiKey,
+            model: SEARCH_MODEL,
+            headers: fetchHeaders(resolved.headers),
+          };
         }
+      } catch {
+        // Try the next authentication source.
       }
     }
   }
@@ -94,7 +77,7 @@ export async function resolveOpenAIAuth(
     normalizeApiKey(process.env.OPENAI_API_KEY) ??
     normalizeApiKey(loadWebSearchConfig(OPENAI_CONFIG_PATH).openaiApiKey);
   return apiKey
-    ? { provider: 'openai', apiKey, model: 'gpt-5.4', headers: {} }
+    ? { provider: 'openai', apiKey, model: SEARCH_MODEL, headers: {} }
     : undefined;
 }
 

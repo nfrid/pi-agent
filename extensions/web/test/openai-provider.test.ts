@@ -58,6 +58,7 @@ describe('OpenAI search transport', () => {
       });
       expect(body.instructions).toContain('Do not use sources from: spam.com.');
       expect(body).toMatchObject({
+        model: 'gpt-5.6-luna',
         stream: true,
         store: false,
         tool_choice: 'required',
@@ -86,7 +87,7 @@ describe('OpenAI search transport', () => {
     });
   });
 
-  it('prefers model-registry Codex auth and preserves resolved headers', async () => {
+  it('uses gpt-5.6-luna with Codex auth and preserves resolved headers', async () => {
     process.env.OPENAI_API_KEY = 'env-fallback';
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
       expect(init?.headers).toMatchObject({
@@ -94,12 +95,17 @@ describe('OpenAI search transport', () => {
         'x-registry': 'preserved',
         originator: 'pi',
       });
+      expect(JSON.parse(String(init?.body)).model).toBe('gpt-5.6-luna');
       return Response.json(responseOutput());
     });
     vi.stubGlobal('fetch', fetchMock);
     const ctx = {
       modelRegistry: {
-        getAll: () => [{ provider: 'openai-codex', id: 'gpt-5.4' }],
+        getAll: () => [
+          { provider: 'openai-codex', id: 'gpt-5.4' },
+          { provider: 'openai-codex', id: 'gpt-5.3-codex' },
+          { provider: 'openai-codex', id: 'gpt-5.6-luna' },
+        ],
         getApiKeyAndHeaders: vi.fn(async () => ({
           ok: true,
           apiKey: 'registry-key',
@@ -112,6 +118,23 @@ describe('OpenAI search transport', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       'https://chatgpt.com/backend-api/codex/responses',
     );
+  });
+
+  it('does not select other registry models when Luna is absent', async () => {
+    delete process.env.OPENAI_API_KEY;
+    const getApiKeyAndHeaders = vi.fn();
+    const ctx = {
+      modelRegistry: {
+        getAll: () => [
+          { provider: 'openai-codex', id: 'gpt-5.4' },
+          { provider: 'openai', id: 'gpt-4o' },
+        ],
+        getApiKeyAndHeaders,
+      },
+    };
+    const { resolveOpenAIAuth } = await import('../openai-auth.js');
+    expect(await resolveOpenAIAuth(ctx as never)).toBeUndefined();
+    expect(getApiKeyAndHeaders).not.toHaveBeenCalled();
   });
 
   it('selects the Codex endpoint and account header for Codex JWTs', async () => {
