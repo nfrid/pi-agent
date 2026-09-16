@@ -325,7 +325,21 @@ export class DashboardServerImpl implements DashboardServer {
           this.configuration.backgroundJobsSocketPath,
           sessionId,
         ).events(jobId, offset);
-        return { sessionId, jobId, ...page };
+        // A retained process host may predate the dashboard's record-count cap.
+        // Leave the next unread record as the cursor so no lines are skipped.
+        const next = page.events[512];
+        return {
+          sessionId,
+          jobId,
+          ...page,
+          ...(next
+            ? {
+                events: page.events.slice(0, 512),
+                nextOffset: next.offset,
+                complete: false,
+              }
+            : {}),
+        };
       },
       sessionImage: (sessionId, entryId, imageIndex, messageTimestamp) =>
         this.sessions.readImage(
