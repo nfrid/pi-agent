@@ -9,6 +9,7 @@ import {
 import { indexBranchPointsById } from './branching';
 import {
   clusterTranscriptUserTurns,
+  currentTranscriptUserTurnKeyAtViewportMidpoint,
   selectTranscriptUserTurns,
   type TranscriptLandmark,
 } from './landmarks';
@@ -80,7 +81,7 @@ export function TranscriptOutline({
   onBranchPointChange?: (pointId: string | undefined) => void;
   onJump: (landmark: TranscriptLandmark) => void;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
-  /** The user turn represented by the first visible model item. */
+  /** Virtualized fallback identity selected using the viewport midpoint. */
   currentUserTurnKey?: string;
 }) {
   const userTurns = useMemo(
@@ -181,26 +182,29 @@ export function TranscriptOutline({
           return;
         }
         const scrollElement = scrollElementRef?.current;
-        const elements = new Map(
+        const viewport = scrollElement?.getBoundingClientRect();
+        const viewportTop = viewport?.top ?? 0;
+        const midpoint = viewport
+          ? viewportTop + viewport.height / 2
+          : window.innerHeight / 2;
+        const anchorTops = new Map(
           Array.from(
             (scrollElement ?? document).querySelectorAll<HTMLElement>(
               '[data-transcript-key]',
             ),
-          ).map((element) => [element.dataset.transcriptKey, element]),
+          ).flatMap((element) => {
+            const key = element.dataset.transcriptKey;
+            return key
+              ? [[key, element.getBoundingClientRect().top] as const]
+              : [];
+          }),
         );
-        const viewportTop = scrollElement
-          ? scrollElement.getBoundingClientRect().top
-          : 0;
-        let active: TranscriptLandmark | undefined;
-        for (const landmark of currentTurns) {
-          const element = elements.get(landmark.key);
-          if (
-            element &&
-            element.getBoundingClientRect().top <= viewportTop + 12
-          )
-            active = landmark;
-        }
-        if (active) setActiveKey(active.key);
+        const activeKey = currentTranscriptUserTurnKeyAtViewportMidpoint(
+          currentTurns,
+          anchorTops,
+          midpoint,
+        );
+        if (activeKey) setActiveKey(activeKey);
       });
     };
     const scrollElement = scrollElementRef?.current;

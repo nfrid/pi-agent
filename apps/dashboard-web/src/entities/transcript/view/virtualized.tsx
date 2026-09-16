@@ -273,12 +273,12 @@ export function VirtualizedTranscript({
   const captureScrollAnchor =
     useVirtualTranscriptScrollRestoration(scrollElementRef);
   const virtualItems = virtualizer.getVirtualItems();
+  const viewportMidpoint =
+    (scrollElementRef.current?.scrollTop ?? 0) +
+    (scrollElementRef.current?.clientHeight ?? 0) / 2;
   const viewportRow = [...virtualItems]
     .reverse()
-    .find(
-      (virtualItem) =>
-        virtualItem.start <= (scrollElementRef.current?.scrollTop ?? 0),
-    );
+    .find((virtualItem) => virtualItem.start <= viewportMidpoint);
   const viewportRowData =
     viewportRow === undefined ? undefined : rows[viewportRow.index];
   const currentItemIndex =

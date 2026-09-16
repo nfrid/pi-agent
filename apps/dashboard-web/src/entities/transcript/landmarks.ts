@@ -137,6 +137,20 @@ export function currentTranscriptUserTurnKey(
     ?.key;
 }
 
+/** Select the latest user anchor whose top edge has reached the viewport midpoint. */
+export function currentTranscriptUserTurnKeyAtViewportMidpoint(
+  landmarks: readonly TranscriptLandmark[],
+  anchorTops: ReadonlyMap<string, number>,
+  midpoint: number,
+): string | undefined {
+  let active: TranscriptLandmark | undefined;
+  for (const landmark of selectTranscriptUserTurns(landmarks)) {
+    const top = anchorTops.get(landmark.key);
+    if (top !== undefined && top <= midpoint) active = landmark;
+  }
+  return active?.key;
+}
+
 export type TranscriptLandmarkCluster = {
   key: string;
   landmarks: readonly TranscriptLandmark[];

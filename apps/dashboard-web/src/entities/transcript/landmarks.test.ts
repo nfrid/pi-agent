@@ -3,6 +3,7 @@ import {
   buildTranscriptLandmarks,
   clusterTranscriptUserTurns,
   currentTranscriptUserTurnKey,
+  currentTranscriptUserTurnKeyAtViewportMidpoint,
   mergeTranscriptLandmarks,
   selectTranscriptUserTurns,
   type TranscriptLandmark,
@@ -28,6 +29,33 @@ describe('transcript landmark selection', () => {
     expect(
       selectTranscriptUserTurns(input).map((landmark) => landmark.key),
     ).toEqual(['landmark-1', 'landmark-4']);
+  });
+
+  it('selects the latest anchor at or above the viewport midpoint', () => {
+    const input = landmarks(3, [0, 1, 2]);
+
+    expect(
+      currentTranscriptUserTurnKeyAtViewportMidpoint(
+        input,
+        new Map([
+          ['landmark-0', 80],
+          ['landmark-1', 180],
+          ['landmark-2', 280],
+        ]),
+        200,
+      ),
+    ).toBe('landmark-1');
+    expect(
+      currentTranscriptUserTurnKeyAtViewportMidpoint(
+        input,
+        new Map([
+          ['landmark-0', 80],
+          ['landmark-1', 220],
+          ['landmark-2', 280],
+        ]),
+        200,
+      ),
+    ).toBe('landmark-0');
   });
 
   it('clusters dense turns contiguously and keeps a representative anchor', () => {
