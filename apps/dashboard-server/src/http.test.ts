@@ -9,9 +9,14 @@ import {
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import type { BackgroundJobSnapshot } from '@pi-agent/background-jobs';
 import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDashboardServer, sessionEventCoalesceKey } from './http.js';
+import {
+  createDashboardServer,
+  publicBackgroundJob,
+  sessionEventCoalesceKey,
+} from './http.js';
 import type { ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
 import { RuntimeRegistry } from './runtime-registry.js';
@@ -24,6 +29,28 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('excludes exact-environment delegate jobs from public background activity', () => {
+    const shell = {
+      id: '123e4567-e89b-12d3-a456-426614174000',
+      ownerSession: 'session-1',
+      title: 'Build',
+      command: 'bun run build',
+      cwd: '/tmp/project',
+      status: 'running',
+      createdAt: 1,
+      stdout: { text: '', totalBytes: 0, droppedBytes: 0 },
+      stderr: { text: '', totalBytes: 0, droppedBytes: 0 },
+    } satisfies BackgroundJobSnapshot;
+    const delegate = { ...shell, exactEnv: true, title: 'Delegate' };
+
+    expect(
+      [shell, delegate].flatMap((snapshot) => {
+        const publicJob = publicBackgroundJob('session-1', snapshot);
+        return publicJob ? [publicJob] : [];
+      }),
+    ).toEqual([expect.objectContaining({ id: shell.id, title: 'Build' })]);
+  });
+
   it('reconciles runtime intents after bridge startup but before HTTP admission', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pd-intent-'));
     server = await createDashboardServer({

@@ -4,6 +4,7 @@ import type {
 } from '@pi-dashboard/client';
 import type { BackgroundJob, BackgroundJobEvent } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
+import { SurfaceStack, SurfaceStats } from '../surface-stack';
 import { ActivityCollapsibleSection } from './collapsible-list-section';
 import { stateGlyph } from './state-glyphs';
 
@@ -215,59 +216,77 @@ function BackgroundLog({
 }
 
 function BackgroundRow({
-  client,
-  sessionId,
   job,
-  expanded,
   now,
-  onToggle,
+  onOpen,
 }: {
-  client: DashboardHttpClient;
-  sessionId: string;
   job: BackgroundJob;
-  expanded: boolean;
   now: number;
-  onToggle: () => void;
+  onOpen: () => void;
 }) {
   const state = statusLabel(job);
-  const glyphState =
-    job.status === 'running'
-      ? 'running'
-      : job.status === 'killed'
-        ? 'aborted'
-        : job.status;
+  const glyphState = job.status === 'killed' ? 'aborted' : job.status;
+  const stateClass = `surface-${glyphState}`;
   return (
-    <div className={`background-row surface-${job.status}`}>
+    <div className={`delegate-row ${stateClass}`}>
       <button
         type="button"
-        className="background-row-toggle activity-panel-inset"
-        aria-expanded={expanded}
-        onClick={onToggle}
+        className="delegate-row-toggle activity-panel-inset"
+        aria-haspopup="dialog"
+        onClick={onOpen}
       >
         <span className="surface-state" aria-hidden="true">
           {stateGlyph(glyphState)}
         </span>
-        <span className="background-row-main">
-          <strong>{job.title}</strong>
-          <code>{job.command}</code>
-          {outcomeLabel(job) && <small>{outcomeLabel(job)}</small>}
-        </span>
-        <span className="background-row-meta">
-          <span className={`background-row-status surface-${job.status}`}>
-            {state}
+        <span className="delegate-row-main">
+          <span className="delegate-row-name">
+            <strong>{job.title}</strong>
           </span>
-          <span>{durationLabel(job.createdAt, job.settledAt, now)}</span>
-          <span aria-hidden="true">{expanded ? '▴' : '▾'}</span>
+        </span>
+        <span className="delegate-row-meta">
+          <span className={`delegate-row-status ${stateClass}`}>{state}</span>
+          <span className="delegate-row-properties">
+            <span>{durationLabel(job.createdAt, job.settledAt, now)}</span>
+          </span>
+        </span>
+        <span className="delegate-row-chevron" aria-hidden="true">
+          ›
         </span>
       </button>
-      {expanded &&
-        (job.events === true ? (
-          <BackgroundLog client={client} sessionId={sessionId} job={job} />
-        ) : (
-          <p className="background-log-note background-log-not-recorded">
-            Logs not recorded for this job.
-          </p>
-        ))}
+    </div>
+  );
+}
+
+function BackgroundInspector({
+  client,
+  sessionId,
+  job,
+}: {
+  client: DashboardHttpClient;
+  sessionId: string;
+  job: BackgroundJob;
+}) {
+  return (
+    <div className="background-inspector">
+      <div className="background-inspector-details">
+        <div>
+          <span className="background-inspector-label">Command</span>
+          <code>{job.command}</code>
+        </div>
+        {outcomeLabel(job) && (
+          <div>
+            <span className="background-inspector-label">Outcome</span>
+            <span>{outcomeLabel(job)}</span>
+          </div>
+        )}
+      </div>
+      {job.events === true ? (
+        <BackgroundLog client={client} sessionId={sessionId} job={job} />
+      ) : (
+        <p className="background-log-note background-log-not-recorded">
+          Logs not recorded for this job.
+        </p>
+      )}
     </div>
   );
 }
@@ -280,7 +299,7 @@ export function BackgroundActivity({
   sessionId: string;
 }) {
   const [jobs, setJobs] = useState<readonly BackgroundJob[]>([]);
-  const [expandedId, setExpandedId] = useState<string>();
+  const [selectedJobId, setSelectedJobId] = useState<string>();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -292,7 +311,7 @@ export function BackgroundActivity({
     setLoading(true);
     setError(undefined);
     setJobs([]);
-    setExpandedId(undefined);
+    setSelectedJobId(undefined);
     void client
       .getTrpcClient()
       .then((trpc: DashboardTrpcClient) => {
@@ -348,50 +367,108 @@ export function BackgroundActivity({
   if (!loading && jobs.length === 0) return null;
 
   const visibleJobs = expanded ? jobs : jobs.slice(0, 3);
-  const activeCount = jobs.filter((job) => job.status === 'running').length;
+  const selectedJob = jobs.find((job) => job.id === selectedJobId);
+  const stats = {
+    running: jobs.filter((job) => job.status === 'running').length,
+    failed: jobs.filter((job) => job.status === 'failed').length,
+    stopped: jobs.filter((job) => job.status === 'killed').length,
+    done: jobs.filter((job) => job.status === 'done').length,
+  };
+  const inspectorPages = selectedJob
+    ? [
+        {
+          id: `background-${selectedJob.id}`,
+          title: `Background · ${selectedJob.title}`,
+          eyebrow: null,
+          backLabel: 'Back to background activity',
+          headerSummary: (
+            <span
+              className={`background-inspector-header-meta surface-${selectedJob.status === 'killed' ? 'aborted' : selectedJob.status}`}
+            >
+              <span>{statusLabel(selectedJob)}</span>
+              <span>
+                {durationLabel(
+                  selectedJob.createdAt,
+                  selectedJob.settledAt,
+                  now,
+                )}
+              </span>
+            </span>
+          ),
+          children: (
+            <BackgroundInspector
+              client={client}
+              sessionId={sessionId}
+              job={selectedJob}
+            />
+          ),
+        },
+      ]
+    : [];
   return (
-    <ActivityCollapsibleSection
-      title="Background"
-      expanded={expanded}
-      onToggle={() => setExpanded((value) => !value)}
-      totalCount={jobs.length}
-      visibleCount={visibleJobs.length}
-      summary={
-        <span className="activity-panel-summary-toggle">
-          {activeCount ? `${activeCount} running` : 'completed'}{' '}
-          {expanded ? '▴' : '▾'}
-        </span>
-      }
-    >
-      {error && jobs.length > 0 && (
-        <p
-          className="background-activity-status activity-panel-inset"
-          role="status"
-        >
-          Live background updates unavailable: {error}
-        </p>
-      )}
-      {loading && jobs.length === 0 && (
-        <p
-          className="background-activity-status activity-panel-inset"
-          role="status"
-        >
-          Loading background activity…
-        </p>
-      )}
-      {visibleJobs.map((job) => (
-        <BackgroundRow
-          key={job.id}
-          client={client}
-          sessionId={sessionId}
-          job={job}
-          expanded={expandedId === job.id}
-          now={now}
-          onToggle={() =>
-            setExpandedId((value) => (value === job.id ? undefined : job.id))
-          }
-        />
-      ))}
-    </ActivityCollapsibleSection>
+    <>
+      <ActivityCollapsibleSection
+        title="Background"
+        expanded={expanded}
+        onToggle={() => setExpanded((value) => !value)}
+        totalCount={jobs.length}
+        visibleCount={visibleJobs.length}
+        summary={
+          <SurfaceStats
+            className="activity-panel-counters"
+            showZero
+            stats={[
+              {
+                label: 'running',
+                value: stats.running,
+                tone: 'surface-running',
+              },
+              { label: 'failed', value: stats.failed, tone: 'surface-failed' },
+              {
+                label: 'stopped',
+                value: stats.stopped,
+                tone: 'surface-aborted',
+              },
+              { label: 'done', value: stats.done, tone: 'surface-done' },
+            ]}
+          />
+        }
+      >
+        {error && jobs.length > 0 && (
+          <p
+            className="background-activity-status activity-panel-inset"
+            role="status"
+          >
+            Live background updates unavailable: {error}
+          </p>
+        )}
+        {loading && jobs.length === 0 && (
+          <p
+            className="background-activity-status activity-panel-inset"
+            role="status"
+          >
+            Loading background activity…
+          </p>
+        )}
+        {visibleJobs.map((job) => (
+          <BackgroundRow
+            key={job.id}
+            job={job}
+            now={now}
+            onOpen={() => setSelectedJobId(job.id)}
+          />
+        ))}
+      </ActivityCollapsibleSection>
+      <SurfaceStack
+        pages={inspectorPages}
+        kind="inspector"
+        size="wide"
+        className="surface-drawer work-surface-drawer background-inspector-drawer"
+        onDepthChange={(depth) => {
+          if (depth < 1) setSelectedJobId(undefined);
+        }}
+        onClose={() => setSelectedJobId(undefined)}
+      />
+    </>
   );
 }

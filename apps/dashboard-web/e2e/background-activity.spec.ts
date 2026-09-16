@@ -91,42 +91,75 @@ async function openActivity(page: Page) {
   return panel;
 }
 
-async function expandAndCheckLogs(page: Page) {
+async function openAndCheckLogs(page: Page) {
   const panel = await openActivity(page);
   const section = panel.getByRole('region', {
     name: 'Background',
     exact: true,
   });
   await expect(section).toBeVisible();
+  await expect(
+    section.getByRole('status', {
+      name: '1 running, 0 failed, 0 stopped, 0 done',
+    }),
+  ).toBeVisible();
   const row = section.getByRole('button', { name: /Dev server/ });
+  await expect(section).not.toContainText('printf live-output');
+  await expect(section).not.toContainText('exit');
   await row.click();
-  const log = section.getByRole('log', { name: 'Dev server output' });
+  const inspector = page.getByRole('dialog', {
+    name: 'Background · Dev server',
+  });
+  await expect(inspector).toBeVisible();
+  await expect(inspector).toContainText('printf live-output');
+  const log = inspector.getByRole('log', { name: 'Dev server output' });
   await expect(log).toContainText('<script>safe-output</script>');
   await expect(log).toContainText('appended-error');
-  await expect(section).toContainText('Logs complete.');
+  await expect(inspector).toContainText('Logs complete.');
   expect(
     (await page.locator('script').allTextContents()).join('\n'),
   ).not.toContain('safe-output');
-  return { panel, section, row };
+  return { panel, section, row, inspector };
 }
 
-test('expands Background activity, appends live stdout/stderr safely, and cleans up on collapse', async ({
+test('opens Background logs in a separate surface, appends live output safely, and cleans up on close', async ({
   page,
 }) => {
   const scenario = await installBackgroundScenario(page);
-  const { section, row } = await expandAndCheckLogs(page);
+  const { inspector, row } = await openAndCheckLogs(page);
   expect(scenario.logSubscriptionCount()).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect(inspector).toHaveCount(0);
   await row.click();
-  await expect(section.getByRole('log')).toHaveCount(0);
-  await row.click();
-  await expect(section.getByRole('log')).toBeVisible();
+  await expect(
+    page.getByRole('dialog', { name: 'Background · Dev server' }),
+  ).toBeVisible();
   expect(scenario.logSubscriptionCount()).toBe(2);
 });
 
-test('renders Background activity and live logs on desktop @desktop', async ({
+test('renders Background activity and live logs in its inspector on desktop @desktop', async ({
   page,
 }) => {
   await installBackgroundScenario(page);
-  await expandAndCheckLogs(page);
+  const { inspector } = await openAndCheckLogs(page);
   await expect(page.locator('.activity-panel')).toBeVisible();
+  await expect(inspector).toBeVisible();
+  const typography = await page.evaluate(() => {
+    const titles = Array.from(
+      document.querySelectorAll('.activity-panel .delegate-row-main strong'),
+    );
+    const backgroundCommand = document.querySelector(
+      '.background-inspector-details code',
+    );
+    if (titles.length < 2 || !backgroundCommand)
+      throw new Error('background typography missing');
+    return {
+      titleFonts: titles.map((title) => getComputedStyle(title).fontFamily),
+      titleSizes: titles.map((title) => getComputedStyle(title).fontSize),
+      commandFont: getComputedStyle(backgroundCommand).fontFamily,
+    };
+  });
+  expect([...new Set(typography.titleFonts)]).toHaveLength(1);
+  expect([...new Set(typography.titleSizes)]).toHaveLength(1);
+  expect(typography.commandFont).toContain('monospace');
 });

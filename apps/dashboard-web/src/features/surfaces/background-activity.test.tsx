@@ -1,4 +1,5 @@
 import type { BackgroundJob, BackgroundJobEvent } from '@pi-dashboard/protocol';
+import type { ReactNode } from 'react';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -6,6 +7,26 @@ import {
   type LogState,
   mergeLogPage,
 } from './background-activity';
+
+vi.mock('../surface-stack', async () => {
+  const actual =
+    await vi.importActual<typeof import('../surface-stack')>(
+      '../surface-stack',
+    );
+  function TestSurfaceStack({
+    pages,
+  }: {
+    pages: readonly { title: string; children: ReactNode }[];
+  }) {
+    const page = pages.at(-1);
+    return page ? (
+      <div role="dialog" aria-label={page.title}>
+        {page.children}
+      </div>
+    ) : null;
+  }
+  return { ...actual, SurfaceStack: TestSurfaceStack };
+});
 
 const job: BackgroundJob = {
   id: '123e4567-e89b-12d3-a456-426614174000',
@@ -81,7 +102,7 @@ describe('background activity', () => {
     expect(duplicate.revision).toBe(4);
   });
 
-  it('renders metadata, loads logs only after expansion, and cleans up', async () => {
+  it('renders metadata, opens a separate log surface, and cleans up', async () => {
     const unsubscribeLogs = vi.fn();
     const unsubscribeJobs = vi.fn();
     const backgroundJobEventsSubscribe = {
@@ -141,9 +162,9 @@ describe('background activity', () => {
       );
     });
     expect(textInTree(renderer)).toContain('Dev server');
-    expect(textInTree(renderer)).toContain('bun run dev');
+    expect(textInTree(renderer)).not.toContain('bun run dev');
     expect(textInTree(renderer)).toContain('completed');
-    expect(textInTree(renderer)).toContain('exit 0');
+    expect(textInTree(renderer)).not.toContain('exit 0');
     expect(backgroundJobs).not.toHaveBeenCalled();
     expect(backgroundJobEventsSubscribe.subscribe).not.toHaveBeenCalled();
 
@@ -151,11 +172,13 @@ describe('background activity', () => {
       const button = renderer.root
         .findAllByType('button')
         .find((candidate) =>
-          String(candidate.props.className).includes('background-row-toggle'),
+          String(candidate.props.className).includes('delegate-row-toggle'),
         );
       if (!button) throw new Error('background row button missing');
       button.props.onClick();
     });
+    expect(textInTree(renderer)).toContain('bun run dev');
+    expect(textInTree(renderer)).toContain('exit 0');
     expect(backgroundJobEventsSubscribe.subscribe).toHaveBeenCalledWith(
       { sessionId: 'session-1', jobId: job.id, offset: 0 },
       expect.any(Object),
@@ -205,7 +228,7 @@ describe('background activity', () => {
       renderer.root
         .findAllByType('button')
         .find((candidate) =>
-          String(candidate.props.className).includes('background-row-toggle'),
+          String(candidate.props.className).includes('delegate-row-toggle'),
         )
         ?.props.onClick();
     });
@@ -264,7 +287,7 @@ describe('background activity', () => {
       const row = renderer.root
         .findAllByType('button')
         .find((candidate) =>
-          String(candidate.props.className).includes('background-row-toggle'),
+          String(candidate.props.className).includes('delegate-row-toggle'),
         );
       if (!row) throw new Error('background row button missing');
       row.props.onClick();

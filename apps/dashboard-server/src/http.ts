@@ -62,11 +62,13 @@ import type { RegistryChange } from './runtime-registry.js';
 /** Keep session deltas comfortably below the authoritative frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
 
-function publicBackgroundJob(
+export function publicBackgroundJob(
   sessionId: string,
   snapshot: Awaited<ReturnType<BackgroundJobsClient['inspect']>>,
 ): BackgroundJob | undefined {
-  if (!snapshot) return undefined;
+  // Delegate children use the same process host but exactEnv is their
+  // authoritative ownership marker. They belong in Delegates, never Background.
+  if (!snapshot || snapshot.exactEnv === true) return undefined;
   return {
     id: snapshot.id,
     sessionId,
