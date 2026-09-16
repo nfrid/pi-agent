@@ -106,6 +106,30 @@ async function openAndCheckLogs(page: Page) {
   const row = section.getByRole('button', { name: /Dev server/ });
   await expect(section).not.toContainText('printf live-output');
   await expect(section).not.toContainText('exit');
+  const rowLayout = await row.evaluate((element) => {
+    const title = element.querySelector<HTMLElement>(
+      '.background-row-name strong',
+    );
+    const status = element.querySelector<HTMLElement>('.delegate-row-status');
+    const time = element.querySelector<HTMLElement>('.delegate-row-properties');
+    const separator = element.querySelector<HTMLElement>(
+      '.background-row-separator',
+    );
+    if (!title || !status || !time || !separator)
+      throw new Error('background row layout missing');
+    return {
+      titleWhiteSpace: getComputedStyle(title).whiteSpace,
+      titleOverflow: getComputedStyle(title).textOverflow,
+      statusTop: status.getBoundingClientRect().top,
+      timeTop: time.getBoundingClientRect().top,
+      separatorText: separator.textContent,
+      separatorColor: getComputedStyle(separator).color,
+    };
+  });
+  expect(rowLayout.titleWhiteSpace).toBe('nowrap');
+  expect(rowLayout.titleOverflow).toBe('ellipsis');
+  expect(Math.abs(rowLayout.statusTop - rowLayout.timeTop)).toBeLessThan(1);
+  expect(rowLayout.separatorText).toBe('·');
   await row.click();
   const inspector = page.getByRole('dialog', {
     name: 'Background · Dev server',
@@ -162,4 +186,29 @@ test('renders Background activity and live logs in its inspector on desktop @des
   expect([...new Set(typography.titleFonts)]).toHaveLength(1);
   expect([...new Set(typography.titleSizes)]).toHaveLength(1);
   expect(typography.commandFont).toContain('monospace');
+  const counters = await page.locator('.activity-panel').evaluate((panel) => {
+    const background = panel.querySelector('.background-row');
+    const delegateCounters = Array.from(
+      panel.querySelectorAll('.activity-panel-section'),
+    ).find((section) => section.getAttribute('aria-label') === 'Delegates');
+    if (!background || !delegateCounters)
+      throw new Error('activity counters missing');
+    const backgroundCounters = Array.from(
+      panel.querySelectorAll('.activity-panel-counters.surface-stats > span'),
+    );
+    const delegateValues = Array.from(
+      delegateCounters.querySelectorAll('.activity-panel-counters > span'),
+    );
+    return {
+      backgroundClasses: backgroundCounters.map((counter) => counter.className),
+      delegateClasses: delegateValues.map((counter) => counter.className),
+      zeroColor: getComputedStyle(backgroundCounters[1] as Element).color,
+      runningColor: getComputedStyle(backgroundCounters[0] as Element).color,
+    };
+  });
+  expect(counters.backgroundClasses).toEqual(['surface-running', '', '', '']);
+  expect(counters.delegateClasses).toContain('surface-running');
+  expect(counters.delegateClasses).toContain('surface-done');
+  expect(counters.delegateClasses).not.toContain('surface-queued');
+  expect(counters.zeroColor).not.toBe(counters.runningColor);
 });

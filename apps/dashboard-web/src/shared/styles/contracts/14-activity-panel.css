@@ -230,6 +230,19 @@ h2.activity-panel-header,
   text-overflow: clip;
   white-space: normal;
 }
+.activity-panel-section .background-row-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-panel-section .background-row .delegate-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.activity-panel-section .background-row-separator {
+  color: var(--muted);
+}
 .activity-panel-section .surface-failed .surface-state {
   color: var(--muted);
 }

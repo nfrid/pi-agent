@@ -629,6 +629,15 @@ export function DelegateSurface({
     setSelectedLineageId(undefined);
     setLastInspectorRow(undefined);
   };
+  if (
+    activityPanel &&
+    panelGroups.length === 0 &&
+    !historyLoading &&
+    historyError === undefined &&
+    !historyIncomplete &&
+    wakeConditions.length === 0
+  )
+    return null;
   if (activityPanel)
     return (
       <>
@@ -645,25 +654,33 @@ export function DelegateSurface({
               aria-label={`${panelCounters.active} active, ${panelCounters.waiting} waiting, ${panelCounters.failed} failed, ${panelCounters.finished} finished`}
             >
               <span
-                className="activity-panel-counter-active"
+                className={
+                  panelCounters.active > 0 ? 'surface-running' : undefined
+                }
                 title={`Active: ${panelCounters.active}`}
               >
                 <span aria-hidden="true">●</span> {panelCounters.active}
               </span>
               <span
-                className="activity-panel-counter-waiting"
+                className={
+                  panelCounters.waiting > 0 ? 'surface-queued' : undefined
+                }
                 title={`Waiting: ${panelCounters.waiting}`}
               >
                 <span aria-hidden="true">○</span> {panelCounters.waiting}
               </span>
               <span
-                className="activity-panel-counter-failed"
+                className={
+                  panelCounters.failed > 0 ? 'surface-failed' : undefined
+                }
                 title={`Failed: ${panelCounters.failed}`}
               >
                 <span aria-hidden="true">!</span> {panelCounters.failed}
               </span>
               <span
-                className="activity-panel-counter-finished"
+                className={
+                  panelCounters.finished > 0 ? 'surface-done' : undefined
+                }
                 title={`Finished: ${panelCounters.finished}`}
               >
                 <span aria-hidden="true">✓</span> {panelCounters.finished}

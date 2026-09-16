@@ -73,6 +73,7 @@ export function TasksSurface({
   const launcherTasks = running.length > 0 ? running : current ? [current] : [];
   const previewRows = taskPreviewRows(rows);
   const [panelExpanded, setPanelExpanded] = useState(false);
+  if (activityPanel && rows.length === 0) return null;
   const fallbackSummary =
     completed === total
       ? 'All tasks complete'

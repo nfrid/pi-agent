@@ -165,6 +165,21 @@ describe('background activity', () => {
     expect(textInTree(renderer)).not.toContain('bun run dev');
     expect(textInTree(renderer)).toContain('completed');
     expect(textInTree(renderer)).not.toContain('exit 0');
+    const counters = renderer.root.findByProps({
+      className: 'surface-stats activity-panel-counters',
+    });
+    const counterClasses = counters.children
+      .filter(
+        (child): child is { props: { className?: string } } =>
+          typeof child === 'object' && child !== null,
+      )
+      .map((counter) => counter.props.className);
+    expect(counterClasses).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      'surface-done',
+    ]);
     expect(backgroundJobs).not.toHaveBeenCalled();
     expect(backgroundJobEventsSubscribe.subscribe).not.toHaveBeenCalled();
 

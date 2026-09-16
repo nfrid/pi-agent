@@ -1676,6 +1676,55 @@ describe('live extension surface fixtures', () => {
     act(() => tree.unmount());
   });
 
+  it('hides empty task activity panels', () => {
+    const tree = create(
+      <TasksSurface
+        activityPanel
+        surface={{
+          id: 'empty-tasks',
+          rendererId: 'tasks.current',
+          viewModel: {
+            version: 1,
+            tasks: [],
+            stats: { total: 0, active: 0, done: 0, blocked: 0, ready: 0 },
+          },
+        }}
+      />,
+    );
+    expect(tree.toJSON()).toBeNull();
+  });
+
+  it('hides empty delegate activity but preserves history status visibility', () => {
+    const surface = {
+      id: 'empty-delegates',
+      rendererId: 'delegate.status',
+      viewModel: { version: 1, statuses: [] },
+    } as Parameters<typeof DelegateSurface>[0]['surface'];
+    expect(
+      create(<DelegateSurface activityPanel surface={surface} />).toJSON(),
+    ).toBeNull();
+    let loadingTree!: ReturnType<typeof create>;
+    act(() => {
+      loadingTree = create(
+        <DelegateSurface activityPanel surface={surface} historyLoading />,
+      );
+    });
+    expect(JSON.stringify(loadingTree.toJSON())).toContain(
+      'Loading delegate history',
+    );
+    let errorTree!: ReturnType<typeof create>;
+    act(() => {
+      errorTree = create(
+        <DelegateSurface
+          activityPanel
+          surface={surface}
+          historyError={new Error('offline')}
+        />,
+      );
+    });
+    expect(JSON.stringify(errorTree.toJSON())).toContain('No delegate history');
+  });
+
   it('caps five active tasks and keeps an all-completed preview empty until expanded', () => {
     const activeRows: TaskSurfaceTask[] = Array.from(
       { length: 5 },

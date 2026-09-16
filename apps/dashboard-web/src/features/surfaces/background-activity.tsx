@@ -228,7 +228,7 @@ function BackgroundRow({
   const glyphState = job.status === 'killed' ? 'aborted' : job.status;
   const stateClass = `surface-${glyphState}`;
   return (
-    <div className={`delegate-row ${stateClass}`}>
+    <div className={`delegate-row background-row ${stateClass}`}>
       <button
         type="button"
         className="delegate-row-toggle activity-panel-inset"
@@ -239,12 +239,15 @@ function BackgroundRow({
           {stateGlyph(glyphState)}
         </span>
         <span className="delegate-row-main">
-          <span className="delegate-row-name">
+          <span className="delegate-row-name background-row-name">
             <strong>{job.title}</strong>
           </span>
         </span>
         <span className="delegate-row-meta">
           <span className={`delegate-row-status ${stateClass}`}>{state}</span>
+          <span className="background-row-separator" aria-hidden="true">
+            ·
+          </span>
           <span className="delegate-row-properties">
             <span>{durationLabel(job.createdAt, job.settledAt, now)}</span>
           </span>
@@ -421,15 +424,23 @@ export function BackgroundActivity({
               {
                 label: 'running',
                 value: stats.running,
-                tone: 'surface-running',
+                tone: stats.running > 0 ? 'surface-running' : undefined,
               },
-              { label: 'failed', value: stats.failed, tone: 'surface-failed' },
+              {
+                label: 'failed',
+                value: stats.failed,
+                tone: stats.failed > 0 ? 'surface-failed' : undefined,
+              },
               {
                 label: 'stopped',
                 value: stats.stopped,
-                tone: 'surface-aborted',
+                tone: stats.stopped > 0 ? 'surface-aborted' : undefined,
               },
-              { label: 'done', value: stats.done, tone: 'surface-done' },
+              {
+                label: 'done',
+                value: stats.done,
+                tone: stats.done > 0 ? 'surface-done' : undefined,
+              },
             ]}
           />
         }
