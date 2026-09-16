@@ -233,6 +233,126 @@ h2.activity-panel-header,
 .activity-panel-section .surface-failed .surface-state {
   color: var(--muted);
 }
+.background-row {
+  min-width: 0;
+  border-top: 1px solid var(--line-soft);
+}
+.background-row:first-child {
+  border-top: 0;
+}
+.background-row-toggle {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: start;
+  width: 100%;
+  gap: 7px;
+  border: 0;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.background-row-toggle:hover,
+.background-row-toggle:focus-visible {
+  background: color-mix(in srgb, var(--line-soft) 45%, transparent);
+}
+.background-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.background-row-main strong,
+.background-row-main code,
+.background-row-main small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.background-row-main strong {
+  color: var(--fg);
+  font-size: 11px;
+}
+.background-row-main code {
+  color: var(--muted);
+  font: 10px / 1.3 var(--font-mono);
+}
+.background-row-main small {
+  color: var(--orange);
+  font-size: 9px;
+}
+.background-row-meta {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.background-row-status {
+  font-weight: 600;
+}
+.background-row.surface-running .background-row-status {
+  color: var(--cyan);
+}
+.background-row.surface-done .background-row-status {
+  color: var(--green);
+}
+.background-row.surface-failed .background-row-status {
+  color: var(--orange);
+}
+.background-row.surface-killed .background-row-status {
+  color: var(--muted);
+}
+.background-log-wrap {
+  display: grid;
+  gap: 3px;
+  padding: 0 var(--activity-panel-inset) 7px 31px;
+}
+.background-log {
+  max-height: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-soft);
+  background: var(--bg);
+  color: var(--fg);
+  font: 9px / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.background-log-line {
+  display: block;
+  padding: 1px 6px;
+}
+.background-log-line.stderr {
+  color: var(--orange);
+}
+.background-log-line b {
+  color: var(--muted);
+  font-weight: 400;
+}
+.background-log-status,
+.background-log-note,
+.background-activity-status {
+  color: var(--muted);
+  font-size: 9px;
+}
+.background-log-status {
+  display: block;
+  padding: 6px;
+}
+.background-log-note {
+  padding-left: 2px;
+}
+.background-activity-status {
+  margin: 0;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
 .activity-panel-location .draft-picker-trigger {
   max-width: 100%;
   margin: 0;

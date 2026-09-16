@@ -2774,8 +2774,8 @@ describe('agent settlement', () => {
     expect(events).toEqual([
       expect.objectContaining({
         type: 'runtime.stateChanged',
-        state: 'working',
-        snapshot: expect.objectContaining({ liveState: 'working' }),
+        state: 'waiting',
+        snapshot: expect.objectContaining({ liveState: 'waiting' }),
       }),
     ]);
   });

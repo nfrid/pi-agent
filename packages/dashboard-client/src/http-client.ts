@@ -1,5 +1,7 @@
 import {
   type AuthoritativeSessionSnapshot,
+  type BackgroundJobEventsResponse,
+  type BackgroundJobsResponse,
   type BridgeCommand,
   type BrowserSnapshot,
   type CancelCommand,
@@ -45,6 +47,8 @@ import {
   type Thread,
   type ThreadCreateCommand,
   tryParseAuthoritativeSessionSnapshot,
+  tryParseBackgroundJobEventsResponse,
+  tryParseBackgroundJobsResponse,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
   tryParseComposerFileSuggestions,
@@ -777,6 +781,54 @@ export class DashboardHttpClient {
     await this.request(`/api/projects/${encodeURIComponent(projectId)}/icon`, {
       method: 'DELETE',
     });
+  }
+
+  async backgroundJobs(
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<BackgroundJobsResponse> {
+    const client = await this.getTrpcClient();
+    let value: unknown;
+    try {
+      value = await client.backgroundJobs.query(
+        { sessionId },
+        signal ? { signal } : undefined,
+      );
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const response = tryParseBackgroundJobsResponse(value);
+    if (!response)
+      throw malformedOutput(
+        'Dashboard returned invalid background jobs data.',
+        value,
+      );
+    return response;
+  }
+
+  async backgroundJobEvents(
+    sessionId: string,
+    jobId: string,
+    offset: number,
+    signal?: AbortSignal,
+  ): Promise<BackgroundJobEventsResponse> {
+    const client = await this.getTrpcClient();
+    let value: unknown;
+    try {
+      value = await client.backgroundJobEvents.query(
+        { sessionId, jobId, offset },
+        signal ? { signal } : undefined,
+      );
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const response = tryParseBackgroundJobEventsResponse(value);
+    if (!response)
+      throw malformedOutput(
+        'Dashboard returned invalid background job log data.',
+        value,
+      );
+    return response;
   }
 
   async delegateHistory(

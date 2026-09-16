@@ -88,6 +88,27 @@ afterAll(async () => {
 });
 
 describe('BackgroundManager', () => {
+  it('broadcasts pending-process changes when a job starts and stops', async () => {
+    const onChange = vi.fn();
+    const manager = new BackgroundManager({
+      scopeId: `test-${++testScope}`,
+      onChange,
+    });
+    try {
+      const started = await manager.start({
+        command: 'sleep 10',
+        title: 'pending transition',
+        cwd: process.cwd(),
+      });
+      const afterStart = onChange.mock.calls.length;
+      expect(afterStart).toBeGreaterThan(0);
+      await manager.stop([started.id]);
+      expect(onChange.mock.calls.length).toBeGreaterThan(afterStart);
+    } finally {
+      await manager.dispose();
+    }
+  });
+
   it('executes commands with Bash rather than the login shell', async () => {
     await withManager(async (manager) => {
       const started = await manager.start({
@@ -113,6 +134,7 @@ describe('BackgroundManager', () => {
         expect(start.mock.calls[0]?.[0].env).toEqual({
           PATH: process.env.PATH,
         });
+        expect(start.mock.calls[0]?.[0].events).toBe(true);
         expect(start.mock.calls[0]?.[0].exactEnv).not.toBe(true);
         const settled = await inspectUntilSettled(manager, started.id);
         expect(settled.status).toBe('done');

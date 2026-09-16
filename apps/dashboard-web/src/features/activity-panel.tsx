@@ -21,6 +21,7 @@ import {
 } from './extension-surfaces';
 import { useModifierShortcut } from './modifier-shortcuts';
 import { SidePanelSurface } from './surface-stack';
+import { BackgroundActivity } from './surfaces/background-activity';
 
 const PIN_KEY = 'pi-dashboard-activity-panel-pinned-v1';
 const WIDE_QUERY = '(min-width: 1200px)';
@@ -195,6 +196,7 @@ export function ActivityPanel({
         </div>
       </div>
       <div className="activity-panel-content">
+        <BackgroundActivity client={client} sessionId={sessionId} />
         <ExtensionSurfaceStack
           runtime={runtime}
           placement="composer"

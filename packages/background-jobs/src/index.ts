@@ -31,6 +31,8 @@ export const BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES = 64 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_BYTES = 4 * 1024 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES = 256 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES = 64 * 1024;
+/** Maximum records returned by one log page, matching the dashboard contract. */
+export const BACKGROUND_JOBS_MAX_EVENT_RECORDS = 512;
 export const BACKGROUND_JOBS_MAX_WATCHES = 8;
 export const BACKGROUND_JOBS_MAX_WATCH_CONTAINS_CHARS = 512;
 export const BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES = 1024;

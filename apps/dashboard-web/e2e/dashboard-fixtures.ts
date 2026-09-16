@@ -117,6 +117,33 @@ export async function installDashboardBootstrap(
       body: trpcData(options.usage ?? {}),
     }),
   );
+  await page.route('**/trpc/backgroundJobs', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: trpcData({
+        sessionId:
+          typeof dashboardTrpcInput(route.request()).sessionId === 'string'
+            ? dashboardTrpcInput(route.request()).sessionId
+            : 'session-1',
+        jobs: [],
+      }),
+    }),
+  );
+  await page.route('**/trpc/backgroundJobsSubscribe*', async (route) => {
+    assertSubscriptionRequest(route.request());
+    const input = dashboardTrpcInput(route.request());
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          sessionId:
+            typeof input.sessionId === 'string' ? input.sessionId : 'session-1',
+          jobs: [],
+        },
+        'background-jobs-fixture-1',
+      ),
+    });
+  });
   await page.route('**/trpc/shellSubscribe*', async (route) => {
     assertSubscriptionRequest(route.request());
     const id = 'shell-fixture-1';

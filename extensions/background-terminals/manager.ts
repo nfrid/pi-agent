@@ -10,6 +10,7 @@ import {
   newBackgroundJobId,
   parseBackgroundWatchInput,
 } from '@pi-agent/background-jobs';
+import { setPendingProcessCount } from '../shared/runtime/pending-processes';
 import type { SessionScopeId } from '../shared/runtime/scoped-services';
 
 export const MAX_RUNNING = 8;
@@ -35,6 +36,7 @@ export interface BackgroundJobsTransport {
     command: string;
     title: string;
     cwd: string;
+    events?: boolean;
     watch?: readonly BackgroundWatchInput[];
   }): Promise<BackgroundSnapshot>;
   list(): Promise<BackgroundSnapshot[]>;
@@ -157,11 +159,13 @@ export class BackgroundManager {
     watchIds: readonly string[],
   ) => void;
   private readonly onChange?: () => void;
+  private readonly scopeId: SessionScopeId;
   private pollTimer?: NodeJS.Timeout;
   private disposed = false;
 
   constructor(options: BackgroundManagerOptions = {}) {
     const ownerSession = options.scopeId ?? 'default';
+    this.scopeId = ownerSession;
     this.client =
       options.client ??
       new BackgroundJobsClient(
@@ -192,6 +196,7 @@ export class BackgroundManager {
       command: options.command,
       title: displayCommand(options.title ?? deriveTitle(options.command)),
       cwd: options.cwd,
+      events: true,
       // Jobs run in a separate host service with its own, often minimal PATH.
       ...(process.env.PATH !== undefined
         ? { env: { PATH: process.env.PATH } }
@@ -203,6 +208,9 @@ export class BackgroundManager {
     if (!isBackgroundTerminalSnapshot(snapshot))
       throw new Error('Process host returned an incompatible background job.');
     this.accept(snapshot, true);
+    // Starting a job changes pending-process accounting immediately; do not
+    // wait for the next poll before the runtime/widget sees it.
+    this.onChange?.();
     return this.records.get(snapshot.id) ?? snapshot;
   }
 
@@ -411,6 +419,7 @@ export class BackgroundManager {
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = undefined;
     this.records.clear();
+    setPendingProcessCount(this, 0, this.scopeId);
     this.onChange?.();
     // Detach only. The sidecar remains the owner and jobs and watches persist.
   }
@@ -458,6 +467,7 @@ export class BackgroundManager {
     const known = new Set(snapshots.map((snapshot) => snapshot.id));
     for (const id of this.records.keys())
       if (!known.has(id)) this.records.delete(id);
+    setPendingProcessCount(this, this.runningCount, this.scopeId);
     this.onChange?.();
   }
 
@@ -468,6 +478,7 @@ export class BackgroundManager {
     }
     const displayed = displaySnapshot(snapshot);
     this.records.set(displayed.id, displayed);
+    setPendingProcessCount(this, this.runningCount, this.scopeId);
     if (displayed.completionDelivered) this.notified.add(displayed.id);
     for (const watch of displayed.watches ?? []) {
       if (watch.delivered)

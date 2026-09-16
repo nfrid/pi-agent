@@ -5,6 +5,36 @@ export {
   DelegateUsageSchema,
   projectDelegateUsage,
 } from '@pi-dashboard/extension-contributions';
+export type {
+  BackgroundJob,
+  BackgroundJobEvent,
+  BackgroundJobEventsInput,
+  BackgroundJobEventsResponse,
+  BackgroundJobEventsSubscribeInput,
+  BackgroundJobStatus,
+  BackgroundJobsInput,
+  BackgroundJobsResponse,
+  BackgroundJobsSubscribeInput,
+  BackgroundOutputStats,
+} from './background-activity.js';
+export {
+  BackgroundJobEventSchema,
+  BackgroundJobEventsInputSchema,
+  BackgroundJobEventsResponseSchema,
+  BackgroundJobEventsSubscribeInputSchema,
+  BackgroundJobSchema,
+  BackgroundJobsInputSchema,
+  BackgroundJobsResponseSchema,
+  BackgroundJobsSubscribeInputSchema,
+  parseBackgroundJobEventsInput,
+  parseBackgroundJobEventsResponse,
+  parseBackgroundJobEventsSubscribeInput,
+  parseBackgroundJobsInput,
+  parseBackgroundJobsResponse,
+  parseBackgroundJobsSubscribeInput,
+  tryParseBackgroundJobEventsResponse,
+  tryParseBackgroundJobsResponse,
+} from './background-activity.js';
 export {
   delegateCompatibilityHash,
   deriveCompatibilityLineageId,

@@ -24,6 +24,8 @@ export interface DashboardServerOptions {
   runtimeProvider?: AgentRuntimeProvider;
   /** Stable sidecar socket; defaults below the dashboard state directory. */
   runtimeHostSocketPath?: string;
+  /** Stable process-host socket; defaults below the dashboard state directory. */
+  backgroundJobsSocketPath?: string;
   metadata?: MetadataStore;
   sessions?: SessionIndex;
   registry?: RuntimeRegistry;
@@ -51,6 +53,7 @@ export interface DashboardConfiguration {
   readonly token: string;
   readonly socketPath: string;
   readonly runtimeHostSocketPath: string;
+  readonly backgroundJobsSocketPath: string;
   readonly origins: string[];
   readonly feedReplayCount: number;
   readonly feedReplayBytes: number;

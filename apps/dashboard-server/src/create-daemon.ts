@@ -75,6 +75,10 @@ function configuration(
     options.runtimeHostSocketPath ??
     process.env.PI_DASHBOARD_RUNTIME_HOST_SOCKET ??
     path.join(stateDir, 'runtime-host.sock');
+  const backgroundJobsSocketPath =
+    options.backgroundJobsSocketPath ??
+    process.env.PI_PROCESS_HOST_SOCKET ??
+    path.join(stateDir, 'background-jobs.sock');
   const origins = [
     ...(options.origins ?? [
       `http://${host}:${port}`,
@@ -91,6 +95,7 @@ function configuration(
     token,
     socketPath,
     runtimeHostSocketPath,
+    backgroundJobsSocketPath,
     origins,
     feedReplayCount: options.feedReplayCount ?? 256,
     feedReplayBytes: options.feedReplayBytes ?? 4 * 1024 * 1024,

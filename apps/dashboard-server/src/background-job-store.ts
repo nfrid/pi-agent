@@ -29,6 +29,7 @@ import {
   BACKGROUND_JOBS_MAX_EVENT_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES,
+  BACKGROUND_JOBS_MAX_EVENT_RECORDS,
   BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES,
   BACKGROUND_JOBS_MAX_WATCH_EXCERPT_BYTES,
   BACKGROUND_JOBS_MAX_WATCHES,
@@ -568,6 +569,7 @@ export class BackgroundJobStore {
     let nextOffset = Math.max(offset, firstOffset);
     const events: BackgroundJobEvent[] = [];
     for (const record of records) {
+      if (events.length >= BACKGROUND_JOBS_MAX_EVENT_RECORDS) break;
       if (record.event.offset < nextOffset) continue;
       const candidate = [...events, record.event];
       const encoded = Buffer.byteLength(

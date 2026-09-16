@@ -430,7 +430,7 @@ export function emitAgentSettlement(
   const pending = pendingProcessCount(scopeId);
   if (!isGenuineAgentSettlement(false, scopeId)) {
     publishSettledBackground(pending, scopeId);
-    emitState(runtime, ctx, 'working');
+    emitState(runtime, ctx, 'waiting');
     return;
   }
   clearSettledBackground(scopeId);

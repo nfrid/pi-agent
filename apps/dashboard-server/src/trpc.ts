@@ -1,5 +1,7 @@
 import {
   type AuthoritativeSessionSnapshot,
+  type BackgroundJobEventsResponse,
+  type BackgroundJobsResponse,
   type BridgeCommand,
   type BrowserSnapshot,
   type ComposerCommandCatalogue,
@@ -16,6 +18,12 @@ import {
   type ProtocolInfo,
   ProtocolInfoSchema,
   parseAuthoritativeSessionSnapshot,
+  parseBackgroundJobEventsInput,
+  parseBackgroundJobEventsResponse,
+  parseBackgroundJobEventsSubscribeInput,
+  parseBackgroundJobsInput,
+  parseBackgroundJobsResponse,
+  parseBackgroundJobsSubscribeInput,
   parseLiveDiagnosticsRequest,
   parseLiveDiagnosticsResponse,
   parseRenameSessionMutationInput,
@@ -78,6 +86,14 @@ export interface DashboardTrpcContext {
     sessionId: string,
     before?: string,
   ) => Promise<AuthoritativeSessionSnapshot>;
+  readonly backgroundJobs?: (
+    sessionId: string,
+  ) => Promise<BackgroundJobsResponse>;
+  readonly backgroundJobEvents?: (
+    sessionId: string,
+    jobId: string,
+    offset: number,
+  ) => Promise<BackgroundJobEventsResponse>;
   readonly runtimeCommand?: (
     runtimeId: string,
     command: BridgeCommand,
@@ -208,6 +224,36 @@ const protocolMiddleware = t.middleware(({ ctx, path, next }) => {
   return next();
 });
 const dashboardProcedure = t.procedure.use(protocolMiddleware);
+
+function waitForBackgroundPoll(signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, 250);
+    const abort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    timer.unref?.();
+  });
+}
+
+function backgroundOffsetFromEventId(
+  eventId: string | undefined,
+  jobId: string,
+): number | undefined {
+  if (!eventId) return undefined;
+  const prefix = `background-log-${jobId}-`;
+  if (!eventId.startsWith(prefix)) return undefined;
+  const value = Number(eventId.slice(prefix.length));
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
 
 /** The module-level router keeps the exported client contract concrete. */
 const dashboardRouter = t.router({
@@ -349,6 +395,102 @@ const dashboardRouter = t.router({
         );
       } catch (error) {
         throw toDashboardTrpcError(error);
+      }
+    }),
+  /** Session-scoped authoritative metadata; output text stays in the log API. */
+  backgroundJobs: dashboardProcedure
+    .input((value: unknown) => parseBackgroundJobsInput(value))
+    .output((value: unknown) => parseBackgroundJobsResponse(value))
+    .query(async ({ ctx, input }) => {
+      if (!ctx.backgroundJobs)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Background jobs are unavailable.',
+        });
+      try {
+        return parseBackgroundJobsResponse(
+          await ctx.backgroundJobs(input.sessionId),
+        );
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  /** Bounded on-demand line pages; clients continue from nextOffset. */
+  backgroundJobEvents: dashboardProcedure
+    .input((value: unknown) => parseBackgroundJobEventsInput(value))
+    .output((value: unknown) => parseBackgroundJobEventsResponse(value))
+    .query(async ({ ctx, input }) => {
+      if (!ctx.backgroundJobEvents)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Background job logs are unavailable.',
+        });
+      try {
+        return parseBackgroundJobEventsResponse(
+          await ctx.backgroundJobEvents(
+            input.sessionId,
+            input.jobId,
+            input.offset,
+          ),
+        );
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  backgroundJobsSubscribe: dashboardProcedure
+    .input((value: unknown) => parseBackgroundJobsSubscribeInput(value))
+    .subscription(async function* ({ ctx, input, signal }) {
+      if (!ctx.backgroundJobs)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Background jobs are unavailable.',
+        });
+      let previous: string | undefined;
+      let sequence = 0;
+      while (!signal?.aborted) {
+        const response = parseBackgroundJobsResponse(
+          await ctx.backgroundJobs(input.sessionId),
+        );
+        const signature = JSON.stringify(response.jobs);
+        if (signature !== previous) {
+          previous = signature;
+          yield tracked(
+            `background-jobs-${input.sessionId}-${sequence++}`,
+            response,
+          );
+        }
+        await waitForBackgroundPoll(signal);
+      }
+    }),
+  backgroundJobEventsSubscribe: dashboardProcedure
+    .input((value: unknown) => parseBackgroundJobEventsSubscribeInput(value))
+    .subscription(async function* ({ ctx, input, signal }) {
+      if (!ctx.backgroundJobEvents)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Background job logs are unavailable.',
+        });
+      let offset =
+        backgroundOffsetFromEventId(
+          ctx.lastEventId ?? input.lastEventId,
+          input.jobId,
+        ) ?? input.offset;
+      while (!signal?.aborted) {
+        const response = parseBackgroundJobEventsResponse(
+          await ctx.backgroundJobEvents(input.sessionId, input.jobId, offset),
+        );
+        if (
+          response.events.length > 0 ||
+          response.truncated ||
+          response.complete
+        )
+          yield tracked(
+            `background-log-${input.jobId}-${response.nextOffset}`,
+            response,
+          );
+        offset = response.nextOffset;
+        if (response.complete) return;
+        await waitForBackgroundPoll(signal);
       }
     }),
   runtimeCommand: dashboardProcedure

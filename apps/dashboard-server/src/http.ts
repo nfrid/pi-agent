@@ -1,12 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type http from 'node:http';
+import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import {
   delegateHistoryFromBranch,
   delegateHistoryRunDetailFromBranch,
   isDelegateHistoryEntry,
   projectDelegateHistoryEntry,
 } from '@pi-dashboard/domain';
+import type { BackgroundJob } from '@pi-dashboard/protocol';
 import {
   type BridgeCommand,
   type BridgeEvent,
@@ -59,6 +61,42 @@ import type { RegistryChange } from './runtime-registry.js';
 
 /** Keep session deltas comfortably below the authoritative frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
+
+function publicBackgroundJob(
+  sessionId: string,
+  snapshot: Awaited<ReturnType<BackgroundJobsClient['inspect']>>,
+): BackgroundJob | undefined {
+  if (!snapshot) return undefined;
+  return {
+    id: snapshot.id,
+    sessionId,
+    title: snapshot.title,
+    command: snapshot.command,
+    cwd: snapshot.cwd,
+    ...(snapshot.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: snapshot.timeoutMs }),
+    ...(snapshot.events === undefined ? {} : { events: snapshot.events }),
+    ...(snapshot.pid === undefined ? {} : { pid: snapshot.pid }),
+    status: snapshot.status,
+    createdAt: snapshot.createdAt,
+    ...(snapshot.settledAt === undefined
+      ? {}
+      : { settledAt: snapshot.settledAt }),
+    ...(snapshot.exitCode === undefined ? {} : { exitCode: snapshot.exitCode }),
+    ...(snapshot.signal === undefined ? {} : { signal: snapshot.signal }),
+    ...(snapshot.error === undefined ? {} : { error: snapshot.error }),
+    ...(snapshot.timedOut === undefined ? {} : { timedOut: snapshot.timedOut }),
+    stdout: {
+      totalBytes: snapshot.stdout.totalBytes,
+      droppedBytes: snapshot.stdout.droppedBytes,
+    },
+    stderr: {
+      totalBytes: snapshot.stderr.totalBytes,
+      droppedBytes: snapshot.stderr.droppedBytes,
+    },
+  };
+}
 
 function validDelegateIdentifier(value: unknown): value is string {
   return (
@@ -269,6 +307,26 @@ export class DashboardServerImpl implements DashboardServer {
           before,
           this.sessionFeeds.get(id).sequence,
         ),
+      backgroundJobs: async (sessionId) => {
+        const jobs = await new BackgroundJobsClient(
+          this.configuration.backgroundJobsSocketPath,
+          sessionId,
+        ).list();
+        return {
+          sessionId,
+          jobs: jobs.flatMap((job) => {
+            const result = publicBackgroundJob(sessionId, job);
+            return result ? [result] : [];
+          }),
+        };
+      },
+      backgroundJobEvents: async (sessionId, jobId, offset) => {
+        const page = await new BackgroundJobsClient(
+          this.configuration.backgroundJobsSocketPath,
+          sessionId,
+        ).events(jobId, offset);
+        return { sessionId, jobId, ...page };
+      },
       sessionImage: (sessionId, entryId, imageIndex, messageTimestamp) =>
         this.sessions.readImage(
           sessionId,

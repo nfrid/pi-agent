@@ -1,6 +1,8 @@
 import {
   ArchiveThreadCommandSchema,
   type AuthoritativeSessionSnapshot,
+  type BackgroundJobEventsResponse,
+  type BackgroundJobsResponse,
   type BridgeCommand,
   type BrowserSnapshot,
   CancelCommandSchema,
@@ -135,6 +137,12 @@ export interface DashboardRouteContext {
     id: string,
     before?: string,
   ): Promise<AuthoritativeSessionSnapshot>;
+  backgroundJobs?(sessionId: string): Promise<BackgroundJobsResponse>;
+  backgroundJobEvents?(
+    sessionId: string,
+    jobId: string,
+    offset: number,
+  ): Promise<BackgroundJobEventsResponse>;
   shellFeed?: ShellFeed;
   sessionFeeds?: SessionFeedRegistry;
   shellSnapshotAt?(sequence: number): unknown;
@@ -429,6 +437,8 @@ export const dashboardRoutes: FastifyPluginAsync<{
         return { snapshot, cursor: snapshot.cursor };
       }),
     sessionSnapshot: context.sessionSnapshot,
+    backgroundJobs: context.backgroundJobs,
+    backgroundJobEvents: context.backgroundJobEvents,
     shellFeed: context.shellFeed,
     sessionFeeds: context.sessionFeeds,
     shellSnapshotAt: context.shellSnapshotAt,
