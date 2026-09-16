@@ -347,6 +347,48 @@ test('current turn remains correct when its user row is virtualized away @deskto
   await expect(markers.first()).toHaveAttribute('aria-current', 'location');
 });
 
+test('outline switches at the exact viewport midpoint in a virtualized transcript @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await openTurns(page, 2, 50);
+  const scroll = page.locator('.session-transcript-scroll');
+  const markers = page.locator('.transcript-minimap-marker');
+  await expect(markers).toHaveCount(2);
+
+  // Start near the middle so the target anchor is mounted by the virtualizer.
+  await scroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight / 2;
+  });
+  const second = scroll.locator('[data-transcript-key]').filter({
+    hasText: 'User prompt 002',
+  });
+  await expect(second).toHaveCount(1);
+  const secondAnchor = await second.evaluate((target) => {
+    const element = target.closest('.session-transcript-scroll');
+    if (!(element instanceof HTMLElement))
+      throw new Error('Missing transcript scroll');
+    const viewport = element.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
+    return {
+      contentTop: rect.top - viewport.top + element.scrollTop,
+      viewportHeight: element.clientHeight,
+    };
+  });
+
+  // Just below the cutoff: the previous anchor remains selected.
+  await scroll.evaluate((element, anchor) => {
+    element.scrollTop = anchor.contentTop - anchor.viewportHeight / 2 - 200;
+  }, secondAnchor);
+  await expect(markers.first()).toHaveAttribute('aria-current', 'location');
+
+  // At the cutoff itself, the latest anchor is selected (<= midpoint).
+  await scroll.evaluate((element, anchor) => {
+    element.scrollTop = anchor.contentTop - anchor.viewportHeight / 2;
+  }, secondAnchor);
+  await expect(markers.last()).toHaveAttribute('aria-current', 'location');
+});
+
 test('short desktop rail fits above a growing composer without overlapping targets @desktop', async ({
   page,
 }) => {
