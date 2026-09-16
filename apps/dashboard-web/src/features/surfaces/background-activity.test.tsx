@@ -169,10 +169,7 @@ describe('background activity', () => {
       className: 'surface-stats activity-panel-counters',
     });
     const counterClasses = counters.children
-      .filter(
-        (child): child is { props: { className?: string } } =>
-          typeof child === 'object' && child !== null,
-      )
+      .filter((child) => typeof child !== 'string')
       .map((counter) => counter.props.className);
     expect(counterClasses).toEqual([
       undefined,
