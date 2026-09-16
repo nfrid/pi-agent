@@ -35,7 +35,10 @@ export interface WorktreeIntegrator {
     record: WorktreeRecord,
     options?: BranchReviewMode | BranchReviewOptions,
   ): Promise<BranchReview>;
-  mergeBranch(record: WorktreeRecord): Promise<MergeOutcome>;
+  mergeBranch(
+    record: WorktreeRecord,
+    options?: MergeOptions,
+  ): Promise<MergeOutcome>;
 }
 
 export interface BranchReviewPathSummary {
@@ -87,10 +90,17 @@ export interface BranchReviewOptions {
   patchBudget?: number;
 }
 
+export interface MergeOptions {
+  /** Explicit parent commit message; enables delegate squash integration. */
+  commitMessage?: string;
+}
+
 export interface MergeOutcome {
   merged: boolean;
   /** Why the merge was refused or failed; absent on success. */
   reason?: string;
+  /** A successful commit landed but post-commit recovery or diagnostics warned. */
+  warning?: string;
   conflicted?: string[];
   blockedPaths?: string[];
   /** The parent HEAD commit after successful integration. */
@@ -770,6 +780,7 @@ export function createWorktreeIntegrator(
     merged: boolean;
     /** Why the merge was refused or failed; absent on success. */
     reason?: string;
+    warning?: string;
     conflicted?: string[];
     blockedPaths?: string[];
     /** The parent HEAD commit after successful integration. */
@@ -779,16 +790,27 @@ export function createWorktreeIntegrator(
   }
 
   /**
-   * Merge a delegate branch into the parent checkout.
+   * Integrate a delegate branch into the parent checkout.
    *
    * Either integration lands or the checkout is left exactly as it was: a
    * conflict is aborted rather than parked, because an agent that continues
    * working from a half-merged tree makes a worse mess than one told to resolve
    * deliberately. A carried branch cherry-picks only unintegrated task patches
    * from `workBase..branch`; a normal branch keeps the ordinary no-fast-forward
-   * merge.
+   * merge. An explicit commit message instead applies only the unintegrated
+   * task patches and records them as one parent-authored commit.
    */
-  async function mergeBranch(record: WorktreeRecord): Promise<MergeOutcome> {
+  async function mergeBranch(
+    record: WorktreeRecord,
+    options: MergeOptions = {},
+  ): Promise<MergeOutcome> {
+    const commitMessage = options.commitMessage;
+    const squash = commitMessage !== undefined;
+    if (commitMessage !== undefined && !commitMessage.trim())
+      return {
+        merged: false,
+        reason: 'Squash integration requires a nonempty parent commit message.',
+      };
     if (record.ownership === 'caller')
       return {
         merged: false,
@@ -825,13 +847,19 @@ export function createWorktreeIntegrator(
     // HEAD (with different commit IDs). Only the remaining patch-identities are
     // safe to cherry-pick; replaying the whole range would stop on an empty
     // pick before reaching a continuation.
-    const taskCommits = range.carried
-      ? await unintegratedTaskCommits(root, record)
-      : [];
+    const taskCommits =
+      range.carried || squash
+        ? await unintegratedTaskCommits(root, record)
+        : [];
     if (range.carried && taskCommits.length === 0)
       return {
         merged: false,
         reason: `${record.branch}'s task commits are already applied to HEAD; there is nothing to merge.`,
+      };
+    if (squash && taskCommits.length === 0)
+      return {
+        merged: false,
+        reason: `${record.branch}'s task commits are already applied to HEAD; there is nothing to squash.`,
       };
     if (
       await succeeds(root, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'])
@@ -857,7 +885,7 @@ export function createWorktreeIntegrator(
 
     const [dirty, incoming] = await Promise.all([
       dirtyPaths(root),
-      range.carried
+      range.carried || squash
         ? taskPaths(root, taskCommits)
         : paths(root, ['diff', '--name-only', '-z', range.range]),
     ]);
@@ -869,14 +897,45 @@ export function createWorktreeIntegrator(
         reason: `These paths are uncommitted here and also changed by the task on ${record.branch}: commit or stash them first.`,
       };
 
-    const cherryPick = range.carried;
+    const cherryPick = range.carried || squash;
+    let stashed = false;
+    let operationStarted = false;
+    let committed = false;
     try {
-      await git(
-        root,
-        cherryPick
-          ? ['cherry-pick', '--no-edit', ...taskCommits]
-          : ['merge', '--no-ff', '--no-edit', record.branch],
-      );
+      if (squash) {
+        if (dirty.length > 0) {
+          await git(root, [
+            'stash',
+            'push',
+            '--include-untracked',
+            '--message',
+            'pi delegate squash temporary WIP',
+          ]);
+          stashed = true;
+        }
+        operationStarted = true;
+        await git(root, ['cherry-pick', '--no-commit', ...taskCommits]);
+        await git(root, [
+          'commit',
+          '--only',
+          '--message',
+          commitMessage,
+          '--',
+          ...incoming,
+        ]);
+        committed = true;
+        if (stashed) {
+          await git(root, ['stash', 'pop', '--index']);
+          stashed = false;
+        }
+      } else {
+        await git(
+          root,
+          cherryPick
+            ? ['cherry-pick', '--no-edit', ...taskCommits]
+            : ['merge', '--no-ff', '--no-edit', record.branch],
+        );
+      }
       const superprojectWorkingTree = await gitText(root, [
         'rev-parse',
         '--show-superproject-working-tree',
@@ -900,6 +959,18 @@ export function createWorktreeIntegrator(
         '--diff-filter=U',
         '-z',
       ]).catch(() => []);
+      if (committed) {
+        const commit = await gitText(root, ['rev-parse', 'HEAD']).catch(
+          () => undefined,
+        );
+        return {
+          merged: true,
+          ...(commit ? { commit } : {}),
+          warning: stashed
+            ? `Integration committed but restoring pre-existing parent WIP failed: ${error instanceof Error ? error.message : String(error)}. Your checkout may need the retained stash restored; inspect it with: git status && git stash list`
+            : `Integration committed, but post-integration diagnostics failed: ${error instanceof Error ? error.message : String(error)}.`,
+        };
+      }
       const abortCommand = cherryPick
         ? ['cherry-pick', '--abort']
         : ['merge', '--abort'];
@@ -908,8 +979,29 @@ export function createWorktreeIntegrator(
       try {
         await git(root, abortCommand);
       } catch (cleanupError) {
-        abortFailed = true;
-        abortError = cleanupError;
+        if (squash && operationStarted) {
+          // A successful --no-commit sequence has no CHERRY_PICK_HEAD, so a
+          // commit failure needs reset --merge rather than cherry-pick --abort.
+          try {
+            await git(root, ['reset', '--merge', 'HEAD']);
+          } catch (resetError) {
+            abortFailed = true;
+            abortError = resetError;
+          }
+        } else if (!squash) {
+          abortFailed = true;
+          abortError = cleanupError;
+        }
+      }
+
+      if (stashed) {
+        try {
+          await git(root, ['stash', 'pop', '--index']);
+          stashed = false;
+        } catch (restoreError) {
+          abortFailed = true;
+          abortError = restoreError;
+        }
       }
 
       const command = cherryPick

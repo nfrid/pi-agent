@@ -213,6 +213,9 @@ describe('workflow symbolic inputs', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       headCommit: 'b'.repeat(40),
+      integratedBy: id,
+      integratedHead: 'b'.repeat(40),
+      integratedCommit: 'c'.repeat(40),
     };
     writeWorktreeRecord(record);
     const run = runWithReport('branch');
@@ -227,6 +230,8 @@ describe('workflow symbolic inputs', () => {
         worktreeId: id,
         headCommit: 'b'.repeat(40),
         workingDirectory: 'src',
+        integrationBoundary: 'b'.repeat(40),
+        integrationCommit: 'c'.repeat(40),
       });
       expect(Object.isFrozen(resolved.inputs[0]?.branch)).toBe(true);
 

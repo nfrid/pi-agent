@@ -347,7 +347,7 @@ export function worktreeLines(run: DelegatedRun): string[] {
     worktree.ownership === 'caller'
       ? 'Integrate: manage the caller-owned branch in that checkout'
       : changeNode
-        ? `Changes: delegate_changes review/merge node ${changeNode}`
+        ? `Changes: delegate_changes review/merge node ${changeNode} (review first; merge with a meaningful message to squash)`
         : `Changes: inspect with /delegate-worktrees ${worktree.id}`,
   );
   return lines;

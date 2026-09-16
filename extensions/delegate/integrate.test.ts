@@ -145,6 +145,156 @@ describe('cumulative base-chain integration', () => {
     );
     expect(await branchState(continuedAncestor)).toBe('unmerged');
   });
+
+  test('uses an ancestor squash boundary for a multi-commit cumulative descendant', async () => {
+    const ancestor = await delegated({
+      name: 'Multi-commit squash ancestor',
+      write: (worktreePath) => {
+        writeFileSync(path.join(worktreePath, 'src', 'value.txt'), 'a\n');
+        git(worktreePath, ['add', 'src/value.txt']);
+        git(worktreePath, ['commit', '-m', 'feat(child): first value']);
+        writeFileSync(path.join(worktreePath, 'src', 'value.txt'), 'b\n');
+        git(worktreePath, ['add', 'src/value.txt']);
+        git(worktreePath, ['commit', '-m', 'fix(child): second value']);
+      },
+    });
+    const ancestorHistory = git(ancestor.worktreePath, [
+      'log',
+      '--format=%s',
+      `${workBase(ancestor)}..${ancestor.branch}`,
+    ]);
+    const descendantPreparation = await prepareWorktree({
+      cwd: repository,
+      name: 'Multi-commit squash descendant',
+      baseRef: ancestor.headCommit,
+    });
+    const descendant = descendantPreparation.worktree?.record;
+    if (!descendant) throw new Error('descendant preparation failed');
+    descendant.integrationBase = ancestor.baseHead;
+    writeWorktreeRecord(descendant);
+    const ancestorSquash = await mergeBranch(ancestor, {
+      commitMessage: 'feat(delegate): integrate ancestor values',
+    });
+    expect(ancestorSquash.merged).toBe(true);
+    expect(await branchState(ancestor)).toBe('merged');
+    const ancestorIncremental = await reviewBranch(ancestor, 'incremental');
+    expect(ancestorIncremental.log).toBe('');
+    writeFileSync(
+      path.join(descendant.worktreePath, 'src', 'value.txt'),
+      'c\n',
+    );
+    const finished = await finishWorktree(descendant.id, {
+      taskName: 'Multi-commit squash descendant',
+      outcome: 'success',
+    });
+    expect(await branchState(finished)).toBe('unmerged');
+    const descendantIncremental = await reviewBranch(finished, 'incremental');
+    expect(descendantIncremental.log).toContain(
+      'Multi-commit squash descendant',
+    );
+    expect(descendantIncremental.diff).toContain('c');
+    expect(descendantIncremental.diff).not.toContain('a\\n');
+    expect(descendantIncremental.diff).not.toContain('b\\n');
+    const descendantHistory = git(descendant.worktreePath, [
+      'log',
+      '--format=%s',
+      `${ancestor.headCommit}..${descendant.branch}`,
+    ]);
+
+    const outcome = await mergeBranch(finished, {
+      commitMessage: 'fix(delegate): integrate descendant value',
+    });
+
+    expect(outcome.merged).toBe(true);
+    expect(
+      readFileSync(path.join(repository, 'src', 'value.txt'), 'utf8'),
+    ).toBe('c\n');
+    expect(git(repository, ['show', '-s', '--format=%s', 'HEAD']).trim()).toBe(
+      'fix(delegate): integrate descendant value',
+    );
+    expect(
+      git(descendant.worktreePath, [
+        'log',
+        '--format=%s',
+        `${ancestor.headCommit}..${descendant.branch}`,
+      ]),
+    ).toBe(descendantHistory);
+    expect(
+      git(ancestor.worktreePath, [
+        'log',
+        '--format=%s',
+        `${workBase(ancestor)}..${ancestor.branch}`,
+      ]),
+    ).toBe(ancestorHistory);
+    const updatedAncestor = loadWorktree(ancestor.id);
+    expect(updatedAncestor?.integratedBy).toBe(finished.id);
+    expect(updatedAncestor?.integratedCommit).toBe(outcome.commit);
+    expect(await branchState(updatedAncestor as WorktreeRecord)).toBe('merged');
+    const parentBranch = git(repository, ['branch', '--show-current']).trim();
+    git(repository, [
+      'branch',
+      'before-descendant',
+      ancestorSquash.commit as string,
+    ]);
+    git(repository, ['checkout', '-q', 'before-descendant']);
+    expect(await branchState(updatedAncestor as WorktreeRecord)).toBe(
+      'unmerged',
+    );
+    git(repository, ['checkout', '-q', parentBranch]);
+    expect(await branchState(finished)).toBe('merged');
+    expect((await reviewBranch(finished, 'incremental')).log).toBe('');
+  });
+
+  test('squashes a cumulative base chain without merging child history', async () => {
+    const ancestor = await delegated({
+      name: 'Squash ancestor',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'ancestor.txt'), 'a\n'),
+    });
+    if (!ancestor.headCommit) throw new Error('missing ancestor head');
+    const preparation = await prepareWorktree({
+      cwd: repository,
+      name: 'Squash descendant',
+      baseRef: ancestor.headCommit,
+    });
+    const descendant = preparation.worktree?.record;
+    if (!descendant) throw new Error('descendant preparation failed');
+    descendant.integrationBase =
+      ancestor.integrationBase ?? ancestor.carryCommit ?? ancestor.baseHead;
+    writeWorktreeRecord(descendant);
+    writeFileSync(
+      path.join(descendant.worktreePath, 'src', 'descendant.txt'),
+      'd\n',
+    );
+    const finished = await finishWorktree(descendant.id, {
+      taskName: 'Squash descendant',
+      outcome: 'success',
+    });
+    const childHead = finished.headCommit;
+
+    const outcome = await mergeBranch(finished, {
+      commitMessage: 'feat(delegate): integrate cumulative work',
+    });
+
+    expect(outcome.merged).toBe(true);
+    expect(
+      git(repository, ['rev-list', '--parents', '-n', '1', 'HEAD'])
+        .trim()
+        .split(' '),
+    ).toHaveLength(2);
+    expect(git(repository, ['show', '-s', '--format=%s', 'HEAD']).trim()).toBe(
+      'feat(delegate): integrate cumulative work',
+    );
+    expect(git(descendant.worktreePath, ['rev-parse', 'HEAD']).trim()).toBe(
+      childHead,
+    );
+    expect(
+      readFileSync(path.join(repository, 'src', 'ancestor.txt'), 'utf8'),
+    ).toBe('a\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'descendant.txt'), 'utf8'),
+    ).toBe('d\n');
+  });
 });
 
 describe('incremental delegate review', () => {
@@ -418,6 +568,323 @@ describe('incremental delegate review', () => {
 });
 
 describe('merging a delegate branch', () => {
+  test('squashes reviewed work into one parent commit without child history or WIP', async () => {
+    parentWip();
+    git(repository, ['add', 'src/value.txt']);
+    writeFileSync(path.join(repository, 'src', 'carried.txt'), 'carried\n');
+    const record = await delegated({
+      name: 'Squash task',
+      write: (worktreePath) => {
+        writeFileSync(path.join(worktreePath, 'src', 'first.txt'), 'first\n');
+        git(worktreePath, ['add', 'src/first.txt']);
+        git(worktreePath, [
+          'commit',
+          '-m',
+          'chore(child): first internal step',
+        ]);
+        writeFileSync(path.join(worktreePath, 'src', 'second.txt'), 'second\n');
+        git(worktreePath, ['add', 'src/second.txt']);
+        git(worktreePath, ['commit', '-m', 'fix(child): second internal step']);
+      },
+    });
+    const childHead = git(record.worktreePath, ['rev-parse', 'HEAD']);
+    const childHistory = git(record.worktreePath, [
+      'log',
+      '--format=%s',
+      `${workBase(record)}..${record.branch}`,
+    ]);
+    const parentStatus = git(repository, ['status', '--porcelain']);
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'feat(delegate): integrate reviewed task',
+    });
+
+    expect(outcome.merged).toBe(true);
+    expect(git(repository, ['show', '-s', '--format=%s', 'HEAD']).trim()).toBe(
+      'feat(delegate): integrate reviewed task',
+    );
+    expect(
+      git(repository, ['rev-list', '--parents', '-n', '1', 'HEAD'])
+        .trim()
+        .split(' '),
+    ).toHaveLength(2);
+    expect(git(record.worktreePath, ['rev-parse', 'HEAD'])).toBe(childHead);
+    expect(
+      git(record.worktreePath, [
+        'log',
+        '--format=%s',
+        `${workBase(record)}..${record.branch}`,
+      ]),
+    ).toBe(childHistory);
+    expect(git(repository, ['status', '--porcelain'])).toBe(parentStatus);
+    expect(
+      readFileSync(path.join(repository, 'src', 'value.txt'), 'utf8'),
+    ).toBe('parent edit\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'carried.txt'), 'utf8'),
+    ).toBe('carried\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'first.txt'), 'utf8'),
+    ).toBe('first\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'second.txt'), 'utf8'),
+    ).toBe('second\n');
+  });
+
+  test('squash continuation starts after the prior squashed child tip', async () => {
+    const record = await delegated({
+      name: 'Squash continuation',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'initial.txt'),
+          'initial\n',
+        ),
+    });
+    const firstOutcome = await mergeBranch(record, {
+      commitMessage: 'feat(delegate): integrate initial',
+    });
+    expect(firstOutcome.merged).toBe(true);
+    const firstParentCommit = git(repository, ['rev-parse', 'HEAD']);
+    const repeated = await mergeBranch(record, {
+      commitMessage: 'feat(delegate): repeat initial',
+    });
+    expect(repeated).toMatchObject({
+      merged: false,
+      reason: expect.stringMatching(/no task commits|already applied/),
+    });
+    expect(git(repository, ['rev-parse', 'HEAD'])).toBe(firstParentCommit);
+    const priorIntegratedHead = record.integratedHead;
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'follow-up.txt'),
+      'follow-up\n',
+    );
+    const continued = await finishWorktree(record.id, {
+      taskName: 'Squash continuation',
+      outcome: 'success',
+    });
+    expect(continued.integratedHead).toBe(priorIntegratedHead);
+
+    const outcome = await mergeBranch(continued, {
+      commitMessage: 'fix(delegate): integrate continuation',
+    });
+
+    expect(outcome.merged).toBe(true);
+    expect(git(repository, ['show', '-s', '--format=%s', 'HEAD']).trim()).toBe(
+      'fix(delegate): integrate continuation',
+    );
+    expect(
+      readFileSync(path.join(repository, 'src', 'initial.txt'), 'utf8'),
+    ).toBe('initial\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'follow-up.txt'), 'utf8'),
+    ).toBe('follow-up\n');
+  });
+
+  test('blocks dirty overlap before squash and leaves the checkout untouched', async () => {
+    const record = await delegated({
+      name: 'Squash dirty overlap',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'overlap.txt'),
+          'delegate\n',
+        ),
+    });
+    writeFileSync(path.join(repository, 'src', 'overlap.txt'), 'parent\n');
+    const beforeHead = git(repository, ['rev-parse', 'HEAD']);
+    const beforeStatus = git(repository, ['status', '--porcelain']);
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'feat(delegate): integrate overlap',
+    });
+
+    expect(outcome).toMatchObject({
+      merged: false,
+      blockedPaths: ['src/overlap.txt'],
+    });
+    expect(git(repository, ['rev-parse', 'HEAD'])).toBe(beforeHead);
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeStatus);
+  });
+
+  test('aborts a conflicting squash and restores the parent checkout', async () => {
+    const record = await delegated({
+      name: 'Squash conflict',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'value.txt'), 'theirs\n'),
+    });
+    writeFileSync(path.join(repository, 'src', 'value.txt'), 'ours\n');
+    git(repository, ['commit', '-aqm', 'parent moved on']);
+    writeFileSync(
+      path.join(repository, 'src', 'staged-conflict-wip.txt'),
+      'staged\n',
+    );
+    git(repository, ['add', 'src/staged-conflict-wip.txt']);
+    writeFileSync(
+      path.join(repository, 'src', 'unstaged-conflict-wip.txt'),
+      'unstaged\n',
+    );
+    writeFileSync(
+      path.join(repository, 'src', 'untracked-conflict-wip.txt'),
+      'untracked\n',
+    );
+    const beforeHead = git(repository, ['rev-parse', 'HEAD']);
+    const beforeStatus = git(repository, ['status', '--porcelain']);
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'feat(delegate): integrate conflict',
+    });
+
+    expect(outcome).toMatchObject({
+      merged: false,
+      conflicted: ['src/value.txt'],
+      reason: expect.stringMatching(/aborted; your checkout is unchanged/),
+    });
+    expect(git(repository, ['rev-parse', 'HEAD'])).toBe(beforeHead);
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeStatus);
+    expect(
+      readFileSync(path.join(repository, 'src', 'value.txt'), 'utf8'),
+    ).toBe('ours\n');
+  });
+
+  test('cleans up when the parent squash commit fails', async () => {
+    const record = await delegated({
+      name: 'Squash commit failure',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'commit-failure.txt'),
+          'work\n',
+        ),
+    });
+    writeFileSync(
+      path.join(repository, 'src', 'staged-parent-wip.txt'),
+      'staged\n',
+    );
+    git(repository, ['add', 'src/staged-parent-wip.txt']);
+    writeFileSync(
+      path.join(repository, 'src', 'unstaged-parent-wip.txt'),
+      'unstaged\n',
+    );
+    writeFileSync(
+      path.join(repository, 'src', 'untracked-parent-wip.txt'),
+      'untracked\n',
+    );
+    const beforeHead = git(repository, ['rev-parse', 'HEAD']);
+    const beforeStatus = git(repository, ['status', '--porcelain']);
+    const originalGit = worktreeGit.git;
+    const gitSpy = vi
+      .spyOn(worktreeGit, 'git')
+      .mockImplementation(async (cwd, args, options) => {
+        if (args.includes('--only') && args.includes('commit'))
+          throw new Error('commit intentionally failed');
+        return originalGit(cwd, args, options);
+      });
+    try {
+      const outcome = await mergeBranch(record, {
+        commitMessage: 'feat(delegate): integrate failed commit',
+      });
+      expect(outcome).toMatchObject({
+        merged: false,
+        reason: expect.stringMatching(/failed and was aborted/),
+      });
+      expect(git(repository, ['rev-parse', 'HEAD'])).toBe(beforeHead);
+      expect(git(repository, ['status', '--porcelain'])).toBe(beforeStatus);
+      expect(
+        existsSync(path.join(repository, 'src', 'commit-failure.txt')),
+      ).toBe(false);
+    } finally {
+      gitSpy.mockRestore();
+    }
+  });
+
+  test('preserves landed commit metadata when WIP restoration warns', async () => {
+    const record = await delegated({
+      name: 'Squash restore warning',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'restore-warning.txt'),
+          'work\n',
+        ),
+    });
+    writeFileSync(
+      path.join(repository, 'src', 'parent-before-restore.txt'),
+      'parent\n',
+    );
+    const originalGit = worktreeGit.git;
+    const gitSpy = vi
+      .spyOn(worktreeGit, 'git')
+      .mockImplementation(async (cwd, args, options) => {
+        if (args[0] === 'stash' && args[1] === 'pop')
+          throw new Error('restore intentionally failed');
+        return originalGit(cwd, args, options);
+      });
+    try {
+      const outcome = await mergeBranch(record, {
+        commitMessage: 'feat(delegate): integrate restore warning',
+      });
+      expect(outcome).toMatchObject({
+        merged: true,
+        commit: expect.stringMatching(/^[0-9a-f]{40}$/),
+        warning: expect.stringMatching(
+          /restoring pre-existing parent WIP failed/,
+        ),
+      });
+      expect(record.integratedCommit).toBe(outcome.commit);
+      expect(
+        git(repository, ['show', '-s', '--format=%s', 'HEAD']).trim(),
+      ).toBe('feat(delegate): integrate restore warning');
+    } finally {
+      gitSpy.mockRestore();
+      git(repository, ['stash', 'pop', '--index']);
+    }
+  });
+
+  test('does not report WIP restoration for a post-success diagnostic warning', async () => {
+    const record = await delegated({
+      name: 'Squash diagnostic warning',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'diagnostic-warning.txt'),
+          'work\n',
+        ),
+    });
+    const originalGitText = worktreeGit.gitText;
+    let headLookup = 0;
+    const gitTextSpy = vi
+      .spyOn(worktreeGit, 'gitText')
+      .mockImplementation(async (cwd, args, options) => {
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD' && headLookup++ === 0)
+          throw new Error('diagnostic intentionally failed');
+        return originalGitText(cwd, args, options);
+      });
+    try {
+      const outcome = await mergeBranch(record, {
+        commitMessage: 'feat(delegate): integrate diagnostic warning',
+      });
+      expect(outcome).toMatchObject({
+        merged: true,
+        commit: expect.stringMatching(/^[0-9a-f]{40}$/),
+        warning: expect.stringMatching(/post-integration diagnostics failed/),
+      });
+      expect(outcome.warning).not.toMatch(/restoring pre-existing parent WIP/);
+    } finally {
+      gitTextSpy.mockRestore();
+    }
+  });
+
+  test('requires a parent message before squash integration', async () => {
+    const record = await delegated({
+      name: 'Message required',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'message.txt'), 'work\n'),
+    });
+    const before = git(repository, ['rev-parse', 'HEAD']);
+    const outcome = await mergeBranch(record, { commitMessage: '   ' });
+    expect(outcome).toMatchObject({
+      merged: false,
+      reason: expect.stringMatching(/nonempty parent commit message/),
+    });
+    expect(git(repository, ['rev-parse', 'HEAD'])).toBe(before);
+  });
+
   test('lands the work and reports the branch merged afterwards', async () => {
     const record = await delegated({
       write: (worktreePath) =>

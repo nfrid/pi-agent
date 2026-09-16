@@ -139,10 +139,14 @@ Use `delegate_changes` with a workflow node:
 ```
 
 ```json
-{ "action": "merge", "node": "reconnect-race-fix" }
+{
+  "action": "merge",
+  "node": "reconnect-race-fix",
+  "message": "fix(session): preserve reconnect state"
+}
 ```
 
-`review` defaults to the node's own delta from its base. Optional `summaryOnly`, exact repository-relative `paths`, and `patchBudget` bound the view. `merge` either lands cleanly or leaves the parent checkout untouched. Caller-owned worktrees remain review-only and caller-managed. The `/delegate-worktrees` command is an operational recovery view for retained checkout records.
+`review` defaults to the node's own delta from its base. Optional `summaryOnly`, exact repository-relative `paths`, and `patchBudget` bound the view. Review before `merge`; merge requires a meaningful parent-supplied Conventional Commit message and lands the cumulative delegate work as one ordinary squash commit, or leaves the parent checkout untouched. Do not rebase or manually merge the retained child history. Caller-owned worktrees remain review-only and caller-managed. The `/delegate-worktrees` command is an operational recovery view for retained checkout records.
 
 ## Route selection
 

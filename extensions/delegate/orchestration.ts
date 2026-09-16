@@ -607,6 +607,8 @@ export async function prepareDelegateWorkflowLaunch(
   }
   if (branch && prepared.worktree) {
     prepared.worktree.record.integrationBase = branch.workBase;
+    prepared.worktree.record.integrationBoundary = branch.integrationBoundary;
+    prepared.worktree.record.integratedCommit = branch.integrationCommit;
     writeWorktreeRecord(prepared.worktree.record);
   }
   const pending = pendingRuns({ mode: 'single', tasks: [prepared] })[0];

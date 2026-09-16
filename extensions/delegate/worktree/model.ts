@@ -24,10 +24,14 @@ export interface WorktreeRecord extends GenericWorktreeRecord {
   sessionToken?: string;
   /** Earliest integration base inherited through a delegate `base` chain. */
   integrationBase?: string;
+  /** Child-tip boundary already covered by an ancestor's squash commit. */
+  integrationBoundary?: string;
   /** Leaf worktree whose cumulative merge integrated this record's changes. */
   integratedBy?: string;
   /** Exact recorded head covered by integratedBy; later continuations invalidate it. */
   integratedHead?: string;
+  /** Parent commit created by a squash integration, used to validate repeats. */
+  integratedCommit?: string;
   integratedAt?: string;
   /** Parent Pi session that first created this retained record. */
   creatorSessionId?: string;

@@ -123,12 +123,18 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
     (record.integrationBase === undefined ||
       (typeof record.integrationBase === 'string' &&
         /^[a-f0-9]{7,64}$/.test(record.integrationBase))) &&
+    (record.integrationBoundary === undefined ||
+      (typeof record.integrationBoundary === 'string' &&
+        /^[a-f0-9]{7,64}$/.test(record.integrationBoundary))) &&
     (record.integratedBy === undefined ||
       (typeof record.integratedBy === 'string' &&
         SAFE_ID.test(record.integratedBy))) &&
     (record.integratedHead === undefined ||
       (typeof record.integratedHead === 'string' &&
         /^[a-f0-9]{7,64}$/.test(record.integratedHead))) &&
+    (record.integratedCommit === undefined ||
+      (typeof record.integratedCommit === 'string' &&
+        /^[a-f0-9]{7,64}$/.test(record.integratedCommit))) &&
     (record.integratedAt === undefined ||
       (typeof record.integratedAt === 'string' &&
         !Number.isNaN(Date.parse(record.integratedAt)))) &&

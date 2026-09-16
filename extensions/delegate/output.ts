@@ -170,7 +170,7 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
           ? ['Changes: manage this caller-owned checkout directly.']
           : workflowNode
             ? [
-                `Changes: delegate_changes review/merge/drop node ${workflowNode}`,
+                `Changes: delegate_changes review/merge/drop node ${workflowNode} (review first; merge with a meaningful message to squash)`,
               ]
             : []),
       );

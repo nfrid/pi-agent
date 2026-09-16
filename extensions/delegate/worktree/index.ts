@@ -32,6 +32,7 @@ export type {
   BranchReviewOptions,
   BranchReviewPathSummary,
   BranchState,
+  MergeOptions,
   MergeOutcome,
 } from './integrate';
 export { branchState, mergeBranch, reviewBranch } from './integrate';

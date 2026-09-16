@@ -40,6 +40,7 @@ export type {
   BranchReviewOptions,
   BranchReviewPathSummary,
   BranchState,
+  MergeOptions,
   MergeOutcome,
   WorktreeGit,
   WorktreeIntegrator,

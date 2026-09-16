@@ -26,6 +26,7 @@ interface RegisteredTool {
       patchBudget?: number;
       node?: string;
       force?: boolean;
+      message?: string;
     },
     signal?: unknown,
     onUpdate?: unknown,
@@ -254,8 +255,14 @@ describe('delegate_changes', () => {
     expect(review).toContain('src/added.txt');
 
     expect(
-      body(await tool.execute('c2', { action: 'merge', node: record.id })),
-    ).toMatch(/^Merged /);
+      body(
+        await tool.execute('c2', {
+          action: 'merge',
+          node: record.id,
+          message: 'feat(delegate): integrate full cycle',
+        }),
+      ),
+    ).toMatch(/^Squashed /);
     expect(
       body(await tool.execute('c3', { action: 'drop', node: record.id })),
     ).toContain('Dropped');
@@ -287,7 +294,11 @@ describe('delegate_changes', () => {
       'head',
     );
     const merged = body(
-      await tool.execute('c1', { action: 'merge', node: record.id }),
+      await tool.execute('c1', {
+        action: 'merge',
+        node: record.id,
+        message: 'feat(delegate): integrate submodule task',
+      }),
     );
     expect(merged).toContain(
       `The outer repository at ${outer} must commit the updated submodule pointer separately.`,
@@ -300,8 +311,14 @@ describe('delegate_changes', () => {
     const tool = captureTool();
     const record = await delegated('Initial task', 'src/initial.txt');
     expect(
-      body(await tool.execute('c1', { action: 'merge', node: record.id })),
-    ).toMatch(/^Merged /);
+      body(
+        await tool.execute('c1', {
+          action: 'merge',
+          node: record.id,
+          message: 'feat(delegate): integrate initial task',
+        }),
+      ),
+    ).toMatch(/^Squashed /);
     writeFileSync(
       path.join(record.worktreePath, 'src', 'follow-up.txt'),
       'follow-up\n',
@@ -348,7 +365,11 @@ describe('delegate_changes', () => {
     expect(review).toContain('Continue');
     expect(review).not.toContain('Branch:');
     await expect(
-      tool.execute('c2', { action: 'merge', node: record.id }),
+      tool.execute('c2', {
+        action: 'merge',
+        node: record.id,
+        message: 'feat(delegate): integrate snapshot',
+      }),
     ).rejects.toThrow(/not integration work/);
     const displayedId = review.match(
       /Cleanup: \/delegate-worktrees ([^\s]+) drop/,
@@ -371,13 +392,25 @@ describe('delegate_changes', () => {
     expect(existsSync(record.worktreePath)).toBe(false);
   });
 
+  test('requires a parent message for merge', async () => {
+    const tool = captureTool();
+    const record = await delegated('Message required', 'src/message.txt');
+    await expect(
+      tool.execute('c1', { action: 'merge', node: record.id }),
+    ).rejects.toThrow(/message is required/);
+  });
+
   test('requires a node for anything but list', async () => {
     const tool = captureTool();
     await expect(tool.execute('c1', { action: 'review' })).rejects.toThrow(
       /node is required/,
     );
     await expect(
-      tool.execute('c2', { action: 'merge', node: 'nope' }),
+      tool.execute('c2', {
+        action: 'merge',
+        node: 'nope',
+        message: 'feat(delegate): integrate missing',
+      }),
     ).rejects.toThrow(/Retained code changes for nope are unavailable/);
   });
 });

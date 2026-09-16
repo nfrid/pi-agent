@@ -57,6 +57,8 @@ export interface WorkflowBranchSource {
   readonly branch: string;
   readonly headCommit: string;
   readonly workBase: string;
+  readonly integrationBoundary?: string;
+  readonly integrationCommit?: string;
   readonly snapshot: boolean;
 }
 
@@ -350,6 +352,11 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
   const record = loadWorktree(summary.id);
   const workBase =
     record?.integrationBase ?? record?.carryCommit ?? record?.baseHead;
+  const integrationBoundary =
+    record?.integratedHead ??
+    (record?.integrationBoundary && record.integratedCommit
+      ? record.integrationBoundary
+      : undefined);
   const normalizedWorkingDirectory = record
     ? path.normalize(record.workingDirectory)
     : '';
@@ -362,6 +369,10 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
     !COMMIT_PATTERN.test(record.headCommit) ||
     typeof workBase !== 'string' ||
     !COMMIT_PATTERN.test(workBase) ||
+    (integrationBoundary !== undefined &&
+      !COMMIT_PATTERN.test(integrationBoundary)) ||
+    (record.integratedCommit !== undefined &&
+      !COMMIT_PATTERN.test(record.integratedCommit)) ||
     !path.isAbsolute(record.repositoryRoot) ||
     !path.isAbsolute(record.worktreePath) ||
     !safeBranchString(record.repositoryRoot, 4096) ||
@@ -384,6 +395,10 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
     branch: record.branch,
     headCommit: record.headCommit,
     workBase,
+    ...(integrationBoundary ? { integrationBoundary } : {}),
+    ...(record.integratedCommit
+      ? { integrationCommit: record.integratedCommit }
+      : {}),
     snapshot: record.snapshot === true,
   });
 }

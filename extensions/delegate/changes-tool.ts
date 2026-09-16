@@ -65,6 +65,13 @@ const Parameters = Type.Object({
         'Logical workflow node or exact attempt. Required for every action except list.',
     }),
   ),
+  message: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description:
+        'For merge only, the meaningful Conventional Commit message authored by the parent. The merge action always creates one squash commit.',
+    }),
+  ),
   force: Type.Optional(
     Type.Boolean({
       description:
@@ -88,6 +95,8 @@ type BranchesDetails = {
   truncated?: boolean;
   entries?: Array<{ id: string; branch: string; state: string }>;
   merged?: boolean;
+  squashed?: boolean;
+  warning?: string;
 };
 
 function text(value: string) {
@@ -95,7 +104,7 @@ function text(value: string) {
 }
 
 const DELEGATE_CHANGES_DESCRIPTION =
-  "Review and integrate code changes produced by a delegate workflow node. review shows that node's own delta from its base by default; merge integrates its cumulative base chain and either lands cleanly or leaves the checkout untouched. list is an operational inventory and defaults to the current parent session.";
+  "Review and integrate code changes produced by a delegate workflow node. review shows that node's own delta from its base by default; merge requires a parent-supplied meaningful Conventional Commit message and lands the cumulative base chain as one squash commit or leaves the checkout untouched. list is an operational inventory and defaults to the current parent session.";
 
 export function registerDelegateChangesTool(
   pi: ExtensionAPI,
@@ -115,6 +124,12 @@ export function registerDelegateChangesTool(
       if (params.action !== 'review' && reviewSelectorUsed)
         throw new Error(
           'incremental, summaryOnly, paths, and patchBudget are only valid for review.',
+        );
+      if (params.action !== 'merge' && params.message !== undefined)
+        throw new Error('message is only valid for merge.');
+      if (params.action === 'merge' && !params.message?.trim())
+        throw new Error(
+          'message is required for merge and must be a meaningful Conventional Commit message.',
         );
       if (params.scope !== undefined && params.action !== 'list')
         throw new Error('scope is only valid for list.');
@@ -214,7 +229,9 @@ export function registerDelegateChangesTool(
             throw new Error(
               'A retired read-only snapshot is not integration work and cannot be merged. Continue it or drop it instead.',
             );
-          const outcome = await mergeBranch(record);
+          const outcome = await mergeBranch(record, {
+            commitMessage: params.message?.trim(),
+          });
           const detail = [
             outcome.blockedPaths?.length
               ? outcome.blockedPaths.map((file) => `  - ${file}`).join('\n')
@@ -226,13 +243,15 @@ export function registerDelegateChangesTool(
             .filter(Boolean)
             .join('\n');
           const summary = outcome.merged
-            ? `Merged ${record.branch} into HEAD as ${outcome.commit?.slice(0, 12)}.${outcome.superprojectWorkingTree ? ` The outer repository at ${outcome.superprojectWorkingTree} must commit the updated submodule pointer separately.` : ''}`
-            : `Did not merge ${record.branch}. ${outcome.reason}`;
+            ? `Squashed ${record.branch} into HEAD as ${outcome.commit?.slice(0, 12)}.${outcome.superprojectWorkingTree ? ` The outer repository at ${outcome.superprojectWorkingTree} must commit the updated submodule pointer separately.` : ''}${outcome.warning ? ` Warning: ${outcome.warning}` : ''}`
+            : `Did not squash ${record.branch}. ${outcome.reason}`;
           return {
             ...text(detail ? `${summary}\n${detail}` : summary),
             details: {
               action: 'merge' as const,
               merged: outcome.merged,
+              squashed: true,
+              ...(outcome.warning ? { warning: outcome.warning } : {}),
               ...(outcome.superprojectWorkingTree
                 ? { superprojectWorkingTree: outcome.superprojectWorkingTree }
                 : {}),
