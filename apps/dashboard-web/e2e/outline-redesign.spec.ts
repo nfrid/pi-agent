@@ -10,24 +10,33 @@ import {
   VISUAL_TIMESTAMP,
 } from './visual-state-fixtures';
 
-async function openTurns(page: Page, count: number, repliesPerTurn = 1) {
+async function openTurns(
+  page: Page,
+  count: number,
+  repliesPerTurn = 1,
+  userTurns = count,
+) {
   const base = buildWorkingScenario();
   if (!base.sessionSnapshot) throw new Error('Missing transcript fixture');
   const entries = Array.from({ length: count }, (_, index) => [
-    {
-      type: 'message',
-      id: `prompt-${index}`,
-      message: {
-        role: 'user',
-        timestamp: VISUAL_TIMESTAMP + index * 1000,
-        content: [
+    ...(index < userTurns
+      ? [
           {
-            type: 'text',
-            text: `User prompt ${String(index + 1).padStart(3, '0')}: inspect the layout`,
+            type: 'message',
+            id: `prompt-${index}`,
+            message: {
+              role: 'user',
+              timestamp: VISUAL_TIMESTAMP + index * 1000,
+              content: [
+                {
+                  type: 'text',
+                  text: `User prompt ${String(index + 1).padStart(3, '0')}: inspect the layout`,
+                },
+              ],
+            },
           },
-        ],
-      },
-    },
+        ]
+      : []),
     ...Array.from({ length: repliesPerTurn }, (_, reply) => ({
       type: 'message',
       id: `reply-${index}-${reply}`,
@@ -351,41 +360,94 @@ test('outline switches at the exact viewport midpoint in a virtualized transcrip
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 700 });
-  await openTurns(page, 2, 50);
+  await openTurns(page, 81, 8, 2);
   const scroll = page.locator('.session-transcript-scroll');
   const markers = page.locator('.transcript-minimap-marker');
   await expect(markers).toHaveCount(2);
 
-  // Start near the middle so the target anchor is mounted by the virtualizer.
+  // Start at the top so both nearby anchors stay mounted by the virtualizer.
   await scroll.evaluate((element) => {
-    element.scrollTop = element.scrollHeight / 2;
+    element.scrollTop = 0;
   });
   const second = scroll.locator('[data-transcript-key]').filter({
     hasText: 'User prompt 002',
   });
   await expect(second).toHaveCount(1);
-  const secondAnchor = await second.evaluate((target) => {
+  const distanceBeforeCrossing = await second.evaluate((target) => {
     const element = target.closest('.session-transcript-scroll');
     if (!(element instanceof HTMLElement))
       throw new Error('Missing transcript scroll');
-    const viewport = element.getBoundingClientRect();
-    const rect = target.getBoundingClientRect();
-    return {
-      contentTop: rect.top - viewport.top + element.scrollTop,
-      viewportHeight: element.clientHeight,
-    };
+    return (
+      target.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      element.clientHeight / 2
+    );
   });
-
-  // Just below the cutoff: the previous anchor remains selected.
-  await scroll.evaluate((element, anchor) => {
-    element.scrollTop = anchor.contentTop - anchor.viewportHeight / 2 - 200;
-  }, secondAnchor);
+  // Before crossing, the next anchor is in the bottom half.
+  expect(distanceBeforeCrossing).toBeGreaterThan(0);
   await expect(markers.first()).toHaveAttribute('aria-current', 'location');
 
-  // At the cutoff itself, the latest anchor is selected (<= midpoint).
-  await scroll.evaluate((element, anchor) => {
-    element.scrollTop = anchor.contentTop - anchor.viewportHeight / 2;
-  }, secondAnchor);
+  // Move past the measured cutoff; the latest anchor now owns the midpoint.
+  await scroll.evaluate((element, distance) => {
+    element.scrollTop += distance + 1;
+  }, distanceBeforeCrossing);
+  await expect
+    .poll(() =>
+      second.evaluate((target) => {
+        const element = target.closest('.session-transcript-scroll');
+        if (!(element instanceof HTMLElement)) return Number.NaN;
+        return (
+          target.getBoundingClientRect().top -
+          element.getBoundingClientRect().top -
+          element.clientHeight / 2
+        );
+      }),
+    )
+    .toBeLessThanOrEqual(0);
+  await expect(markers.last()).toHaveAttribute('aria-current', 'location');
+});
+
+test('outline selects the next normal anchor exactly at midpoint @desktop', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await openTurns(page, 2, 8);
+  const scroll = page.locator('.session-transcript-scroll');
+  const markers = page.locator('.transcript-minimap-marker');
+  await expect(markers).toHaveCount(2);
+  await scroll.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  const second = scroll.locator('[data-transcript-key]').filter({
+    hasText: 'User prompt 002',
+  });
+  await expect(second).toHaveCount(1);
+  const distance = await second.evaluate((target) => {
+    const element = target.closest('.session-transcript-scroll');
+    if (!(element instanceof HTMLElement))
+      throw new Error('Missing transcript scroll');
+    return (
+      target.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      element.clientHeight / 2
+    );
+  });
+  await scroll.evaluate((element, offset) => {
+    element.scrollTop += offset;
+  }, distance);
+  await expect
+    .poll(() =>
+      second.evaluate((target) => {
+        const element = target.closest('.session-transcript-scroll');
+        if (!(element instanceof HTMLElement)) return Number.NaN;
+        return (
+          target.getBoundingClientRect().top -
+          element.getBoundingClientRect().top -
+          element.clientHeight / 2
+        );
+      }),
+    )
+    .toBeCloseTo(0, 0);
   await expect(markers.last()).toHaveAttribute('aria-current', 'location');
 });
 
