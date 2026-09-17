@@ -261,6 +261,154 @@ test('aborts older history when navigating away from a session', async ({
   ).toBeVisible();
 });
 
+test('returning to a thread replaces stale live messages without duplicating notifications', async ({
+  page,
+}) => {
+  const notification = {
+    customType: 'background-terminal-result',
+    display: true,
+    content: 'Background verification completed.',
+    details: {
+      dedupeKey: 'verification-job',
+      title: 'Thread regression verification',
+      status: 'done',
+      exitCode: 0,
+      duration: 2400,
+    },
+  };
+  const request = {
+    type: 'message',
+    id: 'request',
+    message: { role: 'user', content: 'Verify this thread.' },
+  };
+  let completedWhileAway = false;
+  // Keep fixture subscriptions open: an immediate second reconnect could
+  // repair the stale tail before the assertions observe the broken first rebase.
+  await page.addInitScript(() => {
+    const fetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      const url = input instanceof Request ? input.url : String(input);
+      if (!url.includes('/trpc/sessionSubscribe')) return response;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes);
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    };
+  });
+  await installDashboardBootstrap(page, snapshot);
+  await page.route('**/api/usage', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/trpc/sessionSubscribe*', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const second = input.sessionId === 'session-2';
+    if (second) completedWhileAway = true;
+    const completed = !second && completedWhileAway;
+    const cursor = completed ? 10 : 1;
+    const sessionEntries = second
+      ? entries['session-2']
+      : completed
+        ? [
+            request,
+            {
+              ...notification,
+              type: 'custom_message',
+              id: 'persisted-notification',
+              timestamp: '2026-09-17T12:00:00.000Z',
+            },
+            {
+              type: 'message',
+              id: 'persisted-answer',
+              message: {
+                role: 'assistant',
+                content: 'Verification finished successfully.',
+                timestamp: 200,
+              },
+            },
+          ]
+        : [request];
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          type: 'snapshot',
+          sequence: cursor,
+          snapshot: {
+            metadata: snapshot.sessions[second ? 1 : 0],
+            serverId: snapshot.serverId,
+            cursor,
+            entries: sessionEntries,
+            entriesComplete: true,
+            history: {
+              version: 1,
+              start: 0,
+              end: sessionEntries.length,
+              hasOlder: false,
+            },
+            active: {
+              messages:
+                second || completed
+                  ? []
+                  : [
+                      {
+                        messageId: 'live-notification',
+                        role: 'custom',
+                        content: notification.content,
+                        timestamp: 100,
+                        phase: 'finished',
+                        data: notification,
+                      },
+                      {
+                        messageId: 'live-answer',
+                        role: 'assistant',
+                        content: 'Verification is still running.',
+                        timestamp: 200,
+                        phase: 'updated',
+                      },
+                    ],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: true,
+          },
+        },
+        `session-${input.sessionId}-${cursor}`,
+      ),
+    });
+  });
+
+  await page.goto('/sessions/session-1');
+  const transcript = transcriptScroll(page);
+  const notificationRow = transcript.getByText(
+    /Thread regression verification/,
+  );
+  await expect(notificationRow).toHaveCount(1);
+  await expect(
+    transcript.getByText('Verification is still running.', { exact: true }),
+  ).toBeVisible();
+  await navigateInDashboard(page, '/sessions/session-2');
+  await expect(
+    transcript.getByText('second session', { exact: true }),
+  ).toBeVisible();
+  await navigateInDashboard(page, '/sessions/session-1');
+  await expect(
+    transcript.getByText('Verification finished successfully.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(notificationRow).toHaveCount(1);
+  await expect(
+    transcript.getByText('Verification is still running.', { exact: true }),
+  ).toHaveCount(0);
+});
+
 test('switching chats establishes the new transcript tail', async ({
   page,
 }) => {
