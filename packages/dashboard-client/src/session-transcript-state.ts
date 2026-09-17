@@ -53,6 +53,7 @@ export interface LiveMessageIdentity {
   role: string;
   content: unknown;
   timestamp?: string | number;
+  data?: unknown;
 }
 
 export type HistoryPageWatermarkDecision =
@@ -386,6 +387,7 @@ export function installAuthoritativeTranscript({
       projection,
       previousCoverage,
       responsePage?.entryIds ?? [],
+      !replace,
     );
 
   return {
@@ -400,6 +402,7 @@ export function mergeLatestTranscript(
   latest: TranscriptProjection,
   coverage: SessionHistoryCoverage,
   latestPersistedIds: readonly string[],
+  preserveRetainedLive = true,
 ): TranscriptProjection {
   const newestPageIds = new Set(coverage.pages.at(-1)?.entryIds ?? []);
   const allHistoryIds = new Set(
@@ -414,26 +417,26 @@ export function mergeLatestTranscript(
   const persistedMessageCounts = new Map<string, number>();
   for (const id of latestPersistedIds) {
     if (retainedIds.has(id)) continue;
-    const item = latest.items[id];
-    if (item?.kind !== 'message') continue;
-    const key = messageSemanticKey(item);
+    const key = transcriptItemIdentity(latest.items[id]);
     if (key !== undefined)
       persistedMessageCounts.set(
         key,
         (persistedMessageCounts.get(key) ?? 0) + 1,
       );
   }
-  const retainedLive = retained.order.filter((id) => {
-    if (allHistoryIds.has(id) || latestIds.has(id)) return false;
-    const item = retained.items[id];
-    if (item?.kind !== 'message') return true;
-    const key = messageSemanticKey(item);
-    if (key === undefined) return true;
-    const count = persistedMessageCounts.get(key) ?? 0;
-    if (count === 0) return true;
-    persistedMessageCounts.set(key, count - 1);
-    return false;
-  });
+  const retainedLive = preserveRetainedLive
+    ? retained.order.filter((id) => {
+        if (allHistoryIds.has(id) || latestIds.has(id)) return false;
+        const item = retained.items[id];
+        if (item?.kind !== 'message') return true;
+        const key = transcriptItemIdentity(item);
+        if (key === undefined) return true;
+        const count = persistedMessageCounts.get(key) ?? 0;
+        if (count === 0) return true;
+        persistedMessageCounts.set(key, count - 1);
+        return false;
+      })
+    : [];
   const retainedOrder = [...retainedHistory, ...retainedLive];
   const items: Record<string, TranscriptProjection['items'][string]> = {};
   for (const id of retainedOrder) {
@@ -552,6 +555,7 @@ export function liveMessageIdentity(
     (typeof timestamp === 'number' && Number.isFinite(timestamp))
       ? { timestamp }
       : {}),
+    ...(message.data === undefined ? {} : { data: message.data }),
   };
 }
 
@@ -583,23 +587,84 @@ function messageSemanticKey(
     : JSON.stringify([message.role, String(message.timestamp), content]);
 }
 
+function customMessageDedupeKey(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const details = value as Record<string, unknown>;
+  if (typeof details.dedupeKey === 'string' && details.dedupeKey.length > 0)
+    return details.dedupeKey;
+  if (typeof details.deliveryKey === 'string' && details.deliveryKey.length > 0)
+    return `delivery:${details.deliveryKey}`;
+  if (typeof details.id === 'string' && details.id.length > 0)
+    return `id:${details.id}`;
+  if (!Array.isArray(details.jobs)) return undefined;
+  const jobIds = details.jobs.flatMap((job) => {
+    if (!job || typeof job !== 'object' || Array.isArray(job)) return [];
+    const id = (job as Record<string, unknown>).id;
+    return typeof id === 'string' && id.length > 0 ? [id] : [];
+  });
+  return jobIds.length > 0
+    ? `jobs:${[...new Set(jobIds)].sort().join(',')}`
+    : undefined;
+}
+
+/** Stable custom-message identity shared by live and durable delivery forms. */
+function customMessageIdentity(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const message = value as Record<string, unknown>;
+  if (typeof message.customType !== 'string' || !message.customType)
+    return undefined;
+  const key = customMessageDedupeKey(message.details);
+  return key === undefined
+    ? undefined
+    : JSON.stringify(['custom', message.customType, key]);
+}
+
+function messageIdentityKey(
+  message: Pick<LiveMessageIdentity, 'role' | 'content' | 'timestamp'> & {
+    data?: unknown;
+  },
+): string | undefined {
+  return message.role === 'custom'
+    ? customMessageIdentity(message.data)
+    : messageSemanticKey(message);
+}
+
+function transcriptItemIdentity(
+  item: TranscriptProjection['items'][string] | undefined,
+): string | undefined {
+  if (!item) return undefined;
+  if (item.kind === 'message') return messageIdentityKey(item);
+  if (item.kind === 'other') {
+    const raw = item.raw;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const entry = raw as Record<string, unknown>;
+    return entry.type === 'custom_message'
+      ? customMessageIdentity(entry)
+      : undefined;
+  }
+  return undefined;
+}
+
 export function persistedMessageIdForLive(
   projection: TranscriptProjection,
   live: LiveMessageIdentity | undefined,
 ): string | undefined {
   if (!live) return undefined;
-  const liveKey = messageSemanticKey(live);
+  const liveKey = messageIdentityKey(live);
   if (liveKey === undefined) return undefined;
   let matchedId: string | undefined;
   for (const item of Object.values(projection.items)) {
     if (
-      item.kind !== 'message' ||
-      item.messageId === live.messageId ||
-      messageSemanticKey(item) !== liveKey
+      (item.kind === 'message' && item.messageId === live.messageId) ||
+      (item.kind === 'other' && item.id === live.messageId)
     )
       continue;
+    if (transcriptItemIdentity(item) !== liveKey) continue;
     if (matchedId !== undefined) return undefined;
-    matchedId = item.messageId;
+    matchedId = item.kind === 'message' ? item.messageId : undefined;
+    if (item.kind === 'other') matchedId = item.id;
   }
   return matchedId;
 }

@@ -8,6 +8,7 @@ import {
   classifyHistoryPageWatermark,
   mergeLatestTranscript,
   mergePrependedTranscript,
+  persistedMessageIdForLive,
   reduceSessionTranscriptEvent,
 } from './session-transcript-state.js';
 
@@ -155,6 +156,85 @@ describe('session transcript state', () => {
       'live-b',
       'live-c',
     ]);
+  });
+
+  it('uses stable custom identities without text-only or ambiguous matches', () => {
+    const cases = [
+      {
+        name: 'different dedupe keys',
+        entries: [{ customType: 'notice', details: { dedupeKey: 'disk-1' } }],
+        live: { customType: 'notice', details: { dedupeKey: 'live-1' } },
+        expected: undefined,
+      },
+      {
+        name: 'different custom types',
+        entries: [{ customType: 'notice', details: { dedupeKey: 'same' } }],
+        live: { customType: 'other', details: { dedupeKey: 'same' } },
+        expected: undefined,
+      },
+      {
+        name: 'missing stable key',
+        entries: [{ customType: 'notice' }],
+        live: { customType: 'notice' },
+        expected: undefined,
+      },
+      {
+        name: 'ambiguous durable identity',
+        entries: [
+          { customType: 'notice', details: { dedupeKey: 'same' } },
+          { customType: 'notice', details: { dedupeKey: 'same' } },
+        ],
+        live: { customType: 'notice', details: { dedupeKey: 'same' } },
+        expected: undefined,
+      },
+      {
+        name: 'legacy delivery key',
+        entries: [{ customType: 'notice', details: { deliveryKey: 'old-1' } }],
+        live: { customType: 'notice', details: { deliveryKey: 'old-1' } },
+        expected: 'entry-0',
+      },
+      {
+        name: 'legacy id key',
+        entries: [{ customType: 'notice', details: { id: 'old-2' } }],
+        live: { customType: 'notice', details: { id: 'old-2' } },
+        expected: 'entry-0',
+      },
+      {
+        name: 'legacy jobs key',
+        entries: [
+          {
+            customType: 'notice',
+            details: { jobs: [{ id: 'job-b' }, { id: 'job-a' }] },
+          },
+        ],
+        live: {
+          customType: 'notice',
+          details: { jobs: [{ id: 'job-a' }, { id: 'job-b' }] },
+        },
+        expected: 'entry-0',
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const projection = hydrateTranscript(
+        testCase.entries.map((entry, index) => ({
+          type: 'custom_message',
+          id: `entry-${index}`,
+          content: 'same text',
+          ...entry,
+        })),
+        'session-1',
+      );
+      expect(
+        persistedMessageIdForLive(projection, {
+          messageId: 'live-custom',
+          role: 'custom',
+          content: 'same text',
+          data: testCase.live,
+        }),
+        testCase.name,
+      ).toBe(testCase.expected);
+    }
   });
 
   it('uses older-page order while retaining newer tool data', () => {

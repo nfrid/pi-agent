@@ -2080,6 +2080,208 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items['epoch-a:1']).toBeUndefined();
   });
 
+  it('does not resurrect a prior live tail during an authoritative rebase', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.beginSessionSync('session-1', 1);
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(1),
+          entries: [
+            {
+              type: 'message',
+              id: 'newer-verified',
+              message: { role: 'assistant', content: 'verified newer' },
+            },
+          ],
+          history: {
+            version: 1,
+            start: 10,
+            end: 20,
+            hasOlder: true,
+            nextBefore: 'older-page',
+          },
+        },
+        1,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        entries: [
+          {
+            type: 'message',
+            id: 'older-verified',
+            message: { role: 'user', content: 'verified older' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeDefined();
+    expect(
+      store.acceptSessionEvent(
+        'session-1',
+        2,
+        {
+          event: {
+            type: 'message.finished',
+            sessionId: 'session-1',
+            message: {
+              messageId: 'stale-live-tail',
+              role: 'assistant',
+              content: 'stale live tail',
+            },
+          },
+        },
+        1,
+      ),
+    ).toBe(true);
+
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(3),
+          entries: [
+            {
+              type: 'message',
+              id: 'replacement-newest',
+              message: { role: 'assistant', content: 'replacement newest' },
+            },
+          ],
+          history: {
+            version: 1,
+            start: 10,
+            end: 21,
+            hasOlder: true,
+            nextBefore: 'older-page',
+          },
+          active: {
+            messages: [
+              {
+                messageId: 'current-live',
+                role: 'assistant',
+                content: 'current active message',
+              },
+            ],
+            tools: [],
+            delegates: [],
+            truncated: false,
+          },
+        },
+        3,
+        1,
+        true,
+      ),
+    ).toBe(true);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual([
+      'older-verified',
+      'replacement-newest',
+      'current-live',
+    ]);
+    expect(projection?.items['stale-live-tail']).toBeUndefined();
+  });
+
+  it('deduplicates a durable custom message when its live replay arrives later', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.beginSessionSync('session-1', 1);
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(1),
+          entries: [
+            {
+              type: 'custom_message',
+              id: 'persisted-custom',
+              customType: 'background-terminal-result',
+              content: 'durable rendering',
+              details: { dedupeKey: 'terminal-1' },
+            },
+          ],
+        },
+        1,
+        1,
+        true,
+      ),
+    ).toBe(true);
+
+    expect(
+      store.acceptSessionEvent(
+        'session-1',
+        2,
+        {
+          event: {
+            type: 'message.finished',
+            sessionId: 'session-1',
+            message: {
+              messageId: 'live-custom-replay',
+              role: 'custom',
+              content: 'live rendering may differ',
+              data: {
+                customType: 'background-terminal-result',
+                details: { dedupeKey: 'terminal-1' },
+              },
+            },
+          },
+        },
+        1,
+      ),
+    ).toBe(true);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['persisted-custom']);
+    expect(projection?.items['live-custom-replay']).toBeUndefined();
+  });
+
+  it('matches an authoritative active custom overlay to its durable entry', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.beginSessionSync('session-1', 1);
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(1),
+          entries: [
+            {
+              type: 'custom_message',
+              id: 'persisted-custom',
+              customType: 'background-terminal-result',
+              content: 'durable text',
+              details: { dedupeKey: 'terminal-1' },
+            },
+          ],
+          active: {
+            messages: [
+              {
+                messageId: 'live-custom',
+                role: 'custom',
+                content: 'updated live text',
+                data: {
+                  customType: 'background-terminal-result',
+                  details: { dedupeKey: 'terminal-1' },
+                },
+              },
+            ],
+            tools: [],
+            delegates: [],
+            truncated: false,
+          },
+        },
+        1,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['persisted-custom']);
+  });
+
   it('protects incomplete refreshes but clears an authoritative sparse branch', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
