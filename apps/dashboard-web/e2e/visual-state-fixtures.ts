@@ -436,26 +436,35 @@ export function buildWorkingScenario(): VisualStateScenario {
 
 export function buildActivityPanelScenario(
   active: boolean,
+  options: { readonly layoutStress?: boolean } = {},
 ): VisualStateScenario {
   const base = buildWorkingScenario();
   const hydrated = base.sessionSnapshot;
   const sourceDelegate = hydrated?.active?.delegates[0];
   if (!hydrated?.active || !sourceDelegate)
     throw new Error('Working activity is missing.');
+  const taskTexts = [
+    'Review the layout',
+    'Verify browser behavior',
+    'Deploy client bundle',
+    'Fix PWA title-bar clearance and simplify activity panel summaries/spacing',
+    'Review active and completed panel screenshots, run checks, deploy client update',
+  ];
+  const layoutStress = options.layoutStress ?? false;
   const tasks: TaskStateViewModel = {
     version: 1,
     tasks: Array.from({ length: active ? 5 : 3 }, (_, index) => ({
       id: ['layout', 'surfaces', 'verify', 'refine', 'visual'][index] ?? '',
       text:
-        [
-          'Review the layout',
-          'Verify browser behavior',
-          'Deploy client bundle',
-          'Fix PWA title-bar clearance and simplify activity panel summaries/spacing',
-          'Review active and completed panel screenshots, run checks, deploy client update',
-        ][index] ?? '',
+        layoutStress && index === 0
+          ? 'Review the layout with a deliberately long description that should reclaim the entire row after the corner metadata ends'
+          : (taskTexts[index] ?? ''),
       status: index === 3 ? 'doing' : index === 4 ? 'todo' : 'done',
-      dependsOn: [],
+      priority: layoutStress && index === 0 ? 'high' : undefined,
+      dependsOn:
+        layoutStress && index === 0
+          ? ['dependency-with-a-long-label', 'another-long-dependency-label']
+          : [],
       createdAt: VISUAL_TIMESTAMP,
       updatedAt: VISUAL_TIMESTAMP,
     })),

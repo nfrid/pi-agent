@@ -83,6 +83,73 @@ for (const active of [false, true]) {
   });
 }
 
+test('task descriptions flow around corner metadata at narrow and wide widths @desktop', async ({
+  page,
+}) => {
+  for (const width of [420, 1000]) {
+    await page.setViewportSize({ width, height: 900 });
+    await installVisualStateScenario(
+      page,
+      buildActivityPanelScenario(true, { layoutStress: true }),
+    );
+    let tasks = page.getByRole('region', { name: 'Tasks', exact: true });
+    if ((await tasks.count()) === 0) {
+      await page.getByRole('button', { name: 'Open session activity' }).click();
+      tasks = page.getByRole('region', { name: 'Tasks', exact: true });
+    }
+    await tasks.getByRole('heading').getByRole('button').click();
+    const row = tasks.locator('.task-row').first();
+    const rowBox = await row.boundingBox();
+    const stateBox = await row.locator('.surface-state').boundingBox();
+    const metaBox = await row.locator('.task-row-meta').boundingBox();
+    const dependency = row.locator('.task-row-meta small');
+    if (!rowBox || !stateBox || !metaBox)
+      throw new Error('Task corner geometry is missing.');
+    expect(Math.abs(stateBox.x - (rowBox.x + 11))).toBeLessThanOrEqual(2);
+    expect(stateBox.y).toBeGreaterThanOrEqual(rowBox.y);
+    expect(stateBox.y).toBeLessThan(rowBox.y + rowBox.height / 2);
+    expect(Math.abs(metaBox.y - stateBox.y)).toBeLessThanOrEqual(2);
+    expect(
+      Math.abs(metaBox.x + metaBox.width - (rowBox.x + rowBox.width - 11)),
+    ).toBeLessThanOrEqual(2);
+    expect(
+      await dependency.evaluate((element) => element.clientHeight),
+    ).toBeGreaterThan(12);
+
+    const lines = await row.locator('.task-row-main').evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return [...range.getClientRects()].map(
+        ({ top, bottom, left, right }) => ({
+          top,
+          bottom,
+          left,
+          right,
+        }),
+      );
+    });
+    const lineRects = [
+      ...new Map(lines.map((line) => [line.top, line])).values(),
+    ];
+    expect(lineRects.length).toBeGreaterThan(2);
+    const firstLine = lineRects[0];
+    if (!firstLine) throw new Error('Task text line geometry is missing.');
+    expect(firstLine.top).toBeGreaterThanOrEqual(metaBox.y);
+    expect(firstLine.left).toBeGreaterThan(rowBox.x + 11);
+    expect(firstLine.right).toBeLessThanOrEqual(metaBox.x + 1);
+    const lowerLines = lineRects.filter(
+      (line) => line.top >= metaBox.y + metaBox.height - 1,
+    );
+    expect(lowerLines.length).toBeGreaterThan(0);
+    expect(Math.min(...lowerLines.map((line) => line.left))).toBeLessThan(
+      firstLine.left,
+    );
+    expect(
+      Math.max(...lowerLines.map((line) => line.right - line.left)),
+    ).toBeGreaterThan(firstLine.right - firstLine.left);
+  }
+});
+
 test('activity section hit targets span the panel while content stays inset @desktop', async ({
   page,
 }) => {
@@ -113,7 +180,7 @@ test('activity section hit targets span the panel while content stays inset @des
   expect(taskHeaderBox.x).toBe(panelBox.x);
   expect(taskHeaderBox.width).toBe(panelBox.width);
   expect(taskTitleBox.x).toBe(taskHeaderBox.x + inset);
-  expect(taskTextBox.x).toBeGreaterThan(panelBox.x + inset);
+  expect(taskTextBox.x).toBeGreaterThanOrEqual(panelBox.x + inset);
 
   await taskHeader.click({ position: { x: 1, y: 1 } });
   await expect(taskHeader).toHaveAttribute('aria-expanded', 'true');

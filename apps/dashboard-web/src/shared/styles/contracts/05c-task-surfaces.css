@@ -24,6 +24,13 @@
   gap: 7px;
   padding: 7px 11px;
 }
+.task-row-expanded {
+  display: flow-root;
+}
+.task-row-expanded .surface-state {
+  float: left;
+  margin-right: 7px;
+}
 .task-row-main strong {
   color: var(--cyan);
   padding-right: 0.5em;
@@ -42,6 +49,9 @@
   align-items: flex-end;
   flex-direction: column;
   gap: 2px;
+  max-width: min(42%, 180px);
+  margin-left: 7px;
+  float: right;
   color: var(--muted);
   font-size: 9px;
   text-align: right;
@@ -60,10 +70,9 @@
   color: var(--dim);
 }
 .task-row-meta small {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 /* Runtime queue mode vocabulary intentionally stays global for queue-${mode} classes. */
 .queue-followUp {

@@ -111,17 +111,13 @@ export function TasksSurface({
       const dependencies = taskDependencies(row);
       return (
         <div
-          className={`task-row${activityPanel ? ' activity-panel-inset' : ''} ${surfaceStateClass(state)}${compact ? ' activity-task-row-compact' : ''}`}
+          className={`task-row${activityPanel ? ' activity-panel-inset' : ''} ${surfaceStateClass(state)}${compact ? ' activity-task-row-compact' : ' task-row-expanded'}`}
           key={`${surface.id}-${id}`}
         >
           <span className="surface-state" title={state} aria-hidden="true">
             {stateGlyph(state)}
           </span>
           <span className="sr-only">{state}</span>
-          <span className="task-row-main">
-            {!compact && <strong>{id}</strong>}
-            {row.text || 'Untitled task'}
-          </span>
           {!compact && (
             <span className="task-row-meta">
               {priority && <b className={`priority-${priority}`}>{priority}</b>}
@@ -132,6 +128,10 @@ export function TasksSurface({
               )}
             </span>
           )}
+          <span className="task-row-main">
+            {!compact && <strong>{id}</strong>}
+            {row.text || 'Untitled task'}
+          </span>
         </div>
       );
     });
