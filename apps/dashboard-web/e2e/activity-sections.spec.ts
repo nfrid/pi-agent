@@ -85,7 +85,7 @@ for (const active of [false, true]) {
 
 test('task descriptions flow around corner metadata at narrow and wide widths @desktop', async ({
   page,
-}) => {
+}, testInfo) => {
   for (const width of [420, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     await installVisualStateScenario(
@@ -103,12 +103,36 @@ test('task descriptions flow around corner metadata at narrow and wide widths @d
     const stateBox = await row.locator('.surface-state').boundingBox();
     const metaBox = await row.locator('.task-row-meta').boundingBox();
     const dependency = row.locator('.task-row-meta small');
+    const idLines = await row.locator('strong').evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return [...range.getClientRects()].map(({ top, bottom }) => ({
+        top,
+        bottom,
+      }));
+    });
+    expect(idLines).toHaveLength(1);
+    const priorityBox = await row.locator('.task-row-meta b').boundingBox();
+    if (!priorityBox) throw new Error('Task priority is missing.');
+    const idCenter = (idLines[0].top + idLines[0].bottom) / 2;
+    expect(
+      Math.abs(idCenter - (priorityBox.y + priorityBox.height / 2)),
+    ).toBeLessThanOrEqual(2);
     if (!rowBox || !stateBox || !metaBox)
       throw new Error('Task corner geometry is missing.');
     expect(Math.abs(stateBox.x - (rowBox.x + 11))).toBeLessThanOrEqual(2);
     expect(stateBox.y).toBeGreaterThanOrEqual(rowBox.y);
     expect(stateBox.y).toBeLessThan(rowBox.y + rowBox.height / 2);
     expect(Math.abs(metaBox.y - stateBox.y)).toBeLessThanOrEqual(2);
+    expect(
+      Math.abs(idCenter - (stateBox.y + stateBox.height / 2)),
+    ).toBeLessThanOrEqual(2);
+    await testInfo.attach(`expanded-tasks-${width}`, {
+      body: await tasks.screenshot({
+        path: testInfo.outputPath(`expanded-tasks-${width}.png`),
+      }),
+      contentType: 'image/png',
+    });
     expect(
       Math.abs(metaBox.x + metaBox.width - (rowBox.x + rowBox.width - 11)),
     ).toBeLessThanOrEqual(2);
@@ -147,6 +171,11 @@ test('task descriptions flow around corner metadata at narrow and wide widths @d
     expect(
       Math.max(...lowerLines.map((line) => line.right - line.left)),
     ).toBeGreaterThan(firstLine.right - firstLine.left);
+    expect(
+      await row.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
   }
 });
 

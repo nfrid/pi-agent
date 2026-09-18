@@ -454,16 +454,19 @@ export function buildActivityPanelScenario(
   const tasks: TaskStateViewModel = {
     version: 1,
     tasks: Array.from({ length: active ? 5 : 3 }, (_, index) => ({
-      id: ['layout', 'surfaces', 'verify', 'refine', 'visual'][index] ?? '',
+      id:
+        layoutStress && index === 0
+          ? 'final-validation'
+          : (['layout', 'surfaces', 'verify', 'refine', 'visual'][index] ?? ''),
       text:
         layoutStress && index === 0
-          ? 'Review the layout with a deliberately long description that should reclaim the entire row after the corner metadata ends'
+          ? 'Проверить совместную работу новых блоков, обновить README, собрать и перезапустить локальный дашборд'
           : (taskTexts[index] ?? ''),
       status: index === 3 ? 'doing' : index === 4 ? 'todo' : 'done',
-      priority: layoutStress && index === 0 ? 'high' : undefined,
+      priority: layoutStress && index === 0 ? 'normal' : undefined,
       dependsOn:
         layoutStress && index === 0
-          ? ['dependency-with-a-long-label', 'another-long-dependency-label']
+          ? ['mr-review', 'seen-changes', 'keyboard-next']
           : [],
       createdAt: VISUAL_TIMESTAMP,
       updatedAt: VISUAL_TIMESTAMP,

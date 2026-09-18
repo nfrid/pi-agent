@@ -26,12 +26,17 @@
 }
 .task-row-expanded {
   display: flow-root;
+  font-size: 11px;
+  line-height: 16px;
 }
 .task-row-expanded .surface-state {
   float: left;
   margin-right: 7px;
 }
 .task-row-main strong {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: var(--cyan);
   padding-right: 0.5em;
 }
@@ -55,8 +60,10 @@
   color: var(--muted);
   font-size: 9px;
   text-align: right;
+  line-height: 1.45;
 }
 .task-row-meta b {
+  line-height: 16px;
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
