@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { configDefaults, defineConfig } from 'vitest/config';
 
+// Vitest workers can lose transitive CJS ancestry through Bun's cache links.
+// The virtual hoist is a test-only fallback; production uses Node's native loader.
 process.env.NODE_PATH = [
   path.resolve(__dirname, '../../node_modules/.bun/node_modules'),
   process.env.NODE_PATH,
