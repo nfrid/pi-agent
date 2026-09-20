@@ -1,6 +1,13 @@
 import path from 'node:path';
 import { configDefaults, defineConfig } from 'vitest/config';
 
+process.env.NODE_PATH = [
+  path.resolve(__dirname, '../../node_modules/.bun/node_modules'),
+  process.env.NODE_PATH,
+]
+  .filter((value): value is string => Boolean(value))
+  .join(path.delimiter);
+
 export default defineConfig({
   resolve: {
     // Keep Bun's isolated dependency chains intact when resolving CommonJS requires.
