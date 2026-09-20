@@ -30,6 +30,7 @@ import {
   ProjectCreateCommandSchema,
   ProjectDefaultModelCommandSchema,
   ProjectRenameCommandSchema,
+  parseExternalDeliveryCommand,
   parseExternalThreadCreateCommand,
   parseRetryCommand,
   parseThreadCreateCommand,
@@ -61,6 +62,7 @@ import { allowedOrigin, authorizeRequest } from './security.js';
 import { registerDashboardTrpc } from './trpc.js';
 
 const MAX_JSON_BODY = 512 * 1024;
+const MAX_EXTERNAL_JSON_BODY = 14 * 1024 * 1024 + 256 * 1024;
 const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
 const objectBody = Type.Object({}, { additionalProperties: true });
 const anyBody = Type.Any();
@@ -107,7 +109,16 @@ function parseJsonBody(
       return;
     }
   }
-  if (body.byteLength > MAX_JSON_BODY) {
+  const isExternalDelivery =
+    request.raw.url
+      ?.split('?', 1)[0]
+      .match(
+        /^\/api\/external\/v1\/projects\/[^/]+\/deliveries(?:\/[^/]+)?$/,
+      ) !== null;
+  if (
+    body.byteLength >
+    (isExternalDelivery ? MAX_EXTERNAL_JSON_BODY : MAX_JSON_BODY)
+  ) {
     done(bodyTooLarge());
     return;
   }
@@ -255,6 +266,11 @@ export interface DashboardRouteContext {
   listThreads?(projectId?: string): Promise<unknown> | unknown;
   sessionThreadLinks?(): unknown;
   readThread?(threadId: string): Promise<unknown> | unknown;
+  submitExternalDelivery?(
+    projectId: string,
+    command: unknown,
+  ): Promise<unknown>;
+  getExternalDelivery?(projectId: string, deliveryId: string): Promise<unknown>;
 }
 
 function explicitErrorCode(error: unknown): string | undefined {
@@ -263,9 +279,7 @@ function explicitErrorCode(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
-function errorStatus(
-  code: ReturnType<typeof classifyDashboardError>['code'],
-): number {
+function errorStatus(code: string | undefined): number {
   return code === 'active-session' ||
     code === 'merge-conflict' ||
     code === 'restart-precondition' ||
@@ -275,7 +289,8 @@ function errorStatus(
     code === 'sqlite-constraint' ||
     code === 'orchestration-conflict' ||
     code === 'session-assigned' ||
-    code === 'session-link-conflict'
+    code === 'session-link-conflict' ||
+    code === 'busy'
     ? 409
     : code === 'unknown-workspace'
       ? 404
@@ -285,7 +300,7 @@ function errorStatus(
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   const classified = classifyDashboardError(error);
   const code = classified.code ?? explicitErrorCode(error);
-  return reply.code(errorStatus(classified.code)).send({
+  return reply.code(errorStatus(code)).send({
     error: classified.message ?? String(error),
     ...(code === undefined ? {} : { code }),
   });
@@ -369,10 +384,19 @@ function installCorsAndAuth(
       return reply.code(204).send();
     }
     if (request.url.split('?', 1)[0] === '/api/health') return;
+    const externalPath = request.url.split('?', 1)[0];
     const externalCreate =
-      request.url
-        .split('?', 1)[0]
-        .match(/^\/api\/external\/v1\/projects\/[^/]+\/threads$/) !== null;
+      /^\/api\/external\/v1\/projects\/[^/]+\/(?:threads|deliveries(?:\/[^/]+)?)$/.test(
+        externalPath,
+      );
+    if (
+      /^\/api\/external\/v1\/projects\/[^/]+\/deliveries(?:\/[^/]+)?$/.test(
+        externalPath,
+      ) &&
+      (!request.headers.authorization?.startsWith('Bearer ') ||
+        request.headers['x-dashboard-token'] !== undefined)
+    )
+      return reply.code(401).send({ error: 'Bearer authentication required.' });
     const auth = authorizeRequest({
       method: request.method,
       origin,
@@ -815,6 +839,40 @@ export const dashboardRoutes: FastifyPluginAsync<{
           request.params.projectId,
         );
         return reply.code(204).send();
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { projectId: string } }>(
+    '/api/external/v1/projects/:projectId/deliveries',
+    { bodyLimit: MAX_EXTERNAL_JSON_BODY, schema: { body: anyBody } },
+    async (request, reply) => {
+      try {
+        const command = parseExternalDeliveryCommand(request.body);
+        return reply
+          .code(202)
+          .send(
+            await requireOperation(context.submitExternalDelivery)(
+              request.params.projectId,
+              command,
+            ),
+          );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{ Params: { projectId: string; deliveryId: string } }>(
+    '/api/external/v1/projects/:projectId/deliveries/:deliveryId',
+    async (request, reply) => {
+      try {
+        return reply.send(
+          await requireOperation(context.getExternalDelivery)(
+            request.params.projectId,
+            request.params.deliveryId,
+          ),
+        );
       } catch (error) {
         return sendError(reply, error);
       }

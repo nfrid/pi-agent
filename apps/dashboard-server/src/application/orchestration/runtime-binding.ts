@@ -130,7 +130,25 @@ export async function bindAndDeliverPrompt(
     status: 'starting',
   });
   const promptReceiptId = host.promptReceiptId(run.id);
-  if (!host.repository.getCommandReceipt(promptReceiptId)) {
+  const externalDelivery =
+    host
+      .requireThread(run.threadId)
+      .externalRef?.startsWith('external-delivery:') === true;
+  const promptIntent = externalDelivery
+    ? host.repository.getCommandIntent(promptReceiptId)
+    : undefined;
+  if (
+    promptIntent &&
+    promptIntent.executionState !== 'completed' &&
+    promptIntent.executionState !== 'prepared'
+  )
+    throw new Error(
+      'External initial prompt outcome is ambiguous; it was not replayed.',
+    );
+  const delivered = externalDelivery
+    ? promptIntent?.executionState === 'completed'
+    : Boolean(host.repository.getCommandReceipt(promptReceiptId));
+  if (!delivered) {
     if (run.model?.provider === 'openai-codex') {
       await host.registry.sendCommand(runtimeId, {
         type: 'setModel',
@@ -145,17 +163,42 @@ export async function bindAndDeliverPrompt(
         });
     }
     const images = host.initialImages(run.id);
-    if (run.error === 'Initial images pending delivery.' && !images)
+    if (
+      run.error === 'Initial images pending delivery.' &&
+      !images &&
+      !externalDelivery
+    )
       throw new Error(
         'Initial image attachments were lost before delivery; retry the draft.',
       );
+    if (externalDelivery) {
+      host.repository.reserveCommandIntent({
+        idempotencyKey: promptReceiptId,
+        commandType: 'run.prompt',
+        commandFingerprint: run.id,
+        executionPlan: {
+          operation: 'command',
+          runtimeId,
+          sessionId: piSessionId,
+        },
+      });
+      host.repository.transitionCommandIntent(promptReceiptId, 'dispatched');
+    }
     await host.registry.sendCommand(runtimeId, {
       id: promptReceiptId,
       type: 'prompt',
       text: run.initialPrompt,
       ...(images?.length ? { images } : {}),
     });
-    host.saveReceipt(promptReceiptId, 'run.prompt', { runId: run.id });
+    if (externalDelivery)
+      host.repository.completeCommandIntent({
+        idempotencyKey: promptReceiptId,
+        commandType: 'run.prompt',
+        commandFingerprint: run.id,
+        result: { runId: run.id },
+        createdAt: Date.now(),
+      });
+    else host.saveReceipt(promptReceiptId, 'run.prompt', { runId: run.id });
   }
   await host.releaseInitialImages(run.id);
   // A prior ACK failure is no longer actionable once this retry was

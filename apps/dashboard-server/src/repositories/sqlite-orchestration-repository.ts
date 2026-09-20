@@ -131,6 +131,10 @@ function boundedIntentPlan(plan: RuntimeIntentPlan): RuntimeIntentPlan {
     sessionFile: 4096,
     name: 120,
     runtimeProvider: 128,
+    deliveryThreadId: 256,
+    deliveryPrompt: 100_000,
+    deliverySessionId: 256,
+    deliveryLeafId: 256,
   };
   for (const [key, bound] of Object.entries(stringBounds)) {
     const value = plan[key as keyof RuntimeIntentPlan];
@@ -142,6 +146,15 @@ function boundedIntentPlan(plan: RuntimeIntentPlan): RuntimeIntentPlan {
   }
   if (plan.mode === 'read' || plan.mode === 'write') copy.mode = plan.mode;
   if (typeof plan.force === 'boolean') copy.force = plan.force;
+  if (Array.isArray(plan.deliveryArtifactFiles)) {
+    if (plan.deliveryArtifactFiles.length > 4)
+      throw new Error('External delivery artifact count exceeds its bound.');
+    copy.deliveryArtifactFiles = plan.deliveryArtifactFiles.map((file) => {
+      if (file.length > 512)
+        throw new Error('External delivery artifact path exceeds its bound.');
+      return file;
+    });
+  }
   if (plan.model) {
     if (
       plan.model.provider.length > 200 ||
@@ -1712,6 +1725,42 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         return;
       }
       throw new Error('Runtime command intent does not exist.');
+    });
+  }
+
+  deletePreparedExternalDelivery(idempotencyKey: string): void {
+    this.db
+      .prepare(
+        "DELETE FROM command_receipt WHERE idempotency_key=? AND command_type='external.delivery' AND execution_state='prepared'",
+      )
+      .run(idempotencyKey);
+  }
+
+  activeExternalDelivery(threadId: string): RuntimeCommandIntent | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM command_receipt
+      WHERE command_type='external.delivery'
+        AND (json_extract(result_json, '$.threadId')=? OR json_extract(execution_plan_json, '$.deliveryThreadId')=?)
+        AND execution_state <> 'uncertain'
+        AND COALESCE(json_extract(result_json, '$.state'), 'pending') NOT IN ('completed','attention')
+      ORDER BY created_at LIMIT 1`)
+      .get(threadId, threadId) as Record<string, unknown> | undefined;
+    return row ? intentFromRow(row) : undefined;
+  }
+
+  updateCommandIntentResult(idempotencyKey: string, result: unknown): void {
+    this.withTransaction(() => {
+      const existing = this.getCommandIntent(idempotencyKey);
+      if (!existing) throw new Error('Runtime command intent does not exist.');
+      if (existing.commandType !== 'external.delivery')
+        throw new Error('Only external delivery results may be frozen.');
+      const state = (existing.result as { state?: string } | null)?.state;
+      if (state === 'completed' || state === 'attention') return;
+      this.db
+        .prepare(
+          "UPDATE command_receipt SET result_json=?,updated_at=? WHERE idempotency_key=? AND execution_state='completed'",
+        )
+        .run(JSON.stringify(result), Date.now(), idempotencyKey);
     });
   }
 

@@ -3,6 +3,11 @@ export const MAX_PATH = 4096;
 /** Maximum UTF-8 bytes returned by an authenticated host-file read. */
 export const MAX_FILE_READ_BYTES = 1024 * 1024;
 export const MAX_TEXT = 100_000;
+/** External delivery payload limits. */
+export const MAX_EXTERNAL_DELIVERY_ID = 256;
+export const MAX_EXTERNAL_DELIVERY_ATTACHMENTS = 4;
+export const MAX_EXTERNAL_DELIVERY_BYTES = 10 * 1024 * 1024;
+export const MAX_EXTERNAL_DELIVERY_REPLY = 256 * 1024;
 /** Bounds for provisional tool-call argument tracing. */
 export const MAX_TOOL_ARGUMENT_DELTA = 4_096;
 export const MAX_TOOL_ARGUMENT_PREVIEW = 12_000;

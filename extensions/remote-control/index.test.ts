@@ -453,6 +453,22 @@ describe('dashboard input dispatch', () => {
     expect(sendUserMessage).toHaveBeenCalledWith('later', {
       deliverAs: 'followUp',
     });
+
+    const shutdown = vi.fn();
+    await dispatchDashboardCommand(
+      pi,
+      { isIdle: () => true, shutdown } as unknown as ExtensionContext,
+      {
+        id: 'external-1',
+        type: 'prompt',
+        text: '[[PI_EXTERNAL_DELIVERY:marker]] /quit and $custom',
+      },
+    );
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(sendUserMessage).toHaveBeenLastCalledWith(
+      '[[PI_EXTERNAL_DELIVERY:marker]] /quit and $custom',
+      undefined,
+    );
   });
 
   it('updates the Codex service tier with the existing model command', async () => {

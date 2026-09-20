@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type http from 'node:http';
+import path from 'node:path';
 import { BackgroundJobsClient } from '@pi-agent/background-jobs';
 import {
   delegateHistoryFromBranch,
@@ -34,6 +35,7 @@ import {
   type SessionMetadataDelta,
   shellRuntime,
 } from './application/dashboard-application.js';
+import { ExternalDeliveryService } from './application/external-delivery-service.js';
 import type { DashboardImage } from './application/upload-service.js';
 import {
   composerCommandCatalogue,
@@ -204,6 +206,7 @@ export class DashboardServerImpl implements DashboardServer {
   private readonly sessionFeeds: SessionFeedRegistry;
   private readonly application: DashboardDependencies['application'];
   private readonly runtimeProvider: DashboardDependencies['runtimeProvider'];
+  private readonly externalDeliveries: ExternalDeliveryService | undefined;
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
   // A normally stopped server owns closed stateful resources and cannot be
@@ -247,11 +250,31 @@ export class DashboardServerImpl implements DashboardServer {
     this.application = dependencies.application;
     this.runtimeProvider = dependencies.runtimeProvider;
     this.origins = config.origins;
+    this.externalDeliveries = this.application.orchestrationService
+      ? new ExternalDeliveryService(
+          this.metadata.orchestration,
+          this.application.orchestrationService,
+          this.registry,
+          this.sessions,
+          path.join(this.stateDir, 'external-deliveries'),
+          // ExternalDeliveryService owns the pre-send durable intent; do not
+          // create a second command journal that would retain a definite busy.
+          (runtimeId, command) =>
+            this.application.runtime.command(runtimeId, command),
+          async (input) =>
+            (await this.application.runtime.startWithReceipt(input)).result
+              .runtimeId,
+          (projectId) =>
+            this.application.resolveDraftDefaults(projectId).selection,
+        )
+      : undefined;
 
     this.bridge = new BridgeListener((socket) => this.registry.accept(socket));
 
     this.app = Fastify({
       logger: false,
+      // Machine delivery identifiers may contain up to 256 opaque characters.
+      routerOptions: { maxParamLength: 4096 },
       // Reject, rather than silently strip, bounded orchestration command
       // properties at the HTTP boundary.
       ajv: { customOptions: { removeAdditional: false } },
@@ -570,6 +593,19 @@ export class DashboardServerImpl implements DashboardServer {
             ...(images.length > 0 ? { images, releaseImages: release } : {}),
           }),
         );
+      },
+      submitExternalDelivery: (projectId, command) => {
+        if (!this.externalDeliveries)
+          throw new Error('External delivery is unavailable.');
+        return this.externalDeliveries.submit(
+          projectId,
+          command as import('@pi-dashboard/protocol').ExternalDeliveryCommand,
+        );
+      },
+      getExternalDelivery: (projectId, deliveryId) => {
+        if (!this.externalDeliveries)
+          throw new Error('External delivery is unavailable.');
+        return this.externalDeliveries.get(projectId, deliveryId);
       },
       createExternalThread: (projectId, command) => {
         const service = this.application.orchestrationService;

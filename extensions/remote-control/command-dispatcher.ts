@@ -108,6 +108,7 @@ export async function dispatchDashboardCommand(
         command.text,
         undefined,
         command.images,
+        !command.text.startsWith('[[PI_EXTERNAL_DELIVERY:'),
       );
     case 'steer':
     case 'followUp':
@@ -120,6 +121,7 @@ export async function dispatchDashboardCommand(
           command.text,
           command.type === 'steer' ? 'steer' : 'followUp',
           command.images,
+          !command.text.startsWith('[[PI_EXTERNAL_DELIVERY:'),
         )),
         mode: command.type,
       };

@@ -119,6 +119,62 @@ describe('Fastify dashboard route plugin', () => {
     expect(legacy.statusCode).toBe(403);
   });
 
+  it('accepts originless Bearer deliveries and rejects browser-token spoofing', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.submitExternalDelivery = vi.fn(
+      async (_projectId, command) => ({
+        deliveryId: (command as { deliveryId: string }).deliveryId,
+        state: 'pending',
+      }),
+    );
+    routeContext.getExternalDelivery = vi.fn(
+      async (_projectId, deliveryId) => ({
+        deliveryId,
+        state: 'pending',
+      }),
+    );
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const payload = {
+      deliveryId: 'telegram-1',
+      conversationRef: 'chat-1',
+      text: 'hello',
+    };
+    const bearer = await app.inject({
+      method: 'POST',
+      url: '/api/external/v1/projects/project-1/deliveries',
+      headers: { authorization: 'Bearer route-token' },
+      payload,
+    });
+    expect(bearer.statusCode).toBe(202);
+    expect(routeContext.submitExternalDelivery).toHaveBeenCalledWith(
+      'project-1',
+      payload,
+    );
+    const legacy = await app.inject({
+      method: 'POST',
+      url: '/api/external/v1/projects/project-1/deliveries',
+      headers: { 'x-dashboard-token': 'route-token' },
+      payload,
+    });
+    expect(legacy.statusCode).toBe(401);
+    const get = await app.inject({
+      method: 'GET',
+      url: '/api/external/v1/projects/project-1/deliveries/telegram-1',
+      headers: { authorization: 'Bearer route-token' },
+    });
+    expect(get.statusCode).toBe(200);
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/external/v1/projects/project-1/deliveries',
+      headers: { authorization: 'Bearer route-token' },
+      payload: { ...payload, unknown: true },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
   it('returns the exact persisted session/thread projection', async () => {
     const app = Fastify();
     apps.push(app);

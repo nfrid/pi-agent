@@ -97,6 +97,12 @@ export interface RuntimeIntentPlan {
   mode?: 'read' | 'write';
   runtimeProvider?: string;
   force?: boolean;
+  /** External delivery intent evidence; never used for generic runtime commands. */
+  deliveryThreadId?: string;
+  deliveryPrompt?: string;
+  deliverySessionId?: string;
+  deliveryLeafId?: string;
+  deliveryArtifactFiles?: string[];
 }
 
 export interface RuntimeCommandIntent {
@@ -448,6 +454,9 @@ export interface OrchestrationRepository extends ProjectAssociationRepository {
     state: RuntimeIntentState,
   ): RuntimeCommandIntent;
   completeCommandIntent(receipt: CommandReceipt): void;
+  updateCommandIntentResult(idempotencyKey: string, result: unknown): void;
+  activeExternalDelivery(threadId: string): RuntimeCommandIntent | undefined;
+  deletePreparedExternalDelivery(idempotencyKey: string): void;
   pendingCommandIntents(): RuntimeCommandIntent[];
   setRunRuntime(id: string, runtimeId: string): Run;
   setRunError(id: string, error: string): Run;

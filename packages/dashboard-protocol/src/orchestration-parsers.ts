@@ -7,6 +7,8 @@ import {
   CheckoutActionCommandSchema,
   type CheckoutReviewCommand,
   CheckoutReviewCommandSchema,
+  type ExternalDeliveryCommand,
+  ExternalDeliveryCommandSchema,
   type ExternalThreadCreateCommand,
   ExternalThreadCreateCommandSchema,
   type PinThreadCommand,
@@ -135,6 +137,27 @@ export const parseExternalThreadCreateCommand = (
     value,
     'external thread create command',
   );
+export const parseExternalDeliveryCommand = (
+  value: unknown,
+): ExternalDeliveryCommand => {
+  const command = parseSchema(
+    ExternalDeliveryCommandSchema,
+    value,
+    'external delivery command',
+  );
+  if (
+    (command.threadId === undefined) ===
+    (command.conversationRef === undefined)
+  )
+    throw new Error('Exactly one of threadId or conversationRef is required.');
+  if (!command.text.trim() && !command.attachments?.length)
+    throw new Error('Text or an attachment is required.');
+  if (
+    command.attachments?.some((attachment) => attachment.data.length % 4 !== 0)
+  )
+    throw new Error('Attachment data must be base64.');
+  return command;
+};
 export const tryParseExternalThreadCreateCommand = (
   value: unknown,
 ): ExternalThreadCreateCommand | undefined =>

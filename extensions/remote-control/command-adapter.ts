@@ -225,6 +225,7 @@ export async function dispatchDashboardInput(
   text: string,
   deliverAs?: 'steer' | 'followUp',
   images: readonly BridgeImageAttachment[] = [],
+  expandCommands = true,
 ): Promise<{ accepted: true; command?: string }> {
   const invocation = commandParts(text);
   if (
@@ -283,7 +284,7 @@ export async function dispatchDashboardInput(
       `Command "/${invocation.name}" is not available through the dashboard yet.`,
     );
   }
-  const expanded = expandDashboardInput(text, commands);
+  const expanded = expandCommands ? expandDashboardInput(text, commands) : text;
   const content =
     images.length > 0
       ? [

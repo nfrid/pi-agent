@@ -1,5 +1,12 @@
 import { type Static, Type } from 'typebox';
-import { MAX_ID, MAX_PATH, MAX_TEXT } from './limits.js';
+import {
+  MAX_EXTERNAL_DELIVERY_ATTACHMENTS,
+  MAX_EXTERNAL_DELIVERY_BYTES,
+  MAX_EXTERNAL_DELIVERY_ID,
+  MAX_ID,
+  MAX_PATH,
+  MAX_TEXT,
+} from './limits.js';
 import { ModelSelectionSchema } from './orchestration-contracts.js';
 
 /** Command identifiers are persisted receipts, not transport frame IDs. */
@@ -146,6 +153,55 @@ export const ExternalThreadCreateCommandSchema = Type.Object(
 );
 export type ExternalThreadCreateCommand = Static<
   typeof ExternalThreadCreateCommandSchema
+>;
+
+export const ExternalDeliveryAttachmentSchema = Type.Object(
+  {
+    name: Type.String({ minLength: 1, maxLength: 512 }),
+    mimeType: Type.String({ minLength: 1, maxLength: 256 }),
+    data: Type.String({
+      minLength: 1,
+      maxLength: Math.ceil(MAX_EXTERNAL_DELIVERY_BYTES / 3) * 4,
+      pattern: '^[A-Za-z0-9+/]*={0,2}$',
+    }),
+  },
+  { additionalProperties: false },
+);
+export type ExternalDeliveryAttachment = Static<
+  typeof ExternalDeliveryAttachmentSchema
+>;
+export const ExternalDeliveryCommandSchema = Type.Object(
+  {
+    deliveryId: Type.String({
+      minLength: 1,
+      maxLength: MAX_EXTERNAL_DELIVERY_ID,
+      pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+    }),
+    threadId: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_ID,
+        pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+      }),
+    ),
+    conversationRef: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_ID,
+        pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+      }),
+    ),
+    text: Type.String({ maxLength: MAX_TEXT }),
+    attachments: Type.Optional(
+      Type.Array(ExternalDeliveryAttachmentSchema, {
+        maxItems: MAX_EXTERNAL_DELIVERY_ATTACHMENTS,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ExternalDeliveryCommand = Static<
+  typeof ExternalDeliveryCommandSchema
 >;
 
 export const RetryCommandSchema = Type.Object(

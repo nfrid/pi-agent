@@ -248,6 +248,7 @@ export class OrchestrationService implements OrchestrationHost {
   async createExternalThread(
     projectId: string,
     command: ExternalThreadCreateCommand,
+    images?: readonly BridgeImageAttachment[],
   ): Promise<unknown> {
     const title = normalizeSessionTitle(command.title);
     if (title === undefined) throw new Error('External thread title is empty.');
@@ -269,6 +270,9 @@ export class OrchestrationService implements OrchestrationHost {
       .digest('hex');
     return createThreadLifecycle(this, projectId, {
       ...normalizedCommand,
+      ...(images?.length
+        ? { images, releaseImages: async () => undefined }
+        : {}),
       commandId: externalThreadCommandId(normalizedCommand.externalRef),
       externalRef: normalizedCommand.externalRef,
       commandFingerprint: fingerprint,
