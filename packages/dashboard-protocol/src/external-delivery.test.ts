@@ -49,6 +49,40 @@ it('transports delivery provenance outside literal text and rejects queued metad
   ).toBeUndefined();
 });
 
+it('requires an explicit thread and structured bridge input for a source-session fence', () => {
+  const input = {
+    deliveryId: 'reply',
+    threadId: 'thread',
+    text: 'yes',
+    expectedSessionId: 'original-session',
+  };
+  expect(parseExternalDeliveryCommand(input)).toEqual(input);
+  expect(() =>
+    parseExternalDeliveryCommand({
+      ...input,
+      threadId: undefined,
+      conversationRef: 'new',
+    }),
+  ).toThrow();
+  expect(() =>
+    parseBridgeCommand({
+      id: 'reply',
+      type: 'prompt',
+      text: 'yes',
+      expectedSessionId: 'original-session',
+    }),
+  ).toThrow();
+  expect(
+    parseBridgeCommand({
+      id: 'reply',
+      type: 'prompt',
+      text: 'yes',
+      externalDeliveryId: 'delivery',
+      expectedSessionId: 'original-session',
+    }),
+  ).toMatchObject({ expectedSessionId: 'original-session' });
+});
+
 describe('external delivery contract', () => {
   it('accepts a conversation delivery and bounded attachment metadata', () => {
     expect(

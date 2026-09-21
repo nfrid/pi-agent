@@ -145,7 +145,7 @@ async function fixture(conversationRef?: string) {
       version: 1,
       manifests: [],
       capabilities: [
-        { id: EXTERNAL_DELIVERY_CAPABILITY, version: '1', available: true },
+        { id: EXTERNAL_DELIVERY_CAPABILITY, version: '2', available: true },
       ],
     },
   };
@@ -528,6 +528,142 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
       });
       expect(f.send).toHaveBeenCalledOnce();
     }
+  });
+
+  it('resolves only existing canonical current source sessions without writes', async () => {
+    const f = await fixture();
+    expect(f.service.source('session')).toEqual({
+      projectId: 'p',
+      threadId: 'thread',
+      sessionId: 'session',
+      title: 'Thread',
+    });
+    expect(() => f.service.source('missing')).toThrow('canonical thread');
+    expect(() => f.service.source('bad\nID')).toThrow('Invalid source');
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.repository.listThreads()).toHaveLength(1);
+    f.repository.transitionRun('run', 'completed');
+    f.repository.createRun({
+      id: 'replacement',
+      threadId: 'thread',
+      initialPrompt: 'replacement',
+      status: 'waiting',
+      piSessionId: 'new-session',
+    });
+    expect(() => f.service.source('session')).toThrow('superseded');
+    expect(f.service.source('new-session').threadId).toBe('thread');
+    f.repository.transitionRun('replacement', 'completed');
+    f.repository.archiveThread('archive-source', 'thread');
+    expect(() => f.service.source('new-session')).toThrow('unavailable');
+  });
+
+  it('fences replies to their native session and requires runtime capability before admission', async () => {
+    const f = await fixture();
+    const input = { ...command('fenced'), expectedSessionId: 'session' };
+    f.live.capabilities = {
+      version: 1,
+      manifests: [],
+      capabilities: [
+        { id: EXTERNAL_DELIVERY_CAPABILITY, version: '1', available: true },
+      ],
+    };
+    await expect(f.service.submit('p', input)).rejects.toMatchObject({
+      code: 'busy',
+    });
+    expect(
+      f.repository.getCommandIntent(f.intentKey('fenced')),
+    ).toBeUndefined();
+    f.live.capabilities = {
+      version: 1,
+      manifests: [],
+      capabilities: [
+        { id: EXTERNAL_DELIVERY_CAPABILITY, version: '2', available: true },
+      ],
+    };
+    await expect(
+      f.service.submit('p', { ...input, expectedSessionId: 'another-session' }),
+    ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+    f.live.session.id = 'replacement';
+    await expect(f.service.submit('p', input)).rejects.toMatchObject({
+      code: 'orchestration-conflict',
+    });
+    expect(
+      f.repository.getCommandIntent(f.intentKey('fenced')),
+    ).toBeUndefined();
+    expect(f.send).not.toHaveBeenCalled();
+    f.live.session.id = 'session';
+    await f.service.submit('p', input);
+    expect(f.send.mock.calls[0][1]).toMatchObject({
+      expectedSessionId: 'session',
+    });
+    await f.finish();
+    expect((await f.service.get('p', 'fenced')).state).toBe('completed');
+    f.live.session.id = 'replacement';
+    expect((await f.service.submit('p', input)).state).toBe('completed');
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'run',
+    'runtime',
+  ])('releases definitely unsent fenced intents when the %s source changes after restart', async (kind) => {
+    const f = await fixture();
+    const input = {
+      ...command('fenced-crash'),
+      expectedSessionId: 'session',
+      attachments: [{ name: 'note.txt', mimeType: 'text/plain', data: 'YQ==' }],
+    };
+    const transition = f.repository.transitionCommandIntent.bind(f.repository);
+    vi.spyOn(f.repository, 'transitionCommandIntent').mockImplementation(
+      (id, state) => {
+        if (state === 'dispatched') throw new Error('fixture exit before send');
+        return transition(id, state);
+      },
+    );
+    await expect(f.service.submit('p', input)).rejects.toThrow('fixture exit');
+    const files =
+      f.repository.getCommandIntent(f.intentKey('fenced-crash'))?.executionPlan
+        ?.deliveryArtifactFiles ?? [];
+    expect(files).toHaveLength(1);
+    await f.reopen();
+    if (kind === 'runtime') f.live.session.id = 'replacement';
+    else {
+      f.repository.transitionRun('run', 'completed');
+      f.repository.createRun({
+        id: 'replacement-run',
+        threadId: 'thread',
+        initialPrompt: 'new',
+        status: 'waiting',
+        piSessionId: 'replacement',
+      });
+    }
+    await expect(f.service.submit('p', input)).rejects.toMatchObject({
+      code: 'orchestration-conflict',
+    });
+    expect(
+      f.repository.getCommandIntent(f.intentKey('fenced-crash')),
+    ).toBeUndefined();
+    await expect(readFile(files[0])).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects ambiguous source ownership rather than choosing the latest thread', async () => {
+    const f = await fixture();
+    f.repository.createThread({
+      id: 'other-source',
+      projectId: 'p',
+      title: 'Other',
+      checkoutId: 'checkout',
+    });
+    f.repository.createRun({
+      id: 'other-source-run',
+      threadId: 'other-source',
+      initialPrompt: 'other',
+      status: 'completed',
+      piSessionId: 'session',
+    });
+    expect(() => f.service.source('session')).toThrow('unambiguous');
+    expect(f.send).not.toHaveBeenCalled();
   });
 
   it('scopes identical client IDs and conversation refs to the path project', async () => {
@@ -1030,6 +1166,7 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
           unread: [],
         }),
         externalModels: async () => ({ models: [] }),
+        externalSource: (sessionId: string) => f.service.source(sessionId),
         settleExternalConversation: (projectId: string, input: unknown) =>
           f.service.settleConversation(projectId, input),
         submitExternalDelivery: (projectId: string, input: unknown) =>
@@ -1040,6 +1177,49 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
     });
     const url = '/api/external/v1/projects/p/deliveries';
     const headers = { authorization: 'Bearer secret' };
+    const sourceUrl = '/api/external/v1/sessions/session/source';
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: sourceUrl,
+          headers: {
+            'x-dashboard-token': 'secret',
+            origin: 'http://dashboard.test',
+          },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: sourceUrl,
+          headers: { ...headers, origin: 'https://untrusted.test' },
+        })
+      ).statusCode,
+    ).toBe(403);
+    const sourceResponse = await app.inject({
+      method: 'GET',
+      url: sourceUrl,
+      headers,
+    });
+    expect(sourceResponse.statusCode).toBe(200);
+    expect(sourceResponse.json()).toEqual({
+      projectId: 'p',
+      threadId: 'thread',
+      sessionId: 'session',
+      title: 'Thread',
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/external/v1/sessions/unknown/source',
+          headers,
+        })
+      ).statusCode,
+    ).toBe(404);
     for (const method of ['POST', 'GET'] as const) {
       const response = await app.inject({
         method,

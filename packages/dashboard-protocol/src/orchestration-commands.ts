@@ -172,6 +172,14 @@ export type ExternalDeliveryAttachment = Static<
 >;
 export const ExternalDeliveryCommandSchema = Type.Object(
   {
+    /** Bind an explicit reply to its original native session. */
+    expectedSessionId: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_ID,
+        pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+      }),
+    ),
     // Explicit initial selection only; existing conversations retain their model.
     model: Type.Optional(ModelSelectionSchema),
     deliveryId: Type.String({

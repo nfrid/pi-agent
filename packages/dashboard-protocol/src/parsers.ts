@@ -435,7 +435,9 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
           'type',
           'text',
           'images',
-          ...(command.type === 'prompt' ? ['externalDeliveryId'] : []),
+          ...(command.type === 'prompt'
+            ? ['externalDeliveryId', 'expectedSessionId']
+            : []),
         ]),
       )
     )
@@ -445,6 +447,12 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
       !safeIdentifier(command.externalDeliveryId, MAX_ID)
     )
       throw new Error('Invalid external delivery ID.');
+    if (
+      command.expectedSessionId !== undefined &&
+      (command.externalDeliveryId === undefined ||
+        !safeIdentifier(command.expectedSessionId, MAX_ID))
+    )
+      throw new Error('Invalid expected delivery session.');
     const text =
       command.externalDeliveryId === undefined
         ? command.text.trim()

@@ -606,6 +606,11 @@ export class DashboardServerImpl implements DashboardServer {
           throw new Error('External deliveries are unavailable.');
         return this.externalDeliveries.settleConversation(projectId, input);
       },
+      externalSource: (sessionId) => {
+        if (!this.externalDeliveries)
+          throw new Error('External deliveries are unavailable.');
+        return this.externalDeliveries.source(sessionId);
+      },
       externalModels: async (projectId) => {
         if (
           this.metadata.orchestration.getProject(projectId)?.status !== 'active'

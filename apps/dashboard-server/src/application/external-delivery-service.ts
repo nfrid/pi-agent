@@ -194,6 +194,7 @@ export class ExternalDeliveryService {
         type: 'prompt';
         text: string;
         externalDeliveryId?: string;
+        expectedSessionId?: string;
         images?: BridgeImageAttachment[];
       },
     ) => Promise<unknown>,
@@ -402,6 +403,65 @@ export class ExternalDeliveryService {
     return this.progress(stored, key);
   }
 
+  /** Existing canonical ownership only: contacting the owner never adopts a session. */
+  source(sessionId: string): {
+    projectId: string;
+    threadId: string;
+    sessionId: string;
+    title: string;
+  } {
+    if (
+      !sessionId.trim() ||
+      sessionId.length > 256 ||
+      [...sessionId].some(
+        (character) =>
+          character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      )
+    )
+      throw Object.assign(new Error('Invalid source session.'), {
+        code: 'invalid-command',
+      });
+    const candidates = new Set(
+      this.repository
+        .listRuns()
+        .filter((run) => run.piSessionId === sessionId)
+        .map((run) => run.threadId),
+    );
+    const link = this.repository.getSessionThreadLink(sessionId);
+    if (link) candidates.add(link.threadId);
+    if (candidates.size !== 1)
+      throw Object.assign(
+        new Error('Source session has no unambiguous canonical thread.'),
+        {
+          code: candidates.size
+            ? 'orchestration-conflict'
+            : 'unknown-workspace',
+        },
+      );
+    const threadId = [...candidates][0];
+    const thread = this.repository.getThread(threadId);
+    const latest = this.repository.listRuns(threadId).at(-1);
+    if (
+      !thread ||
+      thread.archivedAt !== undefined ||
+      thread.status === 'archived' ||
+      this.repository.getProject(thread.projectId)?.status !== 'active' ||
+      latest?.piSessionId !== sessionId
+    )
+      throw Object.assign(
+        new Error(
+          'Source thread is unavailable or the session has been superseded.',
+        ),
+        { code: 'orchestration-conflict' },
+      );
+    return {
+      projectId: thread.projectId,
+      threadId: thread.id,
+      sessionId,
+      title: thread.title,
+    };
+  }
+
   private async withThreadLock<T>(
     projectId: string,
     operation: () => Promise<T>,
@@ -478,6 +538,23 @@ export class ExternalDeliveryService {
     let run = runs.at(-1);
     if (thread) {
       if (!run) throw busy('Thread is not ready for delivery.');
+      if (
+        command.expectedSessionId !== undefined &&
+        run.piSessionId !== command.expectedSessionId
+      ) {
+        if (existing) {
+          this.repository.deletePreparedExternalDelivery(key);
+          await this.cleanupFiles(
+            existing.executionPlan?.deliveryArtifactFiles ?? [],
+          );
+        }
+        throw Object.assign(
+          new Error(
+            'The source session has been replaced; the old answer was not delivered.',
+          ),
+          { code: 'orchestration-conflict' },
+        );
+      }
       let runtime = this.registry.get(run.runtimeId ?? '');
       if ((!runtime || runtime.online === false) && run.piSessionId) {
         const liveSession = this.registry
@@ -519,7 +596,13 @@ export class ExternalDeliveryService {
         !['idle', 'waiting'].includes(runtime.liveState)
       )
         throw busy();
-      if (correlationId !== undefined && !supportsExternalDelivery(runtime))
+      if (
+        correlationId !== undefined &&
+        !supportsExternalDelivery(
+          runtime,
+          command.expectedSessionId !== undefined,
+        )
+      )
         throw busy(
           'Runtime must support structured external delivery before admission.',
         );
@@ -621,14 +704,29 @@ export class ExternalDeliveryService {
     } else {
       const runtime = this.registry.get(run?.runtimeId ?? '');
       if (!run?.runtimeId) throw busy();
+      const staleSource =
+        command.expectedSessionId !== undefined &&
+        runtime !== undefined &&
+        runtime.session.id !== command.expectedSessionId;
       if (
+        staleSource ||
         !runtime ||
         runtime.online === false ||
         !['idle', 'waiting'].includes(runtime.liveState)
       ) {
         await this.repository.transitionCommandIntent(key, 'prepared');
-        if (!existing) this.repository.deletePreparedExternalDelivery(key);
-        await this.cleanupFiles(prepared.created);
+        if (!existing || staleSource)
+          this.repository.deletePreparedExternalDelivery(key);
+        await this.cleanupFiles(
+          staleSource ? prepared.files : prepared.created,
+        );
+        if (staleSource)
+          throw Object.assign(
+            new Error(
+              'The source session has been replaced; the old answer was not delivered.',
+            ),
+            { code: 'orchestration-conflict' },
+          );
         throw busy(runtime ? 'Thread is busy.' : 'Thread runtime is dormant.');
       }
       stored = {
@@ -654,6 +752,9 @@ export class ExternalDeliveryService {
           ...(correlationId === undefined
             ? {}
             : { externalDeliveryId: correlationId }),
+          ...(command.expectedSessionId === undefined
+            ? {}
+            : { expectedSessionId: command.expectedSessionId }),
           ...(prepared.images.length ? { images: prepared.images } : {}),
         });
         // The external reference is already canonical, even before a resumed

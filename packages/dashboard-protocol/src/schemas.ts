@@ -1210,6 +1210,7 @@ const PromptCommandSchema = Type.Object(
     ...BridgeCommandBaseProperties,
     /** Structured external input is literal; this ID never enters message text. */
     externalDeliveryId: Type.Optional(IdentifierSchema),
+    expectedSessionId: Type.Optional(IdentifierSchema),
     type: Type.Union([
       Type.Literal('prompt'),
       Type.Literal('steer'),

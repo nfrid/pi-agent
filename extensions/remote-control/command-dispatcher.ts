@@ -115,6 +115,7 @@ export async function dispatchDashboardCommand(
               command.images,
               false,
             ),
+          command.expectedSessionId,
         );
       }
       if (!ctx.isIdle())

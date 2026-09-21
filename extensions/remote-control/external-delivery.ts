@@ -26,7 +26,15 @@ export function withExternalDelivery<T>(
   deliveryId: string,
   text: string,
   send: () => T,
+  expectedSessionId?: string,
 ): T {
+  if (
+    expectedSessionId !== undefined &&
+    ctx.sessionManager.getSessionId() !== expectedSessionId
+  )
+    throw new Error(
+      'The source session has been replaced; the old answer was not delivered.',
+    );
   if (!ctx.isIdle() || ctx.hasPendingMessages())
     throw Object.assign(
       new Error(

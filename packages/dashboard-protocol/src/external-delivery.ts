@@ -39,12 +39,14 @@ export function externalDeliveryReceipt(
 
 export function supportsExternalDelivery(
   runtime: { capabilities?: RuntimeCapabilitySnapshot } | undefined,
+  requireSessionFence = false,
 ): boolean {
   return (
     runtime?.capabilities?.capabilities.some(
       (capability) =>
         capability.id === EXTERNAL_DELIVERY_CAPABILITY &&
-        capability.version === '1' &&
+        (capability.version === '2' ||
+          (!requireSessionFence && capability.version === '1')) &&
         capability.available,
     ) === true
   );

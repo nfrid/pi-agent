@@ -34,6 +34,14 @@ POST returns 202; GET returns 200. Both success bodies have only:
 
 An identical POST returns the existing record; changed payloads return `409` with `code: "idempotency-conflict"`, including concurrent requests. Definite busy rejection returns `409` with `code: "busy"` without reserving a new delivery ID. If a record was already prepared before a daemon exit, retry the identical POST to progress it. GET never launches or dispatches anything; there is no additional delivery worker. Keep polling a running turn, and use identical POST retries for pending setup/recovery. Admission to a thread is held until its delivery is observed terminal, even if the runtime's last snapshot still says idle.
 
+## Source-bound user contact
+
+`GET /api/external/v1/sessions/:sessionId/source` is Bearer-only, including originless machine calls. It returns `{projectId, threadId, sessionId, title}` for one existing canonical current source. It does not adopt sessions or create projects/threads. Ambiguous run/link ownership, archived projects/threads, missing runs and superseded sessions fail closed.
+
+Replies to a question can include `expectedSessionId` with an explicit `threadId`. The field participates in the immutable delivery fingerprint. The server checks the latest run and live runtime before dispatch, and a v2 runtime checks its actual native session before accepting the prompt. A definitely unsent prepared request whose source is replaced is released rather than blocking the thread forever. Completed results remain frozen even if the source later changes. A missing v2 capability is retryable busy before admission, never an unfenced fallback.
+
+This contract supports admin's owner-only Telegram outbox. Native source identity comes from the calling Pi session, not a model-selected target thread or recipient. Button answers are literal user input, not remotely executable commands.
+
 ## Ownership and crash behavior
 
 New deliveries carry `externalDeliveryId` separately in the bridge prompt. Native user text has no generated delivery prefix. The runtime writes a hidden SDK custom entry, `external-delivery-receipt`, with `{version: 1, deliveryId, userEntryId}`. It is neither a model message nor a Dashboard transcript item. Completion uses the referenced native user entry ID, not text matching, and requires that receipt and user on the persisted selected branch, ancestry from the pre-send leaf (normal leaf advancement is allowed), the same session/runtime, and a settled live runtime. A final reply must have native `stopReason: "stop"`, contain no tool calls, and be the sole final assistant message after that user entry. Thinking and intermediate tool-use commentary are excluded. An intervening user, removed anchor, replacement runtime/session, multiple final messages, aborted/length-limited output, or oversized output yields attention. Replies are bounded to 256 KiB UTF-8, never silently truncated.
@@ -56,7 +64,7 @@ The bridge accepts structured delivery only as an idle `prompt`, never steering/
 
 The SDK can buffer a new session until its first assistant entry; native user and receipt persistence follow that existing lifecycle. The outer SQLite intent remains durable before any dispatch. A crash between user and receipt persistence therefore cannot authorize replay. The initial delivery ID is stored atomically with the orchestration run (`initial_delivery_id`); it survives daemon restart without changing the initial text or model selection.
 
-Runtimes must advertise `remote-control.external-delivery` version `1`. An older continuation runtime returns retryable busy before admission; initial dispatch also checks support. There is no silent marker fallback for new work, nor a forced runtime refresh during deployment. Previously prepared intents, accepted marker-based deliveries, historical journals and frozen replies keep their original representation and correlation rules. Old `[[PI_EXTERNAL_DELIVERY:…]]` messages are not rewritten or visually relabeled.
+Runtimes must advertise `remote-control.external-delivery` version `1` or `2`; source-session-fenced replies require version `2`. An older continuation runtime returns retryable busy before admission; initial dispatch also checks support. There is no silent marker fallback for new work, nor a forced runtime refresh during deployment. Previously prepared intents, accepted marker-based deliveries, historical journals and frozen replies keep their original representation and correlation rules. Old `[[PI_EXTERNAL_DELIVERY:…]]` messages are not rewritten or visually relabeled.
 
 ## Attachments
 

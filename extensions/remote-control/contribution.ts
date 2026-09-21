@@ -88,7 +88,7 @@ export const remoteControlCapabilitySnapshot = createRuntimeCapabilitySnapshot(
     },
     {
       id: EXTERNAL_DELIVERY_CAPABILITY,
-      version: '1',
+      version: '2',
       available: true,
       summary:
         'Native user entry correlation through hidden delivery receipts.',

@@ -150,6 +150,8 @@ export const parseExternalDeliveryCommand = (
     (command.conversationRef === undefined)
   )
     throw new Error('Exactly one of threadId or conversationRef is required.');
+  if (command.expectedSessionId !== undefined && command.threadId === undefined)
+    throw new Error('A source-session fence requires an explicit thread.');
   if (!command.text.trim() && !command.attachments?.length)
     throw new Error('Text or an attachment is required.');
   if (

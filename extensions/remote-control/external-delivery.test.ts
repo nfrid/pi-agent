@@ -157,12 +157,13 @@ async function fixture(extra?: ExtensionFactory, before = false) {
       await vi.waitFor(() => expect(contexts).toHaveLength(count + 1));
       await session.waitForIdle();
     },
-    dispatch(deliveryId: string, text: string) {
+    dispatch(deliveryId: string, text: string, expectedSessionId?: string) {
       return dispatchDashboardCommand(pi, ctx, {
         id: deliveryId,
         type: 'prompt',
         externalDeliveryId: deliveryId,
         text,
+        ...(expectedSessionId ? { expectedSessionId } : {}),
       });
     },
   };
@@ -236,6 +237,22 @@ it('binds identical native users durably, keeps provider context clean and prese
   await expect(f.dispatch('fixture-correlation-0', 'да')).rejects.toThrow(
     'already has a persisted receipt',
   );
+});
+
+it('rejects an answer addressed to another native session before executing a turn', async () => {
+  const f = await fixture();
+  await expect(
+    f.dispatch('wrong-session-answer', 'yes', 'another-session'),
+  ).rejects.toThrow('source session has been replaced');
+  expect(f.contexts).toHaveLength(0);
+  await f.dispatch('correct-session-answer', 'yes', f.manager.getSessionId());
+  await vi.waitFor(() => expect(f.contexts).toHaveLength(1));
+  await f.session.waitForIdle();
+  expect(
+    f.manager
+      .getEntries()
+      .flatMap((entry) => externalDeliveryReceipt(entry) ?? []),
+  ).toHaveLength(1);
 });
 
 it('does not bind an identical intervening browser message while external preflight is suspended', async () => {

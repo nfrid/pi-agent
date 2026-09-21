@@ -267,6 +267,7 @@ export interface DashboardRouteContext {
   sessionThreadLinks?(): unknown;
   readThread?(threadId: string): Promise<unknown> | unknown;
   externalModels?(projectId: string): Promise<unknown>;
+  externalSource?(sessionId: string): unknown;
   settleExternalConversation?(
     projectId: string,
     input: unknown,
@@ -393,7 +394,7 @@ function installCorsAndAuth(
     const externalDeliveryApi =
       /^\/api\/external\/v1\/projects\/[^/]+\/(?:deliveries(?:\/[^/]+)?|models|conversations\/settle)$/.test(
         externalPath,
-      );
+      ) || /^\/api\/external\/v1\/sessions\/[^/]+\/source$/.test(externalPath);
     const externalCreate =
       externalDeliveryApi ||
       /^\/api\/external\/v1\/projects\/[^/]+\/threads$/.test(externalPath);
@@ -845,6 +846,18 @@ export const dashboardRoutes: FastifyPluginAsync<{
           request.params.projectId,
         );
         return reply.code(204).send();
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{ Params: { sessionId: string } }>(
+    '/api/external/v1/sessions/:sessionId/source',
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.externalSource)(
+          request.params.sessionId,
+        );
       } catch (error) {
         return sendError(reply, error);
       }
