@@ -57,7 +57,17 @@ export function strictToolArgumentError(
   const typedAdditional =
     typeof schema.additionalProperties === 'object' ||
     typeof schema.unevaluatedProperties === 'object';
-  if (property && unexpected.every(Boolean) && !typedAdditional)
+  const hasNonStructuralError = errors.some(
+    (error) =>
+      !(
+        error.keyword === 'boolean' &&
+        (error.schemaPath === '#/additionalProperties' ||
+          error.schemaPath === '#/unevaluatedProperties')
+      ) &&
+      error.keyword !== 'additionalProperties' &&
+      error.keyword !== 'unevaluatedProperties',
+  );
+  if (property && !typedAdditional && !hasNonStructuralError)
     return `Tool "${toolName}" does not support argument "${property}". Remove it and retry.`;
   return `Tool "${toolName}" arguments do not match its declared schema.`;
 }

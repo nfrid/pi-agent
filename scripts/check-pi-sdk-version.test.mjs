@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   checkPiSdkVersions,
@@ -20,7 +21,33 @@ function manifestWithVersions(
   };
 }
 
+const ROOT_MANIFEST = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+);
+const SERVER_MANIFEST = JSON.parse(
+  readFileSync(
+    new URL('../apps/dashboard-server/package.json', import.meta.url),
+    'utf8',
+  ),
+);
+
 describe('Pi SDK version validation', () => {
+  it('keeps the guard aligned with the actual manifests and sync script', () => {
+    expect(ROOT_MANIFEST.dependencies).toMatchObject({
+      '@earendil-works/pi-ai': '0.86.1',
+      '@earendil-works/pi-coding-agent': '0.86.1',
+      '@earendil-works/pi-tui': '0.86.1',
+      typebox: PI_SDK_TYPEBOX_VERSION,
+    });
+    expect(SERVER_MANIFEST.dependencies).toMatchObject({
+      '@earendil-works/pi-coding-agent': '0.86.1',
+      typebox: PI_SDK_TYPEBOX_VERSION,
+    });
+    expect(ROOT_MANIFEST.scripts['pi:sdk-sync']).toContain(
+      `TYPEBOX_VERSION=${PI_SDK_TYPEBOX_VERSION}`,
+    );
+  });
+
   it('accepts exact matches with the runtime', () => {
     const manifest = manifestWithVersions('0.84.1');
 

@@ -9,9 +9,9 @@ export const PI_SDK_PACKAGES = [
   '@earendil-works/pi-tui',
 ];
 
-// Pi 0.84.x imports this exact TypeBox release. Keep it in the same check as
+// Pi 0.86.1 imports this exact TypeBox release. Keep it in the same check as
 // the SDK packages so a later SDK sync cannot silently reintroduce a drift.
-export const PI_SDK_TYPEBOX_VERSION = '1.3.7';
+export const PI_SDK_TYPEBOX_VERSION = '1.3.27';
 export const PI_SERVER_CODING_AGENT =
   '@earendil-works/pi-coding-agent (apps/dashboard-server)';
 

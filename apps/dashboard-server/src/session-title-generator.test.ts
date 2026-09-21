@@ -90,14 +90,18 @@ describe('dashboard session title generator', () => {
         api: 'openai-codex-responses',
         reasoning: true,
       })),
-      complete: vi
+      streamSimple: vi
         .fn()
-        .mockResolvedValueOnce({
-          content: [{ type: 'text', text: 'First generated title' }],
-        })
-        .mockResolvedValueOnce({
-          content: [{ type: 'text', text: 'Second generated title' }],
-        }),
+        .mockImplementationOnce(() => ({
+          result: async () => ({
+            content: [{ type: 'text', text: 'First generated title' }],
+          }),
+        }))
+        .mockImplementationOnce(() => ({
+          result: async () => ({
+            content: [{ type: 'text', text: 'Second generated title' }],
+          }),
+        })),
     } as unknown as SessionTitleModelClient;
     const createClient = vi.fn(async () => client);
     const generator = createDashboardSessionTitleGenerator({

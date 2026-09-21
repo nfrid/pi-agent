@@ -130,8 +130,8 @@ export function formatPromptInfo(
     options.cwd,
   );
   const tools = options.selectedTools ?? ['read', 'bash', 'edit', 'write'];
-  // Extension tool guidelines are represented in promptGuidelines; only the
-  // canonical agent instruction files are source-attributed here.
+  // Count only guidelines for active tools; common prompt guidelines are added
+  // separately below.
   const instructions = loadAgentInstructions();
   const allSkills = options.skills ?? [];
   const visibleSkills = allSkills.filter(
@@ -140,6 +140,10 @@ export function formatPromptInfo(
   const skillIndex = tools.includes('read')
     ? formatSkillsForPrompt(visibleSkills)
     : '';
+  const activeToolGuidelineCount = tools.reduce(
+    (count, tool) => count + (options.toolGuidelines?.[tool]?.length ?? 0),
+    0,
+  );
   const customPromptSize =
     typeof options.customPrompt === 'string' ? options.customPrompt.length : 0;
   const appendSize =
@@ -155,7 +159,7 @@ export function formatPromptInfo(
       estimateSize(emittedPrompt),
     ),
     `Unsupported direct prompt inputs (not loaded): customPrompt=${customPromptSize} chars, appendSystemPrompt=${appendSize} chars`,
-    `Structured tool prompt guidelines: ${options.promptGuidelines?.length ?? 0}`,
+    `Structured tool prompt guidelines: ${activeToolGuidelineCount + (options.promptGuidelines?.length ?? 0)}`,
     `Human instruction sources: ${instructions.length}`,
     ...instructions.map(
       (instruction) =>

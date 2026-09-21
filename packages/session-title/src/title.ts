@@ -1,12 +1,10 @@
-import {
-  type Api,
-  type AssistantMessage,
-  type Context,
-  clampThinkingLevel,
-  type Message,
-  type Model,
-  type ModelsApiStreamOptions,
-  type ModelThinkingLevel,
+import type {
+  Api,
+  AssistantMessage,
+  Context,
+  Message,
+  Model,
+  ModelsSimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import type { SessionTitleConfig } from './config.js';
 
@@ -40,11 +38,11 @@ Rules:
 
 export interface SessionTitleModelClient {
   find(provider: string, model: string): Model<Api> | undefined;
-  complete<TApi extends Api>(
-    model: Model<TApi>,
+  streamSimple(
+    model: Model<Api>,
     context: Context,
-    options?: ModelsApiStreamOptions<TApi>,
-  ): Promise<AssistantMessage>;
+    options?: ModelsSimpleStreamOptions,
+  ): { result(): Promise<AssistantMessage> };
 }
 
 export function sanitizeSessionTitle(
@@ -158,48 +156,6 @@ export function buildSessionTitleHistory(
   return [initial, omitted, ...recent].join('\n\n');
 }
 
-function reasoningOptions(
-  model: Model<Api>,
-  thinking: ModelThinkingLevel,
-): Record<string, unknown> {
-  switch (model.api) {
-    case 'openai-codex-responses':
-      return { reasoningEffort: thinking === 'off' ? 'none' : thinking };
-    case 'openai-completions':
-    case 'openai-responses':
-    case 'azure-openai-responses':
-      return thinking === 'off' ? {} : { reasoningEffort: thinking };
-    case 'anthropic-messages':
-      return thinking === 'off'
-        ? { thinkingEnabled: false }
-        : {
-            thinkingEnabled: true,
-            effort: thinking === 'minimal' ? 'low' : thinking,
-            thinkingDisplay: 'omitted',
-          };
-    case 'google-generative-ai':
-    case 'google-vertex':
-      return thinking === 'off'
-        ? { thinking: { enabled: false } }
-        : {
-            thinking: {
-              enabled: true,
-              level: (thinking === 'xhigh' || thinking === 'max'
-                ? 'high'
-                : thinking
-              ).toUpperCase(),
-            },
-          };
-    case 'mistral-conversations':
-      return { reasoningEffort: thinking === 'off' ? 'none' : 'high' };
-    case 'bedrock-converse-stream':
-    case 'pi-messages':
-      return thinking === 'off' ? {} : { reasoning: thinking };
-    default:
-      return {};
-  }
-}
-
 function countLetters(text: string, script: 'Cyrillic' | 'Latin'): number {
   const pattern =
     script === 'Cyrillic' ? /\p{Script=Cyrillic}/gu : /\p{Script=Latin}/gu;
@@ -251,18 +207,15 @@ async function completeSessionTitle(
   const systemPrompt = requiresCyrillic
     ? `${configuredPrompt}\n\nThis request is predominantly Cyrillic. The title must contain Cyrillic words. An English-only title is invalid.`
     : configuredPrompt;
-  const thinking = clampThinkingLevel(model, config.thinking);
-  const options = {
+  const options: ModelsSimpleStreamOptions = {
     signal,
-    cacheRetention: 'none' as const,
+    cacheRetention: 'none',
     maxTokens: config.maxOutputTokens,
-    ...reasoningOptions(model, thinking),
+    ...(config.thinking === 'off' ? {} : { reasoning: config.thinking }),
   };
-  const response = await client.complete(
-    model,
-    { systemPrompt, messages: [message] },
-    options,
-  );
+  const response = await client
+    .streamSimple(model, { systemPrompt, messages: [message] }, options)
+    .result();
   const title = responseTitle(response, config.maxLength);
   if (!requiresCyrillic || (title && /\p{Script=Cyrillic}/u.test(title)))
     return title;
@@ -277,11 +230,9 @@ async function completeSessionTitle(
     ],
   };
   const retry = responseTitle(
-    await client.complete(
-      model,
-      { systemPrompt, messages: [retryMessage] },
-      options,
-    ),
+    await client
+      .streamSimple(model, { systemPrompt, messages: [retryMessage] }, options)
+      .result(),
     config.maxLength,
   );
   return retry && /\p{Script=Cyrillic}/u.test(retry) ? retry : undefined;

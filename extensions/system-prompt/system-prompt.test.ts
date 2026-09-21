@@ -348,6 +348,28 @@ describe('canonical prompt composition', () => {
     }
   });
 
+  it('includes only active tool guidelines and preserves common guidelines', () => {
+    const prompt = buildSystemPrompt(
+      options({
+        selectedTools: ['read', 'bash'],
+        toolSnippets: { read: 'Read files', bash: 'Run commands' },
+        toolGuidelines: {
+          read: ['Read-specific guidance', 'Common guidance'],
+          bash: ['Bash-specific guidance', 'Common guidance'],
+          edit: ['Inactive guidance'],
+        },
+        promptGuidelines: ['Shared prompt guidance', 'Common guidance'],
+      }),
+      'json',
+    );
+
+    expect(prompt).toContain('- Read-specific guidance');
+    expect(prompt).toContain('- Bash-specific guidance');
+    expect(prompt).toContain('- Shared prompt guidance');
+    expect(prompt).not.toContain('Inactive guidance');
+    expect(prompt.match(/Common guidance/g)).toHaveLength(1);
+  });
+
   it('does not support direct prompt replacement or append inputs', () => {
     const prompt = buildSystemPrompt(
       options({
@@ -657,6 +679,10 @@ describe('prompt diagnostics', () => {
       customPrompt: 'custom',
       appendSystemPrompt: 'append',
       promptGuidelines: ['direct'],
+      toolGuidelines: {
+        read: ['active tool guideline'],
+        edit: ['inactive tool guideline'],
+      },
       selectedTools: ['read', 'delegate_start', 'delegate_continue'],
     });
     const info = formatPromptInfo(
@@ -675,7 +701,7 @@ describe('prompt diagnostics', () => {
     expect(info).toContain('tool-use.md:');
     expect(info).not.toContain('delegate/parent.md');
     expect(info).not.toContain('delegate/routing.md');
-    expect(info).toContain('Structured tool prompt guidelines: 1');
+    expect(info).toContain('Structured tool prompt guidelines: 2');
   });
 
   it('aggregates provider usage and estimates tokens', () => {

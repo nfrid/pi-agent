@@ -246,6 +246,7 @@ export function buildSystemPrompt(
   const {
     selectedTools,
     toolSnippets,
+    toolGuidelines,
     promptGuidelines,
     cwd,
     contextFiles: providedContextFiles,
@@ -292,6 +293,13 @@ export function buildSystemPrompt(
   if (hasBash) {
     if (!hasGrep && !hasFind && !hasLs) {
       addGuidelines('Use bash for listing and searching files (ls, rg, find)');
+    }
+  }
+
+  for (const tool of tools) {
+    for (const guideline of toolGuidelines?.[tool] ?? []) {
+      const normalized = guideline.trim();
+      if (normalized.length > 0) addGuidelines(normalized);
     }
   }
 

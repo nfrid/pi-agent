@@ -36,6 +36,21 @@ describe('strictToolArgumentError', () => {
     ).toBeUndefined();
   });
 
+  test('keeps mixed type and extra-field failures generic', () => {
+    const schema = Type.Object({
+      command: Type.String(),
+      timeout: Type.Number(),
+    });
+
+    expect(
+      strictToolArgumentError(
+        'bash',
+        { command: 42, timeout: 1, workdir: '/tmp' },
+        schema,
+      ),
+    ).toBe('Tool "bash" arguments do not match its declared schema.');
+  });
+
   test('supports plain, record, union, and intersect schemas', () => {
     const plain = {
       type: 'object',
