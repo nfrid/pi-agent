@@ -430,13 +430,27 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
     if (
       !onlyKeys(
         command as Record<string, unknown>,
-        new Set(['id', 'type', 'text', 'images']),
+        new Set([
+          'id',
+          'type',
+          'text',
+          'images',
+          ...(command.type === 'prompt' ? ['externalDeliveryId'] : []),
+        ]),
       )
     )
       throw new Error(`Invalid ${command.type} command.`);
-    const text = command.text.trim();
+    if (
+      command.externalDeliveryId !== undefined &&
+      !safeIdentifier(command.externalDeliveryId, MAX_ID)
+    )
+      throw new Error('Invalid external delivery ID.');
+    const text =
+      command.externalDeliveryId === undefined
+        ? command.text.trim()
+        : command.text;
     const images = validateImages(command.images);
-    if (!text && images.length === 0)
+    if (!text.trim() && images.length === 0)
       throw new Error('Command text or an image is required.');
     return { ...command, text, ...(images.length > 0 ? { images } : {}) };
   }

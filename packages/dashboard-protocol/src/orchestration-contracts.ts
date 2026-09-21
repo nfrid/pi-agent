@@ -304,6 +304,7 @@ export const RunSchema = Type.Object(
     piSessionId: Type.Optional(IdentifierSchema),
     /** Complete user intent; never replace this with a rendered transcript. */
     initialPrompt: Type.String({ maxLength: MAX_TEXT }),
+    initialDeliveryId: Type.Optional(IdentifierSchema),
     model: Type.Optional(ModelSelectionSchema),
     status: RunStatusSchema,
     createdAt: TimestampSchema,
@@ -317,6 +318,7 @@ export type Run = Static<typeof RunSchema>;
 export const RunSummarySchema = Type.Object(
   {
     id: IdentifierSchema,
+    initialDeliveryId: Type.Optional(IdentifierSchema),
     threadId: IdentifierSchema,
     checkoutId: IdentifierSchema,
     attempt: Type.Integer({ minimum: 1 }),

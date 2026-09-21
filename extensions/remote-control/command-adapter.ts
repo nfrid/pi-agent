@@ -227,7 +227,7 @@ export async function dispatchDashboardInput(
   images: readonly BridgeImageAttachment[] = [],
   expandCommands = true,
 ): Promise<{ accepted: true; command?: string }> {
-  const invocation = commandParts(text);
+  const invocation = expandCommands ? commandParts(text) : undefined;
   if (
     invocation &&
     (invocation.name === 'pause' || invocation.name === 'continue')

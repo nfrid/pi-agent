@@ -4,12 +4,14 @@ import path from 'node:path';
 import {
   type BridgeImageAttachment,
   type ExternalDeliveryCommand,
+  externalDeliveryReceipt,
   MAX_EXTERNAL_DELIVERY_BYTES,
   MAX_EXTERNAL_DELIVERY_ID,
   MAX_EXTERNAL_DELIVERY_REPLY,
   MAX_TEXT,
   type ModelSelection,
   parseExternalDeliveryCommand,
+  supportsExternalDelivery,
   type Thread,
 } from '@pi-dashboard/protocol';
 import type {
@@ -34,6 +36,7 @@ export interface ExternalDeliveryResult {
 type StoredDelivery = ExternalDeliveryResult & {
   fingerprint: string;
   prompt: string;
+  correlationId?: string;
   projectId: string;
   runId?: string;
   sessionId?: string;
@@ -190,6 +193,7 @@ export class ExternalDeliveryService {
         id: string;
         type: 'prompt';
         text: string;
+        externalDeliveryId?: string;
         images?: BridgeImageAttachment[];
       },
     ) => Promise<unknown>,
@@ -445,7 +449,14 @@ export class ExternalDeliveryService {
         return this.uncertain(existing);
     }
 
-    const marker = markerFor(projectId, command.deliveryId);
+    // Prepared records from before this change keep their exact legacy format.
+    const correlationId = existing
+      ? existing.executionPlan?.deliveryCorrelationId
+      : key;
+    const marker =
+      correlationId === undefined
+        ? markerFor(projectId, command.deliveryId)
+        : undefined;
     let thread = command.threadId
       ? this.repository.getThread(command.threadId)
       : undefined;
@@ -508,6 +519,10 @@ export class ExternalDeliveryService {
         !['idle', 'waiting'].includes(runtime.liveState)
       )
         throw busy();
+      if (correlationId !== undefined && !supportsExternalDelivery(runtime))
+        throw busy(
+          'Runtime must support structured external delivery before admission.',
+        );
     }
     if (!thread && command.model) {
       const selected = (await this.models()).find(
@@ -534,6 +549,9 @@ export class ExternalDeliveryService {
       projectId,
       deliveryThreadId: thread?.id,
       deliveryPrompt: prepared.prompt,
+      ...(correlationId === undefined
+        ? {}
+        : { deliveryCorrelationId: correlationId }),
       ...(run?.runtimeId ? { runtimeId: run.runtimeId } : {}),
       ...(run?.piSessionId ? { deliverySessionId: run.piSessionId } : {}),
       ...(this.registry.get(run?.runtimeId ?? '')?.session.leafId
@@ -579,6 +597,7 @@ export class ExternalDeliveryService {
               project.defaultModel,
           },
           prepared.images,
+          correlationId,
         );
         thread = (created as { thread: Thread }).thread;
         const createdRun = (created as { run: { id: string } }).run;
@@ -588,6 +607,7 @@ export class ExternalDeliveryService {
           state: 'running',
           fingerprint: hash,
           prompt: prepared.prompt,
+          ...(correlationId === undefined ? {} : { correlationId }),
           projectId,
           runId: createdRun.id,
           artifactFiles: prepared.files,
@@ -617,6 +637,7 @@ export class ExternalDeliveryService {
         state: 'running',
         fingerprint: hash,
         prompt: prepared.prompt,
+        ...(correlationId === undefined ? {} : { correlationId }),
         projectId,
         runId: run.id,
         sessionId: runtime.session.id,
@@ -630,6 +651,9 @@ export class ExternalDeliveryService {
           id: `external-runtime:${digest(key)}`,
           type: 'prompt',
           text: prepared.prompt,
+          ...(correlationId === undefined
+            ? {}
+            : { externalDeliveryId: correlationId }),
           ...(prepared.images.length ? { images: prepared.images } : {}),
         });
         // The external reference is already canonical, even before a resumed
@@ -699,6 +723,9 @@ export class ExternalDeliveryService {
       state: 'pending',
       fingerprint: intent.commandFingerprint ?? '',
       prompt: plan?.deliveryPrompt ?? '',
+      ...(plan?.deliveryCorrelationId === undefined
+        ? {}
+        : { correlationId: plan.deliveryCorrelationId }),
       projectId: plan?.projectId ?? '',
       ...(plan?.deliverySessionId ? { sessionId: plan.deliverySessionId } : {}),
       ...(plan?.deliveryLeafId ? { leafId: plan.deliveryLeafId } : {}),
@@ -797,9 +824,60 @@ export class ExternalDeliveryService {
         'ambiguous-correlation',
         'The pre-send branch anchor is no longer an ancestor.',
       );
-    const matches = messages.flatMap((message, index) =>
-      message.role === 'user' && message.text === stored.prompt ? [index] : [],
-    );
+    let matches: number[];
+    if (stored.correlationId !== undefined) {
+      const receipts = selected.entries.flatMap((entry, index) => {
+        const receipt = externalDeliveryReceipt(entry);
+        return receipt && receipt.deliveryId === stored.correlationId
+          ? [{ receipt, index }]
+          : [];
+      });
+      if (!receipts.length) {
+        // Native user persistence precedes the context hook. Index/bridge lag
+        // must not turn that small window into a terminal failure.
+        const finished = messages
+          .slice(anchorIndex + 1)
+          .some(
+            (message) =>
+              message.role === 'assistant' &&
+              ['stop', 'error', 'aborted', 'length'].includes(
+                message.stopReason ?? '',
+              ),
+          );
+        return finished
+          ? fail(
+              'ambiguous-correlation',
+              'The completed turn has no exact native user receipt.',
+            )
+          : pending();
+      }
+      if (receipts.length !== 1)
+        return fail(
+          'ambiguous-correlation',
+          'Multiple native user receipts refer to this delivery.',
+        );
+      const binding = receipts[0];
+      const index = messages.findIndex(
+        (message) =>
+          message.role === 'user' && message.id === binding.receipt.userEntryId,
+      );
+      if (
+        index < 0 ||
+        index >= binding.index ||
+        messages[index].text !== stored.prompt
+      )
+        return fail(
+          'ambiguous-correlation',
+          'The native user receipt does not match this delivery and branch.',
+        );
+      matches = [index];
+    } else {
+      matches = messages.flatMap((message, index) =>
+        message.role === 'user' && message.text === stored.prompt
+          ? [index]
+          : [],
+      );
+    }
     if (!matches.length) {
       if (
         messages
@@ -916,7 +994,7 @@ export class ExternalDeliveryService {
   private async persistPrompt(
     projectId: string,
     command: ExternalDeliveryCommand,
-    marker: string,
+    marker: string | undefined,
   ): Promise<{
     prompt: string;
     files: string[];
@@ -1017,7 +1095,7 @@ export class ExternalDeliveryService {
       const manifest = docs.length
         ? `\n\n[BEGIN UNTRUSTED ATTACHMENT MANIFEST]\n${JSON.stringify(docs)}\n[END UNTRUSTED ATTACHMENT MANIFEST]`
         : '';
-      const prompt = `${marker}\n${command.text}${manifest}`;
+      const prompt = `${marker === undefined ? '' : `${marker}\n`}${command.text}${manifest}`;
       if (prompt.length > MAX_TEXT)
         throw new Error('External prompt exceeds the runtime input limit.');
       return { prompt, files, created, images };

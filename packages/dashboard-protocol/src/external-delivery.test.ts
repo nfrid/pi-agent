@@ -1,5 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import { parseExternalDeliveryCommand } from './dashboard-api.js';
+import {
+  EXTERNAL_DELIVERY_RECEIPT,
+  externalDeliveryReceipt,
+} from './external-delivery.js';
+import { parseBridgeCommand } from './pi-runtime-protocol.js';
+
+it('transports delivery provenance outside literal text and rejects queued metadata', () => {
+  const command = {
+    id: 'command',
+    type: 'prompt',
+    text: '  /quit\n',
+    externalDeliveryId: 'delivery',
+  };
+  expect(parseBridgeCommand(command)).toEqual(command);
+  expect(() => parseBridgeCommand({ ...command, type: 'steer' })).toThrow();
+  expect(() => parseBridgeCommand({ ...command, type: 'followUp' })).toThrow();
+  expect(() =>
+    parseBridgeCommand({ ...command, externalDeliveryId: 'bad\nID' }),
+  ).toThrow();
+  expect(
+    parseBridgeCommand({ id: 'normal', type: 'prompt', text: '  hello  ' }),
+  ).toMatchObject({ text: 'hello' });
+  const data = {
+    version: 1,
+    deliveryId: 'delivery',
+    userEntryId: 'native-user',
+  };
+  expect(
+    externalDeliveryReceipt({
+      type: 'custom',
+      customType: EXTERNAL_DELIVERY_RECEIPT,
+      data,
+    }),
+  ).toEqual(data);
+  expect(
+    externalDeliveryReceipt({
+      type: 'message',
+      message: { role: 'user', content: JSON.stringify(data) },
+    }),
+  ).toBeUndefined();
+  expect(
+    externalDeliveryReceipt({
+      type: 'custom',
+      customType: EXTERNAL_DELIVERY_RECEIPT,
+      data: { ...data, userEntryId: ' ' },
+    }),
+  ).toBeUndefined();
+});
 
 describe('external delivery contract', () => {
   it('accepts a conversation delivery and bounded attachment metadata', () => {

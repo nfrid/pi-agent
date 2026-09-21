@@ -2,6 +2,7 @@ import {
   ACTIVE_RUN_STATUSES,
   TERMINAL_RUN_STATUSES,
 } from '@pi-dashboard/domain';
+import { supportsExternalDelivery } from '@pi-dashboard/protocol';
 import { createWorktreeFinisher } from '@pi-dashboard/worktree-manager';
 import type { RegistryChange } from '../../runtime-registry.js';
 import { boundedErrorText, type OrchestrationHost } from './helpers.js';
@@ -149,6 +150,16 @@ export async function bindAndDeliverPrompt(
     ? promptIntent?.executionState === 'completed'
     : Boolean(host.repository.getCommandReceipt(promptReceiptId));
   if (!delivered) {
+    if (
+      run.initialDeliveryId !== undefined &&
+      !supportsExternalDelivery(host.registry.get(runtimeId))
+    )
+      throw Object.assign(
+        new Error(
+          'Runtime must support structured external delivery before initial dispatch.',
+        ),
+        { code: 'busy' },
+      );
     if (run.model?.provider === 'openai-codex') {
       await host.registry.sendCommand(runtimeId, {
         type: 'setModel',
@@ -180,6 +191,9 @@ export async function bindAndDeliverPrompt(
           operation: 'command',
           runtimeId,
           sessionId: piSessionId,
+          ...(run.initialDeliveryId === undefined
+            ? {}
+            : { deliveryCorrelationId: run.initialDeliveryId }),
         },
       });
       host.repository.transitionCommandIntent(promptReceiptId, 'dispatched');
@@ -188,6 +202,9 @@ export async function bindAndDeliverPrompt(
       id: promptReceiptId,
       type: 'prompt',
       text: run.initialPrompt,
+      ...(run.initialDeliveryId === undefined
+        ? {}
+        : { externalDeliveryId: run.initialDeliveryId }),
       ...(images?.length ? { images } : {}),
     });
     if (externalDelivery)

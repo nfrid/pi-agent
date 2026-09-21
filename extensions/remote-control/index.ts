@@ -8,6 +8,7 @@ import {
 } from '../shared/codex-service-tier';
 import { defineExtension } from '../shared/runtime/extension';
 import { compactWithDashboardCancellation } from './compaction-shim';
+import { installExternalDeliveryReceipts } from './external-delivery';
 import { clearSettledBackground } from './live';
 import {
   directString,
@@ -38,6 +39,7 @@ export {
   expandDashboardInput,
 } from './command-adapter';
 export { dispatchDashboardCommand } from './command-dispatcher';
+
 export {
   LiveEventNormalizer,
   shouldForwardLiveMessage,
@@ -140,6 +142,7 @@ function onTransportEvent(
 export default defineExtension('remote-control', (pi) => {
   const runtime = createRemoteControlRuntime(pi);
   if (!runtime) return;
+  installExternalDeliveryReceipts(pi);
   const stopSteeringUpdates = pi.events.on(
     'steering-message:marked',
     (value) => {

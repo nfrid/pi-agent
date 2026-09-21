@@ -100,6 +100,7 @@ export interface RuntimeIntentPlan {
   /** External delivery intent evidence; never used for generic runtime commands. */
   deliveryThreadId?: string;
   deliveryPrompt?: string;
+  deliveryCorrelationId?: string;
   deliverySessionId?: string;
   deliveryLeafId?: string;
   deliveryArtifactFiles?: string[];
@@ -206,6 +207,7 @@ export interface CreateRunInput {
   runtimeId?: string;
   piSessionId?: string;
   initialPrompt: string;
+  initialDeliveryId?: string;
   model?: ModelSelection;
   status?: RunStatus;
   createdAt?: number;

@@ -907,6 +907,16 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         db.exec('ALTER TABLE managed_launch ADD COLUMN ready_at INTEGER');
     },
   },
+  {
+    version: 22,
+    name: 'structured-external-initial-delivery',
+    up(db) {
+      if (!columns(db, 'orchestration_run').has('initial_delivery_id'))
+        db.exec(
+          'ALTER TABLE orchestration_run ADD COLUMN initial_delivery_id TEXT',
+        );
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

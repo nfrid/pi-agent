@@ -12,9 +12,11 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type {
-  ExternalDeliveryCommand,
-  RuntimeSnapshot,
+import {
+  EXTERNAL_DELIVERY_CAPABILITY,
+  EXTERNAL_DELIVERY_RECEIPT,
+  type ExternalDeliveryCommand,
+  type RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -139,6 +141,13 @@ async function fixture(conversationRef?: string) {
     liveState: 'waiting',
     online: true,
     session: { id: 'session', leafId: 'base', entries: [] },
+    capabilities: {
+      version: 1,
+      manifests: [],
+      capabilities: [
+        { id: EXTERNAL_DELIVERY_CAPABILITY, version: '1', available: true },
+      ],
+    },
   };
   let sequence = 0;
   let persistedLeaf: string | null = null;
@@ -160,6 +169,16 @@ async function fixture(conversationRef?: string) {
     live.session.leafId = id;
     await sessions.rebuild();
     return id;
+  }
+  async function receipt(deliveryId: string, userEntryId: string) {
+    const id = `receipt-${++sequence}`;
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'custom', id, parentId: persistedLeaf, customType: EXTERNAL_DELIVERY_RECEIPT, data: { version: 1, deliveryId, userEntryId } })}\n`,
+    );
+    persistedLeaf = id;
+    live.session.leafId = id;
+    await sessions.rebuild();
   }
   await append('user', 'prior user', { id: 'before-base' });
   await append('assistant', [{ type: 'text', text: 'prior answer' }], {
@@ -200,16 +219,25 @@ async function fixture(conversationRef?: string) {
     piSessionId: 'session',
   });
   const registry = {
-    sendCommand: async (runtimeId: string, input: { text: string }) =>
-      send(runtimeId, input),
+    sendCommand: async (
+      runtimeId: string,
+      input: { text: string; externalDeliveryId?: string },
+    ) => send(runtimeId, input),
     get: (id: string) => (id === live.runtimeId ? live : undefined),
     snapshots: () => [live],
   };
-  const send = vi.fn(async (_runtimeId: string, command: { text: string }) => {
-    await append('user', command.text);
-    live.liveState = 'working';
-    return { accepted: true };
-  });
+  const send = vi.fn(
+    async (
+      _runtimeId: string,
+      command: { text: string; externalDeliveryId?: string },
+    ) => {
+      const userEntryId = await append('user', command.text);
+      if (command.externalDeliveryId)
+        await receipt(command.externalDeliveryId, userEntryId);
+      live.liveState = 'working';
+      return { accepted: true };
+    },
+  );
   const artifacts = path.join(root, 'artifacts');
   const launch = vi.fn(async (_input: unknown) => {
     live = {
@@ -290,6 +318,7 @@ async function fixture(conversationRef?: string) {
     registry,
     artifacts,
     append,
+    receipt,
     async resetSession() {
       persistedLeaf = null;
       live.session.leafId = undefined;
@@ -376,9 +405,15 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
         reply: { text: `reply-${id}`, messageId },
       });
     }
-    expect(new Set(f.send.mock.calls.map(([, sent]) => sent.text)).size).toBe(
-      3,
-    );
+    expect(f.send.mock.calls.map(([, sent]) => sent.text)).toEqual([
+      'да',
+      'да',
+      'да',
+    ]);
+    expect(
+      new Set(f.send.mock.calls.map(([, sent]) => sent.externalDeliveryId))
+        .size,
+    ).toBe(3);
     await f.reopen();
     await expect(f.service.get('p', 'first')).resolves.toMatchObject({
       reply: { text: 'reply-first' },
@@ -387,6 +422,112 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
       f.service.submit('p', command('first')),
     ).resolves.toMatchObject({ reply: { text: 'reply-first' } });
     expect(f.send).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    false,
+    true,
+  ])('preserves a legacy prepared delivery across reopen (initial=%s)', async (initial) => {
+    const f = await fixture();
+    const text = 'да';
+    const input = initial
+      ? { conversationRef: 'legacy-first', deliveryId: 'legacy', text }
+      : { deliveryId: 'legacy', text, threadId: 'thread' };
+    const marker = `[[PI_EXTERNAL_DELIVERY:${createHash('sha256').update('p\0legacy').digest('hex').slice(0, 32)}]]`;
+    const prompt = `${marker}\n${text}`;
+    f.live.capabilities = undefined;
+    if (initial) f.repository.transitionRun('run', 'completed');
+    f.repository.reserveCommandIntent({
+      idempotencyKey: f.intentKey('legacy'),
+      commandType: 'external.delivery',
+      resourceType: 'external-delivery',
+      resourceId: 'p:legacy',
+      commandFingerprint: createHash('sha256')
+        .update(JSON.stringify({ command: input, projectId: 'p' }))
+        .digest('hex'),
+      executionPlan: {
+        operation: 'command',
+        projectId: 'p',
+        deliveryPrompt: prompt,
+        ...(initial
+          ? {}
+          : {
+              deliveryThreadId: 'thread',
+              deliverySessionId: 'session',
+              deliveryLeafId: 'base',
+              runtimeId: 'runtime',
+            }),
+      },
+    });
+    await f.reopen();
+    const result = await f.service.submit('p', input);
+    if (initial) {
+      const [run] = f.repository.listRuns(result.threadId);
+      expect(run.initialDeliveryId).toBeUndefined();
+      expect(run.initialPrompt).toBe(prompt);
+      f.repository.transitionRun(run.id, 'preparing');
+      f.repository.transitionRun(run.id, 'starting');
+      await f.resetSession();
+      await bindAndDeliverPrompt(
+        f.orchestration(),
+        run.id,
+        'runtime',
+        'session',
+      );
+    }
+    expect(f.send.mock.calls[0][1].text).toBe(prompt);
+    expect(f.send.mock.calls[0][1]).not.toHaveProperty('externalDeliveryId');
+    await f.finish('legacy answer');
+    expect(await f.service.get('p', 'legacy')).toMatchObject({
+      state: 'completed',
+      reply: { text: 'legacy answer' },
+    });
+    await f.reopen();
+    expect(await f.service.submit('p', input)).toMatchObject({
+      state: 'completed',
+      reply: { text: 'legacy answer' },
+    });
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+
+  it('requires capability before new admission, without falling back to a textual marker', async () => {
+    const f = await fixture();
+    f.live.capabilities = undefined;
+    await expect(
+      f.service.submit('p', command('upgrade')),
+    ).rejects.toMatchObject({ code: 'busy' });
+    expect(
+      f.repository.getCommandIntent(f.intentKey('upgrade')),
+    ).toBeUndefined();
+    expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for missing, duplicate or wrong native receipts instead of matching identical text', async () => {
+    for (const mode of ['missing', 'duplicate', 'wrong'] as const) {
+      const f = await fixture();
+      f.send.mockImplementationOnce(async (_runtimeId, sent) => {
+        const userId = await f.append('user', sent.text);
+        if (mode !== 'missing')
+          await f.receipt(
+            sent.externalDeliveryId!,
+            mode === 'wrong' ? 'before-base' : userId,
+          );
+        if (mode === 'duplicate')
+          await f.receipt(sent.externalDeliveryId!, userId);
+        return { accepted: true };
+      });
+      await f.service.submit('p', command(mode));
+      await f.finish();
+      expect(await f.service.get('p', mode)).toMatchObject({
+        state: 'attention',
+        error: { code: 'ambiguous-correlation' },
+      });
+      await f.reopen();
+      expect(await f.service.submit('p', command(mode))).toMatchObject({
+        state: 'attention',
+      });
+      expect(f.send).toHaveBeenCalledOnce();
+    }
   });
 
   it('scopes identical client IDs and conversation refs to the path project', async () => {
@@ -540,10 +681,11 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
     await expect(f.service.get('p', 'lag')).resolves.toMatchObject({
       state: 'pending',
     });
-    await f.append('user', sent);
+    const userEntryId = await f.append('user', sent);
     await expect(f.service.get('p', 'lag')).resolves.toMatchObject({
       state: 'pending',
     });
+    await f.receipt(f.send.mock.calls[0][1].externalDeliveryId!, userEntryId);
     await f.finish();
     await expect(f.service.get('p', 'lag')).resolves.toMatchObject({
       state: 'completed',
@@ -796,6 +938,12 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
         text: 'first turn',
       });
       const [run] = f.repository.listRuns(result.threadId);
+      expect(run.initialPrompt).toBe('first turn');
+      expect(run.initialDeliveryId).toBe(f.intentKey('new'));
+      await f.reopen();
+      expect(f.repository.getRun(run.id)?.initialDeliveryId).toBe(
+        run.initialDeliveryId,
+      );
       expect(f.send).not.toHaveBeenCalled();
       f.repository.transitionRun(run.id, 'preparing');
       f.repository.transitionRun(run.id, 'starting');

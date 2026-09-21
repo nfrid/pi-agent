@@ -1,4 +1,11 @@
 /** Contracts spoken by a Pi runtime bridge. */
+export {
+  EXTERNAL_DELIVERY_CAPABILITY,
+  EXTERNAL_DELIVERY_RECEIPT,
+  type ExternalDeliveryReceipt,
+  externalDeliveryReceipt,
+  supportsExternalDelivery,
+} from './external-delivery.js';
 
 export {
   MAX_ID,

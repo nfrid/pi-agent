@@ -19,6 +19,7 @@ import {
 import { getSessionScopeId } from '../shared/runtime/scoped-services';
 import { dispatchDashboardInput } from './command-adapter';
 import { cancelActiveCompaction } from './compaction-control';
+import { withExternalDelivery } from './external-delivery';
 import {
   isQueueDraftCommand,
   type QueueDraftStore,
@@ -98,10 +99,26 @@ export async function dispatchDashboardCommand(
   }
   switch (command.type) {
     case 'prompt':
-      if (!ctx.isIdle())
-        throw new Error('Agent is working; choose steer or follow-up.');
       if (command.images?.length && !ctx.model?.input.includes('image'))
         throw new Error('The selected model does not support image input.');
+      if (command.externalDeliveryId !== undefined) {
+        return withExternalDelivery(
+          ctx,
+          command.externalDeliveryId,
+          command.text,
+          () =>
+            dispatchDashboardInput(
+              pi,
+              ctx,
+              command.text,
+              undefined,
+              command.images,
+              false,
+            ),
+        );
+      }
+      if (!ctx.isIdle())
+        throw new Error('Agent is working; choose steer or follow-up.');
       return dispatchDashboardInput(
         pi,
         ctx,

@@ -194,6 +194,9 @@ export async function createThread(
   const run = {
     id: runId,
     initialPrompt: command.prompt,
+    ...(command.initialDeliveryId === undefined
+      ? {}
+      : { initialDeliveryId: command.initialDeliveryId }),
     mode: command.mode ?? ('write' as const),
     runtimeProvider: command.runtimeProvider ?? host.defaultRuntimeProvider,
     model: command.model,

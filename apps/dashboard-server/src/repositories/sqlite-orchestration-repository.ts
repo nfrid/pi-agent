@@ -2078,6 +2078,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         ? {}
         : { piSessionId: input.piSessionId }),
       initialPrompt: input.initialPrompt,
+      ...(input.initialDeliveryId === undefined
+        ? {}
+        : { initialDeliveryId: input.initialDeliveryId }),
       ...(input.model === undefined ? {} : { model: input.model }),
       status: requestedStatus,
       createdAt: now,
@@ -2089,8 +2092,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     this.db
       .prepare(
         `INSERT INTO orchestration_run
-         (id,thread_id,checkout_id,attempt,parent_run_id,mode,runtime_provider,runtime_id,pi_session_id,initial_prompt,model_json,status,created_at,started_at,finished_at,error)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         (id,thread_id,checkout_id,attempt,parent_run_id,mode,runtime_provider,runtime_id,pi_session_id,initial_prompt,initial_delivery_id,model_json,status,created_at,started_at,finished_at,error)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         run.id,
@@ -2103,6 +2106,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         run.runtimeId ?? null,
         run.piSessionId ?? null,
         run.initialPrompt,
+        run.initialDeliveryId ?? null,
         run.model === undefined ? null : JSON.stringify(run.model),
         run.status,
         run.createdAt,
@@ -2484,6 +2488,9 @@ function runFromRow(row: Record<string, unknown>): Run {
       ? {}
       : { piSessionId: optionalString(row, 'pi_session_id') }),
     initialPrompt: stringValue(row, 'initial_prompt'),
+    ...(optionalString(row, 'initial_delivery_id') === undefined
+      ? {}
+      : { initialDeliveryId: optionalString(row, 'initial_delivery_id') }),
     ...(model === undefined ? {} : { model }),
     status: stringValue(row, 'status') as RunStatus,
     createdAt: Number(row.created_at),
