@@ -266,6 +266,11 @@ export interface DashboardRouteContext {
   listThreads?(projectId?: string): Promise<unknown> | unknown;
   sessionThreadLinks?(): unknown;
   readThread?(threadId: string): Promise<unknown> | unknown;
+  externalModels?(projectId: string): Promise<unknown>;
+  settleExternalConversation?(
+    projectId: string,
+    input: unknown,
+  ): Promise<unknown>;
   submitExternalDelivery?(
     projectId: string,
     command: unknown,
@@ -385,14 +390,15 @@ function installCorsAndAuth(
     }
     if (request.url.split('?', 1)[0] === '/api/health') return;
     const externalPath = request.url.split('?', 1)[0];
-    const externalCreate =
-      /^\/api\/external\/v1\/projects\/[^/]+\/(?:threads|deliveries(?:\/[^/]+)?)$/.test(
+    const externalDeliveryApi =
+      /^\/api\/external\/v1\/projects\/[^/]+\/(?:deliveries(?:\/[^/]+)?|models|conversations\/settle)$/.test(
         externalPath,
       );
+    const externalCreate =
+      externalDeliveryApi ||
+      /^\/api\/external\/v1\/projects\/[^/]+\/threads$/.test(externalPath);
     if (
-      /^\/api\/external\/v1\/projects\/[^/]+\/deliveries(?:\/[^/]+)?$/.test(
-        externalPath,
-      ) &&
+      externalDeliveryApi &&
       (!request.headers.authorization?.startsWith('Bearer ') ||
         request.headers['x-dashboard-token'] !== undefined)
     )
@@ -839,6 +845,32 @@ export const dashboardRoutes: FastifyPluginAsync<{
           request.params.projectId,
         );
         return reply.code(204).send();
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{ Params: { projectId: string } }>(
+    '/api/external/v1/projects/:projectId/models',
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.externalModels)(
+          request.params.projectId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { projectId: string } }>(
+    '/api/external/v1/projects/:projectId/conversations/settle',
+    { schema: { body: anyBody } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.settleExternalConversation)(
+          request.params.projectId,
+          request.body,
+        );
       } catch (error) {
         return sendError(reply, error);
       }

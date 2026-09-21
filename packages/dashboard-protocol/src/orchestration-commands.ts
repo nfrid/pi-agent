@@ -172,6 +172,8 @@ export type ExternalDeliveryAttachment = Static<
 >;
 export const ExternalDeliveryCommandSchema = Type.Object(
   {
+    // Explicit initial selection only; existing conversations retain their model.
+    model: Type.Optional(ModelSelectionSchema),
     deliveryId: Type.String({
       minLength: 1,
       maxLength: MAX_EXTERNAL_DELIVERY_ID,

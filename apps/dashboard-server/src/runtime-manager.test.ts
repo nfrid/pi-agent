@@ -7,6 +7,67 @@ import { MetadataStore } from './metadata.js';
 import { RuntimeManager } from './runtime-manager.js';
 
 describe('runtime stopping', () => {
+  it('never terminates a process without an idle-only runtime acknowledgement', async () => {
+    const runtimeId = 'idle-stop';
+    const stop = vi.fn(async () => {});
+    const forget = vi.fn();
+    const sendCommand = vi.fn(async () => ({ accepted: true }));
+    const manager = new RuntimeManager(
+      {
+        get: () => ({
+          runtimeId,
+          ownership: 'managed',
+          online: true,
+          liveState: 'idle',
+          session: { id: 'session', entries: [] },
+        }),
+        sendCommand,
+        forget,
+      } as never,
+      { stop } as never,
+      {} as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId,
+            location: { id: 'runtime-host:idle-stop' },
+            identityTokenHash: 'identity',
+            launchTokenHash: 'launch',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        managedLaunchHistory: () => [],
+        markManagedStopped: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    sendCommand.mockRejectedValueOnce(
+      Object.assign(new Error('New work began after the snapshot.'), {
+        code: 'busy',
+      }),
+    );
+    await expect(manager.stop(runtimeId, false, true)).rejects.toMatchObject({
+      code: 'busy',
+    });
+    expect(stop).not.toHaveBeenCalled();
+    expect(forget).not.toHaveBeenCalled();
+    sendCommand.mockRejectedValueOnce(
+      new Error(
+        'Older runtime rejected the new field or acknowledgement was lost.',
+      ),
+    );
+    await expect(manager.stop(runtimeId, false, true)).rejects.toThrow();
+    expect(stop).not.toHaveBeenCalled();
+    await manager.stop(runtimeId, false, true);
+    expect(sendCommand).toHaveBeenCalledWith(runtimeId, {
+      type: 'shutdown',
+      onlyIfIdle: true,
+    });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(forget).toHaveBeenCalledWith(runtimeId);
+  });
+
   it('stops the exact restored opaque binding once when hello never arrives', async () => {
     const restoredBinding = {
       runtimeId: 'runtime-restored-opaque',

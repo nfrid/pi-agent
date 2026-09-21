@@ -19,6 +19,7 @@ import type {
 } from '../repositories/types.js';
 import type { RuntimeRegistry } from '../runtime-registry.js';
 import type { SessionIndex } from '../session-index.js';
+import { type ExternalModel, externalModels } from './external-models.js';
 import type { OrchestrationService } from './orchestration-service.js';
 
 type DeliveryState = 'pending' | 'running' | 'completed' | 'attention';
@@ -201,7 +202,127 @@ export class ExternalDeliveryService {
     private readonly defaultModel?: (
       projectId: string,
     ) => ModelSelection | undefined,
+    private readonly models: () => Promise<ExternalModel[]> = externalModels,
+    private readonly retireThread?: (
+      threadId: string,
+      commandId: string,
+    ) => Promise<Thread>,
   ) {}
+
+  async settleConversation(
+    projectId: string,
+    input: unknown,
+  ): Promise<{
+    state: 'settled' | 'absent' | 'superseded';
+    threadId?: string;
+  }> {
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new Error('Invalid conversation settlement.');
+    const value = input as Record<string, unknown>;
+    if (
+      Object.keys(value).some(
+        (key) => !['commandId', 'conversationRef'].includes(key),
+      )
+    )
+      throw new Error('Invalid conversation settlement.');
+    for (const field of ['commandId', 'conversationRef']) {
+      const item = value[field];
+      if (
+        typeof item !== 'string' ||
+        !item ||
+        item.length > 256 ||
+        [...item].some(
+          (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+        )
+      )
+        throw new Error('Invalid conversation settlement.');
+    }
+    const commandId = value.commandId as string;
+    const conversationRef = value.conversationRef as string;
+    return this.withThreadLock(projectId, async () => {
+      if (this.repository.getProject(projectId)?.status !== 'active')
+        throw new Error('Project not found or archived.');
+      const key = `external-settle:${digest(`${projectId}\0${commandId}`)}`;
+      const fingerprint = digest(stable({ projectId, conversationRef }));
+      let intent = this.repository.getCommandIntent(key);
+      if (
+        intent &&
+        (intent.commandType !== 'external.settle' ||
+          intent.commandFingerprint !== fingerprint)
+      )
+        throw conflict(commandId);
+      if (intent?.executionState === 'completed')
+        return intent.result as {
+          state: 'settled' | 'absent' | 'superseded';
+          threadId?: string;
+        };
+      const ref = externalConversationRef(projectId, conversationRef);
+      const thread = this.repository
+        .listThreads(projectId)
+        .find((item) => item.externalRef === ref);
+      if (thread && this.repository.activeExternalDelivery(thread.id))
+        throw busy('Conversation still has an active delivery.');
+      const run = thread
+        ? this.repository.listRuns(thread.id).at(-1)
+        : undefined;
+      const currentRuntime = run?.piSessionId
+        ? this.registry
+            .snapshots()
+            .find(
+              (runtime) =>
+                runtime.online !== false &&
+                runtime.session.id === run.piSessionId,
+            )
+        : undefined;
+      const runtimeId = currentRuntime?.runtimeId ?? run?.runtimeId;
+      intent ??= this.repository.reserveCommandIntent({
+        idempotencyKey: key,
+        commandType: 'external.settle',
+        resourceType: 'external-conversation',
+        resourceId: ref,
+        commandFingerprint: fingerprint,
+        executionPlan: {
+          operation: 'command',
+          projectId,
+          ...(runtimeId ? { runtimeId } : {}),
+        },
+      });
+      let state: 'settled' | 'absent' | 'superseded' = 'absent';
+      if (thread) {
+        // A retry must never retire a replacement runtime opened by later activity.
+        if (intent.executionPlan?.runtimeId !== runtimeId) state = 'superseded';
+        else {
+          try {
+            const retired = this.retireThread
+              ? await this.retireThread(thread.id, `${key}:thread`)
+              : await this.orchestration.settleThread(
+                  thread.id,
+                  `${key}:thread`,
+                  true,
+                );
+            state = retired.settledAt === undefined ? 'superseded' : 'settled';
+          } catch (error) {
+            if ((error as { code?: string })?.code === 'idempotency-conflict')
+              throw error;
+            throw busy(
+              'Idle-only retirement is not ready; active or unsupported runtimes were not force-stopped.',
+            );
+          }
+        }
+      }
+      const result = { state, ...(thread ? { threadId: thread.id } : {}) };
+      this.repository.completeCommandIntent({
+        idempotencyKey: key,
+        commandType: 'external.settle',
+        resourceType: 'external-conversation',
+        resourceId: ref,
+        commandFingerprint: fingerprint,
+        result,
+        createdAt: intent.createdAt,
+      });
+      return result;
+    });
+  }
 
   async submit(
     projectId: string,
@@ -388,6 +509,24 @@ export class ExternalDeliveryService {
       )
         throw busy();
     }
+    if (!thread && command.model) {
+      const selected = (await this.models()).find(
+        (item) =>
+          item.provider === command.model?.provider &&
+          item.model === command.model.model,
+      );
+      if (
+        !selected ||
+        (command.model.thinking !== undefined &&
+          !selected.thinkingLevels.includes(command.model.thinking))
+      )
+        throw Object.assign(
+          new Error(
+            'Selected model or effort is unavailable; no fallback was used.',
+          ),
+          { code: 'invalid-command' },
+        );
+    }
     const prepared = await this.persistPrompt(projectId, command, marker);
 
     const plan: DeliveryPlan = {
@@ -434,7 +573,10 @@ export class ExternalDeliveryService {
             externalRef: namespacedRef as string,
             title: 'Telegram',
             prompt: prepared.prompt,
-            model: this.defaultModel?.(projectId) ?? project.defaultModel,
+            model:
+              command.model ??
+              this.defaultModel?.(projectId) ??
+              project.defaultModel,
           },
           prepared.images,
         );
@@ -490,6 +632,15 @@ export class ExternalDeliveryService {
           text: prepared.prompt,
           ...(prepared.images.length ? { images: prepared.images } : {}),
         });
+        // The external reference is already canonical, even before a resumed
+        // session's index/link catches up with the runtime hello.
+        if (this.repository.getThread(thread.id)?.settledAt !== undefined) {
+          this.orchestration.noteThreadActivity(thread.id);
+          await this.orchestration.unsettleThread(
+            thread.id,
+            `external-activity:${digest(key)}`,
+          );
+        }
       } catch (error) {
         if ((error as { code?: unknown }).code === 'busy') {
           await this.repository.transitionCommandIntent(key, 'prepared');

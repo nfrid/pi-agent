@@ -1277,11 +1277,15 @@ export type QueueDraftCommand = Static<typeof QueueDraftCommandSchema>;
 const SimpleCommandSchema = Type.Object(
   {
     ...BridgeCommandBaseProperties,
-    type: Type.Union([
-      Type.Literal('abort'),
-      Type.Literal('compact.cancel'),
-      Type.Literal('shutdown'),
-    ]),
+    type: Type.Union([Type.Literal('abort'), Type.Literal('compact.cancel')]),
+  },
+  { additionalProperties: false },
+);
+const ShutdownCommandSchema = Type.Object(
+  {
+    ...BridgeCommandBaseProperties,
+    type: Type.Literal('shutdown'),
+    onlyIfIdle: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -1352,6 +1356,7 @@ export const BridgeCommandSchema = Type.Union([
   PromptCommandSchema,
   QueueDraftCommandSchema,
   SimpleCommandSchema,
+  ShutdownCommandSchema,
   SetModelCommandSchema,
   SetThinkingCommandSchema,
   SetSessionNameCommandSchema,

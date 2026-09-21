@@ -592,10 +592,36 @@ export class RuntimeManager {
     return 'uncertain';
   }
 
-  async stop(runtimeId: string, force = false): Promise<void> {
+  async stop(
+    runtimeId: string,
+    force = false,
+    onlyIfIdle = false,
+  ): Promise<void> {
+    if (force && onlyIfIdle)
+      throw new Error('Idle-only shutdown cannot force-stop a runtime.');
     const snapshot = this.registry.get(runtimeId);
     const launch = this.launches.get(runtimeId);
     if (!snapshot && !launch) throw new Error('Unknown runtime.');
+    if (onlyIfIdle && this.reconcileStop(runtimeId)) return;
+    if (
+      onlyIfIdle &&
+      snapshot?.online !== false &&
+      snapshot?.ownership === 'managed'
+    ) {
+      // No timeout/error may fall through to process termination. Older runtimes
+      // reject the additive field; callers must defer rather than force an upgrade.
+      const result = (await this.registry.sendCommand(runtimeId, {
+        type: 'shutdown',
+        onlyIfIdle: true,
+      })) as { accepted?: unknown };
+      if (result?.accepted !== true)
+        throw new Error('Idle-only shutdown was not acknowledged.');
+    } else if (onlyIfIdle) {
+      throw Object.assign(
+        new Error('Runtime is not online and managed for idle-only shutdown.'),
+        { code: 'busy' },
+      );
+    }
     if (snapshot?.ownership === 'external' && force)
       throw new Error(
         'Force-stop is only available for dashboard-managed runtimes.',
@@ -611,7 +637,7 @@ export class RuntimeManager {
       this.registry.forget(runtimeId);
       return;
     }
-    if (snapshot && !force)
+    if (snapshot && !force && !onlyIfIdle)
       await Promise.race([
         this.registry.sendCommand(runtimeId, { type: 'shutdown' }).then(
           () => undefined,

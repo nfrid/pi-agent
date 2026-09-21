@@ -457,6 +457,7 @@ export async function settleThread(
   host: OrchestrationHost,
   threadId: string,
   commandId: string,
+  onlyIfIdle = false,
 ): Promise<Thread> {
   const prior = host.receipt(commandId, 'thread.settle');
   if (prior) return host.repository.settleThread(commandId, threadId).thread;
@@ -487,7 +488,22 @@ export async function settleThread(
     if (host.registry.get(runtimeId) || manager.hasLaunch?.(runtimeId))
       runtimeIds.add(runtimeId);
   }
-  for (const runtimeId of runtimeIds) await host.manager.stop(runtimeId, false);
+  if (
+    onlyIfIdle &&
+    [...runtimeIds].some((runtimeId) => {
+      const runtime = host.registry.get(runtimeId);
+      return (
+        runtime?.online !== false &&
+        runtime &&
+        !['idle', 'waiting'].includes(runtime.liveState)
+      );
+    })
+  )
+    throw Object.assign(new Error('Thread has active work.'), { code: 'busy' });
+  for (const runtimeId of runtimeIds) {
+    if (onlyIfIdle) await host.manager.stop(runtimeId, false, true);
+    else await host.manager.stop(runtimeId, false);
+  }
 
   if (host.threadActivityRevision(threadId) !== activityRevision)
     return host.requireThread(threadId);

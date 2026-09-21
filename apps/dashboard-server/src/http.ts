@@ -36,6 +36,7 @@ import {
   shellRuntime,
 } from './application/dashboard-application.js';
 import { ExternalDeliveryService } from './application/external-delivery-service.js';
+import { externalModels } from './application/external-models.js';
 import type { DashboardImage } from './application/upload-service.js';
 import {
   composerCommandCatalogue,
@@ -250,10 +251,11 @@ export class DashboardServerImpl implements DashboardServer {
     this.application = dependencies.application;
     this.runtimeProvider = dependencies.runtimeProvider;
     this.origins = config.origins;
-    this.externalDeliveries = this.application.orchestrationService
+    const externalOrchestration = this.application.orchestrationService;
+    this.externalDeliveries = externalOrchestration
       ? new ExternalDeliveryService(
           this.metadata.orchestration,
-          this.application.orchestrationService,
+          externalOrchestration,
           this.registry,
           this.sessions,
           path.join(this.stateDir, 'external-deliveries'),
@@ -266,6 +268,11 @@ export class DashboardServerImpl implements DashboardServer {
               .runtimeId,
           (projectId) =>
             this.application.resolveDraftDefaults(projectId).selection,
+          externalModels,
+          (threadId, commandId) =>
+            this.application.runtime.withThreadRetirement(threadId, () =>
+              externalOrchestration.settleThread(threadId, commandId, true),
+            ),
         )
       : undefined;
 
@@ -593,6 +600,18 @@ export class DashboardServerImpl implements DashboardServer {
             ...(images.length > 0 ? { images, releaseImages: release } : {}),
           }),
         );
+      },
+      settleExternalConversation: (projectId, input) => {
+        if (!this.externalDeliveries)
+          throw new Error('External deliveries are unavailable.');
+        return this.externalDeliveries.settleConversation(projectId, input);
+      },
+      externalModels: async (projectId) => {
+        if (
+          this.metadata.orchestration.getProject(projectId)?.status !== 'active'
+        )
+          throw new Error('Project not found or archived.');
+        return { models: await externalModels() };
       },
       submitExternalDelivery: (projectId, command) => {
         if (!this.externalDeliveries)

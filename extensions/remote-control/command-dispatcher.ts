@@ -132,6 +132,10 @@ export async function dispatchDashboardCommand(
       cancelActiveCompaction();
       return { accepted: true };
     case 'shutdown':
+      if (command.onlyIfIdle && (!ctx.isIdle() || ctx.hasPendingMessages()))
+        throw Object.assign(new Error('Runtime has active or queued work.'), {
+          code: 'busy',
+        });
       ctx.shutdown();
       return { accepted: true };
     case 'setModel': {

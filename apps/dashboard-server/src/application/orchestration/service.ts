@@ -357,13 +357,17 @@ export class OrchestrationService implements OrchestrationHost {
     return unpinThreadLifecycle(this, threadId, commandId);
   }
 
-  async settleThread(threadId: string, commandId: string): Promise<Thread> {
+  async settleThread(
+    threadId: string,
+    commandId: string,
+    onlyIfIdle = false,
+  ): Promise<Thread> {
     const current = this.settleTasks.get(threadId);
     if (current) {
       if (current.commandId === commandId) return current.task;
       await current.task;
     }
-    const task = settleThreadLifecycle(this, threadId, commandId);
+    const task = settleThreadLifecycle(this, threadId, commandId, onlyIfIdle);
     this.settleTasks.set(threadId, { commandId, task });
     try {
       return await task;

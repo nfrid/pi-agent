@@ -4,8 +4,10 @@ Telegram uses:
 
 - `POST /api/external/v1/projects/:projectId/deliveries`
 - `GET /api/external/v1/projects/:projectId/deliveries/:deliveryId`
+- `GET /api/external/v1/projects/:projectId/models`
+- `POST /api/external/v1/projects/:projectId/conversations/settle`
 
-Both require `Authorization: Bearer <dashboard-token>`, including requests with a browser Origin. `x-dashboard-token` is not accepted on delivery endpoints. Originless Bearer requests are supported; a supplied unapproved Origin is rejected. URL-encode opaque path IDs.
+All require `Authorization: Bearer <dashboard-token>`, including requests with a browser Origin. `x-dashboard-token` is not accepted on delivery endpoints. Originless Bearer requests are supported; a supplied unapproved Origin is rejected. URL-encode opaque path IDs.
 
 ```json
 {
@@ -18,7 +20,7 @@ Both require `Authorization: Bearer <dashboard-token>`, including requests with 
 
 Exactly one of `threadId` and `conversationRef` is required. IDs and text are preserved, not trimmed. `deliveryId` is at most 256 characters with no control characters. Text or at least one attachment is required; unknown properties are rejected.
 
-IDs and conversation links are project-scoped. First-use conversations create a normal isolated project thread titled **Telegram**, using normal server model defaults. No empty setup prompt is sent. Existing threads must belong to that project and must not be archived. Dormant threads resume their known indexed session through the existing durable runtime-start lifecycle, without an initial prompt; missing/unavailable resume evidence is not permission to start an unrelated session.
+IDs and conversation links are project-scoped. First-use conversations create a normal isolated project thread titled **Telegram**, using an optional explicit `model: {provider, model, thinking?, serviceTier?}` or normal server defaults when omitted. An explicit initial selection is validated against the installed available model catalogue and supported effort levels before admission; an unavailable choice is rejected without consuming the delivery ID, never silently replaced. The selection participates in the immutable delivery fingerprint. It applies only to creation, not existing conversations. The models endpoint returns `{models: [{provider, model, name, thinkingLevels}]}` without model inference or catalogue-network refresh. No empty setup prompt is sent. Existing threads must belong to that project and must not be archived. Dormant threads resume their known indexed session through the existing durable runtime-start lifecycle, without an initial prompt; missing/unavailable resume evidence is not permission to start an unrelated session.
 
 ## Responses and retries
 
@@ -39,6 +41,16 @@ A delivery-specific marker is included in the actual user message. Completion re
 Missing transcript data during index/bridge lag remains pending. Completed/attention results are frozen atomically in SQLite and cannot change when later messages arrive. Send intent is durable before dispatch, including the first orchestration hello. A genuine restart with an ambiguous dispatched send yields attention, never a speculative resend. An actively owned in-process dispatch is still running, not restart uncertainty.
 
 This is not an arbitrary background-turn correlation protocol. Background activity producing additional user/final messages, compaction removing required evidence, and lost runtime/session evidence can require human attention. Do not replace an attention delivery with a new ID automatically: its original action may have executed. A live runtime that disappears without terminal evidence can remain pending until it reconnects or a terminal lifecycle observation arrives.
+
+## Idle conversation retirement
+
+POST `/conversations/settle` with `{commandId, conversationRef}`. The reference is resolved only within the requested active project; IDs are bounded to 256 characters. No arbitrary runtime ID or force flag is accepted. Results are `{state: "settled" | "absent" | "superseded", threadId?}` and are durably idempotent; reusing an ID for another reference conflicts. A completed close is never repeated against a subsequently reopened thread. A pending retry targeting a replaced runtime becomes superseded instead of stopping the new generation.
+
+The caller must drain its own accepted messages/outgoing replies first. An active external delivery or runtime returns retryable `409 busy`. Dashboard command admission is fenced during retirement, and the runtime must acknowledge `shutdown` with `onlyIfIdle: true` after checking active and queued work. Errors, timeout, disconnected/unmanaged runtimes and older protocol implementations never fall through to forced process termination. An idle legacy runtime needs an explicit verified refresh before it supports this additive command; ordinary Dashboard deployment does not restart runtimes or hosts.
+
+Old replies still resume the same indexed session without a setup prompt; successful input unsets the settled marker even if the session link has not caught up yet. Retirement does not delete history, memory or artifacts.
+
+The visible `[[PI_EXTERNAL_DELIVERY:…]]` marker is still intentional. It disambiguates repeated identical user messages in persisted branches and disables native slash/skill/template expansion for external text. Durable delivery receipts, not the marker alone, provide replay protection. Removing it requires another persisted caller-message correlation mechanism, not simply a display/text cleanup.
 
 ## Attachments
 

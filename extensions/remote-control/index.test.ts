@@ -471,6 +471,36 @@ describe('dashboard input dispatch', () => {
     );
   });
 
+  it('idle-only shutdown refuses live or queued work at the runtime boundary', async () => {
+    const shutdown = vi.fn();
+    let idle = false;
+    let pending = false;
+    const ctx = {
+      isIdle: () => idle,
+      hasPendingMessages: () => pending,
+      shutdown,
+    } as unknown as ExtensionContext;
+    const command = {
+      id: 'retire',
+      type: 'shutdown' as const,
+      onlyIfIdle: true,
+    };
+    await expect(
+      dispatchDashboardCommand({} as ExtensionAPI, ctx, command),
+    ).rejects.toMatchObject({ code: 'busy' });
+    idle = true;
+    pending = true;
+    await expect(
+      dispatchDashboardCommand({} as ExtensionAPI, ctx, command),
+    ).rejects.toMatchObject({ code: 'busy' });
+    expect(shutdown).not.toHaveBeenCalled();
+    pending = false;
+    await expect(
+      dispatchDashboardCommand({} as ExtensionAPI, ctx, command),
+    ).resolves.toEqual({ accepted: true });
+    expect(shutdown).toHaveBeenCalledOnce();
+  });
+
   it('updates the Codex service tier with the existing model command', async () => {
     const appendEntry = vi.fn();
     const emit = vi.fn();

@@ -64,6 +64,55 @@ function runtimeCommandUncertain(): Error & { code: string } {
 }
 
 export class RuntimeService {
+  private readonly retiringThreads = new Set<string>();
+  private readonly admittedCommands = new Map<string, number>();
+
+  async withThreadRetirement<T>(
+    threadId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (
+      this.retiringThreads.has(threadId) ||
+      this.admittedCommands.has(threadId)
+    )
+      throw Object.assign(new Error('Thread has an admitted command.'), {
+        code: 'busy',
+      });
+    this.retiringThreads.add(threadId);
+    try {
+      return await operation();
+    } finally {
+      this.retiringThreads.delete(threadId);
+    }
+  }
+
+  private async withCommandAdmission<T>(
+    runtimeId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const sessionId = this.registry.get(runtimeId)?.session.id;
+    const threadId = sessionId
+      ? this.repository?.getSessionThreadLink(sessionId)?.threadId
+      : undefined;
+    if (!threadId) return operation();
+    if (this.retiringThreads.has(threadId))
+      throw Object.assign(
+        new Error('Thread is retiring; retry after it settles.'),
+        { code: 'busy' },
+      );
+    this.admittedCommands.set(
+      threadId,
+      (this.admittedCommands.get(threadId) ?? 0) + 1,
+    );
+    try {
+      return await operation();
+    } finally {
+      const remaining = (this.admittedCommands.get(threadId) ?? 1) - 1;
+      if (remaining) this.admittedCommands.set(threadId, remaining);
+      else this.admittedCommands.delete(threadId);
+    }
+  }
+
   private readonly runtimeCommandInFlight = new Map<
     string,
     { fingerprint: string; execution: Promise<unknown> }
@@ -86,16 +135,18 @@ export class RuntimeService {
   }
 
   async command(runtimeId: string, input: unknown): Promise<unknown> {
-    const sessionId = this.messageSessionId(runtimeId, input);
-    const result = await this.registry.sendCommand(runtimeId, input);
-    if (sessionId) {
-      const id = (input as { id?: unknown }).id;
-      this.unsettleSessionThread(
-        sessionId,
-        typeof id === 'string' ? id : `runtime-${Date.now()}`,
-      );
-    }
-    return result;
+    return this.withCommandAdmission(runtimeId, async () => {
+      const sessionId = this.messageSessionId(runtimeId, input);
+      const result = await this.registry.sendCommand(runtimeId, input);
+      if (sessionId) {
+        const id = (input as { id?: unknown }).id;
+        this.unsettleSessionThread(
+          sessionId,
+          typeof id === 'string' ? id : `runtime-${Date.now()}`,
+        );
+      }
+      return result;
+    });
   }
 
   private messageSessionId(
@@ -413,46 +464,48 @@ export class RuntimeService {
     runtimeId: string,
     input: BridgeCommand,
   ): Promise<RuntimeCommandOutput> {
-    const command = validateBridgeCommand(input);
-    const { id, ...payload } = command;
-    const completion = await this.executeWithReceipt({
-      commandId: id,
-      commandType: 'runtime.command',
-      target: runtimeId,
-      runtimeId,
-      payload,
-      plan: { operation: 'command', runtimeId },
-      beforeExecute: async () => {
-        await this.repository?.transitionCommandIntent(id, 'dispatched');
-      },
-      execute: async () => {
-        // Registry lookup and connection selection happen only at execution
-        // time; a receipt never authorizes a replacement runtime generation.
-        const sessionId = this.messageSessionId(runtimeId, command);
-        const acknowledged = await this.registry.sendCommand(
-          runtimeId,
-          command,
-        );
-        if (
-          acknowledged &&
-          typeof acknowledged === 'object' &&
-          'commandId' in acknowledged &&
-          'runtimeId' in acknowledged &&
-          'status' in acknowledged
-        )
-          throw new Error(
-            'Bridge acknowledgement must not impersonate a command receipt.',
+    return this.withCommandAdmission(runtimeId, async () => {
+      const command = validateBridgeCommand(input);
+      const { id, ...payload } = command;
+      const completion = await this.executeWithReceipt({
+        commandId: id,
+        commandType: 'runtime.command',
+        target: runtimeId,
+        runtimeId,
+        payload,
+        plan: { operation: 'command', runtimeId },
+        beforeExecute: async () => {
+          await this.repository?.transitionCommandIntent(id, 'dispatched');
+        },
+        execute: async () => {
+          // Registry lookup and connection selection happen only at execution
+          // time; a receipt never authorizes a replacement runtime generation.
+          const sessionId = this.messageSessionId(runtimeId, command);
+          const acknowledged = await this.registry.sendCommand(
+            runtimeId,
+            command,
           );
-        if (sessionId) this.unsettleSessionThread(sessionId, command.id);
-        return acknowledged === undefined ? null : acknowledged;
-      },
+          if (
+            acknowledged &&
+            typeof acknowledged === 'object' &&
+            'commandId' in acknowledged &&
+            'runtimeId' in acknowledged &&
+            'status' in acknowledged
+          )
+            throw new Error(
+              'Bridge acknowledgement must not impersonate a command receipt.',
+            );
+          if (sessionId) this.unsettleSessionThread(sessionId, command.id);
+          return acknowledged === undefined ? null : acknowledged;
+        },
+      });
+      return {
+        runtimeId,
+        commandId: id,
+        status: completion.status,
+        result: completion.result,
+      };
     });
-    return {
-      runtimeId,
-      commandId: id,
-      status: completion.status,
-      result: completion.result,
-    };
   }
 
   activateSession(sessionId: string, activityId: string): void {

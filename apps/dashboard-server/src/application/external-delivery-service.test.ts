@@ -31,7 +31,93 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-async function fixture() {
+it('settles only an idle external conversation, resumes old replies and never replays a completed close', async () => {
+  const f = await fixture('retire-topic');
+  const command = { commandId: 'close-1', conversationRef: 'retire-topic' };
+  await f.service.submit('p', {
+    deliveryId: 'work',
+    conversationRef: 'retire-topic',
+    text: 'work',
+  });
+  await expect(
+    f.service.settleConversation('p', command),
+  ).rejects.toMatchObject({ code: 'busy' });
+  expect(f.stop).not.toHaveBeenCalled();
+  await f.finish();
+  await f.service.get('p', 'work');
+  f.live.liveState = 'working';
+  await expect(
+    f.service.settleConversation('p', command),
+  ).rejects.toMatchObject({ code: 'busy' });
+  expect(f.stop).not.toHaveBeenCalled();
+  f.live.liveState = 'idle';
+  expect(await f.service.settleConversation('p', command)).toEqual({
+    state: 'settled',
+    threadId: f.thread.id,
+  });
+  expect(f.repository.getThread(f.thread.id)?.settledAt).toBeDefined();
+  expect(f.stop).toHaveBeenCalledWith('runtime', false, true);
+  await f.reopen();
+  await f.service.submit('p', {
+    deliveryId: 'reply-old',
+    threadId: f.thread.id,
+    text: 'continue old topic',
+  });
+  expect(f.resume).toHaveBeenCalledOnce();
+  expect(f.repository.getThread(f.thread.id)?.settledAt).toBeUndefined();
+  expect((await f.service.settleConversation('p', command)).state).toBe(
+    'settled',
+  );
+  expect(f.stop).toHaveBeenCalledTimes(1);
+  await expect(
+    f.service.settleConversation('p', {
+      ...command,
+      conversationRef: 'another',
+    }),
+  ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+  expect(
+    await f.service.settleConversation('p', {
+      commandId: 'empty',
+      conversationRef: 'not-created',
+    }),
+  ).toEqual({ state: 'absent' });
+});
+
+it('uses an explicit initial model and rejects unavailable selections without consuming delivery IDs', async () => {
+  const f = await fixture();
+  f.repository.transitionRun(f.run.id, 'completed');
+  const command = {
+    deliveryId: 'model-choice',
+    conversationRef: 'fresh-model',
+    text: 'Hello',
+    model: { provider: 'fixture', model: 'small', thinking: 'medium' },
+  };
+  await expect(
+    f.service.submit('p', {
+      ...command,
+      model: { ...command.model, thinking: 'max' },
+    }),
+  ).rejects.toThrow('unavailable');
+  expect(
+    f.repository.getCommandIntent(f.intentKey(command.deliveryId)),
+  ).toBeUndefined();
+  const result = await f.service.submit('p', command);
+  expect(result.state).toBe('pending');
+  expect(f.send).not.toHaveBeenCalled();
+  expect(f.repository.listRuns(result.threadId ?? '')[0]?.model).toEqual(
+    command.model,
+  );
+  await expect(
+    f.service.submit('p', {
+      ...command,
+      model: { ...command.model, thinking: 'low' },
+    }),
+  ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+  await f.reopen();
+  expect((await f.service.submit('p', command)).threadId).toBe(result.threadId);
+});
+
+async function fixture(conversationRef?: string) {
   const root = await mkdtemp(
     path.join(os.tmpdir(), 'external-delivery-sqlite-'),
   );
@@ -97,6 +183,11 @@ async function fixture() {
     id: 'thread',
     projectId: project.id,
     title: 'Thread',
+    ...(conversationRef
+      ? {
+          externalRef: `external-delivery:${createHash('sha256').update(`p\0${conversationRef}`).digest('hex')}`,
+        }
+      : {}),
     checkoutId: checkout.id,
   });
   const run = metadata.orchestration.createRun({
@@ -154,19 +245,35 @@ async function fixture() {
       return (await runtime.startWithReceipt(input)).result.runtimeId;
     },
   );
+  const stop = vi.fn(
+    async (_runtimeId: string, _force: boolean, onlyIfIdle: boolean) => {
+      if (onlyIfIdle && !['waiting', 'idle'].includes(live.liveState))
+        throw Object.assign(new Error('busy'), { code: 'busy' });
+      live.online = false;
+    },
+  );
   const make = () =>
     new ExternalDeliveryService(
       metadata.orchestration,
       new OrchestrationService({
         repository: metadata.orchestration,
         registry: registry as never,
-        manager: {} as never,
+        manager: { stop } as never,
       }),
       registry as never,
       sessions,
       artifacts,
       send,
       resume,
+      undefined,
+      async () => [
+        {
+          provider: 'fixture',
+          model: 'small',
+          name: 'Small',
+          thinkingLevels: ['medium'],
+        },
+      ],
     );
   let service = make();
   const value = {
@@ -178,6 +285,7 @@ async function fixture() {
     run,
     send,
     resume,
+    stop,
     launch,
     registry,
     artifacts,
@@ -773,6 +881,9 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
           sessions: [],
           unread: [],
         }),
+        externalModels: async () => ({ models: [] }),
+        settleExternalConversation: (projectId: string, input: unknown) =>
+          f.service.settleConversation(projectId, input),
         submitExternalDelivery: (projectId: string, input: unknown) =>
           f.service.submit(projectId, input as ExternalDeliveryCommand),
         getExternalDelivery: (projectId: string, deliveryId: string) =>
@@ -793,6 +904,54 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
       });
       expect(response.statusCode).toBe(401);
     }
+    for (const [method, path, payload] of [
+      ['GET', 'models', undefined],
+      [
+        'POST',
+        'conversations/settle',
+        { commandId: 'unused', conversationRef: 'absent' },
+      ],
+    ] as const) {
+      const route = `/api/external/v1/projects/p/${path}`;
+      expect(
+        (
+          await app.inject({
+            method,
+            url: route,
+            headers: {
+              'x-dashboard-token': 'secret',
+              origin: 'http://dashboard.test',
+            },
+            ...(payload ? { payload } : {}),
+          })
+        ).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await app.inject({
+            method,
+            url: route,
+            headers,
+            ...(payload ? { payload } : {}),
+          })
+        ).statusCode,
+      ).toBe(200);
+    }
+    expect(f.send).not.toHaveBeenCalled();
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/external/v1/projects/p/conversations/settle',
+          headers,
+          payload: {
+            commandId: 'invalid',
+            conversationRef: 'absent',
+            force: true,
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
     const accepted = await app.inject({
       method: 'POST',
       url,

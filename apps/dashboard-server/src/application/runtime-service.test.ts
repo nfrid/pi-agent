@@ -43,10 +43,55 @@ describe('RuntimeService runtime command receipts', () => {
     };
   }
 
+  it('fences command admission while retiring and defers retirement during an admitted command', async () => {
+    const f = fixture();
+    f.registry.get.mockReturnValue({ session: { id: 'session' } });
+    f.repository.getSessionThreadLink.mockReturnValue({ threadId: 'thread' });
+    let release: () => void = () => {};
+    const retiring = f.service.withThreadRetirement(
+      'thread',
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await expect(
+      f.service.commandWithReceipt('runtime', {
+        id: 'during-close',
+        type: 'prompt',
+        text: 'do not lose this',
+      }),
+    ).rejects.toMatchObject({ code: 'busy' });
+    expect(f.repository.getCommandIntent('during-close')).toBeUndefined();
+    expect(f.sendCommand).not.toHaveBeenCalled();
+    release();
+    await retiring;
+    let acknowledge: (value: { accepted: true }) => void = () => {};
+    f.sendCommand.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const sending = f.service.command('runtime', {
+      type: 'prompt',
+      text: 'accepted work',
+    });
+    const stop = vi.fn(async () => {});
+    await expect(
+      f.service.withThreadRetirement('thread', stop),
+    ).rejects.toMatchObject({ code: 'busy' });
+    expect(stop).not.toHaveBeenCalled();
+    acknowledge({ accepted: true });
+    await sending;
+    await f.service.withThreadRetirement('thread', stop);
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
   it('rejects missing durable capability before dispatching', async () => {
     const sendCommand = vi.fn();
     const service = new RuntimeService(
-      { sendCommand } as never,
+      { get: () => undefined, sendCommand } as never,
       {} as never,
       {} as never,
       {
