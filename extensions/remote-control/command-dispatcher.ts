@@ -105,7 +105,6 @@ export async function dispatchDashboardCommand(
         return withExternalDelivery(
           ctx,
           command.externalDeliveryId,
-          command.text,
           () =>
             dispatchDashboardInput(
               pi,

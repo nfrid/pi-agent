@@ -13,7 +13,6 @@ import {
 type Dispatch = {
   deliveryId: string;
   sessionId: string;
-  text: string;
   sawUser: boolean;
   message?: MessageEndEvent['message'];
   recorded: boolean;
@@ -24,7 +23,6 @@ const dispatchScope = new AsyncLocalStorage<Dispatch>();
 export function withExternalDelivery<T>(
   ctx: ExtensionContext,
   deliveryId: string,
-  text: string,
   send: () => T,
   expectedSessionId?: string,
 ): T {
@@ -54,7 +52,6 @@ export function withExternalDelivery<T>(
     {
       deliveryId,
       sessionId: ctx.sessionManager.getSessionId(),
-      text,
       sawUser: false,
       recorded: false,
     },
@@ -67,17 +64,7 @@ export function installExternalDeliveryReceipts(pi: ExtensionAPI): void {
     const dispatch = dispatchScope.getStore();
     if (!dispatch || dispatch.sawUser || event.message.role !== 'user') return;
     dispatch.sawUser = true;
-    const text =
-      typeof event.message.content === 'string'
-        ? event.message.content
-        : event.message.content
-            .filter((part) => part.type === 'text')
-            .map((part) => part.text)
-            .join('');
-    if (
-      ctx.sessionManager.getSessionId() === dispatch.sessionId &&
-      text === dispatch.text
-    )
+    if (ctx.sessionManager.getSessionId() === dispatch.sessionId)
       dispatch.message = event.message;
   });
   pi.on('context', (_event, ctx) => {
@@ -89,7 +76,7 @@ export function installExternalDeliveryReceipts(pi: ExtensionAPI): void {
       ctx.sessionManager.getSessionId() !== dispatch.sessionId
     )
       return;
-    // SDK 0.85.1 persists message_end after extension handlers. At context time
+    // The SDK persists message_end after extension handlers. At context time
     // that exact native object has an entry ID. Never substitute text/timestamps
     // if this invariant changes: a missing receipt must fail closed at the API.
     const entries = ctx.sessionManager

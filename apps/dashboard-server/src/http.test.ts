@@ -983,8 +983,10 @@ describe('dashboard HTTP boundary', () => {
       ),
     });
     await server.start();
+    const runningServer = server;
+    if (!runningServer) throw new Error('dashboard server did not start');
     const bridges = [
-      net.createConnection(server.socketPath),
+      net.createConnection(runningServer.socketPath),
       net.createConnection(server.socketPath),
     ];
     await Promise.all(
@@ -996,7 +998,8 @@ describe('dashboard HTTP boundary', () => {
           }),
       ),
     );
-    for (const [index, bridge] of bridges.entries())
+    for (const [index, bridge] of bridges.entries()) {
+      const runtimeId = `shared-runtime-${index + 1}`;
       bridge.write(
         serializeFrame({
           kind: 'event',
@@ -1005,7 +1008,7 @@ describe('dashboard HTTP boundary', () => {
             type: 'runtime.hello',
             protocolVersion: 1,
             snapshot: {
-              runtimeId: `shared-runtime-${index + 1}`,
+              runtimeId,
               ownership: 'external',
               pid: index + 1,
               cwd: '/tmp/project',
@@ -1015,7 +1018,14 @@ describe('dashboard HTTP boundary', () => {
           },
         }),
       );
-    await new Promise((resolve) => setTimeout(resolve, 25));
+      await vi.waitFor(() =>
+        expect(
+          runningServer
+            .snapshot()
+            .runtimes.some((runtime) => runtime.runtimeId === runtimeId),
+        ).toBe(true),
+      );
+    }
     const before = server.snapshot();
     expect(before.runtimes).toHaveLength(2);
     expect(

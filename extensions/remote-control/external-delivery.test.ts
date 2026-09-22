@@ -27,7 +27,11 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-async function fixture(extra?: ExtensionFactory, before = false) {
+async function fixture(
+  extra?: ExtensionFactory,
+  before = false,
+  imageAutoResize: boolean | null = false,
+) {
   const root = await mkdtemp(join(tmpdir(), 'native-delivery-sdk-'));
   let session: AgentSession | undefined;
   cleanups.push(async () => {
@@ -98,6 +102,12 @@ async function fixture(extra?: ExtensionFactory, before = false) {
   const settings = SettingsManager.inMemory({
     compaction: { enabled: false },
     retry: { enabled: false },
+    // Keep the existing fixture focused on native delivery identity, not
+    // optional 0.87 image normalization hints. Pass null below to test
+    // the SDK default instead.
+    ...(imageAutoResize === null
+      ? {}
+      : { images: { autoResize: imageAutoResize } }),
   });
   const manager = SessionManager.create(root, join(root, 'sessions'));
   const core: ExtensionFactory = (api) => {
@@ -237,6 +247,75 @@ it('binds identical native users durably, keeps provider context clean and prese
   await expect(f.dispatch('fixture-correlation-0', 'да')).rejects.toThrow(
     'already has a persisted receipt',
   );
+});
+
+it('records the native entry when default image normalization augments its text', async () => {
+  const f = await fixture(undefined, false, null);
+  const image = join(f.root, 'image-defaults.png');
+  const bytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  await writeFile(image, bytes);
+
+  await f.send('fixture-correlation-default-image', 'image', [
+    { type: 'image', path: image, mediaType: 'image/png' },
+  ]);
+
+  const userEntry = f.manager
+    .getEntries()
+    .find(
+      (entry) =>
+        entry.type === 'message' &&
+        entry.message.role === 'user' &&
+        Array.isArray(entry.message.content) &&
+        entry.message.content.some(
+          (part) =>
+            part.type === 'text' &&
+            part.text.startsWith('image\n\n[Image omitted:'),
+        ),
+    );
+  expect(userEntry).toBeDefined();
+  if (
+    userEntry?.type !== 'message' ||
+    userEntry.message.role !== 'user' ||
+    !Array.isArray(userEntry.message.content)
+  )
+    throw new Error('missing user entry');
+  const receipts = f.manager
+    .getEntries()
+    .flatMap((entry) => externalDeliveryReceipt(entry) ?? []);
+  expect(receipts).toEqual([
+    {
+      version: 1,
+      deliveryId: 'fixture-correlation-default-image',
+      userEntryId: userEntry.id,
+    },
+  ]);
+  const providerUser = f.contexts
+    .at(-1)
+    ?.messages.filter((message) => message.role === 'user')
+    .at(-1);
+  expect(providerUser).toMatchObject({
+    content: [
+      {
+        type: 'text',
+        text: expect.stringContaining(
+          '[Image omitted: could not be resized below the inline image size limit.]',
+        ),
+      },
+    ],
+  });
+  expect(userEntry.message.content[0]).toMatchObject({
+    type: 'text',
+    text: expect.stringContaining(
+      '[Image omitted: could not be resized below the inline image size limit.]',
+    ),
+  });
+  expect(JSON.stringify(f.contexts)).not.toContain(
+    'fixture-correlation-default-image',
+  );
+  expect(JSON.stringify(f.contexts)).not.toContain('PI_EXTERNAL_DELIVERY');
 });
 
 it('rejects an answer addressed to another native session before executing a turn', async () => {
