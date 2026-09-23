@@ -107,6 +107,7 @@ export function normalizeModelDisplayPreference(
   const normalized: ModelDisplayPreference = {};
   if (preference.alias !== undefined) normalized.alias = preference.alias;
   if (preference.color !== undefined) normalized.color = preference.color;
+  if (preference.hidden !== undefined) normalized.hidden = preference.hidden;
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
@@ -167,6 +168,17 @@ export function useModelDisplayPreferences(): ModelDisplayPreferences {
     );
   }, [importPreferences, query.data, queryClient]);
   return query.data?.modelDisplayPreferences ?? EMPTY_MODEL_DISPLAY_PREFERENCES;
+}
+
+/** Visibility is exact-provider only; display aliases may use a fallback. */
+export function isModelHidden(
+  preferences: ModelDisplayPreferences,
+  provider: string,
+  model: string,
+): boolean {
+  return (
+    preferences[modelDisplayPreferenceKey(provider, model)]?.hidden === true
+  );
 }
 
 export function modelDisplayPreference(

@@ -17,6 +17,7 @@ import {
   type DashboardSettings,
   MAX_MODEL_DISPLAY_ALIAS,
   type ModelDisplayPreference,
+  type ModelDisplayPreferences,
   type ModelSelection,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -39,6 +40,7 @@ import {
   useTranscriptPreviewPreference,
 } from '../shared/lib/transcript-display';
 import {
+  isModelHidden,
   modelDisplayPreferenceKey,
   normalizeModelDisplayPreference,
   useModelDisplayPreferences,
@@ -124,6 +126,7 @@ function DefaultModelControl({
   label,
   value,
   models,
+  preferences,
   levels,
   disabled,
   onSave,
@@ -132,6 +135,7 @@ function DefaultModelControl({
   label: string;
   value: ModelSelection | undefined;
   models: readonly RuntimeModelOption[];
+  preferences: ModelDisplayPreferences;
   levels: readonly string[];
   disabled: boolean;
   onSave: (model: ModelSelection) => Promise<unknown>;
@@ -141,6 +145,9 @@ function DefaultModelControl({
   const [manualProvider, setManualProvider] = useState(value?.provider ?? '');
   const [manualModel, setManualModel] = useState(value?.model ?? '');
   const [pending, setPending] = useState(false);
+  const visibleModels = models.filter(
+    (model) => !isModelHidden(preferences, model.provider, model.model),
+  );
   useEffect(() => {
     setSelection(value);
     setManualProvider(value?.provider ?? '');
@@ -207,15 +214,22 @@ function DefaultModelControl({
         >
           <option value="">Inherit / none</option>
           {selection &&
-            !models.some(
+            !visibleModels.some(
               (model) =>
                 modelOptionValue(model.provider, model.model) === valueKey,
             ) && (
-              <option value={valueKey}>
+              <option
+                value={valueKey}
+                disabled={isModelHidden(
+                  preferences,
+                  selection.provider,
+                  selection.model,
+                )}
+              >
                 {selection.model} ({selection.provider})
               </option>
             )}
-          {models.map((model) => (
+          {visibleModels.map((model) => (
             <option
               key={modelOptionValue(model.provider, model.model)}
               value={modelOptionValue(model.provider, model.model)}
@@ -418,6 +432,7 @@ function DraftDefaultSettings({ snapshot }: { snapshot: BrowserSnapshot }) {
           label="Dashboard"
           value={settingsQuery.data?.defaultModel}
           models={uniqueModels}
+          preferences={settingsQuery.data?.modelDisplayPreferences ?? {}}
           levels={levels}
           disabled={!settingsQuery.data}
           onSave={saveGlobal}
@@ -433,6 +448,7 @@ function DraftDefaultSettings({ snapshot }: { snapshot: BrowserSnapshot }) {
                 : project.defaultModel
             }
             models={uniqueModels}
+            preferences={settingsQuery.data?.modelDisplayPreferences ?? {}}
             levels={levels}
             disabled={!settingsQuery.data}
             onSave={(model) => saveProject(project.id, model)}
@@ -471,7 +487,7 @@ function ModelDisplayPreferencesEditor({
   );
   const editSequence = useRef(0);
   const latestEditByKey = useRef(new Map<string, number>());
-  const models = modelOptionsFromSnapshot(snapshot);
+  const models = modelOptionsFromSnapshot(snapshot, preferences);
   const controlsDisabled = !settingsQuery.data;
   const saveModelPreference = (
     modelKey: string,
@@ -571,11 +587,14 @@ function ModelDisplayPreferencesEditor({
     >
       <summary id="settings-model-display-heading">
         <span className={styles.disclosureTitle}>Model display</span>
-        <small className={styles.disclosureSummary}>Aliases and colors</small>
+        <small className={styles.disclosureSummary}>
+          Aliases, colors, visibility
+        </small>
       </summary>
       <p className={styles.hint}>
-        Choose compact aliases and colors for thread metadata. These settings
-        are shared across connected devices.
+        Choose aliases, colors, and which models appear in selectors. Hiding a
+        model does not change current sessions or defaults. These settings are
+        shared across connected devices.
       </p>
       {(updateMutation.isError || resetMutation.isError) && (
         <small role="alert">Could not save model display settings.</small>
@@ -621,12 +640,29 @@ function ModelDisplayPreferencesEditor({
                 disabled={
                   controlsDisabled ||
                   (preference.alias === undefined &&
-                    preference.color === undefined)
+                    preference.color === undefined &&
+                    preference.hidden === undefined)
                 }
                 onClick={() => saveModelPreference(key)}
               >
                 Reset
               </button>
+              <label className={styles.modelVisibility}>
+                <input
+                  type="checkbox"
+                  aria-label={`Hide ${key} from selectors`}
+                  checked={preference.hidden === true}
+                  disabled={controlsDisabled}
+                  onChange={(event) => {
+                    const hidden = event.currentTarget.checked;
+                    savePreferences(key, (current) => ({
+                      ...current,
+                      hidden,
+                    }));
+                  }}
+                />
+                Hide from selectors
+              </label>
               <fieldset className={styles.modelColorControls}>
                 <legend className="sr-only">Colors for {key}</legend>
                 {DRACULA_MODEL_COLORS.map((color) => (
@@ -664,19 +700,28 @@ function ModelDisplayPreferencesEditor({
 
 function modelOptionsFromSnapshot(
   snapshot: BrowserSnapshot,
+  preferences: ModelDisplayPreferences,
 ): readonly RuntimeModelOption[] {
   const observed = (snapshot.runtimes ?? []).flatMap((runtime) =>
     runtime.model
       ? [{ provider: runtime.model.provider, model: runtime.model.model }]
       : [],
   );
-  return [
-    ...new Map(
-      [...configuredModelOptions(snapshot.runtimes ?? []), ...observed].map(
-        (model) => [modelOptionValue(model.provider, model.model), model],
-      ),
-    ).values(),
-  ];
+  const models = new Map(
+    [...configuredModelOptions(snapshot.runtimes ?? []), ...observed].map(
+      (model) => [modelOptionValue(model.provider, model.model), model],
+    ),
+  );
+  // Keep saved preferences editable even after their runtime disconnects.
+  for (const key of Object.keys(preferences)) {
+    const separator = key.indexOf('/');
+    if (separator < 1 || separator === key.length - 1) continue;
+    const provider = key.slice(0, separator);
+    const model = key.slice(separator + 1);
+    const value = modelOptionValue(provider, model);
+    if (!models.has(value)) models.set(value, { provider, model });
+  }
+  return [...models.values()];
 }
 
 const PROJECT_ICON_EXTENSIONS = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;

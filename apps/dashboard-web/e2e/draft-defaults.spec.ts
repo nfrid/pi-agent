@@ -1,3 +1,4 @@
+import type { ModelDisplayPreferences } from '@pi-dashboard/protocol';
 import { expect, test } from '@playwright/test';
 import { installDashboardBootstrap, trpcData } from './dashboard-fixtures';
 
@@ -25,14 +26,17 @@ function projectResponse(defaultModel: typeof fastModel | undefined) {
   };
 }
 
-test('global and project defaults override/reset and pin draft launch', async ({
+test('global and project defaults preserve hidden models and pin draft launch', async ({
   page,
 }) => {
   let globalDefault: typeof fastModel | undefined;
   let projectDefault: typeof fastModel | undefined;
   let createdCommand: Record<string, unknown> | undefined;
+  const preferences: ModelDisplayPreferences = {
+    'openai-codex/gpt-5': { color: '#ff79c6' },
+  };
   const settings = () => ({
-    modelDisplayPreferences: {},
+    modelDisplayPreferences: preferences,
     ...(globalDefault ? { defaultModel: globalDefault } : {}),
   });
   const defaults = () => {
@@ -55,6 +59,21 @@ test('global and project defaults override/reset and pin draft launch', async ({
       contentType: 'application/json',
       body: JSON.stringify(settings()),
     }),
+  );
+  await page.route(
+    '**/api/settings/model-display-preferences/*',
+    async (route) => {
+      const key = decodeURIComponent(
+        new URL(route.request().url()).pathname.split('/').at(-1) ?? '',
+      );
+      if (route.request().method() === 'PUT') {
+        preferences[key] = route.request().postDataJSON();
+      } else if (route.request().method() === 'DELETE') delete preferences[key];
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(settings()),
+      });
+    },
   );
   await page.route('**/api/settings/default-model', async (route) => {
     if (route.request().method() === 'PUT')
@@ -200,15 +219,43 @@ test('global and project defaults override/reset and pin draft launch', async ({
   ).toHaveValue('');
   await expect.poll(() => projectDefault).toBeUndefined();
 
+  await drawer.getByText('Model display', { exact: true }).click();
+  const hideModel = drawer.getByRole('checkbox', {
+    name: 'Hide openai-codex/gpt-5 from selectors',
+  });
+  await hideModel.focus();
+  await hideModel.press('Space');
+  await expect(hideModel).toBeChecked();
+  await expect
+    .poll(() => preferences['openai-codex/gpt-5'])
+    .toEqual({ color: '#ff79c6', hidden: true });
+  expect(globalDefault).toEqual(fastModel);
+  await expect(drawer.getByLabel('Dashboard model')).toHaveValue(
+    'openai-codex/gpt-5',
+  );
+  await expect(
+    drawer
+      .getByLabel('Dashboard model')
+      .locator('option[value="openai-codex/gpt-5"]'),
+  ).toHaveJSProperty('disabled', true);
+
   await drawer
     .getByRole('button', { name: 'Close Settings' })
     .click({ force: true });
   await expect(drawer).toHaveCount(0);
   await page.goto('/projects/project-defaults/new');
+  await page.reload();
   await expect(page.getByRole('heading', { name: 'New thread' })).toBeVisible();
   const agent = page.getByRole('button', { name: 'Agent and thinking' });
   await expect(agent).toContainText('Fast model');
   await expect(agent.getByRole('img', { name: 'Fast' })).toBeVisible();
+  await agent.click();
+  const picker = page.getByRole('dialog', { name: 'Agent and thinking' });
+  await expect(
+    picker.getByRole('button', { name: /openai-codex\/gpt-5/ }),
+  ).toHaveCount(0);
+  await expect(picker.getByText(/No visible models/)).toBeVisible();
+  await picker.getByRole('button', { name: 'Done', exact: true }).click();
   const composer = page.getByRole('textbox', { name: 'Message Pi' });
   await composer.fill('Use the fast inherited default.');
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -225,6 +272,21 @@ test('global and project defaults override/reset and pin draft launch', async ({
     .getByRole('button', { name: 'Open settings' })
     .click();
   const reopened = page.getByRole('dialog', { name: 'Settings' });
+  await reopened.getByText('Model display', { exact: true }).click();
+  const hidden = reopened.getByRole('checkbox', {
+    name: 'Hide openai-codex/gpt-5 from selectors',
+  });
+  await expect(hidden).toBeChecked();
+  await hidden.click();
+  await expect(hidden).not.toBeChecked();
+  await expect
+    .poll(() => preferences['openai-codex/gpt-5'])
+    .toEqual({ color: '#ff79c6', hidden: false });
+  await expect(
+    reopened
+      .getByLabel('Dashboard model')
+      .locator('option[value="openai-codex/gpt-5"]'),
+  ).toHaveJSProperty('disabled', false);
   const globalRow = reopened
     .locator('[class*="defaultModelRow"]')
     .filter({ hasText: 'Dashboard' });

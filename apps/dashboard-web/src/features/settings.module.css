@@ -154,6 +154,16 @@
   font: inherit;
   font-size: 10px;
 }
+.modelVisibility {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--dim);
+  font-size: 10px;
+}
+.modelVisibility input {
+  margin: 0;
+}
 .modelColorControls {
   display: flex;
   grid-column: 2 / -1;

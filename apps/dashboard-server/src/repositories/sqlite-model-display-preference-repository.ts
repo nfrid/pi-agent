@@ -8,7 +8,7 @@ import {
 } from '@pi-dashboard/protocol';
 import type { ModelDisplayPreferenceRepository } from './types.js';
 
-/** Durable, server-wide model aliases and colors. */
+/** Durable, server-wide model display and selector visibility preferences. */
 export class SqliteModelDisplayPreferenceRepository
   implements ModelDisplayPreferenceRepository
 {
@@ -18,7 +18,7 @@ export class SqliteModelDisplayPreferenceRepository
     const preferences: DashboardSettings['modelDisplayPreferences'] = {};
     const rows = this.db
       .prepare(
-        'SELECT model_key,alias,color FROM model_display_preference ORDER BY model_key',
+        'SELECT model_key,alias,color,hidden FROM model_display_preference ORDER BY model_key',
       )
       .all() as Array<Record<string, unknown>>;
     for (const row of rows) {
@@ -28,6 +28,7 @@ export class SqliteModelDisplayPreferenceRepository
         value: {
           ...(row.alias === null ? {} : { alias: String(row.alias) }),
           ...(row.color === null ? {} : { color: String(row.color) }),
+          ...(row.hidden === null ? {} : { hidden: row.hidden === 1 }),
         },
         writable: true,
       });
@@ -54,11 +55,16 @@ export class SqliteModelDisplayPreferenceRepository
         throw new Error('Too many model display preferences.');
       this.db
         .prepare(
-          `INSERT INTO model_display_preference (model_key,alias,color)
-           VALUES (?,?,?)
-           ON CONFLICT(model_key) DO UPDATE SET alias=excluded.alias,color=excluded.color`,
+          `INSERT INTO model_display_preference (model_key,alias,color,hidden)
+           VALUES (?,?,?,?)
+           ON CONFLICT(model_key) DO UPDATE SET alias=excluded.alias,color=excluded.color,hidden=excluded.hidden`,
         )
-        .run(modelKey, parsed.alias ?? null, parsed.color ?? null);
+        .run(
+          modelKey,
+          parsed.alias ?? null,
+          parsed.color ?? null,
+          parsed.hidden === undefined ? null : Number(parsed.hidden),
+        );
     });
   }
 
@@ -95,7 +101,7 @@ export class SqliteModelDisplayPreferenceRepository
         throw new Error('Too many model display preferences.');
       const insert = this.db.prepare(
         `INSERT OR IGNORE INTO model_display_preference
-         (model_key,alias,color) VALUES (?,?,?)`,
+         (model_key,alias,color,hidden) VALUES (?,?,?,?)`,
       );
       for (const [modelKey, preference] of Object.entries(parsed))
         if (!existingKeys.has(modelKey))
@@ -103,6 +109,7 @@ export class SqliteModelDisplayPreferenceRepository
             modelKey,
             preference.alias ?? null,
             preference.color ?? null,
+            preference.hidden === undefined ? null : Number(preference.hidden),
           );
     });
   }

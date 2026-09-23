@@ -1,5 +1,8 @@
 import { dashboardHttpClient, dashboardQueryKeys } from '@pi-dashboard/client';
-import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import type {
+  BrowserSnapshot,
+  DashboardSettings,
+} from '@pi-dashboard/protocol';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
@@ -247,6 +250,127 @@ describe('settings drawer', () => {
       model: 'gpt-5',
     });
     renderer.unmount();
+  });
+
+  it('can unhide and reset a disconnected model without changing its default', async () => {
+    const key = 'provider/model/with/slash';
+    let settings: DashboardSettings = {
+      modelDisplayPreferences: { [key]: { alias: 'Saved', hidden: true } },
+      defaultModel: { provider: 'provider', model: 'model/with/slash' },
+    };
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(dashboardQueryKeys.settings(), settings);
+    vi.spyOn(dashboardHttpClient, 'settings').mockImplementation(
+      async () => settings,
+    );
+    const update = vi
+      .spyOn(dashboardHttpClient, 'updateModelDisplayPreference')
+      .mockImplementation(async (modelKey, preference) => {
+        settings = {
+          ...settings,
+          modelDisplayPreferences: { [modelKey]: preference },
+        };
+        return settings;
+      });
+    const reset = vi
+      .spyOn(dashboardHttpClient, 'resetModelDisplayPreference')
+      .mockImplementation(async () => {
+        settings = { ...settings, modelDisplayPreferences: {} };
+        return settings;
+      });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <QueryClientProvider client={queryClient}>
+          <SettingsView
+            snapshot={
+              { runtimes: [], projects: [] } as unknown as BrowserSnapshot
+            }
+          />
+        </QueryClientProvider>,
+      );
+    });
+    const checkbox = renderer.root.findByProps({
+      'aria-label': `Hide ${key} from selectors`,
+    });
+    const defaultControl = renderer.root.findByProps({
+      'aria-label': 'Dashboard model',
+    });
+    expect(checkbox.props.checked).toBe(true);
+    expect(defaultControl.props.value).toBe(
+      modelOptionValue('provider', 'model/with/slash'),
+    );
+    expect(
+      defaultControl
+        .findAllByType('option')
+        .find((option) => option.props.value)?.props.disabled,
+    ).toBe(true);
+    const target = { checked: false };
+    await act(async () => {
+      checkbox.props.onChange({ currentTarget: target });
+      target.checked = true;
+      await vi.waitFor(() =>
+        expect(update).toHaveBeenCalledWith(key, {
+          alias: 'Saved',
+          hidden: false,
+        }),
+      );
+    });
+    expect(checkbox.props.checked).toBe(false);
+    expect(
+      defaultControl
+        .findAllByType('option')
+        .find((option) => option.props.value)?.props.disabled,
+    ).not.toBe(true);
+    await act(async () => {
+      renderer.root
+        .findAllByType('button')
+        .find((button) => button.props.children === 'Reset')
+        ?.props.onClick();
+      await vi.waitFor(() => expect(reset).toHaveBeenCalledWith(key));
+    });
+    expect(settings.modelDisplayPreferences).toEqual({});
+    expect(settings.defaultModel).toEqual({
+      provider: 'provider',
+      model: 'model/with/slash',
+    });
+    renderer.unmount();
+    queryClient.clear();
+  });
+
+  it('restores visibility and shows an error if saving fails', async () => {
+    const settings = { modelDisplayPreferences: {} };
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(dashboardQueryKeys.settings(), settings);
+    vi.spyOn(dashboardHttpClient, 'settings').mockResolvedValue(settings);
+    const update = vi
+      .spyOn(dashboardHttpClient, 'updateModelDisplayPreference')
+      .mockRejectedValue(new Error('save failed'));
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <QueryClientProvider client={queryClient}>
+          <SettingsView snapshot={snapshot} />
+        </QueryClientProvider>,
+      );
+    });
+    const checkbox = renderer.root.findByProps({
+      'aria-label': 'Hide openai/gpt-5 from selectors',
+    });
+    await act(async () => {
+      checkbox.props.onChange({ currentTarget: { checked: true } });
+      await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    });
+    await vi.waitFor(() => expect(checkbox.props.checked).toBe(false));
+    expect(renderer.root.findByProps({ role: 'alert' }).props.children).toBe(
+      'Could not save model display settings.',
+    );
+    renderer.unmount();
+    queryClient.clear();
   });
 
   it('captures alias text before asynchronously cancelling stale queries', async () => {

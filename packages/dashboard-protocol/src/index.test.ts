@@ -158,6 +158,23 @@ describe('dashboard protocol', () => {
     });
   });
 
+  it('accepts optional boolean model visibility and rejects invalid flags', () => {
+    for (const preference of [{}, { hidden: true }, { hidden: false }]) {
+      const settings = {
+        modelDisplayPreferences: { 'provider/model': preference },
+      };
+      expect(parseDashboardSettings(settings)).toEqual(settings);
+      expect(parseModelDisplayPreferenceImport(settings)).toEqual(settings);
+    }
+    for (const hidden of ['true', 1, null]) {
+      expect(() =>
+        parseDashboardSettings({
+          modelDisplayPreferences: { 'provider/model': { hidden } },
+        }),
+      ).toThrow();
+    }
+  });
+
   it('accepts bounded Git context and rejects unknown fields', () => {
     expect(
       parseGitContext({

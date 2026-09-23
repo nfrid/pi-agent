@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { MAX_MODEL_DISPLAY_PREFERENCES } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runMigrations } from './migrations.js';
+import { DASHBOARD_MIGRATIONS, runMigrations } from './migrations.js';
 import { SqliteModelDisplayPreferenceRepository } from './sqlite-model-display-preference-repository.js';
 
 const databases: DatabaseSync[] = [];
@@ -30,6 +30,52 @@ describe('SqliteModelDisplayPreferenceRepository', () => {
     });
     expect(settings.reset('openai/gpt-5')).toEqual({
       modelDisplayPreferences: { 'anthropic/claude-3': { alias: 'Claude' } },
+    });
+  });
+
+  it('migrates existing preferences and persists reversible visibility', () => {
+    const db = new DatabaseSync(':memory:');
+    databases.push(db);
+    runMigrations(
+      db,
+      DASHBOARD_MIGRATIONS.filter(({ version }) => version < 23),
+    );
+    db.prepare(
+      'INSERT INTO model_display_preference (model_key,alias,color) VALUES (?,?,?)',
+    ).run('provider/model', 'Alias', '#ff79c6');
+    runMigrations(db);
+    runMigrations(db);
+    const settings = new SqliteModelDisplayPreferenceRepository(db);
+    const display = { alias: 'Alias', color: '#ff79c6' };
+    expect(settings.read().modelDisplayPreferences['provider/model']).toEqual(
+      display,
+    );
+    settings.set('provider/model', { ...display, hidden: true });
+    const reopened = new SqliteModelDisplayPreferenceRepository(db);
+    expect(reopened.read().modelDisplayPreferences['provider/model']).toEqual({
+      ...display,
+      hidden: true,
+    });
+    expect(
+      reopened.importMissing({
+        'provider/model': { hidden: false },
+        'other/model': { hidden: true },
+      }).modelDisplayPreferences,
+    ).toEqual({
+      'provider/model': { ...display, hidden: true },
+      'other/model': { hidden: true },
+    });
+    expect(
+      reopened.set('provider/model', { ...display, hidden: false })
+        .modelDisplayPreferences['provider/model'],
+    ).toEqual({ ...display, hidden: false });
+    expect(
+      reopened.set('provider/model', display).modelDisplayPreferences[
+        'provider/model'
+      ],
+    ).toEqual(display);
+    expect(reopened.reset('other/model').modelDisplayPreferences).toEqual({
+      'provider/model': display,
     });
   });
 

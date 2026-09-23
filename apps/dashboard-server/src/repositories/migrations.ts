@@ -917,6 +917,15 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         );
     },
   },
+  {
+    version: 23,
+    name: 'model-selector-visibility',
+    up(db) {
+      db.exec(
+        'ALTER TABLE model_display_preference ADD COLUMN hidden INTEGER CHECK (hidden IN (0,1))',
+      );
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

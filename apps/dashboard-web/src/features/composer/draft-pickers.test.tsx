@@ -7,7 +7,10 @@ const { setDraftLocation, setDraftModel, modelPreferences } = vi.hoisted(
   () => ({
     setDraftLocation: vi.fn(),
     setDraftModel: vi.fn(),
-    modelPreferences: {} as Record<string, { alias?: string; color?: string }>,
+    modelPreferences: {} as Record<
+      string,
+      { alias?: string; color?: string; hidden?: boolean }
+    >,
   }),
 );
 
@@ -120,6 +123,7 @@ function installKeyboard() {
 afterEach(() => {
   setDraftLocation.mockReset();
   setDraftModel.mockReset();
+  for (const key of Object.keys(modelPreferences)) delete modelPreferences[key];
   vi.unstubAllGlobals();
 });
 
@@ -264,6 +268,52 @@ describe('draft agent picker', () => {
     renderer.unmount();
     delete modelPreferences['test/fast'];
     delete modelPreferences['test/careful'];
+  });
+
+  it('hides only the exact model identity without changing the selected draft', () => {
+    installKeyboard();
+    modelPreferences['test/fast'] = { alias: 'Turbo', hidden: true };
+    const props = {
+      draftId: 'draft-1',
+      model: { provider: 'test', model: 'fast', thinking: 'high' },
+      runtimes: [
+        {
+          modelCatalog: [
+            { provider: 'test', model: 'fast' },
+            { provider: 'other', model: 'fast' },
+          ],
+        },
+      ] as never,
+      disabled: false,
+    };
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(<DraftAgentPicker {...props} />);
+    });
+    act(() =>
+      renderer.root
+        .findByProps({ 'aria-label': 'Agent and thinking' })
+        .props.onPress(),
+    );
+    expect(buttonWithLabel(renderer, 'test/fast')).toBeUndefined();
+    expect(buttonWithLabel(renderer, 'other/fast')).toBeDefined();
+    expect(
+      label(
+        renderer.root.findByProps({ className: 'draft-agent-model' }).props
+          .children,
+      ),
+    ).toBe('Turbo');
+    expect(buttonWithLabel(renderer, 'high')?.props.isDisabled).toBe(false);
+    expect(setDraftModel).not.toHaveBeenCalled();
+
+    modelPreferences['other/fast'] = { hidden: true };
+    act(() => renderer.update(<DraftAgentPicker {...props} />));
+    expect(JSON.stringify(renderer.toJSON())).toContain('No visible models.');
+    modelPreferences['test/fast'].hidden = false;
+    act(() => renderer.update(<DraftAgentPicker {...props} />));
+    expect(buttonWithLabel(renderer, 'test/fast')).toBeDefined();
+    expect(setDraftModel).not.toHaveBeenCalled();
+    renderer.unmount();
   });
 
   it('uses a remembered model and thinking levels without a runtime catalogue', () => {

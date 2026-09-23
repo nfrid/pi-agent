@@ -264,11 +264,12 @@ const IdentifierSchema = Type.String({
   pattern: '^[^\\u0000-\\u001F\\u007F]*$',
 });
 
-/** One user-facing alias/color override for a model identity. */
+/** User-facing display and selector visibility overrides for a model identity. */
 export const ModelDisplayPreferenceSchema = Type.Object(
   {
     alias: Type.Optional(Type.String({ maxLength: MAX_MODEL_DISPLAY_ALIAS })),
     color: Type.Optional(Type.String({ pattern: '^#[0-9a-fA-F]{6}$' })),
+    hidden: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

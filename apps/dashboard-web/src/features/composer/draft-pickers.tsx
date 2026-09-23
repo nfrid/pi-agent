@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { type DraftLocation, setDraftLocation, setDraftModel } from '../drafts';
 import {
+  isModelHidden,
   type ModelDisplayPreferences,
   modelDisplayPreference,
   useModelDisplayPreferences,
@@ -476,6 +477,9 @@ export function AgentPicker({
   const close = () => setOpen(false);
   useEscapeDismiss(open, close);
   const preferences = useModelDisplayPreferences();
+  const visibleModels = models.filter(
+    (item) => !isModelHidden(preferences, item.provider, item.model),
+  );
   const selectedValue = model
     ? modelOptionValue(model.provider, model.model)
     : '';
@@ -513,7 +517,12 @@ export function AgentPicker({
       {open && (
         <PickerSurface label="Agent and thinking" title="Agent" onClose={close}>
           <div className="draft-picker-section">Model</div>
-          {models.map((item) => {
+          {visibleModels.length === 0 && (
+            <small className="draft-picker-empty">
+              No visible models. Manage model visibility in Settings.
+            </small>
+          )}
+          {visibleModels.map((item) => {
             const value = modelOptionValue(item.provider, item.model);
             const preference = modelDisplayPreference(
               preferences,
