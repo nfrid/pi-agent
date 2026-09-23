@@ -86,7 +86,7 @@ describe('dashboard session title generator', () => {
     const client = {
       find: vi.fn(() => ({
         provider: 'openai-codex',
-        id: 'gpt-5.6-luna',
+        id: 'gpt-6-luna',
         api: 'openai-codex-responses',
         reasoning: true,
       })),

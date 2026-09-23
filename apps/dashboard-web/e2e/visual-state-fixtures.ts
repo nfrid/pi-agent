@@ -41,7 +41,7 @@ type SessionScenarioOptions = {
 
 const model = {
   provider: 'openai',
-  model: 'gpt-5.6-sol',
+  model: 'gpt-6-sol',
   thinking: 'medium',
 };
 

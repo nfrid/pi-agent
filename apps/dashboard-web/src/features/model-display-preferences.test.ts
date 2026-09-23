@@ -198,19 +198,19 @@ describe('model display preferences', () => {
 
   it('reuses one unambiguous model preference across provider identities', () => {
     const preferences = {
-      'runtime-provider/gpt-5.6-sol': { alias: 'sol', color: '#ff79c6' },
+      'runtime-provider/gpt-6-sol': { alias: 'sol', color: '#ff79c6' },
     };
     expect(
-      modelDisplayPreference(preferences, 'usage-provider', 'gpt-5.6-sol'),
+      modelDisplayPreference(preferences, 'usage-provider', 'gpt-6-sol'),
     ).toEqual({ alias: 'sol', color: '#ff79c6' });
     expect(
       modelDisplayPreference(
         {
           ...preferences,
-          'other-provider/gpt-5.6-sol': { alias: 'other' },
+          'other-provider/gpt-6-sol': { alias: 'other' },
         },
         'usage-provider',
-        'gpt-5.6-sol',
+        'gpt-6-sol',
       ),
     ).toEqual({});
   });

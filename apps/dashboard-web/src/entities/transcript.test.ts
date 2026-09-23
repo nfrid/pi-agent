@@ -1131,7 +1131,7 @@ describe('tool row views and virtual transcript construction', () => {
         type: 'message',
         message: { role: 'user', content: 'Continue.' },
       },
-      { type: 'model_change', provider: 'openai', modelId: 'gpt-5.6-sol' },
+      { type: 'model_change', provider: 'openai', modelId: 'gpt-6-sol' },
       { type: 'thinking_level_change', thinkingLevel: 'medium' },
       {
         type: 'custom_message',
@@ -1173,7 +1173,7 @@ describe('tool row views and virtual transcript construction', () => {
     expect(
       items.find((item) => item.event?.kind === 'settings')?.event,
     ).toMatchObject({
-      label: 'Model → openai/gpt-5.6-sol · thinking medium',
+      label: 'Model → openai/gpt-6-sol · thinking medium',
     });
     expect(
       items.find((item) => item.event?.kind === 'delegate-result')?.event,

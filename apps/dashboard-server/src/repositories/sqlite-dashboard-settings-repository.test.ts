@@ -18,7 +18,7 @@ describe('SqliteDashboardSettingsRepository', () => {
     expect(settings.readDefaultModel()).toBeUndefined();
     const model = {
       provider: 'openai-codex',
-      model: 'gpt-5.6',
+      model: 'gpt-6-sol',
       thinking: 'high',
       serviceTier: 'fast' as const,
     };

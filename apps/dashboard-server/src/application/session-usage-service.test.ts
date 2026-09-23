@@ -30,7 +30,7 @@ function assistant(id: string, timestamp: string) {
     message: {
       role: 'assistant',
       provider: 'openai-codex',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       usage: {
         input: 10,
         output: 20,
@@ -65,12 +65,12 @@ describe('session usage indexing', () => {
       ...assistant('entry-1', '2026-08-20T10:00:00Z'),
       message: {
         ...assistant('entry-1', '2026-08-20T10:00:00Z').message,
-        responseModel: 'gpt-5.6-sol-actual',
+        responseModel: 'gpt-6-sol-actual',
       },
     };
     expect(sessionUsageEvent(entry)).toMatchObject({
-      modelId: 'gpt-5.6-sol-actual',
-      label: 'gpt-5.6-sol-actual',
+      modelId: 'gpt-6-sol-actual',
+      label: 'gpt-6-sol-actual',
     });
   });
 
@@ -79,8 +79,8 @@ describe('session usage indexing', () => {
       sessionUsageEvent(assistant('entry-1', '2026-08-20T10:00:00Z')),
     ).toMatchObject({
       provider: 'openai-codex',
-      modelId: 'gpt-5.6-sol',
-      label: 'gpt-5.6-sol',
+      modelId: 'gpt-6-sol',
+      label: 'gpt-6-sol',
       inputTokens: 10,
       outputTokens: 20,
       cacheReadTokens: 30,

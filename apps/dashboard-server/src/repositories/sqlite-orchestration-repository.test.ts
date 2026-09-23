@@ -68,7 +68,7 @@ describe('SqliteOrchestrationRepository', () => {
       rootPath: '/repo/default',
       defaultModel: {
         provider: 'openai-codex',
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6-sol',
         thinking: 'medium',
       },
       maxParallelRuns: 1,
@@ -79,7 +79,7 @@ describe('SqliteOrchestrationRepository', () => {
         id: 'project-default',
         defaultModel: {
           provider: 'openai-codex',
-          model: 'gpt-5.6-sol',
+          model: 'gpt-6-sol',
           thinking: 'medium',
         },
       }),
@@ -617,7 +617,7 @@ describe('SqliteOrchestrationRepository', () => {
       id: 'run-1',
       threadId: thread.id,
       initialPrompt: prompt,
-      model: { provider: 'openai-codex', model: 'gpt-5.6-luna' },
+      model: { provider: 'openai-codex', model: 'gpt-6-luna' },
     });
     expect(value.repository.getProject(value.project.id)).toEqual(
       value.project,

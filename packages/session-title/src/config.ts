@@ -27,7 +27,7 @@ export interface SessionTitleConfig {
 export const DEFAULT_SESSION_TITLE_CONFIG: SessionTitleConfig = {
   enabled: true,
   provider: 'openai-codex',
-  model: 'gpt-5.6-luna',
+  model: 'gpt-6-luna',
   thinking: 'low',
   timeoutMs: 20_000,
   maxInputChars: 8_000,

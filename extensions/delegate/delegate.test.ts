@@ -1073,7 +1073,7 @@ describe('delegate', () => {
       routingGuidance: 'Luna routes are for bounded background work.',
       modelCatalog: {
         'luna-low': {
-          model: 'gpt-5.6-luna',
+          model: 'gpt-6-luna',
           thinking: 'low',
           relativeCost: 1,
           useFor: 'mechanical checks',

@@ -300,7 +300,7 @@ describe('render', () => {
       {
         route: 'luna-medium',
         provider: 'openai-codex',
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         thinking: 'medium',
         relativeCost: 8,
       },
@@ -349,7 +349,7 @@ describe('render', () => {
       {
         route: 'luna-medium',
         provider: 'openai-codex',
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         thinking: 'medium',
         relativeCost: 8,
       },
@@ -357,7 +357,7 @@ describe('render', () => {
     );
     run.state = 'success';
     run.exitCode = 0;
-    run.model = 'gpt-5.6-luna';
+    run.model = 'gpt-6-luna';
     run.messages = [assistantMessage as never];
     run.finishedAt = Date.now();
     for (const expanded of [false, true]) {

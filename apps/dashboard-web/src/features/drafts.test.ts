@@ -140,7 +140,7 @@ describe('browser-local draft metadata', () => {
     const draft = createDraft('model-project', 'worktree', 123);
     setDraftModel(draft.id, {
       provider: 'openai-codex',
-      model: 'gpt-5.6',
+      model: 'gpt-6-sol',
       thinking: 'high',
     });
     expect(readDrafts()).toContainEqual(
@@ -148,7 +148,7 @@ describe('browser-local draft metadata', () => {
         id: draft.id,
         model: {
           provider: 'openai-codex',
-          model: 'gpt-5.6',
+          model: 'gpt-6-sol',
           thinking: 'high',
         },
       }),

@@ -3641,7 +3641,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
               {
                 type: 'model_change',
                 provider: 'openai',
-                modelId: 'gpt-5.6-sol',
+                modelId: 'gpt-6-sol',
               },
               { type: 'thinking_level_change', thinkingLevel: 'medium' },
               {
@@ -3905,7 +3905,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(page.getByText(/Tasks · T1 added · 1 waiting/)).toBeVisible();
   await expect(page.getByText(/Tasks · T1 started · 1 active/)).toBeVisible();
   await expect(
-    page.getByText('Model → openai/gpt-5.6-sol · thinking medium'),
+    page.getByText('Model → openai/gpt-6-sol · thinking medium'),
   ).toBeVisible();
   await expect(
     page.getByText(/Background command finished · Dashboard build · 2s/),

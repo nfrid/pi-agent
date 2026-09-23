@@ -37,10 +37,10 @@ function response() {
     ],
     spend: [
       {
-        id: 'openai-codex:gpt-5.6-sol',
+        id: 'openai-codex:gpt-6-sol',
         provider: 'openai-codex',
-        modelId: 'gpt-5.6-sol',
-        label: 'gpt-5.6-sol',
+        modelId: 'gpt-6-sol',
+        label: 'gpt-6-sol',
         points: [
           {
             bucketStart: 0,
@@ -64,7 +64,7 @@ describe('usage history contracts', () => {
       range: '24h',
       bucket: 'hour',
       series: [{ windowLabel: '5h' }],
-      spend: [{ modelId: 'gpt-5.6-sol' }],
+      spend: [{ modelId: 'gpt-6-sol' }],
     });
   });
 

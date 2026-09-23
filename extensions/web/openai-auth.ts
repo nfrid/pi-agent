@@ -8,7 +8,7 @@ import {
 
 export const OPENAI_CONFIG_PATH = getWebSearchConfigPath();
 
-const SEARCH_MODEL = 'gpt-5.6-luna';
+const SEARCH_MODEL = 'gpt-6-luna';
 
 export interface OpenAIAuth {
   provider: 'openai-codex' | 'openai';

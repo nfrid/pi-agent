@@ -91,10 +91,10 @@ function usageHistory(range: string, before: number) {
     ],
     spend: [
       {
-        id: 'openai-codex:gpt-5.6-sol',
+        id: 'openai-codex:gpt-6-sol',
         provider: 'openai-codex',
-        modelId: 'gpt-5.6-sol',
-        label: 'gpt-5.6-sol',
+        modelId: 'gpt-6-sol',
+        label: 'gpt-6-sol',
         points: buckets.map((bucketStart) => ({
           bucketStart,
           calls: 2,
@@ -482,9 +482,9 @@ test('shares the desktop sidebar footer with Settings @desktop', async ({
   await analytics.getByRole('radio', { name: 'API-equivalent cost' }).check();
   const totals = analytics.getByRole('region', { name: 'Period total' });
   await expect(totals).toContainText('Period total$36');
-  await expect(totals).toContainText('gpt-5.6-sol$36');
+  await expect(totals).toContainText('gpt-6-sol$36');
   await expect(
-    analytics.getByText('gpt-5.6-sol', { exact: true }).last(),
+    analytics.getByText('gpt-6-sol', { exact: true }).last(),
   ).toBeVisible();
   await analytics.getByRole('button', { name: 'Cumulative' }).click();
   await expect(

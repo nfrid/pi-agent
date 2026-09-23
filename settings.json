@@ -10,7 +10,7 @@
   "sessionTitle": {
     "enabled": true,
     "provider": "openai-codex",
-    "model": "gpt-5.6-luna",
+    "model": "gpt-6-luna",
     "thinking": "low",
     "timeoutMs": 20000,
     "maxInputChars": 8000,
