@@ -210,7 +210,6 @@ function sameSources(
 export interface WakeDeliveryController {
   readonly dispatch: WakeDispatchHandler;
   readonly filterContext: <T>(messages: readonly T[]) => T[];
-  readonly markContextEntered: (messages: readonly unknown[]) => void;
 }
 
 /**
@@ -298,37 +297,48 @@ export function createWakeDelivery(options: {
         continue;
       const wake = active.get(details.wakeId);
       const sources = wake ? expectedSources(wake) : undefined;
+      const queued =
+        wake?.state === 'queued' &&
+        details.acknowledgement.dispatchGeneration ===
+          wake.dispatchGeneration &&
+        details.acknowledgement.dispatchAttempt === wake.dispatchAttempts;
+      const alreadyEntered =
+        wake?.state === 'entered' &&
+        wake.enteredAcknowledgement?.deliveryKey ===
+          details.acknowledgement.deliveryKey &&
+        wake.enteredAcknowledgement.dispatchGeneration ===
+          details.acknowledgement.dispatchGeneration &&
+        wake.enteredAcknowledgement.dispatchAttempt ===
+          details.acknowledgement.dispatchAttempt;
       if (
-        wake?.state !== 'queued' ||
+        (!queued && !alreadyEntered) ||
         wake.deliveryKey !== details.deliveryKey ||
-        details.acknowledgement.dispatchGeneration !==
-          wake.dispatchGeneration ||
-        details.acknowledgement.dispatchAttempt !== wake.dispatchAttempts ||
         !sources ||
         !sameSources(details.sources, sources)
       )
         continue;
-      try {
-        const entered = active.markEntered(
-          details.wakeId,
-          details.acknowledgement,
-        );
-        accepted.add(details.deliveryKey);
-        filtered.push(message);
-        options.onEntered?.(details.sources, entered);
-      } catch {
-        // A delayed recovery attempt or foreign-branch message is removed
-        // before provider context rather than merely ignored for state.
+      if (queued) {
+        try {
+          const entered = active.markEntered(
+            details.wakeId,
+            details.acknowledgement,
+          );
+          options.onEntered?.(details.sources, entered);
+        } catch {
+          // A delayed recovery attempt or foreign-branch message is removed
+          // before provider context rather than merely ignored for state.
+          continue;
+        }
       }
+      accepted.add(details.deliveryKey);
+      // Preserve this exact accepted result on subsequent requests in the same
+      // branch. Context hooks can run repeatedly for tool/follow-up requests.
+      filtered.push(message);
     }
     return filtered;
   };
 
-  const markContextEntered = (messages: readonly unknown[]) => {
-    filterContext(messages);
-  };
-
-  return { dispatch, filterContext, markContextEntered };
+  return { dispatch, filterContext };
 }
 
 export function registerWakeMessageRenderer(pi: ExtensionAPI): void {

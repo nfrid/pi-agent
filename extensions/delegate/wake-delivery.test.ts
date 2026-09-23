@@ -1,4 +1,7 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import {
+  convertToLlm,
+  type ExtensionAPI,
+} from '@earendil-works/pi-coding-agent';
 import { describe, expect, test, vi } from 'vitest';
 import { createRun } from './types';
 import { WakeCoordinator } from './wake-coordinator';
@@ -86,13 +89,45 @@ describe('wake delivery', () => {
     );
     expect(active.require('ready').state).toBe('queued');
     const message = sendMessage.mock.calls[0]?.[0];
-    expect(message?.content).toContain(
+    if (!message) throw new Error('missing dispatched wake message');
+    expect(message.content).toContain(
       '--- begin untrusted handoff evidence ---',
     );
-    expect(message?.content).not.toContain('Delivered at the next safe');
-    expect(message?.content).not.toContain('### Metadata');
-    expect(message?.content).not.toContain('```json');
-    delivery.markContextEntered([message, message]);
+    // Exercise the same context-filter -> provider conversion path as Pi. A
+    // transcript-visible custom message is insufficient if its body does not
+    // survive into the LLM-compatible request.
+    const providerMessage = {
+      ...message,
+      role: 'custom' as const,
+      timestamp: 1,
+    };
+    const firstTransform = delivery.filterContext([providerMessage]);
+    const repeatedTransform = delivery.filterContext([providerMessage]);
+    expect(firstTransform).toEqual([providerMessage]);
+    expect(repeatedTransform).toEqual([providerMessage]);
+    expect(active.require('ready').state).toBe('entered');
+    const providerMessages = convertToLlm(
+      repeatedTransform as Parameters<typeof convertToLlm>[0],
+    );
+    expect(providerMessages).toContainEqual(
+      expect.objectContaining({
+        role: 'user',
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining(
+              '- complete multiline evidence\n- opaque-continuation-token',
+            ),
+          }),
+        ]),
+      }),
+    );
+    expect(message.content).not.toContain('Delivered at the next safe');
+    expect(message.content).not.toContain('### Metadata');
+    expect(message.content).not.toContain('```json');
+    expect(delivery.filterContext([providerMessage])).toEqual([
+      providerMessage,
+    ]);
     expect(active.require('ready').state).toBe('entered');
     expect(entered).toHaveBeenCalledOnce();
     expect(entered).toHaveBeenCalledWith(
@@ -144,7 +179,7 @@ describe('wake delivery', () => {
     expect(message.details.sources).toEqual([second.identity, first.identity]);
     const snapshot = active.snapshot();
 
-    delivery.markContextEntered([message]);
+    expect(delivery.filterContext([message])).toEqual([message]);
     expect(active.enteredSourceIdentities()).toEqual([
       second.identity,
       first.identity,
@@ -295,7 +330,7 @@ describe('wake delivery', () => {
     // Activation recovery uses this durable entry boundary, rather than a
     // later unrelated context event, to retry its exact persisted sources.
     expect(restored.enteredSourceIdentities()).toEqual([attempt.identity]);
-    expect(restoredDelivery.filterContext([message])).toEqual([]);
+    expect(restoredDelivery.filterContext([message])).toEqual([message]);
 
     await sourceWorkflow.dispose();
     await restoredWorkflow.dispose();
