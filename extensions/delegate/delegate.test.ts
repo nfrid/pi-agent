@@ -187,7 +187,7 @@ describe('delegate', () => {
         {
           id: 'branch-review',
           task: 'Review the implementation',
-          route: 'luna-low',
+          route: 'luna-l',
           base: 'implementation',
           cwd: '/tmp/explicit-cwd',
         },
@@ -252,7 +252,7 @@ describe('delegate', () => {
       {
         id: 'branch-review',
         task: 'Review the implementation',
-        route: 'luna-low',
+        route: 'luna-l',
         base: 'implementation',
         inputs: ['audit'],
         write: true,

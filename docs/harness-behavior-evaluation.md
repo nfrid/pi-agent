@@ -119,7 +119,7 @@ commands.
 **Setup/fixture.** In fresh `T`, create `question.txt` containing `fixture-answer`
 and commit it. Use the existing user-owned catalog at the repository's
 absolute `settings.json` path. Read and record the exact
-`delegate.modelCatalog.luna-low` entry, including `relativeCost: 1`, `useFor`,
+`delegate.modelCatalog.luna-l` entry, including `relativeCost: 1`, `useFor`,
 and any optional `avoid` exclusion; do not modify global configuration or
 invent a mock catalog.
 This named-file lookup is eligible under that entry; compare other catalog

@@ -17,7 +17,7 @@ gate     = intentionally delay result delivery
 {
   "id": "reconnect-race-explore",
   "task": "Trace the reconnect handler's event-loss regression; identify the failure mechanism and recommend the smallest fix. Stop before implementation.",
-  "route": "luna-medium"
+  "route": "luna-m"
 }
 ```
 
@@ -51,7 +51,7 @@ If the next task needs different capabilities or skills, start a fresh delegate 
 {
   "id": "reconnect-race-fix",
   "task": "Implement and verify the reconnect race fix.",
-  "route": "luna-high",
+  "route": "luna-h",
   "inputs": ["reconnect-race-explore"],
   "scope": ["apps/dashboard-server"],
   "write": true
@@ -68,7 +68,7 @@ Settlement is not approval: `inputs` does not interpret an upstream recommendati
 {
   "id": "reconnect-race-review",
   "task": "Review the implementation for correctness, regressions, and unnecessary complexity.",
-  "route": "astra-low",
+  "route": "astra-l",
   "base": "reconnect-race-fix"
 }
 ```
@@ -156,14 +156,17 @@ Choose the cheapest route capable of completing the brief reliably. Each configu
 
 | Route | Task shape |
 | --- | --- |
-| Luna low | Mechanical execution with an exact verifier |
-| Luna medium | Localized implementation or investigation with a clear question and finish line |
-| Luna high | Substantial bounded work across known files or components |
-| Luna xhigh | Difficult bounded diagnosis, implementation, or verification |
-| Luna max | Exceptional bounded work where unusually deep reasoning is justified |
-| Astra low | Work requiring the child to choose the approach, scope, or evaluation criteria |
+| `luna-l` | Mechanical execution with an exact verifier |
+| `luna-m` | Localized implementation or investigation with a clear question and finish line |
+| `luna-h` | Substantial bounded work across known files or components |
+| `luna-x` | Difficult bounded diagnosis, implementation, or verification |
+| `luna-max` | Exceptional bounded work where unusually deep reasoning is justified |
+| `sol-m` | Work requiring the child to choose the approach, scope, or evaluation criteria |
+| `astra-l` | High-stakes cross-subsystem design or diagnosis beyond Sol's expected reliability, or a concrete unresolved issue after a Sol attempt |
 
-Searching unfamiliar code is not, by itself, a reason to choose Astra. Prefer a smaller task over a deeper route when decomposition preserves useful independence. Routing remains the parent's choice; there is no additional model call.
+The checked-in catalog uses GPT-6 Luna, Sol, and Astra. Its `relativeCost` values are **provisional estimates**, not measured GPT-6 route costs. Pending local calibration, Luna retains the historical effort ratios `1/3/11/21/42`; Sol medium is `95` and Astra low is `190`, normalized to GPT-6 Luna low. These rough estimates apply cost-per-task factors of `0.4` for Luna and `0.5` for Sol to the previous catalog's costs (Luna low `1`, Sol medium `75`, Astra low `75`), then renormalize and round. The factors come from [Artificial Analysis's GPT-6 release evaluation](https://artificialanalysis.ai/articles/gpt-6-sol-and-luna-push-the-cost-efficiency-frontier) at **max** effort; transferring them to other efforts is an unverified assumption. Calibrate cost and successful completion on representative local tasks before treating these ratios as measurements, particularly because Luna's coding score regressed slightly in that evaluation.
+
+Searching unfamiliar code is not, by itself, a reason to choose Sol or Astra. Prefer a smaller task over a deeper route when decomposition preserves useful independence. Routing remains the parent's choice; there is no additional model call.
 
 ## Orchestration policy
 
