@@ -442,16 +442,31 @@ describe('Fastify dashboard route plugin', () => {
       .png()
       .toBuffer();
     const routeContext = context();
-    routeContext.sessionImage = vi.fn(async () => ({
-      data: original,
-      mediaType: 'image/png',
-    }));
+    routeContext.sessionImage = vi.fn(async (_session, _entry, imageIndex) => {
+      if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex > 3)
+        throw new Error('Invalid session image.');
+      return { data: original, mediaType: 'image/png' };
+    });
     await app.register(dashboardRoutes, { context: routeContext });
     await app.ready();
     const headers = {
       origin: 'http://dashboard.test',
       'x-dashboard-token': 'route-token',
     };
+
+    const unauthorized = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-1/images/tool-result-entry/0',
+    });
+    expect(unauthorized.statusCode).toBe(401);
+    expect(routeContext.sessionImage).not.toHaveBeenCalled();
+
+    const outOfBounds = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-1/images/tool-result-entry/4',
+      headers,
+    });
+    expect(outOfBounds.statusCode).toBe(404);
 
     const thumbnail = await app.inject({
       method: 'GET',

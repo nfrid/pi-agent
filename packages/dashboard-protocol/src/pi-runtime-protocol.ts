@@ -37,7 +37,11 @@ export {
   tryParseSessionSnapshotPatch,
   validateBridgeCommand,
 } from './parsers.js';
-export { redactBridgeEvent, redactImageData } from './redaction.js';
+export {
+  redactBridgeEvent,
+  redactImageData,
+  redactSessionEntryImages,
+} from './redaction.js';
 export type {
   ActionCommandEnvelope,
   ActionInvocation,

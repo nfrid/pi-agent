@@ -671,10 +671,12 @@ export function SkillInvocationView({
 function ToolDetail({
   tool,
   cwd,
+  sessionId,
   timestamp,
 }: {
   tool: NonNullable<TranscriptModelItem['tool']>;
   cwd?: string;
+  sessionId?: string;
   timestamp?: number | string;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -716,7 +718,7 @@ function ToolDetail({
           timestamp={timestamp}
         />
       </summary>
-      {expanded ? <ToolInspector tool={tool} /> : null}
+      {expanded ? <ToolInspector tool={tool} sessionId={sessionId} /> : null}
     </details>
   );
 }
@@ -828,7 +830,14 @@ function TranscriptEntry({
     );
   }
   if (item.tool)
-    return <ToolDetail tool={item.tool} cwd={cwd} timestamp={timestamp} />;
+    return (
+      <ToolDetail
+        tool={item.tool}
+        cwd={cwd}
+        sessionId={item.sessionId}
+        timestamp={timestamp}
+      />
+    );
   const raw = item.raw;
   return (
     <details className="transcript-entry">

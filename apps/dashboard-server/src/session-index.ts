@@ -13,7 +13,7 @@ import {
   MAX_SESSION_BRANCH_PATHS,
   MAX_SESSION_BRANCH_PATHS_TOTAL,
   MAX_SESSION_BRANCH_POINTS,
-  redactImageData,
+  redactSessionEntryImages,
   type SessionBranchPath,
   type SessionBranchPoint,
   type SessionBranchTopology,
@@ -122,9 +122,17 @@ export interface SessionHistoryPage {
   leadingContinuation?: boolean;
 }
 
+const MAX_SESSION_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_SESSION_IMAGE_BASE64 = Math.ceil(MAX_SESSION_IMAGE_BYTES / 3) * 4;
+
 export interface SessionImage {
   data: Buffer;
-  mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+  mediaType:
+    | 'image/png'
+    | 'image/jpeg'
+    | 'image/webp'
+    | 'image/gif'
+    | 'image/bmp';
 }
 
 export interface SessionEntriesResult {
@@ -927,7 +935,7 @@ export class SessionIndex {
         } catch {
           throw new Error('Stale history cursor.');
         }
-        const entry = redactImageData(parsed);
+        const entry = redactSessionEntryImages(parsed);
         const serialized = JSON.stringify(entry);
         if (serialized === undefined) throw new Error('Stale history cursor.');
         const originalBytes = Buffer.byteLength(serialized);
@@ -1158,9 +1166,14 @@ export class SessionIndex {
       const entry = JSON.parse(buffer.toString('utf8').trim()) as unknown;
       if (!isRecord(entry)) throw new Error('Invalid session image.');
       const message = isRecord(entry.message) ? entry.message : entry;
-      if (!Array.isArray(message.content))
-        throw new Error('Unknown session image.');
-      const images = message.content.filter(
+      const result = isRecord(message.result) ? message.result : undefined;
+      const content = Array.isArray(message.content)
+        ? message.content
+        : Array.isArray(result?.content)
+          ? result.content
+          : undefined;
+      if (!content) throw new Error('Unknown session image.');
+      const images = content.filter(
         (part): part is Record<string, unknown> =>
           isRecord(part) && part.type === 'image',
       );
@@ -1185,11 +1198,16 @@ export class SessionIndex {
         !data ||
         (mediaType !== 'image/png' &&
           mediaType !== 'image/jpeg' &&
-          mediaType !== 'image/webp')
+          mediaType !== 'image/webp' &&
+          mediaType !== 'image/gif' &&
+          mediaType !== 'image/bmp') ||
+        data.length > MAX_SESSION_IMAGE_BASE64 ||
+        data.length % 4 !== 0 ||
+        !/^[A-Za-z0-9+/]*={0,2}$/u.test(data)
       )
         throw new Error('Unknown session image.');
       const decoded = Buffer.from(data, 'base64');
-      if (decoded.length === 0 || decoded.length > 5 * 1024 * 1024)
+      if (decoded.length === 0 || decoded.length > MAX_SESSION_IMAGE_BYTES)
         throw new Error('Invalid session image.');
       return { data: decoded, mediaType };
     } finally {
@@ -1362,7 +1380,7 @@ export class SessionIndex {
         if (Buffer.byteLength(line) > 24 * 1024 * 1024)
           throw new Error('A session entry is too large to open remotely.');
         try {
-          const entry = redactImageData(JSON.parse(line) as unknown);
+          const entry = redactSessionEntryImages(JSON.parse(line) as unknown);
           const serialized = JSON.stringify(entry);
           const originalBytes = Buffer.byteLength(serialized);
           const outputEntry =
@@ -1598,7 +1616,7 @@ export class SessionIndex {
           reachedUpperBound = true;
           break;
         }
-        const entry = redactImageData(parsed);
+        const entry = redactSessionEntryImages(parsed);
         const serialized = JSON.stringify(entry);
         const prefixHash = seenHasher.copy().digest('hex');
         updateHistoryHash(seenHasher, serialized);

@@ -5578,6 +5578,78 @@ test('native tool details mount only when disclosed @desktop', async ({
   await mocks.close();
 });
 
+test('shows historical read images and text in tool details @desktop', async ({
+  page,
+}) => {
+  const png =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aX8AAAAASUVORK5CYII=';
+  const entries = [
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Inspect the screenshot.' },
+          {
+            type: 'toolCall',
+            id: 'image-read',
+            name: 'read',
+            arguments: { path: '/tmp/project/screenshot.png' },
+          },
+        ],
+      },
+    },
+    {
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'image-read',
+        content: [
+          { type: 'text', text: 'Historical read text' },
+          {
+            type: 'image',
+            mimeType: 'image/png',
+            omitted: true,
+            sessionImageRef: {
+              entryId: 'tool-result-entry',
+              imageIndex: 0,
+            },
+          },
+        ],
+        isError: false,
+      },
+    },
+  ];
+  let imageRequests = 0;
+  await page.route(
+    '**/api/sessions/s1/images/tool-result-entry/0*',
+    async (route) => {
+      imageRequests += 1;
+      await route.fulfill({
+        contentType: 'image/png',
+        body: Buffer.from(png, 'base64'),
+      });
+    },
+  );
+  const mocks = await installPhase6Mocks(page, { entries });
+  await page.goto('/sessions/s1');
+
+  const tool = page.locator('.tool-detail').first();
+  await tool.locator(':scope > summary.tool-step').click();
+  await expect(tool.locator('.tool-read-preview')).toContainText(
+    'Historical read text',
+  );
+  const image = tool.locator('.tool-read-image');
+  await expect(image).toHaveAttribute('src', /^blob:/);
+  await expect
+    .poll(() =>
+      image.evaluate((element: HTMLImageElement) => element.naturalWidth),
+    )
+    .toBe(1);
+  expect(imageRequests).toBe(1);
+  await mocks.close();
+});
+
 test('shows structured delegate content while the delegate is running @desktop', async ({
   page,
 }) => {

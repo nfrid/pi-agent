@@ -16,6 +16,38 @@ import { TranscriptEntry } from './entries';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
+function readToolItem(sessionId?: string): TranscriptModelItem {
+  return {
+    key: 'read-image',
+    raw: {},
+    entry: {
+      kind: 'tool',
+      name: 'read',
+      args: { path: 'image.png' },
+      status: 'success',
+    },
+    ...(sessionId ? { sessionId } : {}),
+    tool: {
+      kind: 'tool',
+      key: 'read-image',
+      toolCallId: 'read-call',
+      name: 'read',
+      arguments: { path: 'image.png' },
+      result: {
+        content: [
+          {
+            type: 'image',
+            mimeType: 'image/png',
+            omitted: true,
+            sessionImageRef: { entryId: 'read-result', imageIndex: 0 },
+          },
+        ],
+      },
+      status: 'success',
+    },
+  };
+}
+
 describe('transcript entries', () => {
   it('uses a known title rather than an ID in background tool rows', () => {
     const [item] = toTranscriptEntries([
@@ -443,6 +475,121 @@ describe('transcript entries', () => {
       tree.root.findAllByProps({ className: 'tool-inspector' }),
     ).toHaveLength(0);
     act(() => tree.unmount());
+  });
+
+  it('shows read-image fallback when the session image request fails or lacks session context', async () => {
+    sessionImage.mockRejectedValue(new Error('not found'));
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TranscriptEntry item={readToolItem('session-1')} />);
+    });
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sessionImage).toHaveBeenCalledWith(
+      'session-1',
+      'read-result',
+      0,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(
+      tree.root
+        .findByProps({ className: 'tool-read-image-status' })
+        .children.join(''),
+    ).toBe('Image preview unavailable.');
+    act(() => tree.unmount());
+
+    sessionImage.mockClear();
+    act(() => {
+      tree = create(<TranscriptEntry item={readToolItem()} />);
+    });
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    expect(sessionImage).not.toHaveBeenCalled();
+    expect(
+      tree.root
+        .findByProps({ className: 'tool-read-image-status' })
+        .children.join(''),
+    ).toBe('Image preview unavailable.');
+    act(() => tree.unmount());
+
+    sessionImage.mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
+    const createObjectUrl = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:read-test');
+    const revokeObjectUrl = vi
+      .spyOn(URL, 'revokeObjectURL')
+      .mockImplementation(() => undefined);
+    act(() => {
+      tree = create(<TranscriptEntry item={readToolItem('session-1')} />);
+    });
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() =>
+      tree.root.findByType('img').props.onError({
+        currentTarget: { src: 'blob:read-test' },
+      }),
+    );
+    expect(
+      tree.root
+        .findByProps({ className: 'tool-read-image-status' })
+        .children.join(''),
+    ).toBe('Image preview unavailable.');
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:read-test');
+    act(() => tree.unmount());
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+    sessionImage.mockReset();
+  });
+
+  it('aborts read-image requests when tool details are collapsed', async () => {
+    let requestSignal: AbortSignal | undefined;
+    sessionImage.mockImplementation(
+      (_session, _entry, _index, options) =>
+        new Promise((_resolve, reject) => {
+          requestSignal = options.signal;
+          options.signal?.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+        }),
+    );
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TranscriptEntry item={readToolItem('session-1')} />);
+    });
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(requestSignal?.aborted).toBe(false);
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: false } }),
+    );
+    expect(requestSignal?.aborted).toBe(true);
+    act(() => tree.unmount());
+    sessionImage.mockReset();
   });
 
   it('renders compact colored line metrics for edit tools', () => {

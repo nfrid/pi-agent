@@ -59,6 +59,7 @@ import {
   projectDelegateUsage,
   RuntimeExtensionSurfaceSchema,
   redactImageData,
+  redactSessionEntryImages,
   ShellSnapshotRequestSchema,
   serializeFrame,
   tryParseNormalizedToolPayload,
@@ -994,6 +995,44 @@ describe('dashboard protocol', () => {
         ),
       }),
     ).toThrow();
+  });
+
+  it('redacts session image bytes with entry-scoped lookup references', () => {
+    expect(
+      redactSessionEntryImages({
+        id: 'tool-result-1',
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          content: [
+            { type: 'text', text: 'read output' },
+            { type: 'image', mimeType: 'image/gif', data: 'R0lGODlh' },
+            { type: 'image', mimeType: 'image/bmp', data: 'Qk06' },
+          ],
+        },
+      }),
+    ).toEqual({
+      id: 'tool-result-1',
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        content: [
+          { type: 'text', text: 'read output' },
+          {
+            type: 'image',
+            mimeType: 'image/gif',
+            omitted: true,
+            sessionImageRef: { entryId: 'tool-result-1', imageIndex: 0 },
+          },
+          {
+            type: 'image',
+            mimeType: 'image/bmp',
+            omitted: true,
+            sessionImageRef: { entryId: 'tool-result-1', imageIndex: 1 },
+          },
+        ],
+      },
+    });
   });
 
   it('accepts bounded image-only commands and redacts image bytes', () => {

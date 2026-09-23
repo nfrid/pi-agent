@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { commandStepMeta } from './activity';
 import {
   BoundedPayloadPreview,
@@ -595,6 +595,101 @@ describe('transcript payload inspection', () => {
     expect(read).toContain('tool-read-presentation');
     expect(read).toContain('app.ts');
     expect(read).toContain('1 line');
+
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aX8AAAAASUVORK5CYII=';
+    const imageRead = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'read',
+          arguments: { path: 'screenshot.png' },
+          result: {
+            content: [
+              { type: 'text', text: 'Image description from tool output' },
+              { type: 'image', mimeType: 'image/png', data: png },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(imageRead).toContain('tool-read-preview');
+    expect(imageRead).toContain('Image description from tool output');
+    expect(imageRead).not.toContain('<img');
+
+    const imageTypes = renderToStaticMarkup(
+      <ToolInspector
+        sessionId="session"
+        tool={{
+          name: 'read',
+          arguments: { path: 'raster-assets' },
+          result: {
+            content: [
+              {
+                type: 'image',
+                mimeType: 'image/gif',
+                data: 'R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=',
+                sessionImageRef: { entryId: 'read-entry', imageIndex: 0 },
+              },
+              {
+                type: 'image',
+                mimeType: 'image/bmp',
+                data: 'Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAA',
+                sessionImageRef: { entryId: 'read-entry', imageIndex: 1 },
+              },
+              {
+                type: 'image',
+                mimeType: 'image/png',
+                data: png,
+                sessionImageRef: { entryId: 'read-entry', imageIndex: 2 },
+              },
+              {
+                type: 'image',
+                mimeType: 'image/png',
+                data: png,
+                sessionImageRef: { entryId: 'read-entry', imageIndex: 3 },
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(imageTypes.match(/Loading image preview…/gu)).toHaveLength(4);
+
+    const malformedConsole = vi.spyOn(console, 'error');
+    renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'read',
+          arguments: { path: 'duplicate.png' },
+          result: {
+            content: [
+              { type: 'image', mimeType: 'image/png', data: png },
+              { type: 'image', mimeType: 'image/png', data: png },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(malformedConsole).not.toHaveBeenCalled();
+    malformedConsole.mockRestore();
+
+    for (const malformed of [
+      { type: 'image', mimeType: 'image/svg+xml', data: 'PHN2Zz4=' },
+      { type: 'image', mimeType: 'image/png', data: 'not-base64' },
+      { type: 'image', mimeType: 'image/png', data: 'AAAA'.repeat(3_000_001) },
+    ]) {
+      const fallback = renderToStaticMarkup(
+        <ToolInspector
+          tool={{
+            name: 'read',
+            arguments: { path: 'screenshot.png' },
+            result: { content: [malformed] },
+          }}
+        />,
+      );
+      expect(fallback).not.toContain('<img');
+      expect(fallback).toContain('Raw tool data');
+    }
 
     const grep = renderToStaticMarkup(
       <ToolInspector

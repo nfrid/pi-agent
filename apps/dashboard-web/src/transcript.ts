@@ -710,6 +710,7 @@ export function toTranscriptEntries(
           ...(item.data === undefined ? {} : { data: item.data }),
         }),
         raw: toolRaw(item),
+        ...(sessionId ? { sessionId } : {}),
         tool: backgroundTitle ? { ...item, backgroundTitle } : item,
       });
       continue;

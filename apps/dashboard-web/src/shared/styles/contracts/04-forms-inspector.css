@@ -470,6 +470,13 @@
 .tool-code-preview {
   padding: 6px 9px;
 }
+.tool-read-image {
+  display: block;
+  max-inline-size: 100%;
+  max-block-size: 32rem;
+  object-fit: contain;
+  object-position: left top;
+}
 .tool-code-preview:has(.tool-code-line) {
   padding-inline: 0;
 }

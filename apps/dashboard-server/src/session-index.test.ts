@@ -31,7 +31,7 @@ describe('session index', () => {
     const startedAt = '2026-08-12T10:20:30.000Z';
     await writeFile(
       file,
-      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', timestamp: startedAt, cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry', message: { role: 'user', timestamp: 12345, content: [{ type: 'image', mimeType: 'image/png', data: 'base64-bytes' }] } })}\n`,
+      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', timestamp: startedAt, cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry', message: { role: 'user', timestamp: 12345, content: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }] } })}\n`,
     );
     const index = new SessionIndex(root);
     await index.rebuild();
@@ -55,15 +55,15 @@ describe('session index', () => {
         content: [{ type: 'image', mimeType: 'image/png', omitted: true }],
       },
     });
-    expect(JSON.stringify(session.entries)).not.toContain('base64-bytes');
+    expect(JSON.stringify(session.entries)).not.toContain('aW1hZ2U=');
     await expect(index.readImage('session-id', 'entry', 0)).resolves.toEqual({
-      data: Buffer.from('base64-bytes', 'base64'),
+      data: Buffer.from('aW1hZ2U=', 'base64'),
       mediaType: 'image/png',
     });
     await expect(
       index.readImage('session-id', 'live-runtime-id', 0, 12345),
     ).resolves.toEqual({
-      data: Buffer.from('base64-bytes', 'base64'),
+      data: Buffer.from('aW1hZ2U=', 'base64'),
       mediaType: 'image/png',
     });
     await expect(index.readImage('session-id', 'entry', 1)).rejects.toThrow(
@@ -71,11 +71,86 @@ describe('session index', () => {
     );
     await appendFile(
       file,
-      `${JSON.stringify({ type: 'message', id: 'entry-2', message: { role: 'user', timestamp: 12345, content: [{ type: 'image', mimeType: 'image/png', data: 'second-image' }] } })}\n`,
+      `${JSON.stringify({ type: 'message', id: 'entry-2', message: { role: 'user', timestamp: 12345, content: [{ type: 'image', mimeType: 'image/png', data: 'c2Vjb25kLWltYWdl' }] } })}\n`,
     );
     await expect(
       index.readImage('session-id', 'live-runtime-id', 0, 12345),
     ).rejects.toThrow('Unknown session image');
+  });
+
+  it('resolves redacted read-tool images by session entry and content image index', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-tool-image-'),
+    );
+    const file = path.join(root, 'tool-image.jsonl');
+    const gif = 'R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'tool-image-session', cwd: '/tmp' })}\n${JSON.stringify(
+        {
+          type: 'message',
+          id: 'tool-result-entry',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'read-call',
+            content: [
+              { type: 'text', text: 'read result' },
+              { type: 'image', mimeType: 'image/gif', data: gif },
+            ],
+          },
+        },
+      )}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const history = await index.readEntries('tool-image-session');
+    const selectedBranch = await index.readSelectedBranchEntries(
+      'tool-image-session',
+      undefined,
+      () => true,
+      { resolveLatestLeaf: true },
+    );
+    expect(selectedBranch.entries[1]).toMatchObject({
+      message: {
+        content: [
+          {},
+          {
+            sessionImageRef: {
+              entryId: 'tool-result-entry',
+              imageIndex: 0,
+            },
+          },
+        ],
+      },
+    });
+    expect(history.entries[1]).toMatchObject({
+      message: {
+        role: 'toolResult',
+        content: [
+          { type: 'text', text: 'read result' },
+          {
+            type: 'image',
+            mimeType: 'image/gif',
+            omitted: true,
+            sessionImageRef: {
+              entryId: 'tool-result-entry',
+              imageIndex: 0,
+            },
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(history.entries)).not.toContain(gif);
+    await expect(
+      index.readImage('tool-image-session', 'tool-result-entry', 0),
+    ).resolves.toEqual({
+      data: Buffer.from(gif, 'base64'),
+      mediaType: 'image/gif',
+    });
+    await expect(
+      index.readImage('tool-image-session', 'tool-result-entry', 4),
+    ).rejects.toThrow('Invalid session image');
   });
 
   it('keeps the live catalogue readable while rebuilds stage and publish in order', async () => {

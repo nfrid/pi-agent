@@ -13,8 +13,10 @@ import {
 
 function ToolInspector({
   tool,
+  sessionId,
 }: {
   tool: Record<string, unknown> | TranscriptRenderToolItem;
+  sessionId?: string;
 }) {
   const record = tool as Record<string, unknown>;
   const selectedKind = toolPresentationKind(record);
@@ -45,7 +47,11 @@ function ToolInspector({
         </div>
       </dl>
       {specializedKind ? (
-        <SpecializedToolInspector kind={specializedKind} tool={record} />
+        <SpecializedToolInspector
+          kind={specializedKind}
+          sessionId={sessionId}
+          tool={record}
+        />
       ) : null}
       {!specializedKind && argumentsValue !== undefined && (
         <PayloadSection

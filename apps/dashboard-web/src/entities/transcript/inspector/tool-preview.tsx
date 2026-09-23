@@ -1,4 +1,5 @@
 import { customToolKind } from '@pi-dashboard/activity-model';
+import { dashboardHttpClient } from '@pi-dashboard/client';
 import { diffLines } from 'diff';
 import hljs from 'highlight.js/lib/core';
 import bashLanguage from 'highlight.js/lib/languages/bash';
@@ -10,6 +11,7 @@ import plaintextLanguage from 'highlight.js/lib/languages/plaintext';
 import pythonLanguage from 'highlight.js/lib/languages/python';
 import typescriptLanguage from 'highlight.js/lib/languages/typescript';
 import xmlLanguage from 'highlight.js/lib/languages/xml';
+import { useEffect, useState } from 'react';
 import { CustomToolInspector } from './custom-preview';
 import { PreviewTruncation, sourceTruncated } from './truncation';
 import {
@@ -390,12 +392,109 @@ function grepMatchCount(result: unknown): number | undefined {
 }
 
 function readLineCount(result: unknown): number | undefined {
-  const text = normalizeToolResultText(result);
+  const text = readResultText(result);
   if (!text) return undefined;
   return text.split(/\r\n|\r|\n/u).filter((line, index, lines) => {
     if (index === lines.length - 1 && line === '') return false;
     return true;
   }).length;
+}
+
+const READ_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+]);
+const READ_IMAGE_MAX_BASE64 = 5 * 1024 * 1024;
+
+function readResultText(value: unknown): string | undefined {
+  const content =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as ToolRecord).content
+      : value;
+  if (!Array.isArray(content)) return normalizeToolResultText(value);
+  const textBlocks = content.filter(
+    (part) =>
+      part !== null &&
+      typeof part === 'object' &&
+      !Array.isArray(part) &&
+      (part as ToolRecord).type === 'text' &&
+      typeof (part as ToolRecord).text === 'string',
+  );
+  return textBlocks.length
+    ? normalizeToolResultText({ content: textBlocks })
+    : undefined;
+}
+
+function readResultImages(value: unknown): Array<{
+  key: string;
+  mimeType: string;
+  data?: string;
+  reference?: { entryId: string; imageIndex: number };
+}> {
+  const content =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as ToolRecord).content
+      : value;
+  if (!Array.isArray(content)) return [];
+  const imageCounts = new Map<string, number>();
+  return content.flatMap((part) => {
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return [];
+    const image = part as ToolRecord;
+    const source =
+      image.source && typeof image.source === 'object'
+        ? (image.source as ToolRecord)
+        : undefined;
+    const mimeType =
+      typeof image.mimeType === 'string'
+        ? image.mimeType
+        : typeof source?.media_type === 'string'
+          ? source.media_type
+          : source?.mediaType;
+    if (
+      image.type !== 'image' ||
+      typeof mimeType !== 'string' ||
+      !READ_IMAGE_TYPES.has(mimeType)
+    )
+      return [];
+    const reference = image.sessionImageRef;
+    const entryId =
+      reference && typeof reference === 'object'
+        ? (reference as ToolRecord).entryId
+        : undefined;
+    const imageIndex =
+      reference && typeof reference === 'object'
+        ? (reference as ToolRecord).imageIndex
+        : undefined;
+    const safeReference =
+      typeof entryId === 'string' &&
+      Number.isInteger(imageIndex) &&
+      (imageIndex as number) >= 0 &&
+      (imageIndex as number) <= 3
+        ? { entryId, imageIndex: imageIndex as number }
+        : undefined;
+    const validData =
+      typeof image.data === 'string' &&
+      image.data.length > 0 &&
+      image.data.length <= READ_IMAGE_MAX_BASE64 &&
+      image.data.length % 4 === 0 &&
+      /^[A-Za-z0-9+/]*={0,2}$/u.test(image.data)
+        ? image.data
+        : undefined;
+    if (!validData && !safeReference) return [];
+    const occurrence = imageCounts.get(mimeType) ?? 0;
+    imageCounts.set(mimeType, occurrence + 1);
+    return [
+      {
+        key: `${mimeType}-${occurrence}`,
+        mimeType,
+        ...(validData ? { data: validData } : {}),
+        ...(safeReference ? { reference: safeReference } : {}),
+      },
+    ];
+  });
 }
 
 function resultExitCode(value: unknown): number | undefined {
@@ -407,12 +506,80 @@ function resultExitCode(value: unknown): number | undefined {
     : undefined;
 }
 
+function ReadResultImage({
+  image,
+  path,
+  sessionId,
+}: {
+  image: ReturnType<typeof readResultImages>[number];
+  path: string;
+  sessionId?: string;
+}) {
+  const [source, setSource] = useState<string>();
+  const [failed, setFailed] = useState(false);
+  const entryId = image.reference?.entryId;
+  const imageIndex = image.reference?.imageIndex;
+  useEffect(() => {
+    setSource(undefined);
+    setFailed(false);
+    if (image.data) {
+      setSource(`data:${image.mimeType};base64,${image.data}`);
+      return;
+    }
+    if (!sessionId || !entryId || imageIndex === undefined) {
+      setFailed(true);
+      return;
+    }
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    void dashboardHttpClient
+      .sessionImage(sessionId, entryId, imageIndex, {
+        signal: controller.signal,
+      })
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSource(objectUrl);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(true);
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [entryId, image.data, imageIndex, image.mimeType, sessionId]);
+  return source ? (
+    <img
+      className="tool-read-image"
+      src={source}
+      alt={path.split('/').filter(Boolean).at(-1) ?? path}
+      onError={(event) => {
+        if (event.currentTarget.src.startsWith('blob:'))
+          URL.revokeObjectURL(event.currentTarget.src);
+        setSource(undefined);
+        setFailed(true);
+      }}
+    />
+  ) : failed ? (
+    <span className="tool-read-image-status" role="status">
+      Image preview unavailable.
+    </span>
+  ) : image.reference ? (
+    <span className="tool-read-image-status" role="status">
+      Loading image preview…
+    </span>
+  ) : null;
+}
+
 export function SpecializedToolInspector({
   tool,
   kind,
+  sessionId,
 }: {
   tool: ToolRecord;
   kind: SpecializedToolKind;
+  sessionId?: string;
 }) {
   const path = toolPath(tool);
   const args = toolArguments(tool);
@@ -531,8 +698,9 @@ export function SpecializedToolInspector({
   if (kind === 'read' && path) {
     const language = toolPreviewLanguage(path);
     const lineCount = readLineCount(tool.result);
-    const resultText = normalizeToolResultText(tool.result);
+    const resultText = readResultText(tool.result);
     const bounded = resultText ? boundedSpecializedText(resultText) : undefined;
+    const images = readResultImages(tool.result);
     return (
       <section
         className="payload-section tool-specialized tool-read-presentation"
@@ -549,6 +717,14 @@ export function SpecializedToolInspector({
             <HighlightedLine language={language} value={bounded.text} />
           </pre>
         ) : null}
+        {images.map((image) => (
+          <ReadResultImage
+            image={image}
+            key={image.key}
+            path={path}
+            sessionId={sessionId}
+          />
+        ))}
         {bounded ? (
           <PreviewTruncation
             label="Result"
