@@ -115,7 +115,7 @@
 .modelPreference {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: center;
   gap: 5px;
   border-bottom: 1px solid var(--line-soft);
@@ -155,18 +155,16 @@
   font-size: 10px;
 }
 .modelVisibility {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--dim);
-  font-size: 10px;
-}
-.modelVisibility input {
-  margin: 0;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
 }
 .modelColorControls {
   display: flex;
-  grid-column: 2 / -1;
+  grid-column: 3 / -1;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 4px;

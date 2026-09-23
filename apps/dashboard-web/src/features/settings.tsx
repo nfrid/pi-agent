@@ -605,11 +605,45 @@ function ModelDisplayPreferencesEditor({
           const preference = Object.hasOwn(preferences, key)
             ? preferences[key]
             : {};
+          const hidden = preference.hidden === true;
+          const visibilityLabel = hidden
+            ? `Show ${key} in selectors`
+            : `Hide ${key} from selectors`;
           const selectedColor = preference.color ?? DEFAULT_MODEL_COLOR;
           const setColor = (color: string) =>
             savePreferences(key, (current) => ({ ...current, color }));
           return (
             <div className={styles.modelPreference} key={key}>
+              <button
+                type="button"
+                className={`secondary-button ${styles.modelVisibility}`}
+                aria-label={visibilityLabel}
+                title={visibilityLabel}
+                disabled={controlsDisabled}
+                onClick={() =>
+                  savePreferences(key, (current) => ({
+                    ...current,
+                    hidden: !current.hidden,
+                  }))
+                }
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                  {hidden && <path d="m3 3 18 18" />}
+                </svg>
+              </button>
               <span className={styles.modelPreferenceId} title={key}>
                 {model.name ?? model.model}
                 <small>{model.provider}</small>
@@ -647,22 +681,6 @@ function ModelDisplayPreferencesEditor({
               >
                 Reset
               </button>
-              <label className={styles.modelVisibility}>
-                <input
-                  type="checkbox"
-                  aria-label={`Hide ${key} from selectors`}
-                  checked={preference.hidden === true}
-                  disabled={controlsDisabled}
-                  onChange={(event) => {
-                    const hidden = event.currentTarget.checked;
-                    savePreferences(key, (current) => ({
-                      ...current,
-                      hidden,
-                    }));
-                  }}
-                />
-                Hide from selectors
-              </label>
               <fieldset className={styles.modelColorControls}>
                 <legend className="sr-only">Colors for {key}</legend>
                 {DRACULA_MODEL_COLORS.map((color) => (

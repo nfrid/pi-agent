@@ -220,12 +220,16 @@ test('global and project defaults preserve hidden models and pin draft launch', 
   await expect.poll(() => projectDefault).toBeUndefined();
 
   await drawer.getByText('Model display', { exact: true }).click();
-  const hideModel = drawer.getByRole('checkbox', {
+  const hideModel = drawer.getByRole('button', {
     name: 'Hide openai-codex/gpt-5 from selectors',
   });
   await hideModel.focus();
   await hideModel.press('Space');
-  await expect(hideModel).toBeChecked();
+  await expect(
+    drawer.getByRole('button', {
+      name: 'Show openai-codex/gpt-5 in selectors',
+    }),
+  ).toBeVisible();
   await expect
     .poll(() => preferences['openai-codex/gpt-5'])
     .toEqual({ color: '#ff79c6', hidden: true });
@@ -273,12 +277,16 @@ test('global and project defaults preserve hidden models and pin draft launch', 
     .click();
   const reopened = page.getByRole('dialog', { name: 'Settings' });
   await reopened.getByText('Model display', { exact: true }).click();
-  const hidden = reopened.getByRole('checkbox', {
-    name: 'Hide openai-codex/gpt-5 from selectors',
-  });
-  await expect(hidden).toBeChecked();
-  await hidden.click();
-  await expect(hidden).not.toBeChecked();
+  await reopened
+    .getByRole('button', {
+      name: 'Show openai-codex/gpt-5 in selectors',
+    })
+    .click();
+  await expect(
+    reopened.getByRole('button', {
+      name: 'Hide openai-codex/gpt-5 from selectors',
+    }),
+  ).toBeVisible();
   await expect
     .poll(() => preferences['openai-codex/gpt-5'])
     .toEqual({ color: '#ff79c6', hidden: false });

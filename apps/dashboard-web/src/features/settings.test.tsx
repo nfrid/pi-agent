@@ -292,13 +292,12 @@ describe('settings drawer', () => {
         </QueryClientProvider>,
       );
     });
-    const checkbox = renderer.root.findByProps({
-      'aria-label': `Hide ${key} from selectors`,
+    const visibility = renderer.root.findByProps({
+      'aria-label': `Show ${key} in selectors`,
     });
     const defaultControl = renderer.root.findByProps({
       'aria-label': 'Dashboard model',
     });
-    expect(checkbox.props.checked).toBe(true);
     expect(defaultControl.props.value).toBe(
       modelOptionValue('provider', 'model/with/slash'),
     );
@@ -307,10 +306,8 @@ describe('settings drawer', () => {
         .findAllByType('option')
         .find((option) => option.props.value)?.props.disabled,
     ).toBe(true);
-    const target = { checked: false };
     await act(async () => {
-      checkbox.props.onChange({ currentTarget: target });
-      target.checked = true;
+      visibility.props.onClick();
       await vi.waitFor(() =>
         expect(update).toHaveBeenCalledWith(key, {
           alias: 'Saved',
@@ -318,7 +315,7 @@ describe('settings drawer', () => {
         }),
       );
     });
-    expect(checkbox.props.checked).toBe(false);
+    expect(visibility.props['aria-label']).toBe(`Hide ${key} from selectors`);
     expect(
       defaultControl
         .findAllByType('option')
@@ -358,14 +355,18 @@ describe('settings drawer', () => {
         </QueryClientProvider>,
       );
     });
-    const checkbox = renderer.root.findByProps({
+    const visibility = renderer.root.findByProps({
       'aria-label': 'Hide openai/gpt-5 from selectors',
     });
     await act(async () => {
-      checkbox.props.onChange({ currentTarget: { checked: true } });
+      visibility.props.onClick();
       await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
     });
-    await vi.waitFor(() => expect(checkbox.props.checked).toBe(false));
+    await vi.waitFor(() =>
+      expect(visibility.props['aria-label']).toBe(
+        'Hide openai/gpt-5 from selectors',
+      ),
+    );
     expect(renderer.root.findByProps({ role: 'alert' }).props.children).toBe(
       'Could not save model display settings.',
     );
