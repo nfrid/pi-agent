@@ -49,6 +49,22 @@ function readToolItem(sessionId?: string): TranscriptModelItem {
 }
 
 describe('transcript entries', () => {
+  it('omits empty system messages but keeps system messages with content', () => {
+    const entries = toTranscriptEntries([
+      {
+        type: 'message',
+        message: { role: 'system', content: '' },
+      },
+      {
+        type: 'message',
+        message: { role: 'system', content: 'System context' },
+      },
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.text).toBe('System context');
+  });
+
   it('uses a known title rather than an ID in background tool rows', () => {
     const [item] = toTranscriptEntries([
       {

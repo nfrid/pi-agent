@@ -207,7 +207,15 @@ export function installAuthoritativeTranscript({
   coveredCursor,
   replace = false,
 }: InstallAuthoritativeTranscriptInput): InstallAuthoritativeTranscriptResult {
-  const currentProjection = replace ? undefined : previousProjection;
+  const canPreserveNewerProjection =
+    replace &&
+    previousProjection !== undefined &&
+    response.cursor !== undefined &&
+    previousProjection.lastCursor > response.cursor &&
+    response.serverId === serverId &&
+    previousProjection.runtimeEpoch === response.runtimeEpoch;
+  const currentProjection =
+    replace && !canPreserveNewerProjection ? undefined : previousProjection;
   const baselineRuntimeSeq = response.runtimeSeq;
   let projection = hydrateTranscript(response.entries, response.metadata.id, {
     fallbackEntryIds: true,
@@ -326,6 +334,16 @@ export function installAuthoritativeTranscript({
       const merged = mergePrependedTranscript(currentProjection, projection);
       projection = { ...projection, order: merged.order, items: merged.items };
     }
+  }
+
+  if (
+    replace &&
+    currentProjection &&
+    response.cursor !== undefined &&
+    currentProjection.lastCursor > response.cursor
+  ) {
+    const merged = mergePrependedTranscript(currentProjection, projection);
+    projection = { ...projection, order: merged.order, items: merged.items };
   }
 
   const responsePage = pageCoverage(response, persistedPage);

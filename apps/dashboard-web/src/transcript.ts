@@ -570,6 +570,12 @@ export function toTranscriptEntries(
     }
   }
   for (const item of rendered) {
+    if (
+      item.kind === 'message' &&
+      item.role === 'system' &&
+      messageText(item.content).trim() === ''
+    )
+      continue;
     if (item.kind === 'other') {
       const raw = record(item.raw);
       if (!raw) {
