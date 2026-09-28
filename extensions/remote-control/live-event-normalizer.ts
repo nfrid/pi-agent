@@ -298,11 +298,17 @@ export class LiveEventNormalizer {
     const timestamp =
       directIdentifier(event, 'timestamp') ??
       directIdentifier(message, 'timestamp');
+    const role =
+      directString(message, 'role') ??
+      directString(event, 'role') ??
+      'assistant';
     const identityKey =
       responseId !== undefined
         ? `response:${safeIdentityPart(responseId)}`
         : timestamp !== undefined
-          ? `timestamp:${safeIdentityPart(timestamp)}`
+          ? // System checkpoints and user prompts can share a millisecond.
+            // A finished system row must not consume the user's lifecycle ID.
+            `timestamp:${safeIdentityPart(role)}:${safeIdentityPart(timestamp)}`
           : undefined;
 
     let messageId: string;
@@ -327,10 +333,6 @@ export class LiveEventNormalizer {
         : `${this.runtimeEpoch}:${++this.identitySequence}`;
     }
 
-    const role =
-      directString(message, 'role') ??
-      directString(event, 'role') ??
-      'assistant';
     const stopReason =
       directString(message, 'stopReason') ??
       directString(event, 'stopReason') ??
