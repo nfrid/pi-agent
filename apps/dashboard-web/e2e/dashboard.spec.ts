@@ -2519,6 +2519,95 @@ test('session shell shows compaction progress', async ({ page }) => {
     });
 });
 
+test('image prompt appears once when persisted history overlaps live state after reload', async ({
+  page,
+}) => {
+  const session = {
+    id: 'image-overlap',
+    file: '',
+    cwd: '/tmp',
+    title: 'Image overlap',
+    updatedAt: 1,
+  };
+  const content = [
+    { type: 'text', text: 'Inspect these two screenshots' },
+    { type: 'image', mimeType: 'image/png', omitted: true },
+    { type: 'image', mimeType: 'image/png', omitted: true },
+  ];
+  await installDashboardBootstrap(
+    page,
+    {
+      serverId: 'image-server',
+      revision: 1,
+      cursor: 4,
+      runtimes: [],
+      workspaces: [],
+      sessions: [session],
+      unread: [],
+    },
+    {
+      sessionSnapshot: {
+        serverId: 'image-server',
+        cursor: 4,
+        entriesComplete: true,
+        entries: [
+          {
+            type: 'message',
+            id: 'saved-image-prompt',
+            message: {
+              role: 'user',
+              timestamp: 123,
+              content: content.map((part, index) =>
+                part.type === 'image'
+                  ? {
+                      ...part,
+                      sessionImageRef: {
+                        entryId: 'saved-image-prompt',
+                        imageIndex: index - 1,
+                      },
+                    }
+                  : part,
+              ),
+            },
+          },
+        ],
+        active: {
+          messages: [
+            {
+              messageId: 'live-image-prompt',
+              role: 'user',
+              timestamp: 123,
+              content,
+            },
+          ],
+          tools: [],
+          delegates: [],
+          truncated: false,
+        },
+        completeThroughCursor: false,
+      },
+    },
+  );
+  await page.route('**/api/sessions/image-overlap/images/**', (route) =>
+    route.fulfill({
+      contentType: 'image/png',
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    }),
+  );
+  await page.goto('/sessions/image-overlap');
+  const prompt = page
+    .locator('.transcript')
+    .getByText('Inspect these two screenshots', { exact: true });
+  await expect(prompt).toHaveCount(1);
+  await expect(prompt).toBeVisible();
+  await page.reload();
+  await expect(prompt).toHaveCount(1);
+  await expect(prompt).toBeVisible();
+});
+
 test('older active transcript events render before newer persisted history', async ({
   page,
 }) => {

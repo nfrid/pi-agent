@@ -583,6 +583,12 @@ function messageContentKey(value: unknown): string | undefined {
     if (input && typeof input === 'object')
       return Object.fromEntries(
         Object.entries(input as Record<string, unknown>)
+          // History adds lookup references absent from the same live image.
+          .filter(
+            ([key]) =>
+              key !== 'sessionImageRef' ||
+              (input as Record<string, unknown>).type !== 'image',
+          )
           .sort(([left], [right]) => left.localeCompare(right))
           .map(([key, item]) => [key, normalize(item)]),
       );

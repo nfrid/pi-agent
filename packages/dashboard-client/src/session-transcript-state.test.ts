@@ -1,12 +1,15 @@
 import { hydrateTranscript } from '@pi-dashboard/domain';
-import type {
-  AuthoritativeSessionSnapshot,
-  DashboardEventEnvelope,
+import {
+  type AuthoritativeSessionSnapshot,
+  type DashboardEventEnvelope,
+  redactImageData,
+  redactSessionEntryImages,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   classifyHistoryPageWatermark,
   installAuthoritativeTranscript,
+  type LiveMessageIdentity,
   mergeLatestTranscript,
   mergePrependedTranscript,
   persistedMessageIdForLive,
@@ -88,6 +91,55 @@ describe('session transcript state', () => {
     expect(installed.projection.order).toEqual([
       'persisted-first-user-message',
     ]);
+  });
+
+  it('renders an image prompt once when history and active messages overlap on reload', () => {
+    const content = [
+      { type: 'text', text: 'Inspect these images' },
+      { type: 'image', mimeType: 'image/png', data: 'first-image' },
+      { type: 'image', mimeType: 'image/png', data: 'second-image' },
+    ];
+    const message = { role: 'user', content, timestamp: 123 };
+    const entry = redactSessionEntryImages({
+      type: 'message',
+      id: 'persisted-user',
+      message,
+    });
+    const live = redactImageData({
+      ...message,
+      messageId: 'live-user',
+    }) as LiveMessageIdentity;
+    const installed = installAuthoritativeTranscript({
+      response: {
+        metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+        entries: [entry],
+        entriesComplete: true,
+        cursor: 4,
+        active: { messages: [live], tools: [] },
+      } as unknown as AuthoritativeSessionSnapshot,
+      generation: 1,
+      coveredCursor: 4,
+    });
+    expect(installed.projection.order).toEqual(['persisted-user']);
+    expect(installed.projection.items['persisted-user']).toMatchObject({
+      content: [
+        { type: 'text', text: 'Inspect these images' },
+        { sessionImageRef: { entryId: 'persisted-user', imageIndex: 0 } },
+        { sessionImageRef: { entryId: 'persisted-user', imageIndex: 1 } },
+      ],
+    });
+    expect(
+      persistedMessageIdForLive(installed.projection, {
+        ...live,
+        timestamp: 124,
+      }),
+    ).toBeUndefined();
+    expect(
+      persistedMessageIdForLive(installed.projection, {
+        ...live,
+        content: [{ type: 'text', text: 'A different prompt' }],
+      }),
+    ).toBeUndefined();
   });
 
   it('keeps the latest live update when a snapshot reuses its message ID', () => {
