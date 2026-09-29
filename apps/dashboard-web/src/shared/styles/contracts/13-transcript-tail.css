@@ -6,16 +6,85 @@
 }
 .tool-detail > summary.tool-step {
   display: grid;
-  grid-template-columns: 14px minmax(0, max-content) minmax(0, 1fr) auto;
+  grid-template-columns: 14px minmax(0, max-content) minmax(0, 1fr) auto auto;
+  column-gap: 4px;
   align-items: center;
   min-width: 0;
   padding: 8px 0;
 }
+.tool-detail > summary.tool-step .tool-step-dot {
+  grid-column: 1;
+  grid-row: 1;
+}
+.tool-detail > summary.tool-step .tool-name {
+  grid-column: 2;
+  grid-row: 1;
+}
+.tool-detail > summary.tool-step .tool-step-meta {
+  grid-column: 4;
+  grid-row: 1;
+  white-space: nowrap;
+}
+.tool-detail > summary.tool-step .tool-step-time {
+  grid-column: 5;
+  grid-row: 1;
+  white-space: nowrap;
+}
 .tool-detail > summary.tool-step .tool-argument {
+  grid-column: 3;
+  grid-row: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.codemode-group,
+.codemode-nested-call {
+  min-width: 0;
+}
+.codemode-children {
+  min-width: 0;
+  margin-inline-start: 7px;
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid var(--line-soft);
+}
+.codemode-script {
+  min-width: 0;
+  margin: 0 0 8px 20px;
+}
+.codemode-script-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--dim);
+}
+.codemode-script-controls button {
+  border: 0;
+  padding: 3px 5px;
+  background: transparent;
+  color: var(--cyan);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.codemode-script pre,
+.codemode-output pre {
+  max-height: 28rem;
+  margin: 6px 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.codemode-output {
+  min-width: 0;
+  margin: 4px 0 8px 20px;
+}
+.codemode-output > summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 10px;
 }
 .transcript-entry > summary {
   display: flex;

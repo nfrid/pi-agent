@@ -1,6 +1,9 @@
 import { activityPhases } from '@pi-dashboard/activity-model';
 import { useId } from 'react';
-import type { TranscriptModelItem } from '../../transcript';
+import {
+  type TranscriptModelItem,
+  transcriptToolItems,
+} from '../../transcript';
 import {
   toolStreamDurationLabel,
   toolStreamMetadata,
@@ -69,7 +72,7 @@ export function TranscriptToolStream({
 }) {
   const first = items[0];
   const streamKey = first?.key ?? 'tool-stream';
-  const tools = items.flatMap((item) => {
+  const tools = items.flatMap(transcriptToolItems).flatMap((item) => {
     const tool = toolDescriptor(item);
     return tool ? [tool] : [];
   });

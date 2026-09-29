@@ -32,6 +32,11 @@ export function sourceTruncated(
   tool: Record<string, unknown>,
   field: string,
 ): boolean {
+  if (
+    Array.isArray(tool.sourceTruncated) &&
+    tool.sourceTruncated.includes(field)
+  )
+    return true;
   const data = tool.data;
   return (
     typeof data === 'object' &&

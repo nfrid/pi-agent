@@ -1,15 +1,21 @@
+import { toolBaseName } from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { SessionBranchPoint } from '@pi-dashboard/protocol';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { copyText, Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
-import type { TranscriptModelItem } from '../../transcript';
+import {
+  type TranscriptModelItem,
+  transcriptToolItems,
+} from '../../transcript';
 import {
   type ActivityStepParts,
   activityStepParts,
   commandStepMeta,
+  toolStreamDurationLabel,
 } from './activity';
+import { CodemodeOutput, CodemodeScript } from './codemode';
 import { TranscriptDisclosureIcon } from './disclosure-icon';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
@@ -673,11 +679,15 @@ function ToolDetail({
   cwd,
   sessionId,
   timestamp,
+  children,
+  nestedCallCount = 0,
 }: {
   tool: NonNullable<TranscriptModelItem['tool']>;
   cwd?: string;
   sessionId?: string;
   timestamp?: number | string;
+  children?: ReactNode;
+  nestedCallCount?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const action = activityStepParts(
@@ -706,8 +716,18 @@ function ToolDetail({
       : tool.arguments === undefined && typeof tool.argumentChars === 'number'
         ? `${formatCompactCount(tool.argumentChars)} chars received`
         : undefined;
-  const meta = executionMeta ?? argumentProgressMeta;
-  return (
+  const codemode = toolBaseName(tool.name) === 'codemode';
+  const meta = codemode
+    ? [
+        `${nestedCallCount} call${nestedCallCount === 1 ? '' : 's'}`,
+        tool.durationMs === undefined
+          ? undefined
+          : toolStreamDurationLabel(tool.durationMs),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : (executionMeta ?? argumentProgressMeta);
+  const detail = (
     <details
       className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
       onToggle={(event) => setExpanded(event.currentTarget.open)}
@@ -719,8 +739,25 @@ function ToolDetail({
           timestamp={timestamp}
         />
       </summary>
-      {expanded ? <ToolInspector tool={tool} sessionId={sessionId} /> : null}
+      {expanded ? (
+        codemode ? (
+          <CodemodeScript tool={tool} />
+        ) : (
+          <ToolInspector tool={tool} sessionId={sessionId} />
+        )
+      ) : null}
     </details>
+  );
+  if (!codemode && !children) return detail;
+  return (
+    <section
+      className={codemode ? 'codemode-group' : 'codemode-nested-call'}
+      aria-label={codemode ? 'Codemode execution' : undefined}
+    >
+      {detail}
+      {children ? <div className="codemode-children">{children}</div> : null}
+      {codemode ? <CodemodeOutput tool={tool} /> : null}
+    </section>
   );
 }
 
@@ -837,7 +874,20 @@ function TranscriptEntry({
         cwd={cwd}
         sessionId={item.sessionId}
         timestamp={timestamp}
-      />
+        nestedCallCount={
+          (item.toolChildren ?? []).flatMap(transcriptToolItems).length
+        }
+      >
+        {item.toolChildren?.map((child) => (
+          <div key={child.key} data-transcript-key={child.key}>
+            <TranscriptEntry
+              item={child}
+              cwd={cwd}
+              timestampOverride={timestamp}
+            />
+          </div>
+        ))}
+      </ToolDetail>
     );
   const raw = item.raw;
   return (

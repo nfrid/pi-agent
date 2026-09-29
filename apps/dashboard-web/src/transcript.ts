@@ -82,6 +82,8 @@ export interface TranscriptModelItem {
   event?: TranscriptEvent;
   /** Canonical domain tool semantics used by the inspector presentation. */
   tool?: TranscriptRenderToolItem & { backgroundTitle?: string };
+  /** Nested calls grouped only within a codemode execution. */
+  toolChildren?: readonly TranscriptModelItem[];
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
   /** Presentation-ready native assistant failure detail. */
@@ -788,6 +790,54 @@ export function toTranscriptEntries(
   return hidden
     ? result.filter((_, index) => index < hidden.start || index > hidden.end)
     : result;
+}
+
+/** Group before activity streams/virtual rows; leave orphan and unrelated calls visible. */
+export function groupCodemodeCalls(
+  items: readonly TranscriptModelItem[],
+): TranscriptModelItem[] {
+  const tools = new Map(
+    items.flatMap((item) =>
+      item.tool ? [[item.tool.toolCallId, item] as const] : [],
+    ),
+  );
+  const children = new Map<string, TranscriptModelItem[]>();
+  const nested = new Set<string>();
+  for (const item of items) {
+    const tool = item.tool;
+    if (!tool?.parentToolCallId) continue;
+    const seen = new Set([tool.toolCallId]);
+    let parent = tools.get(tool.parentToolCallId);
+    let insideCodemode = false;
+    while (parent?.tool && !seen.has(parent.tool.toolCallId)) {
+      seen.add(parent.tool.toolCallId);
+      insideCodemode ||= toolBaseName(parent.tool.name) === 'codemode';
+      parent = parent.tool.parentToolCallId
+        ? tools.get(parent.tool.parentToolCallId)
+        : undefined;
+    }
+    if (insideCodemode && !parent?.tool) {
+      const siblings = children.get(tool.parentToolCallId) ?? [];
+      siblings.push(item);
+      children.set(tool.parentToolCallId, siblings);
+      nested.add(tool.toolCallId);
+    }
+  }
+  const attach = (item: TranscriptModelItem): TranscriptModelItem => {
+    const calls = item.tool ? children.get(item.tool.toolCallId) : undefined;
+    return calls ? { ...item, toolChildren: calls.map(attach) } : item;
+  };
+  return items
+    .filter((item) => !item.tool || !nested.has(item.tool.toolCallId))
+    .map(attach);
+}
+
+export function transcriptToolItems(
+  item: TranscriptModelItem,
+): TranscriptModelItem[] {
+  return item.tool
+    ? [item, ...(item.toolChildren ?? []).flatMap(transcriptToolItems)]
+    : [];
 }
 
 /** Compatibility helper retained for consumers with raw tool entries. */

@@ -6154,6 +6154,303 @@ test('codemode nested calls restore their status and failure summary @desktop', 
 });
 
 for (const desktop of [false, true]) {
+  test(`codemode groups calls, formats source and keeps timestamps aligned${desktop ? ' @desktop' : ''}`, async ({
+    page,
+    context,
+  }) => {
+    const code =
+      'globalThis.__codemodePreviewExecuted=true;const result=await tools.read({path:"index.ts"});text(result.text);';
+    const stamp = '2026-09-30T13:11:00.000Z';
+    const description =
+      'Inspect a very long command description without moving the timestamp onto another line '.repeat(
+        3,
+      );
+    await installPhase6Mocks(page, {
+      entries: [
+        {
+          type: 'message',
+          message: {
+            role: 'assistant',
+            timestamp: stamp,
+            content: [
+              {
+                type: 'toolCall',
+                id: 'grouped',
+                name: 'codemode',
+                arguments: { code },
+              },
+            ],
+          },
+        },
+        {
+          type: 'message',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'grouped',
+            toolName: 'codemode',
+            isError: false,
+            content: [{ type: 'text', text: 'Selected script output' }],
+            nestedCalls: {
+              complete: true,
+              calls: [
+                {
+                  id: 'grouped/1',
+                  name: 'bash',
+                  arguments: {
+                    description,
+                    command: 'printf very-long-command-argument'.repeat(12),
+                  },
+                  status: 'error',
+                  error: 'Caught child failure',
+                  durationMs: 5,
+                },
+                {
+                  id: 'grouped/2',
+                  name: 'todo_list',
+                  arguments: {},
+                  status: 'ok',
+                },
+                {
+                  id: 'grouped/3',
+                  name: 'read',
+                  arguments: {
+                    path: `${'a-long-directory/'.repeat(12)}file.ts`,
+                  },
+                  status: 'ok',
+                },
+              ],
+            },
+          },
+        },
+        {
+          type: 'message',
+          message: {
+            role: 'assistant',
+            timestamp: stamp,
+            content: [
+              {
+                type: 'toolCall',
+                id: 'invalid',
+                name: 'codemode',
+                arguments: { code: 'const broken =' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    if (desktop) await page.setViewportSize({ width: 960, height: 760 });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/sessions/s1');
+    const group = page
+      .getByRole('region', { name: 'Codemode execution' })
+      .first();
+    await expect(page.locator('.tool-detail')).toHaveCount(5);
+    await expect(group.locator('.codemode-children .tool-detail')).toHaveCount(
+      3,
+    );
+    const root = group.locator(':scope > .tool-detail');
+    await expect(root).toHaveClass(/step-complete/);
+    await expect(root.locator('.tool-step-meta')).toHaveText('3 calls');
+    const geometry = await group
+      .locator('.codemode-children summary.tool-step')
+      .evaluateAll((rows) =>
+        rows.map((row) => {
+          const time = row
+            .querySelector('.tool-step-time')
+            ?.getBoundingClientRect();
+          const dot = row
+            .querySelector('.tool-step-dot')
+            ?.getBoundingClientRect();
+          const content = Array.from(
+            row.querySelectorAll('.tool-name, .tool-argument, .tool-step-meta'),
+          ).map((node) => node.getBoundingClientRect());
+          if (!time || !dot) throw new Error('Missing tool timestamp');
+          return {
+            sameRow:
+              Math.abs(
+                (time.top + time.bottom) / 2 - (dot.top + dot.bottom) / 2,
+              ) < 2,
+            noOverlap: content.every(
+              (rect) => rect.width === 0 || rect.right <= time.left + 1,
+            ),
+            rightAligned:
+              Math.abs(time.right - row.getBoundingClientRect().right) < 2,
+          };
+        }),
+      );
+    expect(geometry).toHaveLength(3);
+    expect(
+      geometry.every((row) => row.sameRow && row.noOverlap && row.rightAligned),
+    ).toBe(true);
+    await root.locator('summary').click();
+    const script = root.getByRole('region', { name: 'Codemode script' });
+    await expect(script.getByText('Formatted for display')).toBeVisible();
+    expect(await script.locator('pre').innerText()).toContain('\n');
+    await expect(script.locator('.hljs-keyword').first()).toBeVisible();
+    await script.getByRole('button', { name: 'Copy original code' }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      code,
+    );
+    expect(
+      await page.evaluate(() => '__codemodePreviewExecuted' in globalThis),
+    ).toBe(false);
+    await root.locator('summary').click();
+    await expect(
+      group.locator('.codemode-children summary.tool-step').first(),
+    ).toBeVisible();
+    await group.locator('.codemode-output > summary').click();
+    await expect(
+      group.getByRole('region', { name: 'Script output' }),
+    ).toHaveText('Selected script output');
+    const invalid = page
+      .getByRole('region', { name: 'Codemode execution' })
+      .nth(1);
+    await invalid.locator(':scope > .tool-detail > summary').click();
+    await expect(invalid.getByText('Original source')).toBeVisible();
+    await expect(invalid.locator('.codemode-script pre')).toHaveText(
+      'const broken =',
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  });
+}
+
+test('codemode groups live calls and restores the same hierarchy on reconnect @desktop', async ({
+  page,
+}) => {
+  const entries = [
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'live-code',
+            name: 'codemode',
+            arguments: {
+              code: 'try { await tools.bash({command:"inspect"}) } catch {}',
+            },
+          },
+        ],
+      },
+    },
+  ];
+  const mocks = await installPhase6Mocks(page, { entries });
+  await page.goto('/sessions/s1');
+  const group = page.getByRole('region', { name: 'Codemode execution' });
+  await expect(group).toBeVisible();
+  await page.waitForFunction(
+    () =>
+      (
+        window as unknown as { phase6Stream: { session(): unknown } }
+      ).phase6Stream.session() !== undefined,
+  );
+  const tool = {
+    toolCallId: 'live-code/1',
+    parentToolCallId: 'live-code',
+    name: 'bash',
+    arguments: { command: 'inspect', description: 'Inspect live child' },
+    timestamp: Date.parse('2026-09-30T13:11:00Z'),
+  };
+  await mocks.emit({
+    event: {
+      type: 'tool.started',
+      sessionId: 's1',
+      tool: { ...tool, phase: 'started' },
+    },
+  });
+  await expect(group.locator('.codemode-children .tool-detail')).toHaveCount(1);
+  await expect(group.locator('.codemode-children .tool-detail')).toHaveClass(
+    /step-pending/,
+  );
+  await mocks.emit({
+    event: {
+      type: 'tool.finished',
+      sessionId: 's1',
+      tool: {
+        ...tool,
+        phase: 'finished',
+        isError: true,
+        errorMessage: 'Expected child failure',
+        result: { content: [{ type: 'text', text: 'Observed child failure' }] },
+      },
+    },
+  });
+  const result = {
+    content: [{ type: 'text', text: 'Script caught the error' }],
+    nestedCalls: {
+      complete: true,
+      calls: [
+        {
+          id: 'live-code/1',
+          name: 'bash',
+          arguments: tool.arguments,
+          status: 'error',
+          error: 'Expected child failure',
+          durationMs: 5,
+        },
+      ],
+    },
+  };
+  await mocks.emit({
+    event: {
+      type: 'tool.finished',
+      sessionId: 's1',
+      tool: {
+        toolCallId: 'live-code',
+        name: 'codemode',
+        phase: 'finished',
+        isError: false,
+        result,
+      },
+    },
+  });
+  await expect(group.locator(':scope > .tool-detail')).toHaveClass(
+    /step-complete/,
+  );
+  await expect(page.locator('.tool-detail')).toHaveCount(2);
+  await group.locator('.codemode-children summary').click();
+  await expect(
+    group.getByText('Observed child failure', { exact: true }),
+  ).toBeVisible();
+  const streams = await mocks.streamCount();
+  await mocks.close();
+  await expect.poll(mocks.streamCount).toBeGreaterThan(streams);
+  await mocks.emit({
+    type: 'session-snapshot',
+    entries: [
+      ...entries,
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'live-code',
+          toolName: 'codemode',
+          isError: false,
+          ...result,
+        },
+      },
+    ],
+  });
+  await expect(page.locator('.tool-detail')).toHaveCount(2);
+  await expect(group.locator('.codemode-children .tool-detail')).toHaveCount(1);
+  await expect(group.locator(':scope > .tool-detail')).toHaveClass(
+    /step-complete/,
+  );
+  const child = group.locator('.codemode-children .tool-detail');
+  if ((await child.getAttribute('open')) === null)
+    await child.locator('summary').click();
+  await expect(
+    child.getByText('Expected child failure', { exact: true }),
+  ).toBeVisible();
+});
+
+for (const desktop of [false, true]) {
   test(`reasoning paragraphs wrap around their timestamp${desktop ? ' @desktop' : ''}`, async ({
     page,
   }) => {

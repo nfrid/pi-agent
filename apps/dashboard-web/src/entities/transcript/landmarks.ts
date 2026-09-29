@@ -40,7 +40,11 @@ export function transcriptItemTimestamp(
     raw?.data && typeof raw.data === 'object'
       ? (raw.data as Record<string, unknown>)
       : undefined;
-  const timestamp = message?.timestamp ?? raw?.timestamp ?? data?.timestamp;
+  const timestamp =
+    item.tool?.timestamp ??
+    message?.timestamp ??
+    raw?.timestamp ??
+    data?.timestamp;
   return typeof timestamp === 'number' || typeof timestamp === 'string'
     ? timestamp
     : undefined;

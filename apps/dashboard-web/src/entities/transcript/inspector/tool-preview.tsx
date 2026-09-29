@@ -182,7 +182,7 @@ function highlightedMarkup(value: string, language: string): string {
   return hljs.highlight(value, { language, ignoreIllegals: true }).value;
 }
 
-function HighlightedLine({
+export function HighlightedLine({
   value,
   language,
   continuationIndent = false,
@@ -330,7 +330,7 @@ function ReplacementPreview({
   );
 }
 
-function normalizedResultText(
+export function normalizedResultText(
   value: unknown,
 ): NormalizedResultText | undefined {
   const work: ResultTextWork[] = [{ value, depth: 0 }];

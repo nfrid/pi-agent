@@ -17,6 +17,7 @@ import {
 import { FileLinkContext } from '../../../features/file-viewer/link-context';
 import { useTranscriptPreviewPreference } from '../../../shared/lib/transcript-display';
 import {
+  groupCodemodeCalls,
   type TranscriptModelItem,
   toTranscriptEntries,
 } from '../../../transcript';
@@ -101,9 +102,9 @@ function TranscriptContent({
   const input = projection ?? entries ?? [];
   const items = useMemo(
     () =>
-      modelItems
-        ? [...modelItems]
-        : toTranscriptEntries(input, { leadingContinuation }),
+      groupCodemodeCalls(
+        modelItems ?? toTranscriptEntries(input, { leadingContinuation }),
+      ),
     [input, leadingContinuation, modelItems],
   );
   const toolStreams = useMemo(() => buildTranscriptToolStreams(items), [items]);
