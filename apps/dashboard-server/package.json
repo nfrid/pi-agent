@@ -27,7 +27,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-coding-agent": "0.99.1",
     "@pi-agent/background-jobs": "workspace:*",
     "@pi-agent/session-title": "workspace:*",
     "@pi-dashboard/activity-model": "workspace:*",

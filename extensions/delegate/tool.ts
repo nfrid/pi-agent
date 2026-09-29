@@ -631,7 +631,6 @@ function registerDelegateSurface(
         if (!backgroundRuntime)
           throw new Error('Background delegate runtime is unavailable.');
         const materializeHandoff = async (
-          _materializeCtx: typeof ctx,
           runs: import('./types').DelegatedRun[],
           statusId?: string,
         ) => {
@@ -697,14 +696,14 @@ function registerDelegateSurface(
                     const run = runs[0];
                     if (run && statusIds?.[index])
                       activeStatuses?.update(statusIds[index], run);
-                    return materializeHandoff(ctx, runs, statusIds?.[index]);
+                    return materializeHandoff(runs, statusIds?.[index]);
                   } finally {
                     if (detachSignal?.aborted) control.detach();
                     else control.close();
                   }
                 },
-                materialize: (materializeCtx, runs) =>
-                  materializeHandoff(materializeCtx, runs, statusIds?.[index]),
+                materialize: (_materializeCtx, runs) =>
+                  materializeHandoff(runs, statusIds?.[index]),
               };
             }),
           );

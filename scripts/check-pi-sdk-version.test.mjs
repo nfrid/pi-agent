@@ -34,13 +34,13 @@ const SERVER_MANIFEST = JSON.parse(
 describe('Pi SDK version validation', () => {
   it('keeps the guard aligned with the actual manifests and sync script', () => {
     expect(ROOT_MANIFEST.dependencies).toMatchObject({
-      '@earendil-works/pi-ai': '0.87.1',
-      '@earendil-works/pi-coding-agent': '0.87.1',
-      '@earendil-works/pi-tui': '0.87.1',
+      '@earendil-works/pi-ai': '0.99.1',
+      '@earendil-works/pi-coding-agent': '0.99.1',
+      '@earendil-works/pi-tui': '0.99.1',
       typebox: PI_SDK_TYPEBOX_VERSION,
     });
     expect(SERVER_MANIFEST.dependencies).toMatchObject({
-      '@earendil-works/pi-coding-agent': '0.87.1',
+      '@earendil-works/pi-coding-agent': '0.99.1',
       typebox: PI_SDK_TYPEBOX_VERSION,
     });
     expect(ROOT_MANIFEST.scripts['pi:sdk-sync']).toContain(

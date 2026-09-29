@@ -153,6 +153,7 @@ test('extension blocks built-in and dynamic tool calls before execution', () => 
   const tools: ReturnType<ExtensionAPI['getAllTools']> = [
     {
       name: 'bash',
+      exposure: 'direct',
       description: 'Run a command',
       parameters: Type.Object({ command: Type.String() }),
       promptGuidelines: [],
@@ -190,6 +191,7 @@ test('extension blocks built-in and dynamic tool calls before execution', () => 
 
   tools.push({
     name: 'custom_search',
+    exposure: 'direct',
     description: 'Search a custom source',
     parameters: Type.Object({ query: Type.String() }),
     promptGuidelines: [],
