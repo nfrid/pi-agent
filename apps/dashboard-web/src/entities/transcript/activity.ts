@@ -74,7 +74,11 @@ function formatCommandDuration(milliseconds: number): string {
 
 /** Compact exit code and duration badges for collapsed command steps. */
 export function commandStepMeta(
-  tool: ActivityStepTool & { result?: unknown; data?: unknown },
+  tool: ActivityStepTool & {
+    result?: unknown;
+    data?: unknown;
+    durationMs?: number;
+  },
 ): string | undefined {
   const name = toolBaseName(tool.name);
   if (
@@ -91,6 +95,7 @@ export function commandStepMeta(
   if (typeof exitCode === 'number' && Number.isFinite(exitCode))
     parts.push(`exit ${exitCode}`);
   const durationMs =
+    tool.durationMs ??
     (typeof data?.durationMs === 'number' && Number.isFinite(data.durationMs)
       ? data.durationMs
       : undefined) ??

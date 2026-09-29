@@ -2,9 +2,11 @@ import { access, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import {
   createReadToolDefinition,
   type ExtensionAPI,
+  type ReadToolDetails,
 } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { cropRasterImage, IMAGE_CROP_LIMITS, type ImageCrop } from './crop.js';
@@ -45,6 +47,33 @@ const readSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const readOutputSchema = Type.Object({
+  text: Type.String(),
+  images: Type.Array(
+    Type.Object({
+      type: Type.Literal('image'),
+      data: Type.String(),
+      mimeType: Type.String(),
+    }),
+  ),
+});
+
+function readOutput(content: readonly (TextContent | ImageContent)[]) {
+  return {
+    text: content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n'),
+    images: content
+      .filter((block) => block.type === 'image')
+      .map(({ data, mimeType }) => ({
+        type: 'image' as const,
+        data,
+        mimeType,
+      })),
+  };
+}
+
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const DESCRIPTION = `Read the contents of a file. Supports text files and raster images (jpg, png, gif, webp, bmp). Images are sent as attachments. For images, crop selects an exact source-pixel region and reports source/returned dimensions; crops are limited to ${IMAGE_CROP_LIMITS.maxCropDimension}x${IMAGE_CROP_LIMITS.maxCropDimension} and ${IMAGE_CROP_LIMITS.maxCropPixels.toLocaleString('en-US')} pixels. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files.`;
 
@@ -84,17 +113,39 @@ async function resolveReadPath(path: string, cwd: string): Promise<string> {
   return resolved;
 }
 
+type ReadDetails = ReadToolDetails & {
+  crop?: ImageCrop;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  returnedWidth?: number;
+  returnedHeight?: number;
+};
+
 export default function imageReadExtension(pi: ExtensionAPI): void {
-  pi.registerTool({
+  const nativeRead = createReadToolDefinition('');
+  pi.registerTool<typeof readSchema, ReadDetails | undefined>({
+    ...nativeRead,
     name: 'read',
     label: 'read',
     description: DESCRIPTION,
     promptSnippet: 'Read file contents or an exact raster-image crop',
     parameters: readSchema,
+    outputSchema: readOutputSchema,
+    promptGuidelines: [
+      ...(nativeRead.promptGuidelines ?? []),
+      'In codemode, read returns {text, images}. Use text(result.text) for text and image(block) for each result.images block; printing JSON does not forward an image.',
+    ],
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (!params.crop) {
         const builtIn = createReadToolDefinition(ctx.cwd);
-        return builtIn.execute(toolCallId, params, signal, onUpdate, ctx);
+        const result = await builtIn.execute(
+          toolCallId,
+          params,
+          signal,
+          onUpdate,
+          ctx,
+        );
+        return { ...result, structuredContent: readOutput(result.content) };
       }
       if (params.offset !== undefined || params.limit !== undefined) {
         throw new Error(
@@ -121,11 +172,13 @@ export default function imageReadExtension(pi: ExtensionAPI): void {
         text +=
           '\n[Current model does not support images. The image will be omitted from this request.]';
       }
+      const content: (TextContent | ImageContent)[] = [
+        { type: 'text', text },
+        { type: 'image', data: result.data, mimeType: result.mimeType },
+      ];
       return {
-        content: [
-          { type: 'text', text },
-          { type: 'image', data: result.data, mimeType: result.mimeType },
-        ],
+        content,
+        structuredContent: readOutput(content),
         details: {
           crop: params.crop,
           sourceWidth: result.sourceWidth,

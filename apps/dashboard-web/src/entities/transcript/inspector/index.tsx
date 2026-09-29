@@ -46,6 +46,12 @@ function ToolInspector({
           <dd>{String(status)}</dd>
         </div>
       </dl>
+      {typeof record.parentToolCallId === 'string' ? (
+        <p>Called by {record.parentToolCallId}</p>
+      ) : null}
+      {typeof record.errorMessage === 'string' ? (
+        <p className="transcript-message-error">{record.errorMessage}</p>
+      ) : null}
       {specializedKind ? (
         <SpecializedToolInspector
           kind={specializedKind}

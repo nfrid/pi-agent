@@ -758,6 +758,11 @@ export type MessageLivePayload = NormalizedMessagePayload;
 export const NormalizedToolPayloadSchema = Type.Object(
   {
     toolCallId: IdentifierSchema,
+    parentToolCallId: Type.Optional(IdentifierSchema),
+    errorMessage: Type.Optional(
+      Type.String({ maxLength: MAX_ASSISTANT_ERROR_MESSAGE }),
+    ),
+    durationMs: Type.Optional(Type.Number({ minimum: 0 })),
     name: Type.String({ minLength: 1, maxLength: 512 }),
     arguments: Type.Optional(UnknownSchema),
     /** One raw JSON argument chunk; never a cumulative replacement. */

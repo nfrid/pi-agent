@@ -87,6 +87,18 @@ describe('delegate compatibility identities', () => {
 });
 
 describe('dashboard protocol', () => {
+  it('preserves optional nested tool metadata without requiring it from older runtimes', () => {
+    const plain = { toolCallId: 'root', name: 'codemode' };
+    expect(parseNormalizedToolPayload(plain)).toEqual(plain);
+    const nested = {
+      toolCallId: 'root/1',
+      name: 'read',
+      parentToolCallId: 'root',
+      errorMessage: 'Denied',
+      durationMs: 12,
+    };
+    expect(parseNormalizedToolPayload(nested)).toEqual(nested);
+  });
   it('defines the bounded host file-read request and result contract', () => {
     expect(FileReadRequestSchema).toBeDefined();
     expect(FileReadResultSchema).toBeDefined();

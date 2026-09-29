@@ -127,6 +127,45 @@ export type BackgroundAction =
   | 'watch'
   | 'unwatch';
 
+const processOutputSchema = Type.Object({
+  id: Type.String(),
+  title: Type.String(),
+  status: Type.Union(
+    ['running', 'done', 'failed', 'killed'].map((status) =>
+      Type.Literal(status),
+    ),
+  ),
+  pid: Type.Optional(Type.Number()),
+  exitCode: Type.Optional(Type.Number()),
+  signal: Type.Optional(Type.String()),
+  stdoutBytes: Type.Number(),
+  stderrBytes: Type.Number(),
+  watches: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: Type.String(),
+        contains: Type.String(),
+        status: Type.String(),
+        stream: Type.Optional(Type.String()),
+        timeoutMs: Type.Optional(Type.Number()),
+      }),
+    ),
+  ),
+});
+const outputTailSchema = Type.Object({
+  text: Type.String(),
+  omitted: Type.Boolean(),
+  totalBytes: Type.Number(),
+  droppedBytes: Type.Number(),
+});
+export const backgroundOutputSchema = Type.Object({
+  action: Type.String(),
+  process: Type.Optional(processOutputSchema),
+  processes: Type.Optional(Type.Array(processOutputSchema)),
+  stdout: Type.Optional(outputTailSchema),
+  stderr: Type.Optional(outputTailSchema),
+});
+
 export interface ProcessDetails {
   readonly id: string;
   readonly title: string;

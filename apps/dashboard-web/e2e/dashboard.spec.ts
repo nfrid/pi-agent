@@ -6092,6 +6092,125 @@ test('assistant Markdown keeps block-first semantics in a normal message @deskto
   ).toBeVisible();
 });
 
+test('codemode nested calls restore their status and failure summary @desktop', async ({
+  page,
+}) => {
+  await installPhase6Mocks(page, {
+    entries: [
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'compose',
+              name: 'codemode',
+              arguments: { code: 'await tools.bash({command: "inspect"})' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'compose',
+          toolName: 'codemode',
+          isError: true,
+          content: [{ type: 'text', text: 'Script failed' }],
+          nestedCalls: {
+            complete: true,
+            calls: [
+              {
+                id: 'compose/1',
+                name: 'bash',
+                arguments: {
+                  command: 'inspect',
+                  description: 'Inspect workspace',
+                },
+                status: 'error',
+                error: 'Permission denied',
+                durationMs: 20,
+              },
+            ],
+          },
+        },
+      },
+    ],
+  });
+  await page.goto('/sessions/s1');
+  const tools = page.locator('.tool-detail');
+  await expect(tools).toHaveCount(2);
+  const nested = tools.filter({ hasText: 'Inspect workspace' });
+  await nested.locator('summary').click();
+  await expect(
+    nested.getByText('Permission denied', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    nested.getByText('Called by compose', { exact: true }),
+  ).toBeVisible();
+  await expect(nested.locator('.tool-command-output')).toHaveCount(0);
+});
+
+for (const desktop of [false, true]) {
+  test(`reasoning paragraphs wrap around their timestamp${desktop ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    const reasoning =
+      'A long reasoning paragraph explains the next verification step and checks `Promise.allSettled` before continuing with the implementation. '.repeat(
+        8,
+      );
+    await installPhase6Mocks(page, {
+      entries: [
+        {
+          type: 'message',
+          message: {
+            role: 'assistant',
+            timestamp: '2026-08-13T18:42:00.000Z',
+            content: [{ type: 'thinking', thinking: reasoning }],
+          },
+        },
+      ],
+    });
+    if (desktop) await page.setViewportSize({ width: 960, height: 760 });
+    await page.goto('/sessions/s1');
+    const blob = page.locator('.transcript-thinking-blob').first();
+    await expect(blob.locator('time')).toBeVisible();
+    await expect(blob.locator('code').first()).toContainText(
+      'Promise.allSettled',
+    );
+    const geometry = await blob.evaluate((element) => {
+      const timestamp = element.querySelector('time');
+      const paragraph = element.querySelector('.markdown p');
+      if (!timestamp || !paragraph)
+        throw new Error('Missing reasoning content or timestamp');
+      const stamp = timestamp.getBoundingClientRect();
+      const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+      const rects: DOMRect[] = [];
+      while (walker.nextNode()) {
+        const range = document.createRange();
+        range.selectNodeContents(walker.currentNode);
+        rects.push(...range.getClientRects());
+      }
+      const beside = rects.filter(
+        (rect) => rect.top < stamp.bottom && rect.bottom > stamp.top,
+      );
+      const below = rects.filter((rect) => rect.top >= stamp.bottom);
+      return {
+        besideCount: beside.length,
+        overlaps: beside.some((rect) => rect.right > stamp.left + 1),
+        expandsBelow: below.some((rect) => rect.right > stamp.left + 1),
+        overflows: element.scrollWidth > element.clientWidth,
+      };
+    });
+    expect(geometry.besideCount).toBeGreaterThan(0);
+    expect(geometry.overlaps).toBe(false);
+    expect(geometry.expandsBelow).toBe(true);
+    expect(geometry.overflows).toBe(false);
+  });
+}
+
 test('composer text wraps around top-right actions @desktop', async ({
   page,
 }) => {

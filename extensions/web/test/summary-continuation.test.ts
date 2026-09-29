@@ -1,3 +1,5 @@
+import type { TSchema } from 'typebox';
+import { Value } from 'typebox/value';
 import { describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -44,6 +46,7 @@ import type { StoredSearchData } from '../storage';
 type ToolResult = {
   content: Array<{ text: string }>;
   details: Record<string, unknown>;
+  structuredContent: Record<string, unknown>;
 };
 type Execute = (
   id: string,
@@ -54,17 +57,18 @@ type Execute = (
 ) => Promise<ToolResult>;
 
 function setup(): {
-  tools: Map<string, { execute: Execute }>;
+  tools: Map<string, { execute: Execute; outputSchema: TSchema }>;
   entries: unknown[];
 } {
-  const tools = new Map<string, { execute: Execute }>();
+  const tools = new Map<string, { execute: Execute; outputSchema: TSchema }>();
   const entries: unknown[] = [];
   state.payloads.length = 0;
   state.searchResults = [];
   web({
     on: vi.fn(),
-    registerTool: vi.fn((tool: { name: string; execute: Execute }) =>
-      tools.set(tool.name, tool),
+    registerTool: vi.fn(
+      (tool: { name: string; execute: Execute; outputSchema: TSchema }) =>
+        tools.set(tool.name, tool),
     ),
     appendEntry: vi.fn((_type: string, data: unknown) => entries.push(data)),
   } as never);
@@ -118,6 +122,24 @@ describe('stored aggregate and summary continuation', () => {
       undefined,
       {},
     );
+    expect(
+      Value.Check(searchTool.outputSchema, initial.structuredContent),
+    ).toBe(true);
+    expect(initial.structuredContent).toMatchObject({
+      continuationAvailable: true,
+      summaryId: expect.stringMatching(/:summary$/),
+      cacheFile: { path: '/tmp/1.json' },
+      queries: expect.arrayContaining([
+        {
+          query: 'query-0',
+          answer: expect.stringContaining('query-0:'),
+          error: null,
+          contentId: expect.stringMatching(/:query:0$/),
+          sources: [],
+          pages: [],
+        },
+      ]),
+    });
     const reconstructed = await reconstructInitialView(initial, getContent);
     expect(reconstructed).toBe(takeStoredPayload().summary);
     expect(initial.content[0].text).toContain('Content ID manifest:');
@@ -192,6 +214,22 @@ describe('stored aggregate and summary continuation', () => {
       new AbortController().signal,
     );
     const contentId = String(initial.details.contentId);
+    expect(Value.Check(fetchTool.outputSchema, initial.structuredContent)).toBe(
+      true,
+    );
+    expect(initial.structuredContent).toMatchObject({
+      pages: [
+        {
+          url: 'https://example.com/article',
+          contentId,
+          error: null,
+          totalChars: 'page:https://example.com/article'.length,
+        },
+      ],
+    });
+    expect(JSON.stringify(initial.structuredContent)).not.toContain(
+      'page:https://example.com/article',
+    );
     expect(contentId).toMatch(/:page:0$/);
     expect(initial.content[0].text).toContain(`Content ID: ${contentId}`);
     expect(initial.content[0].text).toContain('https://example.com/article');
@@ -223,6 +261,19 @@ describe('stored aggregate and summary continuation', () => {
     const ids = [
       ...text.matchAll(/(?:Summary|Content ID|Page): ([^\s—]+)/g),
     ].map((match) => match[1]);
+    expect(Value.Check(fetchTool.outputSchema, initial.structuredContent)).toBe(
+      true,
+    );
+    expect(initial.structuredContent).toMatchObject({
+      pages: expect.arrayContaining([
+        {
+          url: 'https://failed.test/failed',
+          title: 'Failed page',
+          totalChars: 0,
+          error: 'unreadable',
+        },
+      ]),
+    });
     expect(text).toMatch(/2\. Title 2[^\n]*\n\s+Content ID: [^\s]+:page:2/);
     expect(text).toContain('https://one.test');
     expect(text).toContain('https://failed.test/failed');

@@ -6,12 +6,13 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { Static, TSchema } from 'typebox';
 import { loadGuidelines } from '../shared/instructions';
-import { formatPeek, formatSummary } from './format';
+import { formatPeek, formatSummary, peekOutput } from './format';
 import type { BackgroundManager, BackgroundSnapshot } from './manager';
 import { renderBackgroundCall, renderBackgroundResult } from './renderers';
 import {
   type BackgroundAction,
   type BackgroundToolDetails,
+  backgroundOutputSchema,
   DEFAULT_TAIL_LINES,
   ListParameters,
   PeekParameters,
@@ -48,6 +49,7 @@ type ProcessDetails = ReturnType<typeof processDetails>;
 type ToolResult = {
   content: [{ type: 'text'; text: string }];
   details: BackgroundToolDetails;
+  output?: ReturnType<typeof peekOutput>;
 };
 type OperationContext = Pick<ExtensionContext, 'cwd'>;
 type Operation<T extends TSchema> = {
@@ -89,6 +91,26 @@ function hostWatches(watches: readonly WatchInput[]) {
   }));
 }
 
+function processOutput(process: ProcessDetails) {
+  const { watches, ...metadata } = process;
+  return {
+    ...metadata,
+    ...(watches
+      ? {
+          watches: watches.map(
+            ({ id, contains, status, stream, timeoutMs }) => ({
+              id,
+              contains,
+              status,
+              ...(stream ? { stream } : {}),
+              ...(timeoutMs === undefined ? {} : { timeoutMs }),
+            }),
+          ),
+        }
+      : {}),
+  };
+}
+
 function registerOperation<T extends TSchema>(
   pi: ExtensionAPI,
   operation: Operation<T>,
@@ -103,8 +125,30 @@ function registerOperation<T extends TSchema>(
       ? { promptGuidelines: operation.promptGuidelines }
       : {}),
     parameters: operation.parameters,
+    outputSchema: backgroundOutputSchema,
+    namespace: {
+      name: 'background',
+      description: 'Durable shell jobs and output watches',
+    },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      return operation.execute(params, signal, ctx);
+      const { output, ...result } = await operation.execute(
+        params,
+        signal,
+        ctx,
+      );
+      return {
+        ...result,
+        structuredContent: {
+          action: result.details.action,
+          ...(result.details.process
+            ? { process: processOutput(result.details.process) }
+            : {}),
+          ...(result.details.processes
+            ? { processes: result.details.processes.map(processOutput) }
+            : {}),
+          ...output,
+        },
+      };
     },
     renderCall: (args, theme, context) =>
       renderBackgroundCall(
@@ -173,14 +217,21 @@ async function peek(
   const id = requireText(params.id, 'id');
   const snapshot = await getManager().peek(id, signal);
   if (snapshot.status !== 'running') cancelCompletion(id);
+  const tailLines = params.tail_lines ?? DEFAULT_TAIL_LINES;
+  const output = peekOutput(snapshot, tailLines);
+  const details = {
+    action: 'peek' as const,
+    process: processDetails(snapshot),
+  };
   return {
     content: [
       {
         type: 'text',
-        text: formatPeek(snapshot, params.tail_lines ?? DEFAULT_TAIL_LINES),
+        text: formatPeek(snapshot, tailLines, { output }),
       },
     ],
-    details: { action: 'peek', process: processDetails(snapshot) },
+    details,
+    output,
   };
 }
 

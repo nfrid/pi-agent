@@ -12,6 +12,23 @@ import {
 } from './inspector';
 
 describe('transcript payload inspection', () => {
+  it('shows restored nested-call failures as metadata without a fabricated result', () => {
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'custom',
+          parentToolCallId: 'codemode-1',
+          status: 'error',
+          arguments: { path: 'missing' },
+          errorMessage: 'File unavailable',
+        }}
+      />,
+    );
+    expect(markup).toContain('Called by codemode-1');
+    expect(markup).toContain('File unavailable');
+    expect(markup).toContain('Arguments');
+    expect(markup).not.toContain('>Result<');
+  });
   it('uses resolved process titles in the background inspector summary', () => {
     const markup = renderToStaticMarkup(
       <ToolInspector

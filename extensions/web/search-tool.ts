@@ -13,6 +13,7 @@ import {
   persistenceDetails,
   persistWebResult,
   stripContentIdLines,
+  webArtifactOutputProperties,
 } from './result-support';
 import { search } from './search';
 import {
@@ -79,6 +80,34 @@ export function createWebSearchTool(options: {
     promptSnippet:
       'Search the public web for current information and cited sources',
     parameters,
+    namespace: { name: 'web', description: 'Web search and readable content' },
+    outputSchema: Type.Object({
+      ...webArtifactOutputProperties,
+      continuationAvailable: Type.Boolean(),
+      summaryId: Type.Optional(Type.String()),
+      queries: Type.Array(
+        Type.Object({
+          query: Type.String(),
+          answer: Type.String(),
+          error: Type.Union([Type.String(), Type.Null()]),
+          contentId: Type.Optional(Type.String()),
+          sources: Type.Array(
+            Type.Object({
+              title: Type.String(),
+              url: Type.String(),
+              snippet: Type.Optional(Type.String()),
+            }),
+          ),
+          pages: Type.Array(
+            Type.Object({
+              id: Type.Optional(Type.String()),
+              title: Type.String(),
+              url: Type.String(),
+            }),
+          ),
+        }),
+      ),
+    }),
     async execute(_callId, params, signal, onUpdate, ctx) {
       const assertCurrent = operationGuard(signal);
       const queries = queryList(params.queries);
@@ -261,6 +290,29 @@ export function createWebSearchTool(options: {
             text: appendCacheFileNotice(initial.rendered, payload),
           },
         ],
+        structuredContent: {
+          ...persistenceDetails(payload),
+          continuationAvailable: payload.continuationAvailable,
+          ...(payload.continuationAvailable ? { summaryId } : {}),
+          queries: queryResults.map((item, index) => ({
+            query: item.query,
+            answer: item.answer,
+            error: item.error,
+            ...(payload.continuationAvailable
+              ? { contentId: queryViews[index].contentId }
+              : {}),
+            sources: item.results.map(({ title, url, snippet }) => ({
+              title,
+              url,
+              snippet,
+            })),
+            pages: queryViews[index].pages.map(({ id, title, url }) => ({
+              title,
+              url,
+              ...(payload.continuationAvailable ? { id } : {}),
+            })),
+          })),
+        },
         details: {
           queryCount: queries.length,
           failed,

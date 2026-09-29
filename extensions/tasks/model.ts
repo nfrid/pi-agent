@@ -51,6 +51,30 @@ export const todoRemoveParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const todoOutputSchema = Type.Object({
+  changed: Type.Boolean(),
+  ids: Type.Array(Type.String()),
+  tasks: Type.Array(
+    Type.Object({
+      id: Type.String(),
+      text: Type.String(),
+      status: statusSchema(),
+      dependsOn: Type.Array(Type.String()),
+      priority: Type.Optional(prioritySchema()),
+      notes: Type.Optional(Type.String()),
+      createdAt: Type.Number(),
+      updatedAt: Type.Number(),
+    }),
+  ),
+  stats: Type.Object({
+    total: Type.Number(),
+    active: Type.Number(),
+    done: Type.Number(),
+    blocked: Type.Number(),
+    ready: Type.Number(),
+  }),
+});
+
 export type Status = 'todo' | 'doing' | 'blocked' | 'done' | 'dropped';
 
 export type Task = {

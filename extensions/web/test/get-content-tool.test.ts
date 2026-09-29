@@ -1,3 +1,4 @@
+import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
 import { createGetSearchContentTool } from '../get-content-tool';
 import { createWebResultStore } from '../storage';
@@ -42,6 +43,14 @@ describe('get_search_content pagination guidance', () => {
     expect(page.details.offset).toBe(0);
     expect(page.details.selectedChars).toBe(3);
     expect(text).toContain('contentId: "result:page:0", offset: 3');
+    if (!tool.outputSchema) throw new Error('Missing output schema');
+    expect(Value.Check(tool.outputSchema, page.structuredContent)).toBe(true);
+    expect(page.structuredContent).toMatchObject({
+      text: 'a😀',
+      contentId: 'result:page:0',
+      nextOffset: 3,
+      selectedChars: 3,
+    });
   });
 
   it('does not add a continuation notice to the final slice', async () => {

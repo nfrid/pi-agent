@@ -1174,12 +1174,14 @@ describe('remote event normalization', () => {
     expect(
       normalizer.normalizeTool('started', {
         toolCallId: 'read-1',
+        parentToolCallId: 'codemode-1',
         toolName: 'read',
         args: { path: '/tmp/file' },
         timestamp: 100,
       }),
     ).toMatchObject({
       toolCallId: 'read-1',
+      parentToolCallId: 'codemode-1',
       name: 'read',
       arguments: { path: '/tmp/file' },
       timestamp: 100,

@@ -1,3 +1,4 @@
+import { Type } from 'typebox';
 import { CACHE_FILE_MAX_BYTES, writeCacheFile } from '../shared/cache-files';
 import { pageContent } from './content-retrieval';
 import type { StoredSearchData, WebResultStore } from './storage';
@@ -9,6 +10,13 @@ const CACHE_FILE_WARNING =
   'Cache file unavailable; continuation remains available in this process.';
 const CAPTURE_LIMIT_WARNING =
   'Exact cache file unavailable; aggregate result exceeded the cache-file limit.';
+
+export const webArtifactOutputProperties = {
+  cacheFile: Type.Optional(
+    Type.Object({ path: Type.String(), size: Type.Number() }),
+  ),
+  cacheFileWarning: Type.Optional(Type.String()),
+};
 
 export interface StoredPayload {
   cacheFile?: { path: string; size: number };

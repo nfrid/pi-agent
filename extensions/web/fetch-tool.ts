@@ -8,7 +8,9 @@ import {
   compactManifest,
   persistenceDetails,
   persistWebResult,
+  type StoredPayload,
   stripContentIdLines,
+  webArtifactOutputProperties,
 } from './result-support';
 import { generateId, type StoredContent, type WebResultStore } from './storage';
 import { throwIfAborted } from './utils';
@@ -25,6 +27,28 @@ function urlList(urls: string[]): string[] {
   return [...new Set(urls.map((item) => item.trim()).filter(Boolean))];
 }
 
+function fetchOutput(
+  results: Awaited<ReturnType<typeof fetchAllContent>>,
+  id: string,
+  payload: StoredPayload,
+  summaryId?: string,
+) {
+  return {
+    ...persistenceDetails(payload),
+    continuationAvailable: payload.continuationAvailable,
+    ...(payload.continuationAvailable && summaryId ? { summaryId } : {}),
+    pages: results.map((page, index) => ({
+      url: page.url,
+      title: page.title,
+      totalChars: page.content.length,
+      error: page.error,
+      ...(!page.error && payload.continuationAvailable
+        ? { contentId: `${id}:page:${index}` }
+        : {}),
+    })),
+  };
+}
+
 export function createFetchContentTool(options: {
   resultStore: WebResultStore;
   operationGuard: (signal?: AbortSignal) => () => void;
@@ -37,6 +61,21 @@ export function createFetchContentTool(options: {
       'Retrieve the readable content of one or more public HTTP(S) pages as Markdown. Use this for URLs supplied by the user or found in search results.',
     promptSnippet: 'Retrieve readable content from public web pages',
     parameters,
+    namespace: { name: 'web', description: 'Web search and readable content' },
+    outputSchema: Type.Object({
+      ...webArtifactOutputProperties,
+      continuationAvailable: Type.Boolean(),
+      summaryId: Type.Optional(Type.String()),
+      pages: Type.Array(
+        Type.Object({
+          url: Type.String(),
+          title: Type.String(),
+          totalChars: Type.Number(),
+          error: Type.Union([Type.String(), Type.Null()]),
+          contentId: Type.Optional(Type.String()),
+        }),
+      ),
+    }),
     async execute(_callId, params, signal, onUpdate) {
       const assertCurrent = operationGuard(signal);
       const urls = urlList(params.urls);
@@ -81,6 +120,7 @@ export function createFetchContentTool(options: {
               ),
             },
           ],
+          structuredContent: fetchOutput(results, id, payload),
           details: {
             contentId,
             title: result.title,
@@ -158,6 +198,7 @@ export function createFetchContentTool(options: {
             text: appendCacheFileNotice(initial.rendered, payload),
           },
         ],
+        structuredContent: fetchOutput(results, id, payload, summaryId),
         details: {
           contentIds: {
             summary: summaryId,

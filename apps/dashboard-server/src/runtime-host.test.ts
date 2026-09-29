@@ -366,7 +366,7 @@ describe('runtime host', () => {
         'rpc',
         '--approve',
         '--tools',
-        'read,grep,find,ls',
+        'read,grep,find,ls,codemode',
         '--name',
         `Сетап; touch ${injected}`,
         '--provider',

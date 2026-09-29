@@ -5,7 +5,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { loadGuidelines } from '../shared/instructions';
-import { stats } from './domain';
+import { normalizeIds, stats, unfinished } from './domain';
 import {
   MAX_TODO_RESULT_CHARS,
   type MutationParams,
@@ -13,10 +13,11 @@ import {
   type ToolDetails,
   type ToolName,
   todoListParamsSchema,
+  todoOutputSchema,
   todoRemoveParamsSchema,
   todoUpdateParamsSchema,
 } from './model';
-import { applyMutation, type MutationResult } from './mutations';
+import { applyMutation } from './mutations';
 import type { TaskStore } from './store';
 
 const LIST_DESCRIPTION =
@@ -43,12 +44,33 @@ function executeTodo(
   pi: ExtensionAPI,
   store: TaskStore,
   ctx: ExtensionContext,
-): { message: string; result: MutationResult } {
+) {
   store.lastCtx = ctx;
   const result = applyMutation(store, pi, ctx, tool, params, {
     updateOnError: false,
   });
-  return { result, message: boundedResultText(result.message) };
+  const ids = normalizeIds(
+    'changes' in params
+      ? params.changes.map((change) => change.id)
+      : 'ids' in params
+        ? params.ids
+        : [],
+  );
+  const tasks = store.state.tasks.filter((task) =>
+    tool === 'todo_list'
+      ? ('include_done' in params && params.include_done) || unfinished(task)
+      : ids.includes(task.id),
+  );
+  return {
+    result,
+    message: boundedResultText(result.message),
+    structuredContent: {
+      changed: result.changed,
+      ids,
+      tasks,
+      stats: stats(store),
+    },
+  };
 }
 
 function renderCall(
@@ -112,9 +134,11 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     description: LIST_DESCRIPTION,
     promptSnippet: 'List current session todo tasks and their dependency state',
     parameters: todoListParamsSchema,
+    outputSchema: todoOutputSchema,
+    namespace: { name: 'tasks', description: 'Session todo state' },
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { result, message } = executeTodo(
+      const { result, message, structuredContent } = executeTodo(
         'todo_list',
         params,
         pi,
@@ -124,6 +148,7 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
       if (result.error) throw new Error(message);
       return {
         content: [{ type: 'text', text: message }],
+        structuredContent,
         details: {
           tool: 'todo_list',
           changed: result.changed,
@@ -147,9 +172,11 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     promptSnippet: 'Create or update todo tasks atomically by stable caller id',
     promptGuidelines: loadGuidelines('instructions.md', __dirname),
     parameters: todoUpdateParamsSchema,
+    outputSchema: todoOutputSchema,
+    namespace: { name: 'tasks', description: 'Session todo state' },
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { result, message } = executeTodo(
+      const { result, message, structuredContent } = executeTodo(
         'todo_update',
         params,
         pi,
@@ -159,6 +186,7 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
       if (result.error) throw new Error(message);
       return {
         content: [{ type: 'text', text: message }],
+        structuredContent,
         details: {
           tool: 'todo_update',
           changed: result.changed,
@@ -181,9 +209,11 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     description: REMOVE_DESCRIPTION,
     promptSnippet: 'Remove todo tasks by stable caller id',
     parameters: todoRemoveParamsSchema,
+    outputSchema: todoOutputSchema,
+    namespace: { name: 'tasks', description: 'Session todo state' },
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { result, message } = executeTodo(
+      const { result, message, structuredContent } = executeTodo(
         'todo_remove',
         params,
         pi,
@@ -193,6 +223,7 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
       if (result.error) throw new Error(message);
       return {
         content: [{ type: 'text', text: message }],
+        structuredContent,
         details: {
           tool: 'todo_remove',
           changed: result.changed,

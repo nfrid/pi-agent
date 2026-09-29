@@ -28,7 +28,7 @@ const RPC_RECORD_TYPE_PREFIX =
   /^\{(?:"id":"(?:\\.|[^"\\])*",)?"type":"([^"]+)"/u;
 const RETAINED_RPC_RECORD_TYPES = new Set(['response', 'extension_ui_request']);
 
-const READ_ONLY_TOOLS = 'read,grep,find,ls';
+const READ_ONLY_TOOLS = 'read,grep,find,ls,codemode';
 const LOGIN_ENV_MARKER = '\0__PI_RUNTIME_ENV_START__\0';
 const execFileAsync = promisify(execFile);
 

@@ -576,6 +576,9 @@ export class LiveEventNormalizer {
       toolCallId,
       name,
       phase,
+      ...(directString(event, 'parentToolCallId') === undefined
+        ? {}
+        : { parentToolCallId: directString(event, 'parentToolCallId') }),
       ...(directValue(event, 'args') !== undefined
         ? { arguments: jsonSafe(directValue(event, 'args'), MAX_FRAME_BYTES) }
         : {}),

@@ -42,6 +42,9 @@ export interface TranscriptMessageItem {
 export interface TranscriptToolItem {
   kind: 'tool';
   toolCallId: string;
+  parentToolCallId?: string;
+  errorMessage?: string;
+  durationMs?: number;
   name: string;
   arguments?: unknown;
   argumentPreview?: string;
@@ -111,6 +114,9 @@ export interface TranscriptRenderToolItem {
   kind: 'tool';
   key: string;
   toolCallId: string;
+  parentToolCallId?: string;
+  errorMessage?: string;
+  durationMs?: number;
   name: string;
   arguments?: unknown;
   argumentPreview?: string;
@@ -399,10 +405,28 @@ function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
     ...(tool.args === undefined ? {} : { arguments: tool.args }),
     ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }),
     ...(tool.result === undefined ? {} : { result: tool.result }),
+    ...toolMetadata(tool),
     ...(typeof tool.isError === 'boolean' ? { isError: tool.isError } : {}),
     ...(status === undefined ? {} : { status }),
     ...(timestamp === undefined ? {} : { timestamp }),
     ...(turnId === undefined ? {} : { turnId }),
+  };
+}
+
+function toolMetadata(value: unknown) {
+  if (!isRecord(value)) return {};
+  const parentToolCallId = directString(value, 'parentToolCallId');
+  const errorMessage = boundedErrorMessage(value.errorMessage);
+  const durationMs =
+    typeof value.durationMs === 'number' &&
+    Number.isFinite(value.durationMs) &&
+    value.durationMs >= 0
+      ? value.durationMs
+      : undefined;
+  return {
+    ...(parentToolCallId === undefined ? {} : { parentToolCallId }),
+    ...(errorMessage === undefined ? {} : { errorMessage }),
+    ...(durationMs === undefined ? {} : { durationMs }),
   };
 }
 
@@ -530,6 +554,27 @@ function insertToolOrder(
   items: Readonly<Record<string, TranscriptItem>>,
   payload: NormalizedToolPayload,
 ): readonly string[] {
+  if (payload.parentToolCallId) {
+    const parentIndex = projection.order.indexOf(payload.parentToolCallId);
+    if (parentIndex >= 0) {
+      let index = parentIndex + 1;
+      while (index < projection.order.length) {
+        const sibling = items[projection.order[index] ?? ''];
+        if (
+          sibling?.kind !== 'tool' ||
+          !sibling.parentToolCallId ||
+          !sibling.toolCallId.startsWith(`${payload.parentToolCallId}/`)
+        )
+          break;
+        index++;
+      }
+      return [
+        ...projection.order.slice(0, index),
+        payload.toolCallId,
+        ...projection.order.slice(index),
+      ];
+    }
+  }
   const owner = findToolOwner(projection, items, payload);
   if (owner) {
     const ownerToolCallIds = owner.item.toolCallIds ?? [];
@@ -538,7 +583,11 @@ function insertToolOrder(
       const existing = items[projection.order[insertionIndex] ?? ''];
       if (existing?.kind !== 'tool') break;
       const associated = owner.exact
-        ? ownerToolCallIds.includes(existing.toolCallId)
+        ? ownerToolCallIds.includes(existing.toolCallId) ||
+          (existing.parentToolCallId !== undefined &&
+            ownerToolCallIds.some((id) =>
+              existing.toolCallId.startsWith(`${id}/`),
+            ))
         : payload.turnId !== undefined && existing.turnId === payload.turnId;
       if (!associated) break;
       insertionIndex += 1;
@@ -678,7 +727,7 @@ function mergeTool(
       payload.result !== undefined
     )
   )
-    return projection;
+    return mergeNestedCalls(projection, payload.toolCallId, payload.result);
   const previousTool = previous?.kind === 'tool' ? previous : undefined;
   const status: TranscriptEntityStatus =
     payload.isError === true ||
@@ -699,8 +748,14 @@ function mergeTool(
               ? 'pending'
               : 'running';
   const owner = findToolOwner(projection, items, payload);
+  const parent = payload.parentToolCallId
+    ? items[payload.parentToolCallId]
+    : undefined;
   const timestamp =
-    payload.timestamp ?? previousTool?.timestamp ?? owner?.item.timestamp;
+    payload.timestamp ??
+    previousTool?.timestamp ??
+    (parent?.kind === 'tool' ? parent.timestamp : undefined) ??
+    owner?.item.timestamp;
   const argumentPreview =
     payload.arguments !== undefined
       ? undefined
@@ -714,6 +769,8 @@ function mergeTool(
     kind: 'tool',
     toolCallId: payload.toolCallId,
     name: payload.name || previousTool?.name || 'tool',
+    ...toolMetadata(previousTool),
+    ...toolMetadata(payload),
     ...(payload.arguments === undefined
       ? previousTool?.arguments === undefined
         ? {}
@@ -760,13 +817,76 @@ function mergeTool(
   items[payload.toolCallId] = item;
   const orderingPayload =
     timestamp === payload.timestamp ? payload : { ...payload, timestamp };
-  return {
-    ...projection,
-    order: previous
-      ? projection.order
-      : insertToolOrder(projection, items, orderingPayload),
-    items,
-  };
+  return mergeNestedCalls(
+    {
+      ...projection,
+      order: previous
+        ? projection.order
+        : insertToolOrder(projection, items, orderingPayload),
+      items,
+    },
+    payload.toolCallId,
+    payload.result,
+  );
+}
+
+/** Pi persists bounded metadata for nested calls, never their results. */
+function mergeNestedCalls(
+  projection: TranscriptProjection,
+  rootId: string,
+  result: unknown,
+): TranscriptProjection {
+  const record =
+    isRecord(result) && isRecord(result.nestedCalls)
+      ? result.nestedCalls
+      : undefined;
+  if (!Array.isArray(record?.calls)) return projection;
+  const items = copyItems(projection);
+  let order = projection.order;
+  for (const call of record.calls.slice(0, 256)) {
+    if (!isRecord(call)) continue;
+    const id = directString(call, 'id');
+    const name = directString(call, 'name');
+    if (
+      !id ||
+      !name ||
+      !id.startsWith(`${rootId}/`) ||
+      !['ok', 'error', 'unfinished'].includes(String(call.status))
+    )
+      continue;
+    const parentToolCallId = id.slice(0, id.lastIndexOf('/'));
+    const previous = items[id];
+    const parent = items[parentToolCallId];
+    const timestamp =
+      (previous?.kind === 'tool' ? previous.timestamp : undefined) ??
+      (parent?.kind === 'tool' ? parent.timestamp : undefined);
+    const errorMessage =
+      boundedErrorMessage(call.error) ??
+      (call.status === 'unfinished'
+        ? 'Nested call did not finish before its parent ended.'
+        : undefined);
+    const tool: TranscriptToolItem = {
+      ...(previous?.kind === 'tool' ? previous : {}),
+      kind: 'tool',
+      toolCallId: id,
+      name,
+      parentToolCallId,
+      status: call.status === 'ok' ? 'finished' : 'error',
+      isError: call.status !== 'ok',
+      ...(call.arguments === undefined ? {} : { arguments: call.arguments }),
+      ...toolMetadata({ errorMessage, durationMs: call.durationMs }),
+      ...(timestamp === undefined ? {} : { timestamp }),
+    };
+    items[id] = tool;
+    if (!order.includes(id))
+      order = insertToolOrder({ ...projection, order }, items, {
+        toolCallId: id,
+        name,
+        parentToolCallId,
+        timestamp: tool.timestamp,
+      });
+  }
+  return { ...projection, items, order };
 }
 
 /** Apply one normalized live event without mutating the prior projection. */
@@ -979,6 +1099,13 @@ function persistedToolResult(
   message: Record<string, unknown>,
   previous?: unknown,
 ): unknown {
+  if (message.nestedCalls !== undefined) {
+    return {
+      content: message.content,
+      ...(message.details === undefined ? {} : { details: message.details }),
+      nestedCalls: message.nestedCalls,
+    };
+  }
   if (message.details === undefined) {
     // Duplicate history entries can omit details after the first copy. Keep
     // the retained envelope while accepting the newest content payload.
@@ -1190,6 +1317,7 @@ export function hydrateTranscript(
         items[toolCallId] = {
           kind: 'tool',
           toolCallId,
+          ...toolMetadata(tool),
           name:
             directString(tool, 'name') ??
             directString(tool, 'toolName') ??
@@ -1244,6 +1372,11 @@ export function hydrateTranscript(
       ? {}
       : { lastRuntimeSeq: options.runtimeSeq }),
   };
+  for (const id of order) {
+    const tool = projection.items[id];
+    if (tool?.kind === 'tool')
+      projection = mergeNestedCalls(projection, id, tool.result);
+  }
   return projection;
 }
 
@@ -1324,6 +1457,7 @@ export function persistedEntriesToTranscriptEvents(
       const tool = {
         toolCallId: item.toolCallId,
         name: item.name || 'tool',
+        ...toolMetadata(item),
         ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
         ...(item.result === undefined ? {} : { result: item.result }),
         ...(item.isError === undefined ? {} : { isError: item.isError }),
@@ -1362,13 +1496,16 @@ const NON_RENDERED_PI_ENTRY_TYPES = new Set([
   'branch_summary',
   'label',
   'session_info',
+  'context_edit',
+  'usage',
 ]);
 
 function isNonRenderedPiEntry(value: unknown): boolean {
   return (
     isRecord(value) &&
     typeof value.type === 'string' &&
-    NON_RENDERED_PI_ENTRY_TYPES.has(value.type)
+    (NON_RENDERED_PI_ENTRY_TYPES.has(value.type) ||
+      (value.type === 'custom' && value.customType === 'codemode-store'))
   );
 }
 
@@ -1560,6 +1697,7 @@ export function projectTranscriptForRender(
       key: item.toolCallId,
       toolCallId: item.toolCallId,
       name: item.name,
+      ...toolMetadata(item),
       ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
       ...(item.arguments !== undefined || item.argumentPreview === undefined
         ? {}
@@ -1633,6 +1771,7 @@ export function selectLegacyTranscriptEntries(
         toolCallId: item.toolCallId,
         id: item.toolCallId,
         name: item.name,
+        ...toolMetadata(item),
         ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
         ...(item.result === undefined ? {} : { result: item.result }),
         ...(item.isError === undefined ? {} : { isError: item.isError }),

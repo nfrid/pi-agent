@@ -57,10 +57,6 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
 );
-const MID_RUN_COMPACTION_EXTENSION = path.resolve(
-  __dirname,
-  '../mid-run-compaction/index.ts',
-);
 const CODEX_SERVICE_TIER_EXTENSION = path.resolve(
   __dirname,
   '../codex-service-tier/index.ts',
@@ -70,6 +66,7 @@ const TOOL_ARGUMENT_VALIDATION_EXTENSION = path.resolve(
   __dirname,
   '../tool-argument-validation/index.ts',
 );
+const IMAGE_READ_EXTENSION = path.resolve(__dirname, '../image-read/index.ts');
 const BASH_DESCRIPTION_EXTENSION = path.resolve(
   __dirname,
   '../bash-description/index.ts',
@@ -187,7 +184,11 @@ export function buildChildArgs(
     throw new Error('Writable delegates require a prepared worktree.');
   const baseTools = allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS;
   const webEnabled = options.capabilities?.includes('web') === true;
-  const tools = [...baseTools, ...(webEnabled ? WEB_TOOLS : [])].join(',');
+  const tools = [
+    ...baseTools,
+    'codemode',
+    ...(webEnabled ? WEB_TOOLS : []),
+  ].join(',');
   const args = [
     '--mode',
     'json',
@@ -200,7 +201,7 @@ export function buildChildArgs(
     SYSTEM_PROMPT_EXTENSION,
     ...(webEnabled ? ['--extension', WEB_EXTENSION] : []),
     '--extension',
-    MID_RUN_COMPACTION_EXTENSION,
+    'builtin:codemode',
     ...(options.routing?.provider === 'openai-codex'
       ? ['--extension', CODEX_SERVICE_TIER_EXTENSION]
       : []),
@@ -208,6 +209,8 @@ export function buildChildArgs(
     TOOL_ARGUMENT_VALIDATION_EXTENSION,
     '--extension',
     BASH_DESCRIPTION_EXTENSION,
+    '--extension',
+    IMAGE_READ_EXTENSION,
     '--no-skills',
     '--no-prompt-templates',
     '--no-themes',

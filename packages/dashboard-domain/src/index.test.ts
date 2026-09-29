@@ -1159,9 +1159,158 @@ describe('dashboard domain reducers', () => {
     expect(projectTranscriptForRender(state).items).toEqual([]);
   });
 
+  it('keeps nested live calls with their parent and restores bounded metadata without inventing results', () => {
+    const entries = [
+      {
+        type: 'message',
+        message: {
+          id: 'assistant',
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'root',
+              name: 'codemode',
+              arguments: { code: 'await tools.read({path:"a"})' },
+            },
+          ],
+        },
+      },
+    ];
+    let live = hydrateTranscript(entries, 's');
+    live = reduceTranscriptEvent(live, {
+      type: 'tool.started',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'root/1',
+        parentToolCallId: 'root',
+        name: 'read',
+        timestamp: 200,
+        arguments: { path: 'a' },
+      },
+    } as never);
+    expect(live.order).toEqual(['assistant', 'root', 'root/1']);
+    const nestedCalls = {
+      complete: false,
+      calls: [
+        {
+          id: 'root/1',
+          name: 'read',
+          status: 'error',
+          error: 'File unavailable',
+          durationMs: 10,
+        },
+        {
+          id: 'root/2',
+          name: 'write',
+          arguments: { path: 'b' },
+          status: 'unfinished',
+        },
+        {
+          id: 'root/2/1',
+          name: 'read',
+          arguments: { path: 'c' },
+          status: 'ok',
+        },
+      ],
+    };
+    const result = {
+      content: [{ type: 'text', text: 'Script failed' }],
+      nestedCalls,
+    };
+    live = reduceTranscriptEvent(live, {
+      type: 'tool.finished',
+      sessionId: 's',
+      tool: { toolCallId: 'root', name: 'codemode', isError: true, result },
+    } as never);
+    expect(live.items['root/1']).toMatchObject({
+      parentToolCallId: 'root',
+      arguments: { path: 'a' },
+      errorMessage: 'File unavailable',
+      durationMs: 10,
+      status: 'error',
+      timestamp: 200,
+    });
+    const restored = hydrateTranscript(
+      [
+        ...entries,
+        {
+          type: 'message',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'root',
+            toolName: 'codemode',
+            isError: true,
+            ...result,
+          },
+        },
+      ],
+      's',
+    );
+    expect(restored.order).toEqual([
+      'assistant',
+      'root',
+      'root/1',
+      'root/2',
+      'root/2/1',
+    ]);
+    expect(restored.items['root/1']).toMatchObject({
+      parentToolCallId: 'root',
+      errorMessage: 'File unavailable',
+      durationMs: 10,
+      status: 'error',
+    });
+    expect(restored.items['root/1']).not.toHaveProperty('arguments');
+    expect(restored.items['root/1']).not.toHaveProperty('result');
+    expect(restored.items['root/2']).toMatchObject({
+      status: 'error',
+      errorMessage: expect.stringContaining('did not finish'),
+    });
+    expect(
+      projectTranscriptForRender(restored).items.find(
+        (item) => item.key === 'root/2/1',
+      ),
+    ).toMatchObject({
+      parentToolCallId: 'root/2',
+      status: 'success',
+      arguments: { path: 'c' },
+    });
+    const replay = persistedEntriesToTranscriptEvents(
+      [
+        ...entries,
+        {
+          type: 'message',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'root',
+            toolName: 'codemode',
+            isError: true,
+            ...result,
+          },
+        },
+      ],
+      's',
+    ).reduce(reduceTranscriptEvent, hydrateTranscript([], 's'));
+    expect(replay.order).toEqual(restored.order);
+    expect(replay.items['root/1']).toEqual(restored.items['root/1']);
+  });
+
   it('preserves direct tool associations and skips only Pi metadata', () => {
     const state = hydrateTranscript([
       { type: 'session_info', id: 'meta' },
+      {
+        type: 'custom',
+        id: 'store',
+        customType: 'codemode-store',
+        data: { set: { key: 'value' } },
+      },
+      {
+        type: 'context_edit',
+        id: 'edit',
+        targetId: 'assistant-1',
+        replacement: null,
+      },
+      { type: 'usage', id: 'warm', kind: 'cache_warm' },
       {
         type: 'message',
         message: {

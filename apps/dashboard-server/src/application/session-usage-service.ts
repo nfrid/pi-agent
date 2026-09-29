@@ -101,6 +101,19 @@ export function sessionUsageEvent(
 ): SessionUsageEvent | undefined {
   const entry = record(entryValue);
   if (!entry) return undefined;
+  if (entry.type === 'usage') {
+    const modelId = boundedText(entry.model, 'unknown', 128);
+    return eventFromUsage(
+      entry,
+      entry.usage,
+      {
+        provider: boundedText(entry.provider, 'unknown', 128),
+        modelId,
+        label: modelId,
+      },
+      sessionId,
+    );
+  }
   if (entry.type === 'message') {
     const message = record(entry.message);
     if (message?.role === 'assistant') {

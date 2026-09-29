@@ -22,6 +22,7 @@ import {
   cloneState,
   createTaskStore,
   initialState,
+  reconstruct,
 } from './store';
 import { registerTodoTool } from './tool';
 import { updateUi } from './widget';
@@ -420,6 +421,78 @@ describe('restored task regressions', () => {
     });
     expect(cloneState(store)).toEqual(before);
     expect(store.state).toBe(stateReference);
+  });
+
+  it('returns structured task records and restores mutations without standalone tool results', async () => {
+    const tools = new Map<
+      string,
+      Parameters<ExtensionAPI['registerTool']>[0]
+    >();
+    const entries: unknown[] = [];
+    registerTodoTool(
+      {
+        registerTool(tool: Parameters<ExtensionAPI['registerTool']>[0]) {
+          tools.set(tool.name, tool);
+        },
+        appendEntry(customType: string, data: unknown) {
+          entries.push({
+            type: 'custom',
+            customType,
+            data: structuredClone(data),
+          });
+        },
+      } as unknown as ExtensionAPI,
+      store,
+    );
+    const update = tools.get('todo_update');
+    const list = tools.get('todo_list');
+    const remove = tools.get('todo_remove');
+    if (!update || !list || !remove) throw new Error('Missing todo tools');
+    const ctx = { hasUI: false } as never;
+    const changed = await update.execute(
+      'update',
+      {
+        changes: [
+          { id: 't1', text: 'Done', status: 'done' },
+          { id: 'T2', text: 'Active' },
+        ],
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(changed.structuredContent).toMatchObject({
+      changed: true,
+      ids: ['T1', 'T2'],
+      tasks: [
+        { id: 'T1', status: 'done' },
+        { id: 'T2', status: 'todo' },
+      ],
+    });
+    const active = await list.execute('list', {}, undefined, undefined, ctx);
+    expect(active.structuredContent).toMatchObject({
+      tasks: [{ id: 'T2' }],
+      stats: { active: 1, done: 1 },
+    });
+    if (!list.outputSchema) throw new Error('Missing output schema');
+    expect(Value.Check(list.outputSchema, active.structuredContent)).toBe(true);
+    const removed = await remove.execute(
+      'remove',
+      { ids: ['t1'] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(removed.structuredContent).toMatchObject({
+      changed: true,
+      ids: ['T1'],
+      tasks: [],
+    });
+    const restored = createTaskStore();
+    reconstruct(restored, {
+      sessionManager: { getBranch: () => entries },
+    } as never);
+    expect(restored.state.tasks).toEqual(store.state.tasks);
   });
 
   it('throws failed tool executions so Pi records an error result', async () => {

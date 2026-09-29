@@ -3,6 +3,8 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-6-astra",
   "defaultThinkingLevel": "medium",
+  "defaultTools": ["+codemode"],
+  "codemode": { "mode": "only" },
   "editorPaddingX": 1,
   "hideThinkingBlock": false,
   "quietStartup": true,

@@ -90,6 +90,26 @@ describe('session usage indexing', () => {
     });
   });
 
+  it('includes standalone usage such as cache warming under its physical model', () => {
+    const entry = {
+      type: 'usage',
+      id: 'warm-1',
+      timestamp: '2026-08-20T11:00:00Z',
+      kind: 'cache_warm',
+      provider: 'openai-codex',
+      model: 'gpt-6-luna',
+      usage: assistant('unused', '2026-08-20T11:00:00Z').message.usage,
+    };
+    expect(sessionUsageEvent(entry)).toMatchObject({
+      provider: 'openai-codex',
+      modelId: 'gpt-6-luna',
+      calls: 1,
+      totalTokens: 100,
+      costUsd: 1.25,
+    });
+    expect(sessionUsageEvent({ ...entry, usage: undefined })).toBeUndefined();
+  });
+
   it('keeps unattributed compaction cost under an honest synthetic series', () => {
     expect(
       sessionUsageEvent({

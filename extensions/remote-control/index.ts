@@ -293,6 +293,27 @@ export default defineExtension('remote-control', (pi) => {
     });
   });
   onCurrentTransportEvent('message_end', (event, ctx) => {
+    const message = eventRecord(directValue(eventRecord(event), 'message'));
+    if (
+      directString(message, 'role') === 'toolResult' &&
+      directValue(message, 'nestedCalls')
+    ) {
+      runtime.client.sendEvent({
+        type: 'tool.finished',
+        sessionId: ctx.sessionManager.getSessionId(),
+        tool: runtime.eventNormalizer.normalizeTool('finished', {
+          toolCallId: directString(message, 'toolCallId'),
+          toolName: directString(message, 'toolName'),
+          isError: directValue(message, 'isError'),
+          result: {
+            content: directValue(message, 'content'),
+            details: directValue(message, 'details'),
+            nestedCalls: directValue(message, 'nestedCalls'),
+          },
+        }),
+      });
+      return;
+    }
     if (!shouldForwardLiveMessage(event)) return;
     runtime.client.sendEvent({
       type: 'message.finished',

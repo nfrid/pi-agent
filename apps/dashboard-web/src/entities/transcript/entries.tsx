@@ -698,6 +698,7 @@ function ToolDetail({
     isError: tool.isError,
     result: tool.result,
     data: tool.data,
+    durationMs: tool.durationMs,
   });
   const argumentProgressMeta =
     tool.arguments === undefined && typeof tool.argumentLines === 'number'

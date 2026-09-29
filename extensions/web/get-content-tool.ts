@@ -6,7 +6,11 @@ import {
   pageContent,
 } from './content-retrieval';
 import { renderGetContentCall, renderWebResult } from './render';
-import { persistenceDetails, truncatedPreviewNotice } from './result-support';
+import {
+  persistenceDetails,
+  truncatedPreviewNotice,
+  webArtifactOutputProperties,
+} from './result-support';
 import type { WebResultStore } from './storage';
 import { throwIfAborted } from './utils';
 
@@ -38,6 +42,19 @@ export function createGetSearchContentTool(resultStore: WebResultStore) {
       'Read a bounded slice of saved web content by ID. IDs expire on session shutdown or extension reload. Partial slices include the exact offset for continuing.',
     promptSnippet: 'Retrieve previously saved web search or page content',
     parameters,
+    namespace: { name: 'web', description: 'Web search and readable content' },
+    outputSchema: Type.Object({
+      ...webArtifactOutputProperties,
+      contentId: Type.String(),
+      text: Type.String(),
+      hash: Type.String(),
+      totalChars: Type.Number(),
+      sourceTotalChars: Type.Number(),
+      selectedChars: Type.Number(),
+      offset: Type.Number(),
+      remainingChars: Type.Number(),
+      nextOffset: Type.Union([Type.Number(), Type.Null()]),
+    }),
     async execute(_callId, params, signal) {
       throwIfAborted(signal);
       const stored = resultStore.getContent(params.contentId);
@@ -60,6 +77,14 @@ export function createGetSearchContentTool(resultStore: WebResultStore) {
               )}`;
         return {
           content: [{ type: 'text' as const, text }],
+          structuredContent: {
+            contentId: params.contentId,
+            text: page.text,
+            ...page.details,
+            ...persistenceDetails(
+              stored.cacheFile ? { cacheFile: stored.cacheFile } : {},
+            ),
+          },
           details: {
             contentId: params.contentId,
             ...persistenceDetails(

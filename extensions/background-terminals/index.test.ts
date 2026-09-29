@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { BackgroundJobsClient } from '@pi-agent/background-jobs';
+import type { TSchema } from 'typebox';
+import { Value } from 'typebox/value';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackgroundJobHostService } from '../../apps/dashboard-server/src/background-job-host';
 import backgroundTerminals from './index';
@@ -19,6 +21,7 @@ interface ThemeLike {
 
 interface RegisteredTool {
   name: string;
+  outputSchema?: TSchema;
   description: string;
   promptSnippet?: string;
   promptGuidelines?: string[];
@@ -204,7 +207,19 @@ describe('background terminals extension', () => {
       )) as {
         content: Array<{ type: string; text: string }>;
         details: { process: ProcessDetails };
+        structuredContent: unknown;
       };
+      if (!tool.outputSchema) throw new Error('Missing output schema');
+      expect(Value.Check(tool.outputSchema, result.structuredContent)).toBe(
+        true,
+      );
+      expect(result.structuredContent).toMatchObject({
+        action: 'start',
+        process: {
+          id: result.details.process.id,
+          watches: [expect.objectContaining({ contains: 'READY' })],
+        },
+      });
       id = result.details.process.id;
       const watchId = result.details.process.watches?.[0]?.id;
       expect(watchId).toBeDefined();

@@ -978,13 +978,17 @@ describe('delegate', () => {
     const hostedExtensions = hosted.flatMap((arg, index) =>
       arg === '--extension' ? [hosted[index + 1]] : [],
     );
-    expect(foregroundExtensions).toHaveLength(5);
-    expect(hostedExtensions).toHaveLength(6);
+    expect(foregroundExtensions).toHaveLength(6);
+    expect(hostedExtensions).toHaveLength(7);
     expect(hostedExtensions[1]).toMatch(
       /extensions[\\/]remote-control[\\/]index\.ts$/,
     );
     expect(
-      hostedExtensions.every((extension) => extension && existsSync(extension)),
+      hostedExtensions.every(
+        (extension) =>
+          extension &&
+          (extension === 'builtin:codemode' || existsSync(extension)),
+      ),
     ).toBe(true);
   });
 
@@ -1000,21 +1004,27 @@ describe('delegate', () => {
     expect(extensionPaths[1]).toMatch(
       /extensions[\\/]system-prompt[\\/]index\.ts$/,
     );
-    expect(extensionPaths[2]).toMatch(
-      /extensions[\\/]mid-run-compaction[\\/]index\.ts$/,
-    );
+    expect(extensionPaths[2]).toBe('builtin:codemode');
     expect(extensionPaths[3]).toMatch(
       /extensions[\\/]tool-argument-validation[\\/]index\.ts$/,
     );
     expect(extensionPaths[4]).toMatch(
       /extensions[\\/]bash-description[\\/]index\.ts$/,
     );
-    expect(extensionPaths).toHaveLength(5);
-    expect(extensionPaths.every(existsSync)).toBe(true);
+    expect(extensionPaths[5]).toMatch(
+      /extensions[\\/]image-read[\\/]index\.ts$/,
+    );
+    expect(extensionPaths).toHaveLength(6);
+    expect(
+      extensionPaths.every(
+        (extension) =>
+          extension === 'builtin:codemode' || existsSync(extension),
+      ),
+    ).toBe(true);
     // Read-only is an intent signal, not a sandbox: the child keeps an ordinary
     // shell so it can inspect the repository the way any agent would.
     const tools = args[args.indexOf('--tools') + 1];
-    expect(tools).toBe('read,bash,grep,find,ls');
+    expect(tools).toBe('read,bash,grep,find,ls,codemode');
     expect(tools).not.toContain('write');
     expect(tools).not.toContain('edit');
   });
@@ -1043,7 +1053,7 @@ describe('delegate', () => {
       expect.stringMatching(/extensions[\\/]web[\\/]index\.ts$/),
     );
     expect(args[args.indexOf('--tools') + 1]).toBe(
-      'read,bash,grep,find,ls,web_search,fetch_content,get_search_content',
+      'read,bash,grep,find,ls,codemode,web_search,fetch_content,get_search_content',
     );
   });
 

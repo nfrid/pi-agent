@@ -50,19 +50,39 @@ function byteTail(value: string, maxBytes: number): string {
   return bytes.subarray(start).toString('utf8');
 }
 
-function outputTail(
+function boundedOutputTail(
   output: OutputSnapshot,
   maxLines: number,
   maxBytes: number,
-): string {
+) {
   const sanitized = sanitizeOutput(output.text).trimEnd();
-  if (!sanitized) return '(empty)';
   const lines = sanitized.split('\n');
   const lineTail = lines.slice(-maxLines).join('\n');
   const text = byteTail(lineTail, maxBytes);
   const omitted =
     output.droppedBytes > 0 || lines.length > maxLines || text !== lineTail;
-  return omitted ? `[earlier output omitted]\n${text}` : text;
+  return {
+    text,
+    omitted,
+    totalBytes: output.totalBytes,
+    droppedBytes: output.droppedBytes,
+  };
+}
+
+export function peekOutput(snapshot: BackgroundSnapshot, tailLines: number) {
+  return {
+    stdout: boundedOutputTail(snapshot.stdout, tailLines, STDOUT_RESULT_BYTES),
+    stderr: boundedOutputTail(snapshot.stderr, tailLines, STDERR_RESULT_BYTES),
+  };
+}
+
+function renderOutputTail(
+  output: ReturnType<typeof boundedOutputTail>,
+): string {
+  if (!output.text) return '(empty)';
+  return output.omitted
+    ? `[earlier output omitted]\n${output.text}`
+    : output.text;
 }
 
 export function formatBytes(bytes: number): string {
@@ -110,12 +130,13 @@ export function formatSummary(
 export function formatPeek(
   snapshot: BackgroundSnapshot,
   tailLines: number,
-  options: { human?: boolean } = {},
+  options: { human?: boolean; output?: ReturnType<typeof peekOutput> } = {},
 ): string {
   let text = `${formatSummary(snapshot, options)}\n$ ${snapshot.command}\ncwd: ${snapshot.cwd}`;
   if (snapshot.error) text += `\nerror: ${snapshot.error}`;
-  text += `\n\nstdout (${formatBytes(snapshot.stdout.totalBytes)} total):\n${outputTail(snapshot.stdout, tailLines, STDOUT_RESULT_BYTES)}`;
-  text += `\n\nstderr (${formatBytes(snapshot.stderr.totalBytes)} total):\n${outputTail(snapshot.stderr, tailLines, STDERR_RESULT_BYTES)}`;
+  const output = options.output ?? peekOutput(snapshot, tailLines);
+  text += `\n\nstdout (${formatBytes(snapshot.stdout.totalBytes)} total):\n${renderOutputTail(output.stdout)}`;
+  text += `\n\nstderr (${formatBytes(snapshot.stderr.totalBytes)} total):\n${renderOutputTail(output.stderr)}`;
   return text;
 }
 

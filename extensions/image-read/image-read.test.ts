@@ -128,7 +128,13 @@ describe('image read crops', () => {
     expect(tool.description).toContain(
       'For text files, output is truncated to 2000 lines or 50KB',
     );
-    expect(tool.promptGuidelines).toBeUndefined();
+    expect(tool.promptGuidelines).toEqual(
+      expect.arrayContaining([expect.stringContaining('image(block)')]),
+    );
+    expect(tool.constrainedSampling).toEqual({
+      type: 'json_schema',
+      strict: 'prefer',
+    });
   });
 
   it('returns the exact requested source pixels and dimensions', async () => {
@@ -308,6 +314,10 @@ describe('image read crops', () => {
       type: 'image',
       mimeType: 'image/png',
     });
+    expect(result.structuredContent).toEqual({
+      text: result.content[0].type === 'text' ? result.content[0].text : '',
+      images: [result.content[1]],
+    });
   });
 
   it('preserves built-in text reads when crop is omitted', async () => {
@@ -327,6 +337,10 @@ describe('image read crops', () => {
         text: 'two\n\n[2 more lines in file. Use offset=3 to continue.]',
       },
     ]);
+    expect(result.structuredContent).toEqual({
+      text: 'two\n\n[2 more lines in file. Use offset=3 to continue.]',
+      images: [],
+    });
   });
 
   it('rejects oversized source files before reading them', async () => {
