@@ -12,7 +12,7 @@ vi.mock('@pi-dashboard/client', () => ({
   dashboardHttpClient: { sessionImage },
 }));
 
-import { TranscriptEntry } from './entries';
+import { ThinkingBlob, TranscriptEntry } from './entries';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
@@ -191,7 +191,7 @@ describe('transcript entries', () => {
     ).not.toContain('transcript-branch-indicator');
   });
 
-  it('shows short thinking directly and collapses only longer thinking sequences', () => {
+  it('keeps up to three thinking previews visible and hides earlier history', () => {
     const item = (thinking: string[]): TranscriptModelItem => ({
       key: `assistant-thinking-${thinking.length}`,
       raw: {},
@@ -212,6 +212,70 @@ describe('transcript entries', () => {
     expect(long).toContain('Show 1 earlier item');
     expect(long).not.toContain('>one<');
     expect(long).toContain('four');
+  });
+
+  it('starts thinking as a compact preview and reveals the original Markdown on demand', () => {
+    const content =
+      'Considering `tools.read` before continuing.\nMore details follow.';
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ThinkingBlob content={content} />);
+    });
+    expect(
+      tree.root.findAllByProps({ className: 'thinking-body' }),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findByProps({ className: 'thinking-preview' }).children,
+    ).toEqual([
+      'Considering `tools.read` before continuing. More details follow.',
+    ]);
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    expect(
+      tree.root.findAllByProps({ className: 'thinking-body' }),
+    ).toHaveLength(1);
+    expect(tree.root.findByType('code').children).toEqual(['tools.read']);
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: false } }),
+    );
+    expect(
+      tree.root.findAllByProps({ className: 'thinking-body' }),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('keeps an opened thinking paragraph expanded as its streamed text changes', () => {
+    const item = (content: string): TranscriptModelItem => ({
+      key: 'streaming-thought',
+      raw: {},
+      entry: { kind: 'assistant', speaks: false },
+      role: 'assistant',
+      thinking: [content],
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TranscriptEntry item={item('Initial thoughts')} />);
+    });
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    act(() =>
+      tree.update(
+        <TranscriptEntry item={item('Initial thoughts with `new details`')} />,
+      ),
+    );
+    expect(
+      tree.root.findAllByProps({ className: 'thinking-body' }),
+    ).toHaveLength(1);
+    expect(tree.root.findByType('code').children).toEqual(['new details']);
+    act(() => tree.unmount());
   });
 
   it('copies the raw assistant Markdown and confirms the action', async () => {

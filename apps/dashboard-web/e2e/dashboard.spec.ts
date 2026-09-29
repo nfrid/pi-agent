@@ -4344,6 +4344,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
       (dot) => getComputedStyle(dot, '::before').backgroundColor,
     ),
   ).not.toBe('rgba(0, 0, 0, 0)');
+  await page.locator('.transcript-thinking-blob > summary').first().click();
   const thinkingTime = page.locator('.thinking-time');
   await expect(thinkingTime).toBeVisible();
   const thinkingLayout = await thinkingTime.evaluate((time) => {
@@ -4351,11 +4352,14 @@ test('dense mobile session keeps conversation and activity readable', async ({
     const firstParagraph = blob?.querySelector('.markdown > p');
     if (!blob || !firstParagraph) throw new Error('Thinking layout missing');
     const timeRect = time.getBoundingClientRect();
-    const blobRect = blob.getBoundingClientRect();
+    const bodyRect = blob
+      .querySelector('.thinking-body')
+      ?.getBoundingClientRect();
+    if (!bodyRect) throw new Error('Missing expanded thinking');
     const paragraphRect = firstParagraph.getBoundingClientRect();
     return {
       topDifference: Math.abs(timeRect.top - paragraphRect.top),
-      paragraphTopInset: paragraphRect.top - blobRect.top,
+      paragraphTopInset: paragraphRect.top - bodyRect.top,
       blobBackgroundImage: getComputedStyle(blob).backgroundImage,
       timestampBackgroundImage: getComputedStyle(time).backgroundImage,
     };
@@ -4403,6 +4407,14 @@ test('dense mobile session keeps conversation and activity readable', async ({
         },
       });
     }, content);
+  // Opening the thinking inspector intentionally enters reading mode, just
+  // like other transcript disclosures. Resume following before live output.
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: 1 }));
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await emitAssistant([{ type: 'text', text: 'Preparing live tool.' }]);
   await expect(
     page
@@ -6133,6 +6145,13 @@ test('codemode nested calls restore their status and failure summary @desktop', 
                 error: 'Permission denied',
                 durationMs: 20,
               },
+              {
+                id: 'compose/2',
+                name: 'read',
+                arguments: { path: 'index.ts' },
+                status: 'ok',
+                durationMs: 2,
+              },
             ],
           },
         },
@@ -6141,8 +6160,11 @@ test('codemode nested calls restore their status and failure summary @desktop', 
   });
   await page.goto('/sessions/s1');
   const tools = page.locator('.tool-detail');
-  await expect(tools).toHaveCount(2);
-  const nested = tools.filter({ hasText: 'Inspect workspace' });
+  await expect(tools).toHaveCount(3);
+  await page.locator('.codemode-group > .tool-detail > summary').click();
+  const nested = page
+    .locator('.codemode-children .tool-detail')
+    .filter({ hasText: 'Inspect workspace' });
   await nested.locator('summary').click();
   await expect(
     nested.getByText('Permission denied', { exact: true }),
@@ -6151,6 +6173,15 @@ test('codemode nested calls restore their status and failure summary @desktop', 
     nested.getByText('Called by compose', { exact: true }),
   ).toBeVisible();
   await expect(nested.locator('.tool-command-output')).toHaveCount(0);
+  const rootDot = page.locator(
+    '.codemode-group > .tool-detail > summary .tool-step-dot',
+  );
+  const successfulDot = page.locator(
+    '.codemode-children .step-complete > summary .tool-step-dot',
+  );
+  expect(
+    await successfulDot.evaluate((dot) => getComputedStyle(dot).color),
+  ).not.toBe(await rootDot.evaluate((dot) => getComputedStyle(dot).color));
 });
 
 for (const desktop of [false, true]) {
@@ -6251,7 +6282,30 @@ for (const desktop of [false, true]) {
     );
     const root = group.locator(':scope > .tool-detail');
     await expect(root).toHaveClass(/step-complete/);
-    await expect(root.locator('.tool-step-meta')).toHaveText('3 calls');
+    await expect(root.locator(':scope > summary .tool-step-meta')).toHaveText(
+      '3 calls',
+    );
+    await expect(root.locator(':scope > summary .tool-argument')).toContainText(
+      '1 failed',
+    );
+    await expect(root.locator(':scope > summary .tool-argument')).toContainText(
+      'bash, todo_list, read',
+    );
+    await expect(
+      group.locator('.codemode-children summary.tool-step').first(),
+    ).toBeHidden();
+    await expect(group.locator('.codemode-output > summary')).toBeHidden();
+    expect(
+      await root.evaluate(
+        (element) =>
+          Math.abs(
+            element.getBoundingClientRect().height -
+              (element.querySelector('summary')?.getBoundingClientRect()
+                .height ?? 0),
+          ) < 2,
+      ),
+    ).toBe(true);
+    await root.locator(':scope > summary').click();
     const geometry = await group
       .locator('.codemode-children summary.tool-step')
       .evaluateAll((rows) =>
@@ -6283,7 +6337,6 @@ for (const desktop of [false, true]) {
     expect(
       geometry.every((row) => row.sameRow && row.noOverlap && row.rightAligned),
     ).toBe(true);
-    await root.locator('summary').click();
     const script = root.getByRole('region', { name: 'Codemode script' });
     await expect(script.getByText('Formatted for display')).toBeVisible();
     expect(await script.locator('pre').innerText()).toContain('\n');
@@ -6295,7 +6348,11 @@ for (const desktop of [false, true]) {
     expect(
       await page.evaluate(() => '__codemodePreviewExecuted' in globalThis),
     ).toBe(false);
-    await root.locator('summary').click();
+    await root.locator(':scope > summary').click();
+    await expect(
+      group.locator('.codemode-children summary.tool-step').first(),
+    ).toBeHidden();
+    await root.locator(':scope > summary').click();
     await expect(
       group.locator('.codemode-children summary.tool-step').first(),
     ).toBeVisible();
@@ -6368,6 +6425,10 @@ test('codemode groups live calls and restores the same hierarchy on reconnect @d
   await expect(group.locator('.codemode-children .tool-detail')).toHaveClass(
     /step-pending/,
   );
+  await expect(
+    group.locator(':scope > .tool-detail > summary .tool-argument'),
+  ).toContainText('1 running');
+  await expect(group.locator('.codemode-children summary')).toBeHidden();
   await mocks.emit({
     event: {
       type: 'tool.finished',
@@ -6414,6 +6475,7 @@ test('codemode groups live calls and restores the same hierarchy on reconnect @d
     /step-complete/,
   );
   await expect(page.locator('.tool-detail')).toHaveCount(2);
+  await group.locator(':scope > .tool-detail > summary').click();
   await group.locator('.codemode-children summary').click();
   await expect(
     group.getByText('Observed child failure', { exact: true }),
@@ -6442,6 +6504,9 @@ test('codemode groups live calls and restores the same hierarchy on reconnect @d
   await expect(group.locator(':scope > .tool-detail')).toHaveClass(
     /step-complete/,
   );
+  const codeDetail = group.locator(':scope > .tool-detail');
+  if ((await codeDetail.getAttribute('open')) === null)
+    await codeDetail.locator(':scope > summary').click();
   const child = group.locator('.codemode-children .tool-detail');
   if ((await child.getAttribute('open')) === null)
     await child.locator('summary').click();
@@ -6474,6 +6539,26 @@ for (const desktop of [false, true]) {
     await page.goto('/sessions/s1');
     const blob = page.locator('.transcript-thinking-blob').first();
     await expect(blob.locator('time')).toBeVisible();
+    await expect(blob.locator('.thinking-body')).toHaveCount(0);
+    const collapsed = await blob.locator('summary').evaluate((element) => {
+      const preview = element.querySelector('.thinking-preview');
+      const time = element.querySelector('time');
+      if (!preview || !time) throw new Error('Missing thinking preview');
+      const label = preview.getBoundingClientRect();
+      const stamp = time.getBoundingClientRect();
+      return {
+        oneLine:
+          label.height <=
+          parseFloat(getComputedStyle(preview).lineHeight) * 1.1,
+        clipped: preview.scrollWidth > preview.clientWidth,
+        separated: label.right <= stamp.left,
+      };
+    });
+    expect(collapsed.oneLine && collapsed.clipped && collapsed.separated).toBe(
+      true,
+    );
+    await blob.locator('summary').click();
+    await expect(blob.locator('.thinking-body')).toBeVisible();
     await expect(blob.locator('code').first()).toContainText(
       'Promise.allSettled',
     );
@@ -6505,6 +6590,8 @@ for (const desktop of [false, true]) {
     expect(geometry.overlaps).toBe(false);
     expect(geometry.expandsBelow).toBe(true);
     expect(geometry.overflows).toBe(false);
+    await blob.locator('summary').click();
+    await expect(blob.locator('.thinking-body')).toHaveCount(0);
   });
 }
 

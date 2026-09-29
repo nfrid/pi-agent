@@ -213,7 +213,7 @@ details.session-event {
   font-size: 8px;
 }
 .tool-step.step-complete .tool-step-dot::before,
-.tool-detail.step-complete .tool-step-dot::before {
+.tool-detail.step-complete > summary .tool-step-dot::before {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -263,21 +263,27 @@ details.session-event {
   margin-left: 4px;
 }
 .tool-step.step-failed .tool-step-dot,
-.tool-detail.step-failed .tool-step-dot {
+.tool-detail.step-failed > summary .tool-step-dot {
   background: color-mix(in srgb, var(--red) 16%, transparent);
   color: var(--red);
   font-weight: 800;
 }
 .tool-step.step-pending .tool-step-dot,
-.tool-detail.step-pending .tool-step-dot {
+.tool-detail.step-pending > summary .tool-step-dot {
   color: var(--cyan);
   animation: tui-pulse 1.2s steps(2, end) infinite;
 }
 .session-page[data-runtime-paused] .tool-step.step-pending .tool-step-dot,
-.session-page[data-runtime-paused] .tool-detail.step-pending .tool-step-dot,
+.session-page[data-runtime-paused]
+  .tool-detail.step-pending
+  > summary
+  .tool-step-dot,
 .session-page[data-runtime-paused] .surface-running .surface-state,
 .surface-drawer[data-runtime-paused] .surface-running .surface-state,
-.surface-drawer[data-runtime-paused] .tool-detail.step-pending .tool-step-dot,
+.surface-drawer[data-runtime-paused]
+  .tool-detail.step-pending
+  > summary
+  .tool-step-dot,
 .session-page[data-runtime-paused] .live-compaction-event .session-event-icon {
   animation: none;
 }

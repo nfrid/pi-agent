@@ -1,3 +1,4 @@
+import { toolBaseName } from '@pi-dashboard/activity-model';
 import { useEffect, useState } from 'react';
 import { copyText } from '../../Markdown';
 import type { TranscriptModelItem } from '../../transcript';
@@ -9,6 +10,25 @@ import { PreviewTruncation, sourceTruncated } from './inspector/truncation';
 import { SPECIALIZED_PREVIEW_MAX_TEXT } from './inspector/types';
 
 type Tool = NonNullable<TranscriptModelItem['tool']>;
+
+export function codemodeCallSummary(
+  calls: readonly TranscriptModelItem[],
+): string {
+  const tools = calls.flatMap((item) => (item.tool ? [item.tool] : []));
+  const names = [...new Set(tools.map((tool) => toolBaseName(tool.name)))];
+  const running = tools.filter(
+    (tool) => tool.status === 'running' || tool.status === 'pending',
+  ).length;
+  const failed = tools.filter((tool) => tool.status === 'error').length;
+  return [
+    running ? `${running} running` : undefined,
+    failed ? `${failed} failed` : undefined,
+    names.slice(0, 3).join(', '),
+    names.length > 3 ? `+${names.length - 3} more` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
 
 export function CodemodeScript({ tool }: { tool: Tool }) {
   const args = tool.arguments;

@@ -15,7 +15,11 @@ import {
   commandStepMeta,
   toolStreamDurationLabel,
 } from './activity';
-import { CodemodeOutput, CodemodeScript } from './codemode';
+import {
+  CodemodeOutput,
+  CodemodeScript,
+  codemodeCallSummary,
+} from './codemode';
 import { TranscriptDisclosureIcon } from './disclosure-icon';
 import { BoundedPayloadPreview, ToolInspector } from './inspector';
 import { transcriptItemTimestamp } from './landmarks';
@@ -361,14 +365,37 @@ export function ThinkingBlob({
   content: string;
   timestamp?: number | string;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <div className="transcript-thinking-blob">
-      <DashboardTime
-        className="transcript-time thinking-time"
-        timestamp={timestamp}
-      />
-      <Markdown>{content}</Markdown>
-    </div>
+    <details
+      className="transcript-thinking-blob"
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary
+        className="thinking-summary"
+        title={expanded ? 'Collapse thinking' : 'Expand thinking'}
+      >
+        <TranscriptDisclosureIcon expanded={expanded} />
+        <span className="thinking-preview">
+          {expanded ? 'Thinking' : content.replace(/\s+/gu, ' ').trim()}
+        </span>
+        {!expanded ? (
+          <DashboardTime
+            className="transcript-time thinking-time"
+            timestamp={timestamp}
+          />
+        ) : null}
+      </summary>
+      {expanded ? (
+        <div className="thinking-body">
+          <DashboardTime
+            className="transcript-time thinking-time"
+            timestamp={timestamp}
+          />
+          <Markdown>{content}</Markdown>
+        </div>
+      ) : null}
+    </details>
   );
 }
 
@@ -382,14 +409,13 @@ function ThinkingBlobs({
   const [expanded, setExpanded] = useState(false);
   const hasHiddenHistory = thinking.length > 3;
   const visibleThinking = expanded ? thinking : thinking.slice(-3);
-  const occurrences = new Map<string, number>();
-  const blobs = visibleThinking.map((content) => {
-    const occurrence = (occurrences.get(content) ?? 0) + 1;
-    occurrences.set(content, occurrence);
+  const firstIndex = expanded ? 0 : Math.max(0, thinking.length - 3);
+  const blobs = visibleThinking.map((content, index) => {
     return (
       <ThinkingBlob
         content={content}
-        key={`${content}-${occurrence}`}
+        // biome-ignore lint/suspicious/noArrayIndexKey: Streaming paragraphs are append-only; their text changes.
+        key={firstIndex + index}
         timestamp={timestamp}
       />
     );
@@ -680,17 +706,17 @@ function ToolDetail({
   sessionId,
   timestamp,
   children,
-  nestedCallCount = 0,
+  nestedCalls = [],
 }: {
   tool: NonNullable<TranscriptModelItem['tool']>;
   cwd?: string;
   sessionId?: string;
   timestamp?: number | string;
   children?: ReactNode;
-  nestedCallCount?: number;
+  nestedCalls?: readonly TranscriptModelItem[];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const action = activityStepParts(
+  const baseAction = activityStepParts(
     {
       name: tool.name,
       args: tool.arguments,
@@ -717,9 +743,18 @@ function ToolDetail({
         ? `${formatCompactCount(tool.argumentChars)} chars received`
         : undefined;
   const codemode = toolBaseName(tool.name) === 'codemode';
+  const action = codemode
+    ? {
+        ...baseAction,
+        argument: codemodeCallSummary(nestedCalls) || argumentProgressMeta,
+      }
+    : baseAction;
+  const childCalls = children ? (
+    <div className="codemode-children">{children}</div>
+  ) : null;
   const meta = codemode
     ? [
-        `${nestedCallCount} call${nestedCallCount === 1 ? '' : 's'}`,
+        `${nestedCalls.length} call${nestedCalls.length === 1 ? '' : 's'}`,
         tool.durationMs === undefined
           ? undefined
           : toolStreamDurationLabel(tool.durationMs),
@@ -746,6 +781,12 @@ function ToolDetail({
           <ToolInspector tool={tool} sessionId={sessionId} />
         )
       ) : null}
+      {codemode ? (
+        <>
+          {childCalls}
+          <CodemodeOutput tool={tool} />
+        </>
+      ) : null}
     </details>
   );
   if (!codemode && !children) return detail;
@@ -755,8 +796,7 @@ function ToolDetail({
       aria-label={codemode ? 'Codemode execution' : undefined}
     >
       {detail}
-      {children ? <div className="codemode-children">{children}</div> : null}
-      {codemode ? <CodemodeOutput tool={tool} /> : null}
+      {!codemode ? childCalls : null}
     </section>
   );
 }
@@ -874,9 +914,7 @@ function TranscriptEntry({
         cwd={cwd}
         sessionId={item.sessionId}
         timestamp={timestamp}
-        nestedCallCount={
-          (item.toolChildren ?? []).flatMap(transcriptToolItems).length
-        }
+        nestedCalls={(item.toolChildren ?? []).flatMap(transcriptToolItems)}
       >
         {item.toolChildren?.map((child) => (
           <div key={child.key} data-transcript-key={child.key}>

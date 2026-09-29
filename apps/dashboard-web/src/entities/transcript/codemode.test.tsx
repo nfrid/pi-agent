@@ -6,7 +6,11 @@ import {
   toTranscriptEntries,
   transcriptToolItems,
 } from '../../transcript';
-import { CodemodeOutput, CodemodeScript } from './codemode';
+import {
+  CodemodeOutput,
+  CodemodeScript,
+  codemodeCallSummary,
+} from './codemode';
 import { TranscriptEntry } from './entries';
 import { transcriptItemTimestamp } from './landmarks';
 
@@ -14,6 +18,7 @@ function call(
   id: string,
   name: string,
   parentToolCallId?: string,
+  status: NonNullable<TranscriptModelItem['tool']>['status'] = 'success',
 ): TranscriptModelItem {
   return {
     key: id,
@@ -24,7 +29,7 @@ function call(
       key: id,
       toolCallId: id,
       name,
-      status: 'success',
+      status,
       ...(parentToolCallId ? { parentToolCallId } : {}),
     },
   };
@@ -57,6 +62,19 @@ describe('codemode presentation', () => {
     ).toEqual(['root', 'root/1', 'root/1/1', 'direct', 'second', 'second/1']);
     expect(root).not.toHaveProperty('toolChildren');
     expect(child).not.toHaveProperty('toolChildren');
+  });
+
+  it('summarizes known running/failed calls and bounds the tool name list without guessing progress', () => {
+    expect(
+      codemodeCallSummary([
+        call('a', 'read'),
+        call('b', 'read', undefined, 'running'),
+        call('c', 'bash', undefined, 'error'),
+        call('d', 'web_search', undefined, 'pending'),
+        call('e', 'todo_list'),
+      ]),
+    ).toBe('2 running · 1 failed · read, bash, web_search · +1 more');
+    expect(codemodeCallSummary([])).toBe('');
   });
 
   it('keeps orphan, cyclic, and non-codemode nested calls visible', () => {

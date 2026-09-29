@@ -123,6 +123,28 @@
   color: var(--muted);
   font-size: 10px;
 }
+.thinking-summary {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.5;
+  cursor: pointer;
+  list-style: none;
+}
+.thinking-summary::-webkit-details-marker {
+  display: none;
+}
+.thinking-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thinking-body {
+  display: flow-root;
+  margin-top: 6px;
+}
 .thinking-time {
   float: inline-end;
   display: block;
