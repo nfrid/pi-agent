@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { TERMINAL_RUN_STATUSES } from '@pi-dashboard/domain';
 import {
   type CommandReceipt,
   deriveSessionTitle,
@@ -228,19 +227,12 @@ export async function createThread(
     if (!checkout) throw new Error('Project has no persisted main checkout.');
     if (checkout.projectId !== project.id)
       throw new Error('Checkout does not belong to this project.');
-    const activeRun = host.repository
-      .listRuns()
-      .some(
-        (run) =>
-          run.checkoutId === checkout.id &&
-          !TERMINAL_RUN_STATUSES.includes(run.status),
-      );
     if (checkout.status === 'retired')
       throw Object.assign(
         new Error('A retired checkout cannot receive a new thread.'),
         { code: 'orchestration-conflict' },
       );
-    if (activeRun || !['ready', 'dirty'].includes(checkout.status))
+    if (!['ready', 'dirty'].includes(checkout.status))
       throw Object.assign(
         new Error('The selected checkout is unavailable for a new thread.'),
         { code: 'orchestration-conflict' },

@@ -43,7 +43,6 @@ function modelName(
 }
 
 function checkoutReason(checkout: CheckoutSummary): string | undefined {
-  if (checkout.activeRunId) return 'Active run';
   if (checkout.status === 'preparing') return 'Preparing';
   if (checkout.status === 'merging') return 'Merging';
   if (checkout.status === 'failed') return 'Unavailable';

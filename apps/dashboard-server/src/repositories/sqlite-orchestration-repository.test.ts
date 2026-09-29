@@ -4,7 +4,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
 import { describe, expect, it } from 'vitest';
-import { runMigrations } from './migrations.js';
+import { DASHBOARD_MIGRATIONS, runMigrations } from './migrations.js';
 import { SqliteOrchestrationRepository } from './sqlite-orchestration-repository.js';
 
 async function database(): Promise<{
@@ -60,6 +60,55 @@ async function fixture() {
 }
 
 describe('SqliteOrchestrationRepository', () => {
+  it('upgrades existing databases to allow parallel checkout writers', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      runMigrations(
+        db,
+        DASHBOARD_MIGRATIONS.filter(({ version }) => version < 24),
+      );
+      const repository = new SqliteOrchestrationRepository(db);
+      const project = repository.createProject({
+        id: 'upgrade-project',
+        title: 'Upgrade',
+        rootPath: '/repo',
+      });
+      const checkout = repository.createCheckout({
+        id: 'upgrade-main',
+        projectId: project.id,
+        kind: 'main',
+        path: '/repo',
+        status: 'ready',
+      });
+      for (const id of ['first', 'second']) {
+        repository.createThread({
+          id,
+          projectId: project.id,
+          checkoutId: checkout.id,
+          title: id,
+        });
+      }
+      repository.createRun({
+        id: 'first-run',
+        threadId: 'first',
+        initialPrompt: 'First',
+      });
+      const createSecond = () =>
+        repository.createRun({
+          id: 'second-run',
+          threadId: 'second',
+          initialPrompt: 'Second',
+        });
+      expect(createSecond).toThrow();
+      runMigrations(db);
+      runMigrations(db);
+      expect(createSecond()).toMatchObject({ mode: 'write', status: 'queued' });
+      expect(repository.getRun('first-run')?.status).toBe('queued');
+    } finally {
+      db.close();
+    }
+  });
+
   it('includes the configured default model in project summaries', async () => {
     const value = await database();
     value.repository.createProject({
@@ -1043,7 +1092,7 @@ describe('SqliteOrchestrationRepository', () => {
     );
   });
 
-  it('enforces active thread, writer checkout, runtime session, and worktree uniqueness', async () => {
+  it('allows parallel checkout writers while enforcing thread, runtime session, and worktree uniqueness', async () => {
     const value = await fixture();
     const thread = value.repository.createThread({
       id: 'thread-unique',
@@ -1097,7 +1146,7 @@ describe('SqliteOrchestrationRepository', () => {
         threadId: checkoutConflictThread.id,
         initialPrompt: 'Writer conflict',
       }),
-    ).toThrowError(expect.objectContaining({ code: 'active-writer' }));
+    ).not.toThrow();
     expect(() =>
       value.repository.createCheckout({
         id: 'checkout-duplicate-path',

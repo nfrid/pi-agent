@@ -89,17 +89,12 @@ function normalizeSqliteError(error: unknown): unknown {
   if (!lower.includes('unique') && !lower.includes('constraint')) return error;
   const code = lower.includes('planned_runtime_id')
     ? 'idempotency-conflict'
-    : lower.includes('active_writer_per_checkout') ||
-        lower.includes('orchestration_run.checkout_id')
-      ? 'active-writer'
-      : 'sqlite-constraint';
+    : 'sqlite-constraint';
   return Object.assign(
     new Error(
-      code === 'active-writer'
-        ? 'The checkout already has an active writer.'
-        : code === 'idempotency-conflict'
-          ? 'The runtime identity is reserved by another command.'
-          : 'The orchestration request conflicts with existing state.',
+      code === 'idempotency-conflict'
+        ? 'The runtime identity is reserved by another command.'
+        : 'The orchestration request conflicts with existing state.',
     ),
     { code },
   );
@@ -1123,20 +1118,13 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return this.withTransaction(() => {
       const current = this.getRun(id);
       if (current?.status !== 'queued') return undefined;
-      try {
-        const result = this.db
-          .prepare(
-            `UPDATE orchestration_run SET status='preparing',started_at=COALESCE(started_at,?)
-             WHERE id=? AND status='queued'`,
-          )
-          .run(now, id);
-        if (Number(result.changes) !== 1) return undefined;
-      } catch (error) {
-        // The partial unique writer index is the second concurrency guard. A
-        // queued main-checkout writer remains queued rather than falling back.
-        if (String(error).toLowerCase().includes('unique')) return undefined;
-        throw error;
-      }
+      const result = this.db
+        .prepare(
+          `UPDATE orchestration_run SET status='preparing',started_at=COALESCE(started_at,?)
+           WHERE id=? AND status='queued'`,
+        )
+        .run(now, id);
+      if (Number(result.changes) !== 1) return undefined;
       this.syncThreadStatus(current.threadId, 'preparing', now);
       return this.getRun(id);
     });

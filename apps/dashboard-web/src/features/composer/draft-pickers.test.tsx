@@ -146,7 +146,7 @@ describe('draft location picker', () => {
     act(() => buttonWithLabel(renderer, 'Current checkout')?.props.onPress());
     expect(buttonWithLabel(renderer, 'Done')).toBeDefined();
     act(() => buttonWithLabel(renderer, 'Existing checkout')?.props.onPress());
-    expect(buttonWithLabel(renderer, 'pi/busy')?.props.isDisabled).toBe(true);
+    expect(buttonWithLabel(renderer, 'pi/busy')?.props.isDisabled).toBe(false);
     expect(buttonWithLabel(renderer, 'pi/retired')?.props.isDisabled).toBe(
       true,
     );

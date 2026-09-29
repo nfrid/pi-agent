@@ -1978,6 +1978,42 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('launches parallel write runs in the main checkout', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      const first = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'parallel-main-1',
+        title: 'First main run',
+        prompt: 'First',
+        isolation: 'main',
+      })) as { run: { id: string; checkoutId: string } };
+      await fixture.service.start();
+      await waitFor(() => fixture.launches.length === 1);
+      const second = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'parallel-main-2',
+        title: 'Second main run',
+        prompt: 'Second',
+        checkoutId: first.run.checkoutId,
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => fixture.launches.length === 2);
+      const repository = fixture.metadata.orchestration;
+      expect(repository.getRun(first.run.id)).toMatchObject({
+        mode: 'write',
+        status: 'starting',
+      });
+      expect(repository.getRun(second.run.id)).toMatchObject({
+        mode: 'write',
+        status: 'starting',
+        checkoutId: first.run.checkoutId,
+      });
+      expect(fixture.launches[0]?.checkoutCwd).toBe(
+        fixture.launches[1]?.checkoutCwd,
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('launches isolated runs concurrently when maxParallelRuns is one', async () => {
     const fixture = await isolatedServiceFixture();
     try {

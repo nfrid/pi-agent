@@ -926,6 +926,13 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       );
     },
   },
+  {
+    version: 24,
+    name: 'allow-parallel-checkout-writers',
+    up(db) {
+      db.exec('DROP INDEX IF EXISTS active_writer_per_checkout');
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */
