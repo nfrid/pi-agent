@@ -431,19 +431,19 @@ export function emitAgentSettlement(
 ): void {
   const scopeId = ctx.sessionManager.getSessionId();
   const pending = pendingProcessCount(scopeId);
-  if (responseWaitPending || !isGenuineAgentSettlement(false, scopeId)) {
+  if (closure && !responseWaitPending) {
+    // A handed-off answer is complete even while a passive server stays alive.
+    // Keep that process in the activity panel, not in the foreground wait surface.
+    clearSettledBackground(scopeId);
+    emitState(runtime, ctx, 'idle');
+  } else if (responseWaitPending || !isGenuineAgentSettlement(false, scopeId)) {
     publishSettledBackground(pending, scopeId);
-    emitState(runtime, ctx, closure ? 'idle' : 'waiting');
-    if (closure && runtime.isCurrent(ctx))
-      runtime.client.sendEvent({
-        type: 'agent.settled',
-        sessionId: ctx.sessionManager.getSessionId(),
-        closure,
-      });
+    emitState(runtime, ctx, 'waiting');
     return;
+  } else {
+    clearSettledBackground(scopeId);
+    emitState(runtime, ctx);
   }
-  clearSettledBackground(scopeId);
-  emitState(runtime, ctx);
   if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({
     type: 'agent.settled',

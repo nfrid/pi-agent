@@ -2787,7 +2787,7 @@ describe('remote-control bridge', () => {
 });
 
 describe('agent settlement', () => {
-  it('publishes compact waiting state while a process is pending', () => {
+  it('keeps passive processes separate from handed-off answers and explicit waits', () => {
     const scope = `session-settled-${Date.now()}`;
     const source = {};
     const events: unknown[] = [];
@@ -2819,12 +2819,7 @@ describe('agent settlement', () => {
           endedAt: 20,
         },
       });
-      expect(getLiveExtensionSurfaceHub(scope).snapshot()).toEqual([
-        expect.objectContaining({
-          rendererId: 'runtime.settled-background',
-          viewModel: { version: 1, count: 2 },
-        }),
-      ]);
+      expect(getLiveExtensionSurfaceHub(scope).snapshot()).toEqual([]);
     } finally {
       setPendingProcessCount(source, 0, scope);
       getLiveExtensionSurfaceHub(scope).clear('remote-control');
