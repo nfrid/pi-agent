@@ -1463,6 +1463,56 @@ describe('dashboard protocol', () => {
     ).toThrow();
   });
 
+  it.each([
+    'openai',
+    'openai-codex',
+  ])('preserves service tiers for %s runtime snapshots, historical runs, and defaults', (provider) => {
+    const model = { provider, model: 'gpt-6-luna', serviceTier: 'fast' };
+    const runtime = {
+      runtimeId: 'runtime-tier',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp',
+      liveState: 'idle',
+      session: { id: 'session-tier', entries: [] },
+      model,
+    };
+    expect(parseRuntimeSnapshot(runtime).model).toEqual(model);
+    expect(
+      parseDashboardSettings({
+        modelDisplayPreferences: {},
+        defaultModel: model,
+      }).defaultModel,
+    ).toEqual(model);
+    const shell = {
+      snapshot: {
+        serverId: 'server-tier',
+        revision: 1,
+        cursor: 1,
+        runtimes: [runtime],
+        sessions: [],
+        runs: [
+          {
+            id: 'run-tier',
+            threadId: 'thread-tier',
+            checkoutId: 'checkout-tier',
+            attempt: 1,
+            mode: 'read',
+            runtimeProvider: 'extension-bridge',
+            status: 'completed',
+            createdAt: 1,
+            model,
+          },
+        ],
+        unread: [],
+      },
+      cursor: 1,
+    };
+    expect(
+      parseShellSnapshotResponse(shell).snapshot.runtimes[0]?.model,
+    ).toEqual(model);
+  });
+
   it('accepts bounded model and thinking catalogues in runtime snapshots', () => {
     expect(
       parseRuntimeSnapshot({

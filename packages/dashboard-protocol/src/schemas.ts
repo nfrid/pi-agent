@@ -602,7 +602,11 @@ const RuntimeModelSchema = Type.Unsafe<RuntimeModel>(
   Type.Union([
     Type.Object(
       {
-        provider: Type.Literal('openai'),
+        // Existing runtimes survive dashboard deploys with their original provider.
+        provider: Type.Union([
+          Type.Literal('openai'),
+          Type.Literal('openai-codex'),
+        ]),
         ...RuntimeModelProperties,
         serviceTier: Type.Optional(CodexServiceTierSchema),
       },
