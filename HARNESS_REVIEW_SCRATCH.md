@@ -2,10 +2,10 @@
 
 ## Resume here
 
-- Mode: **batch D complete; next bounded audit pending**. Source fix `0018adcf`, parent test-path correction `3ead57a8`; 102 scoped tests and relevant types/Biome pass. No deployment, model evaluation C, wrapper/base migrations or broad lifecycle refactor authorized.
+- Mode: **read-only task/todo audit complete; optional batch E approval pending**. No task source/docs edits authorized yet; only this roadmap changes. User continues to prioritize simplification over restrictions. D is complete (`0018adcf` + `3ead57a8`); no deployment or model evaluation C authorized.
 - Baseline: `868e113d` (2026-09-30). Checkout was clean before creating this file.
 - Audit milestone and batch A complete. Test patch `a1898260`; aggregate exits 0 with **2,609 passing tests**. Batch B docs committed `7191321c`, focused contracts 54 pass. C remains approval-pending.
-- No active delegates/background dependencies. Batch D source patch is task-owned staged-path selection (`--no-renames`) + explicit merged:false empty-delta result. No-op reset removed rather than adding machinery/restrictions.
+- No active delegates/background dependencies. `tasks-state-audit@1` (`luna-m`, read-only) completed: 35 focused tasks tests pass; no runtime cycle or ownership problem justifying structural refactor. Parent independently reviewed tool/context/docs and verified findings.
 - Child integration 45 tests/types/Biome/isolated package build pass. Parent scoped integration + package/tool/worktree consumer suites **102 tests pass**; log `/tmp/pi-harness-batch-d-tests.log` (background `a6b85f7b-e70b-4ac1-a751-b1b66096a904` completed exit0).
 - Parent package/extension types and changed-file Biome/whitespace pass. Sequencer assertion checks real fixture path (`3ead57a8`). Package runtime build validated only in isolated workspace; parent dist/live services are not upgraded.
 - Historical batch A: `baseline-contract-tests@3` left a reviewed patch but hit carried-scratch integration guards. Initial overlap refusal and absent net-neutral path commit failure preserved checkout; no partial merge landed.
@@ -15,7 +15,7 @@
 - Async setup blocker resolved: child inherits `PI_DELEGATE_CHILD=1`; normal `scripts/clean-npm-env.mjs` strips it. Named async test passes using cleaned launcher; migration/repository 57 and wake 6 pass.
 - Premature aggregate `5407c382-f6c5-4faa-8820-9454d9e4348a` ran old tests before successful integration and is not final validation. Use the final aggregate handle above.
 - Parent independent post-integration async + wake suites: **36 tests pass**. Changed-file Biome and diff whitespace pass. No production behavior changed.
-- Do not read auth/credential files or raw user sessions; do not deploy or restart services. Authorized writes: `packages/worktree-manager/src/integrate.ts`, relevant existing integration test files, and this scratch file.
+- Do not read auth/credential files or raw user sessions; do not deploy or restart services. Current authorized writes: this scratch roadmap only. Task implementation needs approval.
 - Preserve unrelated checkout changes. Full baseline already established in batch A; prefer scoped checks for subsequent localized work.
 - After compaction, read this file and current todo state; use automatic delegate/background completion reports rather than polling.
 
@@ -37,7 +37,7 @@ User reminder during batch D: do not add restrictions or performative safety for
 |---|---|---|
 | 0. Baseline and boundaries | Initial milestone complete | Current checks measured; ownership mapped at component level, not exhaustively audited |
 | 1. Agent-facing harness | Bounded audit complete | No verified prompt/tool-exposure bug; doc drift and compaction evaluation gap identified |
-| 2. Execution/orchestration | Carried-WIP audit/fix complete | Next suggested seam: task/todo ownership and ergonomics; remaining lifecycle/wakeup/remote-control reviews not started |
+| 2. Execution/orchestration | Carried-WIP fix and task/todo audit complete | Optional local task-result cleanup E proposed; remaining lifecycle/wakeup/remote-control reviews not started |
 | 3. Tools/integrations | Not started | Web/search, image reads, argument validation, usage and smaller tools |
 | 4. Shared contracts/backend | Not started | Protocol/domain, persistence/indexing, transports |
 | 5. Presentation | Not started | Dashboard, activity rendering, TUI/themes/notifications |
@@ -98,6 +98,12 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Package + extension typechecks, changed-file Biome and diff whitespace pass. Child isolated package build passes. No full check/build-all/browser E2E/deployment/service restart; parent package dist was not rebuilt, so running/default-export consumers are not claimed upgraded.
 - Review refinements stayed within 2 files: staged/task ownership intersection, truthful no-op outcome, removal of needless destructive reset, correctly resolved fixture sequencer assertion. No generic concurrency mechanism or new API.
 
+### Task/todo read-only audit (`481726e4`)
+
+- Child `node scripts/clean-npm-env.mjs bun x vitest run extensions/tasks`: **35 tests pass** across 4 files. No code changes, whole-repo checks or model evaluations.
+- Parent verifies state/field normalization, graph validation ownership, current result schemas/tests, immutable context/elision/reset semantics and command registrations.
+- No verified task-state defect or justified structural refactor found. Small local tool-response duplication and documentation drift are actionable; no measured performance claims.
+
 ### Pre-implementation baseline (`868e113d`)
 
 - Environment: Node `v25.8.0`, Bun `1.4.0`, Pi `0.99.1`. All runs use system-tool PATH as needed. Baseline HEAD was `868e113d`; scratch was initially untracked.
@@ -137,6 +143,14 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Existing portable (2) and extension (35) tests lack this carried-only deletion squash case. Parent independently reran both: **37 pass**; log `/tmp/pi-harness-integration-audit-tests.log`.
 - **Implemented/verified in batch D.** Effective staged delta is intersected with task-owned paths; deletions/renames preserved. Existing ownership guard and rollback retained. No-op removes destructive cleanup rather than adding restrictions.
 
+### F5 — Small task tool response duplication + stale interface docs (verified)
+
+- `extensions/tasks/tool.ts:67–71` derives stats for structured content; each handler (`:141–157`, `:179–195`, `:216–232`) repeats error handling/result assembly and derives identical stats again for details.
+- Minimal simplification: let the existing `executeTodo` return the complete common tool result, using one stats derivation. Keep all three schema-typed registrations explicit; no generic registration factory, new file or framework. This is maintainability cleanup, not a measured speed claim.
+- `docs/todo-context.md` still describes old `list`/batch steps/generated IDs, a `/todo` overlay, and `/tostats`. Current `commands.ts` registers only `/todo` (widget update + notification/headless print) and `/todump`; schemas reject the old action selector. Text list is bounded, while structured content returns selected task records/stats.
+- Core ownership already sound: store loads/persists state; mutation layer builds/validates atomic candidate graph; domain owns dependency predicates. Store→domain runtime edge's reverse import is type-only. Do not refactor away an apparent cycle or repeat historical audit finding.
+- Preserve legacy todo/snapshot identifiers and persisted `State.version:1`/`nextId` contract; historical context/metrics have named consumers. No storage migration or new validation restrictions.
+
 ## Proposed batches and acceptance
 
 ### A. Restore trustworthy test baseline — complete
@@ -168,6 +182,14 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Validation: reproduce regression before fix; focused real-Git integration suites, package + extension typechecks as needed, changed-file Biome, exact commit/diff assertions and rollback checks. No production deployment or full harness rewrite.
 - Approval/result: **approved; integrated `0018adcf` + test correction `3ead57a8`; kept**. 102 scoped tests/types/Biome pass; isolated package build passes. No runtime API/state model or wrapper/base changes. Live activation/deployment remains unperformed.
 
+### E. Simplify task tool result assembly and align docs — optional next
+
+- Scope: `extensions/tasks/tool.ts`, a few semantic assertions in existing `tasks.test.ts`, `docs/todo-context.md`. Use existing helper to assemble output/error/details once and reuse stats; registrations and metadata stay explicit.
+- Acceptance: all three tool output schemas, IDs/order/task selection, bounded text, error behavior and detail stats remain equivalent; dependency/status/atomicity/persistence/UI/context semantics unchanged. Existing 35 tasks tests plus a small equality assertion for structured/detail stats are sufficient; avoid a new scenario matrix.
+- Documentation: remove non-existent commands/old batch/generated-ID claims; describe current bounded text and structured records plus actual commands. Do not remove legacy runtime compatibility to match docs.
+- Validation: focused task tests, extension typecheck and changed-code Biome/diff check; manual docs/schema/command match. No broader refactor, extra safety policy, benchmark claim, dashboard deployment or full check required.
+- Approval: **pending**; optional small deletion-oriented cleanup, not urgent correctness work.
+
 ## Deliberately unchanged
 
 - Canonical system-prompt owner, composition order, intentional rejection of direct prompt inputs and documented hook precedence.
@@ -178,6 +200,6 @@ Verified correctness findings can move ahead. Review shared packages with their 
 
 ## Next decision
 
-Batch D complete. Recommend next a read-only task/todo subsystem pass (`extensions/tasks/`): state/contract ownership, duplication, coupling and tool ergonomics, with emphasis on simplification/deletion rather than stricter policy. Require evidence before proposing edits. Compaction evaluation C and live activation/deployment remain separate and approval-pending.
+Task/todo audit complete. Offer small optional **batch E** (local result assembly/stats reuse + accurate docs), not a domain/store refactor. If approved implement exactly that; otherwise move to the next component. Compaction evaluation C and live activation/deployment remain separate and approval-pending.
 
 Record for later execution/operations audit: carried untracked parent progress file made test-only integration conflict; deleting that carried artifact led to absent-path `commit --only` failure. Both attempts aborted safely. Recovery was a tracked roadmap and a clean-base child reproduction; no manual merge or integrator changes. Also use cleaned test launcher inside delegate environments to strip `PI_DELEGATE_CHILD`. The verified absent-path defect is now authorized as batch D; broader runtime changes and feedback triage are not authorized. B is approved documentation work; C is a separate evaluation requiring approval of a bounded model-run budget. Scratch is being versioned so future clean-base delegates do not carry an untracked copy that collides with parent progress updates.
