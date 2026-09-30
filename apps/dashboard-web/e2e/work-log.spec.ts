@@ -220,9 +220,12 @@ for (const project of ['mobile', 'desktop']) {
               },
               {
                 id: 'script/2',
-                name: 'read',
+                name: 'bash',
                 status: 'ok',
-                arguments: { path: 'src/two.ts' },
+                arguments: {
+                  command: 'ls src',
+                  description: 'Inspect source files',
+                },
               },
             ],
           },
@@ -251,6 +254,13 @@ for (const project of ['mobile', 'desktop']) {
     ).toHaveAttribute(
       'title',
       'Child results go to the script, not directly to the agent.',
+    );
+    const bashTitle = calls.nth(2).locator('.tool-name');
+    await expect(bashTitle).toContainText('Inspect source files');
+    await expect(bashTitle).toHaveCSS('font-style', 'italic');
+    await expect(bashTitle.locator('.codemode-child-indicator')).toHaveCSS(
+      'font-style',
+      'normal',
     );
     await expect(
       transcript.getByText('via codemode', { exact: true }),
