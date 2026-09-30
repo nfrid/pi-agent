@@ -1,7 +1,14 @@
 import { toolBaseName } from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { SessionBranchPoint } from '@pi-dashboard/protocol';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { copyText, Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
@@ -366,36 +373,44 @@ export function ThinkingBlob({
   timestamp?: number | string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [multiline, setMultiline] = useState(false);
+  const textRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const markdown = textRef.current?.querySelector<HTMLElement>('.markdown');
+    if (!markdown) return;
+    const measure = () => {
+      const wraps =
+        markdown.getBoundingClientRect().height >
+        parseFloat(getComputedStyle(markdown).lineHeight) + 1;
+      setMultiline(wraps);
+      if (!wraps) setExpanded(false);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(markdown);
+    return () => observer.disconnect();
+  }, []);
   return (
-    <details
-      className="transcript-thinking-blob"
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-    >
-      <summary
-        className="thinking-summary"
-        title={expanded ? 'Collapse thinking' : 'Expand thinking'}
-      >
-        <TranscriptDisclosureIcon expanded={expanded} />
-        <span className="thinking-preview">
-          {expanded ? 'Thinking' : content.replace(/\s+/gu, ' ').trim()}
-        </span>
-        {!expanded ? (
-          <DashboardTime
-            className="transcript-time thinking-time"
-            timestamp={timestamp}
-          />
-        ) : null}
-      </summary>
-      {expanded ? (
-        <div className="thinking-body">
-          <DashboardTime
-            className="transcript-time thinking-time"
-            timestamp={timestamp}
-          />
-          <Markdown>{content}</Markdown>
-        </div>
+    <div className="transcript-thinking-blob">
+      {multiline ? (
+        <button
+          type="button"
+          className="thinking-toggle"
+          aria-label={expanded ? 'Collapse thinking' : 'Expand thinking'}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <TranscriptDisclosureIcon expanded={expanded} />
+        </button>
       ) : null}
-    </details>
+      <div ref={textRef} className="thinking-text" data-expanded={expanded}>
+        <DashboardTime
+          className="transcript-time thinking-time"
+          timestamp={timestamp}
+        />
+        <Markdown>{content}</Markdown>
+      </div>
+    </div>
   );
 }
 

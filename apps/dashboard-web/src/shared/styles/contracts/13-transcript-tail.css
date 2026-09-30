@@ -119,31 +119,32 @@
     color-mix(in srgb, var(--purple) 7%, var(--bg)) calc(100% - 84px),
     transparent 100%
   );
-  padding: 7px 9px;
+  padding: 7px 9px 7px 29px;
   color: var(--muted);
   font-size: 10px;
 }
-.thinking-summary {
+.thinking-toggle {
+  position: absolute;
+  inset-inline-start: 9px;
+  top: 7px;
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  line-height: 1.5;
+  place-items: center;
+  width: 14px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cyan);
   cursor: pointer;
-  list-style: none;
 }
-.thinking-summary::-webkit-details-marker {
-  display: none;
-}
-.thinking-preview {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.thinking-body {
+.thinking-text {
   display: flow-root;
-  margin-top: 6px;
+  line-height: 1.55;
+  max-height: 1lh;
+  overflow: hidden;
+}
+.thinking-text[data-expanded="true"] {
+  max-height: none;
 }
 .thinking-time {
   float: inline-end;

@@ -4344,7 +4344,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
       (dot) => getComputedStyle(dot, '::before').backgroundColor,
     ),
   ).not.toBe('rgba(0, 0, 0, 0)');
-  await page.locator('.transcript-thinking-blob > summary').first().click();
+  await expect(
+    page.locator('.transcript-thinking-blob').getByRole('button'),
+  ).toHaveCount(0);
   const thinkingTime = page.locator('.thinking-time');
   await expect(thinkingTime).toBeVisible();
   const thinkingLayout = await thinkingTime.evaluate((time) => {
@@ -4353,7 +4355,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     if (!blob || !firstParagraph) throw new Error('Thinking layout missing');
     const timeRect = time.getBoundingClientRect();
     const bodyRect = blob
-      .querySelector('.thinking-body')
+      .querySelector('.thinking-text')
       ?.getBoundingClientRect();
     if (!bodyRect) throw new Error('Missing expanded thinking');
     const paragraphRect = firstParagraph.getBoundingClientRect();
@@ -4407,14 +4409,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
         },
       });
     }, content);
-  // Opening the thinking inspector intentionally enters reading mode, just
-  // like other transcript disclosures. Resume following before live output.
-  await transcriptScroll(page).evaluate((element) => {
-    element.dispatchEvent(new WheelEvent('wheel', { deltaY: 1 }));
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event('scroll'));
-  });
-  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await emitAssistant([{ type: 'text', text: 'Preparing live tool.' }]);
   await expect(
     page
@@ -6539,29 +6533,31 @@ for (const desktop of [false, true]) {
     await page.goto('/sessions/s1');
     const blob = page.locator('.transcript-thinking-blob').first();
     await expect(blob.locator('time')).toBeVisible();
-    await expect(blob.locator('.thinking-body')).toHaveCount(0);
-    const collapsed = await blob.locator('summary').evaluate((element) => {
-      const preview = element.querySelector('.thinking-preview');
-      const time = element.querySelector('time');
-      if (!preview || !time) throw new Error('Missing thinking preview');
-      const label = preview.getBoundingClientRect();
-      const stamp = time.getBoundingClientRect();
-      return {
-        oneLine:
-          label.height <=
-          parseFloat(getComputedStyle(preview).lineHeight) * 1.1,
-        clipped: preview.scrollWidth > preview.clientWidth,
-        separated: label.right <= stamp.left,
-      };
-    });
-    expect(collapsed.oneLine && collapsed.clipped && collapsed.separated).toBe(
-      true,
-    );
-    await blob.locator('summary').click();
-    await expect(blob.locator('.thinking-body')).toBeVisible();
+    const toggle = blob.getByRole('button', { name: 'Expand thinking' });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(blob.locator('code').first()).toContainText(
       'Promise.allSettled',
     );
+    const collapsed = await blob
+      .locator('.thinking-text')
+      .evaluate((element) => {
+        const markdown = element.querySelector('.markdown');
+        if (!markdown) throw new Error('Missing thinking Markdown');
+        return {
+          oneLine:
+            element.getBoundingClientRect().height <=
+            parseFloat(getComputedStyle(element).lineHeight) * 1.1,
+          clipped:
+            markdown.getBoundingClientRect().height >
+            element.getBoundingClientRect().height,
+        };
+      });
+    expect(collapsed.oneLine && collapsed.clipped).toBe(true);
+    await toggle.click();
+    await expect(
+      blob.getByRole('button', { name: 'Collapse thinking' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    await expect(blob.getByText('Thinking', { exact: true })).toHaveCount(0);
     const geometry = await blob.evaluate((element) => {
       const timestamp = element.querySelector('time');
       const paragraph = element.querySelector('.markdown p');
@@ -6590,8 +6586,62 @@ for (const desktop of [false, true]) {
     expect(geometry.overlaps).toBe(false);
     expect(geometry.expandsBelow).toBe(true);
     expect(geometry.overflows).toBe(false);
-    await blob.locator('summary').click();
-    await expect(blob.locator('.thinking-body')).toHaveCount(0);
+    await blob.getByRole('button', { name: 'Collapse thinking' }).click();
+    await expect(
+      blob.getByRole('button', { name: 'Expand thinking' }),
+    ).toHaveAttribute('aria-expanded', 'false');
+  });
+}
+
+for (const desktop of [false, true]) {
+  test(`thinking keeps Markdown and only collapses wrapped paragraphs${desktop ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    const responsive =
+      '**Checking the available tools** before reading the file and verifying the latest results.';
+    await installPhase6Mocks(page, {
+      entries: [
+        {
+          type: 'message',
+          message: {
+            role: 'assistant',
+            timestamp: '2026-08-13T18:42:00.000Z',
+            content: [
+              { type: 'thinking', thinking: `**Short title**\n${responsive}` },
+            ],
+          },
+        },
+      ],
+    });
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await page.goto('/sessions/s1');
+    const short = page
+      .locator('.transcript-thinking-blob')
+      .filter({ hasText: 'Short title' });
+    const thought = page
+      .locator('.transcript-thinking-blob')
+      .filter({ hasText: 'Checking the available tools' });
+    await expect(short.locator('strong')).toHaveText('Short title');
+    await expect(short.getByRole('button')).toHaveCount(0);
+    await expect(thought.getByRole('button')).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 760 });
+    await expect(short.getByRole('button')).toHaveCount(0);
+    const toggle = thought.getByRole('button', { name: 'Expand thinking' });
+    await expect(toggle).toBeVisible();
+    await expect(thought.locator('strong')).toHaveText(
+      'Checking the available tools',
+    );
+    await toggle.click();
+    await expect(thought.getByText('Thinking', { exact: true })).toHaveCount(0);
+    await expect(
+      thought.getByRole('button', { name: 'Collapse thinking' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await expect(thought.getByRole('button')).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 760 });
+    await expect(
+      thought.getByRole('button', { name: 'Expand thinking' }),
+    ).toHaveAttribute('aria-expanded', 'false');
   });
 }
 

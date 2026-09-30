@@ -214,42 +214,33 @@ describe('transcript entries', () => {
     expect(long).toContain('four');
   });
 
-  it('starts thinking as a compact preview and reveals the original Markdown on demand', () => {
-    const content =
-      'Considering `tools.read` before continuing.\nMore details follow.';
-    let tree!: ReturnType<typeof create>;
-    act(() => {
-      tree = create(<ThinkingBlob content={content} />);
-    });
-    expect(
-      tree.root.findAllByProps({ className: 'thinking-body' }),
-    ).toHaveLength(0);
-    expect(
-      tree.root.findByProps({ className: 'thinking-preview' }).children,
-    ).toEqual([
-      'Considering `tools.read` before continuing. More details follow.',
-    ]);
-    act(() =>
-      tree.root
-        .findByType('details')
-        .props.onToggle({ currentTarget: { open: true } }),
+  it('renders thinking Markdown without a heading or disclosure before measuring overflow', () => {
+    const markup = renderToStaticMarkup(
+      <ThinkingBlob content="**Heading** and `tools.read` with [docs](https://example.com)" />,
     );
-    expect(
-      tree.root.findAllByProps({ className: 'thinking-body' }),
-    ).toHaveLength(1);
-    expect(tree.root.findByType('code').children).toEqual(['tools.read']);
-    act(() =>
-      tree.root
-        .findByType('details')
-        .props.onToggle({ currentTarget: { open: false } }),
-    );
-    expect(
-      tree.root.findAllByProps({ className: 'thinking-body' }),
-    ).toHaveLength(0);
-    act(() => tree.unmount());
+    expect(markup).toContain('<strong>Heading</strong>');
+    expect(markup).toContain('<code>tools.read</code>');
+    expect(markup).toContain('href="https://example.com"');
+    expect(markup).not.toContain('thinking-toggle');
+    expect(markup).not.toContain('>Thinking<');
   });
 
-  it('keeps an opened thinking paragraph expanded as its streamed text changes', () => {
+  it('updates disclosure from measured wrapping and keeps streamed thinking expanded', () => {
+    let height = 15.5;
+    let measure!: () => void;
+    const markdown = { getBoundingClientRect: () => ({ height }) };
+    vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '15.5px' }));
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          measure = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    let tree!: ReturnType<typeof create>;
     const item = (content: string): TranscriptModelItem => ({
       key: 'streaming-thought',
       raw: {},
@@ -257,25 +248,50 @@ describe('transcript entries', () => {
       role: 'assistant',
       thinking: [content],
     });
-    let tree!: ReturnType<typeof create>;
-    act(() => {
-      tree = create(<TranscriptEntry item={item('Initial thoughts')} />);
-    });
-    act(() =>
-      tree.root
-        .findByType('details')
-        .props.onToggle({ currentTarget: { open: true } }),
-    );
-    act(() =>
-      tree.update(
-        <TranscriptEntry item={item('Initial thoughts with `new details`')} />,
-      ),
-    );
-    expect(
-      tree.root.findAllByProps({ className: 'thinking-body' }),
-    ).toHaveLength(1);
-    expect(tree.root.findByType('code').children).toEqual(['new details']);
-    act(() => tree.unmount());
+    try {
+      act(() => {
+        tree = create(<TranscriptEntry item={item('Short')} />, {
+          createNodeMock: (element) =>
+            (element.props as { className?: string }).className ===
+            'thinking-text'
+              ? { querySelector: () => markdown }
+              : null,
+        });
+      });
+      expect(
+        tree.root.findAllByProps({ className: 'thinking-toggle' }),
+      ).toHaveLength(0);
+      height = 46.5;
+      act(() => measure());
+      const toggle = tree.root.findByProps({ 'aria-label': 'Expand thinking' });
+      act(() => toggle.props.onClick());
+      act(() =>
+        tree.update(
+          <TranscriptEntry item={item('New streamed **details**')} />,
+        ),
+      );
+      act(() => measure());
+      expect(
+        tree.root.findByProps({ 'aria-label': 'Collapse thinking' }).props[
+          'aria-expanded'
+        ],
+      ).toBe(true);
+      expect(tree.root.findByType('strong').children).toEqual(['details']);
+      height = 15.5;
+      act(() => measure());
+      expect(
+        tree.root.findAllByProps({ className: 'thinking-toggle' }),
+      ).toHaveLength(0);
+      expect(
+        tree.root.findByProps({ className: 'thinking-text' }).props[
+          'data-expanded'
+        ],
+      ).toBe(false);
+    } finally {
+      if (tree) act(() => tree.unmount());
+      vi.unstubAllGlobals();
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    }
   });
 
   it('copies the raw assistant Markdown and confirms the action', async () => {
