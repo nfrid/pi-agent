@@ -49,6 +49,8 @@ function executeTodo(
   const result = applyMutation(store, pi, ctx, tool, params, {
     updateOnError: false,
   });
+  const message = boundedResultText(result.message);
+  if (result.error) throw new Error(message);
   const ids = normalizeIds(
     'changes' in params
       ? params.changes.map((change) => change.id)
@@ -61,14 +63,20 @@ function executeTodo(
       ? ('include_done' in params && params.include_done) || unfinished(task)
       : ids.includes(task.id),
   );
+  const taskStats = stats(store);
   return {
-    result,
-    message: boundedResultText(result.message),
+    content: [{ type: 'text' as const, text: message }],
     structuredContent: {
       changed: result.changed,
       ids,
       tasks,
-      stats: stats(store),
+      stats: taskStats,
+    },
+    details: {
+      tool,
+      changed: result.changed,
+      message,
+      stats: taskStats,
     },
   };
 }
@@ -138,24 +146,7 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     namespace: { name: 'tasks', description: 'Session todo state' },
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { result, message, structuredContent } = executeTodo(
-        'todo_list',
-        params,
-        pi,
-        store,
-        ctx,
-      );
-      if (result.error) throw new Error(message);
-      return {
-        content: [{ type: 'text', text: message }],
-        structuredContent,
-        details: {
-          tool: 'todo_list',
-          changed: result.changed,
-          message,
-          stats: stats(store),
-        },
-      };
+      return executeTodo('todo_list', params, pi, store, ctx);
     },
     renderCall(args, theme) {
       return renderCall('todo_list', args as Record<string, unknown>, theme);
@@ -176,24 +167,7 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     namespace: { name: 'tasks', description: 'Session todo state' },
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { result, message, structuredContent } = executeTodo(
-        'todo_update',
-        params,
-        pi,
-        store,
-        ctx,
-      );
-      if (result.error) throw new Error(message);
-      return {
-        content: [{ type: 'text', text: message }],
-        structuredContent,
-        details: {
-          tool: 'todo_update',
-          changed: result.changed,
-          message,
-          stats: stats(store),
-        },
-      };
+      return executeTodo('todo_update', params, pi, store, ctx);
     },
     renderCall(args, theme) {
       return renderCall('todo_update', args as Record<string, unknown>, theme);
@@ -213,24 +187,7 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     namespace: { name: 'tasks', description: 'Session todo state' },
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { result, message, structuredContent } = executeTodo(
-        'todo_remove',
-        params,
-        pi,
-        store,
-        ctx,
-      );
-      if (result.error) throw new Error(message);
-      return {
-        content: [{ type: 'text', text: message }],
-        structuredContent,
-        details: {
-          tool: 'todo_remove',
-          changed: result.changed,
-          message,
-          stats: stats(store),
-        },
-      };
+      return executeTodo('todo_remove', params, pi, store, ctx);
     },
     renderCall(args, theme) {
       return renderCall('todo_remove', args as Record<string, unknown>, theme);

@@ -488,6 +488,11 @@ describe('restored task regressions', () => {
       ids: ['T1'],
       tasks: [],
     });
+    for (const result of [changed, active, removed]) {
+      expect(result.details).toMatchObject({
+        stats: (result.structuredContent as { stats: unknown }).stats,
+      });
+    }
     const restored = createTaskStore();
     reconstruct(restored, {
       sessionManager: { getBranch: () => entries },
