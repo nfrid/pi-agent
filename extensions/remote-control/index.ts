@@ -7,6 +7,7 @@ import {
   type CodexServiceTier,
 } from '../shared/codex-service-tier';
 import { defineExtension } from '../shared/runtime/extension';
+import { isLogicalSteering } from '../shared/runtime/logical-input';
 import { compactWithDashboardCancellation } from './compaction-shim';
 import { installExternalDeliveryReceipts } from './external-delivery';
 import { clearSettledBackground } from './live';
@@ -147,9 +148,9 @@ export default defineExtension('remote-control', (pi) => {
   const requestClosure = new RequestClosureLifecycle();
   installRequestClosureBoundary(pi, requestClosure);
   pi.events.on('steering-message:marked', (value) => {
-    requestClosure.markSteer(
-      eventRecord(directValue(eventRecord(value), 'message')),
-    );
+    const message = eventRecord(directValue(eventRecord(value), 'message'));
+    if (message && isLogicalSteering(message))
+      requestClosure.markSteer(message);
   });
   const runtime = createRemoteControlRuntime(pi);
   if (!runtime) return;
@@ -160,7 +161,7 @@ export default defineExtension('remote-control', (pi) => {
       const update = eventRecord(value);
       const message = eventRecord(directValue(update, 'message'));
       const sessionId = directString(update, 'sessionId');
-      if (!message || !sessionId) return;
+      if (!message || !sessionId || !isLogicalSteering(message)) return;
       runtime.client.sendEvent({
         type: 'message.updated',
         sessionId,

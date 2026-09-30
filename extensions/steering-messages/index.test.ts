@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
+import { markLogicalSteering } from '../shared/runtime/logical-input';
 import {
   createTuiShimHost,
   loadHistoryMarks,
@@ -73,6 +74,7 @@ describe('steering message tracking', () => {
       streamingBehavior: 'steer',
     } as never);
     const message = { role: 'user', content: 'redirect', timestamp: 42 };
+    markLogicalSteering(message);
     handlers.get('message_start')?.(
       { message } as never,
       { sessionManager: { getSessionId: () => 'session-1' } } as never,
@@ -101,6 +103,7 @@ describe('steering message tracking', () => {
       content: 'Expanded template',
       timestamp: 43,
     };
+    markLogicalSteering(message);
     handlers.get('message_start')?.(
       { message } as never,
       { sessionManager: { getSessionId: () => 'session-1' } } as never,
@@ -116,6 +119,7 @@ describe('steering message tracking', () => {
   it('binds only the same native object and persists at most one marker', () => {
     const { appendEntry, handlers, persist } = harness();
     const message = { role: 'user', content: 'identical', timestamp: 43 };
+    markLogicalSteering(message);
     handlers.get('input')?.({
       text: 'identical',
       streamingBehavior: 'steer',
@@ -133,6 +137,38 @@ describe('steering message tracking', () => {
       text: 'identical',
       timestamp: 43,
       userEntryId: 'exact-entry',
+    });
+  });
+
+  it('does not give a legacy text collision exact ownership', () => {
+    const { appendEntry, emit, handlers, persist } = harness();
+    handlers.get('input')?.({
+      text: 'collision',
+      streamingBehavior: 'steer',
+    } as never);
+    const ordinary = { role: 'user', content: 'collision', timestamp: 42 };
+    handlers.get('message_start')?.(
+      { message: ordinary } as never,
+      { sessionManager: { getSessionId: () => 'session-1' } } as never,
+    );
+    persist(ordinary);
+    expect(appendEntry).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('steering-message:marked', {
+      sessionId: 'session-1',
+      message: ordinary,
+    });
+
+    const native = { role: 'user', content: 'collision', timestamp: 43 };
+    markLogicalSteering(native);
+    handlers.get('message_start')?.(
+      { message: native } as never,
+      { sessionManager: { getSessionId: () => 'session-1' } } as never,
+    );
+    persist(native, 'native-entry');
+    expect(appendEntry).toHaveBeenCalledWith(STEERING_MESSAGE_MARKER_TYPE, {
+      userEntryId: 'native-entry',
+      timestamp: 43,
+      text: 'collision',
     });
   });
 

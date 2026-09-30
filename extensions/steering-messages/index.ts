@@ -4,10 +4,7 @@ import {
   UserMessageComponent,
 } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
-import {
-  isLogicalSteering,
-  markLogicalSteering,
-} from '../shared/runtime/logical-input';
+import { isLogicalSteering } from '../shared/runtime/logical-input';
 import { installSteeringMessageShim, type SteeringShimHost } from './shim';
 
 export const STEERING_MESSAGE_MARKER_TYPE = 'steering-message';
@@ -238,9 +235,8 @@ export function registerSteeringMessageTracking(
   pi.on('message_start', (event, eventContext) => {
     if (event.message.role !== 'user') return;
     const text = userText(event.message);
-    const steering =
-      takeSteeringInput(pendingSteering, text) ||
-      isLogicalSteering(event.message);
+    const exactSteering = isLogicalSteering(event.message);
+    const steering = takeSteeringInput(pendingSteering, text) || exactSteering;
     const occurrence =
       (marks.historyCounts.get(text) ?? 0) + (liveCounts.get(text) ?? 0);
     liveCounts.set(text, (liveCounts.get(text) ?? 0) + 1);
@@ -250,8 +246,9 @@ export function registerSteeringMessageTracking(
       (event.message as unknown as { timestamp?: unknown }).timestamp,
     );
     if (timestamp === undefined) return;
-    markLogicalSteering(event.message);
-    pendingMarkers.set(event.message, { timestamp, text });
+    if (exactSteering) {
+      pendingMarkers.set(event.message, { timestamp, text });
+    }
     pi.events.emit('steering-message:marked', {
       sessionId: eventContext.sessionManager.getSessionId(),
       message: event.message,
