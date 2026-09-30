@@ -361,17 +361,22 @@ const settled = await Promise.allSettled([
   tools.bash({ command: "git diff --check", description: "Check diff whitespace" }),
 ]);
 const outcomes = settled.map((item, i) => item.status === "fulfilled"
-  ? { check: ["prompt-tests", "diff-check"][i], exit_code: item.value.exit_code, output: item.value.output }
+  ? { ...item.value, check: ["prompt-tests", "diff-check"][i] }
   : { check: ["prompt-tests", "diff-check"][i], error: { name: item.reason?.name, message: String(item.reason), stack: item.reason?.stack } });
 store("bash-check-outcomes-0", outcomes);
 return {
-  checks: outcomes.map(({ check, exit_code, output, error }) => ({
-    check,
-    ...(exit_code === undefined ? { error } : { exit_code, output: exit_code === 0 ? output.slice(0, 1000) : output }),
+  checks: outcomes.map(({ output, ...result }) => ({
+    ...result,
+    ...(output === undefined ? {} : { output: result.exit_code === 0 ? output.slice(0, 1000) : output }),
   })),
   sourceKey: "bash-check-outcomes-0",
 };
 ```
+
+The bash projection retains truncation metadata and full-output paths: the
+underlying tool may already have bounded its output. The web projection omits
+answers/snippets only when titles and URLs are sufficient for the task; retrieve
+the originals before judging content that was not returned.
 
 For a paired evaluation, prepare one large structured local fixture with
 known exact requested fields and known failure cases. Ask the same model, with
