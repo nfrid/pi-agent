@@ -164,13 +164,16 @@ export type ActionIdPresentation = {
   action?: string;
   id?: string;
   ids: readonly string[];
+  message?: string;
 };
 
 export function actionIdPresentation(args: unknown): ActionIdPresentation {
+  const message = recordArgs(args)?.message;
   return {
     action: stringArg(args, 'action'),
     id: stringArg(args, 'id'),
     ids: stringList(args, 'ids'),
+    ...(typeof message === 'string' ? { message } : {}),
   };
 }
 

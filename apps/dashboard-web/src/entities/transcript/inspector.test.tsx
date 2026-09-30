@@ -1032,6 +1032,49 @@ describe('transcript payload inspection', () => {
     expect(gate).toContain('any · 2 nodes · idle');
   });
 
+  it('renders feedback action messages as Markdown without affecting other delegate jobs', () => {
+    const message = `Please review this change.\n\n- Check the edge case\n- Keep the API stable\n\n\`\`\`ts\nconst reviewed = true;\n\`\`\``;
+    const feedback = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'delegate_jobs',
+          arguments: { action: 'feedback', id: 'job-1', message },
+          result: 'Feedback sent.',
+        }}
+      />,
+    );
+    expect(feedback).toContain('feedback · job-1');
+    expect(feedback).toContain('Feedback message');
+    expect(feedback).toContain('<p>Please review this change.</p>');
+    expect(feedback).toContain('<li>Check the edge case</li>');
+    expect(feedback).toContain('class="language-ts"');
+    expect(feedback).toContain('Feedback sent.');
+    expect(feedback).toContain('const reviewed = true;');
+    const longMessage = `Start ${'x'.repeat(12_001)} finish`;
+    const longFeedback = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'delegate_jobs',
+          arguments: { action: 'feedback', message: longMessage },
+        }}
+      />,
+    );
+    expect(longFeedback).toContain('finish</p>');
+
+    for (const arguments_ of [
+      { action: 'list', message },
+      { action: 'feedback', message: 42 },
+      { action: 'feedback' },
+    ]) {
+      const markup = renderToStaticMarkup(
+        <ToolInspector
+          tool={{ name: 'delegate_jobs', arguments: arguments_ }}
+        />,
+      );
+      expect(markup).not.toContain('Feedback message');
+    }
+  });
+
   it('formats command exit code and duration for collapsed step meta', () => {
     expect(
       commandStepMeta({

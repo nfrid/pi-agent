@@ -361,10 +361,18 @@ function ActionSummary({
         ? `${model.ids.length} ids`
         : undefined);
   return (
-    <Summary
-      detail={[model.action ?? fallback, target].filter(Boolean).join(' · ')}
-      title={title}
-    />
+    <>
+      <Summary
+        detail={[model.action ?? fallback, target].filter(Boolean).join(' · ')}
+        title={title}
+      />
+      {model.action === 'feedback' && model.message !== undefined ? (
+        <div className="tool-markdown-result">
+          <small className="tool-custom-meta">Feedback message</small>
+          <Markdown>{model.message}</Markdown>
+        </div>
+      ) : null}
+    </>
   );
 }
 
