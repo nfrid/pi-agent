@@ -248,11 +248,25 @@ export function VirtualizedTranscript({
       setOpen((current) => new Set(current).add(row.key));
       return;
     }
-    if (pendingJumpKey !== undefined) onPendingJumpHandled?.();
-    else setLocalPendingJumpKey(undefined);
     scrollToRow(rowIndex, 'start');
     const frame = window.requestAnimationFrame(() => {
-      scrollToRow(rowIndex, 'start');
+      const element = scrollElementRef.current;
+      const target = Array.from(
+        element?.querySelectorAll<HTMLElement>('[data-transcript-key]') ?? [],
+      ).find(
+        (candidate) =>
+          candidate.dataset.transcriptKey === requestedJumpKey ||
+          candidate.dataset.transcriptKey === `group-${requestedJumpKey}`,
+      );
+      // Newly unfolded rows initially have estimated heights. Align the mounted
+      // target before clearing the request; clearing earlier cancels this frame.
+      if (element && target)
+        element.scrollTop +=
+          target.getBoundingClientRect().top -
+          element.getBoundingClientRect().top;
+      else scrollToRow(rowIndex, 'start');
+      if (pendingJumpKey !== undefined) onPendingJumpHandled?.();
+      else setLocalPendingJumpKey(undefined);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [
@@ -261,6 +275,7 @@ export function VirtualizedTranscript({
     requestedJumpKey,
     rowIndexByKey,
     rows,
+    scrollElementRef,
     scrollToRow,
     setOpen,
   ]);

@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import type { ComponentProps, RefObject } from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TranscriptModelItem } from '../../../transcript';
@@ -61,6 +61,7 @@ function item(index: number): TranscriptModelItem {
 function transcript(
   items: readonly TranscriptModelItem[],
   scrollCommand?: TranscriptScrollCommand,
+  overrides: Partial<ComponentProps<typeof VirtualizedTranscript>> = {},
 ) {
   return (
     <VirtualizedTranscript
@@ -77,6 +78,7 @@ function transcript(
       }
       previewStartCount={2}
       previewEndCount={3}
+      {...overrides}
     />
   );
 }
@@ -103,6 +105,54 @@ describe('virtualized transcript measurement', () => {
 
     expect(virtualizer.measure).not.toHaveBeenCalled();
     expect(virtualizer.scrollToIndex).not.toHaveBeenCalled();
+  });
+
+  it('aligns a mounted jump target before acknowledging the estimated-row jump', () => {
+    const items = Array.from({ length: 81 }, (_, index) => item(index));
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.stubGlobal('window', {
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        const id = ++nextFrame;
+        frames.set(id, callback);
+        return id;
+      },
+      cancelAnimationFrame: (id: number) => frames.delete(id),
+    });
+    const target = {
+      dataset: { transcriptKey: 'message-40' },
+      getBoundingClientRect: () => ({ top: 230 }),
+    };
+    const element = {
+      scrollTop: 0,
+      querySelectorAll: () => [target],
+      getBoundingClientRect: () => ({ top: 80 }),
+    };
+    const handled = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    try {
+      act(() => {
+        tree = create(
+          transcript(items, undefined, {
+            pendingJumpKey: 'message-40',
+            onPendingJumpHandled: handled,
+            scrollElementRef: {
+              current: element,
+            } as unknown as RefObject<HTMLDivElement>,
+          }),
+        );
+      });
+      expect(handled).not.toHaveBeenCalled();
+      expect(element.scrollTop).toBe(40 * 96);
+      const frame = frames.values().next().value;
+      expect(frame).toBeDefined();
+      act(() => frame?.(0));
+      expect(element.scrollTop).toBe(40 * 96 + 150);
+      expect(handled).toHaveBeenCalledTimes(1);
+    } finally {
+      act(() => tree?.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 
   it('owns anchor adjustments without starting virtualizer reconciliation and cancels queued writes', () => {

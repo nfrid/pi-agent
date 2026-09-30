@@ -176,6 +176,93 @@ test('virtualized outline jumps open the containing work log and keep its anchor
 });
 
 for (const project of ['mobile', 'desktop']) {
+  test(`codemode children stay peer rows with a provenance prefix on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    const entries: unknown[] = messages('Here is the result');
+    entries.splice(
+      2,
+      0,
+      {
+        type: 'message',
+        id: 'script-declaration',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'script',
+              name: 'codemode',
+              arguments: {
+                code: 'const result = await tools.read({path: "src/one.ts"}); text(result.text);',
+              },
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'script-result',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'script',
+          toolName: 'codemode',
+          isError: false,
+          content: [{ type: 'text', text: 'Selected script output' }],
+          nestedCalls: {
+            complete: true,
+            calls: [
+              {
+                id: 'script/1',
+                name: 'read',
+                status: 'ok',
+                arguments: { path: 'src/one.ts' },
+              },
+              {
+                id: 'script/2',
+                name: 'read',
+                status: 'ok',
+                arguments: { path: 'src/two.ts' },
+              },
+            ],
+          },
+        },
+      },
+    );
+    await installDashboardBootstrap(page, snapshot(`codemode-${project}`), {
+      strictApi: true,
+      sessionSnapshot: { entries },
+    });
+    await routeLegacySessionReads(page);
+    await page.goto('/sessions/session-1');
+    await page.getByRole('button', { name: /Work log.*2 actions/ }).click();
+    const transcript = page.getByLabel('Transcript', { exact: true });
+    const calls = transcript.locator('details.tool-detail');
+    await expect(calls).toHaveCount(3);
+    await expect(calls.first().locator('.tool-name')).toHaveText('Codemode');
+    await expect(transcript.locator('.codemode-child-indicator')).toHaveCount(
+      2,
+    );
+    await expect(
+      calls.nth(1).locator('.codemode-child-indicator [aria-hidden]'),
+    ).toHaveText('↳');
+    await expect(
+      calls.nth(1).locator('.codemode-child-indicator'),
+    ).toHaveAttribute(
+      'title',
+      'Child results go to the script, not directly to the agent.',
+    );
+    await expect(
+      transcript.getByText('via codemode', { exact: true }),
+    ).toHaveCount(0);
+    await page.screenshot({ path: `/tmp/pi-transcript-${project}.png` });
+    await calls.first().locator(':scope > summary').click();
+    await expect(
+      calls.first().getByText('Script output', { exact: true }),
+    ).toBeVisible();
+    assertNoUnexpectedDashboardApiRequests(page);
+  });
+
   test(`response closure folds the work log on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
     page,
   }) => {
