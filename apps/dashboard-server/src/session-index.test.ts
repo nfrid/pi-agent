@@ -876,6 +876,34 @@ describe('session index', () => {
           id: 'later-user',
           message: { role: 'user', content: 'Now test it' },
         },
+        {
+          type: 'message',
+          id: 'steering-user',
+          message: {
+            role: 'user',
+            timestamp: 250,
+            content: 'Redirect the next step',
+          },
+        },
+        {
+          type: 'message',
+          id: 'ordinary-twin',
+          message: {
+            role: 'user',
+            timestamp: 250,
+            content: 'Redirect the next step',
+          },
+        },
+        {
+          type: 'custom',
+          id: 'steering-marker',
+          customType: 'steering-message',
+          data: {
+            timestamp: 250,
+            text: 'Redirect the next step',
+            userEntryId: 'steering-user',
+          },
+        },
       ]
         .map((entry) => JSON.stringify(entry))
         .join('\n')}
@@ -903,7 +931,23 @@ describe('session index', () => {
         kind: 'user',
         label: 'Now test it',
       }),
+      expect.objectContaining({
+        id: 'steering-user',
+        ordinal: 5,
+        kind: 'user',
+        deliveryMode: 'steer',
+        label: 'Redirect the next step',
+      }),
+      expect.objectContaining({
+        id: 'ordinary-twin',
+        ordinal: 6,
+        kind: 'user',
+        label: 'Redirect the next step',
+      }),
     ]);
+    expect(
+      page.outline?.find((landmark) => landmark.id === 'ordinary-twin'),
+    ).not.toHaveProperty('deliveryMode');
     expect(
       page.outline?.every((landmark) => landmark.label.length <= 220),
     ).toBe(true);

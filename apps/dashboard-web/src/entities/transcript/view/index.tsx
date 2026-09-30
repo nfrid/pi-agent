@@ -40,6 +40,7 @@ import {
 import {
   buildTranscriptToolStreams,
   buildVirtualTranscriptRows,
+  isNewWorkLogClosureAppend,
   shouldPreserveWorkLogOnAppend,
 } from '../virtual-rows';
 import { TranscriptWorkLog } from '../work-log';
@@ -56,7 +57,7 @@ export function Transcript({
   );
   return (
     <FileLinkContext.Provider value={base}>
-      <TranscriptContent {...props} />
+      <TranscriptContent key={props.workLogScopeKey} {...props} />
     </FileLinkContext.Provider>
   );
 }
@@ -76,6 +77,8 @@ function TranscriptContent({
   onPrependAnchorRestored,
   scrollCommand,
   scrollPhase = 'following',
+  historyStart,
+  onExpandWorkLog,
   virtualize = false,
 }: {
   /** Legacy raw-entry input retained for embedders. */
@@ -105,15 +108,20 @@ function TranscriptContent({
   onPrependAnchorRestored?: (revision: number) => void;
   scrollCommand?: TranscriptScrollCommand;
   scrollPhase?: 'restoring' | 'following' | 'reading';
+  historyStart?: number;
+  /** Resets open and pending work-log state when the transcript visit/branch changes. */
+  workLogScopeKey?: string;
+  onExpandWorkLog?: (requestOrdinal: number) => Promise<boolean>;
 }) {
   const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
   const items = useMemo(
     () =>
       annotateCodemodeCalls(
-        modelItems ?? toTranscriptEntries(input, { leadingContinuation }),
+        modelItems ??
+          toTranscriptEntries(input, { leadingContinuation, outline }),
       ),
-    [input, leadingContinuation, modelItems],
+    [input, leadingContinuation, modelItems, outline],
   );
   const transcriptPreview = useTranscriptPreviewPreference();
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -121,6 +129,9 @@ function TranscriptContent({
     new Set(),
   );
   const previousClosuresRef = useRef<Set<string> | undefined>(undefined);
+  const previousItemsRef = useRef<readonly TranscriptModelItem[] | undefined>(
+    undefined,
+  );
   const closures = useMemo(
     () =>
       items.flatMap((item) =>
@@ -143,9 +154,9 @@ function TranscriptContent({
     [closures, previousClosureIds],
   );
   const streams = useMemo(() => buildTranscriptToolStreams(items), [items]);
-  const preserveNewClosures =
-    newClosures.length > 0 &&
-    newClosures.some((closure) =>
+  const preserveNewClosures = newClosures.some(
+    (closure) =>
+      isNewWorkLogClosureAppend(closure, items, previousItemsRef.current) &&
       shouldPreserveWorkLogOnAppend(
         closure,
         items,
@@ -154,7 +165,7 @@ function TranscriptContent({
         openToolDetails,
         scrollPhase,
       ),
-    );
+  );
   const openForPlan = useMemo(() => {
     const next = new Set(open);
     if (preserveNewClosures)
@@ -163,11 +174,16 @@ function TranscriptContent({
     return next;
   }, [newClosures, open, preserveNewClosures]);
   const rows = useMemo(
-    () => buildVirtualTranscriptRows(items, openForPlan),
-    [items, openForPlan],
+    () =>
+      buildVirtualTranscriptRows(items, openForPlan, {
+        outline,
+        historyStart,
+      }),
+    [historyStart, items, openForPlan, outline],
   );
   useEffect(() => {
     previousClosuresRef.current = currentClosureIds;
+    previousItemsRef.current = items;
     if (!preserveNewClosures) return;
     setOpen((current) => {
       const next = new Set(current);
@@ -175,8 +191,26 @@ function TranscriptContent({
         next.add(`work-log-${closure.finalMessageId}`);
       return next;
     });
-  }, [currentClosureIds, newClosures, preserveNewClosures]);
+  }, [currentClosureIds, items, newClosures, preserveNewClosures]);
   const [pendingJumpKey, setPendingJumpKey] = useState<string>();
+  const [loadingWorkLogs, setLoadingWorkLogs] = useState<Set<string>>(
+    new Set(),
+  );
+  const [pendingWorkLogOpen, setPendingWorkLogOpen] = useState<{
+    key: string;
+    requestId: string;
+    requestOrdinal: number;
+    onFailure?: () => void;
+  }>();
+  const workLogLoadSequenceRef = useRef(0);
+  const activeWorkLogLoadRef = useRef<
+    | {
+        key: string;
+        sequence: number;
+        onFailure?: () => void;
+      }
+    | undefined
+  >(undefined);
   const isVirtualizedTranscript =
     items.length > 80 && virtualize && Boolean(transcriptScrollElementRef);
   const restoredRevisionRef = useRef(0);
@@ -233,6 +267,152 @@ function TranscriptContent({
     restoredRevisionRef.current = prependAnchor.revision;
     onPrependAnchorRestored?.(prependAnchor.revision);
   }, [onPrependAnchorRestored, prependAnchor, transcriptScrollElementRef]);
+  const toggleWorkLog = useCallback(
+    (
+      row: Extract<(typeof rows)[number], { kind: 'work-log' }>,
+      onFailure?: () => void,
+    ) => {
+      const cancelWorkLogLoad = () => {
+        const active = activeWorkLogLoadRef.current;
+        if (active?.key === row.key) {
+          activeWorkLogLoadRef.current = undefined;
+          active.onFailure?.();
+        }
+        if (pendingWorkLogOpen?.key === row.key)
+          pendingWorkLogOpen.onFailure?.();
+        setPendingWorkLogOpen((pending) =>
+          pending?.key === row.key ? undefined : pending,
+        );
+        setLoadingWorkLogs((current) => {
+          if (!current.has(row.key)) return current;
+          const next = new Set(current);
+          next.delete(row.key);
+          return next;
+        });
+      };
+      if (row.expanded) {
+        cancelWorkLogLoad();
+        setOpen((current) => {
+          if (!current.has(row.key)) return current;
+          const next = new Set(current);
+          next.delete(row.key);
+          return next;
+        });
+        return;
+      }
+      if (activeWorkLogLoadRef.current?.key === row.key) {
+        if (onFailure) activeWorkLogLoadRef.current.onFailure = onFailure;
+        else cancelWorkLogLoad();
+        return;
+      }
+      if (pendingWorkLogOpen?.key === row.key) {
+        if (onFailure)
+          setPendingWorkLogOpen((pending) =>
+            pending?.key === row.key ? { ...pending, onFailure } : pending,
+          );
+        else cancelWorkLogLoad();
+        return;
+      }
+      if (row.requestOrdinal === undefined) {
+        setOpen((current) => new Set(current).add(row.key));
+        return;
+      }
+      if (!onExpandWorkLog) return;
+      const requestOrdinal = row.requestOrdinal;
+      const requestId = row.requestId;
+      if (requestOrdinal === undefined || !requestId) {
+        setOpen((current) => new Set(current).add(row.key));
+        return;
+      }
+      const sequence = ++workLogLoadSequenceRef.current;
+      activeWorkLogLoadRef.current = {
+        key: row.key,
+        sequence,
+        ...(onFailure ? { onFailure } : {}),
+      };
+      setLoadingWorkLogs((current) => new Set(current).add(row.key));
+      void onExpandWorkLog(requestOrdinal).then(
+        (loaded) => {
+          if (
+            activeWorkLogLoadRef.current?.key !== row.key ||
+            activeWorkLogLoadRef.current.sequence !== sequence
+          )
+            return;
+          const active = activeWorkLogLoadRef.current;
+          activeWorkLogLoadRef.current = undefined;
+          if (!loaded) {
+            active?.onFailure?.();
+            setLoadingWorkLogs((current) => {
+              const next = new Set(current);
+              next.delete(row.key);
+              return next;
+            });
+            return;
+          }
+          setPendingWorkLogOpen({
+            key: row.key,
+            requestId,
+            requestOrdinal,
+            ...(active?.onFailure ? { onFailure: active.onFailure } : {}),
+          });
+        },
+        () => {
+          const active = activeWorkLogLoadRef.current;
+          if (active?.sequence !== sequence) return;
+          activeWorkLogLoadRef.current = undefined;
+          active.onFailure?.();
+          setLoadingWorkLogs((current) => {
+            const next = new Set(current);
+            next.delete(row.key);
+            return next;
+          });
+        },
+      );
+    },
+    [onExpandWorkLog, pendingWorkLogOpen],
+  );
+  useEffect(
+    () => () => {
+      workLogLoadSequenceRef.current += 1;
+      activeWorkLogLoadRef.current = undefined;
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!pendingWorkLogOpen) return;
+    const requestLoaded = items.some(
+      (item) => item.key === pendingWorkLogOpen.requestId,
+    );
+    if (!requestLoaded) {
+      if (
+        historyStart !== undefined &&
+        historyStart <= pendingWorkLogOpen.requestOrdinal
+      ) {
+        pendingWorkLogOpen.onFailure?.();
+        setPendingWorkLogOpen(undefined);
+        setLoadingWorkLogs((current) => {
+          const next = new Set(current);
+          next.delete(pendingWorkLogOpen.key);
+          return next;
+        });
+      }
+      return;
+    }
+    const row = rows.find(
+      (candidate) =>
+        candidate.kind === 'work-log' &&
+        candidate.key === pendingWorkLogOpen.key,
+    );
+    if (row?.kind === 'work-log' && row.requestOrdinal === undefined)
+      setOpen((current) => new Set(current).add(row.key));
+    else pendingWorkLogOpen.onFailure?.();
+    setPendingWorkLogOpen(undefined);
+    setLoadingWorkLogs((current) => {
+      const next = new Set(current);
+      next.delete(pendingWorkLogOpen.key);
+      return next;
+    });
+  }, [historyStart, items, pendingWorkLogOpen, rows]);
   const loadedLandmarks = useMemo(
     () => buildTranscriptLandmarks(items),
     [items],
@@ -262,7 +442,7 @@ function TranscriptContent({
           .some((item) => item.key === pendingJumpKey),
     );
     if (containingWorkLog?.kind === 'work-log') {
-      setOpen((current) => new Set(current).add(containingWorkLog.key));
+      toggleWorkLog(containingWorkLog, () => setPendingJumpKey(undefined));
       return;
     }
     const scrollElement = transcriptScrollElementRef?.current;
@@ -293,6 +473,7 @@ function TranscriptContent({
     pendingJumpKey,
     rows,
     transcriptScrollElementRef,
+    toggleWorkLog,
   ]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
@@ -316,6 +497,9 @@ function TranscriptContent({
         onOpenBranchPaths={openBranchPaths}
         onBranchPointChange={setBranchPointId}
         onJumpToLandmark={onJumpToLandmark}
+        historyStart={historyStart}
+        loadingWorkLogs={loadingWorkLogs}
+        onToggleWorkLog={toggleWorkLog}
         open={openForPlan}
         setOpen={setOpen}
         openToolDetails={openToolDetails}
@@ -349,13 +533,8 @@ function TranscriptContent({
               durationMs={row.durationMs}
               actionCount={row.actionCount}
               expanded={row.expanded}
-              onToggle={() => {
-                setOpen((current) => {
-                  const next = new Set(current);
-                  row.expanded ? next.delete(row.key) : next.add(row.key);
-                  return next;
-                });
-              }}
+              loading={loadingWorkLogs.has(row.key)}
+              onToggle={() => toggleWorkLog(row)}
             />
           );
         if (row.kind === 'tool-stream')

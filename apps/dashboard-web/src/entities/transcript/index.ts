@@ -34,6 +34,7 @@ export type {
 export {
   buildTranscriptToolStreams,
   buildVirtualTranscriptRows,
+  workLogTranscriptScopeKey,
 } from './virtual-rows';
 export {
   preserveVirtualScrollOffset,

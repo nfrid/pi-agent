@@ -32,7 +32,10 @@ import {
   restoreRenderedAnchor,
   useTranscriptScrollCommand,
 } from '../use-scroll-command';
-import { buildVirtualTranscriptRows } from '../virtual-rows';
+import {
+  buildVirtualTranscriptRows,
+  type VirtualTranscriptRow,
+} from '../virtual-rows';
 import {
   isNearPageBottom,
   useVirtualTranscriptScrollRestoration,
@@ -60,6 +63,9 @@ export function VirtualizedTranscript({
   scrollElementRef,
   previewStartCount,
   previewEndCount,
+  historyStart,
+  loadingWorkLogs = new Set(),
+  onToggleWorkLog = () => undefined,
 }: {
   items: readonly TranscriptModelItem[];
   open: ReadonlySet<string>;
@@ -83,10 +89,16 @@ export function VirtualizedTranscript({
   scrollElementRef: RefObject<HTMLDivElement | null>;
   previewStartCount: number;
   previewEndCount: number;
+  historyStart?: number;
+  loadingWorkLogs?: ReadonlySet<string>;
+  onToggleWorkLog?: (
+    row: Extract<VirtualTranscriptRow, { kind: 'work-log' }>,
+    onFailure?: () => void,
+  ) => void;
 }) {
   const rows = useMemo(
-    () => buildVirtualTranscriptRows(items, open),
-    [items, open],
+    () => buildVirtualTranscriptRows(items, open, { outline, historyStart }),
+    [historyStart, items, open, outline],
   );
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
@@ -245,7 +257,11 @@ export function VirtualizedTranscript({
     if (rowIndex === undefined) return;
     const row = rows[rowIndex];
     if (row?.kind === 'work-log' && !row.expanded) {
-      setOpen((current) => new Set(current).add(row.key));
+      const clearPendingJump = () => {
+        if (pendingJumpKey !== undefined) onPendingJumpHandled?.();
+        setLocalPendingJumpKey(undefined);
+      };
+      onToggleWorkLog(row, clearPendingJump);
       return;
     }
     scrollToRow(rowIndex, 'start');
@@ -277,7 +293,7 @@ export function VirtualizedTranscript({
     rows,
     scrollElementRef,
     scrollToRow,
-    setOpen,
+    onToggleWorkLog,
   ]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
@@ -287,7 +303,10 @@ export function VirtualizedTranscript({
     if (loadedRowIndex !== undefined) {
       const row = rows[loadedRowIndex];
       if (row?.kind === 'work-log' && !row.expanded) {
-        setOpen((current) => new Set(current).add(row.key));
+        onToggleWorkLog(row, () => {
+          onPendingJumpHandled?.();
+          setLocalPendingJumpKey(undefined);
+        });
         setLocalPendingJumpKey(landmark.key);
         return;
       }
@@ -402,14 +421,11 @@ export function VirtualizedTranscript({
                   durationMs={row.durationMs}
                   actionCount={row.actionCount}
                   expanded={row.expanded}
+                  loading={loadingWorkLogs.has(row.key)}
                   onToggle={() => {
                     captureScrollAnchor(row.key);
                     affectedRowKeyRef.current = row.key;
-                    setOpen((current) => {
-                      const next = new Set(current);
-                      row.expanded ? next.delete(row.key) : next.add(row.key);
-                      return next;
-                    });
+                    onToggleWorkLog(row);
                   }}
                 />
               ) : (

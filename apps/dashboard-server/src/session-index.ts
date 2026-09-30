@@ -244,6 +244,11 @@ function buildSessionOutline(
   groups: readonly ActivityGroup[],
 ): SessionOutlineLandmark[] {
   const landmarks: SessionOutlineLandmark[] = [];
+  const steeringUserEntryIds = new Set(
+    descriptors.flatMap((descriptor) =>
+      descriptor.steeringUserEntryId ? [descriptor.steeringUserEntryId] : [],
+    ),
+  );
   const grouped = new Set<number>();
   for (const group of groups) {
     const descriptor = descriptors[group.start];
@@ -272,6 +277,11 @@ function buildSessionOutline(
         descriptor.outlineId ?? descriptor.id ?? `entry-${descriptor.ordinal}`,
       ordinal: index,
       kind: descriptor.outlineKind,
+      ...(descriptor.outlineKind === 'user' &&
+      descriptor.outlineEntryId &&
+      steeringUserEntryIds.has(descriptor.outlineEntryId)
+        ? { deliveryMode: 'steer' as const }
+        : {}),
       label: descriptor.outlineLabel,
       ...(descriptor.timestamp === undefined
         ? {}

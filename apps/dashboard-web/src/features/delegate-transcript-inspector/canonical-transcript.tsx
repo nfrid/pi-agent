@@ -14,7 +14,10 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Transcript } from '../../entities/transcript';
+import {
+  Transcript,
+  workLogTranscriptScopeKey,
+} from '../../entities/transcript';
 import { toTranscriptEntries } from '../../transcript';
 import type { DelegateInspectionStatus } from '../delegate/history-compose';
 import { FileLinkContext } from '../file-viewer/link-context';
@@ -127,7 +130,9 @@ function DelegateCanonicalTranscript({
   const modelItems = useMemo(() => {
     if (!projection) return undefined;
     let requestIndex = 0;
-    return toTranscriptEntries(projection).map((item) => {
+    return toTranscriptEntries(projection, {
+      outline: snapshot?.outline,
+    }).map((item) => {
       if (item.role !== 'user' || item.deliveryMode) return item;
       const index = requestIndex++;
       const run = runOptions[index];
@@ -162,7 +167,14 @@ function DelegateCanonicalTranscript({
         },
       };
     });
-  }, [detail, onRunSelected, projection, requestedRunId, runOptions]);
+  }, [
+    detail,
+    onRunSelected,
+    projection,
+    requestedRunId,
+    runOptions,
+    snapshot?.outline,
+  ]);
   const delegateOutline = useMemo(() => {
     if (!snapshot?.outline) return snapshot?.outline;
     let requestIndex = 0;
@@ -220,6 +232,16 @@ function DelegateCanonicalTranscript({
           landmark.ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
             ? loadThroughOrdinal(landmark.ordinal)
             : true
+        }
+        historyStart={history?.start}
+        workLogScopeKey={workLogTranscriptScopeKey(
+          sessionId,
+          snapshot?.branchTopology,
+        )}
+        onExpandWorkLog={(ordinal) =>
+          ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
+            ? loadThroughOrdinal(ordinal)
+            : Promise.resolve(true)
         }
         leadingContinuation={
           history?.hasOlder ? history.leadingContinuation : undefined

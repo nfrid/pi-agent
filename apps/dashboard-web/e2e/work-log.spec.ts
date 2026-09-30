@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import {
   assertNoUnexpectedDashboardApiRequests,
+  dashboardTrpcInput,
   installDashboardBootstrap,
+  trpcData,
 } from './dashboard-fixtures';
 
 const snapshot = (serverId: string) => ({
@@ -40,6 +42,194 @@ async function routeLegacySessionReads(page: import('@playwright/test').Page) {
       body: JSON.stringify({ version: 2, groups: [] }),
     }),
   );
+}
+
+function pagedWorkLogEntries(interiorCount = 1) {
+  return [
+    ...Array.from({ length: interiorCount }, (_, index) => ({
+      type: 'message',
+      id: `work-${index}`,
+      message: {
+        id: `work-${index}`,
+        role: 'assistant',
+        content: [{ type: 'text', text: `Work item ${index}` }],
+      },
+    })),
+    {
+      type: 'message',
+      id: 'answer',
+      message: {
+        id: 'answer',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Paged work is done' }],
+      },
+    },
+    {
+      type: 'custom',
+      id: 'closure',
+      customType: 'response-closure',
+      data: {
+        requestMessageId: 'older-request',
+        finalMessageId: 'answer',
+        startedAt: 1000,
+        endedAt: 91000,
+      },
+    },
+  ];
+}
+
+async function installPagedWorkLog(
+  page: import('@playwright/test').Page,
+  options: {
+    interiorCount?: number;
+    gateFirstPage?: boolean;
+    failFirstPage?: boolean;
+  } = {},
+) {
+  const metadata = snapshot('work-log-paged').sessions[0];
+  if (!metadata) throw new Error('Missing work-log session metadata');
+  const latestEntries = pagedWorkLogEntries(options.interiorCount);
+  if (options.interiorCount && options.interiorCount > 1) {
+    const workFortyIndex = latestEntries.findIndex(
+      (entry) => entry.id === 'work-40',
+    );
+    latestEntries.splice(
+      workFortyIndex + 1,
+      0,
+      {
+        type: 'message',
+        id: 'steering-target',
+        message: {
+          id: 'steering-target',
+          role: 'user',
+          timestamp: 410,
+          content: [{ type: 'text', text: 'Redirect this step' }],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'steering-marker',
+        customType: 'steering-message',
+        data: { timestamp: 410, text: 'Redirect this step' },
+      },
+    );
+  }
+  const latest = {
+    metadata,
+    entries: latestEntries,
+    outline: [
+      { id: 'older-request', ordinal: 1, kind: 'user', label: 'Old request' },
+      ...(options.interiorCount && options.interiorCount > 1
+        ? [
+            {
+              id: 'steering-target',
+              ordinal: 49,
+              kind: 'user',
+              deliveryMode: 'steer',
+              label: 'Redirect this step',
+            },
+          ]
+        : []),
+    ],
+    history: {
+      version: 1,
+      start: 8,
+      end:
+        10 +
+        (options.interiorCount ?? 1) +
+        (options.interiorCount && options.interiorCount > 1 ? 2 : 0),
+      hasOlder: true,
+      nextBefore: 'older-8',
+    },
+    entriesComplete: false,
+    serverId: 'work-log-paged',
+    cursor: 1,
+    active: { messages: [], tools: [], delegates: [], truncated: false },
+    completeThroughCursor: true,
+  };
+  await installDashboardBootstrap(page, snapshot('work-log-paged'), {
+    strictApi: true,
+    sessionSnapshot: latest,
+  });
+  await routeLegacySessionReads(page);
+  let markFirstPageRequested!: () => void;
+  const firstPageRequested = new Promise<void>((resolve) => {
+    markFirstPageRequested = resolve;
+  });
+  let releaseFirstPage!: () => void;
+  const firstPageGate = new Promise<void>((resolve) => {
+    releaseFirstPage = resolve;
+  });
+  await page.route('**/trpc/sessionSnapshot*', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const before = input.before;
+    if (before === 'older-8') {
+      markFirstPageRequested();
+      if (options.failFirstPage) {
+        await route.abort('failed');
+        return;
+      }
+      if (options.gateFirstPage) await firstPageGate;
+      await route.fulfill({
+        contentType: 'application/json',
+        body: trpcData({
+          ...latest,
+          entries: Array.from({ length: 4 }, (_, index) => ({
+            type: 'message',
+            id: `older-${index + 4}`,
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: `Older item ${index + 4}` }],
+            },
+          })),
+          history: {
+            version: 1,
+            start: 4,
+            end: 8,
+            hasOlder: true,
+            nextBefore: 'older-4',
+          },
+        }),
+      });
+      return;
+    }
+    if (before === 'older-4') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: trpcData({
+          ...latest,
+          entries: [
+            { type: 'session', id: 'session-1', cwd: '/tmp' },
+            {
+              type: 'message',
+              id: 'older-request',
+              message: {
+                role: 'user',
+                content: [{ type: 'text', text: 'Old request' }],
+              },
+            },
+            {
+              type: 'message',
+              id: 'older-work-1',
+              message: { role: 'assistant', content: 'Older work 1' },
+            },
+            {
+              type: 'message',
+              id: 'older-work-2',
+              message: { role: 'assistant', content: 'Older work 2' },
+            },
+          ],
+          history: { version: 1, start: 0, end: 4, hasOlder: false },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: trpcData(latest),
+    });
+  });
+  return { firstPageRequested, releaseFirstPage };
 }
 
 const messages = (finalText: string) => [
@@ -82,6 +272,96 @@ const messages = (finalText: string) => [
     },
   },
 ];
+
+test('an incomplete work log fetches only through its request when opened', async ({
+  page,
+}) => {
+  await installPagedWorkLog(page);
+  const cursors: string[] = [];
+  await page.route('**/trpc/sessionSnapshot*', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    if (typeof input.before === 'string') cursors.push(input.before);
+    await route.fallback();
+  });
+  await page.goto('/sessions/session-1');
+  const transcript = page.getByLabel('Transcript', { exact: true });
+  const workLog = transcript.getByRole('button', { name: /Work log/ });
+  await expect(workLog).toBeVisible();
+  await expect(workLog).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('Work item 0', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Paged work is done')).toBeVisible();
+  await workLog.click();
+  await expect(workLog).toHaveAttribute('aria-expanded', 'true');
+  await expect(
+    transcript.locator('[data-transcript-key="older-request"]'),
+  ).toBeVisible();
+  await expect(page.getByText('Work item 0', { exact: true })).toBeVisible();
+  await expect(page.getByText('Paged work is done')).toBeVisible();
+  expect(cursors).toEqual(['older-8', 'older-4']);
+  assertNoUnexpectedDashboardApiRequests(page);
+});
+
+test('closing a partial work log during history loading prevents a late open', async ({
+  page,
+}) => {
+  const { firstPageRequested, releaseFirstPage } = await installPagedWorkLog(
+    page,
+    { gateFirstPage: true },
+  );
+  await page.goto('/sessions/session-1');
+  const workLog = page
+    .getByLabel('Transcript', { exact: true })
+    .getByRole('button', { name: /Work log/ });
+  await expect(workLog).toBeVisible();
+  await workLog.click();
+  await firstPageRequested;
+  await expect(workLog).toHaveAttribute('aria-busy', 'true');
+  await workLog.click();
+  await expect(workLog).toHaveAttribute('aria-expanded', 'false');
+  releaseFirstPage();
+  await expect(
+    page
+      .getByLabel('Transcript', { exact: true })
+      .locator('[data-transcript-key="older-request"]'),
+  ).toBeVisible();
+  await expect(page.getByText('Work item 0', { exact: true })).toHaveCount(0);
+  await expect(workLog).toHaveAttribute('aria-expanded', 'false');
+  assertNoUnexpectedDashboardApiRequests(page);
+});
+
+test('a failed partial work-log load clears its pending disclosure state', async ({
+  page,
+}) => {
+  const { firstPageRequested } = await installPagedWorkLog(page, {
+    failFirstPage: true,
+  });
+  await page.goto('/sessions/session-1');
+  const workLog = page
+    .getByLabel('Transcript', { exact: true })
+    .getByRole('button', { name: /Work log/ });
+  await expect(workLog).toBeVisible();
+  await workLog.click();
+  await firstPageRequested;
+  await expect(workLog).not.toHaveAttribute('aria-busy', 'true');
+  await expect(workLog).toHaveAttribute('aria-expanded', 'false');
+  assertNoUnexpectedDashboardApiRequests(page);
+});
+
+test('virtualized outline jumps open a partial work log and land on the target @desktop', async ({
+  page,
+}) => {
+  await installPagedWorkLog(page, { interiorCount: 88 });
+  await page.goto('/sessions/session-1');
+  const transcript = page.getByLabel('Transcript', { exact: true });
+  const landmark = page
+    .getByLabel('Transcript turn map')
+    .getByRole('button', { name: /Redirect this step/ });
+  await expect(landmark).toBeVisible();
+  await landmark.click();
+  const target = transcript.locator('[data-transcript-key="steering-target"]');
+  await expect(target).toBeInViewport();
+  assertNoUnexpectedDashboardApiRequests(page);
+});
 
 test('virtualized outline jumps open the containing work log and keep its anchor @desktop', async ({
   page,

@@ -27,6 +27,10 @@ export interface SessionLineDescriptor {
   readonly outlineId?: string;
   readonly outlineKind?: SessionOutlineLandmark['kind'];
   readonly outlineLabel?: string;
+  /** Exact JSONL entry ID of a user entry marked as steering. */
+  readonly outlineEntryId?: string;
+  /** Exact user entry ID carried by a native steering marker. */
+  readonly steeringUserEntryId?: string;
   readonly timestamp?: number | string;
   readonly userMessageAt?: number;
   readonly resume?: {
@@ -137,6 +141,22 @@ export function timestampNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function steeringMetadata(
+  value: unknown,
+): Pick<SessionLineDescriptor, 'outlineEntryId' | 'steeringUserEntryId'> {
+  if (!isRecord(value)) return {};
+  if (value.type === 'custom' && value.customType === 'steering-message') {
+    const data = isRecord(value.data) ? value.data : undefined;
+    return typeof data?.userEntryId === 'string' && data.userEntryId.length > 0
+      ? { steeringUserEntryId: data.userEntryId }
+      : {};
+  }
+  const message = isRecord(value.message) ? value.message : value;
+  return message.role === 'user' && typeof value.id === 'string'
+    ? { outlineEntryId: value.id }
+    : {};
 }
 
 function outlineFields(
@@ -266,6 +286,7 @@ function descriptorFromRawEntry(
         }),
     activity,
     ...outlineFields(parsed, activity),
+    ...steeringMetadata(parsed),
   };
 }
 

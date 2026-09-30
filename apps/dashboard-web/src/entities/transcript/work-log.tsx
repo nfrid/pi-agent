@@ -6,12 +6,14 @@ export function TranscriptWorkLog({
   durationMs,
   actionCount,
   expanded,
+  loading = false,
   onToggle,
 }: {
   rowKey: string;
   durationMs: number;
-  actionCount: number;
+  actionCount?: number;
   expanded: boolean;
+  loading?: boolean;
   onToggle: () => void;
 }) {
   return (
@@ -20,13 +22,18 @@ export function TranscriptWorkLog({
         type="button"
         className="transcript-work-log-toggle"
         aria-expanded={expanded}
+        aria-busy={loading || undefined}
         onClick={onToggle}
       >
         <TranscriptDisclosureIcon expanded={expanded} />
         <span>Work log</span>
         <small>
-          {toolStreamDurationLabel(durationMs)} · {actionCount}{' '}
-          {actionCount === 1 ? 'action' : 'actions'}
+          {toolStreamDurationLabel(durationMs)}
+          {actionCount === undefined
+            ? loading
+              ? ' · Loading history…'
+              : ''
+            : ` · ${actionCount} ${actionCount === 1 ? 'action' : 'actions'}`}
         </small>
       </button>
     </section>

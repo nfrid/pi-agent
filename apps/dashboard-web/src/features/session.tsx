@@ -15,7 +15,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Transcript } from '../entities/transcript';
+import { Transcript, workLogTranscriptScopeKey } from '../entities/transcript';
 import { useDashboardNavigate } from '../routes/navigation';
 import { ActivityPanel, useActivityPanelState } from './activity-panel';
 import { AgentThreadNav, projectNameForSession } from './agent-thread-nav';
@@ -266,6 +266,13 @@ export function SessionView({
             }
             leadingContinuation={
               history?.hasOlder ? history.leadingContinuation : undefined
+            }
+            historyStart={history?.start}
+            workLogScopeKey={workLogTranscriptScopeKey(id, data.branchTopology)}
+            onExpandWorkLog={(ordinal) =>
+              ordinal < (history?.start ?? Number.POSITIVE_INFINITY)
+                ? loadThroughOrdinal(ordinal)
+                : Promise.resolve(true)
             }
             prependAnchor={prependAnchor}
             onPrependAnchorRestored={completePrependRestore}

@@ -1845,6 +1845,7 @@ export const SessionOutlineLandmarkSchema = Type.Object(
       Type.Literal('assistant'),
       Type.Literal('activity'),
     ]),
+    deliveryMode: Type.Optional(Type.Literal('steer')),
     label: Type.String({ minLength: 1, maxLength: 240 }),
     timestamp: Type.Optional(
       Type.Union([Type.String({ maxLength: 128 }), FiniteNumberSchema]),

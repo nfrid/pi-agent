@@ -20,6 +20,7 @@ import {
   transcriptToolOutcome,
   transcriptToolRecord,
 } from '@pi-dashboard/domain';
+import type { SessionOutlineLandmark } from '@pi-dashboard/protocol';
 import {
   RESPONSE_CLOSURE_MARKER_TYPE,
   type ResponseClosure,
@@ -549,13 +550,32 @@ function toolRaw(item: TranscriptRenderToolItem) {
  */
 export function toTranscriptEntries(
   input: TranscriptInput,
-  options: { leadingContinuation?: boolean } = {},
+  options: {
+    leadingContinuation?: boolean;
+    outline?: readonly SessionOutlineLandmark[];
+  } = {},
 ): TranscriptModelItem[] {
   const result: TranscriptModelItem[] = [];
   const sessionId = isTranscriptProjection(input) ? input.sessionId : undefined;
   let previousTodo: readonly TranscriptTodoTask[] | undefined;
   let hasConversation = false;
   const workLogClosures: ResponseClosure[] = [];
+  const invalidClosureFinalIds = new Set<string>();
+  if (Array.isArray(input))
+    for (const value of input) {
+      const raw = record(value);
+      if (
+        raw?.type !== 'custom' ||
+        raw.customType !== RESPONSE_CLOSURE_MARKER_TYPE ||
+        tryParseResponseClosure(raw.data)
+      )
+        continue;
+      const invalid = record(raw.data);
+      for (const key of ['finalMessageId', 'liveFinalMessageId']) {
+        const id = stringField(invalid, key);
+        if (id) invalidClosureFinalIds.add(id);
+      }
+    }
   const rendered = renderItems(input);
   // A session-local index also names pending and historical calls whose own
   // result is absent. Never modify the underlying arguments or raw records.
@@ -600,6 +620,13 @@ export function toTranscriptEntries(
       ) {
         const closure = tryParseResponseClosure(raw.data);
         if (closure) workLogClosures.push(closure);
+        else {
+          const invalid = record(raw.data);
+          for (const key of ['finalMessageId', 'liveFinalMessageId']) {
+            const id = stringField(invalid, key);
+            if (id) invalidClosureFinalIds.add(id);
+          }
+        }
         continue;
       }
       const tasks = todoSnapshot(raw);
@@ -801,7 +828,14 @@ export function toTranscriptEntries(
       ...(item.preparing ? { preparing: true } : {}),
     });
   }
-  const conflictedFinalKeys = new Set<string>();
+  const conflictedFinalKeys = new Set(
+    result
+      .filter(
+        (item) =>
+          item.role === 'assistant' && invalidClosureFinalIds.has(item.key),
+      )
+      .map((item) => item.key),
+  );
   for (const closure of workLogClosures) {
     const requestIds = [closure.requestMessageId, closure.liveRequestMessageId];
     const finalIds = [closure.finalMessageId, closure.liveFinalMessageId];
@@ -811,7 +845,17 @@ export function toTranscriptEntries(
     const requestExists = result.some(
       (item) => item.role === 'user' && requestIds.includes(item.key),
     );
-    if (!final || !requestExists || conflictedFinalKeys.has(final.key))
+    const outlinedRequests = options.outline?.filter(
+      (landmark) =>
+        requestIds.includes(landmark.id) && landmark.kind === 'user',
+    );
+    const hasExactEarlierOutlineRequest =
+      !requestExists && outlinedRequests?.length === 1;
+    if (
+      !final ||
+      (!requestExists && !hasExactEarlierOutlineRequest) ||
+      conflictedFinalKeys.has(final.key)
+    )
       continue;
     if (final.workLogClosure) {
       delete final.workLogClosure;

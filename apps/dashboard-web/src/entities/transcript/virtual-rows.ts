@@ -1,4 +1,5 @@
 import { toolBaseName } from '@pi-dashboard/activity-model';
+import type { SessionBranchTopology } from '@pi-dashboard/protocol';
 import type { TranscriptModelItem } from '../../transcript';
 
 export type TranscriptToolStreamRange = {
@@ -128,14 +129,52 @@ export type VirtualTranscriptRow =
       start: number;
       end: number;
       durationMs: number;
-      actionCount: number;
+      actionCount?: number;
+      requestOrdinal?: number;
+      requestId?: string;
       expanded: boolean;
     };
+
+export function workLogTranscriptScopeKey(
+  sessionId: string,
+  branchTopology: SessionBranchTopology | undefined,
+): string {
+  const activePaths = (branchTopology?.points ?? [])
+    .flatMap((point) => {
+      const current = point.paths
+        .filter((candidate) => candidate.current)
+        .map((candidate) => candidate.id)
+        .sort();
+      return current.length > 0 ? [[point.id, current] as const] : [];
+    })
+    .sort(([left], [right]) => left.localeCompare(right));
+  return JSON.stringify([sessionId, activePaths]);
+}
+
+export function isNewWorkLogClosureAppend(
+  closure: NonNullable<TranscriptModelItem['workLogClosure']>,
+  items: readonly TranscriptModelItem[],
+  previousItems: readonly TranscriptModelItem[] | undefined,
+): boolean {
+  if (!previousItems || previousItems.length === 0) return false;
+  if (!previousItems.every((item, index) => items[index]?.key === item.key))
+    return false;
+  const finalIndex = items.findIndex(
+    (item) =>
+      item.key === closure.finalMessageId ||
+      item.key === closure.liveFinalMessageId,
+  );
+  return finalIndex >= 0;
+}
 
 /** Build the authoritative flat row plan for regular and virtual rendering. */
 export function buildVirtualTranscriptRows(
   items: readonly ToolStreamItem[],
   open: ReadonlySet<string> = new Set(),
+  options: {
+    outline?: readonly import('@pi-dashboard/protocol').SessionOutlineLandmark[];
+    historyStart?: number;
+  } = {},
 ): VirtualTranscriptRow[] {
   const streams = buildTranscriptToolStreams(items);
   const streamByStart = new Map(
@@ -161,7 +200,15 @@ export function buildVirtualTranscriptRows(
       });
   }
 
-  const candidates = items.flatMap((item) => {
+  type WorkLogCandidate = {
+    closure: NonNullable<ToolStreamItem['workLogClosure']>;
+    requestIndex: number;
+    finalIndex: number;
+    requestOrdinal?: number;
+    requestId?: string;
+    partial: boolean;
+  };
+  const candidates = items.flatMap<WorkLogCandidate>((item) => {
     const closure = item.workLogClosure;
     if (!closure) return [];
     const requestIds = [
@@ -186,16 +233,54 @@ export function buildVirtualTranscriptRows(
     const finals = items.flatMap((candidate, index) =>
       finalIds.includes(candidate.key) ? [{ candidate, index }] : [],
     );
+    if (finals.length !== 1 || finals[0]?.candidate.role !== 'assistant')
+      return [];
+    const finalIndex = finals[0].index;
+    if (requests.length === 0) {
+      const outlinedRequests = (options.outline ?? []).filter(
+        (landmark) =>
+          requestIds.includes(landmark.id) && landmark.kind === 'user',
+      );
+      const requestOrdinal = outlinedRequests[0]?.ordinal;
+      const historyStart = options.historyStart;
+      if (
+        outlinedRequests.length !== 1 ||
+        historyStart === undefined ||
+        requestOrdinal === undefined ||
+        requestOrdinal >= historyStart ||
+        (options.outline ?? []).some(
+          (landmark) =>
+            landmark.kind === 'user' &&
+            landmark.deliveryMode !== 'steer' &&
+            landmark.ordinal > requestOrdinal &&
+            landmark.ordinal < historyStart,
+        ) ||
+        items
+          .slice(0, finalIndex)
+          .some(
+            (candidate) =>
+              candidate.role === 'user' && candidate.deliveryMode !== 'steer',
+          )
+      )
+        return [];
+      return [
+        {
+          closure,
+          requestIndex: -1,
+          requestOrdinal,
+          requestId: outlinedRequests[0]?.id,
+          finalIndex,
+          partial: true,
+        },
+      ];
+    }
     if (
       requests.length !== 1 ||
-      finals.length !== 1 ||
       requests[0]?.candidate.role !== 'user' ||
-      requests[0].candidate.deliveryMode === 'steer' ||
-      finals[0]?.candidate.role !== 'assistant'
+      requests[0].candidate.deliveryMode === 'steer'
     )
       return [];
     const requestIndex = requests[0].index;
-    const finalIndex = finals[0].index;
     if (requestIndex >= finalIndex) return [];
     if (
       items
@@ -206,23 +291,37 @@ export function buildVirtualTranscriptRows(
         )
     )
       return [];
-    return [{ closure, requestIndex, finalIndex }];
+    return [{ closure, requestIndex, finalIndex, partial: false }];
   });
+  const overlaps = (
+    left: WorkLogCandidate,
+    right: WorkLogCandidate,
+  ): boolean => {
+    if (left.partial && right.partial) return true;
+    if (left.partial) return right.requestIndex <= left.finalIndex;
+    if (right.partial) return left.requestIndex <= right.finalIndex;
+    return (
+      left.requestIndex <= right.finalIndex &&
+      right.requestIndex <= left.finalIndex
+    );
+  };
   const ranges = candidates.filter(
     (candidate) =>
       !candidates.some(
-        (other) =>
-          other !== candidate &&
-          candidate.requestIndex <= other.finalIndex &&
-          other.requestIndex <= candidate.finalIndex,
+        (other) => other !== candidate && overlaps(candidate, other),
       ),
   );
-  for (const { closure, requestIndex, finalIndex } of ranges.sort(
-    (left, right) => right.requestIndex - left.requestIndex,
-  )) {
-    const start = requestIndex + 1;
+  for (const {
+    closure,
+    requestIndex,
+    requestOrdinal,
+    requestId,
+    finalIndex,
+    partial,
+  } of ranges.sort((left, right) => right.requestIndex - left.requestIndex)) {
+    const start = partial ? 0 : requestIndex + 1;
     const end = finalIndex - 1;
-    if (start > end) continue;
+    if (start > end && !partial) continue;
     const key = `work-log-${closure.finalMessageId}`;
     const expanded = open.has(key);
     const interior = result.filter((row) =>
@@ -231,8 +330,19 @@ export function buildVirtualTranscriptRows(
         : row.kind === 'tool-stream' && row.start >= start && row.end <= end,
     );
     const firstInterior = interior[0];
-    if (!firstInterior) continue;
-    const insertion = result.indexOf(firstInterior);
+    const insertionRow =
+      firstInterior ??
+      (partial
+        ? result.find((row) =>
+            row.kind === 'entry'
+              ? row.index === finalIndex
+              : row.kind === 'tool-stream' &&
+                row.start <= finalIndex &&
+                row.end >= finalIndex,
+          )
+        : undefined);
+    if (!insertionRow) continue;
+    const insertion = result.indexOf(insertionRow);
     const hidden = new Set(interior);
     result.splice(insertion, 0, {
       kind: 'work-log',
@@ -240,16 +350,23 @@ export function buildVirtualTranscriptRows(
       start,
       end,
       durationMs: closure.endedAt - closure.startedAt,
-      actionCount: items
-        .slice(start, end + 1)
-        .filter(
-          (candidate) =>
-            candidate.tool &&
-            !(
-              toolBaseName(candidate.tool.name) === 'codemode' &&
-              candidate.codemodeDescendants?.length
-            ),
-        ).length,
+      ...(partial
+        ? {
+            requestOrdinal,
+            requestId,
+          }
+        : {
+            actionCount: items
+              .slice(start, end + 1)
+              .filter(
+                (candidate) =>
+                  candidate.tool &&
+                  !(
+                    toolBaseName(candidate.tool.name) === 'codemode' &&
+                    candidate.codemodeDescendants?.length
+                  ),
+              ).length,
+          }),
       expanded,
     });
     if (!expanded)

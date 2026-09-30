@@ -65,6 +65,72 @@ describe('tool row views and virtual transcript construction', () => {
       endedAt: 90,
     });
   });
+  it('keeps only an unambiguous valid partial closure from the exact outline request', () => {
+    const source = [
+      {
+        type: 'message',
+        id: 'interior',
+        message: { role: 'assistant', content: 'Work' },
+      },
+      {
+        type: 'message',
+        id: 'final',
+        message: { role: 'assistant', content: 'Answer' },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'older-request',
+          finalMessageId: 'final',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ];
+    const outline = [
+      {
+        id: 'older-request',
+        ordinal: 1,
+        kind: 'user' as const,
+        label: 'Request',
+      },
+    ];
+    expect(
+      toTranscriptEntries(source, { outline }).find(
+        (item) => item.key === 'final',
+      )?.workLogClosure?.requestMessageId,
+    ).toBe('older-request');
+    expect(
+      toTranscriptEntries(source, {
+        outline: [
+          ...outline,
+          { id: 'older-request', ordinal: 2, kind: 'user', label: 'Duplicate' },
+        ],
+      }).find((item) => item.key === 'final')?.workLogClosure,
+    ).toBeUndefined();
+    const conflicting = [
+      ...source,
+      {
+        type: 'custom',
+        id: 'malformed-closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'older-request',
+          finalMessageId: 'final',
+          startedAt: 90,
+          endedAt: 10,
+        },
+      },
+    ];
+    expect(
+      toTranscriptEntries(conflicting, { outline }).find(
+        (item) => item.key === 'final',
+      )?.workLogClosure,
+    ).toBeUndefined();
+  });
+
   it('renders provisional argument progress without mounting the inspector', () => {
     const item = {
       key: 'call-1',
