@@ -5,6 +5,27 @@ import { queryViaPiAuth } from './backends';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Pi auth cancellation', () => {
+  it('never sends direct-use OpenAI credentials to the legacy WHAM endpoint', async () => {
+    const model = { provider: 'openai', id: 'gpt-6-luna' };
+    const getApiKeyAndHeaders = vi.fn();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const ctx = {
+      model,
+      modelRegistry: {
+        getAvailable: () => [model],
+        getAll: () => [model],
+        getApiKeyAndHeaders,
+      },
+    } as unknown as ExtensionContext;
+
+    await expect(
+      queryViaPiAuth(ctx, new AbortController().signal),
+    ).rejects.toThrow('No Pi Codex auth available.');
+    expect(getApiKeyAndHeaders).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('filters nullable provider headers before ordinary usage fetch', async () => {
     let requestHeaders: Headers | undefined;
     vi.stubGlobal(
@@ -17,7 +38,7 @@ describe('Pi auth cancellation', () => {
       }),
     );
     const ctx = {
-      model: { provider: 'openai', id: 'gpt-test' },
+      model: { provider: 'openai-codex', id: 'gpt-test' },
       modelRegistry: {
         getAvailable: () => [],
         getAll: () => [],
@@ -43,7 +64,7 @@ describe('Pi auth cancellation', () => {
     const auth = new Promise<never>((_resolve, reject) => {
       rejectAuth = reject;
     });
-    const model = { provider: 'openai', id: 'gpt-test' };
+    const model = { provider: 'openai-codex', id: 'gpt-test' };
     const ctx = {
       model,
       modelRegistry: {

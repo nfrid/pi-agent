@@ -221,7 +221,7 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
   const usageHint = useModifierShortcut(
     usageShortcut,
     () => surfaces?.open({ type: 'usage-analytics' }),
-    Boolean(activeLimit && urgent),
+    Boolean(surfaces),
   );
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -254,7 +254,32 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  if (!activeLimit || !urgent) return null;
+  if (!activeLimit || !urgent)
+    return (
+      <div
+        className={`${styles.capsule} usage-capsule ${styles.sidebar} ${styles.unavailable}`}
+      >
+        <button
+          type="button"
+          className={styles.trigger}
+          aria-label="Usage unavailable — open local analytics"
+          disabled={!surfaces}
+          onClick={() => surfaces?.open({ type: 'usage-analytics' })}
+        >
+          <span>Usage</span>
+          <span className={styles.unavailableLabel}>limits unavailable</span>
+        </button>
+        <a
+          className={styles.accountUsageLink}
+          href="https://chatgpt.com/settings/usage"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="View usage in ChatGPT"
+        >
+          View in ChatGPT ↗
+        </a>
+      </div>
+    );
   return (
     <div
       className={`${styles.capsule} usage-capsule ${styles.sidebar}`}

@@ -2,6 +2,24 @@
   position: relative;
   min-width: 0;
 }
+.unavailable {
+  display: grid;
+  gap: 5px;
+}
+.unavailableLabel {
+  margin-inline-start: auto;
+  color: var(--dim);
+  font-size: 10px;
+}
+.accountUsageLink {
+  color: var(--cyan);
+  font-size: 10px;
+  text-align: right;
+  text-decoration: none;
+}
+.accountUsageLink:hover {
+  text-decoration: underline;
+}
 .trigger {
   position: relative;
   display: flex;

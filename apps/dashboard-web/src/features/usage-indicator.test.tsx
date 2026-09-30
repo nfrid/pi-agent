@@ -16,6 +16,20 @@ import {
 import { UsageSparkline } from './usage-sparkline';
 
 describe('usage parsing and formatting', () => {
+  it.each([
+    undefined,
+    {},
+    { snapshots: [] },
+  ])('keeps usage accessible without inventing limits for %j', (usage) => {
+    const markup = renderToStaticMarkup(<UsageCapsule usage={usage} />);
+    expect(markup).toContain('limits unavailable');
+    expect(markup).toContain('Usage unavailable — open local analytics');
+    expect(markup).toContain('href="https://chatgpt.com/settings/usage"');
+    expect(markup).toContain('rel="noopener noreferrer"');
+    expect(markup).not.toContain('%');
+    expect(markup).not.toContain('reset unknown');
+  });
+
   it('hides limits until historical activity proves they are relevant', () => {
     const limits = parseUsage({
       snapshots: [{ limitId: 'codex', primary: { usedPercent: 50 } }],

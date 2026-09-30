@@ -8,7 +8,6 @@ import {
 } from '../shared/runtime/scoped-services';
 import { queryViaCodexAppServer } from './app-server';
 import { CODEX_USAGE_URL, TIMEOUT_MS } from './constants';
-import { isCodexModel } from './display';
 import { hasHeader } from './parse';
 import type { PiModel, UsageReport } from './types';
 
@@ -39,7 +38,8 @@ async function resolvePiCodexHeaders(
   const candidates: PiModel[] = [];
   const seen = new Set<string>();
   const add = (model: ExtensionContext['model']) => {
-    if (!isCodexModel(model)) return;
+    // WHAM accepts legacy Codex credentials, not OpenAI's direct-use grant.
+    if (model?.provider !== 'openai-codex') return;
     const key = `${model.provider}/${model.id}`;
     if (seen.has(key)) return;
     seen.add(key);

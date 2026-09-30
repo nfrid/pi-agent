@@ -251,6 +251,32 @@ async function openSession(
   await page.goto(path);
 }
 
+for (const desktop of [false, true]) {
+  test(`keeps unavailable usage visible with ChatGPT and local analytics${desktop ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    if (desktop) await page.setViewportSize({ width: 1280, height: 800 });
+    await openSession(page, '/', null);
+    if (!desktop)
+      await page.getByRole('button', { name: 'Open agent list' }).click();
+    const footer = page
+      .getByRole('complementary', { name: 'Agents and threads' })
+      .locator('.agent-nav-footer');
+    const fallback = footer.getByRole('button', {
+      name: 'Usage unavailable — open local analytics',
+    });
+    await expect(fallback).toBeVisible();
+    await expect(fallback).toContainText('limits unavailable');
+    await expect(
+      footer.getByRole('link', { name: 'View usage in ChatGPT' }),
+    ).toHaveAttribute('href', 'https://chatgpt.com/settings/usage');
+    await fallback.click();
+    await expect(
+      page.getByRole('dialog', { name: 'Usage analytics' }),
+    ).toBeVisible();
+  });
+}
+
 test('keeps usage and settings together in the home sidebar footer', async ({
   page,
 }) => {
