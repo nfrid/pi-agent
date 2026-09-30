@@ -1,10 +1,14 @@
 {
-  "lastChangelogVersion": "0.87.1",
+  "lastChangelogVersion": "0.99.1",
   "defaultProvider": "openai",
   "defaultModel": "gpt-6-astra",
   "defaultThinkingLevel": "medium",
-  "defaultTools": ["+codemode"],
-  "codemode": { "mode": "only" },
+  "defaultTools": [
+    "+codemode"
+  ],
+  "codemode": {
+    "mode": "only"
+  },
   "editorPaddingX": 1,
   "hideThinkingBlock": false,
   "quietStartup": true,
@@ -74,5 +78,6 @@
         "useFor": "High-stakes cross-subsystem design or diagnosis where Sol is unlikely to resolve the ambiguity reliably, or a prior Sol attempt left a concrete unresolved issue."
       }
     }
-  }
+  },
+  "deviceId": "fff93d35-7684-41f6-ba09-24dc829b0aac"
 }
