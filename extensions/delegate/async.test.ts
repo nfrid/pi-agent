@@ -2024,13 +2024,21 @@ describe('async delegate extension', () => {
     });
     expect(restored.sendMessage).not.toHaveBeenCalled();
     const firstContext = restored.handlers.get('context')?.({
-      messages: [persistedMessage],
+      messages: [persistedMessage, persistedMessage],
     }) as { messages?: unknown[] } | undefined;
     expect(firstContext?.messages).toEqual([persistedMessage]);
+    const wakeStateEntryCount = restored.entries.filter(
+      (entry) => entry.customType === 'delegate-wake:v1',
+    ).length;
     const repeatedContext = restored.handlers.get('context')?.({
       messages: [persistedMessage],
     }) as { messages?: unknown[] } | undefined;
-    expect(repeatedContext?.messages).toEqual([]);
+    expect(repeatedContext?.messages).toEqual([persistedMessage]);
+    expect(
+      restored.entries.filter(
+        (entry) => entry.customType === 'delegate-wake:v1',
+      ),
+    ).toHaveLength(wakeStateEntryCount);
     expect(restored.sendMessage).not.toHaveBeenCalled();
     await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });

@@ -332,7 +332,18 @@ describe('migration metadata', () => {
             "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('active_run_per_thread','active_runtime_per_pi_session','active_runtime_per_run','active_writer_per_checkout','orchestration_run_thread_attempt_unique','run_checkout_status','session_thread_link_thread','thread_event_thread_order') ORDER BY name",
           )
           .all(),
-      ).toEqual(indexesBefore);
+      ).toEqual(
+        indexesBefore.filter(
+          (index) => index.name !== 'active_writer_per_checkout',
+        ),
+      );
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='active_writer_per_checkout'",
+          )
+          .all(),
+      ).toEqual([]);
       expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       expect(
         db
