@@ -464,6 +464,26 @@ describe('canonical prompt composition', () => {
       expect(prompt).toContain('\n\n# Tool use\n');
       expect(prompt).toContain('\n\n- Keep command output bounded');
       expect(prompt).toContain(
+        'For a single tool operation, call the tool directly by default.',
+      );
+      expect(prompt).toContain(
+        'Use codemode to batch independent calls, compose dependent calls, or filter returned data when doing so reduces model round trips or the amount of data returned.',
+      );
+      expect(prompt).toContain(
+        'Do not bundle calls when a required model judgment needs to happen between them.',
+      );
+      expect(prompt).toContain(
+        'For a known tool name whose signature is missing, use `describeTool`; for an unknown tool name, use `searchTools`.',
+      );
+      expect(prompt).toContain(
+        'Search results already include tool signatures.',
+      );
+      expect(prompt).toContain('Do not discard failure details or evidence');
+      expect(prompt).toContain('Await every intended call');
+      expect(prompt).not.toContain(
+        'use it as the primary interface for tool calls',
+      );
+      expect(prompt).toContain(
         'For non-trivial `bash` calls—compound or control-flow commands, mutating commands, or otherwise non-obvious commands—provide the optional `description` field.',
       );
       expect(prompt).toContain(
