@@ -21,8 +21,9 @@ import {
 export function loadAgentInstructions(): LoadedInstruction[] {
   const workingStyle = loadInstruction('instructions/agent/working-style.md');
   const interaction = loadInstruction('instructions/agent/interaction.md');
+  const unslop = loadInstruction('instructions/agent/unslop.md');
   const toolUse = loadInstruction('instructions/agent/tool-use.md');
-  return [workingStyle, interaction, toolUse];
+  return [workingStyle, interaction, unslop, toolUse];
 }
 
 export function formatSkillsForPrompt(

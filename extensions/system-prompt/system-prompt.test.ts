@@ -461,6 +461,7 @@ describe('canonical prompt composition', () => {
     for (const prompt of prompts) {
       expect(prompt).toContain('<agent_instructions>\n# Working style');
       expect(prompt).toContain('\n\n# Interaction\n');
+      expect(prompt).toContain('\n\n# Unslop\n');
       expect(prompt).toContain('\n\n# Tool use\n');
       expect(prompt).toContain(
         'Choose the evidence needed for the next decision.',
@@ -483,6 +484,7 @@ describe('canonical prompt composition', () => {
       expect(prompt).toContain('\n</agent_instructions>');
       expect(prompt.match(/# Working style/g)).toHaveLength(1);
       expect(prompt.match(/# Interaction/g)).toHaveLength(1);
+      expect(prompt.match(/# Unslop/g)).toHaveLength(1);
       expect(prompt.match(/# Tool use/g)).toHaveLength(1);
       expect(prompt).not.toContain('<agent_instruction source=');
       expect(prompt).not.toContain('instructions/agent/working-style.md');
@@ -709,9 +711,10 @@ describe('prompt diagnostics', () => {
     expect(info).toContain(
       'Unsupported direct prompt inputs (not loaded): customPrompt=6 chars, appendSystemPrompt=6 chars',
     );
-    expect(info).toContain('Human instruction sources: 3');
+    expect(info).toContain('Human instruction sources: 4');
     expect(info).toContain('working-style.md:');
     expect(info).toContain('interaction.md:');
+    expect(info).toContain('unslop.md:');
     expect(info).toContain('tool-use.md:');
     expect(info).not.toContain('delegate/parent.md');
     expect(info).not.toContain('delegate/routing.md');
