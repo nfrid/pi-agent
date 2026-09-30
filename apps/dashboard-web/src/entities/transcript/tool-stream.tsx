@@ -57,6 +57,8 @@ export function TranscriptToolStream({
   timestampOverride,
   previewStartCount = 1,
   previewEndCount = 3,
+  openToolDetails,
+  onToolDetailToggle,
 }: {
   items: readonly TranscriptModelItem[];
   cwd?: string;
@@ -66,6 +68,8 @@ export function TranscriptToolStream({
   timestampOverride?: number | string;
   previewStartCount?: number;
   previewEndCount?: number;
+  openToolDetails?: ReadonlySet<string>;
+  onToolDetailToggle?: (key: string, expanded: boolean) => void;
 }) {
   const first = items[0];
   const streamKey = first?.key ?? 'tool-stream';
@@ -188,6 +192,10 @@ export function TranscriptToolStream({
             item={entry.item}
             cwd={cwd}
             timestampOverride={entry.timestampOverride}
+            toolDetailExpanded={openToolDetails?.has(entry.item.key)}
+            onToolDetailToggle={(expanded) =>
+              onToolDetailToggle?.(entry.item.key, expanded)
+            }
           />
         </div>
       );

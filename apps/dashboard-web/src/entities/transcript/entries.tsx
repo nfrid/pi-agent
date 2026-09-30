@@ -516,18 +516,18 @@ function ActivityStepContent({
       <span
         className={`tool-name${action.described ? ' tool-name-described' : ''}`}
       >
-        {action.action}
         {codemodeChild ? (
           <small
             className="codemode-child-indicator"
             title="Child results go to the script, not directly to the agent."
           >
-            via codemode
+            <span aria-hidden="true">↳</span>
             <span className="sr-only">
-              . Child results go to the script, not directly to the agent.
+              Child result. Results go to the script, not directly to the agent.
             </span>
           </small>
         ) : null}
+        {action.action}
       </span>
       {(action.argument || hasChanges) && (
         <span className="tool-argument">
@@ -741,6 +741,8 @@ function ToolDetail({
   timestamp,
   codemodeChild = false,
   codemodeDescendants = [],
+  expandedOverride,
+  onExpandedChange,
 }: {
   tool: NonNullable<TranscriptModelItem['tool']>;
   cwd?: string;
@@ -748,8 +750,11 @@ function ToolDetail({
   timestamp?: number | string;
   codemodeChild?: boolean;
   codemodeDescendants?: readonly TranscriptModelItem[];
+  expandedOverride?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = expandedOverride ?? localExpanded;
   const baseAction = activityStepParts(
     {
       name: tool.name,
@@ -798,7 +803,12 @@ function ToolDetail({
   const detail = (
     <details
       className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      open={expanded}
+      onToggle={(event) => {
+        const nextExpanded = event.currentTarget.open;
+        if (expandedOverride === undefined) setLocalExpanded(nextExpanded);
+        onExpandedChange?.(nextExpanded);
+      }}
     >
       <summary className="tool-step">
         <ActivityStepContent
@@ -828,6 +838,8 @@ function TranscriptEntry({
   showThinking = true,
   branchPoint,
   onOpenBranchPaths,
+  toolDetailExpanded,
+  onToolDetailToggle,
 }: {
   item: TranscriptModelItem;
   cwd?: string;
@@ -835,6 +847,8 @@ function TranscriptEntry({
   showThinking?: boolean;
   branchPoint?: SessionBranchPoint;
   onOpenBranchPaths?: (point: SessionBranchPoint) => void;
+  toolDetailExpanded?: boolean;
+  onToolDetailToggle?: (expanded: boolean) => void;
 }) {
   const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
@@ -936,6 +950,8 @@ function TranscriptEntry({
         timestamp={timestamp}
         codemodeChild={Boolean(item.codemodeRootKey)}
         codemodeDescendants={item.codemodeDescendants}
+        expandedOverride={toolDetailExpanded}
+        onExpandedChange={onToolDetailToggle}
       />
     );
   const raw = item.raw;

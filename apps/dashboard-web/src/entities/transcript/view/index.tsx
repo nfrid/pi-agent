@@ -9,6 +9,7 @@ import {
   type ComponentProps,
   type RefObject,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -17,7 +18,7 @@ import {
 import { FileLinkContext } from '../../../features/file-viewer/link-context';
 import { useTranscriptPreviewPreference } from '../../../shared/lib/transcript-display';
 import {
-  groupCodemodeCalls,
+  annotateCodemodeCalls,
   type TranscriptModelItem,
   toTranscriptEntries,
 } from '../../../transcript';
@@ -36,7 +37,12 @@ import {
   restoreRenderedAnchor,
   useTranscriptScrollCommand,
 } from '../use-scroll-command';
-import { buildTranscriptToolStreams } from '../virtual-rows';
+import {
+  buildTranscriptToolStreams,
+  buildVirtualTranscriptRows,
+  shouldPreserveWorkLogOnAppend,
+} from '../virtual-rows';
+import { TranscriptWorkLog } from '../work-log';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
 import { VirtualizedTranscript } from './virtualized';
 
@@ -69,6 +75,7 @@ function TranscriptContent({
   prependAnchor,
   onPrependAnchorRestored,
   scrollCommand,
+  scrollPhase = 'following',
   virtualize = false,
 }: {
   /** Legacy raw-entry input retained for embedders. */
@@ -97,30 +104,78 @@ function TranscriptContent({
   };
   onPrependAnchorRestored?: (revision: number) => void;
   scrollCommand?: TranscriptScrollCommand;
+  scrollPhase?: 'restoring' | 'following' | 'reading';
 }) {
   const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
   const items = useMemo(
     () =>
-      groupCodemodeCalls(
+      annotateCodemodeCalls(
         modelItems ?? toTranscriptEntries(input, { leadingContinuation }),
       ),
     [input, leadingContinuation, modelItems],
   );
-  const toolStreams = useMemo(() => buildTranscriptToolStreams(items), [items]);
   const transcriptPreview = useTranscriptPreviewPreference();
-  const streamByStart = useMemo(
-    () => new Map(toolStreams.map((stream) => [stream.start, stream])),
-    [toolStreams],
-  );
-  const streamCoverage = useMemo(() => {
-    const coverage = new Uint8Array(items.length);
-    for (const stream of toolStreams)
-      for (let index = stream.start + 1; index <= stream.end; index += 1)
-        coverage[index] = 1;
-    return coverage;
-  }, [items.length, toolStreams]);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [openToolDetails, setOpenToolDetails] = useState<Set<string>>(
+    new Set(),
+  );
+  const previousClosuresRef = useRef<Set<string> | undefined>(undefined);
+  const closures = useMemo(
+    () =>
+      items.flatMap((item) =>
+        item.workLogClosure ? [item.workLogClosure] : [],
+      ),
+    [items],
+  );
+  const currentClosureIds = useMemo(
+    () => new Set(closures.map((closure) => closure.finalMessageId)),
+    [closures],
+  );
+  const previousClosureIds = previousClosuresRef.current;
+  const newClosures = useMemo(
+    () =>
+      previousClosureIds
+        ? closures.filter(
+            (closure) => !previousClosureIds.has(closure.finalMessageId),
+          )
+        : [],
+    [closures, previousClosureIds],
+  );
+  const streams = useMemo(() => buildTranscriptToolStreams(items), [items]);
+  const preserveNewClosures =
+    newClosures.length > 0 &&
+    newClosures.some((closure) =>
+      shouldPreserveWorkLogOnAppend(
+        closure,
+        items,
+        streams,
+        open,
+        openToolDetails,
+        scrollPhase,
+      ),
+    );
+  const openForPlan = useMemo(() => {
+    const next = new Set(open);
+    if (preserveNewClosures)
+      for (const closure of newClosures)
+        next.add(`work-log-${closure.finalMessageId}`);
+    return next;
+  }, [newClosures, open, preserveNewClosures]);
+  const rows = useMemo(
+    () => buildVirtualTranscriptRows(items, openForPlan),
+    [items, openForPlan],
+  );
+  useEffect(() => {
+    previousClosuresRef.current = currentClosureIds;
+    if (!preserveNewClosures) return;
+    setOpen((current) => {
+      const next = new Set(current);
+      for (const closure of newClosures)
+        next.add(`work-log-${closure.finalMessageId}`);
+      return next;
+    });
+  }, [currentClosureIds, newClosures, preserveNewClosures]);
   const [pendingJumpKey, setPendingJumpKey] = useState<string>();
   const isVirtualizedTranscript =
     items.length > 80 && virtualize && Boolean(transcriptScrollElementRef);
@@ -198,6 +253,18 @@ function TranscriptContent({
     // Re-run after a pending ordinal load commits its rendered items.
     void loadedLandmarks;
     if (!pendingJumpKey) return;
+    const containingWorkLog = rows.find(
+      (row) =>
+        row.kind === 'work-log' &&
+        !row.expanded &&
+        items
+          .slice(row.start, row.end + 1)
+          .some((item) => item.key === pendingJumpKey),
+    );
+    if (containingWorkLog?.kind === 'work-log') {
+      setOpen((current) => new Set(current).add(containingWorkLog.key));
+      return;
+    }
     const scrollElement = transcriptScrollElementRef?.current;
     const keys = new Set([pendingJumpKey, `group-${pendingJumpKey}`]);
     const target = Array.from(
@@ -220,7 +287,13 @@ function TranscriptContent({
         scrollElement.getBoundingClientRect().top,
       behavior: 'auto',
     });
-  }, [loadedLandmarks, pendingJumpKey, transcriptScrollElementRef]);
+  }, [
+    items,
+    loadedLandmarks,
+    pendingJumpKey,
+    rows,
+    transcriptScrollElementRef,
+  ]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
     if (onJumpToLandmark) {
@@ -243,8 +316,10 @@ function TranscriptContent({
         onOpenBranchPaths={openBranchPaths}
         onBranchPointChange={setBranchPointId}
         onJumpToLandmark={onJumpToLandmark}
-        open={open}
+        open={openForPlan}
         setOpen={setOpen}
+        openToolDetails={openToolDetails}
+        setOpenToolDetails={setOpenToolDetails}
         runtime={runtime}
         onBeforeScroll={onBeforeScroll}
         pendingJumpKey={pendingJumpKey}
@@ -265,36 +340,59 @@ function TranscriptContent({
         onJump={jumpToLandmark}
         scrollElementRef={transcriptScrollElementRef}
       />
-      {items.map((item, index) => {
-        const stream = streamByStart.get(index);
-        if (stream) {
-          const streamKey = stream.key;
+      {rows.map((row) => {
+        if (row.kind === 'work-log')
+          return (
+            <TranscriptWorkLog
+              key={row.key}
+              rowKey={row.key}
+              durationMs={row.durationMs}
+              actionCount={row.actionCount}
+              expanded={row.expanded}
+              onToggle={() => {
+                setOpen((current) => {
+                  const next = new Set(current);
+                  row.expanded ? next.delete(row.key) : next.add(row.key);
+                  return next;
+                });
+              }}
+            />
+          );
+        if (row.kind === 'tool-stream')
           return (
             <TranscriptToolStream
-              key={streamKey}
-              items={items.slice(stream.start, stream.end + 1)}
+              key={row.key}
+              items={items.slice(row.start, row.end + 1)}
               cwd={runtime?.cwd}
-              expanded={open.has(streamKey)}
+              expanded={open.has(row.key)}
               timestampOverride={
-                stream.start > 0
-                  ? transcriptItemTimestamp(items[stream.start - 1])
+                row.start > 0
+                  ? transcriptItemTimestamp(items[row.start - 1])
                   : undefined
+              }
+              openToolDetails={openToolDetails}
+              onToolDetailToggle={(key, expanded) =>
+                setOpenToolDetails((current) => {
+                  const next = new Set(current);
+                  expanded ? next.add(key) : next.delete(key);
+                  return next;
+                })
               }
               previewStartCount={transcriptPreview.start}
               previewEndCount={transcriptPreview.end}
               onToggle={(nextExpanded) => {
                 setOpen((current) => {
                   const next = new Set(current);
-                  nextExpanded ? next.add(streamKey) : next.delete(streamKey);
+                  nextExpanded ? next.add(row.key) : next.delete(row.key);
                   return next;
                 });
               }}
             />
           );
-        }
-        if (streamCoverage[index]) return null;
+        const item = items[row.index];
+        if (!item) return null;
         return (
-          <div data-transcript-key={item.key} key={item.key}>
+          <div data-transcript-key={item.key} key={row.key}>
             <TranscriptEntry
               item={item}
               cwd={runtime?.cwd}
@@ -304,6 +402,19 @@ function TranscriptContent({
                   : undefined
               }
               onOpenBranchPaths={openBranchPaths}
+              toolDetailExpanded={
+                item.tool ? openToolDetails.has(item.key) : undefined
+              }
+              onToolDetailToggle={
+                item.tool
+                  ? (expanded) =>
+                      setOpenToolDetails((current) => {
+                        const next = new Set(current);
+                        expanded ? next.add(item.key) : next.delete(item.key);
+                        return next;
+                      })
+                  : undefined
+              }
             />
           </div>
         );

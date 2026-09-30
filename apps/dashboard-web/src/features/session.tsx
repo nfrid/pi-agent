@@ -115,6 +115,7 @@ export function SessionView({
   });
   const {
     awayFromLatest,
+    phase: scrollPhase,
     controlLayerRef,
     jumpToLatest,
     sessionPageRef,
@@ -269,6 +270,7 @@ export function SessionView({
             prependAnchor={prependAnchor}
             onPrependAnchorRestored={completePrependRestore}
             scrollCommand={scrollCommand}
+            scrollPhase={scrollPhase}
             virtualize={!embedded}
           />
         </section>

@@ -39,9 +39,9 @@
   white-space: nowrap;
 }
 .codemode-child-indicator {
-  margin-inline-start: 5px;
+  margin-inline-end: 5px;
   color: var(--dim);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 400;
 }
 .codemode-script {

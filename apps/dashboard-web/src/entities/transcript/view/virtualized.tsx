@@ -37,12 +37,15 @@ import {
   isNearPageBottom,
   useVirtualTranscriptScrollRestoration,
 } from '../virtual-scroll';
+import { TranscriptWorkLog } from '../work-log';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
 
 export function VirtualizedTranscript({
   items,
   open,
   setOpen,
+  openToolDetails,
+  setOpenToolDetails,
   runtime,
   outline,
   branchTopology,
@@ -61,6 +64,8 @@ export function VirtualizedTranscript({
   items: readonly TranscriptModelItem[];
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
+  openToolDetails: ReadonlySet<string>;
+  setOpenToolDetails: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
   outline?: readonly SessionOutlineLandmark[];
   branchTopology?: SessionBranchTopology;
@@ -79,7 +84,10 @@ export function VirtualizedTranscript({
   previewStartCount: number;
   previewEndCount: number;
 }) {
-  const rows = useMemo(() => buildVirtualTranscriptRows(items), [items]);
+  const rows = useMemo(
+    () => buildVirtualTranscriptRows(items, open),
+    [items, open],
+  );
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
   const [localPendingJumpKey, setLocalPendingJumpKey] = useState<string>();
@@ -186,7 +194,7 @@ export function VirtualizedTranscript({
     const result = new Map<string, number>();
     rows.forEach((row, index) => {
       result.set(row.key, index);
-      if (row.kind === 'tool-stream') {
+      if (row.kind === 'tool-stream' || row.kind === 'work-log') {
         for (let itemIndex = row.start; itemIndex <= row.end; itemIndex += 1) {
           const item = items[itemIndex];
           if (item) result.set(item.key, index);
@@ -235,6 +243,11 @@ export function VirtualizedTranscript({
       rowIndexByKey.get(requestedJumpKey) ??
       rowIndexByKey.get(`group-${requestedJumpKey}`);
     if (rowIndex === undefined) return;
+    const row = rows[rowIndex];
+    if (row?.kind === 'work-log' && !row.expanded) {
+      setOpen((current) => new Set(current).add(row.key));
+      return;
+    }
     if (pendingJumpKey !== undefined) onPendingJumpHandled?.();
     else setLocalPendingJumpKey(undefined);
     scrollToRow(rowIndex, 'start');
@@ -247,7 +260,9 @@ export function VirtualizedTranscript({
     pendingJumpKey,
     requestedJumpKey,
     rowIndexByKey,
+    rows,
     scrollToRow,
+    setOpen,
   ]);
   const jumpToLandmark = async (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
@@ -255,6 +270,12 @@ export function VirtualizedTranscript({
       rowIndexByKey.get(landmark.key) ??
       rowIndexByKey.get(`group-${landmark.key}`);
     if (loadedRowIndex !== undefined) {
+      const row = rows[loadedRowIndex];
+      if (row?.kind === 'work-log' && !row.expanded) {
+        setOpen((current) => new Set(current).add(row.key));
+        setLocalPendingJumpKey(landmark.key);
+        return;
+      }
       scrollToRow(loadedRowIndex, 'start');
       return;
     }
@@ -282,7 +303,8 @@ export function VirtualizedTranscript({
   const viewportRowData =
     viewportRow === undefined ? undefined : rows[viewportRow.index];
   const currentItemIndex =
-    viewportRowData?.kind === 'tool-stream'
+    viewportRowData?.kind === 'tool-stream' ||
+    viewportRowData?.kind === 'work-log'
       ? viewportRowData.start
       : viewportRowData?.kind === 'entry'
         ? viewportRowData.index
@@ -305,6 +327,14 @@ export function VirtualizedTranscript({
         start > 0 ? transcriptItemTimestamp(items[start - 1]) : undefined
       }
       captureScrollAnchor={captureScrollAnchor}
+      openToolDetails={openToolDetails}
+      onToolDetailToggle={(key, expanded) =>
+        setOpenToolDetails((current) => {
+          const next = new Set(current);
+          expanded ? next.add(key) : next.delete(key);
+          return next;
+        })
+      }
       previewStartCount={previewStartCount}
       previewEndCount={previewEndCount}
       onToggle={(nextExpanded) => {
@@ -351,6 +381,22 @@ export function VirtualizedTranscript({
             >
               {row.kind === 'tool-stream' ? (
                 renderToolStream(row.start, row.end, row.key)
+              ) : row.kind === 'work-log' ? (
+                <TranscriptWorkLog
+                  rowKey={row.key}
+                  durationMs={row.durationMs}
+                  actionCount={row.actionCount}
+                  expanded={row.expanded}
+                  onToggle={() => {
+                    captureScrollAnchor(row.key);
+                    affectedRowKeyRef.current = row.key;
+                    setOpen((current) => {
+                      const next = new Set(current);
+                      row.expanded ? next.delete(row.key) : next.add(row.key);
+                      return next;
+                    });
+                  }}
+                />
               ) : (
                 <div data-transcript-key={items[row.index]?.key}>
                   <TranscriptEntry
@@ -364,6 +410,23 @@ export function VirtualizedTranscript({
                         : undefined
                     }
                     onOpenBranchPaths={onOpenBranchPaths}
+                    toolDetailExpanded={
+                      items[row.index]?.tool
+                        ? openToolDetails.has(items[row.index]?.key ?? '')
+                        : undefined
+                    }
+                    onToolDetailToggle={
+                      items[row.index]?.tool
+                        ? (expanded) =>
+                            setOpenToolDetails((current) => {
+                              const next = new Set(current);
+                              const key = items[row.index]?.key;
+                              if (key)
+                                expanded ? next.add(key) : next.delete(key);
+                              return next;
+                            })
+                        : undefined
+                    }
                   />
                 </div>
               )}

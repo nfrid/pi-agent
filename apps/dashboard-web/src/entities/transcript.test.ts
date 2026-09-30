@@ -27,6 +27,44 @@ import { TranscriptToolStream } from './transcript/tool-stream';
 import { LivePauseEvent } from './transcript/view';
 
 describe('tool row views and virtual transcript construction', () => {
+  it('consumes response-closure markers as hidden boundary metadata', () => {
+    const source = [
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'middle',
+        message: { role: 'assistant', content: 'Work' },
+      },
+      {
+        type: 'message',
+        id: 'final',
+        message: { role: 'assistant', content: 'Answer' },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'final',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ];
+    const items = toTranscriptEntries(source);
+    expect(items).toHaveLength(3);
+    expect(items.find((item) => item.key === 'final')?.workLogClosure).toEqual({
+      requestMessageId: 'request',
+      finalMessageId: 'final',
+      startedAt: 10,
+      endedAt: 90,
+    });
+  });
   it('renders provisional argument progress without mounting the inspector', () => {
     const item = {
       key: 'call-1',

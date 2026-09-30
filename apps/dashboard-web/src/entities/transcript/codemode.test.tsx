@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
-  groupCodemodeCalls,
+  annotateCodemodeCalls,
   type TranscriptModelItem,
   toTranscriptEntries,
 } from '../../transcript';
@@ -46,7 +46,7 @@ describe('codemode presentation', () => {
       call('second', 'codemode'),
       call('second/1', 'todo_list', 'second'),
     ];
-    const grouped = groupCodemodeCalls(items);
+    const grouped = annotateCodemodeCalls(items);
     expect(grouped.map((item) => item.key)).toEqual([
       'root',
       'root/1',
@@ -89,11 +89,11 @@ describe('codemode presentation', () => {
       call('plain', 'bash'),
       call('plain/1', 'read', 'plain'),
     ];
-    expect(groupCodemodeCalls(items)).toEqual(items);
+    expect(annotateCodemodeCalls(items)).toEqual(items);
   });
 
   it('renders descendants as peer rows with a visible and accessible codemode indicator', () => {
-    const [root, child, unrelated] = groupCodemodeCalls([
+    const [root, child, unrelated] = annotateCodemodeCalls([
       call('root', 'codemode', undefined, 'running'),
       call('root/1', 'read', 'root'),
       call('unrelated', 'marker'),
@@ -103,21 +103,22 @@ describe('codemode presentation', () => {
         item ? renderToStaticMarkup(<TranscriptEntry item={item} />) : '',
       )
       .join('');
-    expect(markup.indexOf('Codemode')).toBeLessThan(
-      markup.indexOf('via codemode'),
+    expect(markup.indexOf('Codemode')).toBeLessThan(markup.indexOf('↳'));
+    expect(markup.indexOf('marker')).toBeGreaterThan(markup.indexOf('↳'));
+    expect(markup).toContain(
+      'title="Child results go to the script, not directly to the agent."',
     );
-    expect(markup.indexOf('marker')).toBeGreaterThan(
-      markup.indexOf('via codemode'),
+    expect(markup).toContain(
+      'Child result. Results go to the script, not directly to the agent.',
     );
-    expect(markup).toContain('Child results go to the script');
-    expect(markup).toContain('directly to the agent.');
+    expect(markup).not.toContain('via codemode');
     expect(markup).toContain('class="tool-step-dot"');
     expect(markup).toContain('step-pending');
     expect(markup).not.toContain('codemode-children');
   });
 
   it('restores metadata-only children while a caught child error leaves the parent successful', () => {
-    const [root] = groupCodemodeCalls(
+    const [root] = annotateCodemodeCalls(
       toTranscriptEntries([
         {
           type: 'message',

@@ -219,6 +219,7 @@ export function useSessionScroll({
   }, [controller, enabled, scrollElementRef, sessionMounted]);
 
   return {
+    phase: state.phase,
     awayFromLatest: enabled && state.away,
     tailReadySessionId: !enabled || state.ready ? id : undefined,
     restoring: state.phase === 'restoring',

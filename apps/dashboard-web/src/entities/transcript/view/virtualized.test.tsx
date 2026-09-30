@@ -68,6 +68,8 @@ function transcript(
       scrollCommand={scrollCommand}
       open={new Set()}
       setOpen={vi.fn()}
+      openToolDetails={new Set()}
+      setOpenToolDetails={vi.fn()}
       scrollElementRef={
         {
           current: { scrollTop: 0, querySelectorAll: () => [] },

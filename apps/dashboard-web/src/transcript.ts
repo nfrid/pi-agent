@@ -20,6 +20,11 @@ import {
   transcriptToolOutcome,
   transcriptToolRecord,
 } from '@pi-dashboard/domain';
+import {
+  RESPONSE_CLOSURE_MARKER_TYPE,
+  type ResponseClosure,
+  tryParseResponseClosure,
+} from '@pi-dashboard/protocol';
 import type { ReactNode } from 'react';
 
 export interface TranscriptTodoTask {
@@ -90,6 +95,8 @@ export interface TranscriptModelItem {
   preparing?: boolean;
   /** Presentation-ready native assistant failure detail. */
   errorMessage?: string;
+  /** Hidden response-lifecycle metadata consumed by transcript row planning. */
+  workLogClosure?: ResponseClosure;
   /** Feature-owned replacement rendered in the normal transcript flow. */
   customMessage?: ReactNode;
   /** Optional outline presentation without changing transcript semantics. */
@@ -548,6 +555,7 @@ export function toTranscriptEntries(
   const sessionId = isTranscriptProjection(input) ? input.sessionId : undefined;
   let previousTodo: readonly TranscriptTodoTask[] | undefined;
   let hasConversation = false;
+  const workLogClosures: ResponseClosure[] = [];
   const rendered = renderItems(input);
   // A session-local index also names pending and historical calls whose own
   // result is absent. Never modify the underlying arguments or raw records.
@@ -584,6 +592,14 @@ export function toTranscriptEntries(
       const raw = record(item.raw);
       if (!raw) {
         result.push({ key: item.key, entry: { kind: 'other' }, raw: item.raw });
+        continue;
+      }
+      if (
+        raw.type === 'custom' &&
+        raw.customType === RESPONSE_CLOSURE_MARKER_TYPE
+      ) {
+        const closure = tryParseResponseClosure(raw.data);
+        if (closure) workLogClosures.push(closure);
         continue;
       }
       const tasks = todoSnapshot(raw);
@@ -785,6 +801,23 @@ export function toTranscriptEntries(
       ...(item.preparing ? { preparing: true } : {}),
     });
   }
+  const conflictedFinalKeys = new Set<string>();
+  for (const closure of workLogClosures) {
+    const requestIds = [closure.requestMessageId, closure.liveRequestMessageId];
+    const finalIds = [closure.finalMessageId, closure.liveFinalMessageId];
+    const final = result.find(
+      (item) => item.role === 'assistant' && finalIds.includes(item.key),
+    );
+    const requestExists = result.some(
+      (item) => item.role === 'user' && requestIds.includes(item.key),
+    );
+    if (!final || !requestExists || conflictedFinalKeys.has(final.key))
+      continue;
+    if (final.workLogClosure) {
+      delete final.workLogClosure;
+      conflictedFinalKeys.add(final.key);
+    } else final.workLogClosure = closure;
+  }
   const hidden = leadingContinuationSpan(
     result.map((item) => item.entry),
     options.leadingContinuation,
@@ -795,7 +828,7 @@ export function toTranscriptEntries(
 }
 
 /** Annotate descendants without changing transcript order or nesting their rows. */
-export function groupCodemodeCalls(
+export function annotateCodemodeCalls(
   items: readonly TranscriptModelItem[],
 ): TranscriptModelItem[] {
   const tools = new Map(
