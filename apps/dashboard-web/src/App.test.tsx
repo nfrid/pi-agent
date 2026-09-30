@@ -291,6 +291,57 @@ describe('command palette', () => {
     ).toBe(true);
   });
 
+  it('keeps service threads out of default palette search but indexes ordinary threads', () => {
+    const snapshot = {
+      runtimes: [],
+      projects: [],
+      sessions: [
+        {
+          id: 'service-session',
+          cwd: '/workspace',
+          title: 'Internal service build',
+          updatedAt: 2,
+        },
+        {
+          id: 'ordinary-session',
+          cwd: '/workspace',
+          title: 'Ordinary project build',
+          updatedAt: 1,
+        },
+      ],
+    } as never;
+    const threads = [
+      {
+        id: 'service-thread',
+        projectId: 'project-1',
+        title: 'Internal service build',
+        isService: true,
+        status: 'active',
+        updatedAt: 2,
+      },
+      {
+        id: 'ordinary-thread',
+        projectId: 'project-1',
+        title: 'Ordinary project build',
+        status: 'active',
+        updatedAt: 1,
+      },
+    ];
+    const directLinks = [
+      { sessionId: 'service-session', threadId: 'service-thread' },
+      { sessionId: 'ordinary-session', threadId: 'ordinary-thread' },
+    ];
+    const items = paletteItems(
+      snapshot,
+      threads as never,
+      directLinks as never,
+    );
+    expect(searchPaletteItems(items, 'Internal service build')).toHaveLength(0);
+    expect(
+      searchPaletteItems(items, 'Ordinary project build')[0]?.item.id,
+    ).toBe('session:ordinary-session');
+  });
+
   it('keeps navigation available and indexes every ordinary thread', () => {
     const snapshot = {
       runtimes: [],

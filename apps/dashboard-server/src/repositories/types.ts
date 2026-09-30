@@ -99,6 +99,7 @@ export interface RuntimeIntentPlan {
   force?: boolean;
   /** External delivery intent evidence; never used for generic runtime commands. */
   deliveryThreadId?: string;
+  deliveryMode?: 'steer';
   deliveryPrompt?: string;
   deliveryCorrelationId?: string;
   deliverySessionId?: string;
@@ -187,6 +188,7 @@ export interface CreateThreadInput {
   title: string;
   checkoutId?: string;
   externalRef?: string;
+  isService?: boolean;
   pinnedAt?: number;
   archivedAt?: number;
   status?: Thread['status'];

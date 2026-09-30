@@ -18,9 +18,13 @@ import {
   type BridgeImageAttachment,
   externalDeliveryReceipt,
 } from '@pi-dashboard/protocol';
+import { Type } from 'typebox';
 import { afterEach, expect, it, vi } from 'vitest';
 import { dispatchDashboardCommand } from './command-dispatcher';
-import { installExternalDeliveryReceipts } from './external-delivery';
+import {
+  installExternalDeliveryReceipts,
+  installExternalSteeringShim,
+} from './external-delivery';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -31,6 +35,7 @@ async function fixture(
   extra?: ExtensionFactory,
   before = false,
   imageAutoResize: boolean | null = false,
+  activeTool = false,
 ) {
   const root = await mkdtemp(join(tmpdir(), 'native-delivery-sdk-'));
   let session: AgentSession | undefined;
@@ -38,6 +43,11 @@ async function fixture(
     session?.dispose();
     await rm(root, { recursive: true, force: true });
   });
+  let releaseTool!: () => void;
+  const toolGate = new Promise<void>((resolve) => {
+    releaseTool = resolve;
+  });
+  const toolStarted = vi.fn();
   const contexts: Context[] = [];
   const errors: unknown[] = [];
   let pi!: ExtensionAPI;
@@ -69,10 +79,20 @@ async function fixture(
       queueMicrotask(() => {
         stream.push({
           type: 'done',
-          reason: 'stop',
+          reason: activeTool && contexts.length === 1 ? 'toolUse' : 'stop',
           message: {
             role: 'assistant',
-            content: [{ type: 'text', text: 'fixture answer' }],
+            content:
+              activeTool && contexts.length === 1
+                ? [
+                    {
+                      type: 'toolCall',
+                      id: 'gate-call',
+                      name: 'gate',
+                      arguments: {},
+                    },
+                  ]
+                : [{ type: 'text', text: 'fixture answer' }],
             api: 'openai-completions',
             provider: 'fixture',
             model: 'fixture',
@@ -90,7 +110,8 @@ async function fixture(
                 total: 0,
               },
             },
-            stopReason: 'stop',
+            stopReason:
+              activeTool && contexts.length === 1 ? 'toolUse' : 'stop',
             timestamp: Date.now(),
           },
         });
@@ -113,6 +134,19 @@ async function fixture(
   const core: ExtensionFactory = (api) => {
     pi = api;
     installExternalDeliveryReceipts(api);
+    installExternalSteeringShim();
+    if (activeTool)
+      api.registerTool({
+        name: 'gate',
+        label: 'Gate',
+        description: 'Model-free boundary fixture',
+        parameters: Type.Object({}),
+        execute: async () => {
+          toolStarted();
+          await toolGate;
+          return { content: [{ type: 'text', text: 'released' }], details: {} };
+        },
+      });
     api.on('session_start', (_event, context) => {
       ctx = context;
     });
@@ -137,7 +171,7 @@ async function fixture(
     settingsManager: settings,
     sessionManager: manager,
     resourceLoader: loader,
-    noTools: 'all',
+    ...(activeTool ? { tools: ['gate'] } : { noTools: 'all' as const }),
   }));
   await session.bindExtensions({
     mode: 'rpc',
@@ -151,6 +185,23 @@ async function fixture(
     manager,
     contexts,
     errors,
+    releaseTool,
+    toolStarted,
+    steer(
+      id: string,
+      text: string,
+      expectedSessionId = manager.getSessionId(),
+      expectedLeafId = manager.getLeafId() ?? undefined,
+    ) {
+      return dispatchDashboardCommand(pi, ctx, {
+        id,
+        type: 'steer',
+        externalDeliveryId: id,
+        text,
+        expectedSessionId,
+        ...(expectedLeafId ? { expectedLeafId } : {}),
+      });
+    },
     async send(
       deliveryId: string,
       text: string,
@@ -167,17 +218,101 @@ async function fixture(
       await vi.waitFor(() => expect(contexts).toHaveLength(count + 1));
       await session.waitForIdle();
     },
-    dispatch(deliveryId: string, text: string, expectedSessionId?: string) {
+    dispatch(
+      deliveryId: string,
+      text: string,
+      expectedSessionId?: string,
+      expectedLeafId?: string,
+    ) {
       return dispatchDashboardCommand(pi, ctx, {
         id: deliveryId,
         type: 'prompt',
         externalDeliveryId: deliveryId,
         text,
         ...(expectedSessionId ? { expectedSessionId } : {}),
+        ...(expectedLeafId ? { expectedLeafId } : {}),
       });
     },
   };
 }
+
+it('queues identical literal steering inputs during a real SDK tool and processes them at the next boundary', async () => {
+  const f = await fixture(undefined, false, false, true);
+  const turn = f.session.prompt('Start the tool.');
+  await vi.waitFor(() => expect(f.toolStarted).toHaveBeenCalledOnce());
+  const anchor = f.manager.getLeafId();
+  if (!anchor) throw new Error('Missing native branch anchor.');
+  expect(
+    await f.steer('steer-1', '/quit', f.manager.getSessionId(), anchor),
+  ).toMatchObject({ accepted: true, mode: 'steer' });
+  expect(
+    await f.steer('steer-2', '/quit', f.manager.getSessionId(), anchor),
+  ).toMatchObject({ accepted: true, mode: 'steer' });
+  expect(f.contexts).toHaveLength(1);
+  await expect(
+    f.steer('wrong-session', 'No', 'replaced-session', anchor),
+  ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+  await expect(
+    f.steer('wrong-branch', 'No', f.manager.getSessionId(), 'removed-anchor'),
+  ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+  f.releaseTool();
+  await turn;
+  await f.session.waitForIdle();
+  await expect(
+    f.steer('idle-race', 'Do not start a new turn'),
+  ).rejects.toMatchObject({ code: 'busy' });
+  const users = f.contexts
+    .at(-1)
+    ?.messages.filter((message) => message.role === 'user');
+  const steered = users?.filter((message) =>
+    JSON.stringify(message.content).includes('/quit'),
+  );
+  expect(steered).toHaveLength(2);
+  const receipts = f.manager
+    .getBranch()
+    .map(externalDeliveryReceipt)
+    .filter((item): item is NonNullable<typeof item> =>
+      Boolean(item && ['steer-1', 'steer-2'].includes(item.deliveryId)),
+    );
+  expect(receipts).toHaveLength(2);
+  expect(new Set(receipts.map((receipt) => receipt.userEntryId)).size).toBe(2);
+  const receiptUsers = receipts.map((receipt) =>
+    f.manager.getBranch().find((entry) => entry.id === receipt.userEntryId),
+  );
+  expect(
+    receiptUsers.every(
+      (entry) =>
+        entry?.type === 'message' &&
+        entry.message.role === 'user' &&
+        JSON.stringify(entry.message.content).includes('/quit'),
+    ),
+  ).toBe(true);
+  expect(f.errors).toEqual([]);
+});
+
+it('rejects a native fork or replaced session without dispatching', async () => {
+  const f = await fixture();
+  await f.send('initial', 'Initial input');
+  const anchor = f.manager.getLeafId();
+  if (!anchor) throw new Error('Missing native branch anchor.');
+  const firstUser = f.manager
+    .getBranch()
+    .find((entry) => entry.type === 'message' && entry.message.role === 'user');
+  if (!firstUser) throw new Error('Missing fixture user.');
+  f.manager.branch(firstUser.id);
+  await expect(
+    f.dispatch('forked-prompt', 'Answer', f.manager.getSessionId(), anchor),
+  ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+  await expect(
+    f.steer('forked-reply', 'Answer', f.manager.getSessionId(), anchor),
+  ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+  const originalSessionId = f.manager.getSessionId();
+  f.manager.newSession();
+  await expect(
+    f.steer('replaced-reply', 'Answer', originalSessionId, firstUser.id),
+  ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+  expect(f.contexts).toHaveLength(1);
+});
 
 it('binds identical native users durably, keeps provider context clean and preserves literal commands and images', async () => {
   const command = vi.fn();
@@ -207,7 +342,9 @@ it('binds identical native users durably, keeps provider context clean and prese
   ]);
   expect(command).not.toHaveBeenCalled();
   expect(f.errors).toEqual([]);
-  const disk = await readFile(f.manager.getSessionFile()!, 'utf8');
+  const sessionFile = f.manager.getSessionFile();
+  if (!sessionFile) throw new Error('Fixture session file is missing.');
+  const disk = await readFile(sessionFile, 'utf8');
   const entries = disk
     .trim()
     .split('\n')
@@ -224,7 +361,8 @@ it('binds identical native users durably, keeps provider context clean and prese
           .content[0].text,
     ),
   ).toEqual([...texts, 'image']);
-  const last = f.contexts.at(-1)!;
+  const last = f.contexts.at(-1);
+  if (!last) throw new Error('Fixture context is missing.');
   expect(
     last.messages.filter((message) => message.role === 'user').at(-1),
   ).toMatchObject({
@@ -235,7 +373,7 @@ it('binds identical native users durably, keeps provider context clean and prese
   });
   expect(JSON.stringify(f.contexts)).not.toContain('fixture-correlation-');
   expect(JSON.stringify(f.contexts)).not.toContain('PI_EXTERNAL_DELIVERY');
-  const reopened = SessionManager.open(f.manager.getSessionFile()!);
+  const reopened = SessionManager.open(sessionFile);
   expect(
     reopened
       .getEntries()

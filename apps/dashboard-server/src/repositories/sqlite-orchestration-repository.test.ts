@@ -80,14 +80,12 @@ describe('SqliteOrchestrationRepository', () => {
         path: '/repo',
         status: 'ready',
       });
-      for (const id of ['first', 'second']) {
-        repository.createThread({
-          id,
-          projectId: project.id,
-          checkoutId: checkout.id,
-          title: id,
-        });
-      }
+      for (const id of ['first', 'second'])
+        db.prepare(
+          `INSERT INTO thread (id,project_id,title,checkout_id,status,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?)`,
+        ).run(id, project.id, id, checkout.id, 'draft', 1, 1);
+      expect(repository.getThread('first')).not.toHaveProperty('isService');
       repository.createRun({
         id: 'first-run',
         threadId: 'first',
@@ -771,6 +769,7 @@ describe('SqliteOrchestrationRepository', () => {
         title: 'External title',
         checkoutId: value.checkout.id,
         externalRef: 'external:opaque-1',
+        isService: true,
       },
       run: { id: 'external-run', initialPrompt: 'External prompt' },
     };
@@ -787,7 +786,10 @@ describe('SqliteOrchestrationRepository', () => {
       ),
     ).toEqual(first);
     expect(value.repository.threadSummaries()).toContainEqual(
-      expect.objectContaining({ externalRef: 'external:opaque-1' }),
+      expect.objectContaining({
+        externalRef: 'external:opaque-1',
+        isService: true,
+      }),
     );
     let conflict: unknown;
     try {
@@ -821,9 +823,13 @@ describe('SqliteOrchestrationRepository', () => {
       ).toThrowError(expect.objectContaining({ code: 'idempotency-conflict' }));
       expect(repository.getThread('external-thread')).toMatchObject({
         externalRef: 'external:opaque-1',
+        isService: true,
       });
       expect(repository.listThreads(value.project.id)).toContainEqual(
-        expect.objectContaining({ externalRef: 'external:opaque-1' }),
+        expect.objectContaining({
+          externalRef: 'external:opaque-1',
+          isService: true,
+        }),
       );
     } finally {
       reopened.close();

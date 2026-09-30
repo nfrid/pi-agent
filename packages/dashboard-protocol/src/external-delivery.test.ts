@@ -6,7 +6,7 @@ import {
 } from './external-delivery.js';
 import { parseBridgeCommand } from './pi-runtime-protocol.js';
 
-it('transports delivery provenance outside literal text and rejects queued metadata', () => {
+it('transports delivery provenance outside literal text and requires source fences for queued metadata', () => {
   const command = {
     id: 'command',
     type: 'prompt',
@@ -15,6 +15,14 @@ it('transports delivery provenance outside literal text and rejects queued metad
   };
   expect(parseBridgeCommand(command)).toEqual(command);
   expect(() => parseBridgeCommand({ ...command, type: 'steer' })).toThrow();
+  expect(
+    parseBridgeCommand({
+      ...command,
+      type: 'steer',
+      expectedSessionId: 'source-session',
+      expectedLeafId: 'source-leaf',
+    }),
+  ).toMatchObject({ text: '  /quit\n', type: 'steer' });
   expect(() => parseBridgeCommand({ ...command, type: 'followUp' })).toThrow();
   expect(() =>
     parseBridgeCommand({ ...command, externalDeliveryId: 'bad\nID' }),
@@ -57,6 +65,37 @@ it('requires an explicit thread and structured bridge input for a source-session
     expectedSessionId: 'original-session',
   };
   expect(parseExternalDeliveryCommand(input)).toEqual(input);
+  expect(
+    parseExternalDeliveryCommand({ ...input, coalesceConversation: true }),
+  ).toMatchObject({ coalesceConversation: true });
+  expect(() =>
+    parseExternalDeliveryCommand({
+      deliveryId: 'unfenced-coalesce',
+      conversationRef: 'new',
+      text: 'yes',
+      coalesceConversation: true,
+    }),
+  ).toThrow();
+  expect(
+    parseExternalDeliveryCommand({ ...input, mode: 'steer' }),
+  ).toMatchObject({ mode: 'steer' });
+  expect(
+    parseExternalDeliveryCommand({
+      ...input,
+      mode: 'reply',
+      coalesceConversation: true,
+    }),
+  ).toMatchObject({ mode: 'reply', coalesceConversation: true });
+  expect(() =>
+    parseExternalDeliveryCommand({ ...input, mode: 'reply' }),
+  ).toThrow();
+  expect(() =>
+    parseExternalDeliveryCommand({
+      ...input,
+      mode: 'steer',
+      expectedSessionId: undefined,
+    }),
+  ).toThrow();
   expect(() =>
     parseExternalDeliveryCommand({
       ...input,
@@ -79,8 +118,12 @@ it('requires an explicit thread and structured bridge input for a source-session
       text: 'yes',
       externalDeliveryId: 'delivery',
       expectedSessionId: 'original-session',
+      expectedLeafId: 'source-leaf',
     }),
-  ).toMatchObject({ expectedSessionId: 'original-session' });
+  ).toMatchObject({
+    expectedSessionId: 'original-session',
+    expectedLeafId: 'source-leaf',
+  });
 });
 
 describe('external delivery contract', () => {

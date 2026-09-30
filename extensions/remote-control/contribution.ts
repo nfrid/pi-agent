@@ -2,8 +2,12 @@ import {
   createRuntimeCapabilitySnapshot,
   type ExtensionManifest,
 } from '@pi-dashboard/extension-contributions';
-import { EXTERNAL_DELIVERY_CAPABILITY } from '@pi-dashboard/protocol';
+import {
+  EXTERNAL_DELIVERY_CAPABILITY,
+  EXTERNAL_STEERING_CAPABILITY,
+} from '@pi-dashboard/protocol';
 import { Type } from 'typebox';
+import { installExternalSteeringShim } from './external-delivery';
 
 export type { SettledBackgroundViewModel } from '@pi-dashboard/extension-contributions';
 export {
@@ -85,6 +89,12 @@ export const remoteControlCapabilitySnapshot = createRuntimeCapabilitySnapshot(
       version: '1',
       available: true,
       summary: 'Bounded semantic actions backed by ExtensionContext APIs.',
+    },
+    {
+      id: EXTERNAL_STEERING_CAPABILITY,
+      version: '1',
+      available: installExternalSteeringShim(),
+      summary: 'Source-fenced literal native steering queue acceptance.',
     },
     {
       id: EXTERNAL_DELIVERY_CAPABILITY,

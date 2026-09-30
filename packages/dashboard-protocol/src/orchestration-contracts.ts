@@ -239,6 +239,8 @@ export const ThreadSchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
     externalRef: Type.Optional(IdentifierSchema),
+    /** Machine-created service thread classification, not an access control. */
+    isService: Type.Optional(Type.Boolean()),
     status: ThreadStatusSchema,
     /** Independent visibility state; execution status is never replaced by archive. */
     archivedAt: Type.Optional(TimestampSchema),
@@ -259,6 +261,8 @@ export const ThreadSummarySchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
     externalRef: Type.Optional(IdentifierSchema),
+    /** Machine-created service thread classification, not an access control. */
+    isService: Type.Optional(Type.Boolean()),
     status: ThreadStatusSchema,
     settledAt: Type.Optional(TimestampSchema),
     pinnedAt: Type.Optional(TimestampSchema),

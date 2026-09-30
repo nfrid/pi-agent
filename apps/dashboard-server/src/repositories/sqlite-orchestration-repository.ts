@@ -617,6 +617,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.externalRef === undefined
         ? {}
         : { externalRef: input.externalRef }),
+      ...(input.isService ? { isService: true } : {}),
       ...(input.archivedAt === undefined
         ? {}
         : { archivedAt: input.archivedAt }),
@@ -627,8 +628,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,external_ref,status,archived_at,pinned_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,external_ref,is_service,status,archived_at,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
@@ -636,6 +637,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         thread.title,
         thread.checkoutId ?? null,
         thread.externalRef ?? null,
+        thread.isService ? 1 : 0,
         thread.status,
         thread.archivedAt ?? null,
         thread.pinnedAt ?? null,
@@ -738,6 +740,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(optionalString(row, 'external_ref') === undefined
         ? {}
         : { externalRef: optionalString(row, 'external_ref') }),
+      ...(Number(row.is_service ?? 0) === 1 ? { isService: true } : {}),
       status: stringValue(row, 'status') as Thread['status'],
       ...(row.settled_at == null ? {} : { settledAt: Number(row.settled_at) }),
       ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
@@ -1730,7 +1733,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       WHERE command_type='external.delivery'
         AND (json_extract(result_json, '$.threadId')=? OR json_extract(execution_plan_json, '$.deliveryThreadId')=?)
         AND execution_state <> 'uncertain'
-        AND COALESCE(json_extract(result_json, '$.state'), 'pending') NOT IN ('completed','attention')
+        AND COALESCE(json_extract(result_json, '$.state'), 'pending') NOT IN ('completed','attention','accepted')
       ORDER BY created_at LIMIT 1`)
       .get(threadId, threadId) as Record<string, unknown> | undefined;
     return row ? intentFromRow(row) : undefined;
@@ -1743,7 +1746,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       if (existing.commandType !== 'external.delivery')
         throw new Error('Only external delivery results may be frozen.');
       const state = (existing.result as { state?: string } | null)?.state;
-      if (state === 'completed' || state === 'attention') return;
+      if (
+        state === 'completed' ||
+        state === 'attention' ||
+        state === 'accepted'
+      )
+        return;
       this.db
         .prepare(
           "UPDATE command_receipt SET result_json=?,updated_at=? WHERE idempotency_key=? AND execution_state='completed'",
@@ -1985,6 +1993,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.externalRef === undefined
         ? {}
         : { externalRef: input.externalRef }),
+      ...(input.isService ? { isService: true } : {}),
       ...(input.archivedAt === undefined
         ? {}
         : { archivedAt: input.archivedAt }),
@@ -1995,8 +2004,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,external_ref,status,archived_at,pinned_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,external_ref,is_service,status,archived_at,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
@@ -2004,6 +2013,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         thread.title,
         thread.checkoutId ?? null,
         thread.externalRef ?? null,
+        thread.isService ? 1 : 0,
         thread.status,
         thread.archivedAt ?? null,
         thread.pinnedAt ?? null,
@@ -2418,6 +2428,7 @@ function threadFromRow(row: Record<string, unknown>): Thread {
     ...(optionalString(row, 'external_ref') === undefined
       ? {}
       : { externalRef: optionalString(row, 'external_ref') }),
+    ...(Number(row.is_service ?? 0) === 1 ? { isService: true } : {}),
     status: stringValue(row, 'status') as Thread['status'],
     ...(row.archived_at == null ? {} : { archivedAt: Number(row.archived_at) }),
     ...(optionalString(row, 'pre_archive_status') === undefined

@@ -15,6 +15,7 @@ import path from 'node:path';
 import {
   EXTERNAL_DELIVERY_CAPABILITY,
   EXTERNAL_DELIVERY_RECEIPT,
+  EXTERNAL_STEERING_CAPABILITY,
   type ExternalDeliveryCommand,
   type RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
@@ -83,6 +84,270 @@ it('settles only an idle external conversation, resumes old replies and never re
       conversationRef: 'not-created',
     }),
   ).toEqual({ state: 'absent' });
+});
+
+it('accepts concurrent source-fenced steering once per ID and preserves one shared final across reopen', async () => {
+  const f = await fixture();
+  f.live.capabilities?.capabilities.push({
+    id: EXTERNAL_STEERING_CAPABILITY,
+    version: '1',
+    available: true,
+  });
+  await f.service.submit('p', {
+    deliveryId: 'owner',
+    threadId: f.thread.id,
+    text: 'Start',
+  });
+  const steer = {
+    deliveryId: 'steer-1',
+    threadId: f.thread.id,
+    expectedSessionId: 'session',
+    mode: 'reply' as const,
+    coalesceConversation: true,
+    text: 'same input',
+  };
+  const results = await Promise.all([
+    f.service.submit('p', steer),
+    f.service.submit('p', steer),
+    f.service.submit('p', { ...steer, deliveryId: 'steer-2' }),
+  ]);
+  expect(results.map((result) => result.state)).toEqual([
+    'accepted',
+    'accepted',
+    'accepted',
+  ]);
+  expect(f.send).toHaveBeenCalledTimes(3);
+  expect(f.send.mock.calls[1][1]).toMatchObject({
+    type: 'steer',
+    expectedSessionId: 'session',
+    expectedLeafId: expect.any(String),
+  });
+  expect(await f.service.get('p', 'steer-1')).toEqual(results[0]);
+  await expect(
+    f.service.submit('p', { ...steer, text: 'different' }),
+  ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+  await f.reopen();
+  expect(await f.service.submit('p', steer)).toEqual(results[0]);
+  expect(f.send).toHaveBeenCalledTimes(3);
+  await f.finish();
+  expect(await f.service.get('p', 'owner')).toMatchObject({
+    state: 'completed',
+    reply: { text: 'answer' },
+  });
+  expect(await f.service.get('p', 'steer-1')).not.toHaveProperty('reply');
+});
+
+it('keeps a standalone source Reply as the shared-final owner through later UI continuation', async () => {
+  const f = await fixture('steer-active');
+  f.live.liveState = 'working';
+  f.live.capabilities?.capabilities.push({
+    id: EXTERNAL_STEERING_CAPABILITY,
+    version: '1',
+    available: true,
+  });
+  const reply = await f.service.submit('p', {
+    deliveryId: 'standalone-reply',
+    threadId: f.thread.id,
+    expectedSessionId: 'session',
+    mode: 'reply',
+    coalesceConversation: true,
+    text: 'Reply body',
+  });
+  expect(reply).toMatchObject({ state: 'running', accepted: true });
+  expect(f.repository.activeExternalDelivery(f.thread.id)?.idempotencyKey).toBe(
+    f.intentKey('standalone-reply'),
+  );
+  await expect(
+    f.service.settleConversation('p', {
+      commandId: 'close-during-steer',
+      conversationRef: 'steer-active',
+    }),
+  ).rejects.toMatchObject({ code: 'busy' });
+  expect(await f.service.get('p', 'standalone-reply')).toMatchObject({
+    state: 'running',
+    accepted: true,
+  });
+  await f.append('user', 'Dashboard follow-up');
+  await f.finish('one shared final');
+  expect(await f.service.get('p', 'standalone-reply')).toMatchObject({
+    state: 'completed',
+    reply: { text: 'one shared final' },
+  });
+});
+
+it('coalesces idle source-fenced Reply only when explicitly requested', async () => {
+  const f = await fixture();
+  const reply = await f.service.submit('p', {
+    deliveryId: 'idle-source-reply',
+    threadId: f.thread.id,
+    expectedSessionId: 'session',
+    mode: 'reply',
+    coalesceConversation: true,
+    text: 'Reply body',
+  });
+  expect(reply.state).toBe('running');
+  await f.append('user', 'Dashboard follow-up');
+  await f.finish('one shared final');
+  const completed = await f.service.get('p', 'idle-source-reply');
+  expect(completed).toMatchObject({
+    state: 'completed',
+    reply: { text: 'one shared final' },
+  });
+  expect(
+    await f.service.submit('p', {
+      deliveryId: 'idle-source-reply',
+      threadId: f.thread.id,
+      expectedSessionId: 'session',
+      mode: 'reply',
+      coalesceConversation: true,
+      text: 'Reply body',
+    }),
+  ).toEqual(completed);
+  expect(f.send).toHaveBeenCalledOnce();
+});
+
+it('defers an active auto Reply on an older receiver and uses its v2 prompt once idle', async () => {
+  const f = await fixture();
+  f.live.liveState = 'working';
+  const command = {
+    deliveryId: 'older-auto-reply',
+    threadId: f.thread.id,
+    expectedSessionId: 'session',
+    mode: 'reply' as const,
+    coalesceConversation: true,
+    text: 'same source Reply',
+  };
+  await expect(f.service.submit('p', command)).rejects.toMatchObject({
+    code: 'busy',
+  });
+  expect(
+    f.repository.getCommandIntent(f.intentKey(command.deliveryId)),
+  ).toBeUndefined();
+  expect(f.send).not.toHaveBeenCalled();
+  f.live.liveState = 'idle';
+  expect(await f.service.submit('p', command)).toMatchObject({
+    state: 'running',
+  });
+  expect(f.send).toHaveBeenCalledOnce();
+  expect(f.send.mock.calls[0][1]).toMatchObject({
+    type: 'prompt',
+    expectedSessionId: 'session',
+    externalDeliveryId: f.intentKey(command.deliveryId),
+  });
+  expect(f.send.mock.calls[0][1]).not.toHaveProperty('expectedLeafId');
+});
+
+it('retries the same auto Reply as an idle prompt after a definite active-to-idle rejection', async () => {
+  const f = await fixture();
+  f.live.liveState = 'working';
+  f.live.capabilities?.capabilities.push({
+    id: EXTERNAL_STEERING_CAPABILITY,
+    version: '1',
+    available: true,
+  });
+  const command = {
+    deliveryId: 'auto-race',
+    threadId: f.thread.id,
+    expectedSessionId: 'session',
+    mode: 'reply' as const,
+    coalesceConversation: true,
+    text: 'unchanged Reply body',
+  };
+  f.send.mockImplementationOnce(async () => {
+    f.live.liveState = 'idle';
+    throw Object.assign(new Error('Runtime became idle before queueing.'), {
+      code: 'busy',
+    });
+  });
+  await expect(f.service.submit('p', command)).rejects.toMatchObject({
+    code: 'busy',
+  });
+  expect(
+    f.repository.getCommandIntent(f.intentKey(command.deliveryId)),
+  ).toBeUndefined();
+  const retry = await f.service.submit('p', command);
+  expect(retry.state).toBe('running');
+  expect(f.send).toHaveBeenCalledTimes(2);
+  expect(f.send.mock.calls[0][1]).toMatchObject({
+    type: 'steer',
+    text: command.text,
+  });
+  expect(f.send.mock.calls[1][1]).toMatchObject({
+    type: 'prompt',
+    text: command.text,
+  });
+});
+
+it('freezes an ambiguous auto Reply send and never retries it as another mode', async () => {
+  const f = await fixture();
+  f.live.liveState = 'working';
+  f.live.capabilities?.capabilities.push({
+    id: EXTERNAL_STEERING_CAPABILITY,
+    version: '1',
+    available: true,
+  });
+  const command = {
+    deliveryId: 'auto-ambiguous',
+    threadId: f.thread.id,
+    expectedSessionId: 'session',
+    mode: 'reply' as const,
+    coalesceConversation: true,
+    text: 'do not replay',
+  };
+  f.send.mockImplementationOnce(async (_runtimeId, sent) => {
+    const userId = await f.append('user', sent.text);
+    await f.receipt(sent.externalDeliveryId ?? '', userId);
+    throw new Error('Lost acknowledgement after native queue acceptance.');
+  });
+  const ambiguous = await f.service.submit('p', command);
+  expect(ambiguous).toMatchObject({
+    state: 'attention',
+    error: { code: 'ambiguous-send' },
+  });
+  expect(ambiguous).not.toHaveProperty('accepted');
+  f.live.liveState = 'idle';
+  await f.reopen();
+  const frozen = await f.service.submit('p', command);
+  expect(frozen).toMatchObject({ state: 'attention' });
+  expect(frozen).not.toHaveProperty('accepted');
+  expect(f.send).toHaveBeenCalledOnce();
+});
+
+it('rejects legacy steering receivers before admission and never replays ambiguous queue sends', async () => {
+  const f = await fixture();
+  f.live.liveState = 'working';
+  const steer = {
+    deliveryId: 'steer',
+    threadId: f.thread.id,
+    expectedSessionId: 'session',
+    mode: 'steer' as const,
+    text: 'Reply',
+  };
+  await expect(f.service.submit('p', steer)).rejects.toMatchObject({
+    code: 'busy',
+  });
+  expect(f.repository.getCommandIntent(f.intentKey('steer'))).toBeUndefined();
+  f.live.capabilities?.capabilities.push({
+    id: EXTERNAL_STEERING_CAPABILITY,
+    version: '1',
+    available: true,
+  });
+  await expect(
+    f.service.submit('p', { ...steer, expectedSessionId: 'replaced' }),
+  ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+  f.send.mockImplementationOnce(async (_runtimeId, command) => {
+    await f.append('user', command.text);
+    throw new Error('lost acknowledgement after native delivery');
+  });
+  expect(await f.service.submit('p', steer)).toMatchObject({
+    state: 'attention',
+    error: { code: 'ambiguous-send' },
+  });
+  await f.reopen();
+  expect(await f.service.submit('p', steer)).toMatchObject({
+    state: 'attention',
+  });
+  expect(f.send).toHaveBeenCalledOnce();
 });
 
 it('uses an explicit initial model and rejects unavailable selections without consuming delivery IDs', async () => {
@@ -507,13 +772,16 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
       const f = await fixture();
       f.send.mockImplementationOnce(async (_runtimeId, sent) => {
         const userId = await f.append('user', sent.text);
-        if (mode !== 'missing')
+        if (mode !== 'missing') {
+          if (!sent.externalDeliveryId)
+            throw new Error('Fixture delivery ID is missing.');
           await f.receipt(
-            sent.externalDeliveryId!,
+            sent.externalDeliveryId,
             mode === 'wrong' ? 'before-base' : userId,
           );
-        if (mode === 'duplicate')
-          await f.receipt(sent.externalDeliveryId!, userId);
+          if (mode === 'duplicate')
+            await f.receipt(sent.externalDeliveryId, userId);
+        }
         return { accepted: true };
       });
       await f.service.submit('p', command(mode));
@@ -821,7 +1089,9 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
     await expect(f.service.get('p', 'lag')).resolves.toMatchObject({
       state: 'pending',
     });
-    await f.receipt(f.send.mock.calls[0][1].externalDeliveryId!, userEntryId);
+    const deliveryId = f.send.mock.calls[0]?.[1].externalDeliveryId;
+    if (!deliveryId) throw new Error('Fixture delivery ID is missing.');
+    await f.receipt(deliveryId, userEntryId);
     await f.finish();
     await expect(f.service.get('p', 'lag')).resolves.toMatchObject({
       state: 'completed',
@@ -845,6 +1115,77 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
       state: 'attention',
       error: { code: 'ambiguous-correlation' },
     });
+  });
+
+  it('persists accepted only after the idle source Reply prompt acknowledgement', async () => {
+    const f = await fixture();
+    f.repository.settleThread('test-settle-before-reply', f.thread.id);
+    const orchestration = (
+      f.service as unknown as { orchestration: OrchestrationService }
+    ).orchestration;
+    const unsettle = orchestration.unsettleThread.bind(orchestration);
+    let releaseActivity!: () => void;
+    let activityStarted!: () => void;
+    const activity = new Promise<void>((resolve) => {
+      activityStarted = resolve;
+    });
+    vi.spyOn(orchestration, 'unsettleThread').mockImplementation(
+      async (threadId, commandId) => {
+        activityStarted();
+        await new Promise<void>((resolve) => {
+          releaseActivity = resolve;
+        });
+        return unsettle(threadId, commandId);
+      },
+    );
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    f.send.mockImplementationOnce(async () => {
+      entered();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      f.live.liveState = 'working';
+      return { accepted: true };
+    });
+    const command = {
+      deliveryId: 'idle-ack-proof',
+      threadId: f.thread.id,
+      expectedSessionId: 'session',
+      mode: 'reply' as const,
+      coalesceConversation: true,
+      text: 'A source Reply',
+    };
+    const posting = f.service.submit('p', command);
+    await started;
+    const beforeAck = await f.service.get('p', command.deliveryId);
+    expect(beforeAck).toMatchObject({ state: 'running' });
+    expect(beforeAck).not.toHaveProperty('accepted');
+    release();
+    await activity;
+    const afterAck = await f.service.get('p', command.deliveryId);
+    expect(afterAck).toMatchObject({ state: 'running', accepted: true });
+    releaseActivity();
+    await expect(posting).resolves.toMatchObject({
+      state: 'running',
+      accepted: true,
+    });
+    await expect(f.service.get('p', command.deliveryId)).resolves.toMatchObject(
+      {
+        state: 'running',
+        accepted: true,
+      },
+    );
+    await f.reopen();
+    await expect(f.service.get('p', command.deliveryId)).resolves.toMatchObject(
+      {
+        state: 'running',
+        accepted: true,
+      },
+    );
   });
 
   it('does not mistake an owned in-flight dispatch for restart uncertainty', async () => {

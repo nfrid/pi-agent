@@ -14,6 +14,7 @@ import { dashboardStatus } from '../presentation-status';
 export type DurableThreadMetadata = {
   threadId: string;
   checkoutId?: string;
+  isService?: boolean;
   archivedAt?: number;
   settledAt?: number;
   pinnedAt?: number;
@@ -54,7 +55,7 @@ export const MAX_VISIBLE_ACTIVE_THREADS = 40;
 type SnapshotRun = NonNullable<BrowserSnapshot['runs']>[number];
 type DurableThread = Pick<
   Thread,
-  'id' | 'checkoutId' | 'archivedAt' | 'pinnedAt' | 'settledAt'
+  'id' | 'checkoutId' | 'isService' | 'archivedAt' | 'pinnedAt' | 'settledAt'
 >;
 
 type ThreadNavIndexes = {
@@ -221,6 +222,7 @@ function durableThreadForSessionFromIndexes(
   return {
     threadId,
     ...(thread?.checkoutId ? { checkoutId: thread.checkoutId } : {}),
+    ...(thread?.isService ? { isService: true } : {}),
     ...(directLink
       ? directLink.archivedAt === undefined
         ? {}
@@ -307,7 +309,7 @@ export function agentThreadRows(
   snapshot: AgentThreadSnapshot,
   durableThreads?: readonly Pick<
     Thread,
-    'id' | 'archivedAt' | 'pinnedAt' | 'settledAt'
+    'id' | 'isService' | 'archivedAt' | 'pinnedAt' | 'settledAt'
   >[],
   directLinks: readonly SessionThreadLink[] = [],
   drafts: readonly DraftMetadata[] = [],

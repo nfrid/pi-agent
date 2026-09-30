@@ -2,9 +2,11 @@
 export {
   EXTERNAL_DELIVERY_CAPABILITY,
   EXTERNAL_DELIVERY_RECEIPT,
+  EXTERNAL_STEERING_CAPABILITY,
   type ExternalDeliveryReceipt,
   externalDeliveryReceipt,
   supportsExternalDelivery,
+  supportsExternalSteering,
 } from './external-delivery.js';
 
 export {

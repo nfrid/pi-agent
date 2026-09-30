@@ -12,6 +12,7 @@ import {
   type ModelSelection,
   parseExternalDeliveryCommand,
   supportsExternalDelivery,
+  supportsExternalSteering,
   type Thread,
 } from '@pi-dashboard/protocol';
 import type {
@@ -24,11 +25,18 @@ import type { SessionIndex } from '../session-index.js';
 import { type ExternalModel, externalModels } from './external-models.js';
 import type { OrchestrationService } from './orchestration-service.js';
 
-type DeliveryState = 'pending' | 'running' | 'completed' | 'attention';
+type DeliveryState =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'attention'
+  | 'accepted';
 export interface ExternalDeliveryResult {
   deliveryId: string;
   threadId?: string;
   state: DeliveryState;
+  /** Queue admission is distinct from receipt processing and final completion. */
+  accepted?: boolean;
   reply?: { text: string; messageId: string };
   error?: { code: string; message: string };
 }
@@ -43,6 +51,8 @@ type StoredDelivery = ExternalDeliveryResult & {
   runtimeId?: string;
   leafId?: string;
   artifactFiles?: string[];
+  /** Opted-in conversation coalescing; this record owns the shared final. */
+  coalesced?: boolean;
 };
 
 type DeliveryPlan = RuntimeIntentPlan & {
@@ -71,6 +81,7 @@ function publicResult(value: ExternalDeliveryResult): ExternalDeliveryResult {
     deliveryId: value.deliveryId,
     ...(value.threadId === undefined ? {} : { threadId: value.threadId }),
     state: value.state,
+    ...(value.accepted === undefined ? {} : { accepted: value.accepted }),
     ...(value.reply === undefined ? {} : { reply: value.reply }),
     ...(value.error === undefined ? {} : { error: value.error }),
   };
@@ -191,10 +202,11 @@ export class ExternalDeliveryService {
       runtimeId: string,
       command: {
         id: string;
-        type: 'prompt';
+        type: 'prompt' | 'steer';
         text: string;
         externalDeliveryId?: string;
         expectedSessionId?: string;
+        expectedLeafId?: string;
         images?: BridgeImageAttachment[];
       },
     ) => Promise<unknown>,
@@ -501,7 +513,11 @@ export class ExternalDeliveryService {
         throw conflict(command.deliveryId);
       if (existing.executionState === 'completed') {
         const stored = this.storedFromIntent(existing);
-        if (stored.state === 'completed' || stored.state === 'attention')
+        if (
+          stored.state === 'completed' ||
+          stored.state === 'attention' ||
+          stored.state === 'accepted'
+        )
           return stored;
         return this.progress(stored, key);
       }
@@ -517,6 +533,9 @@ export class ExternalDeliveryService {
       correlationId === undefined
         ? markerFor(projectId, command.deliveryId)
         : undefined;
+    let dispatchMode: 'prompt' | 'steer' =
+      command.mode === 'steer' ? 'steer' : 'prompt';
+    let hasActiveOwner = false;
     let thread = command.threadId
       ? this.repository.getThread(command.threadId)
       : undefined;
@@ -529,10 +548,14 @@ export class ExternalDeliveryService {
     if (thread?.archivedAt !== undefined || thread?.status === 'archived')
       throw new Error('Thread is archived.');
     if (thread) {
-      const owner = this.repository.activeExternalDelivery(
-        thread.id,
-      )?.idempotencyKey;
-      if (owner && owner !== key) throw busy();
+      const owner = this.repository.activeExternalDelivery(thread.id);
+      hasActiveOwner = Boolean(owner && owner.idempotencyKey !== key);
+      if (
+        hasActiveOwner &&
+        command.mode !== 'steer' &&
+        command.mode !== 'reply'
+      )
+        throw busy();
     }
     const runs = thread ? this.repository.listRuns(thread.id) : [];
     let run = runs.at(-1);
@@ -590,12 +613,34 @@ export class ExternalDeliveryService {
           throw busy('Resumed runtime is not ready.');
         run = this.repository.setRunRuntime(run.id, runtimeId);
       }
+      if (!runtime || runtime.online === false) throw busy();
+      if (command.mode === 'reply') {
+        if (runtime.liveState === 'working') {
+          if (!supportsExternalSteering(runtime) || !runtime.session.leafId)
+            throw busy(
+              'Active source Reply waits for a receiver with native steering support.',
+            );
+          dispatchMode = 'steer';
+        } else if (!['idle', 'waiting'].includes(runtime.liveState)) {
+          throw busy();
+        }
+        if (hasActiveOwner && dispatchMode !== 'steer')
+          throw busy(
+            'The active delivery must settle before an idle source Reply.',
+          );
+      }
       if (
-        !runtime ||
-        runtime.online === false ||
+        dispatchMode !== 'steer' &&
         !['idle', 'waiting'].includes(runtime.liveState)
       )
         throw busy();
+      if (
+        dispatchMode === 'steer' &&
+        (!supportsExternalSteering(runtime) || !runtime.session.leafId)
+      )
+        throw busy(
+          'Runtime must support source-fenced external steering with a selected branch before admission.',
+        );
       if (
         correlationId !== undefined &&
         !supportsExternalDelivery(
@@ -625,24 +670,22 @@ export class ExternalDeliveryService {
           { code: 'invalid-command' },
         );
     }
+    const admissionLeafId = this.registry.get(run?.runtimeId ?? '')?.session
+      .leafId;
     const prepared = await this.persistPrompt(projectId, command, marker);
 
     const plan: DeliveryPlan = {
       operation: 'command',
       projectId,
       deliveryThreadId: thread?.id,
+      ...(dispatchMode === 'steer' ? { deliveryMode: 'steer' as const } : {}),
       deliveryPrompt: prepared.prompt,
       ...(correlationId === undefined
         ? {}
         : { deliveryCorrelationId: correlationId }),
       ...(run?.runtimeId ? { runtimeId: run.runtimeId } : {}),
       ...(run?.piSessionId ? { deliverySessionId: run.piSessionId } : {}),
-      ...(this.registry.get(run?.runtimeId ?? '')?.session.leafId
-        ? {
-            deliveryLeafId: this.registry.get(run?.runtimeId ?? '')?.session
-              .leafId,
-          }
-        : {}),
+      ...(admissionLeafId ? { deliveryLeafId: admissionLeafId } : {}),
       ...(prepared.files.length
         ? { deliveryArtifactFiles: prepared.files }
         : {}),
@@ -665,6 +708,7 @@ export class ExternalDeliveryService {
     }
 
     let stored: StoredDelivery;
+    let steeringHasOwner = false;
     if (!thread) {
       await this.repository.transitionCommandIntent(key, 'dispatched');
       try {
@@ -712,7 +756,11 @@ export class ExternalDeliveryService {
         staleSource ||
         !runtime ||
         runtime.online === false ||
-        !['idle', 'waiting'].includes(runtime.liveState)
+        (dispatchMode === 'steer' &&
+          (!supportsExternalSteering(runtime) ||
+            (command.mode === 'reply' && runtime.liveState !== 'working'))) ||
+        (dispatchMode !== 'steer' &&
+          !['idle', 'waiting'].includes(runtime.liveState))
       ) {
         await this.repository.transitionCommandIntent(key, 'prepared');
         if (!existing || staleSource)
@@ -740,15 +788,41 @@ export class ExternalDeliveryService {
         runId: run.id,
         sessionId: runtime.session.id,
         runtimeId: runtime.runtimeId,
-        leafId: runtime.session.leafId,
+        leafId:
+          dispatchMode === 'steer' || command.mode === 'reply'
+            ? (intent.executionPlan?.deliveryLeafId ?? admissionLeafId)
+            : runtime.session.leafId,
+        ...(command.coalesceConversation || dispatchMode === 'steer'
+          ? { coalesced: true }
+          : {}),
         artifactFiles: prepared.files,
       };
+      // A steering input deliberately joins the owning conversation. Freeze
+      // that permission before dispatch; ambiguous sends still never replay.
+      let coalescedOwner: RuntimeCommandIntent | undefined;
+      if (dispatchMode === 'steer') {
+        const owner = this.repository.activeExternalDelivery(thread.id);
+        if (owner && owner.idempotencyKey !== key) {
+          steeringHasOwner = true;
+          coalescedOwner = owner;
+          const prior = this.storedFromIntent(owner);
+          this.repository.updateCommandIntentResult(owner.idempotencyKey, {
+            ...prior,
+            coalesced: true,
+          });
+        }
+      }
       await this.repository.transitionCommandIntent(key, 'dispatched');
       try {
-        await this.runtimeCommand(run.runtimeId, {
+        const acknowledgement = await this.runtimeCommand(run.runtimeId, {
           id: `external-runtime:${digest(key)}`,
-          type: 'prompt',
+          type: dispatchMode,
           text: prepared.prompt,
+          ...(stored.leafId &&
+          (dispatchMode === 'steer' ||
+            (command.mode === 'reply' && supportsExternalSteering(runtime)))
+            ? { expectedLeafId: stored.leafId }
+            : {}),
           ...(correlationId === undefined
             ? {}
             : { externalDeliveryId: correlationId }),
@@ -757,6 +831,25 @@ export class ExternalDeliveryService {
             : { expectedSessionId: command.expectedSessionId }),
           ...(prepared.images.length ? { images: prepared.images } : {}),
         });
+        if (
+          (dispatchMode === 'steer' || command.mode === 'reply') &&
+          (!acknowledgement ||
+            typeof acknowledgement !== 'object' ||
+            (acknowledgement as { accepted?: unknown }).accepted !== true)
+        )
+          throw new Error('The source Reply acknowledgement is unknown.');
+        if (command.mode === 'reply' && dispatchMode === 'prompt') {
+          stored.accepted = true;
+          this.repository.completeCommandIntent({
+            idempotencyKey: key,
+            commandType: 'external.delivery',
+            resourceType: 'external-delivery',
+            resourceId: `${projectId}:${command.deliveryId}`,
+            commandFingerprint: hash,
+            result: stored,
+            createdAt: intent.createdAt,
+          });
+        }
         // The external reference is already canonical, even before a resumed
         // session's index/link catches up with the runtime hello.
         if (this.repository.getThread(thread.id)?.settledAt !== undefined) {
@@ -767,7 +860,22 @@ export class ExternalDeliveryService {
           );
         }
       } catch (error) {
-        if ((error as { code?: unknown }).code === 'busy') {
+        if (
+          command.mode === 'reply' &&
+          dispatchMode === 'prompt' &&
+          this.repository.getCommandIntent(key)?.executionState === 'completed'
+        )
+          return this.progress(stored, key);
+        if (
+          ['busy', 'orchestration-conflict'].includes(
+            String((error as { code?: unknown }).code),
+          )
+        ) {
+          if (coalescedOwner)
+            this.repository.updateCommandIntentResult(
+              coalescedOwner.idempotencyKey,
+              this.storedFromIntent(coalescedOwner),
+            );
           await this.repository.transitionCommandIntent(key, 'prepared');
           if (!existing) this.repository.deletePreparedExternalDelivery(key);
           await this.cleanupFiles(prepared.created);
@@ -778,6 +886,10 @@ export class ExternalDeliveryService {
           this.repository.getCommandIntent(key) as RuntimeCommandIntent,
         );
       }
+    }
+    if (dispatchMode === 'steer') {
+      stored.accepted = true;
+      stored.state = steeringHasOwner ? 'accepted' : 'running';
     }
     await this.repository.completeCommandIntent({
       idempotencyKey: key,
@@ -840,7 +952,11 @@ export class ExternalDeliveryService {
     stored: StoredDelivery,
     key: string,
   ): Promise<ExternalDeliveryResult> {
-    if (stored.state === 'completed' || stored.state === 'attention')
+    if (
+      stored.state === 'completed' ||
+      stored.state === 'attention' ||
+      stored.state === 'accepted'
+    )
       return publicResult(stored);
     const pending = () => publicResult({ ...stored, state: 'pending' });
     const fail = (code: string, message: string) =>
@@ -1001,18 +1117,28 @@ export class ExternalDeliveryService {
         'The exact user entry could not be identified safely.',
       );
     const userIndex = matches[0];
+    const finalUserIndex = stored.coalesced
+      ? messages.reduce(
+          (latest, message, index) =>
+            index >= userIndex && message.role === 'user' ? index : latest,
+          userIndex,
+        )
+      : userIndex;
     if (
-      messages
+      !stored.coalesced &&
+      (messages
         .slice(anchorIndex + 1, userIndex)
         .some((message) => message.role === 'user') ||
-      messages.slice(userIndex + 1).some((message) => message.role === 'user')
+        messages
+          .slice(userIndex + 1)
+          .some((message) => message.role === 'user'))
     )
       return fail(
         'ambiguous-correlation',
         'Another user turn intervened before completion.',
       );
     const assistants = messages
-      .slice(userIndex + 1)
+      .slice(finalUserIndex + 1)
       .filter((message) => message.role === 'assistant');
     const last = assistants.at(-1);
     if (!last) return pending();

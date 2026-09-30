@@ -168,6 +168,7 @@ export function paletteItems(
     durableThreads?.map((thread) => [thread.id, thread]) ?? [],
   );
   const threads = agentThreadRows(snapshot, durableThreads, directLinks)
+    .filter((row) => !row.durableThread?.isService)
     .filter((row) => row.session || row.runtime)
     .map((row): PaletteItem => {
       const durableThread = row.durableThread

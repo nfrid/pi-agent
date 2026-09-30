@@ -30,7 +30,7 @@ POST returns 202; GET returns 200. Both success bodies have only:
 {"deliveryId":"telegram-update-123","threadId":"thread-id","state":"completed","reply":{"text":"The answer.","messageId":"persisted-entry-id"}}
 ```
 
-`state` is `pending`, `running`, `completed`, or `attention`. `reply` exists only on completion. Attention includes `error: {code,message}`. Internal prompts, fingerprints, and artifact paths are never returned.
+`state` is `pending`, `running`, `completed`, or `attention` for ordinary deliveries. Secondary steering acknowledgements use `accepted`. `reply` exists only on completion. Attention includes `error: {code,message}`. Internal prompts, fingerprints, and artifact paths are never returned.
 
 An identical POST returns the existing record; changed payloads return `409` with `code: "idempotency-conflict"`, including concurrent requests. Definite busy rejection returns `409` with `code: "busy"` without reserving a new delivery ID. If a record was already prepared before a daemon exit, retry the identical POST to progress it. GET never launches or dispatches anything; there is no additional delivery worker. Keep polling a running turn, and use identical POST retries for pending setup/recovery. Admission to a thread is held until its delivery is observed terminal, even if the runtime's last snapshot still says idle.
 
@@ -41,6 +41,68 @@ An identical POST returns the existing record; changed payloads return `409` wit
 Replies to a question can include `expectedSessionId` with an explicit `threadId`. The field participates in the immutable delivery fingerprint. The server checks the latest run and live runtime before dispatch, and a v2 runtime checks its actual native session before accepting the prompt. A definitely unsent prepared request whose source is replaced is released rather than blocking the thread forever. Completed results remain frozen even if the source later changes. A missing v2 capability is retryable busy before admission, never an unfenced fallback.
 
 This contract supports admin's owner-only Telegram outbox. Native source identity comes from the calling Pi session, not a model-selected target thread or recipient. Button answers are literal user input, not remotely executable commands.
+
+## Active Reply steering
+
+An explicit source Reply uses this stable POST payload:
+
+```json
+{"deliveryId":"update-123","threadId":"thread-id","expectedSessionId":"session-id","mode":"reply","coalesceConversation":true,"text":"Reply text"}
+```
+
+Freeze the complete body, including attachment metadata and bytes, before the
+first request. The server selects native steering when the runtime is working
+and advertises external-steering support. When it is idle or waiting, the server
+selects the existing structured correlated prompt. A receiver with v2 structured
+delivery but no steering support returns retryable `409 busy` while active;
+retry the unchanged payload after it becomes idle. A receiver without v2 source
+fencing remains busy. The idle prompt still requires structured source fencing
+and receipts. This does not force a runtime refresh.
+
+`mode: "steer"` remains the strict active-steering operation. Omitted mode retains the
+existing idle prompt behavior. Both modes require an explicit thread and session
+for source fencing. Coalescing changes output ownership only, not who may send
+input. Source Reply never creates a conversation or chooses a new session.
+
+The server dispatches a literal native steering message through the existing
+public SDK queue. A dispatch-scoped local public-method shim enqueues with
+`AgentCore.steer`; ordinary SDK calls retain their original implementation. This
+avoids the fire-and-forget extension API's asynchronous acceptance gap. It also
+bypasses extension input transformations, slash, skill and template expansion. The
+runtime checks the actual native session and selected branch ancestry
+immediately before queueing. Normal leaf advancement is allowed; a fork that
+removes the admission anchor is rejected. A runtime that becomes idle between
+server selection and queue admission rejects with retryable `busy`, without
+sending the message. Retrying the identical `mode: "reply"` payload after the
+idle transition selects the correlated prompt path. The active tool is not
+interrupted; native steering is processed at the SDK's next steering boundary.
+
+The first active source Reply with no existing external owner returns
+`{"state":"running","accepted":true}` and owns polling for the shared final.
+If a correlated external delivery already owns the conversation, or an earlier
+source Reply became the owner, later active Replies return
+`{"state":"accepted","accepted":true}` without `reply`. Admission order picks
+the owner; secondary accepted records never claim a separate final. An idle source Reply returns the ordinary `pending`, `running`, or `completed`
+state and polls for its shared final. It adds `accepted: true` only after the
+runtime's `{ "accepted": true }` prompt acknowledgement is durable. A GET while
+the in-process request is unresolved may report `running` but never `accepted`.
+After restart, a dispatched request without persisted acknowledgement becomes
+`attention`, not accepted. Queue acceptance is not evidence of processing or
+successful action. Identical
+IDs reuse their result, changed payloads conflict, and identical text with
+separate IDs remain distinct native input. The public `mode: "reply"` payload
+and fingerprint stay the same across active-to-idle retry. The receiver records
+the selected internal operation before dispatch. A definite busy rejection
+removes the unsent reservation so the same payload can be admitted again. A
+crash or lost acknowledgement after dispatch yields `attention`, never a mode
+change or automatic resend.
+
+A reply-owning record uses its exact receipt to identify the initial native user
+entry on the fenced session and selected branch. When opted into coalescing, it
+waits for the final after the latest subsequent user entry, so later Dashboard
+input shares that one final. Default idle deliveries retain exact-one-turn
+behavior. No watcher or final-answer worker is added. Later aborts, forks,
+runtime loss or queue removal do not turn queue acceptance into completion.
 
 ## Ownership and crash behavior
 
@@ -60,7 +122,7 @@ Old replies still resume the same indexed session without a setup prompt; succes
 
 ## Structural receipt boundary and compatibility
 
-The bridge accepts structured delivery only as an idle `prompt`, never steering/follow-up or queued input. Its explicit metadata disables slash/skill/template expansion independently of the text. `AsyncLocalStorage` carries dispatch provenance through the SDK input pipeline. The `message_end` hook captures the exact native user object; the subsequent `context` hook finds that same object in `SessionManager` and records its entry ID. There is no next-message, timestamp, or identical-text fallback. A real SDK fixture verifies this boundary, including identical intervening browser input and message-replacement hooks. If native identity is unavailable, a completed turn without its receipt requires attention, not guessed correlation or replay.
+The default correlated bridge delivery accepts only an idle `prompt`. Opt-in source-fenced `steer` uses the separate queue-acceptance contract above; external `followUp` remains unsupported. Its explicit metadata disables slash/skill/template expansion independently of the text. `AsyncLocalStorage` carries dispatch provenance through the SDK input pipeline. The `message_end` hook captures the exact native user object; the subsequent `context` hook finds that same object in `SessionManager` and records its entry ID. There is no next-message, timestamp, or identical-text fallback. A real SDK fixture verifies this boundary, including identical intervening browser input and message-replacement hooks. If native identity is unavailable, a completed turn without its receipt requires attention, not guessed correlation or replay.
 
 The SDK can buffer a new session until its first assistant entry; native user and receipt persistence follow that existing lifecycle. The outer SQLite intent remains durable before any dispatch. A crash between user and receipt persistence therefore cannot authorize replay. The initial delivery ID is stored atomically with the orchestration run (`initial_delivery_id`); it survives daemon restart without changing the initial text or model selection.
 

@@ -71,6 +71,7 @@ export interface CreateThreadCommand {
   prompt: string;
   /** Internal marker used only by the machine-facing create route. */
   externalRef?: string;
+  isService?: boolean;
   commandFingerprint?: string;
   initialDeliveryId?: string;
   checkoutId?: string;

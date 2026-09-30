@@ -315,9 +315,25 @@ message, never a URL token. The PWA asks for the token on first use and stores i
 in browser local storage; it does not embed the token in its build. Machine
 clients may use `POST /api/external/v1/projects/:projectId/threads` with
 `Authorization: Bearer`; this route accepts originless requests and requires
-`externalRef`, `title`, and a nonblank `prompt`. The reference is persisted and
-idempotent for the command payload; reuse with different input returns a
+`externalRef`, `title`, and a nonblank `prompt`. It may also set
+`isService: true` to classify an internal service thread. The marker is stored
+on the canonical thread record, defaults to false, and does not change source
+ownership or access. The dashboard hides marked threads from its sidebar and
+command-palette search by default. The sidebar's "Show service threads" control
+reveals them in its normal project scope and search, while direct thread links
+continue to work. The reference is persisted and idempotent for the complete
+command payload, including `isService`; reuse with different input returns a
 conflict.
+
+Roll out the server and matching dashboard web bundle together. Start sending
+`isService: true` only after the new bundle is served, and have users reload
+before relying on service threads being hidden by default. Existing protocol-v3
+tabs are not forced into the update-required screen by this field. Their live
+shell subscription does not runtime-validate thread summaries, so an old tab can
+keep rendering service threads as ordinary rows. Its strict `/api/threads`
+parser rejects marked thread objects. The PWA checks `/version.json` while
+visible and shows an update prompt when the build changes, but it does not
+reload an open tab automatically. Do not rely on old-bundle interoperability.
 
 Workspace and session launch requests use IDs from trusted indexes, never raw
 paths or flags. Uploads are bounded, server-owned temporary files and are removed

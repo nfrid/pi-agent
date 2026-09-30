@@ -3,6 +3,7 @@ import { MAX_ID } from './limits.js';
 import { safeIdentifier } from './utils.js';
 
 export const EXTERNAL_DELIVERY_CAPABILITY = 'remote-control.external-delivery';
+export const EXTERNAL_STEERING_CAPABILITY = 'remote-control.external-steering';
 export const EXTERNAL_DELIVERY_RECEIPT = 'external-delivery-receipt';
 export type ExternalDeliveryReceipt = {
   version: 1;
@@ -35,6 +36,19 @@ export function externalDeliveryReceipt(
     deliveryId: data.deliveryId,
     userEntryId: data.userEntryId,
   };
+}
+
+export function supportsExternalSteering(
+  runtime: { capabilities?: RuntimeCapabilitySnapshot } | undefined,
+): boolean {
+  return (
+    runtime?.capabilities?.capabilities.some(
+      (capability) =>
+        capability.id === EXTERNAL_STEERING_CAPABILITY &&
+        capability.version === '1' &&
+        capability.available,
+    ) === true
+  );
 }
 
 export function supportsExternalDelivery(

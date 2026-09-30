@@ -152,6 +152,17 @@ export const parseExternalDeliveryCommand = (
     throw new Error('Exactly one of threadId or conversationRef is required.');
   if (command.expectedSessionId !== undefined && command.threadId === undefined)
     throw new Error('A source-session fence requires an explicit thread.');
+  if (command.coalesceConversation && !command.expectedSessionId)
+    throw new Error('Conversation coalescing requires a source-session fence.');
+  if (
+    (command.mode === 'steer' || command.mode === 'reply') &&
+    (!command.threadId || !command.expectedSessionId)
+  )
+    throw new Error(
+      'Source reply mode requires an explicit thread and session.',
+    );
+  if (command.mode === 'reply' && !command.coalesceConversation)
+    throw new Error('Source reply mode requires conversation coalescing.');
   if (!command.text.trim() && !command.attachments?.length)
     throw new Error('Text or an attachment is required.');
   if (

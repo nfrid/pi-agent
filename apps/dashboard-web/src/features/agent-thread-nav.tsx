@@ -503,6 +503,7 @@ export function AgentThreadNav({
     unsettleThreadMutationOptions(dashboardHttpClient),
   );
   const [query, setQuery] = useState('');
+  const [showServiceThreads, setShowServiceThreads] = useState(false);
   const [isMobile, setIsMobile] = useState(
     () =>
       typeof window !== 'undefined' &&
@@ -641,12 +642,16 @@ export function AgentThreadNav({
   }, [draftDefaultQueries, draftProjectIds]);
   const scopedRows = useMemo(
     () =>
-      projectScope === 'all'
-        ? rows
-        : projectScope === 'unassigned'
-          ? rows.filter((row) => !row.projectId)
-          : rows.filter((row) => row.projectId === projectScope),
-    [projectScope, rows],
+      rows.filter(
+        (row) =>
+          (showServiceThreads || !row.durableThread?.isService) &&
+          (projectScope === 'all'
+            ? true
+            : projectScope === 'unassigned'
+              ? !row.projectId
+              : row.projectId === projectScope),
+      ),
+    [projectScope, rows, showServiceThreads],
   );
   const filtered = useMemo(
     () => filterAgentThreadRows(scopedRows, query),
@@ -1176,6 +1181,14 @@ export function AgentThreadNav({
           </button>
         )}
       </div>
+      <label className={styles.scope}>
+        <input
+          type="checkbox"
+          checked={showServiceThreads}
+          onChange={(event) => setShowServiceThreads(event.target.checked)}
+        />
+        <span>Show service threads</span>
+      </label>
       <label className={styles.scope}>
         <span>Project</span>
         <select

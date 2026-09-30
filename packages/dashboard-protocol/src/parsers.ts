@@ -436,8 +436,10 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
           'text',
           'images',
           ...(command.type === 'prompt'
-            ? ['externalDeliveryId', 'expectedSessionId']
-            : []),
+            ? ['externalDeliveryId', 'expectedSessionId', 'expectedLeafId']
+            : command.type === 'steer'
+              ? ['externalDeliveryId', 'expectedSessionId', 'expectedLeafId']
+              : []),
         ]),
       )
     )
@@ -453,6 +455,21 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
         !safeIdentifier(command.expectedSessionId, MAX_ID))
     )
       throw new Error('Invalid expected delivery session.');
+    if (
+      command.type === 'steer' &&
+      command.externalDeliveryId !== undefined &&
+      (!safeIdentifier(command.expectedSessionId, MAX_ID) ||
+        !safeIdentifier(command.expectedLeafId, MAX_ID))
+    )
+      throw new Error(
+        'External steering requires a source session and branch anchor.',
+      );
+    if (
+      command.expectedLeafId !== undefined &&
+      (command.externalDeliveryId === undefined ||
+        !safeIdentifier(command.expectedLeafId, MAX_ID))
+    )
+      throw new Error('Invalid expected delivery branch anchor.');
     const text =
       command.externalDeliveryId === undefined
         ? command.text.trim()

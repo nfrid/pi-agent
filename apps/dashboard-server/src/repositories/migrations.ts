@@ -933,6 +933,16 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       db.exec('DROP INDEX IF EXISTS active_writer_per_checkout');
     },
   },
+  {
+    version: 25,
+    name: 'service-thread-classification',
+    up(db) {
+      if (!columns(db, 'thread').has('is_service'))
+        db.exec(
+          'ALTER TABLE thread ADD COLUMN is_service INTEGER NOT NULL DEFAULT 0 CHECK (is_service IN (0,1))',
+        );
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

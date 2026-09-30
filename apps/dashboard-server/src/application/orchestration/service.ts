@@ -266,6 +266,7 @@ export class OrchestrationService implements OrchestrationHost {
           base: normalizedCommand.base,
           baseRef: normalizedCommand.baseRef,
           model: normalizedCommand.model,
+          ...(normalizedCommand.isService === true ? { isService: true } : {}),
           ...(initialDeliveryId === undefined ? {} : { initialDeliveryId }),
         }),
       )

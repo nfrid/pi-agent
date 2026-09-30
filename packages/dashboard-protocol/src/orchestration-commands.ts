@@ -148,6 +148,7 @@ export const ExternalThreadCreateCommandSchema = Type.Object(
       }),
     ),
     model: Type.Optional(ModelSelectionSchema),
+    isService: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -172,6 +173,12 @@ export type ExternalDeliveryAttachment = Static<
 >;
 export const ExternalDeliveryCommandSchema = Type.Object(
   {
+    /** Reply selects active steering or an idle correlated prompt at admission. */
+    mode: Type.Optional(
+      Type.Union([Type.Literal('steer'), Type.Literal('reply')]),
+    ),
+    /** Let this source-fenced reply share the thread's latest final answer. */
+    coalesceConversation: Type.Optional(Type.Boolean()),
     /** Bind an explicit reply to its original native session. */
     expectedSessionId: Type.Optional(
       Type.String({

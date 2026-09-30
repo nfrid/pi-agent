@@ -189,6 +189,7 @@ export async function createThread(
     ...(command.externalRef === undefined
       ? {}
       : { externalRef: command.externalRef }),
+    ...(command.isService ? { isService: true } : {}),
   };
   const run = {
     id: runId,

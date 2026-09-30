@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   access,
   chmod,
@@ -18,6 +19,18 @@ import { MetadataStore } from '../metadata.js';
 import { OrchestrationService } from './orchestration-service.js';
 
 const exec = promisify(execFile);
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
   await exec('git', ['-C', cwd, ...args]);
@@ -556,6 +569,66 @@ it('drains a rejected production execution during shutdown', async () => {
 });
 
 describe('OrchestrationService', () => {
+  it('reuses pre-classification ordinary external receipts for omitted and false markers', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      const command = {
+        externalRef: 'external:legacy-ordinary',
+        title: 'Legacy ordinary thread',
+        prompt: 'Run the legacy external task.',
+        isolation: 'main' as const,
+      };
+      const legacyFingerprint = createHash('sha256')
+        .update(
+          stableJson({
+            projectId: fixture.projectId,
+            externalRef: command.externalRef,
+            title: command.title,
+            prompt: command.prompt,
+            checkoutId: undefined,
+            isolation: command.isolation,
+            base: undefined,
+            baseRef: undefined,
+            model: undefined,
+          }),
+        )
+        .digest('hex');
+      const commandId = `external-thread:${createHash('sha256')
+        .update(command.externalRef, 'utf8')
+        .digest('hex')}`;
+      const priorResult = {
+        thread: { id: 'legacy-thread', title: command.title },
+        run: { id: 'legacy-run' },
+      };
+      fixture.metadata.orchestration.recordCommandReceipt({
+        idempotencyKey: commandId,
+        commandType: 'external.thread.create',
+        commandFingerprint: legacyFingerprint,
+        result: priorResult,
+        createdAt: 1,
+      });
+
+      const omitted = await fixture.service.createExternalThread(
+        fixture.projectId,
+        command,
+      );
+      const explicitFalse = await fixture.service.createExternalThread(
+        fixture.projectId,
+        { ...command, isService: false },
+      );
+      expect(omitted).toMatchObject({ thread: { id: 'legacy-thread' } });
+      expect(explicitFalse).toEqual(omitted);
+      await expect(
+        fixture.service.createExternalThread(fixture.projectId, {
+          ...command,
+          isService: true,
+        }),
+      ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('persists the generated title before worktree preparation and seeds the runtime name', async () => {
     const events: string[] = [];
     const fixture = await isolatedServiceFixture({
@@ -607,6 +680,7 @@ describe('OrchestrationService', () => {
         title: '  Authoritative   title  ',
         prompt: 'Run the external build.',
         isolation: 'main' as const,
+        isService: true,
       };
       fixture.metadata.orchestration.recordCommandReceipt({
         idempotencyKey: command.externalRef,
@@ -642,6 +716,7 @@ describe('OrchestrationService', () => {
         ['isolation', { isolation: 'worktree' as const }],
         ['base', { base: 'head' as const }],
         ['baseRef', { baseRef: 'main' }],
+        ['isService', { isService: false }],
       ] as const;
       for (const [_field, change, changedProjectId] of conflicts)
         await expect(
@@ -656,6 +731,7 @@ describe('OrchestrationService', () => {
       ).toMatchObject({
         id: result.thread.id,
         externalRef: command.externalRef,
+        isService: true,
         title: 'Authoritative title',
       });
       expect(

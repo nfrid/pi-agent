@@ -19,7 +19,10 @@ import {
 import { getSessionScopeId } from '../shared/runtime/scoped-services';
 import { dispatchDashboardInput } from './command-adapter';
 import { cancelActiveCompaction } from './compaction-control';
-import { withExternalDelivery } from './external-delivery';
+import {
+  withExternalDelivery,
+  withExternalSteering,
+} from './external-delivery';
 import {
   isQueueDraftCommand,
   type QueueDraftStore,
@@ -115,6 +118,7 @@ export async function dispatchDashboardCommand(
               false,
             ),
           command.expectedSessionId,
+          command.expectedLeafId,
         );
       }
       if (!ctx.isIdle())
@@ -129,6 +133,29 @@ export async function dispatchDashboardCommand(
       );
     case 'steer':
     case 'followUp':
+      if (command.externalDeliveryId !== undefined) {
+        if (command.type !== 'steer')
+          throw new Error('External follow-up is unsupported.');
+        if (command.images?.length && !ctx.model?.input.includes('image'))
+          throw new Error('The selected model does not support image input.');
+        return withExternalSteering(
+          ctx,
+          command.externalDeliveryId,
+          command.expectedSessionId,
+          command.expectedLeafId,
+          async () => ({
+            ...(await dispatchDashboardInput(
+              pi,
+              ctx,
+              command.text,
+              'steer',
+              command.images,
+              false,
+            )),
+            mode: 'steer',
+          }),
+        );
+      }
       if (command.images?.length && !ctx.model?.input.includes('image'))
         throw new Error('The selected model does not support image input.');
       return {

@@ -11,6 +11,21 @@ describe('external thread create contract', () => {
         isolation: 'main',
       }),
     ).toMatchObject({ externalRef: 'build:2026/09/04', isolation: 'main' });
+    expect(
+      parseExternalThreadCreateCommand({
+        externalRef: 'build:ordinary',
+        title: 'Ordinary thread',
+        prompt: 'Run a normal task.',
+      }),
+    ).not.toHaveProperty('isService');
+    expect(
+      parseExternalThreadCreateCommand({
+        externalRef: 'build:service',
+        title: 'Service thread',
+        prompt: 'Run a service task.',
+        isService: true,
+      }),
+    ).toMatchObject({ isService: true });
   });
 
   it('rejects extras, blank prompts/titles, and control characters in refs', () => {
