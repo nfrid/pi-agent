@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import { formatReview } from './branches';
@@ -568,6 +568,425 @@ describe('incremental delegate review', () => {
 });
 
 describe('merging a delegate branch', () => {
+  test('squashes a carried-only deletion alongside real task changes', async () => {
+    writeFileSync(
+      path.join(repository, 'src', 'stash.txt'),
+      'base stash file\n',
+    );
+    git(repository, ['add', 'src/stash.txt']);
+    git(repository, ['commit', '-qm', 'add stash fixture']);
+    writeFileSync(path.join(repository, 'src', 'stash.txt'), 'saved stash\n');
+    git(repository, [
+      'stash',
+      'push',
+      '--include-untracked',
+      '-qm',
+      'pre-existing',
+    ]);
+    writeFileSync(
+      path.join(repository, 'src', 'carried-only.txt'),
+      'carried parent data\n',
+    );
+    const record = await delegated({
+      name: 'Delete carried-only file',
+      write: (worktreePath) => {
+        rmSync(path.join(worktreePath, 'src', 'carried-only.txt'));
+        writeFileSync(
+          path.join(worktreePath, 'src', 'added.txt'),
+          'task addition\n',
+        );
+        writeFileSync(
+          path.join(worktreePath, 'src', 'value.txt'),
+          'task edit\n',
+        );
+      },
+    });
+    // The file is in the recorded carry but no longer exists in the parent
+    // checkout; deleting it in the task is not a dirty-path overlap.
+    rmSync(path.join(repository, 'src', 'carried-only.txt'));
+    writeFileSync(path.join(repository, 'src', 'staged-wip.txt'), 'staged\n');
+    git(repository, ['add', 'src/staged-wip.txt']);
+    writeFileSync(
+      path.join(repository, 'src', 'unstaged-wip.txt'),
+      'unstaged\n',
+    );
+    writeFileSync(
+      path.join(repository, 'src', 'untracked-wip.txt'),
+      'untracked\n',
+    );
+    const beforeStatus = git(repository, ['status', '--porcelain']);
+    const beforeStashes = git(repository, ['stash', 'list']);
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'fix(delegate): apply effective task paths',
+    });
+
+    expect(outcome, outcome.reason).toMatchObject({ merged: true });
+    expect(
+      git(repository, ['show', '--format=', '--name-status', 'HEAD']),
+    ).toContain('A\tsrc/added.txt');
+    expect(
+      git(repository, ['show', '--format=', '--name-status', 'HEAD']),
+    ).toContain('M\tsrc/value.txt');
+    expect(
+      git(repository, ['show', '--format=', '--name-status', 'HEAD']),
+    ).not.toContain('carried-only.txt');
+    expect(existsSync(path.join(repository, 'src', 'carried-only.txt'))).toBe(
+      false,
+    );
+    expect(
+      git(repository, ['rev-list', '--parents', '-n', '1', 'HEAD'])
+        .trim()
+        .split(' '),
+    ).toHaveLength(2);
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeStatus);
+    expect(git(repository, ['stash', 'list'])).toBe(beforeStashes);
+    expect(
+      readFileSync(path.join(repository, 'src', 'staged-wip.txt'), 'utf8'),
+    ).toBe('staged\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'unstaged-wip.txt'), 'utf8'),
+    ).toBe('unstaged\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'untracked-wip.txt'), 'utf8'),
+    ).toBe('untracked\n');
+  });
+
+  test('squashes a normal tracked deletion', async () => {
+    writeFileSync(
+      path.join(repository, 'src', 'tracked-delete.txt'),
+      'tracked\n',
+    );
+    git(repository, ['add', 'src/tracked-delete.txt']);
+    git(repository, ['commit', '-qm', 'add tracked deletion fixture']);
+    const record = await delegated({
+      name: 'Squash tracked deletion',
+      write: (worktreePath) =>
+        rmSync(path.join(worktreePath, 'src', 'tracked-delete.txt')),
+    });
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'fix(delegate): integrate tracked deletion',
+    });
+
+    expect(outcome.merged).toBe(true);
+    expect(existsSync(path.join(repository, 'src', 'tracked-delete.txt'))).toBe(
+      false,
+    );
+    expect(
+      git(repository, ['show', '--format=', '--name-status', 'HEAD']),
+    ).toContain('D\tsrc/tracked-delete.txt');
+    expect(git(repository, ['status', '--porcelain'])).toBe('');
+  });
+
+  test('treats add-then-delete paths as ineffective when other task paths change', async () => {
+    const record = await delegated({
+      name: 'Squash net-zero path',
+      write: (worktreePath) => {
+        const temporary = path.join(worktreePath, 'src', 'temporary.txt');
+        writeFileSync(temporary, 'temporary\n');
+        git(worktreePath, ['add', 'src/temporary.txt']);
+        git(worktreePath, ['commit', '-qm', 'add temporary path']);
+        rmSync(temporary);
+        writeFileSync(
+          path.join(worktreePath, 'src', 'real-change.txt'),
+          'real\n',
+        );
+        git(worktreePath, ['add', 'src/real-change.txt']);
+        git(worktreePath, [
+          'commit',
+          '-qm',
+          'remove temporary and add real path',
+        ]);
+      },
+    });
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'fix(delegate): integrate effective paths only',
+    });
+
+    expect(outcome.merged).toBe(true);
+    expect(
+      git(repository, ['show', '--format=', '--name-status', 'HEAD']),
+    ).toContain('A\tsrc/real-change.txt');
+    expect(
+      git(repository, ['show', '--format=', '--name-status', 'HEAD']),
+    ).not.toContain('temporary.txt');
+    expect(existsSync(path.join(repository, 'src', 'temporary.txt'))).toBe(
+      false,
+    );
+    expect(git(repository, ['status', '--porcelain'])).toBe('');
+  });
+
+  test('does not commit an unrelated path staged after task application', async () => {
+    const record = await delegated({
+      name: 'Squash owned paths only',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'task-change.txt'),
+          'task\n',
+        ),
+    });
+    const originalGit = worktreeGit.git;
+    const gitSpy = vi
+      .spyOn(worktreeGit, 'git')
+      .mockImplementation(async (cwd, args, options) => {
+        const result = await originalGit(cwd, args, options);
+        if (args[0] === 'cherry-pick' && args[1] === '--no-commit') {
+          writeFileSync(
+            path.join(repository, 'src', 'foreign-staged.txt'),
+            'outside task ownership\n',
+          );
+          await originalGit(repository, ['add', 'src/foreign-staged.txt']);
+        }
+        return result;
+      });
+    try {
+      const outcome = await mergeBranch(record, {
+        commitMessage: 'fix(delegate): commit owned paths only',
+      });
+
+      expect(outcome.merged).toBe(true);
+      expect(
+        git(repository, ['show', '--format=', '--name-only', 'HEAD']),
+      ).toContain('src/task-change.txt');
+      expect(
+        git(repository, ['show', '--format=', '--name-only', 'HEAD']),
+      ).not.toContain('foreign-staged.txt');
+      expect(git(repository, ['diff', '--cached', '--name-status'])).toContain(
+        'A\tsrc/foreign-staged.txt',
+      );
+      expect(
+        readFileSync(
+          path.join(repository, 'src', 'foreign-staged.txt'),
+          'utf8',
+        ),
+      ).toBe('outside task ownership\n');
+    } finally {
+      gitSpy.mockRestore();
+    }
+  });
+
+  test('returns a clean no-op for an empty effective task delta', async () => {
+    writeFileSync(path.join(repository, 'src', 'stash.txt'), 'stash base\n');
+    git(repository, ['add', 'src/stash.txt']);
+    git(repository, ['commit', '-qm', 'add stash fixture']);
+    writeFileSync(path.join(repository, 'src', 'stash.txt'), 'saved stash\n');
+    git(repository, [
+      'stash',
+      'push',
+      '--include-untracked',
+      '-qm',
+      'pre-existing',
+    ]);
+    const record = await delegated({
+      name: 'Squash empty effective delta',
+      write: (worktreePath) => {
+        const temporary = path.join(worktreePath, 'src', 'temporary.txt');
+        writeFileSync(temporary, 'temporary\n');
+        git(worktreePath, ['add', 'src/temporary.txt']);
+        git(worktreePath, ['commit', '-qm', 'add temporary path']);
+        rmSync(temporary);
+        git(worktreePath, ['add', '-u', 'src/temporary.txt']);
+        git(worktreePath, ['commit', '-qm', 'delete temporary path']);
+      },
+    });
+    writeFileSync(path.join(repository, 'src', 'staged-wip.txt'), 'staged\n');
+    git(repository, ['add', 'src/staged-wip.txt']);
+    writeFileSync(
+      path.join(repository, 'src', 'unstaged-wip.txt'),
+      'unstaged\n',
+    );
+    writeFileSync(
+      path.join(repository, 'src', 'untracked-wip.txt'),
+      'untracked\n',
+    );
+    const beforeHead = git(repository, ['rev-parse', 'HEAD']).trim();
+    const beforeStatus = git(repository, ['status', '--porcelain']);
+    const beforeStashes = git(repository, ['stash', 'list']);
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'fix(delegate): no effective change',
+    });
+
+    expect(outcome).toMatchObject({
+      merged: false,
+      reason: expect.stringMatching(
+        /no effective changes to squash.*unchanged/,
+      ),
+    });
+    expect(git(repository, ['rev-parse', 'HEAD']).trim()).toBe(beforeHead);
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeStatus);
+    expect(git(repository, ['stash', 'list'])).toBe(beforeStashes);
+    expect(git(repository, ['diff', '--cached', '--name-only'])).toBe(
+      'src/staged-wip.txt\n',
+    );
+    expect(() =>
+      git(repository, ['rev-parse', '--verify', '--quiet', 'CHERRY_PICK_HEAD']),
+    ).toThrow();
+    expect(existsSync(path.join(repository, 'src', 'temporary.txt'))).toBe(
+      false,
+    );
+    expect(existsSync(path.join(repository, 'src', 'untracked-wip.txt'))).toBe(
+      true,
+    );
+  });
+
+  test('preserves unrelated staged state on an empty effective delta', async () => {
+    const record = await delegated({
+      name: 'Squash empty delta with foreign stage',
+      write: (worktreePath) => {
+        const temporary = path.join(worktreePath, 'src', 'temporary.txt');
+        writeFileSync(temporary, 'temporary\n');
+        git(worktreePath, ['add', 'src/temporary.txt']);
+        git(worktreePath, ['commit', '-qm', 'add temporary path']);
+        rmSync(temporary);
+        git(worktreePath, ['add', '-u', 'src/temporary.txt']);
+        git(worktreePath, ['commit', '-qm', 'delete temporary path']);
+      },
+    });
+    const beforeHead = git(repository, ['rev-parse', 'HEAD']).trim();
+    const originalGit = worktreeGit.git;
+    const gitSpy = vi
+      .spyOn(worktreeGit, 'git')
+      .mockImplementation(async (cwd, args, options) => {
+        const result = await originalGit(cwd, args, options);
+        if (args[0] === 'cherry-pick' && args[1] === '--no-commit') {
+          writeFileSync(
+            path.join(repository, 'src', 'foreign-staged.txt'),
+            'outside task ownership\n',
+          );
+          await originalGit(repository, ['add', 'src/foreign-staged.txt']);
+        }
+        return result;
+      });
+    try {
+      const outcome = await mergeBranch(record, {
+        commitMessage: 'fix(delegate): preserve staged state on no-op',
+      });
+
+      expect(outcome).toMatchObject({
+        merged: false,
+        reason: expect.stringMatching(
+          /no effective changes to squash.*unchanged/,
+        ),
+      });
+      expect(git(repository, ['rev-parse', 'HEAD']).trim()).toBe(beforeHead);
+      expect(git(repository, ['diff', '--cached', '--name-status'])).toBe(
+        'A\tsrc/foreign-staged.txt\n',
+      );
+      expect(
+        readFileSync(
+          path.join(repository, 'src', 'foreign-staged.txt'),
+          'utf8',
+        ),
+      ).toBe('outside task ownership\n');
+      expect(() =>
+        git(repository, [
+          'rev-parse',
+          '--verify',
+          '--quiet',
+          'CHERRY_PICK_HEAD',
+        ]),
+      ).toThrow();
+      expect(
+        existsSync(
+          git(repository, ['rev-parse', '--git-path', 'sequencer']).trim(),
+        ),
+      ).toBe(false);
+    } finally {
+      gitSpy.mockRestore();
+    }
+  });
+
+  test('keeps the rename source endpoint in the dirty-overlap guard', async () => {
+    writeFileSync(
+      path.join(repository, 'src', 'rename-source.txt'),
+      'rename\n',
+    );
+    git(repository, ['add', 'src/rename-source.txt']);
+    git(repository, ['commit', '-qm', 'add rename source']);
+    const record = await delegated({
+      name: 'Overlapping squash rename',
+      write: (worktreePath) =>
+        git(worktreePath, [
+          'mv',
+          'src/rename-source.txt',
+          'src/rename-destination.txt',
+        ]),
+    });
+    writeFileSync(
+      path.join(repository, 'src', 'rename-source.txt'),
+      'parent edit\n',
+    );
+    const beforeHead = git(repository, ['rev-parse', 'HEAD']);
+    const beforeStatus = git(repository, ['status', '--porcelain']);
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'fix(delegate): integrate overlapping rename',
+    });
+
+    expect(outcome).toMatchObject({
+      merged: false,
+      blockedPaths: ['src/rename-source.txt'],
+    });
+    expect(git(repository, ['rev-parse', 'HEAD'])).toBe(beforeHead);
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeStatus);
+  });
+
+  test('squashes both endpoints of a task-owned rename', async () => {
+    writeFileSync(
+      path.join(repository, 'src', 'rename-source.txt'),
+      'rename\n',
+    );
+    git(repository, ['add', 'src/rename-source.txt']);
+    git(repository, ['commit', '-qm', 'add rename source']);
+    const record = await delegated({
+      name: 'Squash rename',
+      write: (worktreePath) =>
+        git(worktreePath, [
+          'mv',
+          'src/rename-source.txt',
+          'src/rename-destination.txt',
+        ]),
+    });
+
+    const outcome = await mergeBranch(record, {
+      commitMessage: 'fix(delegate): integrate rename',
+    });
+
+    expect(outcome.merged).toBe(true);
+    expect(existsSync(path.join(repository, 'src', 'rename-source.txt'))).toBe(
+      false,
+    );
+    expect(
+      readFileSync(
+        path.join(repository, 'src', 'rename-destination.txt'),
+        'utf8',
+      ),
+    ).toBe('rename\n');
+    expect(git(repository, ['diff', '--cached', '--name-status'])).toBe('');
+    expect(git(repository, ['status', '--porcelain'])).toBe('');
+    expect(
+      git(repository, [
+        'show',
+        '--format=',
+        '--name-status',
+        '--no-renames',
+        'HEAD',
+      ]),
+    ).toContain('D\tsrc/rename-source.txt');
+    expect(
+      git(repository, [
+        'show',
+        '--format=',
+        '--name-status',
+        '--no-renames',
+        'HEAD',
+      ]),
+    ).toContain('A\tsrc/rename-destination.txt');
+  });
+
   test('squashes reviewed work into one parent commit without child history or WIP', async () => {
     parentWip();
     git(repository, ['add', 'src/value.txt']);

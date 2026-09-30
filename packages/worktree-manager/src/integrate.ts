@@ -511,6 +511,7 @@ export function createWorktreeIntegrator(
         paths(root, [
           'diff',
           '--name-only',
+          '--no-renames',
           '-z',
           `${commit}^`,
           commit,
@@ -915,13 +916,34 @@ export function createWorktreeIntegrator(
         }
         operationStarted = true;
         await git(root, ['cherry-pick', '--no-commit', ...taskCommits]);
+        const taskPathSet = new Set(incoming);
+        const effectivePaths = (
+          await paths(root, [
+            'diff',
+            '--cached',
+            '--name-only',
+            '--no-renames',
+            '-z',
+          ])
+        ).filter((file) => taskPathSet.has(file));
+        if (effectivePaths.length === 0) {
+          if (stashed) {
+            await git(root, ['stash', 'pop', '--index']);
+            stashed = false;
+          }
+          return {
+            merged: false,
+            reason:
+              'The task has no effective changes to squash; the parent checkout is unchanged.',
+          };
+        }
         await git(root, [
           'commit',
           '--only',
           '--message',
           commitMessage,
           '--',
-          ...incoming,
+          ...effectivePaths,
         ]);
         committed = true;
         if (stashed) {
