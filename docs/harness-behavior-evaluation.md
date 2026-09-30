@@ -334,3 +334,53 @@ Limitations:
   from 10,094 to 7,042 characters (30.2%); this excludes tool schemas and other
   context. All non-prose settings, including route keys, models, thinking
   levels, and costs, were unchanged.
+
+## Codemode result-use evaluation
+
+Codemode can reduce returned output, but preserve evidence and a retrieval path.
+These runnable examples use the actual tool schemas; they are not permanent
+prompt examples.
+
+```js
+const result = await tools.web_search({ queries: ["Pi codemode"], numResults: 5 });
+store("web-search-result-0", result);
+return {
+  queries: result.queries.map(({ query, error, sources }) => ({
+    query,
+    error,
+    sources: sources.map(({ title, url }) => ({ title, url })),
+  })),
+  cacheFileWarning: result.cacheFileWarning,
+  sourceKey: "web-search-result-0",
+};
+```
+
+```js
+const settled = await Promise.allSettled([
+  tools.bash({ command: "bun x vitest run extensions/system-prompt/system-prompt.test.ts", description: "Run focused prompt tests" }),
+  tools.bash({ command: "git diff --check", description: "Check diff whitespace" }),
+]);
+const outcomes = settled.map((item, i) => item.status === "fulfilled"
+  ? { check: ["prompt-tests", "diff-check"][i], exit_code: item.value.exit_code, output: item.value.output }
+  : { check: ["prompt-tests", "diff-check"][i], error: { name: item.reason?.name, message: String(item.reason), stack: item.reason?.stack } });
+store("bash-check-outcomes-0", outcomes);
+return {
+  checks: outcomes.map(({ check, exit_code, output, error }) => ({
+    check,
+    ...(exit_code === undefined ? { error } : { exit_code, output: exit_code === 0 ? output.slice(0, 1000) : output }),
+  })),
+  sourceKey: "bash-check-outcomes-0",
+};
+```
+
+For a paired evaluation, prepare one large structured local fixture with
+known exact requested fields and known failure cases. Ask the same model, with
+the same thinking setting and task, to answer once via direct tool output and
+once via codemode projection; repeat each condition three times. Pass only if
+requested fields are correct, errors remain visible, and the original data is
+retrievable by its returned source/store key. Record output bytes, model
+round trips, elapsed time, and cost when available; do not claim results until
+runs are actually performed. Scripted fixture construction and byte counts
+measure deterministic reduction only. They do not establish the agent's
+empirical selection of codemode or its performance; those require the paired
+agent runs. No outcomes are recorded here.

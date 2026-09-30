@@ -470,6 +470,9 @@ describe('canonical prompt composition', () => {
         'Use codemode to batch independent calls, compose dependent calls, or filter returned data when doing so reduces model round trips or the amount of data returned.',
       );
       expect(prompt).toContain(
+        'When using codemode to reduce output, return the needed fields, aggregates, or bounded excerpts; preserve failure/error details and a path or store key for retrieving original data.',
+      );
+      expect(prompt).toContain(
         'Do not bundle calls when a required model judgment needs to happen between them.',
       );
       expect(prompt).toContain(
