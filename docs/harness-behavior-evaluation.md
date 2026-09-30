@@ -321,7 +321,7 @@ Limitations:
 
 - These are single trials, not statistical evidence of better behavior or
   speed. The timing difference is dominated by one delegate lookup.
-- Compaction is **blocked/not exercised**: the baseline compact response was
+- Compaction was **blocked/not exercised in this comparison**: the baseline compact response was
   `success=false`, `error="Nothing to compact (session too small)"`. Retaining
   the decision without successful compaction does not pass case 3.
 - This runner omits the todo tool and ambient skills/project context. The
@@ -334,6 +334,55 @@ Limitations:
   from 10,094 to 7,042 characters (30.2%); this excludes tool schemas and other
   context. All non-prose settings, including route keys, models, thinking
   levels, and costs, were unchanged.
+
+## Native compaction smoke (2026-09-30)
+
+A bounded case-3 adaptation exercised successful **native Pi manual compaction**,
+not the system-prompt extension or the complete default harness. Pi `0.99.1`,
+`openai/gpt-6-luna`, low thinking; checkout
+`36ae91f6ccf347340b3819e74076d1252125d074`, `settings.json` SHA-256
+`aa2b267a7501098012b6c1d3df36a12d487efeb9599ef830a968c67d564a8653`.
+Extensions, skills, prompt templates, themes, context files, and tools were
+explicitly disabled. No source files or global settings were changed.
+
+The exported `SessionManager` seeded 50 synthetic messages without a precompact
+model call: an early decision to preserve `buildReport`, a non-goal of adding
+persistence, then 24 filler exchanges. The filler contained no naming decision;
+it did repeat that the archive was inert and involved no persistent data, which
+limits the independence of the no-persistence check. The early decision was
+outside the retained tail after compaction. The RPC sequence was `get_state`,
+`compact`, then one answer-neutral continuation prompt.
+
+Parent inspection of the raw RPC records confirmed:
+
+- `smoke-compact-1` returned `success: true`, `tokensBefore: 64219`,
+  `estimatedTokensAfter: 21610`. The summary explicitly said “Preserve the public
+  name `buildReport`” and “Do not add persistence.” Token estimates describe this
+  fixture, not a measured performance improvement.
+- The continuation said “preserve the public name `buildReport`, add no
+  persistence” and proposed only carrying those constraints into future requested
+  work. It ended with `agent_end` (`willRetry: false`) and `agent_settled`.
+- There was one manual compaction and one agent run, with no automatic retry or
+  automatic compaction events. Nevertheless, the requested setup step disabling
+  both automatic mechanisms was missed (`autoCompactionEnabled: true`). Record
+  the evaluation as **partial protocol compliance, observed behavioral pass**,
+  not as fully compliant or as a default-runtime/automatic-threshold test.
+- The temporary capture script incorrectly tested an `event` field instead of
+  the RPC record's `type`, causing a timeout sidecar despite a completed stream.
+  The raw events—not that sidecar—are the completion evidence.
+
+Synthetic local artifacts are retained in
+`/tmp/pi-compact-smoke-retry.2tUGVV/`: `seed.mjs`, `run.py`, `command.json`,
+`stdout.jsonl`, `stderr.log`, and the seeded session. These temporary files are
+not a permanent fixture framework and may be cleaned by the OS. An earlier
+network-affected attempt under `/tmp/pi-compact-smoke.wsluxe/` timed out without
+saving a response; it remains **blocked/unverified**, even though its fixture
+may have reached the model. Its checkout fingerprint was `d12271e8`, not the
+retry's commit. The user authorized the retry after networking recovered.
+
+No additional requests were made to repair the setup gate or capture script.
+This is one supporting smoke observation, not a before/after comparison,
+statistical quality/cost claim, or completion of the full evaluation suite.
 
 ## Codemode result-use evaluation
 
@@ -357,7 +406,7 @@ return {
 
 ```js
 const settled = await Promise.allSettled([
-  tools.bash({ command: "bun x vitest run extensions/system-prompt/system-prompt.test.ts", description: "Run focused prompt tests" }),
+  tools.bash({ command: "bun run test -- extensions/system-prompt/system-prompt.test.ts", description: "Run focused prompt tests" }),
   tools.bash({ command: "git diff --check", description: "Check diff whitespace" }),
 ]);
 const outcomes = settled.map((item, i) => item.status === "fulfilled"

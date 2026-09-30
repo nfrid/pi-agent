@@ -2,10 +2,14 @@
 
 ## Resume here
 
-- Mode: **read-only task/todo audit complete; optional batch E approval pending**. No task source/docs edits authorized yet; only this roadmap changes. User continues to prioritize simplification over restrictions. D is complete (`0018adcf` + `3ead57a8`); no deployment or model evaluation C authorized.
+- Mode: **autonomous incremental improvement pass**. User approved E and routine in-scope continuation without repeated approval prompts; stop for material product/migration/deployment decisions or blockers requiring user involvement. Prioritize simplification, not restrictions. No production services/deployment authorized. Bounded compaction smoke is complete with setup caveats; no further model-run budget. Prior improvement pass is implemented/validated; explicit new user request is to show the actual feedback message as Markdown in the dashboard feedback-action inspector.
 - Baseline: `868e113d` (2026-09-30). Checkout was clean before creating this file.
-- Audit milestone and batch A complete. Test patch `a1898260`; aggregate exits 0 with **2,609 passing tests**. Batch B docs committed `7191321c`, focused contracts 54 pass. C remains approval-pending.
-- No active delegates/background dependencies. `tasks-state-audit@1` (`luna-m`, read-only) completed: 35 focused tasks tests pass; no runtime cycle or ownership problem justifying structural refactor. Parent independently reviewed tool/context/docs and verified findings.
+- Audit milestone and batch A complete. Test patch `a1898260`; aggregate exits 0 with **2,609 passing tests**. Batch B docs committed `7191321c`, focused contracts 54 pass. C native retry successfully compacted and retained both facts; partial protocol compliance (automatic mechanisms not disabled), not full-harness parity.
+- E completed `c7067a17`: common task result/stats assembly, explicit registrations, corrected docs; 35 tests/types/Biome pass. Runtime deletion `d12271e8`: unused hasPending method removed, count-based API authoritative.
+- Operations `36ae91f6`: root test script forwarded paths/options incorrectly; regression failed before fix, actual Bun child-env invocation now passes37 scoped tests. Simpler script keeps Node guard/environment cleanup; root/workflow guidance updated.
+- tools-simplify-pass@1 (60 focused tests), dashboard-boundaries-pass@1 and small-ui-pass@1 completed without justified changes. Current native SDK0.99.1 still lacks precise APIs needed to remove existing activity/skill/steering fallbacks; preserve them.
+- C `compaction-smoke@2` complete: native manual compact succeeded (64,219 → estimated21,610 tokens), summary/continuation preserve `buildReport`/no persistence; parent verified raw correlated responses, early decision excluded from retained tail, one agent run/settled and no retry/auto-compaction events. Automatic-mechanism disable setup missed; recorder incorrectly waited for `event` rather than `type` and timed out despite completed raw stream. Classify **partial protocol compliance, observed native behavioral pass**. Filler's inert-data wording weakens independence of non-goal check. Artifacts `/tmp/pi-compact-smoke-retry.2tUGVV/`; attempt1 remains blocked/unverified. No more requests.
+- Final prior-pass check `29f219ae-d35a-4644-b909-5b6d7946e159` **exit0** at `36ae91f6`, 2,618 tests/types/lint; log `/tmp/pi-harness-autonomous-final-check.log`. New dashboard rendering work needs its own scoped checks and isolated browser test; no live deployment authorized.
 - Child integration 45 tests/types/Biome/isolated package build pass. Parent scoped integration + package/tool/worktree consumer suites **102 tests pass**; log `/tmp/pi-harness-batch-d-tests.log` (background `a6b85f7b-e70b-4ac1-a751-b1b66096a904` completed exit0).
 - Parent package/extension types and changed-file Biome/whitespace pass. Sequencer assertion checks real fixture path (`3ead57a8`). Package runtime build validated only in isolated workspace; parent dist/live services are not upgraded.
 - Historical batch A: `baseline-contract-tests@3` left a reviewed patch but hit carried-scratch integration guards. Initial overlap refusal and absent net-neutral path commit failure preserved checkout; no partial merge landed.
@@ -15,7 +19,7 @@
 - Async setup blocker resolved: child inherits `PI_DELEGATE_CHILD=1`; normal `scripts/clean-npm-env.mjs` strips it. Named async test passes using cleaned launcher; migration/repository 57 and wake 6 pass.
 - Premature aggregate `5407c382-f6c5-4faa-8820-9454d9e4348a` ran old tests before successful integration and is not final validation. Use the final aggregate handle above.
 - Parent independent post-integration async + wake suites: **36 tests pass**. Changed-file Biome and diff whitespace pass. No production behavior changed.
-- Do not read auth/credential files or raw user sessions; do not deploy or restart services. Current authorized writes: this scratch roadmap only. Task implementation needs approval.
+- Do not read auth/credential files or raw user sessions; do not deploy or restart services. Routine evidence-backed local improvements are authorized within the agreed roadmap. Preserve APIs/defaults/order/persisted contracts; do not invent migrations, new restrictions or broader product features.
 - Preserve unrelated checkout changes. Full baseline already established in batch A; prefer scoped checks for subsequent localized work.
 - After compaction, read this file and current todo state; use automatic delegate/background completion reports rather than polling.
 
@@ -35,13 +39,13 @@ User reminder during batch D: do not add restrictions or performative safety for
 
 | Area | Status | Scope |
 |---|---|---|
-| 0. Baseline and boundaries | Initial milestone complete | Current checks measured; ownership mapped at component level, not exhaustively audited |
-| 1. Agent-facing harness | Bounded audit complete | No verified prompt/tool-exposure bug; doc drift and compaction evaluation gap identified |
-| 2. Execution/orchestration | Carried-WIP fix and task/todo audit complete | Optional local task-result cleanup E proposed; remaining lifecycle/wakeup/remote-control reviews not started |
-| 3. Tools/integrations | Not started | Web/search, image reads, argument validation, usage and smaller tools |
-| 4. Shared contracts/backend | Not started | Protocol/domain, persistence/indexing, transports |
-| 5. Presentation | Not started | Dashboard, activity rendering, TUI/themes/notifications |
-| 6. Development/operations | Not started | Scripts, dependencies/builds/benchmarks, SDK updates, deployment/docs |
+| 0. Baseline and boundaries | Complete for this pass | Measured baseline + ownership map; not an exhaustive line-by-line audit |
+| 1. Agent-facing harness | Reviewed; native compaction observed | Prompt/tool exposure retained, docs corrected; C native behavioral pass with setup caveats, full runtime parity untested |
+| 2. Execution/orchestration | Reviewed; D/E/deletion complete | Worktree/task seams improved; background/remote/shared runtime bounded review, no broader refactor justified |
+| 3. Tools/integrations | Reviewed; no changes justified | Web/image/usage/validation/codemode: named owners, 60 focused tests pass |
+| 4. Shared contracts/backend | Representative boundaries reviewed | Canonical parsers/models/coverage facades coherent; no justified new cuts or alias removal |
+| 5. Presentation | Representative boundaries/config reviewed | Static browser registry + small TUI wrappers/shim contracts/theme/keybindings/prompt defaults preserved |
+| 6. Development/operations | Reviewed; launcher fix complete | Scoped cleaned test args fixed; hooks/guards/deployment/metrics reviewed, no extra changes justified |
 
 Verified correctness findings can move ahead. Review shared packages with their consumers. Larger coordinated refactors require evidence of a faulty boundary, understood consumers, regression coverage, and explicit migration/rollback requirements where applicable.
 
@@ -104,6 +108,13 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Parent verifies state/field normalization, graph validation ownership, current result schemas/tests, immutable context/elision/reset semantics and command registrations.
 - No verified task-state defect or justified structural refactor found. Small local tool-response duplication and documentation drift are actionable; no measured performance claims.
 
+### Autonomous follow-up changes (`c7067a17`, `d12271e8`, `36ae91f6`)
+
+- E: task tool result/error/details assembly centralized in existing helper; stats derived once, explicit registrations/metadata preserved. 35 tasks tests + extension types + changed-code Biome pass.
+- Runtime: removed unused `PendingProcessAccounting.hasPending()`; parent verified no callers, supported count-based API unchanged. Child's 4 focused shared tests + types/Biome pass.
+- Operations: original nested shell ignored forwarded scoped test paths/options (new regression failed: only `run` reached Vitest). Simplified root `test` script to guard Node then run cleaned Vitest directly; regression and real `PI_DELEGATE_CHILD=1 bun run test -- scripts/clean-npm-env.test.mjs extensions/tasks --reporter=dot` pass (37 tests/5 files). Workflow/AGENTS guidance now uses this supported launcher.
+- Final `PATH="$PATH:/usr/sbin:/sbin" bun run check` exits **0** at `36ae91f6`: all guards/types/lint pass, **2,618 tests pass** (1,267 extension/script + 1,351 workspace). Six pre-existing lint and Node localstorage warnings remain non-fatal. No production deployment/restarts/parent dist upgrade.
+
 ### Pre-implementation baseline (`868e113d`)
 
 - Environment: Node `v25.8.0`, Bun `1.4.0`, Pi `0.99.1`. All runs use system-tool PATH as needed. Baseline HEAD was `868e113d`; scratch was initially untracked.
@@ -123,10 +134,10 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Server migration test compares all indexes before/after all migrations. It expects `active_writer_per_checkout`, but migration at `repositories/migrations.ts:933` intentionally drops it; commit `85ca6e22` enables parallel runs in a shared checkout.
 - Proposed batch: reconcile these tests with supported behavior; preserve assertions for single delivery/acknowledgement, stale/foreign rejection, dependent row/index integrity, and named removed-index behavior. No production behavior reversal simply to green the suite. **Implemented/verified in batch A**. Focused pre-fix migration rerun reproduced exactly; migration 24 (`allow-parallel-checkout-writers`) and commit `85ca6e22` explicitly support the changed contract.
 
-### F2 — Successful compaction behavior remains unevaluated (evaluation gap)
+### F2 — Successful compaction behavior (native smoke recorded)
 
 - `docs/harness-behavior-evaluation.md` case 3 specifies decision/non-goal retention, but previous comparison records `Nothing to compact (session too small)` and marks compaction blocked/not exercised.
-- Proposed batch: make a disposable fixture reliably reach compaction; require actual successful compaction and subsequent constraint retention before changing policy. No auth-file access, real-session ingestion, or broad prompt rewrite. Model runs require normal harness-managed credentials and explicit evaluation scope/cost. Approval pending.
+- Proposed batch: make a disposable fixture reliably reach compaction; require actual successful compaction and subsequent constraint retention before changing policy. No auth-file access, real-session ingestion, or broad prompt rewrite. Model runs require normal harness-managed credentials and explicit evaluation scope/cost. **Recorded under explicit bounded scope; observed native behavioral pass with protocol/setup caveats**, not full default-harness parity. See C and `docs/harness-behavior-evaluation.md`.
 
 ### F3 — Agent-facing and operational documentation drift (verified)
 
@@ -167,11 +178,11 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Acceptance: optional incremental review and unchanged default accurately described; hosted delegate ownership/restart implications match caller/runner paths; direct-spawn paths not mislabeled.
 - Approval/result: **approved; committed `7191321c`; kept**. Schema/call-site comparison, 54 focused contract tests and diff whitespace pass. Also corrected the same pending-migration claim in deployment guidance; no operational commands changed.
 
-### C. Close successful-compaction evaluation gap
+### C. Successful native compaction smoke — recorded with caveats
 
 - Prepare a reproducible disposable fixture, pinned harness/config/model/thinking and bounded run budget. Keep case decision/non-goal in conversation rather than re-reading them from a progress file, otherwise the fixture would test a different mechanism.
 - Require a successful compact response and correct continuation preserving both constraints; blocked/setup failure is not a pass. Record transcripts/results without credentials or production state.
-- Do not change prompt/routing/compaction code until evidence warrants it. Single trials are smoke evidence, not general cost/quality claims. Approval: pending.
+- Do not change prompt/routing/compaction code until evidence warrants it. Single trials are smoke evidence, not general cost/quality claims. **Retry complete: partial protocol compliance, observed native behavioral pass.** Attempt1 remains blocked/unverified. Parent verified retry raw summary/continuation and settled event; automatic-mechanism disable was missed, recorder sidecar incorrectly timed out, filler has an inert-persistent-data caveat. No more model requests, prompt changes, broader benchmarks or provider/config repair.
 
 ### D. Commit the effective task delta during squash — complete
 
@@ -182,13 +193,13 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Validation: reproduce regression before fix; focused real-Git integration suites, package + extension typechecks as needed, changed-file Biome, exact commit/diff assertions and rollback checks. No production deployment or full harness rewrite.
 - Approval/result: **approved; integrated `0018adcf` + test correction `3ead57a8`; kept**. 102 scoped tests/types/Biome pass; isolated package build passes. No runtime API/state model or wrapper/base changes. Live activation/deployment remains unperformed.
 
-### E. Simplify task tool result assembly and align docs — optional next
+### E. Simplify task tool result assembly and align docs — complete
 
 - Scope: `extensions/tasks/tool.ts`, a few semantic assertions in existing `tasks.test.ts`, `docs/todo-context.md`. Use existing helper to assemble output/error/details once and reuse stats; registrations and metadata stay explicit.
 - Acceptance: all three tool output schemas, IDs/order/task selection, bounded text, error behavior and detail stats remain equivalent; dependency/status/atomicity/persistence/UI/context semantics unchanged. Existing 35 tasks tests plus a small equality assertion for structured/detail stats are sufficient; avoid a new scenario matrix.
 - Documentation: remove non-existent commands/old batch/generated-ID claims; describe current bounded text and structured records plus actual commands. Do not remove legacy runtime compatibility to match docs.
 - Validation: focused task tests, extension typecheck and changed-code Biome/diff check; manual docs/schema/command match. No broader refactor, extra safety policy, benchmark claim, dashboard deployment or full check required.
-- Approval: **pending**; optional small deletion-oriented cleanup, not urgent correctness work.
+- Result: **complete `c7067a17`; kept**. Existing helper assembles one result/stat projection; explicit registrations and all behavior retained. 35 focused tests/types/Biome pass; net code deletion.
 
 ## Deliberately unchanged
 
@@ -196,10 +207,10 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Optional hybrid codemode with native `models.*` disabled; child tool allowlists and explicit skills.
 - No broad delegate decomposition, protocol/storage migration, dynamic plugin/state framework, feedback triage or performance claims.
 - Six existing lint warnings are recorded but not used to widen the first batch.
-- Next structural audit after agreed batches: bounded execution/orchestration review, choosing one lifecycle/ownership seam rather than all delegate files.
+- Bounded runtime, tools, shared/backend and presentation/config passes completed. No broader structural change justified; preserve named consumers and exact SDK shim-removal gates.
 
 ## Next decision
 
-Task/todo audit complete. Offer small optional **batch E** (local result assembly/stats reuse + accurate docs), not a domain/store refactor. If approved implement exactly that; otherwise move to the next component. Compaction evaluation C and live activation/deployment remain separate and approval-pending.
+Prior incremental improvement pass is complete in source with full validation and recorded compaction caveats. Current explicit addition: render actual `delegate_jobs` feedback `message` as Markdown in the dashboard inspector, reusing current models/renderers. Run scoped checks and isolated browser coverage; no live build/deployment/restart authorized. Close roadmap after this addition; don't invent further refactors when bounded coverage yields no evidence.
 
-Record for later execution/operations audit: carried untracked parent progress file made test-only integration conflict; deleting that carried artifact led to absent-path `commit --only` failure. Both attempts aborted safely. Recovery was a tracked roadmap and a clean-base child reproduction; no manual merge or integrator changes. Also use cleaned test launcher inside delegate environments to strip `PI_DELEGATE_CHILD`. The verified absent-path defect is now authorized as batch D; broader runtime changes and feedback triage are not authorized. B is approved documentation work; C is a separate evaluation requiring approval of a bounded model-run budget. Scratch is being versioned so future clean-base delegates do not carry an untracked copy that collides with parent progress updates.
+Historical integration friction (carried scratch overlap, then absent-path `commit --only`) aborted safely and led to tracked roadmap/clean-base child recovery and verified batch D fix. Version roadmap before writable child launches. Use `bun run test -- <path>` for the cleaned scoped launcher. Preserve unrelated checkout work; no feedback-ticket triage, product/storage migration, broad prompt rewrite, deployment or service restart.
