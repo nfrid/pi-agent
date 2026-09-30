@@ -2,14 +2,16 @@
 
 ## Resume here
 
-- Mode: **implementation — batch A only**. User approved test-contract reconciliation after the audit. No production code changes, batch B documentation fixes, or batch C model evaluations are authorized.
+- Mode: **batch A complete; next batch approval pending**. User-approved test-contract reconciliation is integrated/verified. No production code changes, batch B documentation fixes, or batch C model evaluations are authorized.
 - Baseline: `868e113d` (2026-09-30). Checkout was clean before creating this file.
-- Audit milestone complete. Batch A is in progress; batches B/C remain approval-pending.
-- `baseline-contract-tests@3` settled. Its tests are reviewed/validated, but integration remains blocked by carried-scratch handling: initial overlap refusal; removing carried scratch exposes commit pathspec failure for the now-absent net-neutral path. Checkout was preserved and no tests landed.
-- Recovery: commit this owned roadmap for durable tracking, then create a fresh clean-base implementation delegate (inputs only, no inherited code base) to reproduce the exact two-file reviewed patch. Do not manually merge/rebase child history or broaden scope to fix the integrator. Record this friction for the later execution/operations audit.
+- Audit milestone and batch A complete. Test patch is integrated as `a1898260`; final aggregate validation exits 0 with **2,609 passing tests**. Batches B/C remain approval-pending.
+- No active delegates. `baseline-contract-tests@3` left a reviewed patch but hit carried-scratch integration guards. Initial overlap refusal and absent net-neutral path commit failure preserved checkout; no partial merge landed.
+- Recovery complete: owned roadmap committed `a8c82859`; `baseline-tests-clean@1` reproduced exact reviewed patch from a clean base (inputs only, no inherited history), then `delegate_changes` squash landed `a1898260` with only 2 test files. No manual merge/rebase or integrator code changes.
+- Final aggregate background `522db068-fbf5-4440-ab77-176e8c72a4ce` **completed exit 0**; log `/tmp/pi-harness-batch-a-final-check.log`. No active background dependencies.
 - Reviewed final test patch: same-context wake dedupe, retention across requests, no redispatch/extra durable wake-state append; required migration indexes/data/FKs preserved and intentionally removed writer index explicit.
 - Async setup blocker resolved: child inherits `PI_DELEGATE_CHILD=1`; normal `scripts/clean-npm-env.mjs` strips it. Named async test passes using cleaned launcher; migration/repository 57 and wake 6 pass.
-- First merge refused because carried-WIP scratch overlapped parent scratch; no commit landed. Premature aggregate `5407c382-f6c5-4faa-8820-9454d9e4348a` ran old tests and is not final validation. Parent owns integration retry and final validation.
+- Premature aggregate `5407c382-f6c5-4faa-8820-9454d9e4348a` ran old tests before successful integration and is not final validation. Use the final aggregate handle above.
+- Parent independent post-integration async + wake suites: **36 tests pass**. Changed-file Biome and diff whitespace pass. No production behavior changed.
 - Do not read auth/credential files or raw user sessions; do not deploy or restart services. Authorized writes are the two named tests and this scratch file.
 - Preserve unrelated checkout changes. Use focused checks for local work; a full check is appropriate here once to establish the cross-cutting baseline.
 - After compaction, read this file and current todo state; use automatic delegate/background completion reports rather than polling.
@@ -71,7 +73,16 @@ Verified correctness findings can move ahead. Review shared packages with their 
 
 ## Validation evidence
 
-- Environment: Node `v25.8.0`, Bun `1.4.0`, Pi `0.99.1`. All runs use system-tool PATH as needed. HEAD remains `868e113d`; only this scratch file is untracked.
+### Batch A final result (`a1898260`)
+
+- `PATH="$PATH:/usr/sbin:/sbin" bun run check` exits **0**: guards, all typecheck scopes and Biome pass; extension/script **1,258 tests pass**, workspace **1,351 tests pass** (**2,609 total**, no failing tests).
+- Parent independent async/wake **36 tests pass**; changed-file Biome and diff whitespace pass. Child migration/repository **57 tests pass**.
+- Six pre-existing non-null assertion lint warnings and Node web-test `--localstorage-file` warnings remain non-fatal. No production builds/E2E/deployments/restarts/model evaluations performed for this test-only batch.
+- Scratch is tracked (`a8c82859` plus final progress update); implementation squash contains exactly the two approved test paths.
+
+### Pre-implementation baseline (`868e113d`)
+
+- Environment: Node `v25.8.0`, Bun `1.4.0`, Pi `0.99.1`. All runs use system-tool PATH as needed. Baseline HEAD was `868e113d`; scratch was initially untracked.
 - `PATH="$PATH:/usr/sbin:/sbin" bun run check`: SDK/Node guards and all three typecheck scopes pass. Biome exits successfully with 6 non-null-assertion warnings in external-delivery tests. Extension/script tests: 1,257 pass, 1 fails (125 files). Aggregate stops before workspace tests.
 - Failure: `extensions/delegate/async.test.ts:2033`, `admits one persisted queued wake after runtime recreation`. Exact focused rerun also fails (29 skipped); log `/tmp/pi-harness-wake-repro-868e113d.log`.
 - `bun run workspace:test`: server 485 pass/1 fails (`src/migrations.test.ts:335`); all other workspaces pass. Per workspace pass counts: title 10, background jobs 9, activity-model 28, contributions 8, protocol 63, codex-usage 1, domain 75, worktree-manager 8, client 180, web 483. No browser E2E or model evaluations run.
@@ -86,7 +97,7 @@ Verified correctness findings can move ahead. Review shared packages with their 
 
 - Wake integration test expects an admitted result to disappear on the next context transformation. `wake-delivery.ts:305–336` intentionally preserves the entered result across requests; `wake-delivery.test.ts:96–139` tests retained provider-visible evidence and one acknowledgement. Commit `3ac38472` changed this intentionally but did not touch the async test. Current evidence points to stale integration expectations, not duplicate dispatch.
 - Server migration test compares all indexes before/after all migrations. It expects `active_writer_per_checkout`, but migration at `repositories/migrations.ts:933` intentionally drops it; commit `85ca6e22` enables parallel runs in a shared checkout.
-- Proposed batch: reconcile these tests with supported behavior; preserve assertions for single delivery/acknowledgement, stale/foreign rejection, dependent row/index integrity, and named removed-index behavior. No production behavior reversal simply to green the suite. Approval pending. Focused migration rerun reproduces exactly; migration 24 (`allow-parallel-checkout-writers`) and commit `85ca6e22` explicitly support the changed contract.
+- Proposed batch: reconcile these tests with supported behavior; preserve assertions for single delivery/acknowledgement, stale/foreign rejection, dependent row/index integrity, and named removed-index behavior. No production behavior reversal simply to green the suite. **Implemented/verified in batch A**. Focused pre-fix migration rerun reproduced exactly; migration 24 (`allow-parallel-checkout-writers`) and commit `85ca6e22` explicitly support the changed contract.
 
 ### F2 — Successful compaction behavior remains unevaluated (evaluation gap)
 
@@ -101,13 +112,13 @@ Verified correctness findings can move ahead. Review shared packages with their 
 
 ## Proposed batches and acceptance
 
-### A. Restore trustworthy test baseline — recommended first
+### A. Restore trustworthy test baseline — complete
 
 - Scope: `extensions/delegate/async.test.ts` restored-wake case and `apps/dashboard-server/src/migrations.test.ts` v10 migration case; minimally strengthen related assertions if needed.
 - Preserve retained result content across successive provider contexts; prove no redispatch/re-acknowledgement. Preserve same-context deduplication and stale/foreign-message protections through existing coverage.
 - Assert migration 24's deliberate removed index while retaining required surviving indexes, dependent data and foreign-key integrity. Do not merely weaken all index assertions or remove failed tests.
 - Validate focused wake/async and migration/repository suites, scoped types/Biome; rerun aggregate check for cross-cutting baseline restoration. If a real defect emerges, stop and update proposal rather than reverse supported contracts.
-- Effort: small; risk: low with explicit semantic assertions. Approval: **approved by user; implementing**.
+- Approval/result: **approved by user; integrated as `a1898260`; kept**. Final aggregate exits 0 (2,609 tests). Focused parent async/wake 36 tests and changed-file Biome pass; isolated migration/repository 57 tests pass.
 
 ### B. Align supported-interface and process ownership docs
 
@@ -131,4 +142,6 @@ Verified correctness findings can move ahead. Review shared packages with their 
 
 ## Next decision
 
-Complete and verify batch A; report final baseline and propose next step. B is independent low-risk documentation work; C is a separate evaluation requiring a bounded model-run budget. They are not approved. Scratch is being versioned so future clean-base delegates do not carry an untracked copy that collides with parent progress updates.
+Batch A is complete. Recommend small documentation batch B next, then select one bounded execution/orchestration seam. Compaction evaluation C remains separate and approval-pending.
+
+Record for later execution/operations audit: carried untracked parent progress file made test-only integration conflict; deleting that carried artifact led to absent-path `commit --only` failure. Both attempts aborted safely. Recovery was a tracked roadmap and a clean-base child reproduction; no manual merge or integrator changes. Also use cleaned test launcher inside delegate environments to strip `PI_DELEGATE_CHILD`. These observations are not approved fixes or feedback triage. B is independent low-risk documentation work; C is a separate evaluation requiring a bounded model-run budget. They are not approved. Scratch is being versioned so future clean-base delegates do not carry an untracked copy that collides with parent progress updates.
