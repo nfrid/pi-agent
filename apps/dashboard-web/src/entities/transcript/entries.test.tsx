@@ -264,7 +264,10 @@ describe('transcript entries', () => {
       height = 46.5;
       act(() => measure());
       const toggle = tree.root.findByProps({ 'aria-label': 'Expand thinking' });
-      act(() => toggle.props.onClick());
+      expect(toggle.type).toBe('div');
+      expect(toggle.props.tabIndex).toBe(0);
+      expect(toggle.findAllByType('svg')).toHaveLength(0);
+      act(() => toggle.props.onClick({ target: { closest: () => null } }));
       act(() =>
         tree.update(
           <TranscriptEntry item={item('New streamed **details**')} />,
@@ -277,6 +280,31 @@ describe('transcript entries', () => {
         ],
       ).toBe(true);
       expect(tree.root.findByType('strong').children).toEqual(['details']);
+      const expandedRow = tree.root.findByProps({
+        'aria-label': 'Collapse thinking',
+      });
+      act(() =>
+        expandedRow.props.onClick({
+          target: { closest: () => ({ tagName: 'A' }) },
+        }),
+      );
+      expect(expandedRow.props['aria-expanded']).toBe(true);
+      const preventDefault = vi.fn();
+      const target = {};
+      act(() =>
+        expandedRow.props.onKeyDown({
+          key: 'Enter',
+          target,
+          currentTarget: target,
+          preventDefault,
+        }),
+      );
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(
+        tree.root.findByProps({ 'aria-label': 'Expand thinking' }).props[
+          'aria-expanded'
+        ],
+      ).toBe(false);
       height = 15.5;
       act(() => measure());
       expect(

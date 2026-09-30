@@ -6533,7 +6533,10 @@ for (const desktop of [false, true]) {
     await page.goto('/sessions/s1');
     const blob = page.locator('.transcript-thinking-blob').first();
     await expect(blob.locator('time')).toBeVisible();
-    const toggle = blob.getByRole('button', { name: 'Expand thinking' });
+    const toggle = blob;
+    await expect(blob).toHaveAttribute('role', 'button');
+    await expect(blob.locator('svg, .thinking-toggle')).toHaveCount(0);
+    await expect(blob).toHaveCSS('padding-left', '9px');
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(blob.locator('code').first()).toContainText(
       'Promise.allSettled',
@@ -6554,9 +6557,7 @@ for (const desktop of [false, true]) {
       });
     expect(collapsed.oneLine && collapsed.clipped).toBe(true);
     await toggle.click();
-    await expect(
-      blob.getByRole('button', { name: 'Collapse thinking' }),
-    ).toHaveAttribute('aria-expanded', 'true');
+    await expect(blob).toHaveAttribute('aria-expanded', 'true');
     await expect(blob.getByText('Thinking', { exact: true })).toHaveCount(0);
     const geometry = await blob.evaluate((element) => {
       const timestamp = element.querySelector('time');
@@ -6586,10 +6587,13 @@ for (const desktop of [false, true]) {
     expect(geometry.overlaps).toBe(false);
     expect(geometry.expandsBelow).toBe(true);
     expect(geometry.overflows).toBe(false);
-    await blob.getByRole('button', { name: 'Collapse thinking' }).click();
-    await expect(
-      blob.getByRole('button', { name: 'Expand thinking' }),
-    ).toHaveAttribute('aria-expanded', 'false');
+    await blob.click();
+    await expect(blob).toHaveAttribute('aria-expanded', 'false');
+    await blob.focus();
+    await blob.press('Space');
+    await expect(blob).toHaveAttribute('aria-expanded', 'true');
+    await blob.press('Enter');
+    await expect(blob).toHaveAttribute('aria-expanded', 'false');
   });
 }
 
@@ -6622,26 +6626,25 @@ for (const desktop of [false, true]) {
       .locator('.transcript-thinking-blob')
       .filter({ hasText: 'Checking the available tools' });
     await expect(short.locator('strong')).toHaveText('Short title');
-    await expect(short.getByRole('button')).toHaveCount(0);
-    await expect(thought.getByRole('button')).toHaveCount(0);
+    await expect(short).not.toHaveAttribute('role', 'button');
+    await expect(thought).not.toHaveAttribute('role', 'button');
+    await expect(short).toHaveCSS('padding-left', '9px');
     await page.setViewportSize({ width: 390, height: 760 });
-    await expect(short.getByRole('button')).toHaveCount(0);
-    const toggle = thought.getByRole('button', { name: 'Expand thinking' });
+    await expect(short).not.toHaveAttribute('role', 'button');
+    const toggle = thought;
+    await expect(thought).toHaveAttribute('role', 'button');
+    await expect(thought.locator('svg, .thinking-toggle')).toHaveCount(0);
     await expect(toggle).toBeVisible();
     await expect(thought.locator('strong')).toHaveText(
       'Checking the available tools',
     );
     await toggle.click();
     await expect(thought.getByText('Thinking', { exact: true })).toHaveCount(0);
-    await expect(
-      thought.getByRole('button', { name: 'Collapse thinking' }),
-    ).toHaveAttribute('aria-expanded', 'true');
+    await expect(thought).toHaveAttribute('aria-expanded', 'true');
     await page.setViewportSize({ width: 1800, height: 900 });
-    await expect(thought.getByRole('button')).toHaveCount(0);
+    await expect(thought).not.toHaveAttribute('role', 'button');
     await page.setViewportSize({ width: 390, height: 760 });
-    await expect(
-      thought.getByRole('button', { name: 'Expand thinking' }),
-    ).toHaveAttribute('aria-expanded', 'false');
+    await expect(thought).toHaveAttribute('aria-expanded', 'false');
   });
 }
 

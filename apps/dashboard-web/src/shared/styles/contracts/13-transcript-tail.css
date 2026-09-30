@@ -119,23 +119,16 @@
     color-mix(in srgb, var(--purple) 7%, var(--bg)) calc(100% - 84px),
     transparent 100%
   );
-  padding: 7px 9px 7px 29px;
+  padding: 7px 9px;
   color: var(--muted);
   font-size: 10px;
 }
-.thinking-toggle {
-  position: absolute;
-  inset-inline-start: 9px;
-  top: 7px;
-  display: grid;
-  place-items: center;
-  width: 14px;
-  height: 15px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--cyan);
+.transcript-thinking-blob[role="button"] {
   cursor: pointer;
+}
+.transcript-thinking-blob[role="button"]:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
 }
 .thinking-text {
   display: flow-root;

@@ -390,26 +390,42 @@ export function ThinkingBlob({
     observer.observe(markdown);
     return () => observer.disconnect();
   }, []);
+  const text = (
+    <div ref={textRef} className="thinking-text" data-expanded={expanded}>
+      <DashboardTime
+        className="transcript-time thinking-time"
+        timestamp={timestamp}
+      />
+      <Markdown>{content}</Markdown>
+    </div>
+  );
+  if (!multiline) return <div className="transcript-thinking-blob">{text}</div>;
   return (
-    <div className="transcript-thinking-blob">
-      {multiline ? (
-        <button
-          type="button"
-          className="thinking-toggle"
-          aria-label={expanded ? 'Collapse thinking' : 'Expand thinking'}
-          aria-expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
-        >
-          <TranscriptDisclosureIcon expanded={expanded} />
-        </button>
-      ) : null}
-      <div ref={textRef} className="thinking-text" data-expanded={expanded}>
-        <DashboardTime
-          className="transcript-time thinking-time"
-          timestamp={timestamp}
-        />
-        <Markdown>{content}</Markdown>
-      </div>
+    // biome-ignore lint/a11y/useSemanticElements: Markdown blocks and links cannot be nested inside a native button.
+    <div
+      className="transcript-thinking-blob"
+      role="button"
+      tabIndex={0}
+      aria-label={expanded ? 'Collapse thinking' : 'Expand thinking'}
+      aria-expanded={expanded}
+      onClick={(event) => {
+        if ((event.target as Element).closest('a, button')) return;
+        if (
+          typeof window !== 'undefined' &&
+          window.getSelection()?.isCollapsed === false
+        )
+          return;
+        setExpanded((current) => !current);
+      }}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          setExpanded((current) => !current);
+        }
+      }}
+    >
+      {text}
     </div>
   );
 }
