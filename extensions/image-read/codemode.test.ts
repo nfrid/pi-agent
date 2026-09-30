@@ -1,6 +1,13 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { getCurrentTools, type TranscriptContext } from '@earendil-works/pi-ai';
 import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
 import {
@@ -13,14 +20,92 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { PhotonImage } from '@silvia-odwyer/photon-node';
 import { expect, it } from 'vitest';
+import codemode from '../codemode';
 import { createTaskStore, reconstruct } from '../tasks/store';
 import { registerTodoTool } from '../tasks/tool';
 import imageRead from './index';
 
+it('loads the local wrapper once while the builtin is disabled', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-codemode-loader-'));
+  try {
+    const rootSettings = JSON.parse(
+      await readFile(resolve('settings.json'), 'utf8'),
+    ) as {
+      extensions?: string[];
+      defaultTools?: string[];
+      codemode?: { mode?: string };
+    };
+    expect(rootSettings.extensions).toContain('-builtin:codemode');
+    expect(rootSettings.defaultTools).toContain('+codemode');
+    expect(rootSettings.codemode?.mode).toBe('on');
+
+    const local = join(root, 'extensions', 'codemode', 'index.ts');
+    await mkdir(dirname(local), { recursive: true });
+    await symlink(resolve('extensions/codemode/index.ts'), local);
+    await symlink(
+      resolve('extensions/shared'),
+      join(root, 'extensions', 'shared'),
+    );
+    await symlink(resolve('node_modules'), join(root, 'node_modules'));
+    await writeFile(
+      join(root, 'settings.json'),
+      JSON.stringify({
+        extensions: ['-builtin:codemode'],
+        defaultTools: ['+codemode'],
+        codemode: { mode: 'on' },
+      }),
+    );
+    const settings = SettingsManager.create(root, root);
+    const loader = new DefaultResourceLoader({
+      cwd: root,
+      agentDir: root,
+      settingsManager: settings,
+      additionalExtensionPaths: [local],
+      extensionFactories: [
+        {
+          name: 'codemode',
+          factory: createCodemodeExtension(),
+          builtin: true,
+          replaceable: true,
+        },
+      ],
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await loader.reload();
+    const result = loader.getExtensions();
+    expect(result.errors).toEqual([]);
+    expect(result.warnings ?? []).toEqual([]);
+    expect(
+      result.extensions.filter((extension) => extension.path === local),
+    ).toHaveLength(1);
+    const codemode = result.extensions.filter((extension) =>
+      extension.tools.has('codemode'),
+    );
+    expect(codemode).toHaveLength(1);
+    expect(codemode[0]?.path).toBe(local);
+    expect(codemode[0]?.tools.get('codemode')?.definition.defaultActive).toBe(
+      false,
+    );
+    expect(
+      JSON.stringify(codemode[0]?.tools.get('codemode')?.definition),
+    ).not.toContain('models');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it.each([
-  'image.png',
-  'missing.png',
-])('composes read %s and durable todo mutations through the native codemode-only pipeline', async (path) => {
+  { path: 'image.png', mode: 'on' as const },
+  { path: 'missing.png', mode: 'on' as const },
+  { path: 'image.png', mode: 'only' as const },
+  { path: 'missing.png', mode: 'only' as const },
+])('composes read $path and durable todo mutations in codemode mode $mode', async ({
+  path,
+  mode,
+}) => {
   const root = await mkdtemp(join(tmpdir(), 'pi-codemode-sdk-'));
   let session:
     | Awaited<ReturnType<typeof createAgentSession>>['session']
@@ -40,7 +125,7 @@ it.each([
     });
     const contexts: TranscriptContext[] = [];
     const failedRead = path === 'missing.png';
-    const code = `if ('write' in tools) throw new Error('Unexpected write capability'); const tasks = await tools.todo_update({changes: [{id: "T1", text: "Verify images"}]}); const result = await tools.read({path: ${JSON.stringify(path)}}); text(result.text); for (const block of result.images) image(block); text({ids: tasks.ids});`;
+    const code = `if ('write' in tools) throw new Error('Unexpected write capability'); if (typeof models !== 'undefined') throw new Error('Unexpected models API'); const declaration = await describeTool('read'); const matches = await searchTools('read image file', {limit: 5}); if (!declaration || !matches.some(tool => tool.name === 'read')) throw new Error('Tool discovery failed'); const tasks = await tools.todo_update({changes: [{id: "T1", text: "Verify images"}]}); const result = await tools.read({path: ${JSON.stringify(path)}}); text(result.text); for (const block of result.images) image(block); text({ids: tasks.ids});`;
     runtime.registerProvider('fixture', {
       api: 'openai-completions',
       baseUrl: 'http://fixture.invalid',
@@ -103,6 +188,7 @@ it.each([
       },
     });
     const settings = SettingsManager.inMemory({
+      codemode: { mode },
       compaction: { enabled: false },
       retry: { enabled: false },
       images: { autoResize: false },
@@ -119,7 +205,7 @@ it.each([
       noPromptTemplates: true,
       noThemes: true,
       extensionFactories: [
-        createCodemodeExtension({ mode: 'only', models: false }),
+        codemode,
         (pi) => {
           imageRead(pi);
           registerTodoTool(pi, store);
@@ -152,7 +238,13 @@ it.each([
     expect(errors).toEqual([]);
     expect(
       getCurrentTools(contexts[0].messages).map((tool) => tool.name),
-    ).toEqual(['codemode']);
+    ).toEqual(
+      mode === 'on' ? ['read', 'todo_update', 'codemode'] : ['codemode'],
+    );
+    const codemodeDefinition = getCurrentTools(contexts[0].messages).find(
+      (tool) => tool.name === 'codemode',
+    );
+    expect(JSON.stringify(codemodeDefinition)).not.toContain('models');
     expect(hooks).toEqual([
       { toolName: 'codemode', parentToolCallId: undefined },
       { toolName: 'todo_update', parentToolCallId: 'compose' },

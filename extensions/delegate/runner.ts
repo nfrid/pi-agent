@@ -57,6 +57,7 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
 );
+const CODEMODE_EXTENSION = path.resolve(__dirname, '../codemode/index.ts');
 const CODEX_SERVICE_TIER_EXTENSION = path.resolve(
   __dirname,
   '../codex-service-tier/index.ts',
@@ -201,7 +202,7 @@ export function buildChildArgs(
     SYSTEM_PROMPT_EXTENSION,
     ...(webEnabled ? ['--extension', WEB_EXTENSION] : []),
     '--extension',
-    'builtin:codemode',
+    CODEMODE_EXTENSION,
     ...(options.routing?.provider === 'openai'
       ? ['--extension', CODEX_SERVICE_TIER_EXTENSION]
       : []),

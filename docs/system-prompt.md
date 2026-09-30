@@ -24,10 +24,11 @@ and filtering. A single operation defaults to a direct call; steps that need
 model judgment between them remain separate. Discovery is only needed when a
 tool's signature is missing, and search results already contain signatures.
 
-The native codemode model catalog/classifier API remains enabled. Ordinary
-chat models cannot be passed to `models.classify` unless registered with a
-classifier implementation. This policy does not change delegate model routing,
-tool allowlists, or web/write permissions.
+The native codemode `models.*` catalog/classifier API is disabled in the parent
+and child agents. Optional hybrid codemode (`mode: "on"`) remains available:
+ordinary tools stay directly visible, and codemode can compose and discover only
+the already-authorized tools. This does not change delegate model routing, tool
+allowlists, or web/write permissions.
 
 Reload extensions and start a new session after changing the tool configuration.
 Use `/prompt-info` for prompt diagnostics and `bun run session:metrics` for

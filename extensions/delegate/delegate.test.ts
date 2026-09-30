@@ -984,11 +984,7 @@ describe('delegate', () => {
       /extensions[\\/]remote-control[\\/]index\.ts$/,
     );
     expect(
-      hostedExtensions.every(
-        (extension) =>
-          extension &&
-          (extension === 'builtin:codemode' || existsSync(extension)),
-      ),
+      hostedExtensions.every((extension) => extension && existsSync(extension)),
     ).toBe(true);
   });
 
@@ -1004,7 +1000,7 @@ describe('delegate', () => {
     expect(extensionPaths[1]).toMatch(
       /extensions[\\/]system-prompt[\\/]index\.ts$/,
     );
-    expect(extensionPaths[2]).toBe('builtin:codemode');
+    expect(extensionPaths[2]).toMatch(/extensions[\\/]codemode[\\/]index\.ts$/);
     expect(extensionPaths[3]).toMatch(
       /extensions[\\/]tool-argument-validation[\\/]index\.ts$/,
     );
@@ -1015,12 +1011,9 @@ describe('delegate', () => {
       /extensions[\\/]image-read[\\/]index\.ts$/,
     );
     expect(extensionPaths).toHaveLength(6);
-    expect(
-      extensionPaths.every(
-        (extension) =>
-          extension === 'builtin:codemode' || existsSync(extension),
-      ),
-    ).toBe(true);
+    expect(extensionPaths.every((extension) => existsSync(extension))).toBe(
+      true,
+    );
     // Read-only is an intent signal, not a sandbox: the child keeps an ordinary
     // shell so it can inspect the repository the way any agent would.
     const tools = args[args.indexOf('--tools') + 1];

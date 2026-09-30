@@ -3,9 +3,8 @@
   "defaultProvider": "openai",
   "defaultModel": "gpt-6-astra",
   "defaultThinkingLevel": "medium",
-  "defaultTools": [
-    "+codemode"
-  ],
+  "defaultTools": ["+codemode"],
+  "extensions": ["-builtin:codemode"],
   "codemode": {
     "mode": "on"
   },

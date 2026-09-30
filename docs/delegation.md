@@ -26,7 +26,7 @@ The normal model-facing fields are:
 - required `id`, `task`, and `route`;
 - optional `inputs`, `base`, `scope`, `write`, `cwd`, `web`, and `skills`.
 
-Fresh delegates load the built-in codemode extension explicitly, including with `--no-extensions`. Their existing tool allowlist remains authoritative: codemode composes only those tools and does not add write or web capabilities.
+Fresh delegates explicitly load the local codemode wrapper, including with `--no-extensions`; it disables the native `models.*` API, as in the parent. Optional hybrid codemode remains available, and its existing tool allowlist remains authoritative: codemode composes and discovers only those tools and does not add write or web capabilities.
 
 Fresh delegates default to fresh context. `write: true` gives file-editing tools and automatically selects an isolated Git worktree. `web: true` enables the web tool bundle. `scope` is advisory, not a filesystem boundary. Fresh relative cwd values resolve from the parent cwd; continuations retain their original cwd.
 
