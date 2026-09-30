@@ -215,14 +215,14 @@ export function createRemoteControlRuntime(
         capabilities,
         queueDrafts,
       );
-      // Queue mutations are dashboard-owned state, so acknowledge them only
-      // after refreshing the cached snapshot. A session replacement that wins
-      // the race must not publish the old draft set into the new session.
+      // Queue edits and idle aborts need a fresh snapshot even when the SDK
+      // emits no new run event. Never publish an old session's state.
       if (
-        isQueueDraftCommand(command) &&
+        (isQueueDraftCommand(command) || command.type === 'abort') &&
         context === commandContext &&
         currentSessionId === commandSessionId
       ) {
+        if (command.type === 'abort') clearSettledBackground(commandSessionId);
         setContext(commandContext, false);
         const state = liveState(commandContext);
         client.sendEvent({
@@ -359,6 +359,11 @@ export function flushQueueDrafts(
   mode: QueueDraftMode,
 ): boolean {
   if (!runtime.isCurrent(ctx)) return false;
+  if (
+    mode === 'followUp' &&
+    !isGenuineAgentSettlement(false, ctx.sessionManager.getSessionId())
+  )
+    return false;
   runtime.setContext(ctx, false);
   if (!runtime.isCurrent(ctx)) return false;
   const drafts = runtime.queueDrafts.take(mode);

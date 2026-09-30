@@ -2842,8 +2842,8 @@ describe('agent settlement', () => {
     setPendingProcessCount(source, 0, scope);
     expect(events[0]).toMatchObject({
       type: 'runtime.stateChanged',
-      state: 'waiting',
-      snapshot: expect.objectContaining({ liveState: 'waiting' }),
+      state: 'idle',
+      snapshot: expect.objectContaining({ liveState: 'idle' }),
     });
     events.length = 0;
     emitAgentSettlement(runtime, ctx, undefined, true);

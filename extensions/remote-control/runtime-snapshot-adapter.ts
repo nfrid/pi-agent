@@ -17,11 +17,11 @@ import type {
   SessionSnapshot,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import { codexServiceTier } from '../shared/codex-service-tier';
+import { hasPendingRequestDependencies } from '../shared/runtime/agent-lifecycle';
 import {
   aggregateRuntimeCapabilities,
   contributionManifests,
 } from '../shared/runtime/capability-registry';
-import { hasPendingProcesses } from '../shared/runtime/pending-processes';
 import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import { jsonSafe } from './json-safe';
 
@@ -192,7 +192,7 @@ export function composerCommandsSnapshot(
 
 export function liveState(ctx: ExtensionContext): RuntimeLiveState {
   if (!ctx.isIdle()) return 'working';
-  return hasPendingProcesses(ctx.sessionManager.getSessionId())
+  return hasPendingRequestDependencies(ctx.sessionManager.getSessionId())
     ? 'waiting'
     : 'idle';
 }

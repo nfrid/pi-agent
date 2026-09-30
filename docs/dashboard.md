@@ -279,16 +279,38 @@ An exact persisted `response-closure` marker enables a compact **Work log** betw
 the ordinary user request and the final assistant answer. It shows elapsed wall-clock
 time, including background waits, and an action count that excludes codemode wrappers
 when their child actions are known. Steering stays inside the work log; ordinary
-follow-up requests do not. Missing, invalid, conflicting, or partially loaded boundaries
-leave the transcript open rather than guessing from prose. Older unmarked history
-retains its existing presentation.
+follow-up requests do not. Invalid, conflicting, or ambiguous boundaries leave the
+transcript open rather than guessing from prose. A trusted closure with exact outline
+bounds stays collapsed even when its historical body is not loaded. Opening the log
+or navigating into it loads through its request using the existing history loader;
+closing during loading prevents a late expansion. Partial bodies do not invent a
+complete action count. Older unmarked history retains its existing presentation.
 
 New closures preserve the work log when the reader has scrolled away from the tail
 or opened its technical details. Outline navigation opens a containing work log when
-needed, including in virtualized history. Background activity after handoff remains a
-separate continuation and never reopens an earlier completed answer.
+needed, including in virtualized history. Ordinary appends preserve manual disclosure
+state; selecting a different branch path invalidates pending opens and jumps.
+Background activity stays available after handoff, but passive exits and released
+`any` survivors do not automatically prompt the model or reopen a completed answer.
 
-Request-owned background tasks and watches keep an answer open until their outcomes enter provider context. Passive services alone do not prevent handoff. Delegate gates can batch selected results or release the remaining selected attempts after the first `any` result enters context. The durable boundary is emitted only at genuine SDK settlement; it is not inferred from `agent_end` or from the existence of running processes.
+Request-owned background tasks and watches keep an answer open until their outcomes
+enter provider context. `background_start` defaults to a finite task; explicit
+`kind: 'service'` does not hold the request except for its readiness watches.
+Delegate gates batch selected results or release the remaining selected attempts
+after the first `any` result enters context. The durable boundary is emitted only
+at genuine logical settlement, not inferred from `agent_end` or running processes.
+
+While results are pending, the composer retains **Steer**, **Later**, and **Abort**.
+Steering resumes the same request even when the SDK is idle; ordinary follow-ups
+wait for logical completion. The waiting surface identifies a pending request
+independently of the physical process count, including when all jobs have ended
+but their results have not entered context. Idle abort clears this surface without
+fabricating a final answer or closure.
+
+Request ownership is journaled against exact session/user-entry/source identities.
+The native input integration uses SDK 0.99.1's prompt entry and queue contract, so
+SDK upgrades must rerun its native regressions. Accepted queued user input remains
+in memory, like the native queue, and does not survive a runtime restart.
 
 ## Dashboard UI principle
 
