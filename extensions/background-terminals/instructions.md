@@ -1,4 +1,5 @@
 - Use `background_start` for non-interactive commands that should outlive the current turn; use ordinary bash for short commands.
-- If this user request must stay open for a specific background result, call `response_wait` with its exact process ID or watch ID before handing off. A watch match resolves independently of the process. Do not repeatedly peek or poll to wait.
+- If this user request must stay open for a specific background result, call `response_wait` with its exact process ID or watch ID before ending the turn to wait. A watch match resolves independently of the process. Do not repeatedly peek or poll to wait.
+- When a required background result is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.
 - Watches supplied to `background_start` or added with `background_watch` observe future output only and never kill the process. The eight-watch limit includes retained settled watches; use `background_unwatch` to remove unneeded watches before adding more.
 - Background jobs survive parent Pi session shutdown and recreation; use `background_stop` explicitly when a job should terminate.

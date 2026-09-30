@@ -124,6 +124,8 @@ describe('background terminals extension', () => {
     const guidance = tool?.promptGuidelines?.join('\n');
     expect(guidance).toContain('use ordinary bash for short commands');
     expect(guidance).toContain('one short waiting notice');
+    expect(guidance).toContain('response_wait');
+    expect(guidance).toContain('watch match resolves independently');
     expect(guidance).toContain('includes retained settled watches');
     expect(guidance).toContain('use `background_stop` explicitly');
 
