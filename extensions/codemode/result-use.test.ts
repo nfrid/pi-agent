@@ -45,6 +45,7 @@ function sandbox(tool: ToolDefinition, respond: (args: unknown) => unknown) {
   let call = 0;
   return {
     entries,
+    definition,
     async execute(code: string) {
       const result = await definition.execute(
         'projection',
@@ -76,6 +77,15 @@ function sandbox(tool: ToolDefinition, respond: (args: unknown) => unknown) {
     },
   };
 }
+
+it('removes only codemode prompt guidelines while preserving its registered tool metadata', () => {
+  const run = sandbox(createBashDescriptionToolDefinition(), () => ({}));
+  expect(run.definition.name).toBe('codemode');
+  expect(run.definition.promptGuidelines).toBeUndefined();
+  expect(run.definition.promptSnippet).toBeDefined();
+  expect(run.definition.defaultActive).toBe(false);
+  expect(JSON.stringify(run.definition)).not.toContain('models');
+});
 
 it('runs the documented web projection with smaller output, visible errors, and retrievable originals', async () => {
   const fixture = {

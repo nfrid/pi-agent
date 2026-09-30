@@ -462,35 +462,20 @@ describe('canonical prompt composition', () => {
       expect(prompt).toContain('<agent_instructions>\n# Working style');
       expect(prompt).toContain('\n\n# Interaction\n');
       expect(prompt).toContain('\n\n# Tool use\n');
-      expect(prompt).toContain('\n\n- Keep command output bounded');
       expect(prompt).toContain(
-        'For a single tool operation, call the tool directly by default.',
+        'Choose the evidence needed for the next decision.',
+      );
+      expect(prompt).toContain('Batch known-independent reads or checks');
+      expect(prompt).toContain(
+        'stop and return to the model whenever judgment is needed',
       );
       expect(prompt).toContain(
-        'Use codemode to batch independent calls, compose dependent calls, or filter returned data when doing so reduces model round trips or the amount of data returned.',
+        'preserve errors, exit codes, truncation status, and full-output paths',
       );
-      expect(prompt).toContain(
-        'When using codemode to reduce output, return the needed fields, aggregates, or bounded excerpts; preserve failure/error details and a path or store key for retrieving original data.',
-      );
-      expect(prompt).toContain(
-        'Do not bundle calls when a required model judgment needs to happen between them.',
-      );
-      expect(prompt).toContain(
-        'For a known tool name whose signature is missing, use `describeTool`; for an unknown tool name, use `searchTools`.',
-      );
-      expect(prompt).toContain(
-        'Search results already include tool signatures.',
-      );
-      expect(prompt).toContain('Do not discard failure details or evidence');
-      expect(prompt).toContain('Await every intended call');
+      expect(prompt).toContain('Discover only when a signature is missing');
+      expect(prompt).toContain('For non-trivial `bash` calls');
       expect(prompt).not.toContain(
-        'use it as the primary interface for tool calls',
-      );
-      expect(prompt).toContain(
-        'For non-trivial `bash` calls—compound or control-flow commands, mutating commands, or otherwise non-obvious commands—provide the optional `description` field.',
-      );
-      expect(prompt).toContain(
-        'do not add individual tool-call narration when the surrounding guidance says not to.',
+        'Use codemode to batch or chain several tool calls',
       );
       expect(prompt).toContain('\n</agent_instructions>');
       expect(prompt.match(/# Working style/g)).toHaveLength(1);

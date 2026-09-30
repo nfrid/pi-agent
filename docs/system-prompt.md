@@ -19,10 +19,11 @@ composition; later hooks may still affect the final emitted prompt.
 ## Tool interface
 
 The default configuration uses `codemode.mode: "on"`: ordinary tools remain
-available directly, and codemode is optional for useful batching, composition,
-and filtering. A single operation defaults to a direct call; steps that need
-model judgment between them remain separate. Discovery is only needed when a
-tool's signature is missing, and search results already contain signatures.
+available directly, and codemode is optional for composition, result filtering,
+or batches of known-independent reads and checks. A single operation defaults
+to a direct call; return to the model when judgment is needed between steps.
+Discovery is only needed when a tool's signature is missing, and search results
+already contain signatures.
 
 The native codemode `models.*` catalog/classifier API is disabled in the parent
 and child agents. Optional hybrid codemode (`mode: "on"`) remains available:
