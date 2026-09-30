@@ -472,6 +472,9 @@ describe('canonical prompt composition', () => {
       expect(prompt).toContain(
         'preserve errors, exit codes, truncation status, and full-output paths',
       );
+      expect(prompt).toContain(
+        'inspect its shape (keys, counts, or a small sample)',
+      );
       expect(prompt).toContain('Discover only when a signature is missing');
       expect(prompt).toContain('For non-trivial `bash` calls');
       expect(prompt).not.toContain(
