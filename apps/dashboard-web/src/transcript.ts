@@ -82,8 +82,10 @@ export interface TranscriptModelItem {
   event?: TranscriptEvent;
   /** Canonical domain tool semantics used by the inspector presentation. */
   tool?: TranscriptRenderToolItem & { backgroundTitle?: string };
-  /** Nested calls grouped only within a codemode execution. */
-  toolChildren?: readonly TranscriptModelItem[];
+  /** Nearest codemode ancestor for this projected tool row. */
+  codemodeRootKey?: string;
+  /** All projected descendants of this codemode call, in transcript order. */
+  codemodeDescendants?: readonly TranscriptModelItem[];
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
   /** Presentation-ready native assistant failure detail. */
@@ -792,7 +794,7 @@ export function toTranscriptEntries(
     : result;
 }
 
-/** Group before activity streams/virtual rows; leave orphan and unrelated calls visible. */
+/** Annotate descendants without changing transcript order or nesting their rows. */
 export function groupCodemodeCalls(
   items: readonly TranscriptModelItem[],
 ): TranscriptModelItem[] {
@@ -801,43 +803,50 @@ export function groupCodemodeCalls(
       item.tool ? [[item.tool.toolCallId, item] as const] : [],
     ),
   );
-  const children = new Map<string, TranscriptModelItem[]>();
-  const nested = new Set<string>();
+  const descendants = new Map<string, TranscriptModelItem[]>();
+  const rootByChild = new Map<string, string>();
+
   for (const item of items) {
     const tool = item.tool;
     if (!tool?.parentToolCallId) continue;
     const seen = new Set([tool.toolCallId]);
-    let parent = tools.get(tool.parentToolCallId);
-    let insideCodemode = false;
-    while (parent?.tool && !seen.has(parent.tool.toolCallId)) {
-      seen.add(parent.tool.toolCallId);
-      insideCodemode ||= toolBaseName(parent.tool.name) === 'codemode';
-      parent = parent.tool.parentToolCallId
-        ? tools.get(parent.tool.parentToolCallId)
-        : undefined;
+    const codemodeAncestors: TranscriptModelItem[] = [];
+    let parentId: string | undefined = tool.parentToolCallId;
+    let complete = false;
+    while (parentId) {
+      if (seen.has(parentId)) break;
+      seen.add(parentId);
+      const parent = tools.get(parentId);
+      if (!parent?.tool) break;
+      if (toolBaseName(parent.tool.name) === 'codemode')
+        codemodeAncestors.push(parent);
+      parentId = parent.tool.parentToolCallId;
+      if (!parentId) complete = true;
     }
-    if (insideCodemode && !parent?.tool) {
-      const siblings = children.get(tool.parentToolCallId) ?? [];
-      siblings.push(item);
-      children.set(tool.parentToolCallId, siblings);
-      nested.add(tool.toolCallId);
+    const nearestCodemode = codemodeAncestors[0];
+    if (!complete || !nearestCodemode?.tool) continue;
+    rootByChild.set(tool.toolCallId, nearestCodemode.tool.toolCallId);
+    for (const ancestor of codemodeAncestors) {
+      const ancestorId = ancestor.tool?.toolCallId;
+      if (ancestorId === undefined) continue;
+      const calls = descendants.get(ancestorId) ?? [];
+      calls.push(item);
+      descendants.set(ancestorId, calls);
     }
   }
-  const attach = (item: TranscriptModelItem): TranscriptModelItem => {
-    const calls = item.tool ? children.get(item.tool.toolCallId) : undefined;
-    return calls ? { ...item, toolChildren: calls.map(attach) } : item;
-  };
-  return items
-    .filter((item) => !item.tool || !nested.has(item.tool.toolCallId))
-    .map(attach);
-}
 
-export function transcriptToolItems(
-  item: TranscriptModelItem,
-): TranscriptModelItem[] {
-  return item.tool
-    ? [item, ...(item.toolChildren ?? []).flatMap(transcriptToolItems)]
-    : [];
+  return items.map((item) => {
+    if (!item.tool) return item;
+    const codemodeDescendants = descendants.get(item.tool.toolCallId);
+    const codemodeRootKey = rootByChild.get(item.tool.toolCallId);
+    return codemodeDescendants || codemodeRootKey
+      ? {
+          ...item,
+          ...(codemodeDescendants ? { codemodeDescendants } : {}),
+          ...(codemodeRootKey ? { codemodeRootKey } : {}),
+        }
+      : item;
+  });
 }
 
 /** Compatibility helper retained for consumers with raw tool entries. */

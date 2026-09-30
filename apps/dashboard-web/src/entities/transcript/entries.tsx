@@ -1,21 +1,11 @@
 import { toolBaseName } from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { SessionBranchPoint } from '@pi-dashboard/protocol';
-import {
-  type ReactNode,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { copyText, Markdown } from '../../Markdown';
 import { formatCompactCount } from '../../shared/lib/format';
-import {
-  type TranscriptModelItem,
-  transcriptToolItems,
-} from '../../transcript';
+import type { TranscriptModelItem } from '../../transcript';
 import {
   type ActivityStepParts,
   activityStepParts,
@@ -493,11 +483,13 @@ function ActivityStepContent({
   timestamp,
   showTimestamp = true,
   meta,
+  codemodeChild = false,
 }: {
   action: ActivityStepParts;
   timestamp?: number | string;
   showTimestamp?: boolean;
   meta?: string;
+  codemodeChild?: boolean;
 }) {
   const changes = action.lineChanges;
   const hasChanges = Boolean(
@@ -525,6 +517,17 @@ function ActivityStepContent({
         className={`tool-name${action.described ? ' tool-name-described' : ''}`}
       >
         {action.action}
+        {codemodeChild ? (
+          <small
+            className="codemode-child-indicator"
+            title="Child results go to the script, not directly to the agent."
+          >
+            via codemode
+            <span className="sr-only">
+              . Child results go to the script, not directly to the agent.
+            </span>
+          </small>
+        ) : null}
       </span>
       {(action.argument || hasChanges) && (
         <span className="tool-argument">
@@ -736,15 +739,15 @@ function ToolDetail({
   cwd,
   sessionId,
   timestamp,
-  children,
-  nestedCalls = [],
+  codemodeChild = false,
+  codemodeDescendants = [],
 }: {
   tool: NonNullable<TranscriptModelItem['tool']>;
   cwd?: string;
   sessionId?: string;
   timestamp?: number | string;
-  children?: ReactNode;
-  nestedCalls?: readonly TranscriptModelItem[];
+  codemodeChild?: boolean;
+  codemodeDescendants?: readonly TranscriptModelItem[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const baseAction = activityStepParts(
@@ -777,15 +780,14 @@ function ToolDetail({
   const action = codemode
     ? {
         ...baseAction,
-        argument: codemodeCallSummary(nestedCalls) || argumentProgressMeta,
+        action: 'Codemode',
+        argument:
+          codemodeCallSummary(codemodeDescendants) || argumentProgressMeta,
       }
     : baseAction;
-  const childCalls = children ? (
-    <div className="codemode-children">{children}</div>
-  ) : null;
   const meta = codemode
     ? [
-        `${nestedCalls.length} call${nestedCalls.length === 1 ? '' : 's'}`,
+        `${codemodeDescendants.length} call${codemodeDescendants.length === 1 ? '' : 's'}`,
         tool.durationMs === undefined
           ? undefined
           : toolStreamDurationLabel(tool.durationMs),
@@ -803,6 +805,7 @@ function ToolDetail({
           action={action}
           meta={meta}
           timestamp={timestamp}
+          codemodeChild={codemodeChild}
         />
       </summary>
       {expanded ? (
@@ -812,24 +815,10 @@ function ToolDetail({
           <ToolInspector tool={tool} sessionId={sessionId} />
         )
       ) : null}
-      {codemode ? (
-        <>
-          {childCalls}
-          <CodemodeOutput tool={tool} />
-        </>
-      ) : null}
+      {codemode ? <CodemodeOutput tool={tool} /> : null}
     </details>
   );
-  if (!codemode && !children) return detail;
-  return (
-    <section
-      className={codemode ? 'codemode-group' : 'codemode-nested-call'}
-      aria-label={codemode ? 'Codemode execution' : undefined}
-    >
-      {detail}
-      {!codemode ? childCalls : null}
-    </section>
-  );
+  return detail;
 }
 
 function TranscriptEntry({
@@ -945,18 +934,9 @@ function TranscriptEntry({
         cwd={cwd}
         sessionId={item.sessionId}
         timestamp={timestamp}
-        nestedCalls={(item.toolChildren ?? []).flatMap(transcriptToolItems)}
-      >
-        {item.toolChildren?.map((child) => (
-          <div key={child.key} data-transcript-key={child.key}>
-            <TranscriptEntry
-              item={child}
-              cwd={cwd}
-              timestampOverride={timestamp}
-            />
-          </div>
-        ))}
-      </ToolDetail>
+        codemodeChild={Boolean(item.codemodeRootKey)}
+        codemodeDescendants={item.codemodeDescendants}
+      />
     );
   const raw = item.raw;
   return (

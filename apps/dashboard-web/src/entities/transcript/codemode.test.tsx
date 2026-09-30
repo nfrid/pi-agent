@@ -4,7 +4,6 @@ import {
   groupCodemodeCalls,
   type TranscriptModelItem,
   toTranscriptEntries,
-  transcriptToolItems,
 } from '../../transcript';
 import {
   CodemodeOutput,
@@ -36,7 +35,7 @@ function call(
 }
 
 describe('codemode presentation', () => {
-  it('groups each execution and deeper calls once without moving unrelated items or mutating inputs', () => {
+  it('keeps descendants in projection order and annotates codemode ancestry without mutating inputs', () => {
     const root = call('root', 'codemode');
     const child = call('root/1', 'bash', 'root');
     const items = [
@@ -50,18 +49,23 @@ describe('codemode presentation', () => {
     const grouped = groupCodemodeCalls(items);
     expect(grouped.map((item) => item.key)).toEqual([
       'root',
+      'root/1',
       'direct',
+      'root/1/1',
       'second',
+      'second/1',
     ]);
-    expect(grouped[0]?.toolChildren).toMatchObject([
-      { key: 'root/1', toolChildren: [{ key: 'root/1/1' }] },
+    expect(grouped[0]?.codemodeDescendants?.map((item) => item.key)).toEqual([
+      'root/1',
+      'root/1/1',
     ]);
-    expect(grouped[2]?.toolChildren).toMatchObject([{ key: 'second/1' }]);
-    expect(
-      grouped.flatMap(transcriptToolItems).map((item) => item.key),
-    ).toEqual(['root', 'root/1', 'root/1/1', 'direct', 'second', 'second/1']);
-    expect(root).not.toHaveProperty('toolChildren');
-    expect(child).not.toHaveProperty('toolChildren');
+    expect(grouped[1]?.codemodeRootKey).toBe('root');
+    expect(grouped[3]?.codemodeRootKey).toBe('root');
+    expect(grouped[4]?.codemodeDescendants?.map((item) => item.key)).toEqual([
+      'second/1',
+    ]);
+    expect(root).not.toHaveProperty('codemodeDescendants');
+    expect(child).not.toHaveProperty('codemodeRootKey');
   });
 
   it('summarizes known running/failed calls and bounds the tool name list without guessing progress', () => {
@@ -77,7 +81,7 @@ describe('codemode presentation', () => {
     expect(codemodeCallSummary([])).toBe('');
   });
 
-  it('keeps orphan, cyclic, and non-codemode nested calls visible', () => {
+  it('keeps orphan, cyclic, and non-codemode nested calls visible without assigning provenance', () => {
     const items = [
       call('orphan', 'read', 'absent'),
       call('a', 'codemode', 'b'),
@@ -86,6 +90,30 @@ describe('codemode presentation', () => {
       call('plain/1', 'read', 'plain'),
     ];
     expect(groupCodemodeCalls(items)).toEqual(items);
+  });
+
+  it('renders descendants as peer rows with a visible and accessible codemode indicator', () => {
+    const [root, child, unrelated] = groupCodemodeCalls([
+      call('root', 'codemode', undefined, 'running'),
+      call('root/1', 'read', 'root'),
+      call('unrelated', 'marker'),
+    ]);
+    const markup = [root, child, unrelated]
+      .map((item) =>
+        item ? renderToStaticMarkup(<TranscriptEntry item={item} />) : '',
+      )
+      .join('');
+    expect(markup.indexOf('Codemode')).toBeLessThan(
+      markup.indexOf('via codemode'),
+    );
+    expect(markup.indexOf('marker')).toBeGreaterThan(
+      markup.indexOf('via codemode'),
+    );
+    expect(markup).toContain('Child results go to the script');
+    expect(markup).toContain('directly to the agent.');
+    expect(markup).toContain('class="tool-step-dot"');
+    expect(markup).toContain('step-pending');
+    expect(markup).not.toContain('codemode-children');
   });
 
   it('restores metadata-only children while a caught child error leaves the parent successful', () => {
@@ -131,17 +159,19 @@ describe('codemode presentation', () => {
       ]),
     );
     expect(root?.tool?.status).toBe('success');
-    expect(root?.toolChildren?.[0]?.tool).toMatchObject({
+    expect(root?.codemodeDescendants?.[0]?.tool).toMatchObject({
       name: 'read',
       status: 'error',
       errorMessage: 'File unavailable',
     });
-    expect(root?.toolChildren?.[0]?.tool).not.toHaveProperty('result');
+    expect(root?.codemodeDescendants?.[0]?.tool).not.toHaveProperty('result');
     if (!root) throw new Error('Missing codemode root');
     const markup = renderToStaticMarkup(<TranscriptEntry item={root} />);
-    expect(markup).toContain('Codemode execution');
+    expect(markup).toContain('Codemode');
+    expect(markup).not.toContain('Running codemode');
     expect(markup).toContain('1 call');
     expect(markup).toContain('Script output');
+    expect(markup).not.toContain('via codemode');
   });
 
   it('escapes source, bounds previews, and leaves unavailable streaming source explicit', () => {
