@@ -143,7 +143,7 @@ export function dormantResumeMetadata(
   return {
     ...(model ? { model } : {}),
     ...(thinking ? { thinking } : {}),
-    ...(model?.provider === 'openai-codex' && session?.lastKnownServiceTier
+    ...(model?.provider === 'openai' && session?.lastKnownServiceTier
       ? { serviceTier: session.lastKnownServiceTier }
       : {}),
     ...(session?.lastKnownContextTokens === undefined

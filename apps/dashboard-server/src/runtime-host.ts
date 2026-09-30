@@ -141,7 +141,7 @@ function buildPiArgs(input: HostStartInput): string[] {
   if (input.model) {
     args.push('--provider', input.model.provider, '--model', input.model.model);
     if (input.model.thinking) args.push('--thinking', input.model.thinking);
-    if (input.model.provider === 'openai-codex')
+    if (input.model.provider === 'openai')
       args.push('--service-tier', input.model.serviceTier ?? 'normal');
   }
   return args;

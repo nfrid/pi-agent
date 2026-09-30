@@ -543,7 +543,7 @@ export function AgentPicker({
               />
             );
           })}
-          {model?.provider === 'openai-codex' && (
+          {model?.provider === 'openai' && (
             <>
               <div className="draft-picker-section">Speed</div>
               <fieldset className="draft-picker-chips">
@@ -645,7 +645,7 @@ export function DraftAgentPicker({
         setDraftModel(draftId, {
           ...next,
           ...(model?.thinking ? { thinking: model.thinking } : {}),
-          ...(next.provider === 'openai-codex' && model?.serviceTier
+          ...(next.provider === 'openai' && model?.serviceTier
             ? { serviceTier: model.serviceTier }
             : {}),
         })

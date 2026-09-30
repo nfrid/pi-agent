@@ -207,7 +207,7 @@ export function activeThreadDetails(
     ? draftSelection
     : (row.runtime?.model ?? indexed.model);
   const serviceTier =
-    selectedModel?.provider === 'openai-codex'
+    selectedModel?.provider === 'openai'
       ? row.draft
         ? draftSelection?.serviceTier
         : (row.runtime?.model?.serviceTier ?? indexed.serviceTier)

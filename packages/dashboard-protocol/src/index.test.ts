@@ -1530,7 +1530,7 @@ describe('dashboard protocol', () => {
         checkoutId: 'c',
         mode: 'read',
         model: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'gpt',
           serviceTier: 'ultrafast',
         },

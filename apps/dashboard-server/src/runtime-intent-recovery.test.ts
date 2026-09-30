@@ -112,7 +112,7 @@ async function fixture() {
           entries: [],
         },
         model: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'test-model',
           thinking: 'high',
           serviceTier: 'ultrafast',
@@ -253,7 +253,7 @@ describe('durable runtime intent boundaries', () => {
       mode: 'read',
       runtimeProvider: 'extension-bridge',
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'test-model',
         thinking: 'high',
         serviceTier: 'ultrafast',

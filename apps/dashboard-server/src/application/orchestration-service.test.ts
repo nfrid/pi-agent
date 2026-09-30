@@ -1223,7 +1223,7 @@ describe('OrchestrationService', () => {
   it('restores explicit Codex thinking after service-tier selection', async () => {
     const fixture = await orchestrationFixture({
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-test',
         thinking: 'low',
         serviceTier: 'fast',
@@ -1258,7 +1258,7 @@ describe('OrchestrationService', () => {
       ).toEqual([
         {
           type: 'setModel',
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'gpt-test',
           serviceTier: 'fast',
         },
@@ -1278,7 +1278,7 @@ describe('OrchestrationService', () => {
   it('does not send a thinking override when Codex thinking is omitted', async () => {
     const fixture = await orchestrationFixture({
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-test',
         serviceTier: 'fast',
       },
@@ -1299,7 +1299,7 @@ describe('OrchestrationService', () => {
       ).toEqual([
         {
           type: 'setModel',
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'gpt-test',
           serviceTier: 'fast',
         },
@@ -1317,7 +1317,7 @@ describe('OrchestrationService', () => {
   it('does not deliver the prompt when restoring Codex thinking fails, then retries', async () => {
     const fixture = await orchestrationFixture({
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-test',
         thinking: 'low',
         serviceTier: 'fast',
@@ -1354,14 +1354,14 @@ describe('OrchestrationService', () => {
       ).toEqual([
         {
           type: 'setModel',
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'gpt-test',
           serviceTier: 'fast',
         },
         { type: 'setThinking', level: 'low' },
         {
           type: 'setModel',
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'gpt-test',
           serviceTier: 'fast',
         },

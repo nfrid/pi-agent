@@ -312,7 +312,7 @@ describe('Fastify dashboard route plugin', () => {
       'x-dashboard-token': 'route-token',
     };
     const model = {
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt-6-sol',
       thinking: 'high',
       serviceTier: 'fast',

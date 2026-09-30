@@ -160,7 +160,7 @@ export async function bindAndDeliverPrompt(
         ),
         { code: 'busy' },
       );
-    if (run.model?.provider === 'openai-codex') {
+    if (run.model?.provider === 'openai') {
       await host.registry.sendCommand(runtimeId, {
         type: 'setModel',
         provider: run.model.provider,

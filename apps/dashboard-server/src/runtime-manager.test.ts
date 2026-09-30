@@ -533,7 +533,7 @@ describe('managed runtime launch safety', () => {
       runtimeId,
       cwd: checkoutRoot,
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-test',
         thinking: 'high',
         serviceTier: 'ultrafast',
@@ -563,7 +563,7 @@ describe('managed runtime launch safety', () => {
       cwd: await realpath(checkoutRoot),
       mode: 'read',
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-test',
         thinking: 'high',
         serviceTier: 'ultrafast',

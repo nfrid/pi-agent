@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { installDashboardBootstrap, trpcData } from './dashboard-fixtures';
 
 const fastModel = {
-  provider: 'openai-codex',
+  provider: 'openai',
   model: 'gpt-5',
   serviceTier: 'fast' as const,
 };
@@ -33,7 +33,7 @@ test('global and project defaults preserve hidden models and pin draft launch', 
   let projectDefault: typeof fastModel | undefined;
   let createdCommand: Record<string, unknown> | undefined;
   const preferences: ModelDisplayPreferences = {
-    'openai-codex/gpt-5': { color: '#ff79c6' },
+    'openai/gpt-5': { color: '#ff79c6' },
   };
   const settings = () => ({
     modelDisplayPreferences: preferences,
@@ -156,7 +156,7 @@ test('global and project defaults preserve hidden models and pin draft launch', 
         online: true,
         modelCatalog: [
           {
-            provider: 'openai-codex',
+            provider: 'openai',
             model: 'gpt-5',
             name: 'Fast model',
             supportsImages: true,
@@ -198,7 +198,7 @@ test('global and project defaults preserve hidden models and pin draft launch', 
   const drawer = page.getByRole('dialog', { name: 'Settings' });
   await expect(drawer).toBeVisible();
 
-  await drawer.getByLabel('Dashboard model').selectOption('openai-codex/gpt-5');
+  await drawer.getByLabel('Dashboard model').selectOption('openai/gpt-5');
   await drawer.getByLabel('Dashboard speed').selectOption('fast');
   await expect.poll(() => globalDefault).toEqual(fastModel);
 
@@ -207,7 +207,7 @@ test('global and project defaults preserve hidden models and pin draft launch', 
     .filter({ hasText: 'Draft defaults project' });
   await projectRow
     .getByLabel('Draft defaults project model')
-    .selectOption('openai-codex/gpt-5');
+    .selectOption('openai/gpt-5');
   await projectRow
     .getByLabel('Draft defaults project speed')
     .selectOption('ultrafast');
@@ -221,26 +221,26 @@ test('global and project defaults preserve hidden models and pin draft launch', 
 
   await drawer.getByText('Model display', { exact: true }).click();
   const hideModel = drawer.getByRole('button', {
-    name: 'Hide openai-codex/gpt-5 from selectors',
+    name: 'Hide openai/gpt-5 from selectors',
   });
   await hideModel.focus();
   await hideModel.press('Space');
   await expect(
     drawer.getByRole('button', {
-      name: 'Show openai-codex/gpt-5 in selectors',
+      name: 'Show openai/gpt-5 in selectors',
     }),
   ).toBeVisible();
   await expect
-    .poll(() => preferences['openai-codex/gpt-5'])
+    .poll(() => preferences['openai/gpt-5'])
     .toEqual({ color: '#ff79c6', hidden: true });
   expect(globalDefault).toEqual(fastModel);
   await expect(drawer.getByLabel('Dashboard model')).toHaveValue(
-    'openai-codex/gpt-5',
+    'openai/gpt-5',
   );
   await expect(
     drawer
       .getByLabel('Dashboard model')
-      .locator('option[value="openai-codex/gpt-5"]'),
+      .locator('option[value="openai/gpt-5"]'),
   ).toHaveJSProperty('disabled', true);
 
   await drawer
@@ -256,7 +256,7 @@ test('global and project defaults preserve hidden models and pin draft launch', 
   await agent.click();
   const picker = page.getByRole('dialog', { name: 'Agent and thinking' });
   await expect(
-    picker.getByRole('button', { name: /openai-codex\/gpt-5/ }),
+    picker.getByRole('button', { name: /openai\/gpt-5/ }),
   ).toHaveCount(0);
   await expect(picker.getByText(/No visible models/)).toBeVisible();
   await picker.getByRole('button', { name: 'Done', exact: true }).click();
@@ -279,21 +279,21 @@ test('global and project defaults preserve hidden models and pin draft launch', 
   await reopened.getByText('Model display', { exact: true }).click();
   await reopened
     .getByRole('button', {
-      name: 'Show openai-codex/gpt-5 in selectors',
+      name: 'Show openai/gpt-5 in selectors',
     })
     .click();
   await expect(
     reopened.getByRole('button', {
-      name: 'Hide openai-codex/gpt-5 from selectors',
+      name: 'Hide openai/gpt-5 from selectors',
     }),
   ).toBeVisible();
   await expect
-    .poll(() => preferences['openai-codex/gpt-5'])
+    .poll(() => preferences['openai/gpt-5'])
     .toEqual({ color: '#ff79c6', hidden: false });
   await expect(
     reopened
       .getByLabel('Dashboard model')
-      .locator('option[value="openai-codex/gpt-5"]'),
+      .locator('option[value="openai/gpt-5"]'),
   ).toHaveJSProperty('disabled', false);
   const globalRow = reopened
     .locator('[class*="defaultModelRow"]')

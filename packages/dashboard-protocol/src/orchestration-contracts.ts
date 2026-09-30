@@ -32,7 +32,7 @@ export const ModelSelectionSchema = Type.Unsafe<ModelSelection>(
   Type.Union([
     Type.Object(
       {
-        provider: Type.Literal('openai-codex'),
+        provider: Type.Literal('openai'),
         ...ModelSchemaProperties,
         serviceTier: Type.Optional(CodexServiceTierSchema),
       },

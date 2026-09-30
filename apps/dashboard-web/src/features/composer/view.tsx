@@ -488,8 +488,7 @@ export function Composer({
               disabled={submissionDisabled || busy}
               onModelChange={(next) => {
                 setResumeModel(next);
-                if (next.provider !== 'openai-codex')
-                  setResumeServiceTier(undefined);
+                if (next.provider !== 'openai') setResumeServiceTier(undefined);
               }}
               onThinkingChange={setResumeThinking}
               onServiceTierChange={setResumeServiceTier}

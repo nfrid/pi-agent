@@ -451,7 +451,7 @@ describe('draft thread promotion', () => {
 
   it('pins the displayed inherited tuple into thread creation', async () => {
     draftDefaultState.selection = {
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt-5',
       thinking: 'high',
       serviceTier: 'fast',
@@ -472,7 +472,7 @@ describe('draft thread promotion', () => {
       expect.objectContaining({
         command: expect.objectContaining({
           model: {
-            provider: 'openai-codex',
+            provider: 'openai',
             model: 'gpt-5',
             thinking: 'high',
             serviceTier: 'fast',

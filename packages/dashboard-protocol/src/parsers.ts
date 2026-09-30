@@ -866,7 +866,7 @@ export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
     )
       throw new Error('Invalid thinking level.');
     result.model =
-      input.model.provider === 'openai-codex'
+      input.model.provider === 'openai'
         ? {
             provider: input.model.provider,
             model: input.model.model,

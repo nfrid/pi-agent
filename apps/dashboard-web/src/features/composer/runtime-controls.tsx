@@ -35,7 +35,7 @@ export function RuntimeAgentControl({
       setModel({
         ...next,
         ...(model?.thinking ? { thinking: model.thinking } : {}),
-        ...(next.provider === 'openai-codex' && model?.serviceTier
+        ...(next.provider === 'openai' && model?.serviceTier
           ? { serviceTier: model.serviceTier }
           : {}),
       });
@@ -46,7 +46,7 @@ export function RuntimeAgentControl({
   const setRuntimeServiceTier = async (
     serviceTier: CodexServiceTier | undefined,
   ) => {
-    if (model?.provider !== 'openai-codex') return;
+    if (model?.provider !== 'openai') return;
     setError(undefined);
     try {
       await command.mutateAsync({

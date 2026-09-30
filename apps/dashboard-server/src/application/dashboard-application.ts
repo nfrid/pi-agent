@@ -1105,7 +1105,7 @@ export class DashboardApplication {
           ...(resume.lastKnownThinking === undefined
             ? {}
             : { thinking: resume.lastKnownThinking }),
-          ...(resume.lastKnownModel.provider === 'openai-codex' &&
+          ...(resume.lastKnownModel.provider === 'openai' &&
           resume.lastKnownServiceTier !== undefined
             ? { serviceTier: resume.lastKnownServiceTier }
             : {}),

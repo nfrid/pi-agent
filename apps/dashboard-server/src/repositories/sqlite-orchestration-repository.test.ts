@@ -116,7 +116,7 @@ describe('SqliteOrchestrationRepository', () => {
       title: 'Default model',
       rootPath: '/repo/default',
       defaultModel: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-6-sol',
         thinking: 'medium',
       },
@@ -127,7 +127,7 @@ describe('SqliteOrchestrationRepository', () => {
       expect.objectContaining({
         id: 'project-default',
         defaultModel: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'gpt-6-sol',
           thinking: 'medium',
         },
@@ -666,7 +666,7 @@ describe('SqliteOrchestrationRepository', () => {
       id: 'run-1',
       threadId: thread.id,
       initialPrompt: prompt,
-      model: { provider: 'openai-codex', model: 'gpt-6-luna' },
+      model: { provider: 'openai', model: 'gpt-6-luna' },
     });
     expect(value.repository.getProject(value.project.id)).toEqual(
       value.project,

@@ -903,7 +903,7 @@ describe('workspace-first agent navigation', () => {
           status: 'idle',
           runtime: {
             model: {
-              provider: 'openai-codex',
+              provider: 'openai',
               model: 'current',
               thinking: 'high',
               serviceTier: 'ultrafast',
@@ -922,13 +922,13 @@ describe('workspace-first agent navigation', () => {
             path: '/repo/.worktrees/thread-metadata',
           },
         ] as never,
-        { 'openai-codex/current': { alias: 'Current', color: '#ff79c6' } },
+        { 'openai/current': { alias: 'Current', color: '#ff79c6' } },
       ),
     ).toMatchObject({
       branch: 'feature/thread-metadata',
       checkoutKind: 'worktree',
       model: {
-        id: 'openai-codex/current',
+        id: 'openai/current',
         alias: 'Current',
         color: '#ff79c6',
         serviceTier: 'ultrafast',
@@ -948,7 +948,6 @@ describe('workspace-first agent navigation', () => {
       model: {
         id: 'openai-codex/old',
         alias: 'old',
-        serviceTier: 'fast',
       },
       effort: { full: 'medium', compact: 'm', color: 'cyan' },
     });

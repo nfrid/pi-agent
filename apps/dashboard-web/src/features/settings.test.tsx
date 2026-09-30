@@ -234,7 +234,7 @@ describe('settings drawer', () => {
       'aria-label': 'Dashboard model id',
     });
     await act(async () => {
-      provider.props.onChange({ currentTarget: { value: 'openai-codex' } });
+      provider.props.onChange({ currentTarget: { value: 'openai' } });
       model.props.onChange({ currentTarget: { value: 'gpt-5' } });
     });
     const useModel = renderer.root
@@ -246,7 +246,7 @@ describe('settings drawer', () => {
       await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
     });
     expect(update).toHaveBeenCalledWith({
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt-5',
     });
     renderer.unmount();

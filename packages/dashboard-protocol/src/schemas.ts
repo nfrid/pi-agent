@@ -602,7 +602,7 @@ const RuntimeModelSchema = Type.Unsafe<RuntimeModel>(
   Type.Union([
     Type.Object(
       {
-        provider: Type.Literal('openai-codex'),
+        provider: Type.Literal('openai'),
         ...RuntimeModelProperties,
         serviceTier: Type.Optional(CodexServiceTierSchema),
       },
@@ -1315,7 +1315,7 @@ const SetModelCommandSchema = Type.Unsafe<SetModelCommand>(
     Type.Object(
       {
         ...SetModelCommandProperties,
-        provider: Type.Literal('openai-codex'),
+        provider: Type.Literal('openai'),
         serviceTier: Type.Optional(
           Type.Union([CodexServiceTierSchema, Type.Null()]),
         ),

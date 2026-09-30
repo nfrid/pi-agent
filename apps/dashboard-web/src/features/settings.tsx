@@ -179,7 +179,7 @@ function DefaultModelControl({
     const nextSelection: ModelSelection = {
       ...next,
       ...(selection?.thinking ? { thinking: selection.thinking } : {}),
-      ...(next.provider === 'openai-codex' && selection?.serviceTier
+      ...(next.provider === 'openai' && selection?.serviceTier
         ? { serviceTier: selection.serviceTier }
         : {}),
     };
@@ -193,7 +193,7 @@ function DefaultModelControl({
     commit(next, () => onSave(next));
   };
   const saveSpeed = (speed: string) => {
-    if (selection?.provider !== 'openai-codex') return;
+    if (selection?.provider !== 'openai') return;
     const { serviceTier: _current, ...withoutSpeed } = selection;
     const next =
       speed === 'normal'
@@ -273,7 +273,7 @@ function DefaultModelControl({
                 ...(selection?.thinking
                   ? { thinking: selection.thinking }
                   : {}),
-                ...(provider === 'openai-codex' && selection?.serviceTier
+                ...(provider === 'openai' && selection?.serviceTier
                   ? { serviceTier: selection.serviceTier }
                   : {}),
               };
@@ -305,9 +305,7 @@ function DefaultModelControl({
         <select
           aria-label={`${label} speed`}
           value={selection?.serviceTier ?? 'normal'}
-          disabled={
-            disabled || pending || selection?.provider !== 'openai-codex'
-          }
+          disabled={disabled || pending || selection?.provider !== 'openai'}
           onChange={(event) => saveSpeed(event.currentTarget.value)}
         >
           <option value="normal">Normal</option>

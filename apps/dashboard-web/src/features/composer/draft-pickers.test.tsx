@@ -357,7 +357,7 @@ describe('draft agent picker', () => {
       renderer = create(
         <DraftAgentPicker
           draftId="draft-1"
-          model={{ provider: 'openai-codex', model: 'gpt' }}
+          model={{ provider: 'openai', model: 'gpt' }}
           runtimes={[]}
           disabled={false}
         />,
@@ -377,7 +377,7 @@ describe('draft agent picker', () => {
     ).toHaveLength(2);
     act(() => buttonWithLabel(renderer, 'Fast')?.props.onPress());
     expect(setDraftModel).toHaveBeenLastCalledWith('draft-1', {
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt',
       serviceTier: 'fast',
     });

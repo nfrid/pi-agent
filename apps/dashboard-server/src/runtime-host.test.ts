@@ -344,7 +344,7 @@ describe('runtime host', () => {
       name: `Сетап; touch ${injected}`,
       mode: 'read' as const,
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-test',
         thinking: 'high',
         serviceTier: 'fast' as const,
@@ -370,7 +370,7 @@ describe('runtime host', () => {
         '--name',
         `Сетап; touch ${injected}`,
         '--provider',
-        'openai-codex',
+        'openai',
         '--model',
         'gpt-test',
         '--thinking',

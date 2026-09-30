@@ -139,7 +139,7 @@ describe('browser-local draft metadata', () => {
     installStorage();
     const draft = createDraft('model-project', 'worktree', 123);
     setDraftModel(draft.id, {
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt-6-sol',
       thinking: 'high',
     });
@@ -147,7 +147,7 @@ describe('browser-local draft metadata', () => {
       expect.objectContaining({
         id: draft.id,
         model: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'gpt-6-sol',
           thinking: 'high',
         },

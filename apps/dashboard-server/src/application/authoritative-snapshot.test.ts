@@ -259,7 +259,7 @@ describe('authoritative application snapshot lifecycle', () => {
         if (id === 'offline-recent')
           return {
             lastKnownModel: {
-              provider: 'openai-codex',
+              provider: 'openai',
               model: 'offline-model',
             },
             lastKnownThinking: 'high',
@@ -268,7 +268,7 @@ describe('authoritative application snapshot lifecycle', () => {
         if (id === 'online-older')
           return {
             lastKnownModel: {
-              provider: 'openai-codex',
+              provider: 'openai',
               model: 'online-model',
             },
             lastKnownThinking: 'low',
@@ -279,7 +279,7 @@ describe('authoritative application snapshot lifecycle', () => {
 
     expect(value.app.resolveDraftDefaults('project-a')).toEqual({
       selection: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'offline-model',
         thinking: 'high',
         serviceTier: 'ultrafast',

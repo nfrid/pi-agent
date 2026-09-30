@@ -265,7 +265,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
       contentType: 'application/json',
       body: JSON.stringify({
         selection: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'careful',
           thinking: 'high',
           serviceTier: 'fast',
@@ -322,16 +322,16 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         online: false,
         lastSeenAt: 20,
         model: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'careful',
           thinking: 'high',
           serviceTier: 'ultrafast',
           supportsImages: true,
         },
         modelCatalog: [
-          { provider: 'openai-codex', model: 'fast', name: 'Fast' },
+          { provider: 'openai', model: 'fast', name: 'Fast' },
           {
-            provider: 'openai-codex',
+            provider: 'openai',
             model: 'careful',
             name: 'Careful',
             supportsImages: true,
@@ -352,7 +352,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
         rootPath:
           '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
         defaultModel: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'careful',
           thinking: 'high',
           serviceTier: 'fast',
@@ -631,7 +631,7 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     .toEqual({
       location: { kind: 'current' },
       model: {
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'fast',
         thinking: 'medium',
         serviceTier: 'fast',

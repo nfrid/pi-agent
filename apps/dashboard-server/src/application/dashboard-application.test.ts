@@ -59,7 +59,7 @@ describe('draft default precedence', () => {
       resolveDraftDefaultSelection({
         dashboardDefault: { provider: 'test', model: 'dashboard' },
         recentThreadDefault: {
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'recent',
           thinking: 'low',
           serviceTier: 'fast',
