@@ -7,6 +7,7 @@
 export * from './dashboard-api.js';
 export * from './orchestration-contracts.js';
 export * from './pi-runtime-protocol.js';
+export * from './response-closure.js';
 export {
   isRecord,
   isRuntimeLiveState,

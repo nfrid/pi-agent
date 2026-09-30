@@ -56,6 +56,7 @@ import {
   type ThreadSummary,
   ThreadSummarySchema,
 } from './orchestration-contracts.js';
+import { ResponseClosureMarkerSchema } from './response-closure.js';
 import { DelegateWorkflowMetadataSchema } from './workflow-contracts.js';
 
 export * from './delegate-history-contracts.js';
@@ -1135,7 +1136,11 @@ const ToolEventSchema = Type.Object(
   { additionalProperties: false },
 );
 const AgentSettledEventSchema = Type.Object(
-  { type: Type.Literal('agent.settled'), sessionId: IdentifierSchema },
+  {
+    type: Type.Literal('agent.settled'),
+    sessionId: IdentifierSchema,
+    closure: Type.Optional(ResponseClosureMarkerSchema),
+  },
   { additionalProperties: false },
 );
 const GoodbyeEventSchema = Type.Object(

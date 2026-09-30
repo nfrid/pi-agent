@@ -5,6 +5,8 @@ import {
   MAX_TOOL_ARGUMENT_PREVIEW,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
+  RESPONSE_CLOSURE_MARKER_TYPE,
+  tryParseResponseClosure,
 } from '@pi-dashboard/protocol';
 import { applyTransportOrdering } from './transport.js';
 import {
@@ -916,6 +918,32 @@ export function applyTranscriptEvent(
     return { state, accepted: true };
   if (!state.sessionId && eventSession)
     state = { ...state, sessionId: eventSession };
+  if (event.type === 'agent.settled' && event.closure) {
+    const closure = event.closure;
+    const data = tryParseResponseClosure(closure.data);
+    if (
+      data &&
+      closure.type === 'custom' &&
+      closure.customType === RESPONSE_CLOSURE_MARKER_TYPE &&
+      closure.id
+    ) {
+      const raw = { ...closure, data };
+      return {
+        state: {
+          ...state,
+          order: state.order.includes(closure.id)
+            ? state.order
+            : [...state.order, closure.id],
+          items: {
+            ...state.items,
+            [closure.id]: { kind: 'other', id: closure.id, raw },
+          },
+        },
+        accepted: true,
+      };
+    }
+    return { state, accepted: true };
+  }
   if (event.type === 'session.compacted') {
     const id =
       event.entryId ??
@@ -1304,6 +1332,12 @@ export function hydrateTranscript(
       return;
     }
     if (isSteeringMarkerEntry(raw)) return;
+    if (
+      raw.type === 'custom' &&
+      raw.customType === RESPONSE_CLOSURE_MARKER_TYPE &&
+      !tryParseResponseClosure(raw.data)
+    )
+      return;
     const tool =
       raw.type === 'tool' || raw.kind === 'tool'
         ? transcriptToolRecord(raw)

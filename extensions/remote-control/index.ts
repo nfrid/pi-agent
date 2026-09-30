@@ -18,6 +18,10 @@ import {
   shouldForwardLiveMessage,
 } from './live-event-normalizer';
 import {
+  installRequestClosureBoundary,
+  RequestClosureLifecycle,
+} from './request-closure';
+import {
   createRemoteControlRuntime,
   emitAgentSettlement,
   emitState,
@@ -140,6 +144,13 @@ function onTransportEvent(
 }
 
 export default defineExtension('remote-control', (pi) => {
+  const requestClosure = new RequestClosureLifecycle();
+  installRequestClosureBoundary(pi, requestClosure);
+  pi.events.on('steering-message:marked', (value) => {
+    requestClosure.markSteer(
+      eventRecord(directValue(eventRecord(value), 'message')),
+    );
+  });
   const runtime = createRemoteControlRuntime(pi);
   if (!runtime) return;
   installExternalDeliveryReceipts(pi);
@@ -252,7 +263,13 @@ export default defineExtension('remote-control', (pi) => {
     emitTurnEnd(runtime, pi, ctx);
   });
   pi.on('agent_settled', (_event, ctx) => {
-    emitAgentSettlement(runtime, ctx);
+    const closure = requestClosure.takeSettledMarker(ctx);
+    emitAgentSettlement(
+      runtime,
+      ctx,
+      closure,
+      requestClosure.hasPendingWait(ctx),
+    );
   });
   pi.on('agent_end', (_event, ctx) => {
     if (!flushQueueDrafts(runtime, pi, ctx, 'followUp'))
@@ -315,10 +332,15 @@ export default defineExtension('remote-control', (pi) => {
       return;
     }
     if (!shouldForwardLiveMessage(event)) return;
+    const normalized = runtime.eventNormalizer.normalizeMessage(
+      'finished',
+      event,
+    );
+    requestClosure.observeLiveAlias(message, normalized.messageId);
     runtime.client.sendEvent({
       type: 'message.finished',
       sessionId: ctx.sessionManager.getSessionId(),
-      message: runtime.eventNormalizer.normalizeMessage('finished', event),
+      message: normalized,
     });
   });
   onCurrentTransportEvent('tool_execution_start', (event, ctx) =>

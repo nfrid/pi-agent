@@ -6,6 +6,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import {
+  type BridgeEvent,
   MAX_ID,
   type QueueDraftMode,
   type RuntimeLiveState,
@@ -425,12 +426,20 @@ export function emitState(
 export function emitAgentSettlement(
   runtime: RemoteControlRuntime,
   ctx: ExtensionContext,
+  closure?: Extract<BridgeEvent, { type: 'agent.settled' }>['closure'],
+  responseWaitPending = false,
 ): void {
   const scopeId = ctx.sessionManager.getSessionId();
   const pending = pendingProcessCount(scopeId);
-  if (!isGenuineAgentSettlement(false, scopeId)) {
+  if (responseWaitPending || !isGenuineAgentSettlement(false, scopeId)) {
     publishSettledBackground(pending, scopeId);
-    emitState(runtime, ctx, 'waiting');
+    emitState(runtime, ctx, closure ? 'idle' : 'waiting');
+    if (closure && runtime.isCurrent(ctx))
+      runtime.client.sendEvent({
+        type: 'agent.settled',
+        sessionId: ctx.sessionManager.getSessionId(),
+        closure,
+      });
     return;
   }
   clearSettledBackground(scopeId);
@@ -439,5 +448,6 @@ export function emitAgentSettlement(
   runtime.client.sendEvent({
     type: 'agent.settled',
     sessionId: ctx.sessionManager.getSessionId(),
+    ...(closure ? { closure } : {}),
   });
 }

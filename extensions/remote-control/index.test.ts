@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -30,7 +31,7 @@ import {
   releaseScopedServices,
 } from '../shared/runtime/scoped-services';
 import { registerTasksCapability } from '../tasks/register-capability';
-import {
+import remoteControlExtension, {
   BridgeClient,
   composerCommandsSnapshot,
   createRemoteControlRuntime,
@@ -2807,7 +2808,17 @@ describe('agent settlement', () => {
 
     setPendingProcessCount(source, 2, scope);
     try {
-      emitAgentSettlement(runtime, ctx);
+      emitAgentSettlement(runtime, ctx, {
+        id: 'marker-entry',
+        type: 'custom',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'user-entry',
+          finalMessageId: 'assistant-entry',
+          startedAt: 10,
+          endedAt: 20,
+        },
+      });
       expect(getLiveExtensionSurfaceHub(scope).snapshot()).toEqual([
         expect.objectContaining({
           rendererId: 'runtime.settled-background',
@@ -2822,9 +2833,140 @@ describe('agent settlement', () => {
     expect(events).toEqual([
       expect.objectContaining({
         type: 'runtime.stateChanged',
-        state: 'waiting',
-        snapshot: expect.objectContaining({ liveState: 'waiting' }),
+        state: 'idle',
+        snapshot: expect.objectContaining({ liveState: 'idle' }),
+      }),
+      expect.objectContaining({
+        type: 'agent.settled',
+        closure: expect.objectContaining({ id: 'marker-entry' }),
       }),
     ]);
+    events.length = 0;
+    setPendingProcessCount(source, 1, scope);
+    emitAgentSettlement(runtime, ctx);
+    setPendingProcessCount(source, 0, scope);
+    expect(events[0]).toMatchObject({
+      type: 'runtime.stateChanged',
+      state: 'waiting',
+      snapshot: expect.objectContaining({ liveState: 'waiting' }),
+    });
+    events.length = 0;
+    emitAgentSettlement(runtime, ctx, undefined, true);
+    expect(events[0]).toMatchObject({
+      type: 'runtime.stateChanged',
+      state: 'waiting',
+      snapshot: expect.objectContaining({ liveState: 'waiting' }),
+    });
+    getLiveExtensionSurfaceHub(scope).clear('remote-control');
+  });
+
+  it('persists response closure through the extension with an unavailable bridge', () => {
+    const previousSocket = process.env.PI_DASHBOARD_SOCKET;
+    process.env.PI_DASHBOARD_SOCKET = path.join(
+      os.tmpdir(),
+      `pi-closure-offline-${randomUUID()}.sock`,
+    );
+    type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
+    const handlers = new Map<string, Handler[]>();
+    const events = new Map<string, (value: unknown) => void>();
+    const branch: Array<Record<string, unknown>> = [];
+    let entryNumber = 0;
+    const sessionId = `closure-offline-${randomUUID()}`;
+    const ctx = {
+      cwd: '/tmp',
+      isIdle: () => true,
+      hasPendingMessages: () => false,
+      getContextUsage: () => undefined,
+      sessionManager: {
+        getSessionId: () => sessionId,
+        getSessionFile: () => undefined,
+        getSessionName: () => undefined,
+        getCwd: () => '/tmp',
+        getLeafId: () => undefined,
+        getBranch: () => branch,
+        getEntries: () => branch,
+      },
+    } as unknown as ExtensionContext;
+    const pi = {
+      on: (name: string, handler: Handler) => {
+        const registered = handlers.get(name) ?? [];
+        registered.push(handler);
+        handlers.set(name, registered);
+      },
+      events: {
+        on: (name: string, handler: (value: unknown) => void) => {
+          events.set(name, handler);
+          return () => events.delete(name);
+        },
+        emit: vi.fn(),
+      },
+      registerTool: vi.fn(),
+      getCommands: () => [],
+      appendEntry: (customType: string, data: unknown) => {
+        branch.push({
+          type: 'custom',
+          id: `entry-${++entryNumber}`,
+          parentId: 'assistant-entry',
+          timestamp: new Date().toISOString(),
+          customType,
+          data,
+        });
+      },
+    } as unknown as ExtensionAPI;
+    const dispatch = (name: string, event: unknown) => {
+      for (const handler of handlers.get(name) ?? []) handler(event, ctx);
+    };
+    try {
+      remoteControlExtension(pi);
+      dispatch('session_start', {});
+      const user = { role: 'user', content: 'Check this', timestamp: 10 };
+      const assistant = {
+        role: 'assistant',
+        content: 'Done',
+        timestamp: 20,
+      };
+      branch.push(
+        {
+          type: 'message',
+          id: 'user-entry',
+          parentId: null,
+          timestamp: new Date(10).toISOString(),
+          message: user,
+        },
+        {
+          type: 'message',
+          id: 'assistant-entry',
+          parentId: 'user-entry',
+          timestamp: new Date(20).toISOString(),
+          message: assistant,
+        },
+      );
+      dispatch('message_end', { message: user });
+      dispatch('message_end', { message: assistant });
+      dispatch('agent_before_settle', {
+        outcome: 'completed',
+        continue: false,
+        entries: [],
+        context: { pendingMessages: [], canContinue: false },
+      });
+      dispatch('agent_settled', {});
+      expect(branch.at(-1)).toMatchObject({
+        type: 'custom',
+        id: 'entry-1',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'user-entry',
+          finalMessageId: 'assistant-entry',
+          startedAt: 10,
+          endedAt: 20,
+          liveRequestMessageId: expect.any(String),
+          liveFinalMessageId: expect.any(String),
+        },
+      });
+    } finally {
+      dispatch('session_shutdown', { reason: 'quit' });
+      if (previousSocket === undefined) delete process.env.PI_DASHBOARD_SOCKET;
+      else process.env.PI_DASHBOARD_SOCKET = previousSocket;
+    }
   });
 });

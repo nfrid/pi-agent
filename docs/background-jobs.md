@@ -12,6 +12,7 @@ terminals: there is no stdin.
 - `background_stop`: `ids`. Stops processes and suppresses redundant notifications.
 - `background_watch`: `id` and `watch`. Adds watches to a running process.
 - `background_unwatch`: `id` and `watch_ids`. Removes watches without stopping the process.
+- `response_wait`: `targets`, with exact `{ "kind": "process", "id": "..." }`, `{ "kind": "watch", "id": "...", "watchId": "..." }`, or delegate targets. Records the outcomes that must enter context before this request can close.
 
 Titles default to a short label derived from the command. User-facing labels use
 these titles, including watch, inspect, and stop actions; missing metadata uses a
@@ -30,11 +31,12 @@ Example `background_start` arguments:
 }
 ```
 
-The result supplies the process and watch IDs. Continue other work; if a watched
-condition or completion is the only remaining dependency, end the turn with one
-short waiting notice. Do not repeatedly peek to wait for it. When the process exits,
-one completion notification includes any watches that ended without observing their
-conditions.
+The result supplies the process and watch IDs. To keep this user request open for
+one or more exact outcomes, call `response_wait` with `process` IDs or `watch` IDs
+and their `watchId`. A watch match resolves its wait even while the process keeps
+running. Timeout, process exit, and failure outcomes also resolve when their result
+enters context. Continue other work while waiting. Do not repeatedly peek to wait
+for completion.
 
 ## Watch semantics
 

@@ -79,7 +79,7 @@ Base chains are cumulative. For `A --base--> B --base--> C`, C starts from A and
 
 ## Result delivery and gates
 
-Every newly settled result is delivered eagerly at the next safe model boundary. Results ready before the same boundary enter the same parent turn. When other work remains active, delivery includes a compact `Still running` list. Do not poll.
+Every newly settled result is delivered eagerly at the next safe model boundary. Results ready before the same boundary enter the same parent turn. When other work remains active, delivery includes a compact `Still running` list. Do not poll. To keep the current user request open for an exact delegate completion, call `response_wait` with `{ "kind": "delegate", "id": "<attempt-identity>" }` from the `workflow.identity` receipt. The tool canonicalizes a returned job ID or unambiguous logical ID to that attempt. Ambiguous or unknown IDs fail before any wait is recorded. Queued delivery does not resolve the wait until that result enters model context.
 
 Do not call `delegate_gate` for ordinary result delivery. Newly settled delegates already arrive as `any` at the next safe model boundary. Use a gate only to batch an `all` fan-in or to delay an `any` race until idle. Exactly one explicit gate is active per parent branch; a later call replaces it.
 
