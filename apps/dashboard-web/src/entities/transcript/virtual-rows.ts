@@ -245,6 +245,7 @@ export function buildVirtualTranscriptRows(
       const historyStart = options.historyStart;
       if (
         outlinedRequests.length !== 1 ||
+        outlinedRequests[0]?.deliveryMode === 'steer' ||
         historyStart === undefined ||
         requestOrdinal === undefined ||
         requestOrdinal >= historyStart ||

@@ -426,7 +426,7 @@ describe('transcript work-log row plan', () => {
     );
   });
 
-  it('rejects ambiguous, non-user, and not-yet-covered outline boundaries', () => {
+  it('rejects ambiguous, non-user, steering, and not-yet-covered outline boundaries', () => {
     const partial = [
       item('work', 'assistant'),
       item('answer', 'assistant', {
@@ -463,6 +463,20 @@ describe('transcript work-log row plan', () => {
         ...options,
         outline: [
           { id: 'request', ordinal: 1, kind: 'assistant', label: 'Wrong role' },
+        ],
+      }).some((row) => row.kind === 'work-log'),
+    ).toBe(false);
+    expect(
+      buildVirtualTranscriptRows(partial, new Set(), {
+        ...options,
+        outline: [
+          {
+            id: 'request',
+            ordinal: 1,
+            kind: 'user',
+            label: 'Steering',
+            deliveryMode: 'steer',
+          },
         ],
       }).some((row) => row.kind === 'work-log'),
     ).toBe(false);
