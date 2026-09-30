@@ -26,10 +26,6 @@ export class PendingProcessAccounting {
     return this.total;
   }
 
-  hasPending(): boolean {
-    return this.total > 0;
-  }
-
   clear(source?: object): void {
     if (source) {
       const previous = this.sources.get(source) ?? 0;
