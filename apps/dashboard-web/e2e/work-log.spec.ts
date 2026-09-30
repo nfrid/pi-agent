@@ -160,8 +160,18 @@ test('virtualized outline jumps open the containing work log and keep its anchor
   await expect(workLog).toBeVisible();
   await expect(page.getByText('Long task complete')).toBeVisible();
   await page.getByRole('button', { name: /Redirect this step/ }).click();
+  const steering = page
+    .getByLabel('Transcript', { exact: true })
+    .getByText('Redirect this step', { exact: true });
+  await expect(steering).toBeInViewport();
+  // The disclosure is correctly virtualized away after the jump. Return to
+  // the request before checking its retained expanded state.
+  await page
+    .getByRole('button', { name: 'Long task request', exact: true })
+    .click();
   await expect(workLog).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.getByText('Redirect this step')).toBeVisible();
+  await workLog.click();
+  await expect(page.getByText('Long task complete')).toBeVisible();
   assertNoUnexpectedDashboardApiRequests(page);
 });
 

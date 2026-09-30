@@ -416,6 +416,60 @@ describe('request closure lifecycle', () => {
     });
   });
 
+  it('resolves nested cancellations only after their script result enters context', () => {
+    const { lifecycle, ctx, event, appendEntry } = setup();
+    lifecycle.wait(
+      [
+        { kind: 'process', id: 'process-1' },
+        { kind: 'delegate', id: 'review@1' },
+      ],
+      new Map([['review@1', 'review@1']]),
+      [],
+    );
+    lifecycle.observeToolReceipt(
+      'session',
+      'script/inner/stop',
+      'background_stop',
+      {
+        details: {
+          action: 'stop',
+          processes: [{ id: 'process-1', status: 'killed' }],
+        },
+      },
+      'script/inner',
+    );
+    lifecycle.observeToolReceipt(
+      'session',
+      'script/inner/cancel',
+      'delegate_jobs',
+      {
+        details: {
+          action: 'cancel',
+          attempts: [{ identity: 'review@1', state: 'cancelled' }],
+        },
+      },
+      'script/inner',
+    );
+    lifecycle.beforeSettle(event, ctx);
+    expect(lifecycle.persistedMarker(ctx, appendEntry)).toBeUndefined();
+    const result = {
+      role: 'toolResult',
+      toolName: 'codemode',
+      toolCallId: 'script',
+      nestedCalls: {
+        calls: [{ id: 'script/inner/stop' }, { id: 'script/inner/cancel' }],
+      },
+    };
+    lifecycle.entered([result]);
+    lifecycle.beforeSettle(event, ctx);
+    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
+    });
+    // The same delivered script evidence must not establish a new wait.
+    lifecycle.wait([{ kind: 'process', id: 'process-1' }], new Map(), [result]);
+    expect(lifecycle.hasPendingWait(ctx)).toBe(false);
+  });
+
   it('keeps stop and cancel waits open for nonterminal snapshots', () => {
     const { lifecycle, ctx, event, appendEntry } = setup();
     lifecycle.wait(

@@ -268,6 +268,31 @@ actions, structured tool inspectors, and a keyboard-first command palette.
 Short transcripts retain normal document flow, while long transcripts are
 virtualized. Activity-group headers are the sole sticky transcript landmark.
 
+### Transcript work logs
+
+Live work retains ordinary assistant messages and chronological activity groups.
+Codemode remains a visible `Codemode` call, while its children are peer rows marked
+with a `↳` prefix. Their results pass through the script rather than going directly
+to the agent; the script and selected output remain available in the root inspector.
+
+An exact persisted `response-closure` marker enables a compact **Work log** between
+the ordinary user request and the final assistant answer. It shows elapsed wall-clock
+time, including background waits, and an action count that excludes codemode wrappers
+when their child actions are known. Steering stays inside the work log; ordinary
+follow-up requests do not. Missing, invalid, conflicting, or partially loaded boundaries
+leave the transcript open rather than guessing from prose. Older unmarked history
+retains its existing presentation.
+
+New closures preserve the work log when the reader has scrolled away from the tail
+or opened its technical details. Outline navigation opens a containing work log when
+needed, including in virtualized history. Background activity after handoff remains a
+separate continuation and never reopens an earlier completed answer.
+
+`response_wait` declares an exact process, output-watch, or delegate dependency when
+an answer must remain open for automatic continuation. A passive server alone does
+not prevent handoff. The durable boundary is emitted only at genuine SDK settlement;
+it is not inferred from `agent_end` or from the existence of running processes.
+
 ## Dashboard UI principle
 
 Prefer content over labels and chrome: expanded technical payloads should be

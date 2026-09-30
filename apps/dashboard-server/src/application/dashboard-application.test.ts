@@ -132,6 +132,29 @@ describe('public runtime event projection', () => {
     expect(JSON.stringify(projected)).not.toContain('large eager delegate');
   });
 
+  it('forwards response closure markers unchanged to the session feed', () => {
+    const event: BridgeEvent = {
+      type: 'agent.settled',
+      sessionId: 'session-1',
+      closure: {
+        id: 'closure-entry',
+        type: 'custom',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request-entry',
+          finalMessageId: 'answer-entry',
+          startedAt: 10,
+          endedAt: 20,
+          liveRequestMessageId: 'live-request',
+          liveFinalMessageId: 'live-answer',
+        },
+      },
+    };
+    // Settlement intentionally is not a terminal-message overlay. Its marker
+    // still travels in the event while the durable session owns history.
+    expect(projectPublicBridgeEvent(event)).toEqual(event);
+  });
+
   it('strips transcript entries from all session-bearing public events', () => {
     const events: BridgeEvent[] = [
       { type: 'runtime.hello', protocolVersion: 1, snapshot: runtime },

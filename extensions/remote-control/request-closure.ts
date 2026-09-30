@@ -179,6 +179,7 @@ export class RequestClosureLifecycle {
     receiptId: string,
     toolName: string,
     result: unknown,
+    parentToolCallId?: string,
   ): void {
     if (sessionId !== this.sessionId) {
       this.observe(sessionId, { role: 'system' });
@@ -197,13 +198,39 @@ export class RequestClosureLifecycle {
     }
     this.startReceipts.set(receiptId, {
       role: 'toolResult',
+      toolCallId: receiptId,
+      ...(parentToolCallId ? { parentToolCallId } : {}),
       toolName,
       details: message.details,
     });
   }
 
-  getStartReceipts(): NativeMessage[] {
+  getToolReceipts(): NativeMessage[] {
     return [...this.startReceipts.values()];
+  }
+
+  private enteredResultEvidence(messages: readonly unknown[]): unknown[] {
+    const enteredCalls = new Set<string>();
+    for (const value of messages) {
+      const message = messageFrom(value);
+      if (message?.role !== 'toolResult') continue;
+      if (typeof message.toolCallId === 'string')
+        enteredCalls.add(message.toolCallId);
+      const nested = message.nestedCalls;
+      if (isRecord(nested) && Array.isArray(nested.calls))
+        for (const call of nested.calls)
+          if (isRecord(call) && typeof call.id === 'string')
+            enteredCalls.add(call.id);
+    }
+    return [
+      ...messages,
+      ...this.getToolReceipts().filter(
+        (receipt) =>
+          typeof receipt.parentToolCallId === 'string' &&
+          (enteredCalls.has(String(receipt.toolCallId)) ||
+            enteredCalls.has(receipt.parentToolCallId)),
+      ),
+    ];
   }
 
   observeLiveAlias(message: NativeMessage, liveId: string): void {
@@ -231,7 +258,10 @@ export class RequestClosureLifecycle {
   ): void {
     for (const [alias, identity] of delegateAliases)
       this.delegateAliases.set(alias, identity);
-    const resolved = resultKeys(history, this.delegateAliases);
+    const resolved = resultKeys(
+      this.enteredResultEvidence(history),
+      this.delegateAliases,
+    );
     for (const key of resolved) this.waiting.delete(key);
     for (const target of targets) {
       const key = waitTargetKey(target);
@@ -240,7 +270,10 @@ export class RequestClosureLifecycle {
   }
 
   entered(messages: readonly unknown[]): void {
-    for (const key of resultKeys(messages, this.delegateAliases))
+    for (const key of resultKeys(
+      this.enteredResultEvidence(messages),
+      this.delegateAliases,
+    ))
       this.waiting.delete(key);
   }
 
@@ -521,7 +554,7 @@ export function installRequestClosureBoundary(
       const branch = ctx.sessionManager.getBranch();
       const resolved = canonicalizeWaitTargets(params.targets, [
         ...branch,
-        ...lifecycle.getStartReceipts(),
+        ...lifecycle.getToolReceipts(),
       ]);
       lifecycle.wait(resolved.targets, resolved.delegateAliases, branch);
       return {
@@ -542,8 +575,10 @@ export function installRequestClosureBoundary(
         'background_start',
         'background_watch',
         'background_list',
+        'background_stop',
         'delegate_start',
         'delegate_continue',
+        'delegate_jobs',
       ].includes(toolName)
     )
       return;
@@ -553,6 +588,7 @@ export function installRequestClosureBoundary(
       event.toolCallId,
       toolName,
       event.result,
+      event.parentToolCallId,
     );
   });
   pi.on('message_end', (event, ctx) => {
