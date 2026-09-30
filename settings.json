@@ -7,7 +7,7 @@
     "+codemode"
   ],
   "codemode": {
-    "mode": "only"
+    "mode": "on"
   },
   "editorPaddingX": 1,
   "hideThinkingBlock": false,
