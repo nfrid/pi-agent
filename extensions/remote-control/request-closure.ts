@@ -75,7 +75,12 @@ function resultKeys(
       Array.isArray(details.processes)
     ) {
       for (const process of details.processes) {
-        if (!isRecord(process) || typeof process.id !== 'string') continue;
+        if (
+          !isRecord(process) ||
+          typeof process.id !== 'string' ||
+          !['done', 'failed', 'killed'].includes(String(process.status))
+        )
+          continue;
         keys.add(`process:${process.id}`);
         if (Array.isArray(process.watches))
           for (const watch of process.watches)
@@ -98,10 +103,17 @@ function resultKeys(
     ) {
       if (Array.isArray(details.attempts))
         for (const attempt of details.attempts)
-          if (isRecord(attempt)) addDelegate(attempt.identity);
+          if (
+            isRecord(attempt) &&
+            ['cancelled', 'completed', 'failed'].includes(String(attempt.state))
+          )
+            addDelegate(attempt.identity);
       if (Array.isArray(details.jobs))
         for (const job of details.jobs)
-          if (isRecord(job)) {
+          if (
+            isRecord(job) &&
+            ['cancelled', 'success', 'error'].includes(String(job.state))
+          ) {
             addDelegate(job.attemptIdentity);
             addDelegate(job.id);
           }
@@ -121,6 +133,8 @@ export class RequestClosureLifecycle {
   private previousRequest?: TrackedMessage;
   private previousFinal?: TrackedMessage;
   private readonly delegateAliases = new Map<string, string>();
+  private readonly startReceipts = new Map<string, NativeMessage>();
+  private readonly receiptIds = new Set<string>();
   private steeredMessages = new WeakSet<object>();
   private previousWaiting: string[] = [];
 
@@ -133,6 +147,8 @@ export class RequestClosureLifecycle {
       this.settledMarker = undefined;
       this.waiting.clear();
       this.delegateAliases.clear();
+      this.startReceipts.clear();
+      this.receiptIds.clear();
     }
     if (this.steeredMessages.has(message)) return;
     if (this.request?.message === message) return;
@@ -156,6 +172,38 @@ export class RequestClosureLifecycle {
     } else if (message.role === 'assistant' && this.request) {
       this.final = { message };
     }
+  }
+
+  observeToolReceipt(
+    sessionId: string,
+    receiptId: string,
+    toolName: string,
+    result: unknown,
+  ): void {
+    if (sessionId !== this.sessionId) {
+      this.observe(sessionId, { role: 'system' });
+    }
+    if (this.receiptIds.has(receiptId)) return;
+    this.receiptIds.add(receiptId);
+    if (this.receiptIds.size > 128) {
+      const oldest = this.receiptIds.values().next().value;
+      if (oldest) this.receiptIds.delete(oldest);
+    }
+    const message = isRecord(result) ? result : undefined;
+    if (!message || !isRecord(message.details)) return;
+    if (this.startReceipts.size >= 128) {
+      const oldest = this.startReceipts.keys().next().value;
+      if (oldest) this.startReceipts.delete(oldest);
+    }
+    this.startReceipts.set(receiptId, {
+      role: 'toolResult',
+      toolName,
+      details: message.details,
+    });
+  }
+
+  getStartReceipts(): NativeMessage[] {
+    return [...this.startReceipts.values()];
   }
 
   observeLiveAlias(message: NativeMessage, liveId: string): void {
@@ -325,6 +373,8 @@ export class RequestClosureLifecycle {
     this.settledMarker = undefined;
     this.waiting.clear();
     this.delegateAliases.clear();
+    this.startReceipts.clear();
+    this.receiptIds.clear();
     this.previousRequest = undefined;
     this.previousFinal = undefined;
     this.previousWaiting = [];
@@ -380,19 +430,25 @@ function canonicalizeWaitTargets(
     if (message?.role !== 'toolResult') continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (!details) continue;
+    const addProcess = (process: unknown) => {
+      if (!isRecord(process) || typeof process.id !== 'string') return;
+      processes.add(process.id);
+      if (Array.isArray(process.watches))
+        for (const watch of process.watches)
+          if (isRecord(watch) && typeof watch.id === 'string')
+            watches.add(`${process.id}:${watch.id}`);
+    };
     if (
       (message.toolName === 'background_start' ||
         message.toolName === 'background_watch') &&
-      isRecord(details.process) &&
-      typeof details.process.id === 'string'
-    ) {
-      const id = details.process.id;
-      processes.add(id);
-      if (Array.isArray(details.process.watches))
-        for (const watch of details.process.watches)
-          if (isRecord(watch) && typeof watch.id === 'string')
-            watches.add(`${id}:${watch.id}`);
-    }
+      isRecord(details.process)
+    )
+      addProcess(details.process);
+    if (
+      message.toolName === 'background_list' &&
+      Array.isArray(details.processes)
+    )
+      for (const process of details.processes) addProcess(process);
     if (
       (message.toolName === 'delegate_start' ||
         message.toolName === 'delegate_continue') &&
@@ -463,7 +519,10 @@ export function installRequestClosureBoundary(
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const branch = ctx.sessionManager.getBranch();
-      const resolved = canonicalizeWaitTargets(params.targets, branch);
+      const resolved = canonicalizeWaitTargets(params.targets, [
+        ...branch,
+        ...lifecycle.getStartReceipts(),
+      ]);
       lifecycle.wait(resolved.targets, resolved.delegateAliases, branch);
       return {
         content: [
@@ -475,6 +534,26 @@ export function installRequestClosureBoundary(
         details: { targets: resolved.targets },
       };
     },
+  });
+  pi.on('tool_execution_end', (event, ctx) => {
+    const toolName = event.toolName;
+    if (
+      ![
+        'background_start',
+        'background_watch',
+        'background_list',
+        'delegate_start',
+        'delegate_continue',
+      ].includes(toolName)
+    )
+      return;
+    const sessionId = ctx.sessionManager.getSessionId();
+    lifecycle.observeToolReceipt(
+      sessionId,
+      event.toolCallId,
+      toolName,
+      event.result,
+    );
   });
   pi.on('message_end', (event, ctx) => {
     const message = messageFrom(event);

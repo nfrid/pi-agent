@@ -242,6 +242,76 @@ describe('request closure lifecycle', () => {
     });
   });
 
+  it('accepts authoritative nested tool receipts before their parent tool result persists', async () => {
+    const { lifecycle } = setup();
+    const tools = new Map<
+      string,
+      { execute: (...args: unknown[]) => Promise<unknown> }
+    >();
+    const handlers = new Map<string, (...args: unknown[]) => void>();
+    installRequestClosureBoundary(
+      {
+        registerTool: (tool: {
+          name: string;
+          execute: (...args: unknown[]) => Promise<unknown>;
+        }) => tools.set(tool.name, tool),
+        on: (name: string, handler: (...args: unknown[]) => void) =>
+          handlers.set(name, handler),
+      } as never,
+      lifecycle,
+    );
+    const receipt = (toolCallId: string, toolName: string, details: unknown) =>
+      handlers.get('tool_execution_end')?.(
+        { toolCallId, toolName, result: { details } },
+        { sessionManager: { getSessionId: () => 'session' } },
+      );
+    receipt('nested-bg', 'background_start', {
+      process: { id: 'nested-process', watches: [{ id: 'ready' }] },
+    });
+    receipt('nested-delegate', 'delegate_start', {
+      workflow: { identity: 'review@4', logicalId: 'review', jobId: 'job-4' },
+    });
+    const wait = tools.get('response_wait');
+    if (!wait) throw new Error('response_wait was not registered');
+    await expect(
+      wait.execute(
+        'wait',
+        {
+          targets: [
+            { kind: 'process', id: 'nested-process' },
+            { kind: 'watch', id: 'nested-process', watchId: 'ready' },
+            { kind: 'delegate', id: 'review' },
+          ],
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getBranch: () => [] } },
+      ),
+    ).resolves.toMatchObject({
+      details: {
+        targets: [
+          { kind: 'process', id: 'nested-process' },
+          { kind: 'watch', id: 'nested-process', watchId: 'ready' },
+          { kind: 'delegate', id: 'review@4' },
+        ],
+      },
+    });
+    await expect(
+      wait.execute(
+        'unknown',
+        {
+          targets: [
+            { kind: 'process', id: 'nested-process' },
+            { kind: 'process', id: 'unknown' },
+          ],
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getBranch: () => [] } },
+      ),
+    ).rejects.toThrow('Unknown background process');
+  });
+
   it('does not wait again for an exact target whose result already entered history', async () => {
     const already = setup();
     const tools = new Map<
@@ -328,6 +398,64 @@ describe('request closure lifecycle', () => {
           dedupeKey: 'process-1',
           status: 'killed',
           endedWatches: [{ id: 'watch-1', contains: 'READY' }],
+        },
+      },
+      {
+        role: 'toolResult',
+        toolName: 'delegate_jobs',
+        details: {
+          action: 'cancel',
+          attempts: [{ identity: 'review@1', state: 'cancelled' }],
+          jobs: [],
+        },
+      },
+    ]);
+    lifecycle.beforeSettle(event, ctx);
+    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
+    });
+  });
+
+  it('keeps stop and cancel waits open for nonterminal snapshots', () => {
+    const { lifecycle, ctx, event, appendEntry } = setup();
+    lifecycle.wait(
+      [
+        { kind: 'process', id: 'process-1' },
+        { kind: 'delegate', id: 'review@1' },
+      ],
+      new Map([['review@1', 'review@1']]),
+      [],
+    );
+    lifecycle.entered([
+      {
+        role: 'toolResult',
+        toolName: 'background_stop',
+        details: {
+          action: 'stop',
+          processes: [{ id: 'process-1', status: 'running' }],
+        },
+      },
+      {
+        role: 'toolResult',
+        toolName: 'delegate_jobs',
+        details: {
+          action: 'cancel',
+          attempts: [{ identity: 'review@1', state: 'running' }],
+          jobs: [
+            { id: 'job-1', attemptIdentity: 'review@1', state: 'running' },
+          ],
+        },
+      },
+    ]);
+    expect(lifecycle.beforeSettle(event, ctx)).toBeUndefined();
+    expect(lifecycle.persistedMarker(ctx, appendEntry)).toBeUndefined();
+    lifecycle.entered([
+      {
+        role: 'toolResult',
+        toolName: 'background_stop',
+        details: {
+          action: 'stop',
+          processes: [{ id: 'process-1', status: 'killed' }],
         },
       },
       {
