@@ -15,7 +15,7 @@ repository check when a narrower command proves the same thing.
 - `bun run typecheck:apps` — every app under `apps/*`
 - `bun run typecheck` — all three typecheck scopes; `workspace:typecheck`
   remains a compatibility alias for packages plus apps
-- `bun x vitest run <path>` — focused root/extension tests
+- `bun run test -- <path>` — focused root/extension tests through the cleaned launcher
 - `bun run --filter <workspace> test` — one package or app test suite
 - `bun x biome check <path...>` — focused lint and formatting validation
 - `bun run lint` and `bun run format` — repository-wide Biome checks

@@ -40,12 +40,15 @@ bun run typecheck:packages
 bun run typecheck:apps
 
 # One root or extension test file
-bun x vitest run extensions/example/example.test.ts
+bun run test -- extensions/example/example.test.ts
 
 # One workspace and focused Biome paths
 bun run --filter <workspace-name> test
 bun x biome check path/to/changed-file.ts
 ```
+
+The root test script forwards Vitest paths and options while removing delegate-only
+and broken sandbox environment variables, so it also works from child agents.
 
 Combine scopes only when the change crosses them. `bun run typecheck` runs all
 three TypeScript categories. Use `bun run check` for changes to shared validation
