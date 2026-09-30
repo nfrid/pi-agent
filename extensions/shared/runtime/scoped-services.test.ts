@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('scoped runtime services', () => {
-  test('keeps live surfaces and pending settlement accounting isolated', () => {
+  test('keeps live surfaces and logical request dependencies isolated', () => {
     const first = services(`surface-a-${randomUUID()}`);
     const second = services(`surface-b-${randomUUID()}`);
     first.liveSurfaceHub.publish('tasks', [
@@ -42,6 +42,12 @@ describe('scoped runtime services', () => {
 
     const source = {};
     first.pendingProcesses.set(source, 1);
+    expect(isGenuineAgentSettlement(false, first.scopeId)).toBe(true);
+    first.requestDependencies = {
+      register: () => undefined,
+      resolveDelegateGate: () => undefined,
+      hasPending: () => true,
+    };
     expect(isGenuineAgentSettlement(false, first.scopeId)).toBe(false);
     expect(isGenuineAgentSettlement(false, second.scopeId)).toBe(true);
   });

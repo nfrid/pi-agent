@@ -176,6 +176,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     pi,
     getRuntimeActive: () => runtimeActive,
     getActiveCoordinator: () => activeWake?.coordinator,
+    isRequired: (sources) =>
+      sources.some(
+        (id) =>
+          getScopedServices(scopeId).requestDependencies?.isRequired?.(
+            'delegate',
+            id,
+          ) ?? true,
+      ),
     getDeliveryBroker: () => getScopedServices(scopeId).backgroundDeliveries,
     getOutstanding: (sources) => {
       const sourceSet = new Set(sources);
@@ -194,7 +202,19 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
           ) ?? []
       );
     },
-    onEntered: (sources) => {
+    onEntered: (sources, wake) => {
+      const mode = isExplicitGate(wake)
+        ? 'all' in wake.condition
+          ? 'all'
+          : 'any' in wake.condition
+            ? 'any'
+            : undefined
+        : 'all';
+      if (mode)
+        getScopedServices(scopeId).requestDependencies?.resolveDelegateGate(
+          isExplicitGate(wake) ? wake.references : sources,
+          mode,
+        );
       statuses?.markWorkflowDelivered(sources);
       void hostedCompletionAcker
         ?.entered(sources)
@@ -298,6 +318,11 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
             'cancelled',
             'blocked',
           ].includes(attempt.state) &&
+          (getScopedServices(scopeId).requestDependencies?.isRequired?.(
+            'delegate',
+            attempt.identity,
+          ) ??
+            true) &&
           !delivered.has(attempt.identity) &&
           !explicitlyHeld.has(attempt.identity) &&
           !alreadyQueued.has(attempt.identity),
@@ -518,6 +543,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getUi: () => ui,
     getDeliveryBroker: () => getScopedServices(scopeId).backgroundDeliveries,
     getPaused: () => getPauseCoordinator(scopeId).isActive(),
+    isRequired: (job) =>
+      getScopedServices(scopeId).requestDependencies?.isRequired?.(
+        'delegate',
+        job.attemptIdentity ?? job.id,
+      ) ?? true,
+    onEntered: (sources) =>
+      getScopedServices(scopeId).requestDependencies?.resolveDelegateGate(
+        sources,
+        'all',
+      ),
   });
 
   subscribeDelegateControlLifecycle((event) => {
@@ -964,12 +999,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     syncWidget();
   });
   pi.on('context', (event) => {
-    // Keep the automatic-delivery marker through context entry so a later
-    // peek does not replay the same settled completion.
-    getScopedServices(scopeId).backgroundDeliveries.markEntered(event.messages);
     const currentMessages = delivery.filterContext(event.messages);
-    delivery.markAutomaticDeliveriesEntered(currentMessages);
     return { messages: wakeDelivery.filterContext(currentMessages) };
+  });
+  pi.on('context_with_system', (event) => {
+    const currentMessages = delivery.filterContext(event.messages);
+    getScopedServices(scopeId).backgroundDeliveries.markEntered(
+      currentMessages,
+    );
+    delivery.markAutomaticDeliveriesEntered(currentMessages);
+    wakeDelivery.acknowledgeEntered(currentMessages);
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component

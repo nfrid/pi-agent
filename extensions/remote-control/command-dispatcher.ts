@@ -11,12 +11,16 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import type { BridgeCommand } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import { setCodexServiceTier } from '../shared/codex-service-tier';
+import { hasPendingRequestDependencies } from '../shared/runtime/agent-lifecycle';
 import type { CapabilityActionHost } from '../shared/runtime/capability-action-host';
 import {
   aggregateRuntimeCapabilities,
   getCapabilityRegistry,
 } from '../shared/runtime/capability-registry';
-import { getSessionScopeId } from '../shared/runtime/scoped-services';
+import {
+  getScopedServices,
+  getSessionScopeId,
+} from '../shared/runtime/scoped-services';
 import { dispatchDashboardInput } from './command-adapter';
 import { cancelActiveCompaction } from './compaction-control';
 import {
@@ -123,6 +127,13 @@ export async function dispatchDashboardCommand(
       }
       if (!ctx.isIdle())
         throw new Error('Agent is working; choose steer or follow-up.');
+      if (hasPendingRequestDependencies(getSessionScopeId(ctx)))
+        throw Object.assign(
+          new Error(
+            'The current logical request is still waiting for a required result.',
+          ),
+          { code: 'busy' },
+        );
       return dispatchDashboardInput(
         pi,
         ctx,
@@ -156,6 +167,15 @@ export async function dispatchDashboardCommand(
           }),
         );
       }
+      if (
+        command.type === 'steer' &&
+        ctx.isIdle() &&
+        !hasPendingRequestDependencies(getSessionScopeId(ctx))
+      )
+        throw Object.assign(
+          new Error('Steering requires an active agent run.'),
+          { code: 'busy' },
+        );
       if (command.images?.length && !ctx.model?.input.includes('image'))
         throw new Error('The selected model does not support image input.');
       return {
@@ -170,6 +190,9 @@ export async function dispatchDashboardCommand(
         mode: command.type,
       };
     case 'abort':
+      getScopedServices(
+        getSessionScopeId(ctx),
+      ).requestDependencies?.abandon?.();
       ctx.abort();
       return { accepted: true };
     case 'compact.cancel':

@@ -10,8 +10,12 @@ import {
   type ExternalDeliveryReceipt,
   externalDeliveryReceipt,
 } from '@pi-dashboard/protocol';
-
+import { hasPendingRequestDependencies } from '../shared/runtime/agent-lifecycle';
 import { resolveHostAgentSession } from '../shared/runtime/keyed-turn-scheduler';
+import {
+  installLogicalInputShim,
+  markLogicalSteering,
+} from '../shared/runtime/logical-input';
 
 type SteeringScope = {
   deliveryId: string;
@@ -30,6 +34,7 @@ const steeringShimKey = Symbol.for('pi.remote-control.external-steering');
 
 /** Only public methods, and only inside an authenticated external dispatch. */
 export function installExternalSteeringShim(): boolean {
+  installLogicalInputShim();
   const host = resolveHostAgentSession();
   if (!host) return false;
   const prototype = host.prototype as AgentSession & {
@@ -60,7 +65,7 @@ export function installExternalSteeringShim(): boolean {
         new Error('The native source session or branch was replaced.'),
         { code: 'orchestration-conflict' },
       );
-    if (!this.isStreaming)
+    if (!this.isStreaming && !hasPendingRequestDependencies(scope.sessionId))
       throw Object.assign(
         new Error('Runtime is no longer working; use idle prompt delivery.'),
         { code: 'busy' },
@@ -78,8 +83,19 @@ export function installExternalSteeringShim(): boolean {
       sessionId: scope.sessionId,
     };
     steeringIdentities.set(nativeMessage, identity);
+    markLogicalSteering(nativeMessage);
     try {
-      this.agent.steer(nativeMessage);
+      if (this.isStreaming) this.agent.steer(nativeMessage);
+      else {
+        const session = this as unknown as {
+          _runAgentPrompt(message: MessageEndEvent['message']): Promise<void>;
+        };
+        void session
+          ._runAgentPrompt(nativeMessage)
+          .catch((error) =>
+            console.error('external idle steering failed', error),
+          );
+      }
       scope.queued = true;
     } catch (error) {
       steeringIdentities.delete(nativeMessage);
@@ -131,10 +147,14 @@ export function withExternalDelivery<T>(
       new Error('The source branch anchor is no longer selected.'),
       { code: 'orchestration-conflict' },
     );
-  if (!ctx.isIdle() || ctx.hasPendingMessages())
+  if (
+    !ctx.isIdle() ||
+    ctx.hasPendingMessages() ||
+    hasPendingRequestDependencies(ctx.sessionManager.getSessionId())
+  )
     throw Object.assign(
       new Error(
-        'External input requires an idle runtime with no queued messages.',
+        'External input requires an idle runtime with no queued messages or open logical request.',
       ),
       { code: 'busy' },
     );

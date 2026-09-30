@@ -27,7 +27,21 @@ function harness() {
       sessionManager: { buildContextEntries: () => [] },
     } as never,
   );
-  return { appendEntry, emit, handlers };
+  return {
+    appendEntry,
+    emit,
+    handlers,
+    persist(message: object, id = 'user-entry', event = 'message_end') {
+      handlers.get(event)?.(
+        { message } as never,
+        {
+          sessionManager: {
+            getBranch: () => [{ type: 'message', id, message }],
+          },
+        } as never,
+      );
+    },
+  };
 }
 
 describe('steering message tracking', () => {
@@ -53,18 +67,20 @@ describe('steering message tracking', () => {
   });
 
   it('records and publishes an explicitly steered user message', () => {
-    const { appendEntry, emit, handlers } = harness();
+    const { appendEntry, emit, handlers, persist } = harness();
     handlers.get('input')?.({
       text: 'redirect',
       streamingBehavior: 'steer',
     } as never);
+    const message = { role: 'user', content: 'redirect', timestamp: 42 };
     handlers.get('message_start')?.(
-      {
-        message: { role: 'user', content: 'redirect', timestamp: 42 },
-      } as never,
+      { message } as never,
       { sessionManager: { getSessionId: () => 'session-1' } } as never,
     );
+    expect(appendEntry).not.toHaveBeenCalled();
+    persist(message);
     expect(appendEntry).toHaveBeenCalledWith(STEERING_MESSAGE_MARKER_TYPE, {
+      userEntryId: 'user-entry',
       timestamp: 42,
       text: 'redirect',
     });
@@ -75,20 +91,48 @@ describe('steering message tracking', () => {
   });
 
   it('matches a transformed steering input to the next delivered user message', () => {
-    const { appendEntry, handlers } = harness();
+    const { appendEntry, handlers, persist } = harness();
     handlers.get('input')?.({
       text: '/template',
       streamingBehavior: 'steer',
     } as never);
+    const message = {
+      role: 'user',
+      content: 'Expanded template',
+      timestamp: 43,
+    };
     handlers.get('message_start')?.(
-      {
-        message: { role: 'user', content: 'Expanded template', timestamp: 43 },
-      } as never,
+      { message } as never,
       { sessionManager: { getSessionId: () => 'session-1' } } as never,
     );
+    persist(message);
     expect(appendEntry).toHaveBeenCalledWith(STEERING_MESSAGE_MARKER_TYPE, {
+      userEntryId: 'user-entry',
       timestamp: 43,
       text: 'Expanded template',
+    });
+  });
+
+  it('binds only the same native object and persists at most one marker', () => {
+    const { appendEntry, handlers, persist } = harness();
+    const message = { role: 'user', content: 'identical', timestamp: 43 };
+    handlers.get('input')?.({
+      text: 'identical',
+      streamingBehavior: 'steer',
+    } as never);
+    handlers.get('message_start')?.(
+      { message } as never,
+      { sessionManager: { getSessionId: () => 'session-1' } } as never,
+    );
+    persist({ ...message }, 'wrong-entry');
+    expect(appendEntry).not.toHaveBeenCalled();
+    persist(message, 'exact-entry', 'context');
+    persist(message, 'exact-entry');
+    expect(appendEntry).toHaveBeenCalledOnce();
+    expect(appendEntry).toHaveBeenCalledWith(STEERING_MESSAGE_MARKER_TYPE, {
+      text: 'identical',
+      timestamp: 43,
+      userEntryId: 'exact-entry',
     });
   });
 

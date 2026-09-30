@@ -30,7 +30,7 @@ import {
 } from './schema';
 
 const START_DESCRIPTION =
-  'Launch a non-interactive Bash command with /bin/bash -c and no stdin that outlives the current turn. The process survives parent Pi session shutdown; completion is delivered automatically, and stop is explicit.';
+  'Launch a non-interactive Bash command with /bin/bash -c and no stdin. kind defaults to task, which keeps this request open until process exit; kind=service is passive unless an output watch is requested. Completion is delivered automatically, and stop is explicit.';
 const PEEK_DESCRIPTION =
   'Inspect one retained background process immediately. This never waits; use completion notifications instead of polling.';
 const LIST_DESCRIPTION =
@@ -51,7 +51,17 @@ type ToolResult = {
   details: BackgroundToolDetails;
   output?: ReturnType<typeof peekOutput>;
 };
-type OperationContext = Pick<ExtensionContext, 'cwd'>;
+type RequestDependency = { kind: 'process' | 'watch'; id: string };
+type RegisterRequestDependency = (
+  kind: RequestDependency['kind'],
+  id: string,
+  ctx: ExtensionContext,
+) => boolean | undefined;
+type ResolveRequestDependency = (
+  kind: RequestDependency['kind'],
+  id: string,
+  ctx: ExtensionContext,
+) => void;
 type Operation<T extends TSchema> = {
   name: string;
   label: string;
@@ -63,7 +73,7 @@ type Operation<T extends TSchema> = {
   execute: (
     params: Static<T>,
     signal: AbortSignal | undefined,
-    ctx: OperationContext,
+    ctx: ExtensionContext,
   ) => Promise<ToolResult>;
 };
 
@@ -146,6 +156,10 @@ function registerOperation<T extends TSchema>(
           ...(result.details.processes
             ? { processes: result.details.processes.map(processOutput) }
             : {}),
+          ...(result.details.id ? { id: result.details.id } : {}),
+          ...(result.details.watchIds
+            ? { watchIds: result.details.watchIds }
+            : {}),
           ...output,
         },
       };
@@ -181,8 +195,11 @@ function registerOperation<T extends TSchema>(
 function start(
   params: StartParams,
   _signal: AbortSignal | undefined,
-  ctx: OperationContext,
+  ctx: ExtensionContext,
   getManager: () => BackgroundManager,
+  registerDependency: RegisterRequestDependency,
+  resolveDependency: ResolveRequestDependency,
+  cancelCompletion: (id: string) => boolean,
 ): Promise<ToolResult> {
   const command = requireText(params.command, 'command');
   const title =
@@ -191,21 +208,65 @@ function start(
       : requireText(params.title, 'title').replace(/\s+/gu, ' ');
   const cwd = validateCwd(ctx.cwd, params.cwd);
   return getManager()
-    .start({
-      command,
-      title,
-      cwd,
-      ...(params.watch ? { watch: hostWatches(params.watch) } : {}),
-    })
-    .then((snapshot) => ({
-      content: [
-        {
-          type: 'text' as const,
-          text: `Started ${formatSummary(snapshot)}.\nCompletion and watch outcomes will be delivered automatically; do not poll.`,
+    .start(
+      {
+        command,
+        title,
+        cwd,
+        ...(params.watch ? { watch: hostWatches(params.watch) } : {}),
+      },
+      async (snapshot) => {
+        const registered: RequestDependency[] = [];
+        try {
+          const register = (kind: RequestDependency['kind'], id: string) => {
+            if (registerDependency(kind, id, ctx) === false)
+              throw new Error(
+                'Could not bind the background source to this request.',
+              );
+            registered.push({ kind, id });
+          };
+          if ((params.kind ?? 'task') === 'task')
+            register('process', snapshot.id);
+          for (const watch of snapshot.watches ?? [])
+            register('watch', `${snapshot.id}:${watch.id}`);
+        } catch (error) {
+          let cleanupError: unknown;
+          for (const dependency of registered) {
+            try {
+              resolveDependency(dependency.kind, dependency.id, ctx);
+            } catch (resolveError) {
+              cleanupError ??= resolveError;
+            }
+          }
+          try {
+            await getManager().stop([snapshot.id]);
+          } catch (stopError) {
+            cleanupError ??= stopError;
+          }
+          cancelCompletion(snapshot.id);
+          if (cleanupError)
+            throw new Error(
+              `${error instanceof Error ? error.message : String(error)} Background process cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+              { cause: error },
+            );
+          throw error;
+        }
+      },
+    )
+    .then((snapshot) => {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Started ${formatSummary(snapshot)}.\nCompletion and watch outcomes will be delivered automatically; do not poll.`,
+          },
+        ],
+        details: {
+          action: 'start' as const,
+          process: processDetails(snapshot),
         },
-      ],
-      details: { action: 'start' as const, process: processDetails(snapshot) },
-    }));
+      };
+    });
 }
 
 async function peek(
@@ -281,9 +342,59 @@ async function stop(
 async function watch(
   params: WatchParams,
   getManager: () => BackgroundManager,
+  ctx: ExtensionContext,
+  registerDependency: RegisterRequestDependency,
+  resolveDependency: ResolveRequestDependency,
 ): Promise<ToolResult> {
   const id = requireText(params.id, 'id');
-  const snapshot = await getManager().watch(id, hostWatches(params.watch));
+  const manager = getManager();
+  await manager.list();
+  const priorIds = new Set(
+    (manager.get(id)?.watches ?? []).map((item) => item.id),
+  );
+  const snapshot = await manager.watch(
+    id,
+    hostWatches(params.watch),
+    async (snapshot) => {
+      const added = (snapshot.watches ?? []).filter(
+        (item) => !priorIds.has(item.id),
+      );
+      const registered: string[] = [];
+      try {
+        for (const item of added) {
+          if (
+            registerDependency('watch', `${snapshot.id}:${item.id}`, ctx) ===
+            false
+          )
+            throw new Error('Could not bind the output watch to this request.');
+          registered.push(item.id);
+        }
+      } catch (error) {
+        let cleanupError: unknown;
+        for (const watchId of registered) {
+          try {
+            resolveDependency('watch', `${snapshot.id}:${watchId}`, ctx);
+          } catch (resolveError) {
+            cleanupError ??= resolveError;
+          }
+        }
+        try {
+          await manager.unwatch(
+            id,
+            added.map((item) => item.id),
+          );
+        } catch (unwatchError) {
+          cleanupError ??= unwatchError;
+        }
+        if (cleanupError)
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)} Output-watch cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            { cause: error },
+          );
+        throw error;
+      }
+    },
+  );
   return {
     content: [
       { type: 'text', text: `Added watches. ${formatSummary(snapshot)}` },
@@ -306,7 +417,12 @@ async function unwatch(
     content: [
       { type: 'text', text: `Removed watches. ${formatSummary(snapshot)}` },
     ],
-    details: { action: 'unwatch', process: processDetails(snapshot) },
+    details: {
+      action: 'unwatch',
+      id,
+      watchIds,
+      process: processDetails(snapshot),
+    },
   };
 }
 
@@ -316,6 +432,8 @@ export function registerBackgroundTools(
   cancelCompletion: (id: string) => boolean = () => false,
   resolveProcess: (id: string) => BackgroundSnapshot | undefined = () =>
     undefined,
+  registerDependency: RegisterRequestDependency = () => undefined,
+  resolveDependency: ResolveRequestDependency = () => undefined,
 ): void {
   registerOperation(
     pi,
@@ -327,7 +445,16 @@ export function registerBackgroundTools(
       promptGuidelines: START_GUIDELINES,
       action: 'start',
       parameters: StartParameters,
-      execute: (params, signal, ctx) => start(params, signal, ctx, getManager),
+      execute: (params, signal, ctx) =>
+        start(
+          params,
+          signal,
+          ctx,
+          getManager,
+          registerDependency,
+          resolveDependency,
+          cancelCompletion,
+        ),
     },
     resolveProcess,
   );
@@ -381,7 +508,8 @@ export function registerBackgroundTools(
       promptSnippet: 'Watch future output from a background process',
       action: 'watch',
       parameters: WatchParameters,
-      execute: (params) => watch(params, getManager),
+      execute: (params, _signal, ctx) =>
+        watch(params, getManager, ctx, registerDependency, resolveDependency),
     },
     resolveProcess,
   );

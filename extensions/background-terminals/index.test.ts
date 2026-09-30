@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,7 @@ import type { TSchema } from 'typebox';
 import { Value } from 'typebox/value';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BackgroundJobHostService } from '../../apps/dashboard-server/src/background-job-host';
+import { getScopedServices } from '../shared/runtime/scoped-services';
 import backgroundTerminals from './index';
 import type { ProcessDetails } from './schema';
 
@@ -110,7 +112,7 @@ describe('background terminals extension', () => {
     ]);
     expect(tool?.name).toBe('background_start');
     expect(tool?.description).toContain(
-      'completion is delivered automatically',
+      'Completion is delivered automatically',
     );
     expect(tool?.description).not.toContain(
       'waiting for the background process',
@@ -124,8 +126,9 @@ describe('background terminals extension', () => {
     const guidance = tool?.promptGuidelines?.join('\n');
     expect(guidance).toContain('use ordinary bash for short commands');
     expect(guidance).toContain('one short waiting notice');
-    expect(guidance).toContain('response_wait');
-    expect(guidance).toContain('watch match resolves independently');
+    expect(guidance).toContain('kind: "task"');
+    expect(guidance).toContain('kind: "service"');
+    expect(guidance).toContain('task still waits for process exit');
     expect(guidance).toContain('includes retained settled watches');
     expect(guidance).toContain('use `background_stop` explicitly');
 
@@ -164,6 +167,183 @@ describe('background terminals extension', () => {
     expect(sendMessage.mock.calls[0][1]).toEqual({ triggerTurn: false });
 
     await handlers.get('session_shutdown')?.({});
+  });
+
+  it('does not publish a passive service late exit, but publishes a fast required task', async () => {
+    const handlers = new Map<string, Handler>();
+    const tools = new Map<string, RegisteredTool>();
+    const sendMessage = vi.fn();
+    backgroundTerminals({
+      on: (event: string, handler: Handler) => handlers.set(event, handler),
+      registerTool: (tool: RegisteredTool) => tools.set(tool.name, tool),
+      registerCommand: vi.fn(),
+      registerMessageRenderer: vi.fn(),
+      sendMessage,
+    } as unknown as ExtensionAPI);
+    const scope = `required-delivery-${randomUUID()}`;
+    const services = getScopedServices(scope);
+    const required = new Set<string>();
+    services.requestDependencies = {
+      register: (kind, id) => {
+        required.add(`${kind}:${id}`);
+        return true;
+      },
+      resolveDelegateGate: () => undefined,
+      hasPending: () => required.size > 0,
+      isRequired: (kind, id) => required.has(`${kind}:${id}`),
+    };
+    const ctx = {
+      cwd: process.cwd(),
+      hasUI: false,
+      mode: 'print',
+      sessionManager: { getSessionId: () => scope, getBranch: () => [] },
+    } as unknown as { cwd: string };
+    handlers.get('session_start')?.({}, ctx);
+    const client = new BackgroundJobsClient(host.socketPath, scope);
+    try {
+      const start = tools.get('background_start');
+      if (!start) throw new Error('missing start tool');
+      const service = (await start.execute(
+        'passive',
+        { kind: 'service', command: 'sleep 0.1' },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details: { process: ProcessDetails } };
+      await vi.waitFor(async () =>
+        expect((await client.inspect(service.details.process.id))?.status).toBe(
+          'done',
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(sendMessage).not.toHaveBeenCalled();
+      const task = (await start.execute(
+        'fast-task',
+        { command: 'true' },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details: { process: ProcessDetails } };
+      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+      expect(JSON.stringify(sendMessage.mock.calls)).toContain(
+        task.details.process.id,
+      );
+      required.clear();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(sendMessage).toHaveBeenCalledOnce();
+    } finally {
+      services.requestDependencies = undefined;
+      await handlers.get('session_shutdown')?.({}, ctx);
+    }
+  });
+
+  it('registers task exits and watch outcomes at background source creation, but not passive service exits', async () => {
+    const handlers = new Map<string, Handler>();
+    const tools = new Map<string, RegisteredTool>();
+    const pi = {
+      on(event: string, handler: Handler) {
+        handlers.set(event, handler);
+      },
+      registerTool(definition: RegisteredTool) {
+        tools.set(definition.name, definition);
+      },
+      registerCommand: vi.fn(),
+      registerMessageRenderer: vi.fn(),
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+    backgroundTerminals(pi);
+    const scope = `request-dependencies-${randomUUID()}`;
+    const services = getScopedServices(scope);
+    const registered: Array<{ kind: string; id: string }> = [];
+    const rejectedIds: string[] = [];
+    let rejectNext = false;
+    services.requestDependencies = {
+      register: (kind, id) => {
+        if (rejectNext) {
+          rejectNext = false;
+          rejectedIds.push(id);
+          return false;
+        }
+        registered.push({ kind, id });
+        return true;
+      },
+      resolveDelegateGate: () => undefined,
+      hasPending: () => registered.length > 0,
+    };
+    const ctx = {
+      cwd: process.cwd(),
+      hasUI: false,
+      mode: 'print',
+      sessionManager: { getSessionId: () => scope, getBranch: () => [] },
+    } as unknown as { cwd: string };
+    handlers.get('session_start')?.({}, ctx);
+    const client = new BackgroundJobsClient(host.socketPath, scope);
+    const stopIds: string[] = [];
+    try {
+      const start = tools.get('background_start');
+      if (!start) throw new Error('background_start was not registered');
+      const task = (await start.execute(
+        'task',
+        { command: 'sleep 30' },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details: { process: ProcessDetails } };
+      stopIds.push(task.details.process.id);
+      const service = (await start.execute(
+        'service',
+        { kind: 'service', command: 'sleep 30' },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details: { process: ProcessDetails } };
+      stopIds.push(service.details.process.id);
+      const watchedService = (await start.execute(
+        'watched-service',
+        {
+          kind: 'service',
+          command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify('process.stdout.write("READY");setInterval(() => {}, 1000)')}`,
+          watch: [{ contains: 'READY', timeout_seconds: 2 }],
+        },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details: { process: ProcessDetails } };
+      stopIds.push(watchedService.details.process.id);
+      const watchId = watchedService.details.process.watches?.[0]?.id;
+      expect(registered).toEqual([
+        { kind: 'process', id: task.details.process.id },
+        ...(watchId
+          ? [
+              {
+                kind: 'watch',
+                id: `${watchedService.details.process.id}:${watchId}`,
+              },
+            ]
+          : []),
+      ]);
+      expect(await client.inspect(service.details.process.id)).toMatchObject({
+        status: 'running',
+      });
+      rejectNext = true;
+      await expect(
+        start.execute(
+          'unowned-task',
+          { kind: 'task', command: 'sleep 30' },
+          undefined,
+          undefined,
+          ctx,
+        ),
+      ).rejects.toThrow('Could not bind the background source');
+      expect(rejectedIds).toHaveLength(1);
+      expect(await client.inspect(rejectedIds[0] ?? '')).toMatchObject({
+        status: 'killed',
+      });
+    } finally {
+      if (stopIds.length) await client.stop(stopIds);
+      services.requestDependencies = undefined;
+      handlers.get('session_shutdown')?.({}, ctx);
+    }
   });
 
   it('delivers and durably ACKs a watch before process exit', async () => {
@@ -242,6 +422,15 @@ describe('background terminals extension', () => {
         watches: [{ status: 'matched', delivered: false }],
       });
       handlers.get('context')?.({ messages: [control.details.message] }, ctx);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect((await client.inspect(id))?.watches?.[0]?.delivered).toBe(false);
+      handlers.get('context_with_system')?.({ messages: [] }, ctx);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect((await client.inspect(id))?.watches?.[0]?.delivered).toBe(false);
+      handlers.get('context_with_system')?.(
+        { messages: [control.details.message] },
+        ctx,
+      );
       await vi.waitFor(async () => {
         expect(
           (await client.inspect(id as string))?.watches?.[0]?.delivered,
@@ -322,6 +511,11 @@ describe('background terminals extension', () => {
         (await client.inspect(id))?.watches?.every((watch) => !watch.delivered),
       ).toBe(true);
       handlers.get('context')?.({ messages: [message] }, ctx);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect((await client.inspect(id))?.completionDelivered).toBe(false);
+      handlers.get('context_with_system')?.({ messages: [] }, ctx);
+      expect((await client.inspect(id))?.completionDelivered).toBe(false);
+      handlers.get('context_with_system')?.({ messages: [message] }, ctx);
       await vi.waitFor(async () => {
         const snapshot = await client.inspect(id);
         expect(snapshot?.completionDelivered).toBe(true);

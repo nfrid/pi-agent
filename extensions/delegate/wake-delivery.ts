@@ -210,6 +210,7 @@ function sameSources(
 export interface WakeDeliveryController {
   readonly dispatch: WakeDispatchHandler;
   readonly filterContext: <T>(messages: readonly T[]) => T[];
+  readonly acknowledgeEntered: (messages: readonly unknown[]) => void;
 }
 
 /**
@@ -224,6 +225,7 @@ export function createWakeDelivery(options: {
   getDeliveryBroker?: () => BackgroundDeliveryBroker | undefined;
   onEntered?: (sources: readonly string[], wake: WakeSnapshot) => void;
   getOutstanding?: (sources: readonly string[]) => readonly string[];
+  isRequired?: (sources: readonly string[]) => boolean;
 }): WakeDeliveryController {
   const dispatch: WakeDispatchHandler = (value) => {
     const active = options.getActiveCoordinator();
@@ -234,6 +236,8 @@ export function createWakeDelivery(options: {
       active.ownerEpoch !== value.ownerEpoch
     )
       throw new Error('Wake delivery branch is no longer active.');
+    if (options.isRequired?.(Object.keys(value.payload.sources)) === false)
+      throw new Error('Wake sources no longer belong to an open request.');
     const outstanding =
       options.getOutstanding?.(Object.keys(value.payload.sources)) ?? [];
     const message = {
@@ -257,88 +261,103 @@ export function createWakeDelivery(options: {
     });
   };
 
-  const filterContext = <T>(messages: readonly T[]): T[] => {
+  const validatedWake = (message: unknown) => {
     const active = options.getActiveCoordinator();
-    const usable = Boolean(active && options.getRuntimeActive());
-    const accepted = new Set<string>();
+    if (
+      !active ||
+      !options.getRuntimeActive() ||
+      !message ||
+      typeof message !== 'object'
+    )
+      return undefined;
+    const candidate = message as {
+      customType?: unknown;
+      details?: Partial<WakeDeliveryDetails>;
+    };
+    const details = candidate.details;
+    if (
+      candidate.customType !== DELEGATE_WAKE_MESSAGE_TYPE ||
+      !isRecord(details) ||
+      typeof details.deliveryKey !== 'string' ||
+      typeof details.wakeId !== 'string' ||
+      details.ownerSessionId !== active.ownerSessionId ||
+      details.ownerEpoch !== active.ownerEpoch ||
+      details.state !== 'queued' ||
+      !Array.isArray(details.sources) ||
+      details.sources.length === 0 ||
+      details.sources.some((source) => typeof source !== 'string') ||
+      !isAcknowledgement(details.acknowledgement) ||
+      details.deliveryKey !==
+        `${active.ownerSessionId}:${active.ownerEpoch}:${details.wakeId}` ||
+      details.acknowledgement.deliveryKey !== details.deliveryKey
+    )
+      return undefined;
+    const wake = active.get(details.wakeId);
+    const sources = wake ? expectedSources(wake) : undefined;
+    const queued =
+      wake?.state === 'queued' &&
+      details.acknowledgement.dispatchGeneration === wake.dispatchGeneration &&
+      details.acknowledgement.dispatchAttempt === wake.dispatchAttempts;
+    const alreadyEntered =
+      wake?.state === 'entered' &&
+      wake.enteredAcknowledgement?.deliveryKey === details.deliveryKey &&
+      wake.enteredAcknowledgement.dispatchGeneration ===
+        details.acknowledgement.dispatchGeneration &&
+      wake.enteredAcknowledgement.dispatchAttempt ===
+        details.acknowledgement.dispatchAttempt;
+    if (
+      (!queued && !alreadyEntered) ||
+      wake.deliveryKey !== details.deliveryKey ||
+      !sources ||
+      !sameSources(details.sources, sources)
+    )
+      return undefined;
+    return { active, details: details as WakeDeliveryDetails, wake, queued };
+  };
+
+  const filterContext = <T>(messages: readonly T[]): T[] => {
     const filtered: T[] = [];
+    const seen = new Set<string>();
     for (const message of messages) {
       if (!message || typeof message !== 'object') {
         filtered.push(message);
         continue;
       }
-      const candidate = message as {
-        customType?: unknown;
-        details?: Partial<WakeDeliveryDetails>;
-      };
-      if (candidate.customType !== DELEGATE_WAKE_MESSAGE_TYPE) {
+      if (
+        message &&
+        typeof message === 'object' &&
+        (message as { customType?: unknown }).customType !==
+          DELEGATE_WAKE_MESSAGE_TYPE
+      ) {
         filtered.push(message);
         continue;
       }
-      const details = candidate.details;
-      if (
-        !usable ||
-        !active ||
-        !isRecord(details) ||
-        typeof details.deliveryKey !== 'string' ||
-        typeof details.wakeId !== 'string' ||
-        details.ownerSessionId !== active.ownerSessionId ||
-        details.ownerEpoch !== active.ownerEpoch ||
-        details.state !== 'queued' ||
-        !Array.isArray(details.sources) ||
-        details.sources.length === 0 ||
-        details.sources.some((source) => typeof source !== 'string') ||
-        !isAcknowledgement(details.acknowledgement) ||
-        details.deliveryKey !==
-          `${active.ownerSessionId}:${active.ownerEpoch}:${details.wakeId}` ||
-        details.acknowledgement.deliveryKey !== details.deliveryKey ||
-        accepted.has(details.deliveryKey)
-      )
-        continue;
-      const wake = active.get(details.wakeId);
-      const sources = wake ? expectedSources(wake) : undefined;
-      const queued =
-        wake?.state === 'queued' &&
-        details.acknowledgement.dispatchGeneration ===
-          wake.dispatchGeneration &&
-        details.acknowledgement.dispatchAttempt === wake.dispatchAttempts;
-      const alreadyEntered =
-        wake?.state === 'entered' &&
-        wake.enteredAcknowledgement?.deliveryKey ===
-          details.acknowledgement.deliveryKey &&
-        wake.enteredAcknowledgement.dispatchGeneration ===
-          details.acknowledgement.dispatchGeneration &&
-        wake.enteredAcknowledgement.dispatchAttempt ===
-          details.acknowledgement.dispatchAttempt;
-      if (
-        (!queued && !alreadyEntered) ||
-        wake.deliveryKey !== details.deliveryKey ||
-        !sources ||
-        !sameSources(details.sources, sources)
-      )
-        continue;
-      if (queued) {
-        try {
-          const entered = active.markEntered(
-            details.wakeId,
-            details.acknowledgement,
-          );
-          options.onEntered?.(details.sources, entered);
-        } catch {
-          // A delayed recovery attempt or foreign-branch message is removed
-          // before provider context rather than merely ignored for state.
-          continue;
-        }
+      const accepted = validatedWake(message);
+      if (accepted && !seen.has(accepted.details.deliveryKey)) {
+        seen.add(accepted.details.deliveryKey);
+        filtered.push(message);
       }
-      accepted.add(details.deliveryKey);
-      // Preserve this exact accepted result on subsequent requests in the same
-      // branch. Context hooks can run repeatedly for tool/follow-up requests.
-      filtered.push(message);
     }
     return filtered;
   };
 
-  return { dispatch, filterContext };
+  const acknowledgeEntered = (messages: readonly unknown[]): void => {
+    for (const message of messages) {
+      const accepted = validatedWake(message);
+      if (!accepted?.queued) continue;
+      try {
+        const entered = accepted.active.markEntered(
+          accepted.details.wakeId,
+          accepted.details.acknowledgement,
+        );
+        options.onEntered?.(accepted.details.sources, entered);
+      } catch {
+        // Owner changes between context filtering and final entry are rejected.
+      }
+    }
+  };
+
+  return { dispatch, filterContext, acknowledgeEntered };
 }
 
 export function registerWakeMessageRenderer(pi: ExtensionAPI): void {

@@ -1,4 +1,3 @@
-import { hasPendingProcesses } from './pending-processes';
 import { getScopedServices, type SessionScopeId } from './scoped-services';
 
 function removeFreshTurn(
@@ -32,23 +31,32 @@ export interface AgentInputEvent {
   streamingBehavior?: 'steer' | 'followUp';
 }
 
-/** Treat settlement as genuine only when no shared or caller-local work remains. */
+export function hasPendingRequestDependencies(
+  scopeId?: SessionScopeId,
+): boolean {
+  return getScopedServices(scopeId).requestDependencies?.hasPending() ?? false;
+}
+
+/** Logical request dependencies, not passive process activity, delay settlement. */
 export function isGenuineAgentSettlement(
   hasPendingLocalWork = false,
   scopeId?: SessionScopeId,
 ): boolean {
-  return !hasPendingLocalWork && !hasPendingProcesses(scopeId);
+  const dependencies = getScopedServices(scopeId).requestDependencies;
+  return !hasPendingLocalWork && !(dependencies?.hasPending() ?? false);
 }
 
-/** Match a new idle user turn, excluding steering, follow-ups, and automation. */
+/** Match a new idle user turn, excluding steering, follow-ups, automation, and an open logical request. */
 export function beginsFreshUserTurn(
   event: AgentInputEvent,
   scopeId?: SessionScopeId,
 ): boolean {
   if (event.streamingBehavior !== undefined) return false;
-  if (event.source === 'extension') {
-    const dashboardTurn = consumeDashboardFreshUserTurn(scopeId);
-    return dashboardTurn && !hasPendingProcesses(scopeId);
-  }
-  return !hasPendingProcesses(scopeId);
+  const dashboardTurn =
+    event.source === 'extension'
+      ? consumeDashboardFreshUserTurn(scopeId)
+      : false;
+  if (getScopedServices(scopeId).requestDependencies?.hasPending())
+    return false;
+  return event.source === 'extension' ? dashboardTurn : true;
 }

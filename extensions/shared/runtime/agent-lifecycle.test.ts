@@ -5,10 +5,14 @@ import {
   markDashboardFreshUserTurn,
 } from './agent-lifecycle';
 import { setPendingProcessCount } from './pending-processes';
+import { getScopedServices } from './scoped-services';
 
 const source = {};
 
-afterEach(() => setPendingProcessCount(source, 0));
+afterEach(() => {
+  setPendingProcessCount(source, 0);
+  getScopedServices().requestDependencies = undefined;
+});
 
 describe('shared agent lifecycle policy', () => {
   test('recognizes settlement only after shared and caller-local work ends', () => {
@@ -16,6 +20,12 @@ describe('shared agent lifecycle policy', () => {
     expect(isGenuineAgentSettlement(true)).toBe(false);
 
     setPendingProcessCount(source, 1);
+    expect(isGenuineAgentSettlement()).toBe(true);
+    getScopedServices().requestDependencies = {
+      register: () => undefined,
+      resolveDelegateGate: () => undefined,
+      hasPending: () => true,
+    };
     expect(isGenuineAgentSettlement()).toBe(false);
   });
 
@@ -55,10 +65,19 @@ describe('shared agent lifecycle policy', () => {
     ).toBe(false);
 
     setPendingProcessCount(source, 1);
+    expect(beginsFreshUserTurn({ source: 'interactive' })).toBe(true);
+    const services = getScopedServices();
+    let waiting = true;
+    services.requestDependencies = {
+      register: () => undefined,
+      resolveDelegateGate: () => undefined,
+      hasPending: () => waiting,
+    };
     expect(beginsFreshUserTurn({ source: 'interactive' })).toBe(false);
     markDashboardFreshUserTurn();
     expect(beginsFreshUserTurn({ source: 'extension' })).toBe(false);
-    setPendingProcessCount(source, 0);
+    waiting = false;
     expect(beginsFreshUserTurn({ source: 'extension' })).toBe(false);
+    services.requestDependencies = undefined;
   });
 });

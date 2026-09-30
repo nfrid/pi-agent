@@ -67,7 +67,19 @@ export default defineExtension(
       snapshot: BackgroundSnapshot,
       services: ScopedServices,
     ): boolean => {
-      const ended = endedWatches(snapshot);
+      const ended = endedWatches(snapshot).filter(
+        (watch) =>
+          services.requestDependencies?.isRequired?.(
+            'watch',
+            `${snapshot.id}:${watch.id}`,
+          ) ?? true,
+      );
+      if (
+        services.requestDependencies?.isRequired &&
+        !services.requestDependencies.isRequired('process', snapshot.id) &&
+        !ended.length
+      )
+        return false;
       try {
         services.backgroundDeliveries.publish({
           key: completionKey(snapshot.id),
@@ -103,6 +115,14 @@ export default defineExtension(
       watch: NonNullable<BackgroundSnapshot['watches']>[number],
       services: ScopedServices,
     ): boolean => {
+      if (
+        services.requestDependencies?.isRequired &&
+        !services.requestDependencies.isRequired(
+          'watch',
+          `${snapshot.id}:${watch.id}`,
+        )
+      )
+        return false;
       const excerpt = watch.excerpt
         ? sanitizeOutput(watch.excerpt).slice(-1_024)
         : undefined;
@@ -174,11 +194,22 @@ export default defineExtension(
       widget.attach(ui);
     });
 
+    pi.on('session_tree', () => {
+      void manager
+        ?.replayUnentered()
+        .catch((error) =>
+          console.error(
+            'background-terminals: failed to replay branch outcomes',
+            error,
+          ),
+        );
+    });
+
     // Dialogs and occasional TUI rebuilds can drop widget components. Reassert
     // the keyed widget at stable agent boundaries even when the count is unchanged.
     pi.on('agent_start', () => widget.reassert());
     pi.on('agent_settled', () => widget.reassert());
-    pi.on('context', (event) => {
+    pi.on('context_with_system', (event) => {
       scopedServices?.backgroundDeliveries.markEntered(event.messages);
       void manager
         ?.acknowledgeEntered(event.messages)
@@ -206,8 +237,21 @@ export default defineExtension(
 
     const cancelCompletion = (id: string) =>
       scopedServices?.backgroundDeliveries.cancel(completionKey(id)) ?? false;
-    registerBackgroundTools(pi, getManager, cancelCompletion, (id) =>
-      manager?.get(id),
+    registerBackgroundTools(
+      pi,
+      getManager,
+      cancelCompletion,
+      (id) => manager?.get(id),
+      (kind, id, ctx) =>
+        getScopedServices(getSessionScopeId(ctx)).requestDependencies?.register(
+          kind,
+          id,
+          ctx,
+        ),
+      (kind, id, ctx) =>
+        getScopedServices(
+          getSessionScopeId(ctx),
+        ).requestDependencies?.resolve?.(kind, id),
     );
     registerBackgroundMessageRenderer(pi);
     registerBackgroundCommands(pi, getManager, cancelCompletion, () =>

@@ -20,11 +20,17 @@ import {
 } from '@pi-dashboard/protocol';
 import { Type } from 'typebox';
 import { afterEach, expect, it, vi } from 'vitest';
+import { getScopedServices } from '../shared/runtime/scoped-services';
+import { registerSteeringMessageTracking } from '../steering-messages';
 import { dispatchDashboardCommand } from './command-dispatcher';
 import {
   installExternalDeliveryReceipts,
   installExternalSteeringShim,
 } from './external-delivery';
+import {
+  installRequestClosureBoundary,
+  RequestClosureLifecycle,
+} from './request-closure';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -131,8 +137,11 @@ async function fixture(
       : { images: { autoResize: imageAutoResize } }),
   });
   const manager = SessionManager.create(root, join(root, 'sessions'));
+  const closure = new RequestClosureLifecycle();
   const core: ExtensionFactory = (api) => {
     pi = api;
+    installRequestClosureBoundary(api, closure);
+    registerSteeringMessageTracking(api);
     installExternalDeliveryReceipts(api);
     installExternalSteeringShim();
     if (activeTool)
@@ -185,8 +194,34 @@ async function fixture(
     manager,
     contexts,
     errors,
+    closure,
+    abort() {
+      return dispatchDashboardCommand(pi, ctx, { id: 'abort', type: 'abort' });
+    },
+    register(id: string) {
+      return getScopedServices(
+        manager.getSessionId(),
+      ).requestDependencies?.register('process', id, ctx);
+    },
+    complete(id: string) {
+      pi.sendMessage(
+        {
+          customType: 'background-terminal-result',
+          content: 'required result',
+          display: true,
+          details: { id, status: 'done' },
+        },
+        { triggerTurn: true, deliverAs: 'steer' },
+      );
+    },
     releaseTool,
     toolStarted,
+    followUp(id: string, text: string) {
+      return dispatchDashboardCommand(pi, ctx, { id, type: 'followUp', text });
+    },
+    nativeSteer(id: string, text: string) {
+      return dispatchDashboardCommand(pi, ctx, { id, type: 'steer', text });
+    },
     steer(
       id: string,
       text: string,
@@ -287,6 +322,203 @@ it('queues identical literal steering inputs during a real SDK tool and processe
         JSON.stringify(entry.message.content).includes('/quit'),
     ),
   ).toBe(true);
+  expect(f.errors).toEqual([]);
+});
+
+it('queues follow-up before source creation, holds it across SDK idle, and releases only after logical closure', async () => {
+  const f = await fixture(
+    (api) => {
+      api.on('tool_execution_end', (_event, ctx) => {
+        getScopedServices(
+          ctx.sessionManager.getSessionId(),
+        ).requestDependencies?.register('process', 'hung-task', ctx);
+      });
+    },
+    false,
+    false,
+    true,
+  );
+  const run = f.session.prompt('Start the blocked tool.');
+  await vi.waitFor(() => expect(f.toolStarted).toHaveBeenCalledOnce());
+  expect(await f.session.followUp('next request')).toBe('queued');
+  expect(f.session.getFollowUpMessages()).toEqual(['next request']);
+  f.releaseTool();
+  await run;
+  await f.session.waitForIdle();
+  expect(f.contexts).toHaveLength(2);
+  expect(f.session.getFollowUpMessages()).toEqual(['next request']);
+  await expect(f.dispatch('new-prompt', 'not admitted')).rejects.toMatchObject({
+    code: 'busy',
+  });
+  f.complete('hung-task');
+  await vi.waitFor(() => expect(f.contexts).toHaveLength(4));
+  await f.session.waitForIdle();
+  const users = f.manager
+    .getBranch()
+    .filter(
+      (entry) => entry.type === 'message' && entry.message.role === 'user',
+    );
+  const markers = f.manager
+    .getBranch()
+    .filter(
+      (entry) =>
+        entry.type === 'custom' && entry.customType === 'response-closure',
+    );
+  expect(users).toHaveLength(2);
+  expect(markers).toHaveLength(2);
+  expect(f.session.getFollowUpMessages()).toEqual([]);
+  expect(f.errors).toEqual([]);
+});
+
+it('tree navigation cancels held user follow-ups from the previous branch', async () => {
+  const f = await fixture(
+    (api) => {
+      api.on('tool_execution_start', (_event, ctx) => {
+        getScopedServices(
+          ctx.sessionManager.getSessionId(),
+        ).requestDependencies?.register('process', 'branch-task', ctx);
+      });
+    },
+    false,
+    false,
+    true,
+  );
+  const run = f.session.prompt('branch work');
+  await vi.waitFor(() => expect(f.toolStarted).toHaveBeenCalledOnce());
+  await f.followUp('old-branch-input', 'do not run on another branch');
+  f.releaseTool();
+  await run;
+  expect(f.session.getFollowUpMessages()).toHaveLength(1);
+  const user = f.manager
+    .getBranch()
+    .find((entry) => entry.type === 'message' && entry.message.role === 'user');
+  if (!user) throw new Error('missing branch user');
+  await f.session.navigateTree(user.id);
+  expect(f.session.getFollowUpMessages()).toEqual([]);
+  expect(f.register('unowned-source')).toBe(false);
+  expect(f.contexts).toHaveLength(2);
+});
+
+it('idle abort abandons the owner and a late result cannot manufacture closure', async () => {
+  const f = await fixture(
+    (api) => {
+      api.on('tool_execution_start', (_event, ctx) => {
+        getScopedServices(
+          ctx.sessionManager.getSessionId(),
+        ).requestDependencies?.register('process', 'aborted-task', ctx);
+      });
+    },
+    false,
+    false,
+    true,
+  );
+  const run = f.session.prompt('start work');
+  await vi.waitFor(() => expect(f.toolStarted).toHaveBeenCalledOnce());
+  f.releaseTool();
+  await run;
+  expect(
+    getScopedServices(f.manager.getSessionId()).requestDependencies?.isOpen?.(),
+  ).toBe(true);
+  await f.abort();
+  expect(
+    getScopedServices(f.manager.getSessionId()).requestDependencies?.isOpen?.(),
+  ).toBe(false);
+  f.complete('aborted-task');
+  await vi.waitFor(() => expect(f.contexts).toHaveLength(3));
+  await f.session.waitForIdle();
+  expect(
+    f.manager
+      .getBranch()
+      .filter(
+        (entry) =>
+          entry.type === 'custom' && entry.customType === 'response-closure',
+      ),
+  ).toEqual([]);
+  const restored = new RequestClosureLifecycle();
+  restored.restore({
+    sessionManager: f.manager,
+  } as unknown as ExtensionContext);
+  expect(
+    restored.isOpen({
+      sessionManager: f.manager,
+    } as unknown as ExtensionContext),
+  ).toBe(false);
+});
+
+it.each([
+  false,
+  true,
+])('idle waiting steering resumes the original request, external=%s', async (external) => {
+  const f = await fixture(
+    (api) => {
+      api.on('tool_execution_start', (_event, ctx) => {
+        getScopedServices(
+          ctx.sessionManager.getSessionId(),
+        ).requestDependencies?.register('process', 'hung-task', ctx);
+      });
+    },
+    false,
+    false,
+    true,
+  );
+  const run = f.session.prompt('Start work.');
+  await vi.waitFor(() => expect(f.toolStarted).toHaveBeenCalledOnce());
+  f.releaseTool();
+  await run;
+  const originalUser = f.manager
+    .getBranch()
+    .find((entry) => entry.type === 'message' && entry.message.role === 'user');
+  expect(
+    await (external
+      ? f.steer('idle-steer', 'stop hung work')
+      : f.nativeSteer('idle-steer', 'stop hung work')),
+  ).toMatchObject({ accepted: true });
+  await vi.waitFor(() => expect(f.contexts).toHaveLength(3));
+  await f.session.waitForIdle();
+  const steeringUsers = f.manager
+    .getBranch()
+    .filter(
+      (entry) => entry.type === 'message' && entry.message.role === 'user',
+    );
+  expect(
+    f.manager
+      .getBranch()
+      .filter(
+        (entry) =>
+          entry.type === 'custom' && entry.customType === 'steering-message',
+      ),
+  ).toMatchObject([{ data: { userEntryId: steeringUsers[1]?.id } }]);
+  expect(f.register('second-task')).toBe(true);
+  const restored = new RequestClosureLifecycle();
+  restored.restore({
+    sessionManager: f.manager,
+  } as unknown as ExtensionContext);
+  expect(
+    restored.hasPendingWait({
+      sessionManager: f.manager,
+    } as unknown as ExtensionContext),
+  ).toBe(true);
+  f.complete('hung-task');
+  await vi.waitFor(() => expect(f.contexts).toHaveLength(4));
+  await f.session.waitForIdle();
+  f.complete('second-task');
+  await vi.waitFor(() => expect(f.contexts).toHaveLength(5));
+  await f.session.waitForIdle();
+  const marker = f.manager
+    .getBranch()
+    .find(
+      (entry) =>
+        entry.type === 'custom' && entry.customType === 'response-closure',
+    );
+  expect(marker).toMatchObject({
+    data: { requestMessageId: originalUser?.id },
+  });
+  if (external)
+    expect(
+      f.manager
+        .getBranch()
+        .flatMap((entry) => externalDeliveryReceipt(entry) ?? []),
+    ).toHaveLength(1);
   expect(f.errors).toEqual([]);
 });
 

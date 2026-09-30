@@ -9,22 +9,26 @@ import {
   type ResponseClosureMarker,
   tryParseResponseClosure,
 } from '@pi-dashboard/protocol';
-import { type Static, Type } from 'typebox';
+import {
+  forgetLogicalInput,
+  installLogicalInputShim,
+  isLogicalSteering,
+  REQUEST_STEERING_ENTRY_TYPE,
+  releaseLogicalFollowUps,
+} from '../shared/runtime/logical-input';
+import { getScopedServices } from '../shared/runtime/scoped-services';
 
 type NativeMessage = Record<string, unknown>;
+type DependencyKind = 'process' | 'watch' | 'delegate';
+type Dependency = { kind: DependencyKind; id: string };
 type TrackedMessage = { message: NativeMessage; liveId?: string };
-type WaitTarget = Static<typeof WaitTargets>[number];
-type CanonicalWaitTarget =
-  | { kind: 'process'; id: string }
-  | { kind: 'watch'; id: string; watchId: string }
-  | { kind: 'delegate'; id: string };
-
-function epochMilliseconds(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return undefined;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
+type RequestDependencyContext = {
+  sessionManager: {
+    getSessionId(): string;
+    getBranch(): unknown[];
+  };
+};
+export const REQUEST_DEPENDENCY_ENTRY_TYPE = 'request-dependency:v1';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -35,39 +39,66 @@ function messageFrom(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value.message) ? value.message : value;
 }
 
-function waitTargetKey(target: CanonicalWaitTarget): string {
-  return target.kind === 'watch'
-    ? `watch:${target.id}:${target.watchId}`
-    : `${target.kind}:${target.id}`;
+function steeringEntryIds(branch: readonly unknown[]): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of branch) {
+    if (!isRecord(entry) || entry.type !== 'custom' || !isRecord(entry.data))
+      continue;
+    if (entry.customType === REQUEST_STEERING_ENTRY_TYPE) {
+      if (typeof entry.data.userEntryId === 'string')
+        ids.add(entry.data.userEntryId);
+    }
+  }
+  return ids;
 }
 
-function resultKeys(
-  values: readonly unknown[],
-  delegateAliases: ReadonlyMap<string, string>,
-): Set<string> {
+function hasAmbiguousSteering(branch: readonly unknown[]): boolean {
+  return branch.some(
+    (entry) =>
+      isRecord(entry) &&
+      entry.type === 'custom' &&
+      entry.customType === REQUEST_STEERING_ENTRY_TYPE &&
+      (!isRecord(entry.data) || typeof entry.data.userEntryId !== 'string'),
+  );
+}
+
+function key(kind: DependencyKind, id: string): string {
+  return `${kind}:${id}`;
+}
+
+function terminalProcessStatus(value: unknown): boolean {
+  return value === 'done' || value === 'failed' || value === 'killed';
+}
+
+function resultKeys(values: readonly unknown[]): Set<string> {
   const keys = new Set<string>();
-  const addDelegate = (value: unknown) => {
-    if (typeof value !== 'string') return;
-    const identity = delegateAliases.get(value);
-    if (identity) keys.add(`delegate:${identity}`);
-  };
   for (const value of values) {
     const message = messageFrom(value);
     if (!message) continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (!details) continue;
-    if (message.customType === 'background-terminal-result') {
-      if (typeof details.id === 'string') keys.add(`process:${details.id}`);
-      if (typeof details.id === 'string' && Array.isArray(details.endedWatches))
+    if (
+      message.customType === 'background-terminal-result' &&
+      typeof details.id === 'string' &&
+      terminalProcessStatus(details.status)
+    ) {
+      keys.add(key('process', details.id));
+      if (Array.isArray(details.endedWatches))
         for (const watch of details.endedWatches)
-          if (isRecord(watch) && typeof watch.id === 'string')
-            keys.add(`watch:${details.id}:${watch.id}`);
+          if (
+            isRecord(watch) &&
+            typeof watch.id === 'string' &&
+            (watch.status === undefined ||
+              ['matched', 'timed_out', 'ended'].includes(String(watch.status)))
+          )
+            keys.add(key('watch', `${details.id}:${watch.id}`));
     } else if (
       message.customType === 'background-watch-result' &&
       typeof details.id === 'string' &&
-      typeof details.watchId === 'string'
+      typeof details.watchId === 'string' &&
+      ['matched', 'timed_out', 'ended'].includes(String(details.status))
     ) {
-      keys.add(`watch:${details.id}:${details.watchId}`);
+      keys.add(key('watch', `${details.id}:${details.watchId}`));
     } else if (
       message.role === 'toolResult' &&
       message.toolName === 'background_stop' &&
@@ -75,27 +106,25 @@ function resultKeys(
       Array.isArray(details.processes)
     ) {
       for (const process of details.processes) {
-        if (
-          !isRecord(process) ||
-          typeof process.id !== 'string' ||
-          !['done', 'failed', 'killed'].includes(String(process.status))
-        )
+        if (!isRecord(process) || !terminalProcessStatus(process.status))
           continue;
-        keys.add(`process:${process.id}`);
+        if (typeof process.id !== 'string') continue;
+        keys.add(key('process', process.id));
         if (Array.isArray(process.watches))
           for (const watch of process.watches)
             if (isRecord(watch) && typeof watch.id === 'string')
-              keys.add(`watch:${process.id}:${watch.id}`);
+              keys.add(key('watch', `${process.id}:${watch.id}`));
       }
     } else if (
-      message.customType === 'delegate-job-result' &&
-      Array.isArray(details.jobs)
+      message.role === 'toolResult' &&
+      message.toolName === 'background_unwatch' &&
+      details.action === 'unwatch' &&
+      typeof details.id === 'string' &&
+      Array.isArray(details.watchIds)
     ) {
-      for (const job of details.jobs) {
-        if (!isRecord(job)) continue;
-        addDelegate(job.attemptIdentity);
-        addDelegate(job.id);
-      }
+      for (const watchId of details.watchIds)
+        if (typeof watchId === 'string')
+          keys.add(key('watch', `${details.id}:${watchId}`));
     } else if (
       message.role === 'toolResult' &&
       message.toolName === 'delegate_jobs' &&
@@ -105,73 +134,225 @@ function resultKeys(
         for (const attempt of details.attempts)
           if (
             isRecord(attempt) &&
-            ['cancelled', 'completed', 'failed'].includes(String(attempt.state))
+            [
+              'cancelled',
+              'completed',
+              'failed',
+              'success',
+              'error',
+              'timed-out',
+              'aborted',
+              'blocked',
+            ].includes(String(attempt.state)) &&
+            typeof attempt.identity === 'string'
           )
-            addDelegate(attempt.identity);
+            keys.add(key('delegate', attempt.identity));
       if (Array.isArray(details.jobs))
         for (const job of details.jobs)
           if (
             isRecord(job) &&
-            ['cancelled', 'success', 'error'].includes(String(job.state))
+            [
+              'cancelled',
+              'success',
+              'error',
+              'aborted',
+              'timed-out',
+              'blocked',
+            ].includes(String(job.state))
           ) {
-            addDelegate(job.attemptIdentity);
-            addDelegate(job.id);
+            if (typeof job.attemptIdentity === 'string')
+              keys.add(key('delegate', job.attemptIdentity));
+            else if (typeof job.id === 'string')
+              keys.add(key('delegate', job.id));
           }
     }
   }
   return keys;
 }
 
-/** Binds request boundaries only through native message object identity. */
+function exactMessageEntry(
+  branch: readonly unknown[],
+  message: NativeMessage,
+): Record<string, unknown> | undefined {
+  const entries = branch.filter((entry) => {
+    if (!isRecord(entry) || entry.type !== 'message') return false;
+    return entry.message === message;
+  });
+  if (entries.length !== 1) return undefined;
+  const [entry] = entries;
+  return isRecord(entry) ? entry : undefined;
+}
+
+type DependencyRecord =
+  | {
+      operation: 'register' | 'resolve';
+      sessionId: string;
+      requestMessageId: string;
+      kind: DependencyKind;
+      id: string;
+    }
+  | {
+      operation: 'abandon-request';
+      sessionId: string;
+      requestMessageId: string;
+    };
+
+function dependencyRecord(value: unknown): DependencyRecord | undefined {
+  if (!isRecord(value) || value.version !== 1) return undefined;
+  if (
+    typeof value.sessionId !== 'string' ||
+    typeof value.requestMessageId !== 'string'
+  )
+    return undefined;
+  if (value.operation === 'abandon-request')
+    return {
+      operation: 'abandon-request',
+      sessionId: value.sessionId,
+      requestMessageId: value.requestMessageId,
+    };
+  if (
+    (value.operation !== 'register' && value.operation !== 'resolve') ||
+    (value.kind !== 'process' &&
+      value.kind !== 'watch' &&
+      value.kind !== 'delegate') ||
+    typeof value.id !== 'string' ||
+    !value.id
+  )
+    return undefined;
+  return {
+    operation: value.operation,
+    sessionId: value.sessionId,
+    requestMessageId: value.requestMessageId,
+    kind: value.kind,
+    id: value.id,
+  };
+}
+
+/** Binds request boundaries and background dependencies to native branch identity. */
 export class RequestClosureLifecycle {
   private sessionId?: string;
   private request?: TrackedMessage;
   private final?: TrackedMessage;
   private marker?: ResponseClosure;
   private settledMarker?: ResponseClosureMarker;
-  private readonly waiting = new Set<string>();
+  private readonly waiting = new Map<string, Dependency>();
   private previousRequest?: TrackedMessage;
   private previousFinal?: TrackedMessage;
-  private readonly delegateAliases = new Map<string, string>();
-  private readonly startReceipts = new Map<string, NativeMessage>();
-  private readonly receiptIds = new Set<string>();
+  private previousWaiting = new Map<string, Dependency>();
   private steeredMessages = new WeakSet<object>();
-  private previousWaiting: string[] = [];
+  private readonly controlReceipts = new Map<string, NativeMessage>();
 
-  observe(sessionId: string, message: NativeMessage): void {
+  observe(
+    sessionId: string,
+    message: NativeMessage,
+    branch?: readonly unknown[],
+  ): void {
     if (sessionId !== this.sessionId) {
+      this.reset();
       this.sessionId = sessionId;
-      this.request = undefined;
+    }
+    if (branch) this.currentBranch = branch;
+    if (this.steeredMessages.has(message) || isLogicalSteering(message)) {
+      this.steeredMessages.add(message);
+      return;
+    }
+    if (this.request?.message === message || this.final?.message === message)
+      return;
+    if (message.role === 'user') {
+      this.previousRequest = this.request;
+      this.previousFinal = this.final;
+      this.previousWaiting = new Map(this.waiting);
+      this.request = { message };
       this.final = undefined;
       this.marker = undefined;
-      this.settledMarker = undefined;
       this.waiting.clear();
-      this.delegateAliases.clear();
-      this.startReceipts.clear();
-      this.receiptIds.clear();
-    }
-    if (this.steeredMessages.has(message)) return;
-    if (this.request?.message === message) return;
-    if (this.final?.message === message) return;
-    if (message.role === 'user') {
-      const data = message.data;
-      const deliveryMode =
-        data && typeof data === 'object' && !Array.isArray(data)
-          ? (data as Record<string, unknown>).deliveryMode
-          : undefined;
-      if (deliveryMode !== 'steer') {
-        this.previousRequest = this.request;
-        this.previousFinal = this.final;
-        this.previousWaiting = [...this.waiting];
-        this.request = { message };
-        this.final = undefined;
-        this.marker = undefined;
-        this.waiting.clear();
-        this.delegateAliases.clear();
-      }
     } else if (message.role === 'assistant' && this.request) {
       this.final = { message };
     }
+  }
+
+  restore(ctx: ExtensionContext): void {
+    this.reset();
+    const sessionId = ctx.sessionManager.getSessionId();
+    const branch = ctx.sessionManager.getBranch() as readonly unknown[];
+    const steeredIds = steeringEntryIds(branch);
+    const requests = branch.filter((entry) => {
+      if (!isRecord(entry) || entry.type !== 'message') return false;
+      const message = isRecord(entry.message) ? entry.message : undefined;
+      return message?.role === 'user' && !steeredIds.has(String(entry.id));
+    });
+    const requestEntry = requests.at(-1);
+    if (!isRecord(requestEntry) || !isRecord(requestEntry.message)) return;
+    const requestMessageId = requestEntry.id;
+    if (typeof requestMessageId !== 'string') return;
+    const requestIndex = branch.indexOf(requestEntry);
+    const closed = branch.some((entry) => {
+      if (
+        !isRecord(entry) ||
+        entry.type !== 'custom' ||
+        entry.customType !== RESPONSE_CLOSURE_MARKER_TYPE ||
+        !isRecord(entry.data) ||
+        entry.data.requestMessageId !== requestMessageId
+      )
+        return false;
+      const marker = tryParseResponseClosure(entry.data);
+      if (!marker) return false;
+      const finalIndex = branch.findIndex(
+        (candidate) =>
+          isRecord(candidate) &&
+          candidate.type === 'message' &&
+          candidate.id === marker.finalMessageId &&
+          isRecord(candidate.message) &&
+          candidate.message.role === 'assistant',
+      );
+      return finalIndex > requestIndex;
+    });
+    if (closed) return;
+
+    this.sessionId = sessionId;
+    const restoredWaiting = new Map<string, Dependency>();
+    let hadRegistration = false;
+    let abandoned = false;
+    let restoredFinal: TrackedMessage | undefined;
+    for (const entry of branch.slice(requestIndex + 1)) {
+      if (!isRecord(entry)) continue;
+      if (entry.type === 'message' && isRecord(entry.message)) {
+        if (entry.message.role === 'assistant')
+          restoredFinal = { message: entry.message };
+        continue;
+      }
+      if (
+        entry.type !== 'custom' ||
+        entry.customType !== REQUEST_DEPENDENCY_ENTRY_TYPE
+      )
+        continue;
+      const record = dependencyRecord(entry.data);
+      if (
+        !record ||
+        record.sessionId !== sessionId ||
+        record.requestMessageId !== requestMessageId
+      )
+        continue;
+      if (record.operation === 'abandon-request') {
+        abandoned = true;
+        continue;
+      }
+      const dependencyKey = key(record.kind, record.id);
+      if (record.operation === 'register') {
+        hadRegistration = true;
+        restoredWaiting.set(dependencyKey, {
+          kind: record.kind,
+          id: record.id,
+        });
+      } else restoredWaiting.delete(dependencyKey);
+    }
+    if (!hadRegistration || abandoned) return;
+    this.currentBranch = branch;
+    this.request = { message: requestEntry.message };
+    this.final = restoredFinal;
+    this.waiting.clear();
+    for (const [dependencyKey, dependency] of restoredWaiting)
+      this.waiting.set(dependencyKey, dependency);
   }
 
   observeToolReceipt(
@@ -181,56 +362,26 @@ export class RequestClosureLifecycle {
     result: unknown,
     parentToolCallId?: string,
   ): void {
-    if (sessionId !== this.sessionId) {
-      this.observe(sessionId, { role: 'system' });
-    }
-    if (this.receiptIds.has(receiptId)) return;
-    this.receiptIds.add(receiptId);
-    if (this.receiptIds.size > 128) {
-      const oldest = this.receiptIds.values().next().value;
-      if (oldest) this.receiptIds.delete(oldest);
-    }
+    if (sessionId !== this.sessionId) return;
+    if (
+      toolName !== 'background_stop' &&
+      toolName !== 'background_unwatch' &&
+      toolName !== 'delegate_jobs'
+    )
+      return;
     const message = isRecord(result) ? result : undefined;
     if (!message || !isRecord(message.details)) return;
-    if (this.startReceipts.size >= 128) {
-      const oldest = this.startReceipts.keys().next().value;
-      if (oldest) this.startReceipts.delete(oldest);
-    }
-    this.startReceipts.set(receiptId, {
+    this.controlReceipts.set(receiptId, {
       role: 'toolResult',
       toolCallId: receiptId,
       ...(parentToolCallId ? { parentToolCallId } : {}),
       toolName,
       details: message.details,
     });
-  }
-
-  getToolReceipts(): NativeMessage[] {
-    return [...this.startReceipts.values()];
-  }
-
-  private enteredResultEvidence(messages: readonly unknown[]): unknown[] {
-    const enteredCalls = new Set<string>();
-    for (const value of messages) {
-      const message = messageFrom(value);
-      if (message?.role !== 'toolResult') continue;
-      if (typeof message.toolCallId === 'string')
-        enteredCalls.add(message.toolCallId);
-      const nested = message.nestedCalls;
-      if (isRecord(nested) && Array.isArray(nested.calls))
-        for (const call of nested.calls)
-          if (isRecord(call) && typeof call.id === 'string')
-            enteredCalls.add(call.id);
+    if (this.controlReceipts.size > 128) {
+      const oldest = this.controlReceipts.keys().next().value;
+      if (oldest) this.controlReceipts.delete(oldest);
     }
-    return [
-      ...messages,
-      ...this.getToolReceipts().filter(
-        (receipt) =>
-          typeof receipt.parentToolCallId === 'string' &&
-          (enteredCalls.has(String(receipt.toolCallId)) ||
-            enteredCalls.has(receipt.parentToolCallId)),
-      ),
-    ];
   }
 
   observeLiveAlias(message: NativeMessage, liveId: string): void {
@@ -245,48 +396,206 @@ export class RequestClosureLifecycle {
     this.final = this.previousFinal;
     this.marker = undefined;
     this.waiting.clear();
-    for (const target of this.previousWaiting) this.waiting.add(target);
+    for (const [dependencyKey, dependency] of this.previousWaiting)
+      this.waiting.set(dependencyKey, dependency);
     this.previousRequest = undefined;
     this.previousFinal = undefined;
-    this.previousWaiting = [];
+    this.previousWaiting.clear();
   }
 
-  wait(
-    targets: readonly CanonicalWaitTarget[],
-    delegateAliases: ReadonlyMap<string, string>,
-    history: readonly unknown[],
+  registerDependency(
+    kind: DependencyKind,
+    id: string,
+    ctx: RequestDependencyContext,
+    appendEntry: (customType: string, data: unknown) => void,
+  ): boolean {
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (sessionId !== this.sessionId || !this.request || !id) return false;
+    const branch = ctx.sessionManager.getBranch() as readonly unknown[];
+    const steeredIds = steeringEntryIds(branch);
+    const latestRequest = [...branch].reverse().find((entry) => {
+      const message = messageFrom(entry);
+      return (
+        message?.role === 'user' &&
+        !this.steeredMessages.has(message) &&
+        !isLogicalSteering(message) &&
+        !(isRecord(entry) && steeredIds.has(String(entry.id)))
+      );
+    });
+    if (messageFrom(latestRequest) !== this.request.message) return false;
+    const requestEntry = exactMessageEntry(branch, this.request.message);
+    if (typeof requestEntry?.id !== 'string') return false;
+    if (hasAmbiguousSteering(branch.slice(branch.indexOf(requestEntry) + 1)))
+      return false;
+    const dependencyKey = key(kind, id);
+    if (this.waiting.has(dependencyKey)) return true;
+    appendEntry(REQUEST_DEPENDENCY_ENTRY_TYPE, {
+      version: 1,
+      operation: 'register',
+      sessionId,
+      requestMessageId: requestEntry.id,
+      kind,
+      id,
+    });
+    this.waiting.set(dependencyKey, { kind, id });
+    this.currentBranch = branch;
+    this.marker = undefined;
+    return true;
+  }
+
+  resolveDependency(
+    kind: DependencyKind,
+    id: string,
+    appendEntry: (customType: string, data: unknown) => void,
   ): void {
-    for (const [alias, identity] of delegateAliases)
-      this.delegateAliases.set(alias, identity);
-    const resolved = resultKeys(
-      this.enteredResultEvidence(history),
-      this.delegateAliases,
+    const branch = this.currentBranch;
+    if (!branch) return;
+    this.persistResolutions(
+      [key(kind, id)],
+      'source-registration-failed',
+      branch,
+      appendEntry,
     );
-    for (const key of resolved) this.waiting.delete(key);
-    for (const target of targets) {
-      const key = waitTargetKey(target);
-      if (!resolved.has(key)) this.waiting.add(key);
+  }
+
+  resolveDelegateGate(
+    sources: readonly string[],
+    mode: 'all' | 'any',
+    appendEntry: (customType: string, data: unknown) => void,
+  ): void {
+    if (!this.request || this.waiting.size === 0) return;
+    const selected = new Set(sources.map((id) => key('delegate', id)));
+    if (![...selected].some((dependencyKey) => this.waiting.has(dependencyKey)))
+      return;
+    const resolved =
+      mode === 'any'
+        ? [...this.waiting.keys()].filter((dependencyKey) =>
+            selected.has(dependencyKey),
+          )
+        : [...selected].filter((dependencyKey) =>
+            this.waiting.has(dependencyKey),
+          );
+    if (this.currentBranch)
+      this.persistResolutions(
+        resolved,
+        'delegate-gate',
+        this.currentBranch,
+        appendEntry,
+      );
+  }
+
+  entered(
+    messages: readonly unknown[],
+    ctx: ExtensionContext,
+    appendEntry: (customType: string, data: unknown) => void,
+  ): void {
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (
+      sessionId !== this.sessionId ||
+      !this.request ||
+      this.waiting.size === 0
+    )
+      return;
+    const enteredCalls = new Set<string>();
+    for (const value of messages) {
+      const message = messageFrom(value);
+      if (message?.role !== 'toolResult') continue;
+      if (typeof message.toolCallId === 'string')
+        enteredCalls.add(message.toolCallId);
+      const nested = isRecord(message.nestedCalls)
+        ? message.nestedCalls.calls
+        : undefined;
+      if (Array.isArray(nested))
+        for (const call of nested)
+          if (isRecord(call) && typeof call.id === 'string')
+            enteredCalls.add(call.id);
+    }
+    const receipts = [...this.controlReceipts.values()].filter(
+      (receipt) =>
+        typeof receipt.parentToolCallId === 'string' &&
+        (enteredCalls.has(String(receipt.toolCallId)) ||
+          enteredCalls.has(receipt.parentToolCallId)),
+    );
+    const branch = ctx.sessionManager.getBranch() as readonly unknown[];
+    this.currentBranch = branch;
+    const resolvedKeys = resultKeys([...messages, ...receipts]);
+    const dependencies = [...this.waiting.keys()].filter((dependencyKey) =>
+      resolvedKeys.has(dependencyKey),
+    );
+    this.persistResolutions(
+      dependencies,
+      'result-entered',
+      branch,
+      appendEntry,
+    );
+  }
+
+  private persistResolutions(
+    dependencyKeys: readonly string[],
+    reason: string,
+    branch: readonly unknown[],
+    appendEntry: (customType: string, data: unknown) => void,
+  ): void {
+    if (!this.request) return;
+    for (const dependencyKey of dependencyKeys) {
+      const dependency = this.waiting.get(dependencyKey);
+      if (!dependency) continue;
+      const requestEntry = exactMessageEntry(branch, this.request.message);
+      if (typeof requestEntry?.id !== 'string' || !this.sessionId) continue;
+      appendEntry(REQUEST_DEPENDENCY_ENTRY_TYPE, {
+        version: 1,
+        operation: 'resolve',
+        sessionId: this.sessionId,
+        requestMessageId: requestEntry.id,
+        kind: dependency.kind,
+        id: dependency.id,
+        reason,
+      });
+      this.waiting.delete(dependencyKey);
     }
   }
 
-  entered(messages: readonly unknown[]): void {
-    for (const key of resultKeys(
-      this.enteredResultEvidence(messages),
-      this.delegateAliases,
-    ))
-      this.waiting.delete(key);
+  private currentBranch?: readonly unknown[];
+
+  abandon(
+    ctx: ExtensionContext,
+    appendEntry: (type: string, data: unknown) => void,
+  ): void {
+    if (ctx.sessionManager.getSessionId() !== this.sessionId || !this.request)
+      return;
+    const requestEntry = exactMessageEntry(
+      ctx.sessionManager.getBranch(),
+      this.request.message,
+    );
+    if (typeof requestEntry?.id !== 'string') return;
+    appendEntry(REQUEST_DEPENDENCY_ENTRY_TYPE, {
+      version: 1,
+      operation: 'abandon-request',
+      sessionId: this.sessionId,
+      requestMessageId: requestEntry.id,
+    });
+    getScopedServices(this.sessionId).backgroundDeliveries.clear();
+    this.reset();
   }
 
-  beforeSettle(event: AgentBeforeSettleEvent, ctx: ExtensionContext) {
+  beforeSettle(
+    event: AgentBeforeSettleEvent,
+    ctx: ExtensionContext,
+    appendEntry: (customType: string, data: unknown) => void,
+  ) {
     this.marker = undefined;
+    this.currentBranch = ctx.sessionManager.getBranch() as readonly unknown[];
+    if (event.outcome === 'aborted') {
+      this.abandon(ctx, appendEntry);
+      return;
+    }
     const queuedResult = event.context.pendingMessages.some((message) => {
       if (message.role !== 'custom') return false;
-      const type = message.customType;
       return (
-        type === 'background-terminal-result' ||
-        type === 'background-watch-result' ||
-        type === 'delegate-job-result' ||
-        type === 'delegate-wake-result'
+        message.customType === 'background-terminal-result' ||
+        message.customType === 'background-watch-result' ||
+        message.customType === 'delegate-job-result' ||
+        message.customType === 'delegate-wake-result'
       );
     });
     if (
@@ -300,25 +609,25 @@ export class RequestClosureLifecycle {
     const request = this.request;
     const final = this.final;
     if (!request || !final) return;
-    const branch = ctx.sessionManager.getBranch();
-    const exactEntry = (message: NativeMessage) => {
-      const found = branch.filter(
-        (entry) => entry.type === 'message' && entry.message === message,
-      );
-      return found.length === 1 ? found[0] : undefined;
-    };
-    const requestEntry = exactEntry(request.message);
-    const finalEntry = exactEntry(final.message);
-    const startedAt = epochMilliseconds(requestEntry?.timestamp);
-    const endedAt = epochMilliseconds(finalEntry?.timestamp);
+    const branch = this.currentBranch;
+    const requestEntry = exactMessageEntry(branch, request.message);
+    const finalEntry = exactMessageEntry(branch, final.message);
+    const startedAt =
+      typeof requestEntry?.timestamp === 'string'
+        ? Date.parse(requestEntry.timestamp)
+        : Number.NaN;
+    const endedAt =
+      typeof finalEntry?.timestamp === 'string'
+        ? Date.parse(finalEntry.timestamp)
+        : Number.NaN;
     if (
-      !requestEntry?.id ||
-      !finalEntry?.id ||
-      startedAt === undefined ||
-      endedAt === undefined
+      typeof requestEntry?.id !== 'string' ||
+      typeof finalEntry?.id !== 'string' ||
+      !Number.isFinite(startedAt) ||
+      !Number.isFinite(endedAt)
     )
       return;
-    const closure = tryParseResponseClosure({
+    this.marker = tryParseResponseClosure({
       requestMessageId: requestEntry.id,
       finalMessageId: finalEntry.id,
       startedAt,
@@ -326,7 +635,6 @@ export class RequestClosureLifecycle {
       ...(request.liveId ? { liveRequestMessageId: request.liveId } : {}),
       ...(final.liveId ? { liveFinalMessageId: final.liveId } : {}),
     });
-    this.marker = closure;
   }
 
   persistedMarker(
@@ -375,11 +683,13 @@ export class RequestClosureLifecycle {
           }
         : undefined;
     this.settledMarker = result;
-    if (!this.waiting.size) {
+    if (result && !this.waiting.size) {
       this.request = undefined;
       this.final = undefined;
       this.marker = undefined;
-      this.delegateAliases.clear();
+      this.previousRequest = undefined;
+      this.previousFinal = undefined;
+      this.previousWaiting.clear();
     }
     return result;
   }
@@ -389,6 +699,53 @@ export class RequestClosureLifecycle {
     const marker = this.settledMarker;
     this.settledMarker = undefined;
     return marker;
+  }
+
+  isLogicallyOpen(sessionId: string): boolean {
+    return sessionId === this.sessionId && !!this.request;
+  }
+
+  isOpen(ctx: ExtensionContext): boolean {
+    return (
+      ctx.sessionManager.getSessionId() === this.sessionId &&
+      !!this.request &&
+      !!exactMessageEntry(ctx.sessionManager.getBranch(), this.request.message)
+    );
+  }
+
+  isRequired(kind: DependencyKind, id: string, ctx: ExtensionContext): boolean {
+    return this.isOpen(ctx) && this.waiting.has(key(kind, id));
+  }
+
+  persistSteering(
+    ctx: ExtensionContext,
+    appendEntry: (type: string, data: unknown) => void,
+  ): void {
+    const branch = ctx.sessionManager.getBranch();
+    const marked = steeringEntryIds(branch);
+    for (const entry of branch) {
+      if (
+        entry.type !== 'message' ||
+        entry.message.role !== 'user' ||
+        marked.has(entry.id)
+      )
+        continue;
+      if (
+        this.steeredMessages.has(entry.message) ||
+        isLogicalSteering(entry.message)
+      )
+        appendEntry(REQUEST_STEERING_ENTRY_TYPE, {
+          userEntryId: entry.id,
+          timestamp: entry.message.timestamp,
+          text:
+            typeof entry.message.content === 'string'
+              ? entry.message.content
+              : entry.message.content
+                  .filter((part) => part.type === 'text')
+                  .map((part) => part.text)
+                  .join(''),
+        });
+    }
   }
 
   hasPendingWait(ctx: ExtensionContext): boolean {
@@ -405,205 +762,96 @@ export class RequestClosureLifecycle {
     this.marker = undefined;
     this.settledMarker = undefined;
     this.waiting.clear();
-    this.delegateAliases.clear();
-    this.startReceipts.clear();
-    this.receiptIds.clear();
     this.previousRequest = undefined;
     this.previousFinal = undefined;
-    this.previousWaiting = [];
+    this.previousWaiting.clear();
+    this.controlReceipts.clear();
+    this.currentBranch = undefined;
     this.steeredMessages = new WeakSet<object>();
   }
-}
-
-const WaitTargets = Type.Array(
-  Type.Union([
-    Type.Object(
-      { kind: Type.Literal('process'), id: Type.String({ minLength: 1 }) },
-      { additionalProperties: false },
-    ),
-    Type.Object(
-      {
-        kind: Type.Literal('watch'),
-        id: Type.String({ minLength: 1 }),
-        watchId: Type.String({ minLength: 1 }),
-      },
-      { additionalProperties: false },
-    ),
-    Type.Object(
-      { kind: Type.Literal('delegate'), id: Type.String({ minLength: 1 }) },
-      { additionalProperties: false },
-    ),
-  ]),
-  { minItems: 1, maxItems: 32 },
-);
-
-function canonicalizeWaitTargets(
-  requested: readonly WaitTarget[],
-  branch: readonly unknown[],
-): { targets: CanonicalWaitTarget[]; delegateAliases: Map<string, string> } {
-  const processes = new Set<string>();
-  const watches = new Set<string>();
-  const delegateRefs = new Map<string, Set<string>>();
-  const rememberDelegate = (
-    identity: unknown,
-    logicalId?: unknown,
-    jobId?: unknown,
-  ) => {
-    if (typeof identity !== 'string' || !identity) return;
-    for (const ref of [identity, logicalId, jobId]) {
-      if (typeof ref !== 'string' || !ref) continue;
-      const identities = delegateRefs.get(ref) ?? new Set<string>();
-      identities.add(identity);
-      delegateRefs.set(ref, identities);
-    }
-  };
-
-  for (const entry of branch) {
-    const message = messageFrom(entry);
-    if (message?.role !== 'toolResult') continue;
-    const details = isRecord(message.details) ? message.details : undefined;
-    if (!details) continue;
-    const addProcess = (process: unknown) => {
-      if (!isRecord(process) || typeof process.id !== 'string') return;
-      processes.add(process.id);
-      if (Array.isArray(process.watches))
-        for (const watch of process.watches)
-          if (isRecord(watch) && typeof watch.id === 'string')
-            watches.add(`${process.id}:${watch.id}`);
-    };
-    if (
-      (message.toolName === 'background_start' ||
-        message.toolName === 'background_watch') &&
-      isRecord(details.process)
-    )
-      addProcess(details.process);
-    if (
-      message.toolName === 'background_list' &&
-      Array.isArray(details.processes)
-    )
-      for (const process of details.processes) addProcess(process);
-    if (
-      (message.toolName === 'delegate_start' ||
-        message.toolName === 'delegate_continue') &&
-      isRecord(details.workflow)
-    ) {
-      rememberDelegate(
-        details.workflow.identity,
-        details.workflow.logicalId,
-        details.workflow.jobId,
-      );
-    }
-  }
-
-  const aliases = new Map<string, string>();
-  for (const [ref, identities] of delegateRefs) {
-    if (identities.size !== 1) continue;
-    const [identity] = identities;
-    if (identity) aliases.set(ref, identity);
-  }
-  const targets: CanonicalWaitTarget[] = [];
-  for (const target of requested) {
-    if (target.kind === 'process') {
-      if (!processes.has(target.id))
-        throw new Error(
-          `Unknown background process wait target "${target.id}".`,
-        );
-      targets.push({ kind: 'process', id: target.id });
-    } else if (target.kind === 'watch') {
-      if (!watches.has(`${target.id}:${target.watchId}`))
-        throw new Error(
-          `Unknown background watch wait target "${target.id}:${target.watchId}".`,
-        );
-      targets.push({ kind: 'watch', id: target.id, watchId: target.watchId });
-    } else {
-      const identities = delegateRefs.get(target.id);
-      if (!identities?.size)
-        throw new Error(`Unknown delegate wait target "${target.id}".`);
-      if (identities.size !== 1)
-        throw new Error(`Ambiguous delegate wait target "${target.id}".`);
-      const identity = [...identities][0];
-      if (!identity)
-        throw new Error(`Unknown delegate wait target "${target.id}".`);
-      targets.push({ kind: 'delegate', id: identity });
-    }
-  }
-  return {
-    targets: [
-      ...new Map(
-        targets.map((target) => [waitTargetKey(target), target]),
-      ).values(),
-    ],
-    delegateAliases: aliases,
-  };
 }
 
 export function installRequestClosureBoundary(
   pi: ExtensionAPI,
   lifecycle: RequestClosureLifecycle,
 ): void {
-  pi.registerTool({
-    name: 'response_wait',
-    label: 'Wait for background results',
-    description:
-      'Keep this user request open for exact background process, output watch, or delegate IDs. Call with IDs returned by their start tools. A watch match resolves independently of its still-running process.',
-    parameters: Type.Object(
-      { targets: WaitTargets },
-      { additionalProperties: false },
-    ),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const branch = ctx.sessionManager.getBranch();
-      const resolved = canonicalizeWaitTargets(params.targets, [
-        ...branch,
-        ...lifecycle.getToolReceipts(),
-      ]);
-      lifecycle.wait(resolved.targets, resolved.delegateAliases, branch);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'Waiting intent recorded for the named targets. Continue other useful work, then hand off when ready.',
-          },
-        ],
-        details: { targets: resolved.targets },
-      };
-    },
-  });
-  pi.on('tool_execution_end', (event, ctx) => {
-    const toolName = event.toolName;
-    if (
-      ![
-        'background_start',
-        'background_watch',
-        'background_list',
-        'background_stop',
-        'delegate_start',
-        'delegate_continue',
-        'delegate_jobs',
-      ].includes(toolName)
-    )
-      return;
+  installLogicalInputShim();
+  const bindDependencies = (ctx: ExtensionContext) => {
     const sessionId = ctx.sessionManager.getSessionId();
-    lifecycle.observeToolReceipt(
-      sessionId,
-      event.toolCallId,
-      toolName,
-      event.result,
-      event.parentToolCallId,
-    );
-  });
+    const services = getScopedServices(sessionId);
+    services.requestDependencies = {
+      register: (kind, id, sourceCtx) =>
+        lifecycle.registerDependency(kind, id, sourceCtx, (type, data) =>
+          pi.appendEntry(type, data),
+        ),
+      resolve: (kind, id) =>
+        lifecycle.resolveDependency(kind, id, (type, data) =>
+          pi.appendEntry(type, data),
+        ),
+      resolveDelegateGate: (sources, mode) =>
+        lifecycle.resolveDelegateGate(sources, mode, (type, data) =>
+          pi.appendEntry(type, data),
+        ),
+      hasPending: () => lifecycle.hasPendingWait(ctx),
+      isOpen: () => lifecycle.isOpen(ctx),
+      isOpenNow: () => lifecycle.isLogicallyOpen(sessionId),
+      abandon: () =>
+        lifecycle.abandon(ctx, (type, data) => pi.appendEntry(type, data)),
+      isRequired: (kind, id) => lifecycle.isRequired(kind, id, ctx),
+    };
+  };
   pi.on('message_end', (event, ctx) => {
     const message = messageFrom(event);
-    if (message) lifecycle.observe(ctx.sessionManager.getSessionId(), message);
+    if (!message) return;
+    lifecycle.observe(
+      ctx.sessionManager.getSessionId(),
+      message,
+      ctx.sessionManager.getBranch() as readonly unknown[],
+    );
+    bindDependencies(ctx);
   });
-  pi.on('context', (event) => lifecycle.entered(event.messages));
-  pi.on('session_start', () => lifecycle.reset());
+  pi.on('tool_execution_end', (event, ctx) =>
+    lifecycle.observeToolReceipt(
+      ctx.sessionManager.getSessionId(),
+      event.toolCallId,
+      event.toolName,
+      event.result,
+      event.parentToolCallId,
+    ),
+  );
+  pi.on('context_with_system', (event, ctx) => {
+    lifecycle.persistSteering(ctx, (type, data) => pi.appendEntry(type, data));
+    lifecycle.entered(event.messages, ctx, (type, data) =>
+      pi.appendEntry(type, data),
+    );
+  });
+  pi.on('session_start', (_event, ctx) => {
+    lifecycle.restore(ctx);
+    bindDependencies(ctx);
+  });
+  pi.on('session_tree', (_event, ctx) => {
+    getScopedServices(
+      ctx.sessionManager.getSessionId(),
+    ).backgroundDeliveries.clear();
+    forgetLogicalInput(ctx.sessionManager.getSessionId());
+    lifecycle.restore(ctx);
+    bindDependencies(ctx);
+  });
   pi.on('agent_before_settle', (event, ctx) =>
-    lifecycle.beforeSettle(event, ctx),
+    lifecycle.beforeSettle(event, ctx, (type, data) =>
+      pi.appendEntry(type, data),
+    ),
   );
   pi.on('agent_settled', (_event, ctx) => {
     lifecycle.persistedMarker(ctx, (customType, data) =>
       pi.appendEntry(customType, data),
     );
+    releaseLogicalFollowUps(ctx.sessionManager.getSessionId());
   });
-  pi.on('session_shutdown', () => lifecycle.reset());
+  pi.on('session_shutdown', (_event, ctx) => {
+    const services = getScopedServices(ctx.sessionManager.getSessionId());
+    services.requestDependencies = undefined;
+    forgetLogicalInput(ctx.sessionManager.getSessionId());
+    lifecycle.reset();
+  });
 }

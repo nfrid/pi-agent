@@ -3,6 +3,7 @@ import {
   type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test, vi } from 'vitest';
+import { createCompletionDelivery } from './completion-delivery';
 import { createRun } from './types';
 import { WakeCoordinator } from './wake-coordinator';
 import {
@@ -34,6 +35,106 @@ function result(): { runs: ReturnType<typeof createRun>[]; handoff: string } {
 }
 
 describe('wake delivery', () => {
+  test('an entered any gate suppresses the real survivor terminal callback', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    let finishFirst!: () => void;
+    let finishSecond!: () => void;
+    const firstWork = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    const secondWork = new Promise<void>((resolve) => {
+      finishSecond = resolve;
+    });
+    const first = workflow.schedule({
+      logicalId: 'first',
+      mode: 'single',
+      tasks: ['first'],
+      execute: async () => {
+        await firstWork;
+        return result();
+      },
+    });
+    const second = workflow.schedule({
+      logicalId: 'second',
+      mode: 'single',
+      tasks: ['second'],
+      execute: async () => {
+        await secondWork;
+        return result();
+      },
+    });
+    const required = new Set([first.identity, second.identity]);
+    const sendMessage = vi.fn();
+    const pi = { sendMessage } as unknown as ExtensionAPI;
+    const automatic = createCompletionDelivery({
+      pi,
+      getRuntimeActive: () => true,
+      getDeliveryEpoch: () => 0,
+      getRunningCount: () => 0,
+      getStatuses: () => undefined,
+      getUi: () => undefined,
+      isRequired: (job) => required.has(job.attemptIdentity ?? job.id),
+    });
+    const survivorCallback = vi.fn();
+    const detach = workflow.subscribeTerminal((attempt) => {
+      if (attempt.identity !== second.identity) return;
+      survivorCallback();
+      automatic.queueCompletion({
+        id: 'survivor-job',
+        attemptIdentity: attempt.identity,
+        name: 'survivor',
+        mode: 'single',
+        state: 'success',
+        tasks: ['second'],
+        createdAt: 1,
+        settledAt: 2,
+        deliveryEpoch: 0,
+      });
+    });
+    let active: WakeCoordinator | undefined;
+    const delivery = createWakeDelivery({
+      pi,
+      getRuntimeActive: () => true,
+      getActiveCoordinator: () => active,
+      isRequired: (sources) => sources.some((id) => required.has(id)),
+      onEntered: (_sources, wake) => {
+        for (const id of wake.references) required.delete(id);
+      },
+    });
+    active = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'session',
+      ownerEpoch: 0,
+      dispatch: delivery.dispatch,
+    });
+    active.register({
+      id: 'any-gate',
+      condition: { any: [first.identity, second.identity] },
+    });
+    try {
+      finishFirst();
+      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+      const message = sendMessage.mock.calls[0]?.[0];
+      expect(delivery.filterContext([message])).toEqual([message]);
+      expect(required.size).toBe(2);
+      delivery.acknowledgeEntered([]);
+      expect(required.size).toBe(2);
+      expect(sendMessage).toHaveBeenCalledOnce();
+      delivery.acknowledgeEntered([message]);
+      expect(required.size).toBe(0);
+      finishSecond();
+      await vi.waitFor(() => expect(survivorCallback).toHaveBeenCalledOnce());
+      automatic.flushCompletions();
+      expect(automatic.pendingCount()).toBe(0);
+      expect(sendMessage).toHaveBeenCalledOnce();
+    } finally {
+      finishFirst();
+      finishSecond();
+      detach();
+      automatic.clearTimer();
+      await workflow.dispose();
+    }
+  });
   test('uses steer by default and acknowledges only when the custom message enters context', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const attempt = workflow.schedule({
@@ -105,6 +206,9 @@ describe('wake delivery', () => {
     const repeatedTransform = delivery.filterContext([providerMessage]);
     expect(firstTransform).toEqual([providerMessage]);
     expect(repeatedTransform).toEqual([providerMessage]);
+    expect(active.require('ready').state).toBe('queued');
+    expect(entered).not.toHaveBeenCalled();
+    delivery.acknowledgeEntered(repeatedTransform);
     expect(active.require('ready').state).toBe('entered');
     const providerMessages = convertToLlm(
       repeatedTransform as Parameters<typeof convertToLlm>[0],
@@ -128,6 +232,7 @@ describe('wake delivery', () => {
     expect(delivery.filterContext([providerMessage])).toEqual([
       providerMessage,
     ]);
+    delivery.acknowledgeEntered([providerMessage]);
     expect(active.require('ready').state).toBe('entered');
     expect(entered).toHaveBeenCalledOnce();
     expect(entered).toHaveBeenCalledWith(
@@ -180,6 +285,8 @@ describe('wake delivery', () => {
     const snapshot = active.snapshot();
 
     expect(delivery.filterContext([message])).toEqual([message]);
+    expect(active.enteredSourceIdentities()).toEqual([]);
+    delivery.acknowledgeEntered([message]);
     expect(active.enteredSourceIdentities()).toEqual([
       second.identity,
       first.identity,
@@ -205,6 +312,8 @@ describe('wake delivery', () => {
     };
     expect(restored.restore(queuedSnapshot)).toBe(true);
     expect(restoredDelivery.filterContext([message])).toEqual([message]);
+    expect(restored.enteredSourceIdentities()).toEqual([]);
+    restoredDelivery.acknowledgeEntered([message]);
     expect(restored.enteredSourceIdentities()).toEqual([
       second.identity,
       first.identity,
@@ -326,6 +435,8 @@ describe('wake delivery', () => {
       expect(restoredDelivery.filterContext([candidate])).toEqual([]);
     expect(restored.require('reload-wake').state).toBe('queued');
     expect(restoredDelivery.filterContext([message])).toEqual([message]);
+    expect(restored.require('reload-wake').state).toBe('queued');
+    restoredDelivery.acknowledgeEntered([message]);
     expect(restored.require('reload-wake').state).toBe('entered');
     // Activation recovery uses this durable entry boundary, rather than a
     // later unrelated context event, to retry its exact persisted sources.
@@ -377,6 +488,9 @@ describe('wake delivery', () => {
     expect(delivery.filterContext([foreign, first, second, second])).toEqual([
       second,
     ]);
+    expect(active.require('recoverable').state).toBe('queued');
+    expect(entered).not.toHaveBeenCalled();
+    delivery.acknowledgeEntered([second]);
     expect(active.require('recoverable').state).toBe('entered');
     expect(entered).toHaveBeenCalledOnce();
     expect(entered).toHaveBeenCalledWith(

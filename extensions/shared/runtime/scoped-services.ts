@@ -42,6 +42,28 @@ export interface DashboardUsageBroker {
   read(force: boolean, signal?: AbortSignal): Promise<unknown>;
 }
 
+export interface RequestDependencyContext {
+  readonly sessionManager: {
+    getSessionId(): string;
+    getBranch(): unknown[];
+  };
+}
+
+export interface RequestDependencyHooks {
+  register(
+    kind: 'process' | 'watch' | 'delegate',
+    id: string,
+    ctx: RequestDependencyContext,
+  ): boolean | undefined;
+  resolve?(kind: 'process' | 'watch' | 'delegate', id: string): void;
+  resolveDelegateGate(sources: readonly string[], mode: 'all' | 'any'): void;
+  hasPending(): boolean;
+  isOpen?(): boolean;
+  isOpenNow?(): boolean;
+  abandon?(): void;
+  isRequired?(kind: 'process' | 'watch' | 'delegate', id: string): boolean;
+}
+
 /** Shared code stores the delegate service without depending on its coordinator. */
 export interface ScopedDelegateWorkflow {
   get(reference: string): unknown;
@@ -60,6 +82,8 @@ export interface ScopedServices {
   freshDashboardUserTurns: number;
   /** Session-owned delegate workflow identity for extension integrations. */
   delegateWorkflow?: ScopedDelegateWorkflow;
+  /** Dependencies that keep the current logical user request open. */
+  requestDependencies?: RequestDependencyHooks;
 }
 
 const scopedServicesKey = Symbol.for('pi.dashboard.scoped-runtime-services');
@@ -130,6 +154,7 @@ export function releaseScopedServices(
   current.liveSurfaceHub.clearAll();
   current.pendingProcesses.clear();
   current.freshDashboardUserTurns = 0;
+  current.requestDependencies = undefined;
   registry().delete(id);
   return true;
 }

@@ -52,6 +52,44 @@ describe('delegate completion delivery while paused', () => {
     expect(sendMessage).toHaveBeenCalledOnce();
   });
 
+  test('does not acknowledge an automatic completion removed after its first context filter', () => {
+    const entered = vi.fn();
+    const job: DelegateJobSnapshot = {
+      id: 'dj-filtered',
+      name: 'Filtered child',
+      mode: 'single',
+      state: 'success',
+      tasks: ['work'],
+      createdAt: 1,
+      settledAt: 2,
+      deliveryEpoch: 0,
+      handoff: 'done',
+    };
+    const delivery = createCompletionDelivery({
+      pi: { sendMessage: vi.fn() } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getDeliveryEpoch: () => 0,
+      getRunningCount: () => 0,
+      getStatuses: () => undefined,
+      getUi: () => undefined,
+      onEntered: entered,
+    });
+    delivery.queueCompletion(job);
+    delivery.flushCompletions();
+    const message = {
+      customType: 'delegate-job-result',
+      details: { jobs: [job] },
+    };
+    const ordinaryContext = delivery.filterContext([message]);
+    expect(ordinaryContext).toEqual([message]);
+    expect(entered).not.toHaveBeenCalled();
+    // Another extension removes the message before context_with_system.
+    const finalContext: unknown[] = [];
+    delivery.markAutomaticDeliveriesEntered(finalContext);
+    expect(entered).not.toHaveBeenCalled();
+    expect(delivery.automaticDeliveryState(job)).toBe('queued');
+  });
+
   test('filters a drained automatic completion after its tree epoch expires', () => {
     let epoch = 4;
     const delivery = createCompletionDelivery({

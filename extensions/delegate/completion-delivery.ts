@@ -150,6 +150,8 @@ export function createCompletionDelivery(options: {
   getUi: () => { notify(message: string, level: 'info'): void } | undefined;
   getDeliveryBroker?: () => BackgroundDeliveryBroker | undefined;
   getPaused?: () => boolean;
+  onEntered?: (sources: readonly string[]) => void;
+  isRequired?: (job: DelegateJobSnapshot) => boolean;
 }): CompletionDeliveryController {
   let pendingCompletions: DelegateJobSnapshot[] = [];
   const automaticDeliveryStates = new Map<string, AutomaticDeliveryState>();
@@ -201,7 +203,9 @@ export function createCompletionDelivery(options: {
     pendingCompletions = [];
     const deliveryEpoch = options.getDeliveryEpoch();
     const completed = queued.filter(
-      (job) => job.deliveryEpoch === deliveryEpoch,
+      (job) =>
+        job.deliveryEpoch === deliveryEpoch &&
+        (options.isRequired?.(job) ?? true),
     );
     const stale = queued.filter((job) => job.deliveryEpoch !== deliveryEpoch);
     if (stale.length > 0) notifyStaleCompletions(stale);
@@ -255,7 +259,8 @@ export function createCompletionDelivery(options: {
   };
 
   const queueCompletion = (job: DelegateJobSnapshot) => {
-    if (!options.getRuntimeActive()) return;
+    if (!options.getRuntimeActive() || options.isRequired?.(job) === false)
+      return;
     // Settlement is normally idempotent, but delivery can also be retried
     // around a branch/session boundary. Do not enqueue a second copy of the
     // same stable job ID while the first copy is pending or already accepted.
@@ -322,6 +327,7 @@ export function createCompletionDelivery(options: {
         );
       }),
     markAutomaticDeliveriesEntered: (messages) => {
+      const enteredSources = new Set<string>();
       for (const message of messages) {
         const candidate = message as {
           customType?: unknown;
@@ -337,9 +343,18 @@ export function createCompletionDelivery(options: {
               : undefined;
           if (id && automaticDeliveryStates.get(id) === 'queued')
             automaticDeliveryStates.set(id, 'entered');
+          const source =
+            job &&
+            typeof job === 'object' &&
+            typeof (job as { attemptIdentity?: unknown }).attemptIdentity ===
+              'string'
+              ? (job as { attemptIdentity: string }).attemptIdentity
+              : id;
+          if (source) enteredSources.add(source);
         }
       }
       trimAutomaticDeliveryStates();
+      if (enteredSources.size) options.onEntered?.([...enteredSources]);
     },
     hasQueuedAutomaticDeliveries: () =>
       [...automaticDeliveryStates.values()].some((state) => state === 'queued'),

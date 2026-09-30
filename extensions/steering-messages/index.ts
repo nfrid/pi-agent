@@ -4,6 +4,10 @@ import {
   UserMessageComponent,
 } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
+import {
+  isLogicalSteering,
+  markLogicalSteering,
+} from '../shared/runtime/logical-input';
 import { installSteeringMessageShim, type SteeringShimHost } from './shim';
 
 export const STEERING_MESSAGE_MARKER_TYPE = 'steering-message';
@@ -11,6 +15,7 @@ export const STEERING_MESSAGE_MARKER_TYPE = 'steering-message';
 export interface SteeringMessageMarker {
   timestamp: number | string;
   text: string;
+  userEntryId?: string;
 }
 
 type Timestamp = number | string;
@@ -64,7 +69,13 @@ function markerData(
   const text = data?.text;
   return timestamp === undefined || typeof text !== 'string'
     ? undefined
-    : { timestamp, text };
+    : {
+        timestamp,
+        text,
+        ...(typeof data?.userEntryId === 'string'
+          ? { userEntryId: data.userEntryId }
+          : {}),
+      };
 }
 
 function markerTimestamp(
@@ -167,6 +178,31 @@ export function registerSteeringMessageTracking(
   let uninstall: (() => void) | undefined;
   const pendingSteering: Array<{ text: string }> = [];
   const liveCounts = new Map<string, number>();
+  const pendingMarkers = new Map<object, SteeringMessageMarker>();
+
+  const persistMarkers = (ctx: ExtensionContext): void => {
+    if (!pendingMarkers.size) return;
+    const branch = ctx.sessionManager.getBranch();
+    for (const [message, marker] of pendingMarkers) {
+      const entries = branch.filter(
+        (entry) => entry.type === 'message' && entry.message === message,
+      );
+      if (entries.length !== 1 || !entries[0]) continue;
+      const userEntryId = entries[0].id;
+      const alreadyMarked = branch.some(
+        (entry) =>
+          entry.type === 'custom' &&
+          entry.customType === STEERING_MESSAGE_MARKER_TYPE &&
+          record(entry.data)?.userEntryId === userEntryId,
+      );
+      if (!alreadyMarked)
+        pi.appendEntry<SteeringMessageMarker>(STEERING_MESSAGE_MARKER_TYPE, {
+          ...marker,
+          userEntryId,
+        });
+      pendingMarkers.delete(message);
+    }
+  };
 
   const resetSession = (nextContext: ExtensionContext): void => {
     uninstall?.();
@@ -175,6 +211,7 @@ export function registerSteeringMessageTracking(
     marks = loadHistoryMarks(nextContext.sessionManager.buildContextEntries());
     pendingSteering.length = 0;
     liveCounts.clear();
+    pendingMarkers.clear();
     const host =
       nextContext.mode === 'tui'
         ? getTuiShimHost(
@@ -201,7 +238,9 @@ export function registerSteeringMessageTracking(
   pi.on('message_start', (event, eventContext) => {
     if (event.message.role !== 'user') return;
     const text = userText(event.message);
-    const steering = takeSteeringInput(pendingSteering, text);
+    const steering =
+      takeSteeringInput(pendingSteering, text) ||
+      isLogicalSteering(event.message);
     const occurrence =
       (marks.historyCounts.get(text) ?? 0) + (liveCounts.get(text) ?? 0);
     liveCounts.set(text, (liveCounts.get(text) ?? 0) + 1);
@@ -211,17 +250,19 @@ export function registerSteeringMessageTracking(
       (event.message as unknown as { timestamp?: unknown }).timestamp,
     );
     if (timestamp === undefined) return;
-    pi.appendEntry<SteeringMessageMarker>(STEERING_MESSAGE_MARKER_TYPE, {
-      timestamp,
-      text,
-    });
+    markLogicalSteering(event.message);
+    pendingMarkers.set(event.message, { timestamp, text });
     pi.events.emit('steering-message:marked', {
       sessionId: eventContext.sessionManager.getSessionId(),
       message: event.message,
     });
   });
 
-  pi.on('agent_settled', () => {
+  pi.on('message_end', (_event, ctx) => persistMarkers(ctx));
+  pi.on('context', (_event, ctx) => persistMarkers(ctx));
+
+  pi.on('agent_settled', (_event, ctx) => {
+    persistMarkers(ctx);
     pendingSteering.length = 0;
   });
 
@@ -231,6 +272,7 @@ export function registerSteeringMessageTracking(
     uninstall = undefined;
     context = undefined;
     pendingSteering.length = 0;
+    pendingMarkers.clear();
     liveCounts.clear();
   });
 }

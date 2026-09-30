@@ -1,16 +1,35 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
+import { getScopedServices } from '../shared/runtime/scoped-services';
 import notifySound, { shouldNotifyAgentSettled } from './index';
 
 describe('notify sound lifecycle', () => {
-  it('suppresses settled notification while a process is pending', () => {
+  it('does not suppress settlement for a passive running process', () => {
     const source = {};
-    setPendingProcessCount(source, 1);
+    setPendingProcessCount(source, 1, 'passive-service');
     try {
-      expect(shouldNotifyAgentSettled()).toBe(false);
+      expect(shouldNotifyAgentSettled('passive-service')).toBe(true);
     } finally {
-      setPendingProcessCount(source, 0);
+      setPendingProcessCount(source, 0, 'passive-service');
+    }
+  });
+
+  it('suppresses settlement only while its session has required outcomes', () => {
+    const services = getScopedServices('required-outcome');
+    let pending = true;
+    services.requestDependencies = {
+      register: () => true,
+      resolveDelegateGate: () => undefined,
+      hasPending: () => pending,
+    };
+    try {
+      expect(shouldNotifyAgentSettled('required-outcome')).toBe(false);
+      expect(shouldNotifyAgentSettled('unrelated-session')).toBe(true);
+      pending = false;
+      expect(shouldNotifyAgentSettled('required-outcome')).toBe(true);
+    } finally {
+      services.requestDependencies = undefined;
     }
   });
 

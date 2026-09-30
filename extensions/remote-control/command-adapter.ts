@@ -8,6 +8,7 @@ import { DASHBOARD_SUPPORTED_BUILTIN_COMMANDS } from '@pi-dashboard/protocol/das
 import type { BridgeImageAttachment } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import { requestRuntimePause, resumeRuntimePause } from '../pause/operations';
 import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
+import { installLogicalInputShim } from '../shared/runtime/logical-input';
 import { getSessionScopeId } from '../shared/runtime/scoped-services';
 
 type CommandInfo = ReturnType<ExtensionAPI['getCommands']>[number];
@@ -227,6 +228,8 @@ export async function dispatchDashboardInput(
   images: readonly BridgeImageAttachment[] = [],
   expandCommands = true,
 ): Promise<{ accepted: true; command?: string }> {
+  if (deliverAs && !installLogicalInputShim())
+    throw new Error('Native logical input queue is unavailable.');
   const invocation = expandCommands ? commandParts(text) : undefined;
   if (
     invocation &&

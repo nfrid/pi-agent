@@ -183,7 +183,10 @@ export class BackgroundManager {
     this.pollTimer.unref?.();
   }
 
-  async start(options: StartOptions): Promise<BackgroundSnapshot> {
+  async start(
+    options: StartOptions,
+    onCreated?: (snapshot: BackgroundSnapshot) => void | Promise<void>,
+  ): Promise<BackgroundSnapshot> {
     this.assertLive();
     const generation = this.generation;
     await this.refresh(true, generation);
@@ -191,27 +194,36 @@ export class BackgroundManager {
     validateWatches(options.watch);
     if (options.watch?.length) await this.assertWatchSupport();
     this.assertLive();
-    const snapshot = await this.client.start({
-      id: newBackgroundJobId(),
-      command: options.command,
-      title: displayCommand(options.title ?? deriveTitle(options.command)),
-      cwd: options.cwd,
-      events: true,
-      // Jobs run in a separate host service with its own, often minimal PATH.
-      ...(process.env.PATH !== undefined
-        ? { env: { PATH: process.env.PATH } }
-        : {}),
-      ...(options.watch?.length ? { watch: options.watch } : {}),
-    });
-    if (this.disposed || generation !== this.generation)
-      throw new Error('Background manager is shut down.');
-    if (!isBackgroundTerminalSnapshot(snapshot))
-      throw new Error('Process host returned an incompatible background job.');
-    this.accept(snapshot, true);
-    // Starting a job changes pending-process accounting immediately; do not
-    // wait for the next poll before the runtime/widget sees it.
-    this.onChange?.();
-    return this.records.get(snapshot.id) ?? snapshot;
+    const id = newBackgroundJobId();
+    this.observing.add(id);
+    try {
+      const snapshot = await this.client.start({
+        id,
+        command: options.command,
+        title: displayCommand(options.title ?? deriveTitle(options.command)),
+        cwd: options.cwd,
+        events: true,
+        // Jobs run in a separate host service with its own, often minimal PATH.
+        ...(process.env.PATH !== undefined
+          ? { env: { PATH: process.env.PATH } }
+          : {}),
+        ...(options.watch?.length ? { watch: options.watch } : {}),
+      });
+      if (this.disposed || generation !== this.generation)
+        throw new Error('Background manager is shut down.');
+      if (!isBackgroundTerminalSnapshot(snapshot))
+        throw new Error(
+          'Process host returned an incompatible background job.',
+        );
+      this.accept(snapshot, false);
+      await onCreated?.(displaySnapshot(snapshot));
+      this.observing.delete(id);
+      this.accept(snapshot, true);
+      this.onChange?.();
+      return this.records.get(snapshot.id) ?? snapshot;
+    } finally {
+      this.observing.delete(id);
+    }
   }
 
   get(id: string): BackgroundSnapshot | undefined {
@@ -287,6 +299,7 @@ export class BackgroundManager {
   async watch(
     id: string,
     watches: readonly BackgroundWatchInput[],
+    onCreated?: (snapshot: BackgroundSnapshot) => void | Promise<void>,
   ): Promise<BackgroundSnapshot> {
     this.assertLive();
     validateWatches(watches);
@@ -305,11 +318,19 @@ export class BackgroundManager {
       throw new Error(`Background process "${id}" is not running.`);
     if (!this.client.watch)
       throw new Error('Background host does not support watches.');
-    const snapshot = await this.client.watch(id, watches);
-    if (this.disposed || generation !== this.generation)
-      throw new Error('Background manager is shut down.');
-    this.accept(snapshot, true);
-    return displaySnapshot(snapshot);
+    this.observing.add(id);
+    try {
+      const snapshot = await this.client.watch(id, watches);
+      if (this.disposed || generation !== this.generation)
+        throw new Error('Background manager is shut down.');
+      this.accept(snapshot, false);
+      await onCreated?.(displaySnapshot(snapshot));
+      this.observing.delete(id);
+      this.accept(snapshot, true);
+      return displaySnapshot(snapshot);
+    } finally {
+      this.observing.delete(id);
+    }
   }
 
   async unwatch(
@@ -422,6 +443,12 @@ export class BackgroundManager {
     setPendingProcessCount(this, 0, this.scopeId);
     this.onChange?.();
     // Detach only. The sidecar remains the owner and jobs and watches persist.
+  }
+
+  async replayUnentered(): Promise<void> {
+    this.notified.clear();
+    this.notifiedWatches.clear();
+    await this.refresh(true);
   }
 
   get runningCount(): number {

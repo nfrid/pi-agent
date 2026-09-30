@@ -288,10 +288,7 @@ or opened its technical details. Outline navigation opens a containing work log 
 needed, including in virtualized history. Background activity after handoff remains a
 separate continuation and never reopens an earlier completed answer.
 
-`response_wait` declares an exact process, output-watch, or delegate dependency when
-an answer must remain open for automatic continuation. A passive server alone does
-not prevent handoff. The durable boundary is emitted only at genuine SDK settlement;
-it is not inferred from `agent_end` or from the existence of running processes.
+Request-owned background tasks and watches keep an answer open until their outcomes enter provider context. Passive services alone do not prevent handoff. Delegate gates can batch selected results or release the remaining selected attempts after the first `any` result enters context. The durable boundary is emitted only at genuine SDK settlement; it is not inferred from `agent_end` or from the existence of running processes.
 
 ## Dashboard UI principle
 

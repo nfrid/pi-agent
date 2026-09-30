@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { markLogicalSteering } from '../shared/runtime/logical-input';
 import {
   installRequestClosureBoundary,
   RequestClosureLifecycle,
@@ -22,413 +23,192 @@ function setup() {
       message: answer,
     },
   ];
+  let nextEntry = 0;
+  let currentBranch: Array<Record<string, unknown>> = branch;
   const ctx = {
     sessionManager: {
       getSessionId: () => 'session',
-      getBranch: () => branch,
+      getBranch: () => currentBranch,
     },
   } as never;
   const event = {
     outcome: 'completed',
-    entries: [],
+    continue: false,
     context: { pendingMessages: [] },
   } as never;
-  lifecycle.observe('session', user);
-  lifecycle.observeLiveAlias(user, 'live-user');
-  lifecycle.observe('session', answer);
-  lifecycle.observeLiveAlias(answer, 'live-answer');
   const appendEntry = (customType: string, data: unknown) => {
+    nextEntry += 1;
     branch.push({
       type: 'custom',
-      id: 'marker-entry',
+      id: `custom-${nextEntry}`,
       parentId: 'assistant-entry',
-      timestamp: new Date(21).toISOString(),
+      timestamp: new Date(20 + nextEntry).toISOString(),
       customType,
       data,
     });
   };
+  lifecycle.observe('session', user, branch);
+  lifecycle.observeLiveAlias(user, 'live-user');
+  lifecycle.observe('session', answer, branch);
+  lifecycle.observeLiveAlias(answer, 'live-answer');
   const settle = () => {
-    lifecycle.beforeSettle(event, ctx);
+    lifecycle.beforeSettle(event, ctx, appendEntry);
     return lifecycle.persistedMarker(ctx, appendEntry);
   };
-  return { lifecycle, ctx, event, user, branch, appendEntry, settle };
+  const register = (kind: 'process' | 'watch' | 'delegate', id: string) =>
+    lifecycle.registerDependency(kind, id, ctx, appendEntry);
+  const entered = (messages: readonly unknown[]) =>
+    lifecycle.entered(messages, ctx, appendEntry);
+  return {
+    lifecycle,
+    user,
+    answer,
+    branch,
+    setBranch: (value: Array<Record<string, unknown>>) => {
+      currentBranch = value;
+    },
+    ctx,
+    event,
+    appendEntry,
+    register,
+    entered,
+    settle,
+  };
 }
 
-describe('request closure lifecycle', () => {
-  it('binds exact persisted entries and live aliases at final settlement', () => {
-    const { settle } = setup();
-    expect(settle()).toMatchObject({
-      id: 'marker-entry',
-      type: 'custom',
+const processResult = (
+  id: string,
+  status = 'done',
+  endedWatches?: unknown[],
+) => ({
+  role: 'custom',
+  customType: 'background-terminal-result',
+  details: { id, status, ...(endedWatches ? { endedWatches } : {}) },
+});
+const watchResult = (id: string, watchId: string, status = 'matched') => ({
+  role: 'custom',
+  customType: 'background-watch-result',
+  details: { id, watchId, status },
+});
+
+describe('automatic request closure dependencies', () => {
+  it('registers a task at source creation and closes only after its result enters context', () => {
+    const f = setup();
+    f.register('process', 'task-1');
+    expect(f.settle()).toBeUndefined();
+    const pending = f.event as { context: { pendingMessages: unknown[] } };
+    pending.context.pendingMessages.push(processResult('task-1'));
+    expect(f.settle()).toBeUndefined();
+    pending.context.pendingMessages.length = 0;
+    f.entered([processResult('task-1', 'failed')]);
+    expect(f.settle()).toMatchObject({
       customType: 'response-closure',
       data: {
         requestMessageId: 'user-entry',
         finalMessageId: 'assistant-entry',
-        startedAt: 10,
-        endedAt: 20,
         liveRequestMessageId: 'live-user',
         liveFinalMessageId: 'live-answer',
       },
     });
   });
 
-  it('does not persist a provisional marker at a continuing boundary', () => {
-    const { lifecycle, ctx, event, appendEntry, branch } = setup();
-    const continuing = event as { continue: boolean };
-    continuing.continue = true;
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toBeUndefined();
-    expect(
-      branch.some((entry) => entry.customType === 'response-closure'),
-    ).toBe(false);
-  });
+  it('lets a passive service close without a watch and waits for a service watch', () => {
+    const passive = setup();
+    expect(passive.settle()).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
+    });
 
-  it('fails closed when native message identity is missing or ambiguous', () => {
-    const missing = setup();
-    missing.branch.pop();
-    expect(
-      missing.lifecycle.beforeSettle(missing.event, missing.ctx),
-    ).toBeUndefined();
-    const ambiguous = setup();
-    const firstEntry = ambiguous.branch[0];
-    if (firstEntry) ambiguous.branch.push({ ...firstEntry });
-    expect(
-      ambiguous.lifecycle.beforeSettle(ambiguous.event, ambiguous.ctx),
-    ).toBeUndefined();
-  });
-
-  it('keeps the request open for a named process or watch until its exact result enters context', () => {
-    const { lifecycle, ctx, event, appendEntry } = setup();
-    lifecycle.wait(
-      [
-        { kind: 'process', id: 'job' },
-        { kind: 'watch', id: 'job', watchId: 'ready' },
-      ],
-      new Map(),
-      [],
-    );
-    expect(lifecycle.beforeSettle(event, ctx)).toBeUndefined();
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toBeUndefined();
-    expect(lifecycle.beforeSettle(event, ctx)).toBeUndefined();
-    lifecycle.entered([
-      {
-        role: 'custom',
-        customType: 'background-watch-result',
-        details: {
-          id: 'job',
-          watchId: 'ready',
-          dedupeKey: 'job:ready',
-          status: 'timed_out',
-        },
-      },
-    ]);
-    expect(lifecycle.beforeSettle(event, ctx)).toBeUndefined();
-    lifecycle.entered([
-      {
-        role: 'custom',
-        customType: 'background-terminal-result',
-        details: {
-          id: 'job',
-          dedupeKey: 'job',
-          status: 'done',
-          endedWatches: [{ id: 'ready', contains: 'READY' }],
-        },
-      },
-    ]);
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
-      customType: 'response-closure',
+    const watched = setup();
+    watched.register('watch', 'server:ready');
+    expect(watched.settle()).toBeUndefined();
+    watched.entered([watchResult('server', 'ready', 'timed_out')]);
+    expect(watched.settle()).toMatchObject({
       data: { requestMessageId: 'user-entry' },
     });
   });
 
-  it('validates all targets from persisted start receipts and canonicalizes delegate identities', async () => {
-    const { lifecycle, ctx, event, appendEntry } = setup();
-    const tools = new Map<
-      string,
-      { execute: (...args: unknown[]) => Promise<unknown> }
-    >();
-    const pi = {
-      registerTool: (tool: {
-        name: string;
-        execute: (...args: unknown[]) => Promise<unknown>;
-      }) => tools.set(tool.name, tool),
-      on: () => undefined,
-    } as never;
-    installRequestClosureBoundary(pi, lifecycle);
-    const tool = tools.get('response_wait');
-    if (!tool) throw new Error('response_wait was not registered');
-    const receipts = [
-      {
-        type: 'message',
-        message: {
-          role: 'toolResult',
-          toolName: 'background_start',
-          details: {
-            action: 'start',
-            process: { id: 'process-1', watches: [{ id: 'watch-1' }] },
-          },
-        },
-      },
-      {
-        type: 'message',
-        message: {
-          role: 'toolResult',
-          toolName: 'delegate_start',
-          details: {
-            workflow: {
-              identity: 'review@2',
-              logicalId: 'review',
-              jobId: 'delegate-uuid',
-            },
-          },
-        },
-      },
-    ];
-    const toolContext = { sessionManager: { getBranch: () => receipts } };
-    const invoke = (targets: unknown[]) =>
-      tool.execute('call', { targets }, undefined, undefined, toolContext);
-    await expect(
-      invoke([
-        { kind: 'process', id: 'process-1' },
-        { kind: 'watch', id: 'process-1', watchId: 'watch-1' },
-        { kind: 'delegate', id: 'review' },
-      ]),
-    ).resolves.toMatchObject({
-      details: {
-        targets: [
-          { kind: 'process', id: 'process-1' },
-          { kind: 'watch', id: 'process-1', watchId: 'watch-1' },
-          { kind: 'delegate', id: 'review@2' },
-        ],
-      },
+  it('keeps task exit required after an early watch and treats failed exits as outcomes', () => {
+    const f = setup();
+    f.register('process', 'task-2');
+    f.register('watch', 'task-2:progress');
+    f.entered([watchResult('task-2', 'progress')]);
+    expect(f.settle()).toBeUndefined();
+    f.entered([
+      processResult('task-2', 'failed', [{ id: 'late', contains: 'done' }]),
+    ]);
+    expect(f.settle()).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
     });
-    await expect(
-      invoke([
-        { kind: 'process', id: 'process-1' },
-        { kind: 'process', id: 'not-started' },
-      ]),
-    ).rejects.toThrow('Unknown background process');
-    lifecycle.entered([
+  });
+
+  it('keeps unrelated delegates required while all and any gates affect selected refs only', () => {
+    const all = setup();
+    all.register('delegate', 'a@1');
+    all.register('delegate', 'b@1');
+    all.register('delegate', 'other@1');
+    all.lifecycle.resolveDelegateGate(['a@1', 'b@1'], 'all', all.appendEntry);
+    expect(all.settle()).toBeUndefined();
+    all.entered([
       {
         role: 'custom',
-        customType: 'background-terminal-result',
-        details: {
-          id: 'process-1',
-          dedupeKey: 'process-1',
-          status: 'done',
-          endedWatches: [{ id: 'watch-1', contains: 'READY' }],
-        },
+        customType: 'delegate-wake-result',
+        details: { sources: ['a@1', 'b@1'] },
       },
+    ]);
+    expect(all.settle()).toBeUndefined();
+    all.entered([
+      {
+        role: 'custom',
+        customType: 'delegate-job-result',
+        details: { jobs: [{ attemptIdentity: 'other@1', state: 'error' }] },
+      },
+    ]);
+    all.lifecycle.resolveDelegateGate(['other@1'], 'all', all.appendEntry);
+    expect(all.settle()).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
+    });
+
+    const any = setup();
+    any.register('delegate', 'first@1');
+    any.register('delegate', 'second@1');
+    any.register('delegate', 'unrelated@1');
+    any.lifecycle.resolveDelegateGate(
+      ['first@1', 'second@1'],
+      'any',
+      any.appendEntry,
+    );
+    // A wake removed by a later context filter never reaches this entry hook.
+    expect(any.settle()).toBeUndefined();
+    any.entered([
+      {
+        role: 'custom',
+        customType: 'delegate-wake-result',
+        details: { sources: ['first@1'] },
+      },
+    ]);
+    expect(any.settle()).toBeUndefined();
+    any.entered([
       {
         role: 'custom',
         customType: 'delegate-job-result',
         details: {
-          dedupeKey: 'delegate-uuid',
-          jobs: [
-            {
-              id: 'delegate-uuid',
-              attemptIdentity: 'review@2',
-              logicalId: 'review',
-              state: 'success',
-            },
-          ],
+          jobs: [{ attemptIdentity: 'unrelated@1', state: 'success' }],
         },
       },
     ]);
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
+    any.lifecycle.resolveDelegateGate(['unrelated@1'], 'all', any.appendEntry);
+    expect(any.settle()).toMatchObject({
       data: { requestMessageId: 'user-entry' },
     });
   });
 
-  it('accepts authoritative nested tool receipts before their parent tool result persists', async () => {
-    const { lifecycle } = setup();
-    const tools = new Map<
-      string,
-      { execute: (...args: unknown[]) => Promise<unknown> }
-    >();
-    const handlers = new Map<string, (...args: unknown[]) => void>();
-    installRequestClosureBoundary(
-      {
-        registerTool: (tool: {
-          name: string;
-          execute: (...args: unknown[]) => Promise<unknown>;
-        }) => tools.set(tool.name, tool),
-        on: (name: string, handler: (...args: unknown[]) => void) =>
-          handlers.set(name, handler),
-      } as never,
-      lifecycle,
-    );
-    const receipt = (toolCallId: string, toolName: string, details: unknown) =>
-      handlers.get('tool_execution_end')?.(
-        { toolCallId, toolName, result: { details } },
-        { sessionManager: { getSessionId: () => 'session' } },
-      );
-    receipt('nested-bg', 'background_start', {
-      process: { id: 'nested-process', watches: [{ id: 'ready' }] },
-    });
-    receipt('nested-delegate', 'delegate_start', {
-      workflow: { identity: 'review@4', logicalId: 'review', jobId: 'job-4' },
-    });
-    const wait = tools.get('response_wait');
-    if (!wait) throw new Error('response_wait was not registered');
-    await expect(
-      wait.execute(
-        'wait',
-        {
-          targets: [
-            { kind: 'process', id: 'nested-process' },
-            { kind: 'watch', id: 'nested-process', watchId: 'ready' },
-            { kind: 'delegate', id: 'review' },
-          ],
-        },
-        undefined,
-        undefined,
-        { sessionManager: { getBranch: () => [] } },
-      ),
-    ).resolves.toMatchObject({
-      details: {
-        targets: [
-          { kind: 'process', id: 'nested-process' },
-          { kind: 'watch', id: 'nested-process', watchId: 'ready' },
-          { kind: 'delegate', id: 'review@4' },
-        ],
-      },
-    });
-    await expect(
-      wait.execute(
-        'unknown',
-        {
-          targets: [
-            { kind: 'process', id: 'nested-process' },
-            { kind: 'process', id: 'unknown' },
-          ],
-        },
-        undefined,
-        undefined,
-        { sessionManager: { getBranch: () => [] } },
-      ),
-    ).rejects.toThrow('Unknown background process');
-  });
-
-  it('does not wait again for an exact target whose result already entered history', async () => {
-    const already = setup();
-    const tools = new Map<
-      string,
-      { execute: (...args: unknown[]) => Promise<unknown> }
-    >();
-    installRequestClosureBoundary(
-      {
-        registerTool: (tool: {
-          name: string;
-          execute: (...args: unknown[]) => Promise<unknown>;
-        }) => tools.set(tool.name, tool),
-        on: () => undefined,
-      } as never,
-      already.lifecycle,
-    );
-    const tool = tools.get('response_wait');
-    if (!tool) throw new Error('response_wait was not registered');
-    const branch = [
-      {
-        type: 'message',
-        message: {
-          role: 'toolResult',
-          toolName: 'delegate_start',
-          details: {
-            workflow: {
-              identity: 'review@1',
-              logicalId: 'review',
-              jobId: 'host-job-9',
-            },
-          },
-        },
-      },
-      {
-        type: 'message',
-        message: {
-          role: 'custom',
-          customType: 'delegate-job-result',
-          details: {
-            dedupeKey: 'host-job-9',
-            jobs: [
-              {
-                id: 'host-job-9',
-                attemptIdentity: 'review@1',
-                logicalId: 'review',
-                state: 'success',
-              },
-            ],
-          },
-        },
-      },
-    ];
-    await tool.execute(
-      'call',
-      { targets: [{ kind: 'delegate', id: 'review' }] },
-      undefined,
-      undefined,
-      { sessionManager: { getBranch: () => branch } },
-    );
-    already.lifecycle.beforeSettle(already.event, already.ctx);
-    expect(
-      already.lifecycle.persistedMarker(already.ctx, already.appendEntry),
-    ).toMatchObject({ data: { requestMessageId: 'user-entry' } });
-  });
-
-  it('resolves coalesced ended watches and explicit stop/cancel results only after entry', () => {
-    const { lifecycle, ctx, event, appendEntry } = setup();
-    lifecycle.wait(
-      [
-        { kind: 'watch', id: 'process-1', watchId: 'watch-1' },
-        { kind: 'process', id: 'process-1' },
-        { kind: 'delegate', id: 'review@1' },
-      ],
-      new Map([['review@1', 'review@1']]),
-      [],
-    );
-    expect(lifecycle.beforeSettle(event, ctx)).toBeUndefined();
-    lifecycle.entered([
-      {
-        role: 'custom',
-        customType: 'background-terminal-result',
-        details: {
-          id: 'process-1',
-          dedupeKey: 'process-1',
-          status: 'killed',
-          endedWatches: [{ id: 'watch-1', contains: 'READY' }],
-        },
-      },
-      {
-        role: 'toolResult',
-        toolName: 'delegate_jobs',
-        details: {
-          action: 'cancel',
-          attempts: [{ identity: 'review@1', state: 'cancelled' }],
-          jobs: [],
-        },
-      },
-    ]);
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
-      data: { requestMessageId: 'user-entry' },
-    });
-  });
-
-  it('resolves nested cancellations only after their script result enters context', () => {
-    const { lifecycle, ctx, event, appendEntry } = setup();
-    lifecycle.wait(
-      [
-        { kind: 'process', id: 'process-1' },
-        { kind: 'delegate', id: 'review@1' },
-      ],
-      new Map([['review@1', 'review@1']]),
-      [],
-    );
-    lifecycle.observeToolReceipt(
+  it('requires nested stop and cancel outcomes to enter with their codemode result', () => {
+    const f = setup();
+    f.register('process', 'process-1');
+    f.register('delegate', 'review@1');
+    f.lifecycle.observeToolReceipt(
       'session',
-      'script/inner/stop',
+      'nested-stop',
       'background_stop',
       {
         details: {
@@ -436,11 +216,11 @@ describe('request closure lifecycle', () => {
           processes: [{ id: 'process-1', status: 'killed' }],
         },
       },
-      'script/inner',
+      'script-call',
     );
-    lifecycle.observeToolReceipt(
+    f.lifecycle.observeToolReceipt(
       'session',
-      'script/inner/cancel',
+      'nested-cancel',
       'delegate_jobs',
       {
         details: {
@@ -448,149 +228,81 @@ describe('request closure lifecycle', () => {
           attempts: [{ identity: 'review@1', state: 'cancelled' }],
         },
       },
-      'script/inner',
+      'script-call',
     );
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toBeUndefined();
-    const result = {
-      role: 'toolResult',
-      toolName: 'codemode',
-      toolCallId: 'script',
-      nestedCalls: {
-        calls: [{ id: 'script/inner/stop' }, { id: 'script/inner/cancel' }],
+    expect(f.settle()).toBeUndefined();
+    f.entered([
+      {
+        role: 'toolResult',
+        toolName: 'codemode',
+        toolCallId: 'script-call',
+        nestedCalls: {
+          calls: [{ id: 'nested-stop' }, { id: 'nested-cancel' }],
+        },
       },
-    };
-    lifecycle.entered([result]);
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
+    ]);
+    expect(f.settle()).toMatchObject({
       data: { requestMessageId: 'user-entry' },
     });
-    // The same delivered script evidence must not establish a new wait.
-    lifecycle.wait([{ kind: 'process', id: 'process-1' }], new Map(), [result]);
-    expect(lifecycle.hasPendingWait(ctx)).toBe(false);
   });
 
-  it('keeps stop and cancel waits open for nonterminal snapshots', () => {
-    const { lifecycle, ctx, event, appendEntry } = setup();
-    lifecycle.wait(
-      [
-        { kind: 'process', id: 'process-1' },
-        { kind: 'delegate', id: 'review@1' },
-      ],
-      new Map([['review@1', 'review@1']]),
-      [],
-    );
-    lifecycle.entered([
+  it('does not clear a process dependency for stop intent or a nonterminal result', () => {
+    const f = setup();
+    f.register('process', 'process-2');
+    f.entered([
       {
         role: 'toolResult',
         toolName: 'background_stop',
         details: {
           action: 'stop',
-          processes: [{ id: 'process-1', status: 'running' }],
-        },
-      },
-      {
-        role: 'toolResult',
-        toolName: 'delegate_jobs',
-        details: {
-          action: 'cancel',
-          attempts: [{ identity: 'review@1', state: 'running' }],
-          jobs: [
-            { id: 'job-1', attemptIdentity: 'review@1', state: 'running' },
-          ],
+          processes: [{ id: 'process-2', status: 'running' }],
         },
       },
     ]);
-    expect(lifecycle.beforeSettle(event, ctx)).toBeUndefined();
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toBeUndefined();
-    lifecycle.entered([
+    expect(f.settle()).toBeUndefined();
+    f.entered([
       {
         role: 'toolResult',
         toolName: 'background_stop',
         details: {
           action: 'stop',
-          processes: [{ id: 'process-1', status: 'killed' }],
-        },
-      },
-      {
-        role: 'toolResult',
-        toolName: 'delegate_jobs',
-        details: {
-          action: 'cancel',
-          attempts: [{ identity: 'review@1', state: 'cancelled' }],
-          jobs: [],
+          processes: [{ id: 'process-2', status: 'killed' }],
         },
       },
     ]);
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
+    expect(f.settle()).toMatchObject({
       data: { requestMessageId: 'user-entry' },
     });
   });
 
-  it('resolves delivered delegate failures and restores the active request for steer and followUp', () => {
-    const { lifecycle, ctx, event, user, appendEntry } = setup();
-    lifecycle.wait(
-      [{ kind: 'delegate', id: 'delegate-1' }],
-      new Map([['delegate-1', 'delegate-1']]),
-      [],
-    );
-    const boundary = event as { context: { pendingMessages: unknown[] } };
-    boundary.context.pendingMessages.push({
-      role: 'custom',
-      customType: 'delegate-job-result',
-    });
-    expect(lifecycle.beforeSettle(event, ctx)).toBeUndefined();
-    boundary.context.pendingMessages.length = 0;
-    lifecycle.entered([
-      {
-        role: 'custom',
-        customType: 'delegate-job-result',
-        details: {
-          dedupeKey: 'job-u1',
-          jobs: [
-            {
-              id: 'job-u1',
-              attemptIdentity: 'delegate-1',
-              logicalId: 'review',
-              state: 'error',
-            },
-          ],
-        },
-      },
-    ]);
-    lifecycle.beforeSettle(event, ctx);
-    expect(lifecycle.persistedMarker(ctx, appendEntry)).toMatchObject({
-      data: { requestMessageId: 'user-entry' },
-    });
-
-    const steering = setup();
-    const steer = { role: 'user', timestamp: 15, content: 'redirect' };
-    steering.lifecycle.observe('session', steer);
-    steering.lifecycle.observeLiveAlias(steer, 'live-steer');
-    steering.lifecycle.markSteer(steer);
-    steering.lifecycle.beforeSettle(steering.event, steering.ctx);
-    expect(
-      steering.lifecycle.persistedMarker(steering.ctx, steering.appendEntry),
-    ).toMatchObject({ data: { requestMessageId: 'user-entry' } });
-    const followUp = setup();
-    const nextUser = {
+  it('keeps steering in the request and treats follow-up as a later request', () => {
+    const f = setup();
+    f.register('process', 'task-3');
+    const steer = {
       role: 'user',
-      timestamp: 30,
+      content: 'redirect',
+    };
+    markLogicalSteering(steer);
+    f.lifecycle.observe('session', steer, f.branch);
+    expect(f.lifecycle.hasPendingWait(f.ctx)).toBe(true);
+    f.entered([processResult('task-3')]);
+    expect(f.settle()).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
+    });
+
+    const next = {
+      role: 'user',
       content: 'next request',
-      data: { deliveryMode: 'followUp' },
     };
-    const nextAnswer = {
-      role: 'assistant',
-      timestamp: 40,
-      content: 'next answer',
-    };
-    followUp.branch.push(
+    f.lifecycle.observe('session', next, f.branch);
+    const nextAnswer = { role: 'assistant', content: 'next answer' };
+    f.lifecycle.observe('session', nextAnswer, f.branch);
+    f.branch.push(
       {
         type: 'message',
         id: 'followup-user',
         timestamp: new Date(30).toISOString(),
-        message: nextUser,
+        message: next,
       },
       {
         type: 'message',
@@ -599,14 +311,222 @@ describe('request closure lifecycle', () => {
         message: nextAnswer,
       },
     );
-    followUp.lifecycle.observe('session', nextUser);
-    followUp.lifecycle.observeLiveAlias(nextUser, 'live-followup-user');
-    followUp.lifecycle.observe('session', nextAnswer);
-    followUp.lifecycle.observeLiveAlias(nextAnswer, 'live-followup-answer');
-    followUp.lifecycle.beforeSettle(followUp.event, followUp.ctx);
+    expect(f.settle()).toMatchObject({
+      data: { requestMessageId: 'followup-user' },
+    });
+  });
+
+  it('uses exact steering IDs, not colliding text or timestamps, for restored ownership', () => {
+    const f = setup();
+    f.register('process', 'original-task');
+    const steer = { role: 'user', content: 'same text', timestamp: 10 };
+    f.branch.push({ type: 'message', id: 'steering-user', message: steer });
+    f.branch.push({
+      type: 'custom',
+      customType: 'steering-message',
+      data: {
+        userEntryId: 'steering-user',
+        text: 'same text',
+        timestamp: 10,
+      },
+    });
+    const restored = new RequestClosureLifecycle();
+    restored.restore(f.ctx);
+    expect(restored.isRequired('process', 'original-task', f.ctx)).toBe(true);
     expect(
-      followUp.lifecycle.persistedMarker(followUp.ctx, followUp.appendEntry),
-    ).toMatchObject({ data: { requestMessageId: 'followup-user' } });
-    expect(user.role).toBe('user');
+      restored.registerDependency(
+        'process',
+        'new-source',
+        f.ctx,
+        f.appendEntry,
+      ),
+    ).toBe(true);
+    f.branch.push({
+      type: 'message',
+      id: 'ordinary-user',
+      message: { ...steer },
+    });
+    expect(
+      restored.registerDependency(
+        'process',
+        'wrong-owner',
+        f.ctx,
+        f.appendEntry,
+      ),
+    ).toBe(false);
+    restored.restore(f.ctx);
+    expect(restored.hasPendingWait(f.ctx)).toBe(false);
+  });
+
+  it('does not infer ownership from an ambiguous legacy steering marker', () => {
+    const f = setup();
+    f.register('process', 'original-task');
+    f.branch.push({
+      type: 'custom',
+      customType: 'steering-message',
+      data: { timestamp: 10, text: 'redirect' },
+    });
+    f.branch.push({
+      type: 'message',
+      id: 'legacy-user',
+      message: { role: 'user', content: 'redirect', timestamp: 10 },
+    });
+    const restored = new RequestClosureLifecycle();
+    restored.restore(f.ctx);
+    expect(restored.hasPendingWait(f.ctx)).toBe(false);
+    expect(f.register('process', 'ambiguous-source')).toBe(false);
+  });
+
+  it('rejects nonterminal or incomplete background result shapes', () => {
+    const f = setup();
+    f.register('process', 'task-invalid');
+    f.register('watch', 'task-invalid:watch-invalid');
+    f.entered([processResult('task-invalid', 'running')]);
+    expect(f.settle()).toBeUndefined();
+    f.entered([
+      processResult('task-invalid', 'done', [
+        { id: 'watch-invalid', status: 'pending' },
+      ]),
+    ]);
+    expect(f.settle()).toBeUndefined();
+    f.entered([watchResult('task-invalid', 'watch-invalid')]);
+    expect(f.settle()).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
+    });
+  });
+
+  it('abandons dependencies durably after an abort and does not restore the request', () => {
+    const f = setup();
+    f.register('process', 'aborted-task');
+    (f.event as { outcome: string }).outcome = 'aborted';
+    f.lifecycle.beforeSettle(f.event, f.ctx, f.appendEntry);
+    expect(f.lifecycle.hasPendingWait(f.ctx)).toBe(false);
+    expect(f.branch).toContainEqual(
+      expect.objectContaining({
+        customType: 'request-dependency:v1',
+        data: expect.objectContaining({
+          operation: 'abandon-request',
+          requestMessageId: 'user-entry',
+        }),
+      }),
+    );
+    f.lifecycle.restore(f.ctx);
+    expect(f.lifecycle.hasPendingWait(f.ctx)).toBe(false);
+  });
+
+  it('persists an abort even when no source dependency remains', () => {
+    const f = setup();
+    (f.event as { outcome: string }).outcome = 'aborted';
+    f.lifecycle.beforeSettle(f.event, f.ctx, f.appendEntry);
+    const restored = new RequestClosureLifecycle();
+    restored.restore(f.ctx);
+    expect(restored.hasPendingWait(f.ctx)).toBe(false);
+    expect(restored.persistedMarker(f.ctx, f.appendEntry)).toBeUndefined();
+  });
+
+  it('restores a service watch without treating service exit as a dependency', () => {
+    const f = setup();
+    f.register('watch', 'service-1:ready');
+    const restored = new RequestClosureLifecycle();
+    restored.restore(f.ctx);
+    expect(restored.hasPendingWait(f.ctx)).toBe(true);
+    restored.entered([processResult('service-1')], f.ctx, f.appendEntry);
+    expect(restored.hasPendingWait(f.ctx)).toBe(true);
+    restored.entered([watchResult('service-1', 'ready')], f.ctx, f.appendEntry);
+    expect(restored.hasPendingWait(f.ctx)).toBe(false);
+  });
+
+  it('does not register a source against an older request on the selected branch', () => {
+    const f = setup();
+    f.register('process', 'original-task');
+    const laterUser = { role: 'user', content: 'later request' };
+    f.branch.push({
+      type: 'message',
+      id: 'later-user-entry',
+      timestamp: new Date(30).toISOString(),
+      message: laterUser,
+    });
+    expect(f.register('process', 'unowned-task')).toBe(false);
+    expect(
+      f.branch.filter(
+        (entry) =>
+          entry.customType === 'request-dependency:v1' &&
+          entry.data !== null &&
+          typeof entry.data === 'object' &&
+          'id' in entry.data &&
+          entry.data.id === 'unowned-task',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('clears old dependencies when restoring a different selected branch', () => {
+    const f = setup();
+    f.register('process', 'old-branch-task');
+    const nextUser = { role: 'user', content: 'other branch' };
+    f.setBranch([
+      {
+        type: 'message',
+        id: 'other-user-entry',
+        timestamp: new Date(30).toISOString(),
+        message: nextUser,
+      },
+    ]);
+    f.lifecycle.restore(f.ctx);
+    expect(f.lifecycle.hasPendingWait(f.ctx)).toBe(false);
+  });
+
+  it('restores only source metadata owned by the exact session and request', () => {
+    const f = setup();
+    f.register('process', 'restore-task');
+    const restored = new RequestClosureLifecycle();
+    restored.restore(f.ctx);
+    expect(restored.hasPendingWait(f.ctx)).toBe(true);
+    restored.entered([processResult('restore-task')], f.ctx, f.appendEntry);
+    restored.beforeSettle(f.event, f.ctx, f.appendEntry);
+    expect(restored.persistedMarker(f.ctx, f.appendEntry)).toMatchObject({
+      data: { requestMessageId: 'user-entry' },
+    });
+
+    const isolated = new RequestClosureLifecycle();
+    const otherCtx = {
+      sessionManager: {
+        getSessionId: () => 'other-session',
+        getBranch: () => f.branch,
+      },
+    } as never;
+    isolated.restore(otherCtx);
+    expect(isolated.hasPendingWait(otherCtx)).toBe(false);
+  });
+
+  it('acknowledges results after context filters and persists markers only at genuine settlement', () => {
+    const f = setup();
+    const tools = new Map<string, unknown>();
+    const handlers = new Map<string, (...args: never[]) => unknown>();
+    installRequestClosureBoundary(
+      {
+        registerTool: (tool: { name: string }) => tools.set(tool.name, tool),
+        on: (name: string, handler: (...args: never[]) => unknown) =>
+          handlers.set(name, handler),
+        appendEntry: f.appendEntry,
+      } as never,
+      f.lifecycle,
+    );
+    expect(tools.size).toBe(0);
+    const continuing = f.event as { continue: boolean };
+    continuing.continue = true;
+    f.lifecycle.beforeSettle(f.event, f.ctx, f.appendEntry);
+    expect(f.lifecycle.persistedMarker(f.ctx, f.appendEntry)).toBeUndefined();
+    continuing.continue = false;
+    expect(handlers.has('context')).toBe(false);
+    const entered = handlers.get('context_with_system');
+    expect(entered).toBeDefined();
+    f.register('process', 'filtered-task');
+    entered?.({ messages: [] } as never, f.ctx);
+    expect(f.settle()).toBeUndefined();
+    entered?.({ messages: [processResult('filtered-task')] } as never, f.ctx);
+    expect(f.settle()).toMatchObject({
+      customType: 'response-closure',
+      data: { requestMessageId: 'user-entry' },
+    });
   });
 });

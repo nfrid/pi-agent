@@ -5,6 +5,7 @@ import type {
 import { Type } from 'typebox';
 import { codexServiceTier } from '../shared/codex-service-tier';
 import { loadGuidelines } from '../shared/instructions';
+import { getScopedServices } from '../shared/runtime/scoped-services';
 import {
   type DelegateConfig,
   loadDelegateConfig,
@@ -571,6 +572,23 @@ function registerDelegateSurface(
             },
           });
           scheduled = true;
+          try {
+            if (
+              getScopedServices(launchSessionId).requestDependencies?.register(
+                'delegate',
+                attempt.identity,
+                ctx,
+              ) === false
+            )
+              throw new Error(
+                'Could not bind the delegate attempt to this request.',
+              );
+          } catch (error) {
+            await activeWorkflow
+              .cancel(attempt.identity)
+              .catch(() => undefined);
+            throw error;
+          }
           const statusId = statusIds[0];
           if (statusId) activeStatuses.setWorkflow(statusId, attempt);
           if (statusId && attempt.jobId)
@@ -721,6 +739,37 @@ function registerDelegateSurface(
           run.backgroundJobId = jobs[index]?.id;
           if (statusIds?.[index] && jobs[index]?.id)
             activeStatuses?.setJobId(statusIds[index], jobs[index].id);
+        }
+        const dependencies =
+          getScopedServices(launchSessionId).requestDependencies;
+        const registered: string[] = [];
+        try {
+          for (const job of jobs) {
+            const identity = job.attemptIdentity ?? job.id;
+            if (dependencies?.register('delegate', identity, ctx) === false)
+              throw new Error(
+                'Could not bind the delegate attempt to this request.',
+              );
+            registered.push(identity);
+          }
+        } catch (error) {
+          for (const identity of registered) {
+            try {
+              dependencies?.resolve?.('delegate', identity);
+            } catch {
+              // Keep cancelling the jobs if the request journal is unavailable.
+            }
+          }
+          for (const control of controls) control.close();
+          await backgroundRuntime.manager
+            .cancel(
+              jobs.map((job) => job.id),
+              undefined,
+              ctx,
+            )
+            .catch(() => undefined);
+          if (statusIds) activeStatuses?.finish(statusIds);
+          throw error;
         }
         backgroundRuntime.activateJobs?.();
         if (initialRuns.some((run) => run.worktree))

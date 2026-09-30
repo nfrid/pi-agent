@@ -35,6 +35,12 @@ const Watch = Type.Object(
 
 export const StartParameters = Type.Object(
   {
+    kind: Type.Optional(
+      StringEnum(['task', 'service'] as const, {
+        description:
+          'task waits for process exit as part of this request; service is passive unless it has watches.',
+      }),
+    ),
     command: Type.String({
       minLength: 1,
       description: 'Shell command run with /bin/bash -c.',
@@ -160,6 +166,8 @@ const outputTailSchema = Type.Object({
 });
 export const backgroundOutputSchema = Type.Object({
   action: Type.String(),
+  id: Type.Optional(Type.String()),
+  watchIds: Type.Optional(Type.Array(Type.String())),
   process: Type.Optional(processOutputSchema),
   processes: Type.Optional(Type.Array(processOutputSchema)),
   stdout: Type.Optional(outputTailSchema),
@@ -180,6 +188,8 @@ export interface ProcessDetails {
 
 export interface BackgroundToolDetails {
   readonly action: BackgroundAction;
+  readonly id?: string;
+  readonly watchIds?: string[];
   readonly process?: ProcessDetails;
   readonly processes?: ProcessDetails[];
 }

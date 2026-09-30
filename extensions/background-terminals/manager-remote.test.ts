@@ -53,6 +53,89 @@ function fakeTransport(initial = snapshot()) {
 }
 
 describe('BackgroundManager remote lifecycle', () => {
+  it('binds an immediately terminal start and watch before publishing either result', async () => {
+    let current: BackgroundSnapshot | undefined;
+    const required = new Set<string>();
+    const completion = vi.fn((value: BackgroundSnapshot) =>
+      required.has(value.id),
+    );
+    const watchResult = vi.fn(
+      (_value: BackgroundSnapshot, watch: { id: string }) =>
+        required.has(watch.id),
+    );
+    const client: BackgroundJobsTransport = {
+      async list() {
+        return current ? [current] : [];
+      },
+      async start(input) {
+        current = snapshot({
+          id: input.id,
+          watches: [
+            {
+              id: 'fast-watch',
+              contains: 'ready',
+              status: 'matched',
+              createdAt: 1,
+            },
+          ],
+        });
+        return current;
+      },
+      async inspect() {
+        return current;
+      },
+      async stop() {
+        return current ? [current] : [];
+      },
+      async info() {
+        return { outputWatches: true };
+      },
+      async watch() {
+        current = snapshot({
+          ...current,
+          status: 'running',
+          watches: [
+            {
+              id: 'added-watch',
+              contains: 'ready',
+              status: 'matched',
+              createdAt: 1,
+            },
+          ],
+        });
+        return current;
+      },
+    };
+    const manager = new BackgroundManager({
+      client,
+      scopeId: 'fast',
+      onSettled: completion,
+      onWatchSettled: watchResult,
+    });
+    try {
+      const started = await manager.start(
+        { command: 'true', cwd: '.', watch: [{ contains: 'ready' }] },
+        (value) => {
+          expect(completion).not.toHaveBeenCalled();
+          expect(watchResult).not.toHaveBeenCalled();
+          required.add(value.id);
+          required.add('fast-watch');
+        },
+      );
+      await vi.waitFor(() => expect(completion).toHaveReturnedWith(true));
+      expect(watchResult).toHaveReturnedWith(true);
+      current = { ...started, status: 'running' };
+      await manager.watch(started.id, [{ contains: 'ready' }], () => {
+        required.add('added-watch');
+      });
+      await vi.waitFor(() => expect(watchResult).toHaveBeenCalledTimes(2));
+      expect(
+        watchResult.mock.results.every((result) => result.value === true),
+      ).toBe(true);
+    } finally {
+      await manager.dispose();
+    }
+  });
   it('recovers when the process host appears after construction', async () => {
     let available = false;
     const transport = fakeTransport(

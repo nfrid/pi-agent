@@ -1285,6 +1285,21 @@ describe('async delegate extension', () => {
     handlers.get('context')?.({
       messages: [sendMessage.mock.calls[0]?.[0].details?.message],
     });
+    const stillQueuedPeek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-still-queued-peek',
+        { action: 'peek', id: 'dj-3' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(stillQueuedPeek?.details).toMatchObject({
+      delivery: 'automatic-queued',
+    });
+    handlers.get('context_with_system')?.({
+      messages: [sendMessage.mock.calls[0]?.[0].details?.message],
+    });
     const deliveredPeek = await tools
       .get('delegate_jobs')
       ?.execute(

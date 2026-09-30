@@ -79,9 +79,9 @@ Base chains are cumulative. For `A --base--> B --base--> C`, C starts from A and
 
 ## Result delivery and gates
 
-Every newly settled result is delivered eagerly at the next safe model boundary. Results ready before the same boundary enter the same parent turn. When other work remains active, delivery includes a compact `Still running` list. Do not poll. To keep the current user request open for an exact delegate completion, call `response_wait` with `{ "kind": "delegate", "id": "<attempt-identity>" }` from the `workflow.identity` receipt. The tool canonicalizes a returned job ID or unambiguous logical ID to that attempt. Ambiguous or unknown IDs fail before any wait is recorded. Queued delivery does not resolve the wait until that result enters model context.
+Every workflow attempt created during a user request is a required result. It is delivered at the next safe model boundary, and the request stays open until the result enters provider context. Results ready before the same boundary enter the same parent turn. When other work remains active, delivery includes a compact `Still running` list. Do not poll.
 
-Do not call `delegate_gate` for ordinary result delivery. Newly settled delegates already arrive as `any` at the next safe model boundary. Use a gate only to batch an `all` fan-in or to delay an `any` race until idle. Exactly one explicit gate is active per parent branch; a later call replaces it.
+Use `delegate_gate` only to change delivery for selected attempts. An `all` gate keeps the selected attempts required until all selected results enter context. An `any` gate lets the first selected result enter context and releases the remaining selected attempts from this request; those jobs and results remain available, but they do not reopen the request. Attempts outside the selected set remain required. Exactly one explicit gate is active per parent branch; a later call replaces it.
 
 Batch a fan-in:
 
