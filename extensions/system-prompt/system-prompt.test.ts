@@ -516,6 +516,9 @@ describe('canonical prompt composition', () => {
     expect(prompt).toContain(
       'If repeated attempts yield no new evidence, report the blocker and do not widen the scope.',
     );
+    expect(prompt).toContain(
+      'continue through routine component and validation steps without renewed approval.',
+    );
     expect(prompt.match(/Keep the current work mode/g)).toHaveLength(1);
   });
 
