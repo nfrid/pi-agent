@@ -2,17 +2,18 @@
 
 ## Resume here
 
-- Mode: **batch A complete; next batch approval pending**. User-approved test-contract reconciliation is integrated/verified. No production code changes, batch B documentation fixes, or batch C model evaluations are authorized.
+- Mode: **batch B and bounded integration audit complete; next runtime fix approval pending**. No runtime fixes, deployment or batch C model evaluations are authorized.
 - Baseline: `868e113d` (2026-09-30). Checkout was clean before creating this file.
-- Audit milestone and batch A complete. Test patch is integrated as `a1898260`; final aggregate validation exits 0 with **2,609 passing tests**. Batches B/C remain approval-pending.
-- No active delegates. `baseline-contract-tests@3` left a reviewed patch but hit carried-scratch integration guards. Initial overlap refusal and absent net-neutral path commit failure preserved checkout; no partial merge landed.
+- Audit milestone and batch A complete. Test patch `a1898260`; aggregate exits 0 with **2,609 passing tests**. Batch B docs committed `7191321c`, focused contracts 54 pass. C remains approval-pending.
+- Read-only `carried-wip-audit@1` completed: one verified carried-only deletion squash defect; dirty-overlap guard is intentional. No active delegates/background dependencies. Next proposal: batch D below; do not implement until approved.
+- Historical batch A: `baseline-contract-tests@3` left a reviewed patch but hit carried-scratch integration guards. Initial overlap refusal and absent net-neutral path commit failure preserved checkout; no partial merge landed.
 - Recovery complete: owned roadmap committed `a8c82859`; `baseline-tests-clean@1` reproduced exact reviewed patch from a clean base (inputs only, no inherited history), then `delegate_changes` squash landed `a1898260` with only 2 test files. No manual merge/rebase or integrator code changes.
 - Final aggregate background `522db068-fbf5-4440-ab77-176e8c72a4ce` **completed exit 0**; log `/tmp/pi-harness-batch-a-final-check.log`. No active background dependencies.
 - Reviewed final test patch: same-context wake dedupe, retention across requests, no redispatch/extra durable wake-state append; required migration indexes/data/FKs preserved and intentionally removed writer index explicit.
 - Async setup blocker resolved: child inherits `PI_DELEGATE_CHILD=1`; normal `scripts/clean-npm-env.mjs` strips it. Named async test passes using cleaned launcher; migration/repository 57 and wake 6 pass.
 - Premature aggregate `5407c382-f6c5-4faa-8820-9454d9e4348a` ran old tests before successful integration and is not final validation. Use the final aggregate handle above.
 - Parent independent post-integration async + wake suites: **36 tests pass**. Changed-file Biome and diff whitespace pass. No production behavior changed.
-- Do not read auth/credential files or raw user sessions; do not deploy or restart services. Authorized writes are the two named tests and this scratch file.
+- Do not read auth/credential files or raw user sessions; do not deploy or restart services. Current authorized writes: `docs/delegation.md`, `docs/dashboard.md`, matching ownership warning in `docs/dashboard-deployment.md`, and this scratch file.
 - Preserve unrelated checkout changes. Use focused checks for local work; a full check is appropriate here once to establish the cross-cutting baseline.
 - After compaction, read this file and current todo state; use automatic delegate/background completion reports rather than polling.
 
@@ -33,7 +34,7 @@ Separate correctness fixes, behavior-preserving refactors, behavior changes, and
 |---|---|---|
 | 0. Baseline and boundaries | Initial milestone complete | Current checks measured; ownership mapped at component level, not exhaustively audited |
 | 1. Agent-facing harness | Bounded audit complete | No verified prompt/tool-exposure bug; doc drift and compaction evaluation gap identified |
-| 2. Execution/orchestration | Not started | Delegate/worktree/task/background lifecycle, wakeups, remote control, recovery |
+| 2. Execution/orchestration | First bounded audit complete; batch D pending | Carried-WIP integration seam only; remaining lifecycle/wakeup/remote-control reviews not started |
 | 3. Tools/integrations | Not started | Web/search, image reads, argument validation, usage and smaller tools |
 | 4. Shared contracts/backend | Not started | Protocol/domain, persistence/indexing, transports |
 | 5. Presentation | Not started | Dashboard, activity rendering, TUI/themes/notifications |
@@ -80,6 +81,12 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Six pre-existing non-null assertion lint warnings and Node web-test `--localstorage-file` warnings remain non-fatal. No production builds/E2E/deployments/restarts/model evaluations performed for this test-only batch.
 - Scratch is tracked (`a8c82859` plus final progress update); implementation squash contains exactly the two approved test paths.
 
+### Batch B final result (`7191321c`)
+
+- Corrected `docs/delegation.md`, `docs/dashboard.md`, `docs/dashboard-deployment.md` only: review-only incremental selector, current hosted-child ownership, restart/detach/cancel semantics, direct-spawn distinction.
+- `node scripts/clean-npm-env.mjs bun x vitest run extensions/delegate/changes-tool.test.ts extensions/delegate/lifecycle.test.ts extensions/delegate/delegate-child.test.ts`: **54 tests pass**. Log `/tmp/pi-harness-batch-b-contracts.log`.
+- Manual schema/caller/lifecycle contract comparison and `git diff --check` pass. No test/source/schema/deployment-command changes; no full check/build/browser E2E or deployment warranted for docs-only change.
+
 ### Pre-implementation baseline (`868e113d`)
 
 - Environment: Node `v25.8.0`, Bun `1.4.0`, Pi `0.99.1`. All runs use system-tool PATH as needed. Baseline HEAD was `868e113d`; scratch was initially untracked.
@@ -108,7 +115,16 @@ Verified correctness findings can move ahead. Review shared packages with their 
 
 - `docs/delegation.md:151` omits review-only `incremental`; `extensions/delegate/changes-tool.ts:32–36` documents it as task commits not represented in current parent HEAD by patch identity. Current full recorded-range review remains the default. Document the selector without changing behavior.
 - `docs/dashboard.md:245–246` says delegate migration to durable jobs is pending. The current async tool launch explicitly sets `hosted: true` (`extensions/delegate/tool.ts:683`); `runner.ts:358` invokes `runHostedDelegateChild`. `docs/background-jobs.md` already warns process-host restarts terminate hosted children. Correct ownership docs while distinguishing hosted production paths from directly spawned runner/test paths; do not claim every invocation is hosted.
-- Impact: missing useful review affordance and contradictory process/restart ownership. Effort/risk: low; approval pending.
+- Impact: missing useful review affordance and contradictory process/restart ownership. **Corrected/verified in batch B (`7191321c`)**; no behavior changes.
+
+### F4 — Squash path list includes an absent carried-only deletion (verified)
+
+- `packages/worktree-manager/src/integrate.ts:886–897` dirty/incoming overlap guard is intentional and ownership-safe. Keep it.
+- `taskPaths()` unions per-commit changed paths. At `integrate.ts:917–925`, squash applies unintegrated commits with `cherry-pick --no-commit` then passes that original incoming path list to `git commit --only`.
+- A file that exists only in the carried snapshot and is deleted by the task is absent from parent HEAD and the resulting index, but remains in incoming paths. A task that also adds/updates a real file can apply successfully then fail commit with absent-path pathspec error.
+- Evidence: observed in batch A and reproduced by child with disposable repo using real integrator. Failure returned merged:false, rolled back HEAD/index/worktree and left pre-existing stash intact. Cumulative-base wrapper not established as the cause.
+- Existing portable (2) and extension (35) tests lack this carried-only deletion squash case. Parent independently reran both: **37 pass**; log `/tmp/pi-harness-integration-audit-tests.log`.
+- Parent refinement: choose task-owned paths with an actual staged delta after applying commits, NOT merely paths present in the index (that would wrongly drop legitimate tracked-file deletions). Preserve unrelated staged/unstaged/untracked WIP and existing stashes. Approval pending.
 
 ## Proposed batches and acceptance
 
@@ -120,17 +136,26 @@ Verified correctness findings can move ahead. Review shared packages with their 
 - Validate focused wake/async and migration/repository suites, scoped types/Biome; rerun aggregate check for cross-cutting baseline restoration. If a real defect emerges, stop and update proposal rather than reverse supported contracts.
 - Approval/result: **approved by user; integrated as `a1898260`; kept**. Final aggregate exits 0 (2,609 tests). Focused parent async/wake 36 tests and changed-file Biome pass; isolated migration/repository 57 tests pass.
 
-### B. Align supported-interface and process ownership docs
+### B. Align supported-interface and process ownership docs — complete
 
 - Scope: the two F3 omissions/contradictions only. No lifecycle migration, SDK shim removal, new API or service restart.
 - Acceptance: optional incremental review and unchanged default accurately described; hosted delegate ownership/restart implications match caller/runner paths; direct-spawn paths not mislabeled.
-- Validate against tool schema, current call sites, existing tests and dashboard deployment guidance as relevant. Approval: pending.
+- Approval/result: **approved; committed `7191321c`; kept**. Schema/call-site comparison, 54 focused contract tests and diff whitespace pass. Also corrected the same pending-migration claim in deployment guidance; no operational commands changed.
 
 ### C. Close successful-compaction evaluation gap
 
 - Prepare a reproducible disposable fixture, pinned harness/config/model/thinking and bounded run budget. Keep case decision/non-goal in conversation rather than re-reading them from a progress file, otherwise the fixture would test a different mechanism.
 - Require a successful compact response and correct continuation preserving both constraints; blocked/setup failure is not a pass. Record transcripts/results without credentials or production state.
 - Do not change prompt/routing/compaction code until evidence warrants it. Single trials are smoke evidence, not general cost/quality claims. Approval: pending.
+
+### D. Commit the effective task delta during squash — recommended next
+
+- Scope: portable integrator squash commit-path selection in `packages/worktree-manager/src/integrate.ts`, regression at its real-Git integration-test boundary (existing extension suite is acceptable). No wrapper/base migration, new API, broad cleanup or weakened dirty-overlap guard.
+- Candidate remedy: derive staged changed paths after no-commit cherry-pick and restrict commit to the task-owned effective delta. Preserve normal tracked-file deletions. Handle an empty effective delta explicitly with a safe, clear no-op outcome rather than an accidental broad commit.
+- Acceptance: carried-only deletion plus actual edit/addition squashes to one correct parent-authored commit; absent file is not introduced; tracked deletion still lands; add-then-delete/net-neutral task paths do not poison pathspecs; no effective delta creates no empty/spurious commit.
+- Ownership/safety: dirty task-path overlap still refuses; unrelated staged/unstaged/untracked files and pre-existing stash stack are preserved; genuine conflicts/commit failures restore HEAD/index/worktree and operation state. Existing cumulative/patch-identity behavior remains unchanged.
+- Validation: reproduce regression before fix; focused real-Git integration suites, package + extension typechecks as needed, changed-file Biome, exact commit/diff assertions and rollback checks. No production deployment or full harness rewrite.
+- Approval: **pending**. No runtime source changes made during audit.
 
 ## Deliberately unchanged
 
@@ -142,6 +167,6 @@ Verified correctness findings can move ahead. Review shared packages with their 
 
 ## Next decision
 
-Batch A is complete. Recommend small documentation batch B next, then select one bounded execution/orchestration seam. Compaction evaluation C remains separate and approval-pending.
+Recommend **batch D** next: smallest repair to squash's effective commit-path selection with real-Git safety regression coverage. B and its audit are complete; implementation needs user approval. Compaction evaluation C remains separate and approval-pending.
 
-Record for later execution/operations audit: carried untracked parent progress file made test-only integration conflict; deleting that carried artifact led to absent-path `commit --only` failure. Both attempts aborted safely. Recovery was a tracked roadmap and a clean-base child reproduction; no manual merge or integrator changes. Also use cleaned test launcher inside delegate environments to strip `PI_DELEGATE_CHILD`. These observations are not approved fixes or feedback triage. B is independent low-risk documentation work; C is a separate evaluation requiring a bounded model-run budget. They are not approved. Scratch is being versioned so future clean-base delegates do not carry an untracked copy that collides with parent progress updates.
+Record for later execution/operations audit: carried untracked parent progress file made test-only integration conflict; deleting that carried artifact led to absent-path `commit --only` failure. Both attempts aborted safely. Recovery was a tracked roadmap and a clean-base child reproduction; no manual merge or integrator changes. Also use cleaned test launcher inside delegate environments to strip `PI_DELEGATE_CHILD`. These observations authorize the current read-only audit, not runtime fixes or feedback triage. B is approved documentation work; C is a separate evaluation requiring approval of a bounded model-run budget. Scratch is being versioned so future clean-base delegates do not carry an untracked copy that collides with parent progress updates.
