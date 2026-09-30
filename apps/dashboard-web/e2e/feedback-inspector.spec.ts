@@ -62,6 +62,26 @@ for (const suffix of ['', ' @desktop']) {
         completeThroughCursor: true,
       },
     });
+    await page.route(
+      '**/api/sessions/feedback-session/delegate-history',
+      (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            version: 2,
+            sessionId: 'feedback-session',
+            groups: [],
+          }),
+        }),
+    );
+    for (const endpoint of ['threads', 'session-threads']) {
+      await page.route(`**/api/${endpoint}`, (route) =>
+        route.fulfill({ contentType: 'application/json', body: '[]' }),
+      );
+    }
+    await page.route('**/api/settings', (route) =>
+      route.fulfill({ contentType: 'application/json', body: '{}' }),
+    );
     await page.route('**/api/usage', (route) =>
       route.fulfill({ contentType: 'application/json', body: '{}' }),
     );
