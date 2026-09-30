@@ -227,7 +227,7 @@ Pi child process groups, drains RPC pipes, and force-closes them on shutdown or
 crash; children are never adopted. The dashboard never becomes a second agent
 protocol.
 
-### Durable background jobs (phase 1)
+### Durable background jobs and hosted delegates
 
 `@pi-agent/background-jobs` defines a bounded, versioned JSONL protocol over the
 separate `PI_PROCESS_HOST_SOCKET`. The separate process-host sidecar (`process-host-main.ts`) owns Bash jobs
@@ -241,8 +241,13 @@ remain retryable across shutdown. The extension manager therefore detaches on
 disposal; users must explicitly run `background stop` to terminate a job. A host restart marks persisted active rows failed with an
 explicit host-restart diagnostic and never adopts a PID by itself. Settled jobs
 are retained per owner session with active jobs plus at most 32 settled rows.
-Delegate execution is not migrated in phase 1; delegate migration remains
-pending.
+The asynchronous delegate tools also launch children through this process host.
+Their orchestration and wake state remain extension-owned; the host owns the
+child processes. Parent teardown detaches observation rather than terminating
+hosted children; explicit delegate cancellation stops them. A process-host
+restart terminates its jobs, including hosted delegates, so it requires a quiet
+window or explicitly finishing/stopping those jobs first. Directly spawned
+runner paths remain distinct and are not process-host jobs.
 
 ## Browser surface
 
