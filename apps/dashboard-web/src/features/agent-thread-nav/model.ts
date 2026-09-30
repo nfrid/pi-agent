@@ -48,6 +48,7 @@ export type AgentThreadSections = {
   active: AgentThreadRow[];
   archived: AgentThreadRow[];
   settled: AgentThreadRow[];
+  services: AgentThreadRow[];
 };
 
 export const MAX_VISIBLE_ACTIVE_THREADS = 40;
@@ -513,13 +514,17 @@ export function sectionAgentThreadRows(
   activeLimit = MAX_VISIBLE_ACTIVE_THREADS,
   selectedSessionId?: string,
 ): AgentThreadSections {
+  const services = rows.filter(
+    (row) => row.durableThread?.isService && !isArchivedThread(row),
+  );
+  const regularRows = rows.filter((row) => !row.durableThread?.isService);
   const pinned = pinnedFirst(
-    rows.filter((row) => isPinnedThread(row) && !isArchivedThread(row)),
+    regularRows.filter((row) => isPinnedThread(row) && !isArchivedThread(row)),
   );
   // Runtime absence is availability, not a lifecycle shelf. Dormant and
   // offline sessions therefore remain in Active until explicitly archived.
   const allSettled = pinnedFirst(
-    rows.filter(
+    regularRows.filter(
       (row) =>
         !isPinnedThread(row) &&
         !isArchivedThread(row) &&
@@ -527,7 +532,7 @@ export function sectionAgentThreadRows(
     ),
   );
   const allActive = pinnedFirst(
-    rows.filter(
+    regularRows.filter(
       (row) =>
         !isPinnedThread(row) &&
         !isArchivedThread(row) &&
@@ -548,6 +553,7 @@ export function sectionAgentThreadRows(
     active,
     archived: pinnedFirst(rows.filter(isArchivedThread)),
     settled: allSettled,
+    services,
   };
 }
 
@@ -555,11 +561,13 @@ export function displayedAgentThreadRows(
   sections: AgentThreadSections,
   displayedSettled: readonly AgentThreadRow[] = sections.settled,
   displayedArchived: readonly AgentThreadRow[] = sections.archived,
+  displayedServices: readonly AgentThreadRow[] = sections.services,
 ): AgentThreadRow[] {
   return [
     ...sections.pinned,
     ...sections.active,
     ...displayedSettled,
+    ...displayedServices,
     ...displayedArchived,
   ];
 }

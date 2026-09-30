@@ -21,6 +21,13 @@ test('service threads stay out of default search and can be revealed and opened'
       projectId: 'visual-project',
       updatedAt: Date.now(),
     },
+    {
+      id: 'other-service-session',
+      cwd: '/workspace/dashboard',
+      title: 'Internal service cleanup',
+      projectId: 'visual-project',
+      updatedAt: Date.now() - 1,
+    },
   ];
   scenario.snapshot.runtimes = scenario.snapshot.runtimes.map((runtime) =>
     runtime.session.id === sessionId
@@ -47,6 +54,15 @@ test('service threads stay out of default search and can be revealed and opened'
       activeRunId: 'service-run',
       updatedAt: Date.now(),
     },
+    {
+      id: 'other-service-thread',
+      projectId: 'visual-project',
+      title: 'Internal service cleanup',
+      checkoutId: 'visual-checkout',
+      isService: true,
+      status: 'idle',
+      updatedAt: Date.now() - 1,
+    },
   ];
   scenario.snapshot.runs = [
     {
@@ -71,6 +87,17 @@ test('service threads stay out of default search and can be revealed and opened'
       piSessionId: sessionId,
       status: 'running',
       createdAt: Date.now(),
+    },
+    {
+      id: 'other-service-run',
+      threadId: 'other-service-thread',
+      checkoutId: 'visual-checkout',
+      attempt: 1,
+      mode: 'write',
+      runtimeProvider: 'pi',
+      piSessionId: 'other-service-session',
+      status: 'completed',
+      createdAt: Date.now() - 1,
     },
   ];
   const sessionSnapshot = scenario.sessionSnapshot;
@@ -111,15 +138,85 @@ test('service threads stay out of default search and can be revealed and opened'
     panel.getByRole('button', { name: 'Ordinary project thread ready' }),
   ).toBeVisible();
   await search.fill('Internal service build');
-  await expect(
-    panel.getByRole('button', { name: /Internal service build/ }),
-  ).toHaveCount(0);
+  const serviceThread = panel.getByRole('button', {
+    name: /Internal service build/,
+  });
+  await expect(serviceThread).toBeVisible();
+  const serviceHeading = panel.getByRole('button', {
+    name: 'Collapse Service',
+  });
+  await expect(serviceHeading).toContainText('1');
+  await search.fill('');
+  const collapsedServiceHeading = panel.getByRole('button', {
+    name: 'Expand Service',
+  });
+  await expect(collapsedServiceHeading).toContainText('2');
+  await expect(serviceThread).toBeVisible();
+  const otherServiceThread = panel.getByRole('button', {
+    name: 'Internal service cleanup ready',
+  });
+  await expect(otherServiceThread).toHaveCount(0);
 
-  await panel.getByRole('checkbox', { name: 'Show service threads' }).check();
-  await search.fill('Internal service build');
+  await collapsedServiceHeading.tap();
+  await expect(otherServiceThread).toBeVisible();
   const thread = panel.getByRole('button', { name: /Internal service build/ });
   await expect(thread).toBeVisible();
   await thread.click();
   await expect(page).toHaveURL(/\/sessions\/working-session$/);
   await expect(page.getByRole('textbox', { name: 'Message Pi' })).toBeVisible();
+});
+
+test('service section is collapsed in the desktop sidebar @desktop', async ({
+  page,
+}, testInfo) => {
+  const scenario = buildActivityPanelScenario(true);
+  const title = 'Internal service build';
+  scenario.snapshot.threads = [
+    {
+      id: 'service-thread',
+      projectId: 'visual-project',
+      title,
+      checkoutId: 'visual-checkout',
+      isService: true,
+      status: 'running',
+      activeRunId: 'service-run',
+      updatedAt: Date.now(),
+    },
+  ];
+  scenario.snapshot.runs = [
+    {
+      id: 'service-run',
+      threadId: 'service-thread',
+      checkoutId: 'visual-checkout',
+      attempt: 1,
+      mode: 'write',
+      runtimeProvider: 'pi',
+      runtimeId: 'working-runtime',
+      piSessionId: 'working-session',
+      status: 'running',
+      createdAt: Date.now(),
+    },
+  ];
+  if (!scenario.sessionSnapshot)
+    throw new Error('Scenario session snapshot is missing.');
+  const fixture = {
+    ...scenario,
+    sessionSnapshot: {
+      ...scenario.sessionSnapshot,
+      metadata: { ...scenario.sessionSnapshot.metadata, title },
+    },
+  };
+  await page.route('**/api/projects/*/icon', (route) =>
+    route.fulfill({ status: 404 }),
+  );
+  await installVisualStateScenario(page, fixture);
+  const panel = page.locator('.agent-thread-nav');
+  const serviceHeading = panel.getByRole('button', {
+    name: 'Expand Service',
+  });
+  await expect(serviceHeading).toContainText('1');
+  await expect(
+    panel.getByRole('button', { name: /Internal service build/ }),
+  ).toBeVisible();
+  await panel.screenshot({ path: testInfo.outputPath('service-sidebar.png') });
 });

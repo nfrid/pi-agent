@@ -102,6 +102,7 @@ export {
 } from './agent-thread-nav/model';
 
 const EXPANDED_ARCHIVED_KEY = 'pi-dashboard-expanded-archived-v1';
+const EXPANDED_SERVICE_KEY = 'pi-dashboard-expanded-service-v1';
 const MAX_VISIBLE_COMPLETED_THREADS = 8;
 
 const BULK_ACTION_LABELS: Record<BulkThreadAction, string> = {
@@ -115,9 +116,9 @@ const BULK_ACTION_LABELS: Record<BulkThreadAction, string> = {
 
 type ExpandedArchived = Record<string, boolean>;
 
-function readExpandedArchived(): ExpandedArchived {
+function readExpanded(key: string): ExpandedArchived {
   try {
-    const raw = globalThis.localStorage?.getItem(EXPANDED_ARCHIVED_KEY);
+    const raw = globalThis.localStorage?.getItem(key);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
@@ -133,12 +134,9 @@ function readExpandedArchived(): ExpandedArchived {
   }
 }
 
-function writeExpandedArchived(state: ExpandedArchived): void {
+function writeExpanded(key: string, state: ExpandedArchived): void {
   try {
-    globalThis.localStorage?.setItem(
-      EXPANDED_ARCHIVED_KEY,
-      JSON.stringify(state),
-    );
+    globalThis.localStorage?.setItem(key, JSON.stringify(state));
   } catch {
     // Storage can be unavailable in private browsing; expansion remains local.
   }
@@ -503,7 +501,6 @@ export function AgentThreadNav({
     unsettleThreadMutationOptions(dashboardHttpClient),
   );
   const [query, setQuery] = useState('');
-  const [showServiceThreads, setShowServiceThreads] = useState(false);
   const [isMobile, setIsMobile] = useState(
     () =>
       typeof window !== 'undefined' &&
@@ -523,7 +520,10 @@ export function AgentThreadNav({
   const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [projectScope, setProjectScope] = useState('all');
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
-    Boolean(readExpandedArchived().all),
+    Boolean(readExpanded(EXPANDED_ARCHIVED_KEY).all),
+  );
+  const [serviceExpanded, setServiceExpanded] = useState(() =>
+    Boolean(readExpanded(EXPANDED_SERVICE_KEY).all),
   );
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [activeResultId, setActiveResultId] = useState<string>();
@@ -642,16 +642,14 @@ export function AgentThreadNav({
   }, [draftDefaultQueries, draftProjectIds]);
   const scopedRows = useMemo(
     () =>
-      rows.filter(
-        (row) =>
-          (showServiceThreads || !row.durableThread?.isService) &&
-          (projectScope === 'all'
-            ? true
-            : projectScope === 'unassigned'
-              ? !row.projectId
-              : row.projectId === projectScope),
+      rows.filter((row) =>
+        projectScope === 'all'
+          ? true
+          : projectScope === 'unassigned'
+            ? !row.projectId
+            : row.projectId === projectScope,
       ),
-    [projectScope, rows, showServiceThreads],
+    [projectScope, rows],
   );
   const filtered = useMemo(
     () => filterAgentThreadRows(scopedRows, query),
@@ -678,6 +676,7 @@ export function AgentThreadNav({
       ...sections.active,
       ...sections.settled,
       ...sections.archived,
+      ...sections.services,
     ],
     [sections],
   );
@@ -689,14 +688,27 @@ export function AgentThreadNav({
         : sections.archived.filter((row) => row.id === currentSessionId),
     [archivedExpanded, currentSessionId, query, sections.archived],
   );
+  const displayedServiceRows = useMemo(
+    () =>
+      serviceExpanded || query.trim()
+        ? sections.services
+        : sections.services.filter((row) => row.id === currentSessionId),
+    [currentSessionId, query, sections.services, serviceExpanded],
+  );
   const displayedNavigationRows = useMemo(
     () =>
       displayedAgentThreadRows(
         sections,
         displayedCompletedRows,
         displayedArchivedRows,
+        displayedServiceRows,
       ),
-    [displayedArchivedRows, displayedCompletedRows, sections],
+    [
+      displayedArchivedRows,
+      displayedCompletedRows,
+      displayedServiceRows,
+      sections,
+    ],
   );
   const selectableRows = useMemo(
     () =>
@@ -704,9 +716,10 @@ export function AgentThreadNav({
         ...sections.pinned,
         ...sections.active,
         ...sections.settled,
+        ...displayedServiceRows,
         ...displayedArchivedRows,
       ].filter((row) => row.durableThread !== undefined),
-    [displayedArchivedRows, sections],
+    [displayedArchivedRows, displayedServiceRows, sections],
   );
   const selectedRows = selectableRows.filter((row) =>
     selectedThreadIds.has(row.id),
@@ -738,7 +751,14 @@ export function AgentThreadNav({
   const toggleArchived = () => {
     setArchivedExpanded((current) => {
       const next = !current;
-      writeExpandedArchived(next ? { all: true } : {});
+      writeExpanded(EXPANDED_ARCHIVED_KEY, next ? { all: true } : {});
+      return next;
+    });
+  };
+  const toggleServices = () => {
+    setServiceExpanded((current) => {
+      const next = !current;
+      writeExpanded(EXPANDED_SERVICE_KEY, next ? { all: true } : {});
       return next;
     });
   };
@@ -1182,14 +1202,6 @@ export function AgentThreadNav({
         )}
       </div>
       <label className={styles.scope}>
-        <input
-          type="checkbox"
-          checked={showServiceThreads}
-          onChange={(event) => setShowServiceThreads(event.target.checked)}
-        />
-        <span>Show service threads</span>
-      </label>
-      <label className={styles.scope}>
         <span>Project</span>
         <select
           aria-label="Project scope"
@@ -1294,6 +1306,31 @@ export function AgentThreadNav({
                 </button>
               )}
           </section>
+        )}
+        {sections.services.length > 0 && (
+          <>
+            <button
+              type="button"
+              className={styles.shelfHeading}
+              aria-expanded={serviceExpanded || Boolean(query.trim())}
+              aria-controls="agent-thread-services"
+              aria-label={`${serviceExpanded || query.trim() ? 'Collapse' : 'Expand'} Service`}
+              onClick={toggleServices}
+            >
+              <span>Service</span>
+              <small>{sections.services.length}</small>
+              <span aria-hidden="true">
+                {serviceExpanded || query.trim() ? '▾' : '▸'}
+              </span>
+            </button>
+            <section
+              id="agent-thread-services"
+              className={styles.compactShelf}
+              aria-label="Service threads"
+            >
+              {displayedServiceRows.map((row) => renderThreadRow(row, 'slim'))}
+            </section>
+          </>
         )}
         {sections.archived.length > 0 && (
           <>

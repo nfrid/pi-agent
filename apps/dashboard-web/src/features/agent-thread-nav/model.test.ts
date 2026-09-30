@@ -576,6 +576,31 @@ describe('agent thread view model', () => {
     ]);
   });
 
+  it('orders displayed Service rows before Archived rows', () => {
+    const service = {
+      ...row('service', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-service',
+        isService: true,
+        hasActiveRun: false,
+      },
+    };
+    const archived = {
+      ...row('archived', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-archived',
+        archivedAt: 1,
+        hasActiveRun: false,
+      },
+    };
+    const sections = sectionAgentThreadRows([archived, service]);
+
+    expect(displayedAgentThreadRows(sections).map(({ id }) => id)).toEqual([
+      'service',
+      'archived',
+    ]);
+  });
+
   it('partitions pinned rows globally before active and archived', () => {
     const pinnedDormant = {
       ...row('pinned-dormant', 'Other', 'dormant'),
@@ -601,6 +626,66 @@ describe('agent thread view model', () => {
     expect(sections.pinned.map(({ id }) => id)).toEqual(['pinned-dormant']);
     expect(sections.active.map(({ id }) => id)).toEqual(['active', 'history']);
     expect(sections.archived.map(({ id }) => id)).toEqual(['archived']);
+  });
+
+  it('keeps service rows separate from pinned, active, and settled rows', () => {
+    const serviceActive = {
+      ...row('service-active', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-service-active',
+        isService: true,
+        hasActiveRun: true,
+      },
+    };
+    const serviceSettled = {
+      ...row('service-settled', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-service-settled',
+        isService: true,
+        settledAt: 20,
+        pinnedAt: 30,
+        hasActiveRun: false,
+      },
+    };
+    const serviceArchived = {
+      ...row('service-archived', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-service-archived',
+        isService: true,
+        archivedAt: 40,
+        hasActiveRun: false,
+      },
+    };
+    const ordinary = {
+      ...row('ordinary', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-ordinary',
+        isService: false,
+        hasActiveRun: false,
+      },
+    };
+    const legacy = {
+      ...row('legacy', 'Dashboard'),
+      durableThread: {
+        threadId: 'thread-legacy',
+        hasActiveRun: false,
+      },
+    };
+    const sections = sectionAgentThreadRows([
+      serviceActive,
+      serviceSettled,
+      serviceArchived,
+      ordinary,
+      legacy,
+    ]);
+    expect(sections.services.map(({ id }) => id)).toEqual([
+      'service-active',
+      'service-settled',
+    ]);
+    expect(sections.pinned).toEqual([]);
+    expect(sections.active.map(({ id }) => id)).toEqual(['ordinary', 'legacy']);
+    expect(sections.settled).toEqual([]);
+    expect(sections.archived.map(({ id }) => id)).toEqual(['service-archived']);
   });
 
   it('gives archived and pinned rows precedence over Settled and Active', () => {

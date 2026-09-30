@@ -318,12 +318,12 @@ clients may use `POST /api/external/v1/projects/:projectId/threads` with
 `externalRef`, `title`, and a nonblank `prompt`. It may also set
 `isService: true` to classify an internal service thread. The marker is stored
 on the canonical thread record, defaults to false, and does not change source
-ownership or access. The dashboard hides marked threads from its sidebar and
-command-palette search by default. The sidebar's "Show service threads" control
-reveals them in its normal project scope and search, while direct thread links
-continue to work. The reference is persisted and idempotent for the complete
-command payload, including `isService`; reuse with different input returns a
-conflict.
+ownership or access. The dashboard groups marked threads in a separate,
+collapsed Service section in the sidebar and keeps them out of command-palette
+search by default. Sidebar search reveals matching service threads, and direct
+thread links continue to work. The reference is persisted and idempotent for
+the complete command payload, including `isService`; reuse with different input
+returns a conflict.
 
 Roll out the server and matching dashboard web bundle together. Start sending
 `isService: true` only after the new bundle is served, and have users reload
