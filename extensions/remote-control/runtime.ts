@@ -437,7 +437,9 @@ export function emitAgentSettlement(
     clearSettledBackground(scopeId);
     emitState(runtime, ctx, 'idle');
   } else if (responseWaitPending || !isGenuineAgentSettlement(false, scopeId)) {
-    publishSettledBackground(pending, scopeId);
+    // Required results can be queued, or come from delegates rather than
+    // processes. Keep their request wait distinct from passive activity.
+    publishSettledBackground(pending, scopeId, responseWaitPending);
     emitState(runtime, ctx, 'waiting');
     return;
   } else {

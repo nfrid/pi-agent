@@ -4,6 +4,19 @@ import { SETTLED_BACKGROUND_RENDERER_ID } from './contribution';
 import { clearSettledBackground, publishSettledBackground } from './live';
 
 describe('settled background live surface', () => {
+  it('keeps a logical wait visible after all processes have stopped', () => {
+    const scope = `required-results-${Date.now()}`;
+    const hub = getLiveExtensionSurfaceHub(scope);
+    publishSettledBackground(0, scope, true);
+    expect(hub.snapshot()[0]?.viewModel).toEqual({
+      version: 1,
+      count: 0,
+      requestPending: true,
+    });
+    publishSettledBackground(0, scope);
+    expect(hub.snapshot()).toEqual([]);
+  });
+
   it('publishes, updates, and clears the active count', () => {
     const scope = `settled-background-${Date.now()}`;
     const hub = getLiveExtensionSurfaceHub(scope);

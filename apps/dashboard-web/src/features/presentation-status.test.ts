@@ -19,6 +19,23 @@ const waitingSurface = (count: number) => ({
 });
 
 describe('dashboard presentation status', () => {
+  it('labels logical waiting independently of passive process counts', () => {
+    for (const count of [0, 3])
+      expect(
+        dashboardStatus(
+          runtime({
+            liveState: 'waiting',
+            extensionSurfaces: [
+              {
+                ...waitingSurface(count),
+                viewModel: { version: 1, count, requestPending: true },
+              },
+            ],
+          }),
+        ),
+      ).toEqual({ status: 'waiting', label: 'waiting' });
+  });
+
   it('uses waiting labels for settled background work without user input', () => {
     expect(
       dashboardStatus(runtime({ extensionSurfaces: [waitingSurface(1)] })),

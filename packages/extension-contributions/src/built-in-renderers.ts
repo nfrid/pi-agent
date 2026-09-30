@@ -584,13 +584,20 @@ export const tasksRenderer: RendererDescriptor = {
 export const SETTLED_BACKGROUND_RENDERER_ID = 'runtime.settled-background';
 export const SETTLED_BACKGROUND_SURFACE_ID = 'runtime.settled-background';
 
-export const SettledBackgroundViewModelSchema = Type.Object(
-  {
-    version: Type.Literal(1),
-    count: Type.Integer({ minimum: 1 }),
-  },
-  { additionalProperties: false },
-);
+export const SettledBackgroundViewModelSchema = Type.Union([
+  Type.Object(
+    { version: Type.Literal(1), count: Type.Integer({ minimum: 1 }) },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      version: Type.Literal(1),
+      count: Type.Integer({ minimum: 0 }),
+      requestPending: Type.Literal(true),
+    },
+    { additionalProperties: false },
+  ),
+]);
 export type SettledBackgroundViewModel = Static<
   typeof SettledBackgroundViewModelSchema
 >;

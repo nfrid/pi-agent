@@ -16,7 +16,10 @@ import { Button as AriaButton } from 'react-aria-components';
 import { errorMessage } from '../../shared/lib/error-message';
 import { ProgressBar } from '../../shared/ui/progress-bar';
 import { draftRuntimeOptions, modelOptionValue } from '../model-option';
-import { hasSettledBackground } from '../presentation-status';
+import {
+  hasPendingLogicalRequest,
+  hasSettledBackground,
+} from '../presentation-status';
 import { useImageAttachments } from './attachments';
 import { useComposerDraft } from './draft';
 import { AgentPicker } from './draft-pickers';
@@ -28,6 +31,7 @@ import {
   useComposerQueue,
 } from './queue';
 import {
+  composerCanSteer,
   composerIsDisabled,
   composerMode,
   composerSubmissionPolicy,
@@ -128,7 +132,9 @@ export function Composer({
     runtime?.composerCommands ?? discoveredCommands.data?.commands;
   const { queue, setQueue, addOptimistic, rejectOptimistic } =
     useComposerQueue(runtime);
-  const settledBackground = hasSettledBackground(runtime);
+  const requestPending = hasPendingLogicalRequest(runtime);
+  const settledBackground = hasSettledBackground(runtime) && !requestPending;
+  const canSteer = composerCanSteer(runtime);
   const defaultMode = composerMode(runtime);
   const disabled = composerIsDisabled(runtime);
   const submissionDisabled = runtime
@@ -399,7 +405,7 @@ export function Composer({
         markdown={text}
         cwd={composerCwd}
         commands={
-          runtime?.liveState === 'working' && !settledBackground
+          canSteer
             ? composerCommands?.filter(
                 (command) => command.source !== 'builtin',
               )
@@ -425,7 +431,7 @@ export function Composer({
           runtime ? (queuesCurrentMessage ? 'Queue' : 'Send') : undefined
         }
         actionExtras={
-          runtime?.liveState === 'working' && !settledBackground ? (
+          canSteer ? (
             <AriaButton
               type="button"
               className="composer-abort"
@@ -439,7 +445,7 @@ export function Composer({
         }
         mode={
           <>
-            {runtime?.liveState === 'working' && !settledBackground && (
+            {canSteer && (
               <AriaButton
                 type="button"
                 aria-label="Steer current work instead of following up later"
@@ -461,9 +467,13 @@ export function Composer({
               }
             />
             {(!runtime ||
-              runtime.liveState === 'idle' ||
-              settledBackground) && <span>Prompt</span>}
-            {runtime?.liveState === 'waiting' && <span>Answer above</span>}
+              (!requestPending &&
+                (runtime.liveState === 'idle' || settledBackground))) && (
+              <span>Prompt</span>
+            )}
+            {runtime?.liveState === 'waiting' && !requestPending && (
+              <span>Answer above</span>
+            )}
           </>
         }
         controls={

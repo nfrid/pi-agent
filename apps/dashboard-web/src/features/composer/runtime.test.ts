@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  composerCanSteer,
   composerCommandType,
   composerIsDisabled,
   composerMode,
@@ -14,6 +15,39 @@ import {
 } from './runtime';
 
 describe('composer runtime model', () => {
+  it('steers a suspended logical request and holds ordinary follow-ups', () => {
+    for (const count of [0, 2]) {
+      const runtime = {
+        liveState: 'waiting',
+        online: true,
+        extensionSurfaces: [
+          {
+            id: 'runtime.settled-background',
+            rendererId: 'runtime.settled-background',
+            viewModel: { version: 1, count, requestPending: true },
+          },
+        ],
+      } as never;
+      expect(composerCanSteer(runtime)).toBe(true);
+      expect(composerMode(runtime)).toBe('steer');
+      expect(composerIsDisabled(runtime)).toBe(false);
+      expect(composerSubmissionPolicy(runtime, 'prompt', false)).toEqual({
+        commandType: 'steer',
+        queues: false,
+      });
+      expect(composerSubmissionPolicy(runtime, 'steer', true)).toEqual({
+        commandType: 'steer',
+        queues: false,
+      });
+      expect(composerSubmissionPolicy(runtime, 'followUp', true)).toEqual({
+        commandType: 'followUp',
+        queues: true,
+      });
+    }
+    expect(composerCanSteer({ liveState: 'waiting' } as never)).toBe(false);
+    expect(composerIsDisabled({ liveState: 'waiting' } as never)).toBe(true);
+  });
+
   it('formats context usage at compact warning thresholds', () => {
     expect(formatContextTokens(950)).toBe('950');
     expect(formatContextTokens(12_400)).toBe('12.4k');

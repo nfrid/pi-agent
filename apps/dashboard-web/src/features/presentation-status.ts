@@ -4,6 +4,7 @@ import {
   type PauseStatusViewModel,
   PauseStatusViewModelSchema,
   SETTLED_BACKGROUND_RENDERER_ID,
+  type SettledBackgroundViewModel,
   SettledBackgroundViewModelSchema,
   tryParseExtensionSurface,
 } from '@pi-dashboard/extension-contributions';
@@ -42,17 +43,31 @@ function pauseStatus(
     : undefined;
 }
 
-/** Read the central settled-background transport surface. */
-export function settledBackgroundCount(
+function settledBackgroundModel(
   runtime: RuntimeSnapshot | undefined,
-): number {
+): SettledBackgroundViewModel | undefined {
   const surface = runtimeSurfaces(runtime).find(
     (candidate) => candidate.rendererId === SETTLED_BACKGROUND_RENDERER_ID,
   );
   return surface &&
     Value.Check(SettledBackgroundViewModelSchema, surface.viewModel)
-    ? (surface.viewModel as { count: number }).count
-    : 0;
+    ? (surface.viewModel as SettledBackgroundViewModel)
+    : undefined;
+}
+
+/** Process activity is not proof that a logical request has finished. */
+export function hasPendingLogicalRequest(
+  runtime: RuntimeSnapshot | undefined,
+): boolean {
+  const model = settledBackgroundModel(runtime);
+  return !!model && 'requestPending' in model && model.requestPending;
+}
+
+/** Read the central settled-background transport surface. */
+export function settledBackgroundCount(
+  runtime: RuntimeSnapshot | undefined,
+): number {
+  return settledBackgroundModel(runtime)?.count ?? 0;
 }
 
 export function hasSettledBackground(
@@ -70,6 +85,12 @@ export function dashboardStatus(
 
   const pause = pauseStatus(runtime);
   if (pause) return { status: 'paused', label: pause.label };
+
+  if (
+    hasPendingLogicalRequest(runtime) &&
+    ['idle', 'working', 'waiting'].includes(runtime.liveState)
+  )
+    return { status: 'waiting', label: 'waiting' };
 
   const count = settledBackgroundCount(runtime);
   if (

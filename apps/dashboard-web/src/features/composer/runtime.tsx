@@ -11,7 +11,10 @@ import {
   modelOptionValue,
   type RuntimeModelOption,
 } from '../model-option';
-import { hasSettledBackground } from '../presentation-status';
+import {
+  hasPendingLogicalRequest,
+  hasSettledBackground,
+} from '../presentation-status';
 
 export async function waitForStartedRuntime(
   store: DashboardLiveStore,
@@ -188,18 +191,27 @@ export function dormantContextUsage(
 
 export type ComposerMode = 'prompt' | 'steer' | 'followUp';
 
+export function composerCanSteer(
+  runtime: RuntimeSnapshot | undefined,
+): boolean {
+  return (
+    hasPendingLogicalRequest(runtime) ||
+    (runtime?.liveState === 'working' && !hasSettledBackground(runtime))
+  );
+}
+
 export function composerMode(
   runtime: RuntimeSnapshot | undefined,
 ): ComposerMode {
-  return runtime?.liveState === 'working' && !hasSettledBackground(runtime)
-    ? 'steer'
-    : 'prompt';
+  return composerCanSteer(runtime) ? 'steer' : 'prompt';
 }
 
 export function composerCommandType(
   runtime: RuntimeSnapshot,
   mode: ComposerMode,
 ): ComposerMode {
+  if (hasPendingLogicalRequest(runtime))
+    return mode === 'followUp' ? 'followUp' : 'steer';
   return runtime.liveState === 'idle' || hasSettledBackground(runtime)
     ? 'prompt'
     : mode;
@@ -211,6 +223,14 @@ export function composerSubmissionPolicy(
   _hasAttachments: boolean,
 ): { commandType: ComposerMode; queues: boolean } {
   const commandType = composerCommandType(runtime, mode);
+  if (hasPendingLogicalRequest(runtime))
+    return {
+      commandType,
+      queues:
+        commandType === 'followUp' ||
+        runtime.liveState === 'working' ||
+        runtime.liveState === 'compacting',
+    };
   if (hasSettledBackground(runtime)) return { commandType, queues: false };
   return {
     commandType,
@@ -227,6 +247,8 @@ export function composerIsDisabled(
     !runtime ||
     runtime.online === false ||
     runtime.liveState === 'stopping' ||
-    (runtime.liveState === 'waiting' && !hasSettledBackground(runtime))
+    (runtime.liveState === 'waiting' &&
+      !hasPendingLogicalRequest(runtime) &&
+      !hasSettledBackground(runtime))
   );
 }
