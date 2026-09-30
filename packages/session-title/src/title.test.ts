@@ -22,7 +22,7 @@ describe('session title generation', () => {
     const model = {
       provider: 'custom-codex',
       id: 'cheap-title-model',
-      api: 'openai-codex-responses',
+      api: 'openai-responses',
       reasoning: true,
     };
     const client = {
@@ -99,9 +99,9 @@ describe('session title generation', () => {
       );
     const client = {
       find: vi.fn(() => ({
-        provider: 'openai-codex',
+        provider: 'openai',
         id: 'title-model',
-        api: 'openai-codex-responses',
+        api: 'openai-responses',
         reasoning: true,
       })),
       streamSimple,
@@ -201,9 +201,9 @@ describe('session title generation', () => {
     );
     const client = {
       find: vi.fn(() => ({
-        provider: 'openai-codex',
+        provider: 'openai',
         id: 'gpt-6-luna',
-        api: 'openai-codex-responses',
+        api: 'openai-responses',
         reasoning: true,
       })),
       streamSimple,
@@ -247,9 +247,9 @@ describe('session title generation', () => {
       }));
     const client = {
       find: vi.fn(() => ({
-        provider: 'openai-codex',
+        provider: 'openai',
         id: 'gpt-6-luna',
-        api: 'openai-codex-responses',
+        api: 'openai-responses',
         reasoning: true,
       })),
       streamSimple,

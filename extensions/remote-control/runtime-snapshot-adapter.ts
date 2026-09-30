@@ -58,7 +58,7 @@ export function modelSnapshot(ctx: ExtensionContext): RuntimeSnapshot['model'] {
   const model = ctx.model;
   if (!model) return undefined;
   const serviceTier =
-    model.provider === 'openai-codex' ? codexServiceTier(ctx) : undefined;
+    model.provider === 'openai' ? codexServiceTier(ctx) : undefined;
   return {
     provider: model.provider,
     model: model.id,

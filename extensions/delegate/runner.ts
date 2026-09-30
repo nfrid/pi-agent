@@ -202,7 +202,7 @@ export function buildChildArgs(
     ...(webEnabled ? ['--extension', WEB_EXTENSION] : []),
     '--extension',
     'builtin:codemode',
-    ...(options.routing?.provider === 'openai-codex'
+    ...(options.routing?.provider === 'openai'
       ? ['--extension', CODEX_SERVICE_TIER_EXTENSION]
       : []),
     '--extension',
@@ -223,7 +223,7 @@ export function buildChildArgs(
     args.push('--provider', options.routing.provider);
     args.push('--model', options.routing.model);
     args.push('--thinking', options.routing.thinking);
-    if (options.routing.provider === 'openai-codex')
+    if (options.routing.provider === 'openai')
       args.push('--service-tier', options.serviceTier ?? 'normal');
   }
   args.push(

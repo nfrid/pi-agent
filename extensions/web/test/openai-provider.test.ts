@@ -87,13 +87,12 @@ describe('OpenAI search transport', () => {
     });
   });
 
-  it('uses gpt-6-luna with Codex auth and preserves resolved headers', async () => {
+  it('uses gpt-6-luna with OpenAI registry auth and preserves resolved headers', async () => {
     process.env.OPENAI_API_KEY = 'env-fallback';
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
       expect(init?.headers).toMatchObject({
         Authorization: 'Bearer registry-key',
         'x-registry': 'preserved',
-        originator: 'pi',
       });
       expect(JSON.parse(String(init?.body)).model).toBe('gpt-6-luna');
       return Response.json(responseOutput());
@@ -102,9 +101,9 @@ describe('OpenAI search transport', () => {
     const ctx = {
       modelRegistry: {
         getAll: () => [
-          { provider: 'openai-codex', id: 'gpt-5.4' },
-          { provider: 'openai-codex', id: 'gpt-5.3-codex' },
-          { provider: 'openai-codex', id: 'gpt-6-luna' },
+          { provider: 'openai', id: 'gpt-5.4' },
+          { provider: 'openai', id: 'gpt-5.3-codex' },
+          { provider: 'openai', id: 'gpt-6-luna' },
         ],
         getApiKeyAndHeaders: vi.fn(async () => ({
           ok: true,
@@ -116,7 +115,7 @@ describe('OpenAI search transport', () => {
     const { searchWithOpenAI } = await import('../openai-search.js');
     await searchWithOpenAI('docs', {}, ctx as never);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'https://chatgpt.com/backend-api/codex/responses',
+      'https://api.openai.com/v1/responses',
     );
   });
 
@@ -126,7 +125,7 @@ describe('OpenAI search transport', () => {
     const ctx = {
       modelRegistry: {
         getAll: () => [
-          { provider: 'openai-codex', id: 'gpt-5.4' },
+          { provider: 'openai', id: 'gpt-5.4' },
           { provider: 'openai', id: 'gpt-4o' },
         ],
         getApiKeyAndHeaders,
@@ -137,7 +136,7 @@ describe('OpenAI search transport', () => {
     expect(getApiKeyAndHeaders).not.toHaveBeenCalled();
   });
 
-  it('selects the Codex endpoint and account header for Codex JWTs', async () => {
+  it('uses the OpenAI endpoint for subscription JWTs', async () => {
     const payload = Buffer.from(
       JSON.stringify({
         'https://api.openai.com/auth': { chatgpt_account_id: 'account-1' },
@@ -146,16 +145,17 @@ describe('OpenAI search transport', () => {
     process.env.OPENAI_API_KEY = `header.${payload}.signature`;
     const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
       expect(init?.headers).toMatchObject({
-        'chatgpt-account-id': 'account-1',
-        originator: 'pi',
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       });
+      expect(init?.headers).not.toHaveProperty('chatgpt-account-id');
+      expect(init?.headers).not.toHaveProperty('originator');
       return Response.json(responseOutput());
     });
     vi.stubGlobal('fetch', fetchMock);
     const { searchWithOpenAI } = await import('../openai-search.js');
     await searchWithOpenAI('docs');
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'https://chatgpt.com/backend-api/codex/responses',
+      'https://api.openai.com/v1/responses',
     );
   });
 

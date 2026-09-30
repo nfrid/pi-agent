@@ -5,7 +5,7 @@ import { formatUsage } from './display';
 import type { UsageReport } from './types';
 
 const ctx = {
-  model: { provider: 'openai-codex', id: 'gpt-test', name: 'gpt-test' },
+  model: { provider: 'openai', id: 'gpt-test', name: 'gpt-test' },
   ui: {
     theme: {
       fg: (_color: unknown, text: string) => text,

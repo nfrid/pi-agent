@@ -472,7 +472,7 @@ describe('delegate', () => {
 
   test('resolves exact catalog route keys', () => {
     const config = parseDelegateConfig({
-      provider: 'openai-codex',
+      provider: 'openai',
       modelCatalog: {
         precise: {
           provider: 'custom-provider',
@@ -723,7 +723,7 @@ describe('delegate', () => {
 
   test('describes only explicit catalog routes', () => {
     const config = parseDelegateConfig({
-      provider: 'openai-codex',
+      provider: 'openai',
       modelCatalog: {
         quick: {
           model: 'quick',
@@ -786,7 +786,7 @@ describe('delegate', () => {
       skills: ['/tmp'],
       routing: {
         route: 'quick-high',
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'quick',
         thinking: 'high',
         relativeCost: 1,
@@ -1228,7 +1228,7 @@ describe('delegate', () => {
         serviceTier,
         routing: {
           route: 'exact-low',
-          provider: 'openai-codex',
+          provider: 'openai',
           model: 'exact-model',
           thinking: 'low',
           relativeCost: 2,
@@ -1243,7 +1243,7 @@ describe('delegate', () => {
       ),
     ).toEqual([
       '--provider',
-      'openai-codex',
+      'openai',
       '--model',
       'exact-model',
       '--thinking',

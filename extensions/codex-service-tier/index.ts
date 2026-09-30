@@ -19,7 +19,7 @@ function choiceTier(value: string | undefined): CodexServiceTier | undefined {
 
 export default function codexServiceTierExtension(pi: ExtensionAPI): void {
   pi.registerFlag(FLAG, {
-    description: 'Codex request speed: normal, fast, or ultrafast',
+    description: 'OpenAI request speed: normal, fast, or ultrafast',
     type: 'string',
   });
 
@@ -37,7 +37,7 @@ export default function codexServiceTierExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand('service-tier', {
-    description: 'Set Codex request speed',
+    description: 'Set OpenAI request speed',
     getArgumentCompletions: (prefix) =>
       CHOICES.filter((choice) => choice.startsWith(prefix)).map((choice) => ({
         value: choice,
@@ -46,21 +46,21 @@ export default function codexServiceTierExtension(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       if (ctx.model?.provider !== CODEX_PROVIDER) {
         ctx.ui.notify(
-          'Service tier is available only for Codex models.',
+          'Service tier is available only for OpenAI models.',
           'warning',
         );
         return;
       }
       const requested = args.trim().toLowerCase();
       const choice =
-        requested || (await ctx.ui.select('Codex speed', [...CHOICES]));
+        requested || (await ctx.ui.select('OpenAI speed', [...CHOICES]));
       if (!choice || !CHOICES.includes(choice as (typeof CHOICES)[number])) {
         if (requested)
           ctx.ui.notify('Use normal, fast, or ultrafast.', 'warning');
         return;
       }
       setCodexServiceTier(pi, ctx, choiceTier(choice));
-      ctx.ui.notify(`Codex speed: ${choice}`, 'info');
+      ctx.ui.notify(`OpenAI speed: ${choice}`, 'info');
     },
   });
 

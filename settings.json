@@ -1,6 +1,6 @@
 {
   "lastChangelogVersion": "0.87.1",
-  "defaultProvider": "openai-codex",
+  "defaultProvider": "openai",
   "defaultModel": "gpt-6-astra",
   "defaultThinkingLevel": "medium",
   "defaultTools": ["+codemode"],
@@ -11,7 +11,7 @@
   "theme": "dracula",
   "sessionTitle": {
     "enabled": true,
-    "provider": "openai-codex",
+    "provider": "openai",
     "model": "gpt-6-luna",
     "thinking": "low",
     "timeoutMs": 20000,
@@ -20,54 +20,54 @@
     "maxLength": 50
   },
   "delegate": {
-    "provider": "openai-codex",
+    "provider": "openai",
     "routingGuidance": "Costs in this catalog are provisional estimates pending local calibration, not measured GPT-6 route costs. Searching unfamiliar code is not, by itself, a reason to choose Sol or Astra. Prefer a smaller task over a deeper route when decomposition preserves useful independence.",
     "timeoutMs": 1800000,
     "modelCatalog": {
       "luna-l": {
-        "provider": "openai-codex",
+        "provider": "openai",
         "model": "gpt-6-luna",
         "thinking": "low",
         "relativeCost": 1,
         "useFor": "Mechanical execution with an exact verifier."
       },
       "luna-m": {
-        "provider": "openai-codex",
+        "provider": "openai",
         "model": "gpt-6-luna",
         "thinking": "medium",
         "relativeCost": 3,
         "useFor": "Localized implementation or investigation with a clear question and finish line."
       },
       "luna-h": {
-        "provider": "openai-codex",
+        "provider": "openai",
         "model": "gpt-6-luna",
         "thinking": "high",
         "relativeCost": 11,
         "useFor": "Substantial bounded work across known files or components."
       },
       "luna-x": {
-        "provider": "openai-codex",
+        "provider": "openai",
         "model": "gpt-6-luna",
         "thinking": "xhigh",
         "relativeCost": 21,
         "useFor": "Difficult bounded diagnosis, implementation, or verification."
       },
       "luna-max": {
-        "provider": "openai-codex",
+        "provider": "openai",
         "model": "gpt-6-luna",
         "thinking": "max",
         "relativeCost": 42,
         "useFor": "Exceptional bounded work where unusually deep reasoning is justified."
       },
       "sol-m": {
-        "provider": "openai-codex",
+        "provider": "openai",
         "model": "gpt-6.1-sol",
         "thinking": "medium",
         "relativeCost": 95,
         "useFor": "Work requiring the child to choose the approach, scope, or evaluation criteria."
       },
       "astra-l": {
-        "provider": "openai-codex",
+        "provider": "openai",
         "model": "gpt-6-astra",
         "thinking": "low",
         "relativeCost": 190,

@@ -23,7 +23,7 @@ const config: DelegateConfig = {
   timeoutMs: 60_000,
   maxParallelTasks: 2,
   maxConcurrency: 2,
-  provider: 'openai-codex',
+  provider: 'openai',
   modelCatalog: {
     quick: {
       model: 'gpt-test',
@@ -37,7 +37,7 @@ const config: DelegateConfig = {
 
 const routing: DelegateRouteState = {
   route: 'quick',
-  provider: 'openai-codex',
+  provider: 'openai',
   model: 'gpt-test',
   thinking: 'low',
   relativeCost: 1,

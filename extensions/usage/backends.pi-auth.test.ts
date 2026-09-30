@@ -17,7 +17,7 @@ describe('Pi auth cancellation', () => {
       }),
     );
     const ctx = {
-      model: { provider: 'openai-codex', id: 'gpt-test' },
+      model: { provider: 'openai', id: 'gpt-test' },
       modelRegistry: {
         getAvailable: () => [],
         getAll: () => [],
@@ -43,7 +43,7 @@ describe('Pi auth cancellation', () => {
     const auth = new Promise<never>((_resolve, reject) => {
       rejectAuth = reject;
     });
-    const model = { provider: 'openai-codex', id: 'gpt-test' };
+    const model = { provider: 'openai', id: 'gpt-test' };
     const ctx = {
       model,
       modelRegistry: {

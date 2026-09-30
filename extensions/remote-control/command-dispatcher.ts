@@ -160,8 +160,7 @@ export async function dispatchDashboardCommand(
       if (!model) throw new Error('Requested model is not available.');
       if (!(await pi.setModel(model)))
         throw new Error('Model authentication is unavailable.');
-      if (model.provider !== 'openai-codex')
-        setCodexServiceTier(pi, ctx, undefined);
+      if (model.provider !== 'openai') setCodexServiceTier(pi, ctx, undefined);
       else if (command.serviceTier !== undefined)
         setCodexServiceTier(pi, ctx, command.serviceTier ?? undefined);
       return { accepted: true };

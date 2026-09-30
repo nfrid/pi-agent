@@ -299,7 +299,7 @@ describe('render', () => {
       'Inspect the project',
       {
         route: 'luna-medium',
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-6-luna',
         thinking: 'medium',
         relativeCost: 8,
@@ -348,7 +348,7 @@ describe('render', () => {
       'Inspect the project',
       {
         route: 'luna-medium',
-        provider: 'openai-codex',
+        provider: 'openai',
         model: 'gpt-6-luna',
         thinking: 'medium',
         relativeCost: 8,

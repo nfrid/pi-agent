@@ -1,7 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import {
-  extractAccountId,
-  isCodexJwt,
   isOpenAISearchAvailable,
   OPENAI_CONFIG_PATH,
   resolveOpenAIAuth,
@@ -15,7 +13,6 @@ import type { SearchOptions, SearchResponse } from './types';
 import { fetchWithRetry, readResponseTextLimited } from './utils';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
-const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const SEARCH_TIMEOUT_MS = 60_000;
 
 export { isOpenAISearchAvailable, resolveOpenAIAuth };
@@ -127,7 +124,7 @@ export async function searchWithOpenAI(
   if (!auth) {
     throw new Error(
       'OpenAI web search unavailable. Either:\n' +
-        '  1. Use /login to sign in with a Codex subscription\n' +
+        '  1. Use /login to sign in with OpenAI (ChatGPT subscription)\n' +
         `  2. Create ${OPENAI_CONFIG_PATH} with { "openaiApiKey": "your-key" }\n` +
         '  3. Set OPENAI_API_KEY environment variable',
     );
@@ -139,13 +136,6 @@ export async function searchWithOpenAI(
     'Content-Type': 'application/json',
     'OpenAI-Beta': 'responses=experimental',
   };
-  const useCodexEndpoint =
-    auth.provider === 'openai-codex' || isCodexJwt(auth.apiKey);
-  if (useCodexEndpoint) {
-    const accountId = extractAccountId(auth.apiKey);
-    if (accountId) headers['chatgpt-account-id'] = accountId;
-    headers.originator = 'pi';
-  }
 
   const body = {
     model: auth.model,
@@ -158,20 +148,17 @@ export async function searchWithOpenAI(
     tool_choice: 'required' as const,
     parallel_tool_calls: true,
   };
-  const response = await fetchWithRetry(
-    useCodexEndpoint ? CODEX_RESPONSES_URL : OPENAI_RESPONSES_URL,
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: options.signal
-        ? AbortSignal.any([
-            AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-            options.signal,
-          ])
-        : AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    },
-  );
+  const response = await fetchWithRetry(OPENAI_RESPONSES_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: options.signal
+      ? AbortSignal.any([
+          AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+          options.signal,
+        ])
+      : AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+  });
 
   if (!response.ok) {
     const errorText = await readResponseTextLimited(response, 64 * 1024);

@@ -27,7 +27,7 @@ function fixture(flag?: string, priorTier?: string) {
     getBranch: () => entries.map((entry) => ({ type: 'custom', ...entry })),
   };
   const ctx = {
-    model: { provider: 'openai-codex' },
+    model: { provider: 'openai' },
     sessionManager: manager,
     ui: { notify: vi.fn(), select: vi.fn() },
   } as unknown as ExtensionContext;

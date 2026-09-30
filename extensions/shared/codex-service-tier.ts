@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 
-export const CODEX_PROVIDER = 'openai-codex';
+export const CODEX_PROVIDER = 'openai';
 export const CODEX_SERVICE_TIER_ENTRY = 'codex-service-tier';
 export const CODEX_SERVICE_TIER_CHANGED = 'codex-service-tier:changed';
 

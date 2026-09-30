@@ -25,7 +25,7 @@ function context(id = 'codex-test', idle = false): ExtensionContext {
   return {
     hasUI: true,
     model: {
-      provider: 'openai-codex',
+      provider: 'openai',
       id,
       name: id,
     },

@@ -27,7 +27,7 @@ import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 const originalRoute: DelegateRouteState = {
   route: 'original',
-  provider: 'openai-codex',
+  provider: 'openai',
   model: 'original-model',
   thinking: 'low',
   relativeCost: 1,

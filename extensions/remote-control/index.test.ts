@@ -504,7 +504,7 @@ describe('dashboard input dispatch', () => {
   it('updates the Codex service tier with the existing model command', async () => {
     const appendEntry = vi.fn();
     const emit = vi.fn();
-    const model = { provider: 'openai-codex', id: 'gpt' };
+    const model = { provider: 'openai', id: 'gpt' };
     const pi = {
       setModel: vi.fn(async () => true),
       appendEntry,
@@ -519,7 +519,7 @@ describe('dashboard input dispatch', () => {
     await dispatchDashboardCommand(pi, context, {
       id: 'model-fast',
       type: 'setModel',
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt',
       serviceTier: 'fast',
     });
@@ -529,14 +529,14 @@ describe('dashboard input dispatch', () => {
     await dispatchDashboardCommand(pi, context, {
       id: 'model-preserve',
       type: 'setModel',
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt',
     });
     expect(appendEntry).toHaveBeenCalledTimes(1);
     await dispatchDashboardCommand(pi, context, {
       id: 'model-normal',
       type: 'setModel',
-      provider: 'openai-codex',
+      provider: 'openai',
       model: 'gpt',
       serviceTier: null,
     });

@@ -1,4 +1,4 @@
-export const CODEX_PROVIDER_ID = 'openai-codex';
+export const CODEX_PROVIDER_ID = 'openai';
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 export const STATUS_KEY = 'usage';
 export const ACTIVE_REFRESH_INTERVAL_MS = 60 * 1000;
