@@ -1,0 +1,134 @@
+# Harness improvement — scratch roadmap
+
+## Resume here
+
+- Mode: **implementation — batch A only**. User approved test-contract reconciliation after the audit. No production code changes, batch B documentation fixes, or batch C model evaluations are authorized.
+- Baseline: `868e113d` (2026-09-30). Checkout was clean before creating this file.
+- Audit milestone complete. Batch A is in progress; batches B/C remain approval-pending.
+- `baseline-contract-tests@3` settled. Its tests are reviewed/validated, but integration remains blocked by carried-scratch handling: initial overlap refusal; removing carried scratch exposes commit pathspec failure for the now-absent net-neutral path. Checkout was preserved and no tests landed.
+- Recovery: commit this owned roadmap for durable tracking, then create a fresh clean-base implementation delegate (inputs only, no inherited code base) to reproduce the exact two-file reviewed patch. Do not manually merge/rebase child history or broaden scope to fix the integrator. Record this friction for the later execution/operations audit.
+- Reviewed final test patch: same-context wake dedupe, retention across requests, no redispatch/extra durable wake-state append; required migration indexes/data/FKs preserved and intentionally removed writer index explicit.
+- Async setup blocker resolved: child inherits `PI_DELEGATE_CHILD=1`; normal `scripts/clean-npm-env.mjs` strips it. Named async test passes using cleaned launcher; migration/repository 57 and wake 6 pass.
+- First merge refused because carried-WIP scratch overlapped parent scratch; no commit landed. Premature aggregate `5407c382-f6c5-4faa-8820-9454d9e4348a` ran old tests and is not final validation. Parent owns integration retry and final validation.
+- Do not read auth/credential files or raw user sessions; do not deploy or restart services. Authorized writes are the two named tests and this scratch file.
+- Preserve unrelated checkout changes. Use focused checks for local work; a full check is appropriate here once to establish the cross-cutting baseline.
+- After compaction, read this file and current todo state; use automatic delegate/background completion reports rather than polling.
+
+## Agreed priorities and approach
+
+1. Correctness/safety.
+2. Harness effectiveness and task correctness.
+3. Simplicity and authoritative ownership.
+4. Measured performance/cost.
+5. Usability/maintenance.
+
+Default loop: bound scope → establish evidence → propose → approve → implement → verify → delete obsolete code → evaluate (keep/revise/revert/insufficient evidence).
+Separate correctness fixes, behavior-preserving refactors, behavior changes, and optimization claims. File size alone does not justify refactoring. No new framework or tracking system. An audit with no justified changes is valid.
+
+## Whole-system review order
+
+| Area | Status | Scope |
+|---|---|---|
+| 0. Baseline and boundaries | Initial milestone complete | Current checks measured; ownership mapped at component level, not exhaustively audited |
+| 1. Agent-facing harness | Bounded audit complete | No verified prompt/tool-exposure bug; doc drift and compaction evaluation gap identified |
+| 2. Execution/orchestration | Not started | Delegate/worktree/task/background lifecycle, wakeups, remote control, recovery |
+| 3. Tools/integrations | Not started | Web/search, image reads, argument validation, usage and smaller tools |
+| 4. Shared contracts/backend | Not started | Protocol/domain, persistence/indexing, transports |
+| 5. Presentation | Not started | Dashboard, activity rendering, TUI/themes/notifications |
+| 6. Development/operations | Not started | Scripts, dependencies/builds/benchmarks, SDK updates, deployment/docs |
+
+Verified correctness findings can move ahead. Review shared packages with their consumers. Larger coordinated refactors require evidence of a faulty boundary, understood consumers, regression coverage, and explicit migration/rollback requirements where applicable.
+
+## Existing evidence and constraints
+
+- `docs/refactor-audit-context.md`: completed architecture/hardening work, guardrails, older validation caveats. Revalidate applicability; do not reopen completed cuts or treat old failures as current.
+- `docs/harness-behavior-evaluation.md`: deterministic/manual agent behavior cases and limited prior smoke comparisons. Behavioral correctness is distinct from cost/latency proxies.
+- `docs/session-metrics.md`: privacy-safe offline metrics; pending evaluation is not proof of improvement.
+- `docs/system-prompt.md`, `docs/delegation.md`, `docs/background-jobs.md`: supported agent-facing contracts.
+- `docs/development-workflow.md`: shared-checkout and scoped-check hygiene.
+- `docs/dashboard-deployment.md`: must be read/followed before any dashboard-affecting implementation/deployment.
+- Feedback maintenance uses `.agents/feedback/`; this milestone does not authorize report triage, ticket edits, or implementation.
+
+## Preliminary ownership map
+
+- Pi-facing behavior: `extensions/`; shared extension runtime/UI: `extensions/shared/`.
+- Prompt composition: `extensions/system-prompt/`; shared instructions: `instructions/agent/`.
+- Delegation: `extensions/delegate/`; isolation support: `packages/worktree-manager/`.
+- Process/background support: `extensions/background-terminals/` and delegate hosted execution use the dashboard process host; `packages/background-jobs/` owns its portable protocol. Delegate orchestration still owns workflow/wake policy; the host owns child processes. Caller path verified in `extensions/delegate/tool.ts:683` and `runner.ts:358`.
+- Dashboard server/persistence/runtime/indexing: `apps/dashboard-server/`.
+- Browser presentation: `apps/dashboard-web/`.
+- Portable shared contracts/models: `packages/dashboard-protocol/`, `dashboard-domain/`, `dashboard-client/`, `activity-model/`, `extension-contributions/`.
+- Usage/title support: `packages/codex-usage/`, `packages/session-title/` and corresponding extensions.
+- Validation/development/measurements: `package.json`, `scripts/`, workspace manifests/configs.
+
+## Current work and durable handles
+
+- Aggregate baseline `c1e0e105-dc49-4181-be05-796fd7571080` completed exit 1; log `/tmp/pi-harness-baseline-868e113d.log`.
+- Skipped workspace tests `2f95621d-c8ba-4183-90b1-13a098bf3d36` completed exit 1; log `/tmp/pi-harness-workspace-baseline-868e113d.log`.
+- Read-only prompt/context audit `prompt-context-audit@1` completed: no verified code defect; successful-compaction evaluation remains missing; 24 focused tests pass.
+- Read-only tools/routing audit `tool-routing-audit@1` completed: no verified exposure/validation bug; review-selector documentation omission confirmed; 4 focused files/64 tests pass. Both audits are continuable but no further child work is active.
+- Parent: owns scratch file, validation baseline, verification of findings, prioritization and final proposals.
+
+## Validation evidence
+
+- Environment: Node `v25.8.0`, Bun `1.4.0`, Pi `0.99.1`. All runs use system-tool PATH as needed. HEAD remains `868e113d`; only this scratch file is untracked.
+- `PATH="$PATH:/usr/sbin:/sbin" bun run check`: SDK/Node guards and all three typecheck scopes pass. Biome exits successfully with 6 non-null-assertion warnings in external-delivery tests. Extension/script tests: 1,257 pass, 1 fails (125 files). Aggregate stops before workspace tests.
+- Failure: `extensions/delegate/async.test.ts:2033`, `admits one persisted queued wake after runtime recreation`. Exact focused rerun also fails (29 skipped); log `/tmp/pi-harness-wake-repro-868e113d.log`.
+- `bun run workspace:test`: server 485 pass/1 fails (`src/migrations.test.ts:335`); all other workspaces pass. Per workspace pass counts: title 10, background jobs 9, activity-model 28, contributions 8, protocol 63, codex-usage 1, domain 75, worktree-manager 8, client 180, web 483. No browser E2E or model evaluations run.
+- Prompt audit focused tests: 24 pass. Tool/routing audit focused tests: 64 pass across changes-tool, delegate, codemode/result-use, tool-argument-validation.
+- Parent focused wake-delivery contract suite: 6 pass; log `/tmp/pi-harness-wake-contract-868e113d.log`. Parent isolated server migration rerun: same named index assertion fails; log `/tmp/pi-harness-migration-repro-868e113d.log`.
+- No production builds, browser E2E, successful compaction, paid model evaluation, deployment or service restart performed. No performance/behavior improvement claims established.
+- Earlier audit's aggregate `ajv` and migration-version caveats are historical, not reproduced by these current scoped commands. Current aggregate stops sooner, so it does not independently verify the old aggregate-only `ajv` case.
+
+## Findings / proposals
+
+### F1 — Current tests disagree with intentional contract changes (verified failures)
+
+- Wake integration test expects an admitted result to disappear on the next context transformation. `wake-delivery.ts:305–336` intentionally preserves the entered result across requests; `wake-delivery.test.ts:96–139` tests retained provider-visible evidence and one acknowledgement. Commit `3ac38472` changed this intentionally but did not touch the async test. Current evidence points to stale integration expectations, not duplicate dispatch.
+- Server migration test compares all indexes before/after all migrations. It expects `active_writer_per_checkout`, but migration at `repositories/migrations.ts:933` intentionally drops it; commit `85ca6e22` enables parallel runs in a shared checkout.
+- Proposed batch: reconcile these tests with supported behavior; preserve assertions for single delivery/acknowledgement, stale/foreign rejection, dependent row/index integrity, and named removed-index behavior. No production behavior reversal simply to green the suite. Approval pending. Focused migration rerun reproduces exactly; migration 24 (`allow-parallel-checkout-writers`) and commit `85ca6e22` explicitly support the changed contract.
+
+### F2 — Successful compaction behavior remains unevaluated (evaluation gap)
+
+- `docs/harness-behavior-evaluation.md` case 3 specifies decision/non-goal retention, but previous comparison records `Nothing to compact (session too small)` and marks compaction blocked/not exercised.
+- Proposed batch: make a disposable fixture reliably reach compaction; require actual successful compaction and subsequent constraint retention before changing policy. No auth-file access, real-session ingestion, or broad prompt rewrite. Model runs require normal harness-managed credentials and explicit evaluation scope/cost. Approval pending.
+
+### F3 — Agent-facing and operational documentation drift (verified)
+
+- `docs/delegation.md:151` omits review-only `incremental`; `extensions/delegate/changes-tool.ts:32–36` documents it as task commits not represented in current parent HEAD by patch identity. Current full recorded-range review remains the default. Document the selector without changing behavior.
+- `docs/dashboard.md:245–246` says delegate migration to durable jobs is pending. The current async tool launch explicitly sets `hosted: true` (`extensions/delegate/tool.ts:683`); `runner.ts:358` invokes `runHostedDelegateChild`. `docs/background-jobs.md` already warns process-host restarts terminate hosted children. Correct ownership docs while distinguishing hosted production paths from directly spawned runner/test paths; do not claim every invocation is hosted.
+- Impact: missing useful review affordance and contradictory process/restart ownership. Effort/risk: low; approval pending.
+
+## Proposed batches and acceptance
+
+### A. Restore trustworthy test baseline — recommended first
+
+- Scope: `extensions/delegate/async.test.ts` restored-wake case and `apps/dashboard-server/src/migrations.test.ts` v10 migration case; minimally strengthen related assertions if needed.
+- Preserve retained result content across successive provider contexts; prove no redispatch/re-acknowledgement. Preserve same-context deduplication and stale/foreign-message protections through existing coverage.
+- Assert migration 24's deliberate removed index while retaining required surviving indexes, dependent data and foreign-key integrity. Do not merely weaken all index assertions or remove failed tests.
+- Validate focused wake/async and migration/repository suites, scoped types/Biome; rerun aggregate check for cross-cutting baseline restoration. If a real defect emerges, stop and update proposal rather than reverse supported contracts.
+- Effort: small; risk: low with explicit semantic assertions. Approval: **approved by user; implementing**.
+
+### B. Align supported-interface and process ownership docs
+
+- Scope: the two F3 omissions/contradictions only. No lifecycle migration, SDK shim removal, new API or service restart.
+- Acceptance: optional incremental review and unchanged default accurately described; hosted delegate ownership/restart implications match caller/runner paths; direct-spawn paths not mislabeled.
+- Validate against tool schema, current call sites, existing tests and dashboard deployment guidance as relevant. Approval: pending.
+
+### C. Close successful-compaction evaluation gap
+
+- Prepare a reproducible disposable fixture, pinned harness/config/model/thinking and bounded run budget. Keep case decision/non-goal in conversation rather than re-reading them from a progress file, otherwise the fixture would test a different mechanism.
+- Require a successful compact response and correct continuation preserving both constraints; blocked/setup failure is not a pass. Record transcripts/results without credentials or production state.
+- Do not change prompt/routing/compaction code until evidence warrants it. Single trials are smoke evidence, not general cost/quality claims. Approval: pending.
+
+## Deliberately unchanged
+
+- Canonical system-prompt owner, composition order, intentional rejection of direct prompt inputs and documented hook precedence.
+- Optional hybrid codemode with native `models.*` disabled; child tool allowlists and explicit skills.
+- No broad delegate decomposition, protocol/storage migration, dynamic plugin/state framework, feedback triage or performance claims.
+- Six existing lint warnings are recorded but not used to widen the first batch.
+- Next structural audit after agreed batches: bounded execution/orchestration review, choosing one lifecycle/ownership seam rather than all delegate files.
+
+## Next decision
+
+Complete and verify batch A; report final baseline and propose next step. B is independent low-risk documentation work; C is a separate evaluation requiring a bounded model-run budget. They are not approved. Scratch is being versioned so future clean-base delegates do not carry an untracked copy that collides with parent progress updates.
