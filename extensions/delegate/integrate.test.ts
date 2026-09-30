@@ -891,7 +891,10 @@ describe('merging a delegate branch', () => {
       ).toThrow();
       expect(
         existsSync(
-          git(repository, ['rev-parse', '--git-path', 'sequencer']).trim(),
+          path.resolve(
+            repository,
+            git(repository, ['rev-parse', '--git-path', 'sequencer']).trim(),
+          ),
         ),
       ).toBe(false);
     } finally {
