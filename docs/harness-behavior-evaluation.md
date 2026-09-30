@@ -438,3 +438,50 @@ runs are actually performed. Scripted fixture construction and byte counts
 measure deterministic reduction only. They do not establish the agent's
 empirical selection of codemode or its performance; those require the paired
 agent runs. No outcomes are recorded here.
+
+## Tool-use judgment smoke (2026-09-30)
+
+A separate, bounded comparison used `openai/gpt-6.1-sol`, medium thinking,
+with one run per condition/case (six model calls). Baseline instructions were
+pinned from `68ea3820`; candidate tool guidance and codemode metadata from
+`f4f4bf3a`, with approved-scope autonomy wording from `dcbb27cd`. Matching
+pristine fixtures received the same natural requests; the prompts did not
+prescribe direct tools, codemode, parallelism, or projection strategies.
+
+| Case | Baseline | Initial candidate |
+|---|---|---|
+| Exact named-file lookup | Correct; one direct read, no discovery or edits | Same |
+| Three independent checks and selected large-JSON facts | Correct facts and exit codes; initial oversized read, then bounded inspection/projection | Correct facts and exit codes, but a guessed exclusion projected 456,500 bytes and caused truncation |
+| Approved two-stage repair | Observed second failure after first fix; only named files changed; final rerun passed | Same |
+
+The initial comparison is **mixed**, not evidence of improved overall tool use.
+The output failure prompted one targeted instruction revision: inspect unfamiliar
+large data's shape before selecting explicit fields, rather than dumping values
+to discover structure. One additional status-case run (seven model calls total)
+used the unchanged request and matching fixture. It first attempted an oversized
+read, which returned a 90-byte notice and no content, then inspected keys/counts
+(129 bytes), sampled field types (286 bytes), and projected requested fields
+(253 bytes). Codemode results were untruncated; all check exit codes (0, 0, 1)
+and requested facts were correct, and the fixture remained unchanged. Parent
+inspection independently confirmed the reported facts and repair outcomes.
+The evaluated tool-use hash `7c6d2cb1edd8f840a81d6c36465439281d5050ec64d5fc4b393a470762f7579c`
+matches the revision committed as `4a4dc990`.
+
+Evidence is retained in `/tmp/tool-guidance-smoke.SVO0ST/`: `run-case.sh`,
+`evaluation-summary.json`, `revised-candidate-summary.json`, and per-run
+`artifacts/<condition>-<case>/` launch records, transcripts, session files,
+stderr, and fixture diffs. `artifacts/revised-candidate-output-accounting.txt`
+distinguishes source/output bytes from content returned to the model. JSONL
+transcript size includes streaming events and is not model token usage.
+An earlier launch used the wrong cwd/incomplete configuration and failed before
+model execution; it is setup-failure evidence, not a baseline trial. Corrected
+normal and isolated CLI authentication checks were ready without exposing
+credentials.
+
+The runs explicitly loaded only canonical system-prompt and codemode extensions,
+with `codemode.mode: "on"`, models API disabled, and direct
+`read,bash,edit,write,codemode` tools. Ambient skills, context files, templates,
+and other extensions were disabled. Thus these are isolated tool-judgment smoke
+observations, not full default-runtime parity, delegation coverage, a statistical
+comparison, or proof of lower cost. The revised output result is supporting
+single-case evidence; reliability across ordinary sessions remains unmeasured.
