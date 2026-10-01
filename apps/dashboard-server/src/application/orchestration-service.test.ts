@@ -320,6 +320,42 @@ it('stops the linked runtime before settling a thread', async () => {
   }
 });
 
+it('leaves an ordinary thread unsettled when activity races its stop', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    await fixture.service.cancelRun(
+      fixture.runId,
+      'cancel-before-ordinary-settle',
+    );
+    fixture.setLive({
+      runtimeId: 'runtime-ordinary-settle',
+      ownership: 'external',
+      pid: 1,
+      cwd: fixture.root,
+      liveState: 'idle',
+      online: true,
+      session: { id: 'ordinary-settle-session', entries: [] },
+    });
+    const adopted = await fixture.service.adoptSession(
+      fixture.projectId,
+      'ordinary-settle-session',
+      { commandId: 'adopt-ordinary-settle-session' },
+    );
+    fixture.manager.stop.mockImplementation(async () => {
+      fixture.service.noteThreadActivity(adopted.thread.id);
+    });
+    await expect(
+      fixture.service.settleThread(adopted.thread.id, 'ordinary-settle'),
+    ).resolves.not.toHaveProperty('settledAt');
+    expect(fixture.manager.stop).toHaveBeenCalledWith(
+      'runtime-ordinary-settle',
+      false,
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 it('adopts an inactive legacy session without launching or duplicating rows', async () => {
   const fixture = await orchestrationFixture();
   try {

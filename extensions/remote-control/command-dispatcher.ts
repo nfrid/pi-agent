@@ -199,7 +199,14 @@ export async function dispatchDashboardCommand(
       cancelActiveCompaction();
       return { accepted: true };
     case 'shutdown':
-      if (command.onlyIfIdle && (!ctx.isIdle() || ctx.hasPendingMessages()))
+      if (
+        command.onlyIfIdle &&
+        (!ctx.isIdle() ||
+          ctx.hasPendingMessages() ||
+          (queueDrafts?.getSessionId() === getSessionScopeId(ctx) &&
+            queueDrafts.list().length > 0) ||
+          hasPendingRequestDependencies(getSessionScopeId(ctx)))
+      )
         throw Object.assign(new Error('Runtime has active or queued work.'), {
           code: 'busy',
         });

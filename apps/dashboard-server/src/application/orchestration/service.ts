@@ -365,13 +365,20 @@ export class OrchestrationService implements OrchestrationHost {
     threadId: string,
     commandId: string,
     onlyIfIdle = false,
+    expected?: { runId: string; sessionId: string; strictIdle?: boolean },
   ): Promise<Thread> {
     const current = this.settleTasks.get(threadId);
     if (current) {
       if (current.commandId === commandId) return current.task;
       await current.task;
     }
-    const task = settleThreadLifecycle(this, threadId, commandId, onlyIfIdle);
+    const task = settleThreadLifecycle(
+      this,
+      threadId,
+      commandId,
+      onlyIfIdle,
+      expected,
+    );
     this.settleTasks.set(threadId, { commandId, task });
     try {
       return await task;

@@ -226,6 +226,184 @@ export class ExternalDeliveryService {
     ) => Promise<Thread>,
   ) {}
 
+  getServiceThreadStatus(
+    projectId: string,
+    threadId: string,
+  ): {
+    projectId: string;
+    threadId: string;
+    runId: string;
+    sessionId: string;
+    runStatus: string;
+    settled: boolean;
+  } {
+    if (this.repository.getProject(projectId)?.status !== 'active')
+      throw Object.assign(new Error('Project not found or archived.'), {
+        code: 'unknown-workspace',
+      });
+    const thread = this.repository.getThread(threadId);
+    if (!thread || thread.projectId !== projectId || thread.isService !== true)
+      throw Object.assign(new Error('Service thread not found.'), {
+        code: 'unknown-workspace',
+      });
+    const run = this.repository.listRuns(threadId).at(-1);
+    if (!run?.piSessionId)
+      throw Object.assign(new Error('Service thread has no owning run.'), {
+        code: 'unknown-workspace',
+      });
+    return {
+      projectId,
+      threadId,
+      runId: run.id,
+      sessionId: run.piSessionId,
+      runStatus: run.status,
+      settled: thread.settledAt !== undefined,
+    };
+  }
+
+  async retireServiceThread(
+    projectId: string,
+    threadId: string,
+    input: unknown,
+  ): Promise<{ state: 'settled' | 'superseded'; threadId: string }> {
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new Error('Invalid service thread retirement.');
+    const value = input as Record<string, unknown>;
+    const fields = ['commandId', 'runId', 'sessionId'];
+    if (
+      Object.keys(value).some((key) => !fields.includes(key)) ||
+      fields.some((field) => {
+        const item = value[field];
+        return (
+          typeof item !== 'string' ||
+          !item ||
+          item.length > 256 ||
+          [...item].some(
+            (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+          )
+        );
+      })
+    )
+      throw new Error('Invalid service thread retirement.');
+    const commandId = value.commandId as string;
+    const runId = value.runId as string;
+    const sessionId = value.sessionId as string;
+    return this.withThreadLock(projectId, async () => {
+      if (this.repository.getProject(projectId)?.status !== 'active')
+        throw Object.assign(new Error('Project not found or archived.'), {
+          code: 'unknown-workspace',
+        });
+      const thread = this.repository.getThread(threadId);
+      if (
+        !thread ||
+        thread.projectId !== projectId ||
+        thread.isService !== true
+      )
+        throw Object.assign(new Error('Service thread not found.'), {
+          code: 'unknown-workspace',
+        });
+      const key = `external-service-retire:${digest(`${projectId}\0${threadId}\0${commandId}`)}`;
+      const fingerprint = digest(
+        stable({ projectId, threadId, runId, sessionId }),
+      );
+      let intent = this.repository.getCommandIntent(key);
+      if (
+        intent &&
+        (intent.commandType !== 'external.service.retire' ||
+          intent.resourceId !== threadId ||
+          intent.commandFingerprint !== fingerprint)
+      )
+        throw conflict(commandId);
+      if (intent?.executionState === 'completed')
+        return intent.result as {
+          state: 'settled' | 'superseded';
+          threadId: string;
+        };
+      const latest = this.repository.listRuns(threadId).at(-1);
+      if (latest?.id !== runId || latest.piSessionId !== sessionId)
+        throw Object.assign(new Error('Expected service run was superseded.'), {
+          code: 'superseded',
+        });
+      if (latest.status !== 'completed')
+        throw busy('Expected service run is not completed.');
+      if (this.repository.activeExternalDelivery(threadId))
+        throw busy('Service thread still has an active external delivery.');
+      const runtime = this.registry
+        .snapshots()
+        .find((item) => item.online !== false && item.session.id === sessionId);
+      if (runtime && runtime.liveState !== 'idle')
+        throw busy('Service runtime is not idle.');
+      const runtimeId = runtime?.runtimeId ?? latest.runtimeId;
+      intent ??= this.repository.reserveCommandIntent({
+        idempotencyKey: key,
+        commandType: 'external.service.retire',
+        resourceType: 'service-thread',
+        resourceId: threadId,
+        commandFingerprint: fingerprint,
+        executionPlan: {
+          operation: 'command',
+          projectId,
+          ...(runtimeId ? { runtimeId } : {}),
+        },
+      });
+      if (intent.executionPlan?.runtimeId !== runtimeId)
+        return this.completeServiceRetirement(
+          intent,
+          key,
+          threadId,
+          'superseded',
+          fingerprint,
+        );
+      try {
+        const retired = await this.orchestration.settleThread(
+          threadId,
+          `${key}:thread`,
+          true,
+          { runId, sessionId, strictIdle: true },
+        );
+        const state =
+          retired.settledAt === undefined ? 'superseded' : 'settled';
+        return this.completeServiceRetirement(
+          intent,
+          key,
+          threadId,
+          state,
+          fingerprint,
+        );
+      } catch (error) {
+        if ((error as { code?: string })?.code === 'superseded')
+          return this.completeServiceRetirement(
+            intent,
+            key,
+            threadId,
+            'superseded',
+            fingerprint,
+          );
+        throw error;
+      }
+    });
+  }
+
+  private completeServiceRetirement(
+    intent: RuntimeCommandIntent,
+    key: string,
+    threadId: string,
+    state: 'settled' | 'superseded',
+    fingerprint: string,
+  ): { state: 'settled' | 'superseded'; threadId: string } {
+    const result = { state, threadId };
+    this.repository.completeCommandIntent({
+      idempotencyKey: key,
+      commandType: 'external.service.retire',
+      resourceType: 'service-thread',
+      resourceId: threadId,
+      commandFingerprint: fingerprint,
+      result,
+      createdAt: intent.createdAt,
+    });
+    return result;
+  }
+
   async settleConversation(
     projectId: string,
     input: unknown,

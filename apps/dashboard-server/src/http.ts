@@ -601,6 +601,23 @@ export class DashboardServerImpl implements DashboardServer {
           }),
         );
       },
+      getServiceThreadStatus: (projectId, threadId) => {
+        if (!this.externalDeliveries)
+          throw new Error('External deliveries are unavailable.');
+        return this.externalDeliveries.getServiceThreadStatus(
+          projectId,
+          threadId,
+        );
+      },
+      retireServiceThread: (projectId, threadId, input) => {
+        if (!this.externalDeliveries)
+          throw new Error('External deliveries are unavailable.');
+        return this.externalDeliveries.retireServiceThread(
+          projectId,
+          threadId,
+          input,
+        );
+      },
       settleExternalConversation: (projectId, input) => {
         if (!this.externalDeliveries)
           throw new Error('External deliveries are unavailable.');

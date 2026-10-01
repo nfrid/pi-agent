@@ -454,12 +454,26 @@ export async function settleThread(
   threadId: string,
   commandId: string,
   onlyIfIdle = false,
+  expected?: { runId: string; sessionId: string; strictIdle?: boolean },
 ): Promise<Thread> {
   const prior = host.receipt(commandId, 'thread.settle');
   if (prior) return host.repository.settleThread(commandId, threadId).thread;
 
   host.requireThread(threadId);
   const activityRevision = host.threadActivityRevision(threadId);
+  const matchesExpectedRun = () => {
+    if (!expected) return true;
+    const latest = host.repository.listRuns(threadId).at(-1);
+    return (
+      latest?.id === expected.runId &&
+      latest.piSessionId === expected.sessionId &&
+      latest.status === 'completed'
+    );
+  };
+  if (!matchesExpectedRun())
+    throw Object.assign(new Error('Service run was superseded.'), {
+      code: 'superseded',
+    });
   const linkedSessionId =
     host.repository.getSessionThreadLinkByThreadId(threadId)?.sessionId;
   const runRuntimeIds = new Set(
@@ -491,18 +505,49 @@ export async function settleThread(
       return (
         runtime?.online !== false &&
         runtime &&
-        !['idle', 'waiting'].includes(runtime.liveState)
+        !(expected?.strictIdle
+          ? runtime.liveState === 'idle'
+          : ['idle', 'waiting'].includes(runtime.liveState))
       );
     })
   )
     throw Object.assign(new Error('Thread has active work.'), { code: 'busy' });
   for (const runtimeId of runtimeIds) {
+    if (
+      expected &&
+      (!matchesExpectedRun() ||
+        host.threadActivityRevision(threadId) !== activityRevision)
+    )
+      throw Object.assign(
+        new Error('Service thread changed during retirement.'),
+        {
+          code: 'superseded',
+        },
+      );
+    if (expected?.strictIdle) {
+      const runtime = host.registry.get(runtimeId);
+      if (runtime?.online !== false && runtime && runtime.liveState !== 'idle')
+        throw Object.assign(new Error('Service runtime is not idle.'), {
+          code: 'busy',
+        });
+    }
     if (onlyIfIdle) await host.manager.stop(runtimeId, false, true);
     else await host.manager.stop(runtimeId, false);
   }
 
-  if (host.threadActivityRevision(threadId) !== activityRevision)
-    return host.requireThread(threadId);
+  if (!matchesExpectedRun())
+    throw Object.assign(new Error('Service run was superseded.'), {
+      code: 'superseded',
+    });
+  if (host.threadActivityRevision(threadId) !== activityRevision) {
+    if (!expected) return host.requireThread(threadId);
+    throw Object.assign(
+      new Error('Thread activity changed during retirement.'),
+      {
+        code: 'superseded',
+      },
+    );
+  }
   const result = host.repository.settleThread(commandId, threadId);
   host.changed();
   return result.thread;

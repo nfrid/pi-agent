@@ -34,6 +34,151 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
+it('exposes and safely retires only the fenced completed service run', async () => {
+  const f = await fixture(undefined, true);
+  f.repository.transitionRun(f.run.id, 'completed');
+  f.live.liveState = 'idle';
+  expect(f.service.getServiceThreadStatus('p', f.thread.id)).toEqual({
+    projectId: 'p',
+    threadId: f.thread.id,
+    runId: f.run.id,
+    sessionId: 'session',
+    runStatus: 'completed',
+    settled: false,
+  });
+  const command = {
+    commandId: 'retire-1',
+    runId: f.run.id,
+    sessionId: 'session',
+  };
+  expect(
+    await f.service.retireServiceThread('p', f.thread.id, command),
+  ).toEqual({
+    state: 'settled',
+    threadId: f.thread.id,
+  });
+  expect(f.repository.getThread(f.thread.id)?.settledAt).toBeDefined();
+  expect(f.stop).toHaveBeenCalledOnce();
+  await f.reopen();
+  await f.service.submit('p', {
+    deliveryId: 'reply-after-retire',
+    threadId: f.thread.id,
+    text: 'Continue the same session.',
+  });
+  expect(f.resume).toHaveBeenCalledOnce();
+  expect(f.live.runtimeId).toBe('resumed');
+  expect(f.live.session.id).toBe('session');
+  expect(f.repository.getThread(f.thread.id)?.settledAt).toBeUndefined();
+  expect(
+    await f.service.retireServiceThread('p', f.thread.id, command),
+  ).toMatchObject({
+    state: 'settled',
+  });
+  expect(f.stop).toHaveBeenCalledOnce();
+  expect(f.live.online).toBe(true);
+  expect(f.repository.getThread(f.thread.id)?.settledAt).toBeUndefined();
+  expect(f.repository.getThread(f.thread.id)?.externalRef).toBeUndefined();
+  expect(f.repository.getRun(f.run.id)?.piSessionId).toBe('session');
+});
+
+it('does not retire a stale idle snapshot when the runtime rejects queued work', async () => {
+  const f = await fixture(undefined, true);
+  f.repository.transitionRun(f.run.id, 'completed');
+  f.live.liveState = 'idle';
+  f.queuedWork = true;
+  const command = {
+    commandId: 'retire-queued',
+    runId: f.run.id,
+    sessionId: 'session',
+  };
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, command),
+  ).rejects.toMatchObject({ code: 'busy' });
+  expect(f.stop).toHaveBeenCalledWith('runtime', false, true);
+  expect(f.live.online).toBe(true);
+  expect(f.repository.getThread(f.thread.id)?.settledAt).toBeUndefined();
+  f.queuedWork = false;
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, command),
+  ).resolves.toMatchObject({ state: 'settled' });
+  expect(f.stop).toHaveBeenLastCalledWith('runtime', false, true);
+  expect(f.stop).toHaveBeenCalledTimes(2);
+});
+
+it('returns superseded if a replacement run appears during idle stop', async () => {
+  const f = await fixture(undefined, true);
+  f.repository.transitionRun(f.run.id, 'completed');
+  f.live.liveState = 'idle';
+  f.stop.mockImplementationOnce(async () => {
+    f.repository.createRun({
+      id: 'replacement-run',
+      threadId: f.thread.id,
+      checkoutId: f.run.checkoutId,
+      initialPrompt: 'replacement',
+      mode: 'write',
+      runtimeProvider: 'extension-bridge',
+      status: 'queued',
+    });
+    f.live.online = false;
+  });
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, {
+      commandId: 'retire-race',
+      runId: f.run.id,
+      sessionId: 'session',
+    }),
+  ).resolves.toEqual({ state: 'superseded', threadId: f.thread.id });
+  expect(f.repository.getThread(f.thread.id)?.settledAt).toBeUndefined();
+  expect(f.stop).toHaveBeenCalledOnce();
+});
+
+it('rejects service retirement unless completed, idle, service-owned and delivery-free', async () => {
+  const f = await fixture(undefined, true);
+  const command = {
+    commandId: 'retire-guard',
+    runId: f.run.id,
+    sessionId: 'session',
+  };
+  expect(() =>
+    f.service.getServiceThreadStatus('other', f.thread.id),
+  ).toThrow();
+  expect(() => f.service.getServiceThreadStatus('p', 'missing')).toThrow();
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, command),
+  ).rejects.toMatchObject({ code: 'busy' });
+  f.repository.transitionRun(f.run.id, 'completed');
+  f.live.liveState = 'working';
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, command),
+  ).rejects.toMatchObject({ code: 'busy' });
+  f.live.liveState = 'waiting';
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, command),
+  ).rejects.toMatchObject({ code: 'busy' });
+  f.live.liveState = 'idle';
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, {
+      ...command,
+      runId: 'different-run',
+    }),
+  ).rejects.toMatchObject({ code: 'superseded' });
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, {
+      ...command,
+      sessionId: 'different-session',
+    }),
+  ).rejects.toMatchObject({ code: 'superseded' });
+  await f.service.submit('p', {
+    deliveryId: 'pending-retire',
+    threadId: f.thread.id,
+    text: 'unfinished',
+  });
+  await expect(
+    f.service.retireServiceThread('p', f.thread.id, command),
+  ).rejects.toMatchObject({ code: 'busy' });
+  expect(f.stop).not.toHaveBeenCalled();
+});
+
 it('settles only an idle external conversation, resumes old replies and never replays a completed close', async () => {
   const f = await fixture('retire-topic');
   const command = { commandId: 'close-1', conversationRef: 'retire-topic' };
@@ -384,7 +529,7 @@ it('uses an explicit initial model and rejects unavailable selections without co
   expect((await f.service.submit('p', command)).threadId).toBe(result.threadId);
 });
 
-async function fixture(conversationRef?: string) {
+async function fixture(conversationRef?: string, isService = false) {
   const root = await mkdtemp(
     path.join(os.tmpdir(), 'external-delivery-sqlite-'),
   );
@@ -473,6 +618,7 @@ async function fixture(conversationRef?: string) {
         }
       : {}),
     checkoutId: checkout.id,
+    ...(isService ? { isService: true } : {}),
   });
   const run = metadata.orchestration.createRun({
     id: 'run',
@@ -538,9 +684,13 @@ async function fixture(conversationRef?: string) {
       return (await runtime.startWithReceipt(input)).result.runtimeId;
     },
   );
+  let queuedWork = false;
   const stop = vi.fn(
     async (_runtimeId: string, _force: boolean, onlyIfIdle: boolean) => {
-      if (onlyIfIdle && !['waiting', 'idle'].includes(live.liveState))
+      if (
+        onlyIfIdle &&
+        (!['waiting', 'idle'].includes(live.liveState) || queuedWork)
+      )
         throw Object.assign(new Error('busy'), { code: 'busy' });
       live.online = false;
     },
@@ -614,6 +764,12 @@ async function fixture(conversationRef?: string) {
     },
     set live(next: RuntimeSnapshot) {
       live = next;
+    },
+    get queuedWork() {
+      return queuedWork;
+    },
+    set queuedWork(value: boolean) {
+      queuedWork = value;
     },
     async reopen() {
       metadata.close();
@@ -1508,6 +1664,13 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
         }),
         externalModels: async () => ({ models: [] }),
         externalSource: (sessionId: string) => f.service.source(sessionId),
+        getServiceThreadStatus: (projectId: string, threadId: string) =>
+          f.service.getServiceThreadStatus(projectId, threadId),
+        retireServiceThread: (
+          projectId: string,
+          threadId: string,
+          input: unknown,
+        ) => f.service.retireServiceThread(projectId, threadId, input),
         settleExternalConversation: (projectId: string, input: unknown) =>
           f.service.settleConversation(projectId, input),
         submitExternalDelivery: (projectId: string, input: unknown) =>
@@ -1540,6 +1703,84 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
         })
       ).statusCode,
     ).toBe(403);
+    const serviceStatusUrl = '/api/external/v1/projects/p/threads/thread';
+    const serviceRetireUrl = `${serviceStatusUrl}/settle`;
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: serviceStatusUrl,
+          headers,
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/external/v1/projects/other/threads/thread',
+          headers,
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: serviceStatusUrl,
+          headers: { 'x-dashboard-token': 'secret' },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: serviceRetireUrl,
+          headers,
+          payload: { commandId: 'retire', runId: 'run', sessionId: 'session' },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: serviceRetireUrl,
+          headers,
+          payload: {
+            commandId: 'retire-extra',
+            runId: 'run',
+            sessionId: 'session',
+            force: true,
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/external/v1/projects/other/threads/thread/settle',
+          headers,
+          payload: {
+            commandId: 'wrong-project',
+            runId: 'run',
+            sessionId: 'session',
+          },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: serviceRetireUrl,
+          headers: { 'x-dashboard-token': 'secret' },
+          payload: { commandId: 'retire', runId: 'run', sessionId: 'session' },
+        })
+      ).statusCode,
+    ).toBe(401);
     const sourceResponse = await app.inject({
       method: 'GET',
       url: sourceUrl,

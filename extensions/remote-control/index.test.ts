@@ -472,13 +472,24 @@ describe('dashboard input dispatch', () => {
     );
   });
 
-  it('idle-only shutdown refuses live or queued work at the runtime boundary', async () => {
+  it('idle-only shutdown refuses active, queued, drafted, and dependent work', async () => {
     const shutdown = vi.fn();
+    const scope = `idle-shutdown-${randomUUID()}`;
+    const services = getScopedServices(scope);
     let idle = false;
     let pending = false;
+    let dependencies = false;
+    const queueDrafts = new QueueDraftStore();
+    queueDrafts.setSession(scope);
+    services.requestDependencies = {
+      register: () => true,
+      resolveDelegateGate: () => {},
+      hasPending: () => dependencies,
+    };
     const ctx = {
       isIdle: () => idle,
       hasPendingMessages: () => pending,
+      sessionManager: { getSessionId: () => scope },
       shutdown,
     } as unknown as ExtensionContext;
     const command = {
@@ -486,20 +497,37 @@ describe('dashboard input dispatch', () => {
       type: 'shutdown' as const,
       onlyIfIdle: true,
     };
-    await expect(
-      dispatchDashboardCommand({} as ExtensionAPI, ctx, command),
-    ).rejects.toMatchObject({ code: 'busy' });
-    idle = true;
-    pending = true;
-    await expect(
-      dispatchDashboardCommand({} as ExtensionAPI, ctx, command),
-    ).rejects.toMatchObject({ code: 'busy' });
-    expect(shutdown).not.toHaveBeenCalled();
-    pending = false;
-    await expect(
-      dispatchDashboardCommand({} as ExtensionAPI, ctx, command),
-    ).resolves.toEqual({ accepted: true });
-    expect(shutdown).toHaveBeenCalledOnce();
+    try {
+      const dispatch = () =>
+        dispatchDashboardCommand(
+          {} as ExtensionAPI,
+          ctx,
+          command,
+          undefined,
+          queueDrafts,
+        );
+      await expect(dispatch()).rejects.toMatchObject({ code: 'busy' });
+      idle = true;
+      pending = true;
+      await expect(dispatch()).rejects.toMatchObject({ code: 'busy' });
+      pending = false;
+      queueDrafts.add({
+        clientId: 'draft',
+        mode: 'followUp',
+        text: 'pending draft',
+      });
+      await expect(dispatch()).rejects.toMatchObject({ code: 'busy' });
+      queueDrafts.clear();
+      dependencies = true;
+      await expect(dispatch()).rejects.toMatchObject({ code: 'busy' });
+      expect(shutdown).not.toHaveBeenCalled();
+      dependencies = false;
+      await expect(dispatch()).resolves.toEqual({ accepted: true });
+      expect(shutdown).toHaveBeenCalledOnce();
+    } finally {
+      services.requestDependencies = undefined;
+      releaseScopedServices(scope, services);
+    }
   });
 
   it('updates the Codex service tier with the existing model command', async () => {

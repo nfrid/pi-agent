@@ -120,6 +120,14 @@ The caller must drain its own accepted messages/outgoing replies first. An activ
 
 Old replies still resume the same indexed session without a setup prompt; successful input unsets the settled marker even if the session link has not caught up yet. Retirement does not delete history, memory or artifacts.
 
+## Service thread retirement
+
+The service-only API reads `GET /api/external/v1/projects/:projectId/threads/:threadId` and retires with `POST /api/external/v1/projects/:projectId/threads/:threadId/settle`. Both require Bearer authentication. The status response contains only the project and thread IDs, latest run ID, native session ID, run status, and settled flag. It fails for ordinary threads or threads outside the active project. The caller uses that response to supply `{commandId, runId, sessionId}` to settle. Extra body fields are rejected.
+
+Retirement accepts only the exact latest `completed` run and its native session. It rejects pending external deliveries and requires an online runtime to report `idle`; `waiting` is busy, not completion. The runtime command rechecks SDK activity, queued SDK messages, dashboard queue drafts, and pending logical request dependencies before shutdown. The server also checks the run/session and thread activity around each idle-only stop. A replaced run or intervening activity returns `superseded`. Busy work returns `409 busy`. Same-command retries replay their durable result without stopping a later runtime generation. The server retains the thread, run, session link, and session file so ordinary UI or external Reply can resume that same session.
+
+The caller must check its own Telegram pending-question and outbox state before calling this API. The dashboard server does not read or verify that private ledger. Its server-side guards cover project/thread ownership, service marking, latest run/session, external deliveries, runtime state, and observed thread activity only.
+
 ## Structural receipt boundary and compatibility
 
 The default correlated bridge delivery accepts only an idle `prompt`. Opt-in source-fenced `steer` uses the separate queue-acceptance contract above; external `followUp` remains unsupported. Its explicit metadata disables slash/skill/template expansion independently of the text. `AsyncLocalStorage` carries dispatch provenance through the SDK input pipeline. The `message_end` hook captures the exact native user object; the subsequent `context` hook finds that same object in `SessionManager` and records its entry ID. There is no next-message, timestamp, or identical-text fallback. A real SDK fixture verifies this boundary, including identical intervening browser input and message-replacement hooks. If native identity is unavailable, a completed turn without its receipt requires attention, not guessed correlation or replay.

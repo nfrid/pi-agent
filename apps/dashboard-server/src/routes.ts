@@ -268,6 +268,12 @@ export interface DashboardRouteContext {
   readThread?(threadId: string): Promise<unknown> | unknown;
   externalModels?(projectId: string): Promise<unknown>;
   externalSource?(sessionId: string): unknown;
+  getServiceThreadStatus?(projectId: string, threadId: string): unknown;
+  retireServiceThread?(
+    projectId: string,
+    threadId: string,
+    input: unknown,
+  ): Promise<unknown>;
   settleExternalConversation?(
     projectId: string,
     input: unknown,
@@ -296,7 +302,8 @@ function errorStatus(code: string | undefined): number {
     code === 'orchestration-conflict' ||
     code === 'session-assigned' ||
     code === 'session-link-conflict' ||
-    code === 'busy'
+    code === 'busy' ||
+    code === 'superseded'
     ? 409
     : code === 'unknown-workspace'
       ? 404
@@ -392,7 +399,7 @@ function installCorsAndAuth(
     if (request.url.split('?', 1)[0] === '/api/health') return;
     const externalPath = request.url.split('?', 1)[0];
     const externalDeliveryApi =
-      /^\/api\/external\/v1\/projects\/[^/]+\/(?:deliveries(?:\/[^/]+)?|models|conversations\/settle)$/.test(
+      /^\/api\/external\/v1\/projects\/[^/]+\/(?:deliveries(?:\/[^/]+)?|models|conversations\/settle|threads\/[^/]+(?:\/settle)?)$/.test(
         externalPath,
       ) || /^\/api\/external\/v1\/sessions\/[^/]+\/source$/.test(externalPath);
     const externalCreate =
@@ -869,6 +876,34 @@ export const dashboardRoutes: FastifyPluginAsync<{
       try {
         return await requireOperation(context.externalModels)(
           request.params.projectId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{ Params: { projectId: string; threadId: string } }>(
+    '/api/external/v1/projects/:projectId/threads/:threadId',
+    async (request, reply) => {
+      try {
+        return requireOperation(context.getServiceThreadStatus)(
+          request.params.projectId,
+          request.params.threadId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { projectId: string; threadId: string } }>(
+    '/api/external/v1/projects/:projectId/threads/:threadId/settle',
+    { schema: { body: anyBody } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.retireServiceThread)(
+          request.params.projectId,
+          request.params.threadId,
+          request.body,
         );
       } catch (error) {
         return sendError(reply, error);
