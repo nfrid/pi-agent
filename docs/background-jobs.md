@@ -57,7 +57,7 @@ A dashboard follow-up is accepted into the native user queue while a logical req
 
 Steering during an idle dependency wait resumes the existing request. Native user message identity binds the durable `steering-message` marker to its exact `userEntryId`. Text and timestamp remain presentation fields, not ownership evidence. Legacy markers without an exact ID cannot establish a restored steering boundary.
 
-This integration targets Pi SDK 0.99.1. Its public follow-up API drains user follow-ups before logical settlement, and its idle `sendUserMessage` path normally starts a fresh prompt. The narrow shim therefore gates the native follow-up queue and uses the SDK's existing `_runAgentPrompt` entry to resume idle steering and release queued input. Queue contents remain in memory, as in the SDK; accepted but unconsumed follow-ups do not survive a runtime restart. Tree navigation discards queued input from the previous branch. SDK upgrades must retain the native queue contract and prompt entry, or update the shim and native integration tests.
+This integration targets Pi SDK 1.0.0. Its public follow-up API drains user follow-ups before logical settlement, and its idle `sendUserMessage` path normally starts a fresh prompt. The narrow shim therefore gates the native follow-up queue and uses the SDK's existing `_runAgentPrompt` entry to resume idle steering and release queued input. Queue contents remain in memory, as in the SDK; accepted but unconsumed follow-ups do not survive a runtime restart. Tree navigation discards queued input from the previous branch. SDK upgrades must retain the native queue contract and prompt entry, or update the shim and native integration tests.
 
 ## Updating the host
 

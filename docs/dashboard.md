@@ -308,7 +308,7 @@ but their results have not entered context. Idle abort clears this surface witho
 fabricating a final answer or closure.
 
 Request ownership is journaled against exact session/user-entry/source identities.
-The native input integration uses SDK 0.99.1's prompt entry and queue contract, so
+The native input integration uses SDK 1.0.0's prompt entry and queue contract, so
 SDK upgrades must rerun its native regressions. Accepted queued user input remains
 in memory, like the native queue, and does not survive a runtime restart.
 
