@@ -2,7 +2,7 @@
 
 ## new features
 
-- Computer use: [findings and deferred experiments](docs/computer-use-notes.md). Authenticated browsing uses separate persistent Playwright profiles; desktop backend selection is deferred.
+- Computer use: [findings and deferred experiments](docs/computer-use-notes.md). Authenticated profiles are prepared but blocked on cookie-preserving shutdown; desktop backend selection is deferred.
 
 ## maintenance
 
