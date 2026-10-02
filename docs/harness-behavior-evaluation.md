@@ -485,3 +485,66 @@ and other extensions were disabled. Thus these are isolated tool-judgment smoke
 observations, not full default-runtime parity, delegation coverage, a statistical
 comparison, or proof of lower cost. The revised output result is supporting
 single-case evidence; reliability across ordinary sessions remains unmeasured.
+
+## Session-audit follow-up, 2026-10-02
+
+Baseline: `ed3a71a1`. Guidance candidate: `b2dd24bd`. Pi `1.0.0`,
+`openai/gpt-6.1-sol`, high thinking, matching the active parent model rather
+than changing the default model or routing catalog. Fifteen disposable native
+sessions exercised the remaining session-audit recommendations. Three baseline
+and six initial candidate cases were followed by targeted style and waiting
+rechecks. Each launch pinned copies of the instruction files and recorded their
+SHA-256 hashes, arguments, fixture state, transcripts, and usage.
+
+| Case | Observed result |
+|---|---|
+| Named-file lookup | Baseline and candidate returned `42` with one direct read, no discovery, TODO, delegation, clarification, or mutation. |
+| Source search with generated and dependency distractors | Both found `src/limit.ts` and its request consumer without dumping generated bodies or truncating tool output. Largest tool outputs were 414 and 507 bytes. |
+| Approved multi-part implementation | Both completed both repairs and the required summary without another approval. Parent independently reran both tests and checked that the test file stayed unchanged. |
+| Analysis-only request | Candidate and revised candidate made no edits or commits. |
+| Russian result report and review prose | The initial review contained a prohibited em dash. After a short editing-pass instruction, the repeated review and result report passed the inspected style boundaries and retained the facts and uncertainty. |
+| Required background task | The owned RPC case delivered one automatic completion and recorded one request-closure marker after the final `CHECK_OK` answer. Tool-use compliance remained partial: it made an unnecessary `background_peek` and repeated the waiting notice. |
+
+The style recheck prompted the editing-pass wording. The waiting recheck
+prompted a specific instruction against progress-only metadata calls. This is
+not proof that the latter instruction reliably prevents those calls: the final
+RPC run still violated it. No model-only waiting tool or runtime output filter
+was added. The existing request-lifecycle implementation remained unchanged.
+
+The initial isolated profile loaded canonical prompt, codemode, bash-description,
+tasks, background-terminals, and delegate extensions. Ambient skills, context
+files, templates, and themes were disabled. Targeted rechecks also observed the
+effective `before_agent_start` prompt after earlier handler overrides, verifying
+one instruction block and the revised rules. Pi's persisted structured system
+sections do not contain that forced prompt rendering.
+
+Print-mode waiting probes exited after the first model run before receiving the
+required result, including a probe with the request owner installed. They do
+not pass the waiting case. The corrected RPC probe kept the process open and
+explicitly loaded the existing remote-control request owner, with its bridge
+socket pointed at a unique nonexistent path inside a disposable directory.
+It never connected to the production dashboard. This demonstrates the owned
+RPC lifecycle, not parity for all foreground print configurations.
+
+Parent post-integration checks passed 113 tests across eight files covering
+canonical prompt guidance, task and watch dependencies, passive services, keyed
+deliveries, restored ownership, and delegate gates. Changed-file Biome and
+whitespace checks passed. These checks remain separate from model behavior.
+No deployment, service restart, default-model change, routing change, or
+production data access was part of the evaluation.
+
+Evidence lives under ignored `artifacts/prompt-audit-2026-10-02/`. The runner,
+launch records, fixture diffs, and targeted effective-prompt observations are
+retained there. A separate source-output demonstration measured the historical
+wide lookup at 933,814 bytes and a targeted owner/reference lookup at 7,025 bytes.
+Those queries differ in scope, so this is not a speed or correctness-equivalence
+benchmark.
+
+Evaluation result: **insufficient evidence of improved reliability**. The
+baseline already passed the common behavior cases; single trials cannot prove
+lower cost or latency. The pending evaluation window is the next ten ordinary
+sessions with relevant task shapes. Record denominators for unnecessary tool
+discovery, truncation caused by wide queries, reminders to finish approved work,
+style corrections, and progress-only metadata calls or repeated waiting notices.
+Recheck task correctness and analysis-only boundaries, then choose keep, revise,
+or revert. These synthetic sessions do not fill that ordinary-session window.
