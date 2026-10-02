@@ -4,7 +4,7 @@ Recorded 2026-10-02. This is a source/user-report review, not a performance benc
 
 ## Current decision
 
-- Planned authenticated browsing: separate persistent Playwright Chromium profiles for the personal agent in `~/admin` and the work agent in `~/job`. Each workspace owns `.playwright/cli.config.json`; profile data stays outside the repositories under `~/.local/share/pi/browser-profiles/{admin,job}`. Initial sign-in/MFA is manual in a headed browser; ordinary launches are headless.
+- Authenticated browser setup: separate persistent Playwright Chromium profiles for the personal agent in `~/admin` and the work agent in `~/job`. Each workspace owns `.playwright/cli.config.json`; profile data stays outside the repositories under `~/.local/share/pi/browser-profiles/{admin,job}`. Initial sign-in/MFA is manual in a headed browser; ordinary launches are headless.
 - Do not restart Arc or expose its live profile through CDP for this setup. The read-only probe found no Arc-owned TCP listener and nothing on port 9222; no tabs, authentication data, or settings were accessed. Arc 1.162.0 / macOS 15.7.9 browser automation remains untested.
 - Defer desktop computer use. When returning, evaluate the Codex local backend and `@injaneity/pi-computer-use` on the same apps and Pi model. Keep `axcli` as a simpler CLI alternative. No winner has been established.
 - Child usage/cost instrumentation is not a current priority. Existing task notes/snapshots are sufficient for short working constraints; pass relevant constraints explicitly into delegate briefs rather than adding a memory subsystem. Snapshot text is bounded and completed tasks are not automatically shown.
@@ -15,15 +15,23 @@ CDP is a debugging protocol also used for browser automation. Playwright support
 
 Both global CLI 0.1.17 and official CLI 0.1.22 retained the selected profile and localStorage but lost persistent cookies on close/reopen. An earlier 0.1.22 success was retracted: its fixture set the cookie again after restart. A one-shot `/set` route and non-mutating `/check` route exposed the failure. Closing the context/browser through CLI `run-code` did not fix it. Direct Playwright `launchPersistentContext` with awaited `context.close()` preserved both cookies and localStorage. The local adapter below launches that persistent context and attaches the installed Playwright CLI to its owned CDP endpoint. Authenticated use still requires manual headed sign-in and has not been tested against a real account. No global CLI update or unrelated-session restart was performed.
 
-Use the adapter with the workspace's `.playwright/cli.config.json` and an absolute path to the adapter script:
+Use the project's native command; it selects the profile automatically:
 
 ```sh
-node /absolute/path/to/scripts/browser-profile.mjs open --config /absolute/path/to/admin/.playwright/cli.config.json --headed
-node /absolute/path/to/scripts/browser-profile.mjs goto --config /absolute/path/to/admin/.playwright/cli.config.json https://example.com
-node /absolute/path/to/scripts/browser-profile.mjs close --config /absolute/path/to/admin/.playwright/cli.config.json
+admin browser open --headed  # personal profile, manual sign-in
+admin browser goto https://example.com
+admin browser snapshot
+admin browser close
+
+mg browser open --headed     # work profile, manual sign-in
+mg browser close
 ```
 
-Omit `--headed` for the config's headless default. Keep one owner open per profile. The adapter creates one random named CLI session during startup and reuses it for actions. It forwards only an allowlist of ordinary commands, not CLI lifecycle/session-management commands or storage and network-detail commands. It rejects eval expressions containing common credential-storage or credential-field terms. This name filter is not a security boundary or JavaScript sandbox. CLI commands run from the config file's directory so the named session registry stays consistent when callers use different working directories. Relative file arguments therefore resolve from that config directory. Owner metadata and its Unix control socket sit beside the profile in a private `0700` directory; the CDP endpoint and control token are not printed. Closing detaches that one CLI session, then asks its authenticated owner process to await `BrowserContext.close()`.
+Omit `--headed` for headless operation. `open` starts the owner in the background and returns only when ready; there is no separate service/readiness procedure. `close` waits for the profile to flush and close. Relative file arguments resolve from the project root, independent of the caller's directory. Initial sign-in/MFA stays manual; ordinary actions use the same command prefix.
+
+Implementation notes: one persistent context and random named CLI session per profile, reused across actions. Owner metadata and its Unix control socket live beside the profile in a private `0700` directory. CDP/control capabilities are not printed. The owner detaches only its CLI session and awaits `BrowserContext.close()` before acknowledging close. Owner signals use the same graceful shutdown. Credential-dump and arbitrary-code commands are not forwarded; the eval name filter is a heuristic, not a JavaScript sandbox.
+
+Parent validation used both actual admin/job configs against a neutral localhost fixture: synthetic persistent cookies and localStorage survived complete owner restarts, profile values remained isolated, and the fixture was removed afterward. Focused tests also cover immediate reopen, snapshot-ref clicks across commands, duplicate and foreign ownership, missing CLI sessions, control-secret redaction, and the headed override. Real-account sign-in/MFA remains a manual, untested step.
 
 A separate profile keeps the user's tabs untouched, but does not reduce the authority of an authenticated account. Sessions can expire or require renewed SSO/MFA. Copying cookies is not universal: localStorage/IndexedDB may also participate, and sessionStorage is not included in ordinary Playwright storage state. Do not copy Arc's raw cookie database or send cookies/storage-state contents into model context or ordinary logs.
 

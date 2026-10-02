@@ -9,7 +9,6 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,6 +21,7 @@ let origin;
 let server;
 const owners = new Map();
 const childConfigs = new Map();
+const ownerSnapshots = new Map();
 
 function run(args, cwd = caller, env = {}) {
   return new Promise((resolveRun, reject) => {
@@ -43,8 +43,13 @@ function run(args, cwd = caller, env = {}) {
   });
 }
 
-async function open(config, headed = false) {
-  const args = ['open', '--config', config, ...(headed ? ['--headed'] : [])];
+async function open(config, headed = false, foreground = false) {
+  const args = [
+    foreground ? '_owner' : 'open',
+    '--config',
+    config,
+    ...(headed ? ['--headed'] : []),
+  ];
   const child = spawn(process.execPath, [adapter, ...args], {
     cwd: caller,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -57,7 +62,11 @@ async function open(config, headed = false) {
     const timeout = setTimeout(() => child.kill('SIGTERM'), 30_000);
     child.stdout.setEncoding('utf8').on('data', (chunk) => {
       output += chunk;
-      if (output.includes('Persistent browser profile is open')) {
+      if (
+        output.includes(
+          foreground ? 'Persistent browser profile is open' : 'Browser opened.',
+        )
+      ) {
         ready = true;
         clearTimeout(timeout);
         resolveOpen();
@@ -75,6 +84,10 @@ async function open(config, headed = false) {
       if (!ready) reject(new Error(`Profile owner exited ${code}: ${output}`));
     });
   });
+  const profile = JSON.parse(await readFile(config, 'utf8')).browser
+    .userDataDir;
+  const file = `${profile}.pi-owner/owner.json`;
+  ownerSnapshots.set(config, { file, text: await readFile(file, 'utf8') });
   return child;
 }
 
@@ -110,7 +123,8 @@ async function stop(config) {
 }
 
 beforeAll(async () => {
-  temp = await mkdtemp(join(tmpdir(), 'pi-browser-profile-'));
+  // macOS's default temp prefix exceeds the Unix socket pathname limit.
+  temp = await mkdtemp('/tmp/pi-browser-profile-');
   caller = join(temp, 'outside-config-root');
   await mkdir(caller);
   server = createServer((request, response) => {
@@ -140,7 +154,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const [path, child] of owners) {
-    await run(['close', '--config', path]).catch(() => child.kill('SIGTERM'));
+    const result = await run(['close', '--config', path]).catch(() => ({
+      code: 1,
+    }));
+    if (result.code !== 0) {
+      const saved = ownerSnapshots.get(path);
+      if (saved) {
+        await writeFile(saved.file, saved.text, { mode: 0o600 });
+        await run(['close', '--config', path]);
+      } else child.kill('SIGTERM');
+    }
   }
   for (const child of childConfigs.keys()) {
     if (child.exitCode === null && child.signalCode === null)
@@ -219,6 +242,14 @@ describe('persistent browser profile adapter', () => {
     );
     const copied = await run(['snapshot', '--config', admin.path]);
     expect(copied.code).not.toBe(0);
+    await writeFile(
+      adminFile,
+      JSON.stringify({ ...adminOwner, session: jobOwner.session }),
+      { mode: 0o600 },
+    );
+    const wrongSession = await run(['close', '--config', admin.path]);
+    expect(wrongSession.code).not.toBe(0);
+    expect(await command(job, 'eval', '1 + 1')).toContain('2');
     await writeFile(adminFile, adminText, { mode: 0o600 });
 
     const fakeCli = join(temp, 'fake-playwright-cli');
@@ -238,6 +269,24 @@ describe('persistent browser profile adapter', () => {
       expect(output.includes(adminOwner.endpoint)).toBe(false);
     }
     expect(await command(job, 'eval', '1 + 1')).toContain('2');
+    await new Promise((resolveDetach, rejectDetach) => {
+      const child = spawn(
+        'playwright-cli',
+        [`-s=${adminOwner.session}`, 'detach'],
+        {
+          cwd: admin.workspace,
+          stdio: 'ignore',
+        },
+      );
+      child.once('error', rejectDetach);
+      child.once('close', (code) =>
+        code === 0
+          ? resolveDetach()
+          : rejectDetach(new Error('Owned test CLI detach failed')),
+      );
+    });
+    await stop(admin);
+    await open(admin.path);
     await stop(admin);
     await stop(job);
   }, 60_000);
@@ -264,4 +313,51 @@ describe('persistent browser profile adapter', () => {
     }
     await stop(config);
   }, 60_000);
+
+  it('flushes the owned profile and removes metadata on Ctrl-C', async () => {
+    const config = await configFor('signal');
+    const child = await open(config.path, false, true);
+    await command(config, 'goto', `${origin}/set?profile=admin`);
+    const closed = new Promise((resolveExit) =>
+      child.once('close', resolveExit),
+    );
+    child.kill('SIGINT');
+    expect(await closed).toBe(0);
+    owners.delete(config.path);
+    await expect(
+      stat(`${config.profile}.pi-owner/owner.json`),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    await open(config.path);
+    await command(config, 'goto', `${origin}/check`);
+    const resumed = await command(config, 'snapshot');
+    expect(resumed).toContain('cookie-admin');
+    expect(resumed).toContain('storage-admin');
+    await stop(config);
+  }, 60_000);
+
+  it.skipIf(process.env.BROWSER_PROFILE_HEADED_SMOKE !== '1')(
+    'supports a headed override without changing the headless config',
+    async () => {
+      const config = await configFor('headed');
+      await open(config.path);
+      expect(
+        await command(
+          config,
+          'eval',
+          "navigator.userAgent.includes('HeadlessChrome')",
+        ),
+      ).toContain('true');
+      await stop(config);
+      await open(config.path, true);
+      expect(
+        await command(
+          config,
+          'eval',
+          "navigator.userAgent.includes('HeadlessChrome')",
+        ),
+      ).toContain('false');
+      await stop(config);
+    },
+    60_000,
+  );
 });

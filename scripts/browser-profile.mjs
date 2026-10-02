@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmod, mkdir, open, readFile, rm } from 'node:fs/promises';
 import { connect, createServer } from 'node:net';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const cli = process.env.PLAYWRIGHT_CLI ?? 'playwright-cli';
@@ -11,10 +11,9 @@ const args = process.argv.slice(2);
 const command = args.shift();
 
 function usage() {
-  console.error(
-    'Usage: node browser-profile.mjs open [--headed] --config PATH | close --config PATH | <playwright-cli command> --config PATH [args...]',
+  process.stdout.write(
+    'Browser commands: open [--headed], close, goto URL, snapshot, click REF, fill REF TEXT, eval EXPR, screenshot.\n',
   );
-  process.exitCode = 2;
 }
 
 function parseConfig(argv) {
@@ -185,7 +184,7 @@ async function runCli(argv, cwd, secrets = [], quiet = false) {
   if (code !== 0) throw new Error(`Playwright CLI exited with code ${code}`);
 }
 
-function sendControl(socketPath, token, action) {
+function sendControl(socketPath, token, session, action) {
   return new Promise((resolveControl, reject) => {
     const socket = connect(socketPath);
     let response = '';
@@ -194,7 +193,7 @@ function sendControl(socketPath, token, action) {
     );
     socket.setEncoding('utf8');
     socket.once('connect', () =>
-      socket.write(`${JSON.stringify({ token, action })}\n`),
+      socket.write(`${JSON.stringify({ token, session, action })}\n`),
     );
     socket.on('data', (chunk) => {
       response += chunk;
@@ -215,7 +214,7 @@ function sendControl(socketPath, token, action) {
   });
 }
 
-async function closeProfile(paths, configDir) {
+async function closeProfile(paths) {
   const owner = await readOwner(paths);
   if (
     !owner.token ||
@@ -224,14 +223,8 @@ async function closeProfile(paths, configDir) {
     !/^pi-profile-[a-f0-9]{24}$/.test(owner.session)
   )
     throw new Error('Profile owner metadata is invalid');
-  await sendControl(paths.socket, owner.token, 'ping');
-  await runCli(
-    [`-s=${owner.session}`, 'detach'],
-    configDir,
-    [owner.token, owner.endpoint],
-    true,
-  );
-  await sendControl(paths.socket, owner.token, 'close');
+  await sendControl(paths.socket, owner.token, owner.session, 'ping');
+  await sendControl(paths.socket, owner.token, owner.session, 'close');
 }
 
 async function openProfile(settings, paths, configDir, headed) {
@@ -287,6 +280,7 @@ async function openProfile(settings, paths, configDir, headed) {
         const supplied = Buffer.from(String(request.token ?? ''));
         const expected = Buffer.from(token);
         if (
+          request.session !== owner.session ||
           supplied.length !== expected.length ||
           !timingSafeEqual(supplied, expected)
         )
@@ -346,11 +340,11 @@ async function openProfile(settings, paths, configDir, headed) {
     if (!shutdownPromise) {
       shutdownPromise = (async () => {
         const current = context;
+        await detachCliSession();
         if (closeContext && current) {
           await current.close();
           context = undefined;
         }
-        await detachCliSession();
         await cleanup();
       })().catch((error) => {
         shutdownPromise = undefined;
@@ -370,14 +364,16 @@ async function openProfile(settings, paths, configDir, headed) {
       });
     });
     await chmod(paths.socket, 0o600);
-    process.once('SIGINT', () => {
-      void shutdown(true).catch(() => {});
-    });
-    process.once('SIGTERM', () => {
-      void shutdown(true).catch(() => {});
-    });
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+      process.once(signal, () => {
+        void shutdown(true).catch(() => {});
+      });
+    }
     const options = {
       ...settings.launchOptions,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
       headless: !headed,
       args: [
         '--remote-debugging-port=0',
@@ -436,28 +432,87 @@ async function openProfile(settings, paths, configDir, headed) {
   }
 }
 
+async function startBackgroundOwner(configPath, headed) {
+  await new Promise((resolveReady, rejectReady) => {
+    const child = spawn(
+      process.execPath,
+      [
+        process.argv[1],
+        '_owner',
+        '--config',
+        configPath,
+        ...(headed ? ['--headed'] : []),
+      ],
+      {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let output = '';
+    let errors = '';
+    let ready = false;
+    const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+    const forward = (signal) => child.kill(signal);
+    const handlers = signals.map((signal) => [signal, () => forward(signal)]);
+    for (const [signal, handler] of handlers) process.on(signal, handler);
+    const timer = setTimeout(() => child.kill('SIGTERM'), 45_000);
+    const cleanup = () => {
+      clearTimeout(timer);
+      for (const [signal, handler] of handlers) process.off(signal, handler);
+    };
+    child.stdout.setEncoding('utf8').on('data', (chunk) => {
+      output += chunk;
+      if (!ready && output.includes('Persistent browser profile is open')) {
+        ready = true;
+        cleanup();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.unref();
+        process.stdout.write('Browser opened.\n');
+        resolveReady();
+      }
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => {
+      errors += chunk;
+    });
+    child.once('error', (error) => {
+      cleanup();
+      rejectReady(error);
+    });
+    child.once('close', (code) => {
+      cleanup();
+      if (!ready)
+        rejectReady(
+          new Error(errors.trim() || `Browser startup failed (${code})`),
+        );
+    });
+  });
+}
+
 async function main() {
-  if (!command) return usage();
+  if (!command || ['--help', '-h', 'help'].includes(command)) return usage();
   const parsed = parseConfig(args);
   const settings = await loadSettings(parsed.configPath);
   const paths = pathsFor(settings.profile);
-  const configDir = dirname(parsed.configPath);
+  const configDirectory = dirname(parsed.configPath);
+  const configDir =
+    basename(configDirectory) === '.playwright'
+      ? dirname(configDirectory)
+      : configDirectory;
 
-  if (command === 'open') {
+  if (command === 'open' || command === '_owner') {
     if (parsed.rest.some((arg) => arg !== '--headed'))
       throw new Error('Only --headed is supported with open');
-    await openProfile(
-      settings,
-      paths,
-      configDir,
-      parsed.rest.includes('--headed') || settings.headed,
-    );
+    const headed = parsed.rest.includes('--headed') || settings.headed;
+    if (command === 'open')
+      await startBackgroundOwner(parsed.configPath, headed);
+    else await openProfile(settings, paths, configDir, headed);
     return;
   }
   if (command === 'close') {
     if (parsed.rest.length)
       throw new Error('close takes no additional arguments');
-    await closeProfile(paths, configDir);
+    await closeProfile(paths);
     return;
   }
   const cliArgs = [command, ...parsed.rest];
@@ -472,7 +527,7 @@ async function main() {
     throw new Error(
       'Profile owner metadata does not authenticate this profile',
     );
-  await sendControl(paths.socket, owner.token, 'ping');
+  await sendControl(paths.socket, owner.token, owner.session, 'ping');
   await runCli([`-s=${owner.session}`, ...cliArgs], configDir, [
     owner.token,
     owner.endpoint,
