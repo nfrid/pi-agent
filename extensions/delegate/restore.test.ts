@@ -8,6 +8,7 @@ import {
   resolveTrustedDelegateSession,
   restoreHostedDelegateAttempt,
 } from './restore';
+import type { RunDelegateOptions } from './runner';
 import {
   createDelegateSession,
   removeDelegateSession,
@@ -104,6 +105,64 @@ describe('restored delegate adapter', () => {
       else rmSync(item.filePath, { force: true });
     }
   }
+
+  test('restores the original start time and warning target for an overdue hosted attempt', async () => {
+    const child = session();
+    sessions.push(child);
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-restore',
+    });
+    managers.push(manager);
+    coordinators.push(coordinator);
+    const startedAt = Date.now() - 120_000;
+    const history = metadata(child.token);
+    coordinator.restoreMetadata({
+      ...history,
+      attempts: history.attempts.map((attempt) => ({
+        ...attempt,
+        startedAt,
+        route: 'luna-x',
+      })),
+    });
+    const warning = vi.fn();
+    const execute = vi.fn(async (options: RunDelegateOptions) => {
+      const run = createRun('restored warning');
+      run.state = 'running';
+      run.startedAt = options.startedAt;
+      options.onRuntimeWarning?.(run, 120_000);
+      return finishedRun('restored');
+    });
+    restoreHostedDelegateAttempt({
+      parentSessionId: PARENT,
+      attempt: 'restore@1',
+      manager,
+      coordinator,
+      dependencies: {
+        runDelegate: execute,
+        warningAfterMs: 60_000,
+        onRuntimeWarning: warning,
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require('restore@1').state).toBe('success'),
+    );
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      startedAt,
+      warningAfterMs: 60_000,
+      hosted: true,
+      observeExisting: true,
+    });
+    expect(warning).toHaveBeenCalledWith(
+      'branch-restore',
+      { identity: 'restore@1', logicalId: 'restore', route: 'luna-x' },
+      expect.objectContaining({ startedAt }),
+      120_000,
+      60_000,
+    );
+    await cleanup();
+  });
 
   test('enumerates and idempotently binds one local link without a fresh launch', async () => {
     const child = session();

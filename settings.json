@@ -25,7 +25,7 @@
   "delegate": {
     "provider": "openai",
     "routingGuidance": "Costs in this catalog are provisional estimates pending local calibration, not measured GPT-6 route costs. Searching unfamiliar code is not, by itself, a reason to choose Sol or Astra. Prefer a smaller task over a deeper route when decomposition preserves useful independence.",
-    "timeoutMs": 1800000,
+    "warningAfterMs": 1800000,
     "modelCatalog": {
       "luna-l": {
         "provider": "openai",

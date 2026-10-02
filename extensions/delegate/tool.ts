@@ -34,7 +34,7 @@ import {
   delegateToolResult,
   makeDetails,
 } from './tool-result';
-import { createRun } from './types';
+import { createRun, type DelegatedRun } from './types';
 import type {
   DelegateWorkflowAttemptSnapshot,
   DelegateWorkflowCoordinator,
@@ -306,6 +306,13 @@ export interface DelegateBackgroundRuntime {
   getDeliveryEpoch: () => number;
   activateJobs?: () => void;
   activateBranches?: () => void;
+  onRuntimeWarning?: (
+    ownerBranchId: string | undefined,
+    target: import('./runtime-warning').DelegateRuntimeWarningTarget,
+    run: DelegatedRun,
+    elapsedMs: number,
+    warningAfterMs: number,
+  ) => void;
 }
 
 function registerDelegateSurface(
@@ -362,6 +369,7 @@ function registerDelegateSurface(
         isLaunchBranchActive: () =>
           launchBranchId !== undefined &&
           backgroundRuntime?.getBranchId?.() === launchBranchId,
+        onRuntimeWarning: backgroundRuntime?.onRuntimeWarning,
       };
       const activeWorkflow =
         backgroundRuntime?.getWorkflow?.() ?? backgroundRuntime?.workflow;

@@ -15,6 +15,7 @@ import { Value } from 'typebox/value';
 import { describe, expect, test, vi } from 'vitest';
 import { buildSystemPrompt } from '../system-prompt';
 import { acquireSession } from './concurrency';
+import * as configModule from './config';
 import {
   describeDelegateRouting,
   fingerprintDelegateConfig,
@@ -206,6 +207,21 @@ describe('delegate', () => {
   });
 
   test('persists branch ownership before admitting a valid symbolic branch attempt', async () => {
+    const configLoader = vi
+      .spyOn(configModule, 'loadDelegateConfig')
+      .mockReturnValue(
+        parseDelegateConfig({
+          provider: 'test',
+          modelCatalog: {
+            'luna-l': {
+              model: 'test',
+              thinking: 'low',
+              relativeCost: 1,
+              useFor: 'test',
+            },
+          },
+        }),
+      );
     let execute:
       | ((
           toolCallId: string,
@@ -265,6 +281,7 @@ describe('delegate', () => {
         sessionManager: { getSessionId: () => 'parent-session' },
       },
     );
+    configLoader.mockRestore();
     expect(ordering).toEqual(['owner', 'schedule']);
     expect(schedule).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -449,24 +466,16 @@ describe('delegate', () => {
       contextNote: 'The parser path is already ruled out.',
       scope: ['src/cache', 'tests/cache'],
       continuation: true,
-      timeoutMs: 10 * 60 * 1000,
     });
     expect(prompt).toContain('Context from the parent agent');
     expect(prompt).toContain('parser path is already ruled out');
     expect(prompt).toContain('guidance rather than a hard boundary');
     expect(prompt).toContain('follow-up feedback');
-    expect(prompt).toContain(
-      'maximum runtime of approximately 10 minutes; reserve time to return partial findings.',
-    );
+    expect(prompt).not.toContain('maximum runtime');
   });
 
   test('includes the configured runtime guidance for fresh prompts', () => {
-    const prompt = buildDelegatePrompt('Inspect the repository', {
-      timeoutMs: 90_000,
-    });
-    expect(prompt).toContain(
-      'maximum runtime of approximately 90 seconds; reserve time to return partial findings.',
-    );
+    const prompt = buildDelegatePrompt('Inspect the repository', {});
     expect(prompt).toContain('## Child report');
   });
 
@@ -521,6 +530,19 @@ describe('delegate', () => {
           .error,
       ).toMatch(/avoid must be non-empty text/);
     }
+  });
+
+  test('uses a soft warning threshold and rejects the obsolete timeout setting', () => {
+    expect(parseDelegateConfig({}).warningAfterMs).toBe(10 * 60 * 1000);
+    expect(
+      parseDelegateConfig({ warningAfterMs: 30_000 }).error,
+    ).toBeUndefined();
+    expect(parseDelegateConfig({ timeoutMs: 30_000 }).error).toContain(
+      'delegate.timeoutMs is not supported',
+    );
+    expect(parseDelegateConfig({ warningAfterMs: 9_999 }).error).toContain(
+      'delegate.warningAfterMs must be between',
+    );
   });
 
   test('starts all admitted work by default while keeping a finite ceiling', () => {
@@ -652,7 +674,7 @@ describe('delegate', () => {
   test('fingerprints only the normalized effective config', () => {
     const first = parseDelegateConfig({
       provider: ' provider ',
-      timeoutMs: 60_000,
+      warningAfterMs: 60_000,
       modelCatalog: {
         quick: {
           model: ' model ',
@@ -673,7 +695,7 @@ describe('delegate', () => {
           model: 'model',
         },
       },
-      timeoutMs: 60_000,
+      warningAfterMs: 60_000,
       provider: 'provider',
     });
     expect(fingerprintDelegateConfig(first)).toBe(
@@ -683,7 +705,7 @@ describe('delegate', () => {
       fingerprintDelegateConfig(
         parseDelegateConfig({
           provider: 'provider',
-          timeoutMs: 60_000,
+          warningAfterMs: 60_000,
           routingGuidance: 'Prefer quick routes.',
           modelCatalog: {
             quick: {
@@ -701,7 +723,7 @@ describe('delegate', () => {
       fingerprintDelegateConfig(
         parseDelegateConfig({
           provider: 'provider',
-          timeoutMs: 60_001,
+          warningAfterMs: 60_001,
         }),
       ),
     ).not.toBe(fingerprintDelegateConfig(first));
@@ -953,14 +975,10 @@ describe('delegate', () => {
     expect(resolvePiSpawn()).toEqual({ command: 'pi', prefixArgs: [] });
   });
 
-  test('passes the configured timeout into the child prompt', () => {
-    const args = buildChildArgs(
-      { task: 'inspect', timeoutMs: 10 * 60 * 1000 },
-      '/tmp/child.jsonl',
-    );
-    expect(args.at(-1)).toContain(
-      'maximum runtime of approximately 10 minutes; reserve time to return partial findings.',
-    );
+  test('does not tell the child to stop at a runtime deadline', () => {
+    const args = buildChildArgs({ task: 'inspect' }, '/tmp/child.jsonl');
+    expect(args.at(-1)).not.toContain('maximum runtime');
+    expect(args.at(-1)).not.toContain('pre-timeout checkpoint');
   });
 
   test('keeps foreground child arguments unchanged and adds dashboard control only when hosted', () => {

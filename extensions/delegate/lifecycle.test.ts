@@ -142,11 +142,115 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-test.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });
     expect(getDelegateLifecycle(run)?.reason).toBe(reason);
+  });
+
+  test('warns once at the soft threshold and leaves the local child running', async () => {
+    const warning = vi.fn();
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (run) => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        processJsonLine(
+          JSON.stringify({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'completed after warning' }],
+            },
+          }),
+          run,
+        );
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      },
+    );
+
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'continue after the warning',
+      context: 'fresh',
+      sessionPath: '/tmp/runtime-warning-test.jsonl',
+      isolation: 'shared',
+      warningAfterMs: 20,
+      onRuntimeWarning: warning,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+
+    expect(warning).toHaveBeenCalledOnce();
+    expect(warning.mock.calls[0]?.[1]).toBeGreaterThanOrEqual(20);
+    expect(run.state).toBe('success');
+  });
+
+  test('checks an overdue hosted delegate using its original start time without stopping it', async () => {
+    const warning = vi.fn();
+    const startedAt = Date.now() - 120_000;
+    vi.spyOn(delegateChild, 'runHostedDelegateChild').mockImplementation(
+      async (run) => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        processJsonLine(
+          JSON.stringify({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'restored result' }],
+            },
+          }),
+          run,
+        );
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      },
+    );
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'overdue hosted run',
+      context: 'continuation',
+      sessionPath: '/tmp/runtime-warning-restored.jsonl',
+      isolation: 'shared',
+      hosted: true,
+      observeExisting: true,
+      startedAt,
+      warningAfterMs: 60_000,
+      onRuntimeWarning: warning,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+    expect(warning).toHaveBeenCalledOnce();
+    expect(warning.mock.calls[0]?.[1]).toBeGreaterThanOrEqual(120_000);
+    expect(run.startedAt).toBe(startedAt);
+    expect(run.state).toBe('success');
+  });
+
+  test('keeps explicit cancellation and does not warn after it', async () => {
+    const controller = new AbortController();
+    const warning = vi.fn();
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        controller.abort();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { exitCode: 130, wasAborted: true, timedOut: false };
+      },
+    );
+
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'cancel this run',
+      context: 'fresh',
+      sessionPath: '/tmp/runtime-warning-cancel-test.jsonl',
+      isolation: 'shared',
+      warningAfterMs: 20,
+      onRuntimeWarning: warning,
+      signal: controller.signal,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+
+    expect(warning).not.toHaveBeenCalled();
+    expect(run.state).toBe('aborted');
   });
 
   test('marks successful-exit runs with truncated events as failures and publishes exact recovery evidence', async () => {
@@ -186,7 +290,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-overflow-test.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });
@@ -265,7 +369,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: `/tmp/lifecycle-overflow-${_label}.jsonl`,
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });
@@ -346,16 +450,14 @@ describe('delegate lifecycle failure projection', () => {
     expect(handoff).not.toContain('private publication marker');
   });
 
-  test('reports an acknowledged pre-timeout checkpoint with retained partial status', async () => {
+  test('retains a historical checkpoint when observing an old host timeout', async () => {
     vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
-      async (run, options) => {
-        options.onCheckpoint?.();
-        if (run.checkpoint)
-          run.checkpoint = {
-            ...run.checkpoint,
-            state: 'acknowledged',
-            acknowledgedAt: Date.now(),
-          };
+      async (run) => {
+        run.checkpoint = {
+          requestedAt: 1,
+          state: 'acknowledged',
+          acknowledgedAt: 2,
+        };
         return { exitCode: 124, wasAborted: false, timedOut: true };
       },
     );
@@ -366,7 +468,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-checkpoint-test.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });
@@ -395,7 +497,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-foreground-env.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });
@@ -411,7 +513,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-hosted-env.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       hosted: true,
       ownerSessionId: 'parent-session',
@@ -445,7 +547,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-hosted-error.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       hosted: true,
       ownerSessionId: 'parent-session',
@@ -475,7 +577,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-nonzero-event.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });
@@ -495,7 +597,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-queued.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
       signal: controller.signal,
@@ -511,7 +613,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-runner.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });
@@ -521,7 +623,7 @@ describe('delegate lifecycle failure projection', () => {
       context: 'fresh',
       sessionPath: '/tmp/lifecycle-unknown.jsonl',
       isolation: 'shared',
-      timeoutMs: 5_000,
+      warningAfterMs: 5_000,
       maxConcurrency: 1,
       mode: 'single',
     });

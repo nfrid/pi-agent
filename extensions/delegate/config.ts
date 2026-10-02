@@ -21,19 +21,19 @@ const SETTINGS_KEY = 'delegate';
 const MAX_RELATIVE_COST = 1000;
 
 export const DEFAULT_DELEGATE_RUNTIME = {
-  timeoutMs: 10 * 60 * 1000,
+  warningAfterMs: 10 * 60 * 1000,
   maxParallelTasks: 6,
   maxConcurrency: 20,
 } as const;
 
 const RUNTIME_LIMITS = {
-  timeoutMs: { min: 10_000, max: 60 * 60 * 1000 },
+  warningAfterMs: { min: 10_000, max: 60 * 60 * 1000 },
   maxParallelTasks: { min: 1, max: 20 },
   maxConcurrency: { min: 1, max: 20 },
 } as const;
 
 export interface DelegateRuntimeConfig {
-  timeoutMs: number;
+  warningAfterMs: number;
   maxParallelTasks: number;
   maxConcurrency: number;
 }
@@ -195,24 +195,24 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
     'provider',
     'routingGuidance',
     'modelCatalog',
-    'timeoutMs',
+    'warningAfterMs',
     'maxParallelTasks',
     'maxConcurrency',
   ]);
   const unknownField = Object.keys(record).find(
     (field) => !allowedFields.has(field),
   );
-  const timeout = parseRuntimeSetting(record, 'timeoutMs');
+  const warningAfter = parseRuntimeSetting(record, 'warningAfterMs');
   const maxTasks = parseRuntimeSetting(record, 'maxParallelTasks');
   const concurrency = parseRuntimeSetting(record, 'maxConcurrency');
   const parsedCatalog = parseModelCatalog(record.modelCatalog);
   const config: DelegateConfig = {
-    timeoutMs: timeout.value,
+    warningAfterMs: warningAfter.value,
     maxParallelTasks: maxTasks.value,
     maxConcurrency: concurrency.value,
   };
   const errors = [
-    timeout.error,
+    warningAfter.error,
     maxTasks.error,
     concurrency.error,
     unknownField ? `delegate.${unknownField} is not supported.` : undefined,
@@ -301,7 +301,7 @@ export function fingerprintDelegateConfig(config: DelegateConfig): string {
     routingGuidance: config.routingGuidance ?? null,
     catalog: config.modelCatalog ?? null,
     runtime: {
-      timeoutMs: config.timeoutMs,
+      warningAfterMs: config.warningAfterMs,
       maxParallelTasks: config.maxParallelTasks,
       maxConcurrency: config.maxConcurrency,
     },

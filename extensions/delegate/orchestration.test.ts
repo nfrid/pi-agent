@@ -20,7 +20,7 @@ import type { DelegateRouteState } from './types';
 import type { PreparedWorktree } from './worktree';
 
 const config: DelegateConfig = {
-  timeoutMs: 60_000,
+  warningAfterMs: 60_000,
   maxParallelTasks: 2,
   maxConcurrency: 2,
   provider: 'openai',

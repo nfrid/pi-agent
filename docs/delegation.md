@@ -81,6 +81,8 @@ Base chains are cumulative. For `A --base--> B --base--> C`, C starts from A and
 
 Every workflow attempt created during a user request is a required result. It is delivered at the next safe model boundary, and the request stays open until the result enters provider context. Results ready before the same boundary enter the same parent turn. When other work remains active, delivery includes a compact `Still running` list. Do not poll.
 
+`delegate.warningAfterMs` sets a soft runtime review threshold, not a deadline. At the threshold, the parent receives one `Delegate runtime check` at its next safe model boundary, including while idle. The delegate continues running. The warning is separate from completion delivery and does not satisfy dependencies, consume a gate, or mark the attempt complete. If the attempt settles before the warning reaches context, the extension suppresses it. The checked-in setting is 30 minutes; the allowed range is 10 seconds to 60 minutes.
+
 Use `delegate_gate` only to change delivery for selected attempts. An `all` gate keeps the selected attempts required until all selected results enter context. An `any` gate lets the first selected result enter context and releases the remaining selected attempts from this request; those jobs and results remain available, but they do not reopen the request. Attempts outside the selected set remain required. Exactly one explicit gate is active per parent branch; a later call replaces it.
 
 Batch a fan-in:
@@ -130,7 +132,7 @@ A stdout event clipped by the delegate runner is excluded from transcript and st
 
 Inspection shows state and timing, recent assistant progress messages, and compact tool activity with status and brief errors when available. It excludes thinking, full tool results, file contents, and edit payloads. Missing activity and truncation are explicit; settled attempts return metadata rather than their final report. Inspection does not consume or alter automatic completion delivery.
 
-Inspect only when the evidence could change a steering, cancellation, or coordination decision—not to wait for completion or routinely supervise every delegate. Use `feedback` for a bounded correction. Never loop or alternate sleeps with `list`, `status`, or `inspect` to wait for settlement; these are not result-retrieval APIs.
+Inspect only when the evidence could change a steering, cancellation, or coordination decision—not to wait for completion or routinely supervise every delegate. A runtime check is not evidence of a stall. Inspect recent activity once if it would help decide whether to leave the delegate running, send feedback, or cancel. Lack of visible activity alone does not establish a stall. Use `feedback` for a bounded correction. Never loop or alternate sleeps with `list`, `status`, or `inspect` to wait for settlement; these are not result-retrieval APIs.
 
 `/pause` gates the parent and active delegates at provider-safe boundaries. `/continue` releases them and resumes queued delivery.
 

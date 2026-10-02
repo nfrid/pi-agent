@@ -53,6 +53,13 @@ export type DelegateRunContext = {
   config: DelegateConfig;
   signal?: AbortSignal;
   getSnapshot: SnapshotLookup;
+  onRuntimeWarning?: (
+    ownerBranchId: string | undefined,
+    target: import('./runtime-warning').DelegateRuntimeWarningTarget,
+    run: DelegatedRun,
+    elapsedMs: number,
+    warningAfterMs: number,
+  ) => void;
 };
 
 export interface PreparedDelegateExecution {
@@ -230,6 +237,8 @@ type RunHooks = {
   onWorktreeRunning?: (worktree: PreparedWorktree) => void;
   hosted?: boolean;
   detachSignal?: AbortSignal;
+  runtimeWarning?: import('./runtime-warning').DelegateRuntimeWarningTarget;
+  startedAt?: number;
 };
 
 function errorText(error: unknown): string {
@@ -313,7 +322,19 @@ async function runPreparedWithLifecycle(
   let run: DelegatedRun;
   try {
     run = await runPreparedDelegateTask(prepared, {
-      timeoutMs: config.timeoutMs,
+      warningAfterMs: config.warningAfterMs,
+      startedAt: hooks.startedAt,
+      onRuntimeWarning:
+        hooks.runtimeWarning && runCtx.onRuntimeWarning
+          ? (run, elapsedMs) =>
+              runCtx.onRuntimeWarning?.(
+                runCtx.launchBranchId,
+                hooks.runtimeWarning as import('./runtime-warning').DelegateRuntimeWarningTarget,
+                run,
+                elapsedMs,
+                config.warningAfterMs,
+              )
+          : undefined,
       maxConcurrency: config.maxConcurrency,
       signal,
       detachSignal: hooks.detachSignal,
@@ -662,6 +683,11 @@ export async function prepareDelegateWorkflowLaunch(
               control,
               hosted: true,
               detachSignal,
+              runtimeWarning: {
+                identity: workflow.attempt.identity,
+                logicalId: workflow.attempt.logicalId,
+                route: finalPlan.routing?.route ?? 'unknown',
+              },
               onRunUpdate: (run) => hooks.onRunUpdate?.(run),
             },
           );

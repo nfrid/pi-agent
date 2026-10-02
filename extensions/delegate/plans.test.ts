@@ -17,7 +17,7 @@ import {
 import { createWorkflowModel } from './workflow-model';
 
 const config = {
-  timeoutMs: 10_000,
+  warningAfterMs: 10_000,
   maxParallelTasks: 4,
   maxConcurrency: 4,
   modelCatalog: {

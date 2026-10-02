@@ -1,12 +1,10 @@
 import * as path from 'node:path';
 import { acquireSession, acquireSlot } from './concurrency';
 import {
-  checkpointRequestMessage,
   createDelegateControlChannel,
   type DelegateControlChannel,
 } from './control';
 import {
-  checkpointLeadMs,
   PROGRESS_UPDATE_INTERVAL_MS,
   runHostedDelegateChild,
   spawnDelegateChild,
@@ -144,8 +142,10 @@ export interface RunDelegateOptions {
   refreshSource?: import('./worktree/model').WorktreeBase;
   continuation?: string;
   resuming?: boolean;
-  timeoutMs: number;
+  warningAfterMs?: number;
+  startedAt?: number;
   maxConcurrency: number;
+  onRuntimeWarning?: (run: DelegatedRun, elapsedMs: number) => void;
   killGraceMs?: number;
   signal?: AbortSignal;
   /** Manager teardown detaches a hosted process instead of stopping it. */
@@ -178,7 +178,7 @@ export function buildChildArgs(
     | 'handoffText'
     | 'scope'
     | 'resuming'
-  > & { timeoutMs?: number; hosted?: boolean },
+  > & { hosted?: boolean },
   sessionPath: string,
 ): string[] {
   const allowWrites = options.allowWrites === true;
@@ -235,7 +235,6 @@ export function buildChildArgs(
       handoffText: options.handoffText,
       scope: options.scope,
       continuation: options.resuming,
-      timeoutMs: options.timeoutMs,
       branch: options.worktree?.record.branch,
     }),
   );
@@ -285,6 +284,7 @@ export async function runDelegate(
     createDelegateControlChannel(options.sessionPath, options.ownerSessionId);
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
+  let runtimeWarningTimer: ReturnType<typeof setTimeout> | undefined;
 
   const emitUpdate = () => {
     options.onRunUpdate?.(run);
@@ -307,8 +307,33 @@ export async function runDelegate(
     if (options.signal?.aborted)
       throw new Error('Delegated task was aborted before launch.');
     run.state = 'running';
-    run.startedAt = Date.now();
+    run.startedAt = options.startedAt ?? Date.now();
     emitUpdate();
+    if ((options.warningAfterMs ?? 0) > 0 && options.onRuntimeWarning) {
+      runtimeWarningTimer = setTimeout(
+        () => {
+          if (
+            run.state !== 'running' ||
+            options.signal?.aborted ||
+            options.detachSignal?.aborted
+          )
+            return;
+          try {
+            options.onRuntimeWarning?.(
+              run,
+              Math.max(0, Date.now() - (run.startedAt ?? Date.now())),
+            );
+          } catch {
+            // The advisory warning must not change child execution or settlement.
+          }
+        },
+        Math.max(
+          0,
+          (options.warningAfterMs ?? 0) - (Date.now() - run.startedAt),
+        ),
+      );
+      runtimeWarningTimer.unref();
+    }
     const { command, prefixArgs } = resolvePiSpawn();
     // An observed host row supplies the already-running command. Avoid even
     // reconstructing a prompt/argv from restored metadata; the host adapter
@@ -365,26 +390,12 @@ export async function runDelegate(
       args: spawnTarget.args,
       cwd: spawnTarget.cwd,
       env: spawnTarget.env,
-      timeoutMs: options.timeoutMs,
-      checkpointLeadMs: checkpointLeadMs(options.timeoutMs),
       killGraceMs: options.killGraceMs,
       signal: options.signal,
       detachSignal: options.detachSignal,
       processJobId: options.processJobId ?? run.runId,
       ownerSession: options.ownerSessionId,
       observeExisting: options.observeExisting,
-      onCheckpoint: () => {
-        const requestedAt = Date.now();
-        const queued = control.enqueue(
-          'checkpoint',
-          checkpointRequestMessage(),
-        );
-        run.checkpoint = {
-          requestedAt,
-          state: queued.accepted ? 'requested' : 'unavailable',
-        };
-        emitUpdate();
-      },
       onControlAck: acknowledgeControl,
       onLine: emitUpdate,
     });
@@ -424,7 +435,7 @@ export async function runDelegate(
             : checkpoint?.state === 'unavailable'
               ? ' The pre-timeout checkpoint request could not be queued; retained output/worktree is partial and requires review.'
               : '';
-      run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.${checkpointStatus}`;
+      run.errorMessage = `Delegated task was stopped by a process-host timeout.${checkpointStatus}`;
       setDelegateLifecycle(run, 'timeout', run.errorMessage);
       run.state = 'timed-out';
     } else if (!spawnError && exitCode === 0 && hasDelegateEventOverflow(run)) {
@@ -503,6 +514,7 @@ export async function runDelegate(
     );
     run.state = aborted ? 'aborted' : 'error';
   } finally {
+    if (runtimeWarningTimer) clearTimeout(runtimeWarningTimer);
     if (updateTimer) clearInterval(updateTimer);
     const detached = options.detachSignal?.aborted === true;
     if (!detached) {

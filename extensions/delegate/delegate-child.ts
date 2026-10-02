@@ -13,9 +13,6 @@ import type { DelegatedRun } from './types';
 import { isCanonicalUuid } from './workflow-model';
 
 export const SIGKILL_TIMEOUT_MS = 5000;
-/** Reserve a bounded final window for a child to checkpoint before hard stop. */
-export const PRETIMEOUT_CHECKPOINT_LEAD_MS = 30_000;
-export const MIN_PRETIMEOUT_CHECKPOINT_LEAD_MS = 1_000;
 export const MAX_STDERR_BYTES = 64 * 1024;
 export const MAX_JSON_LINE_BYTES = 1024 * 1024;
 export const PROGRESS_UPDATE_INTERVAL_MS = 1000;
@@ -41,9 +38,6 @@ export interface SpawnChildOptions {
   args: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
-  timeoutMs: number;
-  /** How much of the hard deadline to reserve for a checkpoint request. */
-  checkpointLeadMs?: number;
   killGraceMs?: number;
   signal?: AbortSignal;
   /** Parent-manager teardown signal; detaches without stopping a hosted job. */
@@ -54,7 +48,6 @@ export interface SpawnChildOptions {
   observeExisting?: boolean;
   /** Parent session owner required by the process host. */
   ownerSession?: string;
-  onCheckpoint?: () => void;
   onControlAck?: (id: string, kind: string, generation?: number) => void;
   onLine: () => void;
 }
@@ -117,14 +110,6 @@ export function effectiveDelegateHome(): string {
   return fallback;
 }
 
-export function checkpointLeadMs(timeoutMs: number): number {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return 0;
-  return Math.min(
-    PRETIMEOUT_CHECKPOINT_LEAD_MS,
-    Math.max(MIN_PRETIMEOUT_CHECKPOINT_LEAD_MS, Math.floor(timeoutMs / 5)),
-  );
-}
-
 export function buildDelegateChildEnvironment(
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
@@ -173,7 +158,6 @@ export async function runHostedDelegateChild(
   let terminalObserved = false;
   let stopPromise: Promise<void> | undefined;
   let started = false;
-  let checkpoint: NodeJS.Timeout | undefined;
   let final: BackgroundJobSnapshot | undefined;
   let reportedHostError: string | undefined;
   let terminalHostError: string | undefined;
@@ -238,7 +222,6 @@ export async function runHostedDelegateChild(
             (entry): entry is [string, string] => entry[1] !== undefined,
           ),
         ),
-        timeoutMs: options.timeoutMs,
         events: true,
         exactEnv: true,
       });
@@ -246,25 +229,6 @@ export async function runHostedDelegateChild(
       observeSnapshot(command);
     }
     if (cancellationRequested) stopHost(true);
-    const checkpointLead = Math.min(
-      Math.max(0, options.checkpointLeadMs ?? 0),
-      Math.max(0, options.timeoutMs - 1),
-    );
-    if (checkpointLead > 0) {
-      checkpoint = setTimeout(
-        () => {
-          if (!detached && !cancellationRequested && !terminalObserved) {
-            try {
-              options.onCheckpoint?.();
-            } catch {
-              // Checkpoint delivery is best effort; host timeout remains final.
-            }
-          }
-        },
-        Math.max(1, options.timeoutMs - checkpointLead),
-      );
-      checkpoint.unref();
-    }
     let offset = 0;
     let eventsComplete = false;
     while (!detached) {
@@ -418,7 +382,6 @@ export async function runHostedDelegateChild(
       retryable: true,
     };
   } finally {
-    if (checkpoint) clearTimeout(checkpoint);
     options.signal?.removeEventListener('abort', abortHandler);
     options.detachSignal?.removeEventListener('abort', detachHandler);
   }
@@ -430,7 +393,6 @@ export async function spawnDelegateChild(
   options: SpawnChildOptions,
 ): Promise<SpawnChildResult> {
   let wasAborted = false;
-  let timedOut = false;
   let spawnError: string | undefined;
 
   const exitCode = await new Promise<number>((resolve) => {
@@ -463,11 +425,10 @@ export async function spawnDelegateChild(
       resolve(code);
     };
 
-    const terminate = (reason: 'abort' | 'timeout' = 'abort') => {
+    const terminate = () => {
       if (terminating || closed) return;
       terminating = true;
-      if (reason === 'timeout') timedOut = true;
-      else if (reason === 'abort') wasAborted = true;
+      wasAborted = true;
       if (isWindows && proc.pid) {
         spawn('taskkill', ['/T', '/F', '/PID', String(proc.pid)], {
           stdio: 'ignore',
@@ -650,43 +611,16 @@ export async function spawnDelegateChild(
       finish(1);
     });
 
-    const checkpointLead = Math.min(
-      Math.max(0, options.checkpointLeadMs ?? 0),
-      Math.max(0, options.timeoutMs - 1),
-    );
-    const checkpoint =
-      checkpointLead > 0
-        ? setTimeout(
-            () => {
-              if (closed || terminating) return;
-              try {
-                options.onCheckpoint?.();
-              } catch {
-                // Checkpoint delivery is best effort; the hard timeout remains
-                // authoritative even if the control path fails.
-              }
-            },
-            Math.max(1, options.timeoutMs - checkpointLead),
-          )
-        : undefined;
-    checkpoint?.unref();
-    const timeout = setTimeout(() => terminate('timeout'), options.timeoutMs);
-    timeout.unref();
-    proc.once('close', () => {
-      clearTimeout(timeout);
-      if (checkpoint) clearTimeout(checkpoint);
-    });
-
-    abortHandler = () => terminate('abort');
+    abortHandler = terminate;
     if (options.signal?.aborted) abortHandler();
     else
       options.signal?.addEventListener('abort', abortHandler, { once: true });
   });
 
   return {
-    exitCode: wasAborted ? 130 : timedOut ? 124 : exitCode,
+    exitCode: wasAborted ? 130 : exitCode,
     wasAborted,
-    timedOut,
+    timedOut: false,
     ...(spawnError ? { spawnError } : {}),
   };
 }

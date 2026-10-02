@@ -432,7 +432,9 @@ export async function runPreparedDelegateTask(
   prepared: PreparedDelegateTask,
   options: Pick<
     RunDelegateOptions,
-    | 'timeoutMs'
+    | 'warningAfterMs'
+    | 'startedAt'
+    | 'onRuntimeWarning'
     | 'maxConcurrency'
     | 'signal'
     | 'ownerSessionId'
@@ -483,7 +485,9 @@ export async function runPreparedDelegateTask(
     skills: prepared.skills ?? prepared.session.skills ?? [],
     isolation: prepared.isolation,
     worktree: prepared.worktree,
-    timeoutMs: options.timeoutMs,
+    warningAfterMs: options.warningAfterMs,
+    startedAt: options.startedAt,
+    onRuntimeWarning: options.onRuntimeWarning,
     maxConcurrency: options.maxConcurrency,
     signal: options.signal,
     detachSignal: options.detachSignal,

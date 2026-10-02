@@ -52,6 +52,14 @@ export interface RestoredDelegateDependencies {
   materialize?: (runs: DelegatedRun[]) => Promise<DelegateJobResult>;
   /** Feed restored live activity into the existing status store. */
   onRunUpdate?: (run: DelegatedRun) => void;
+  warningAfterMs?: number;
+  onRuntimeWarning?: (
+    ownerBranchId: string | undefined,
+    target: import('./runtime-warning').DelegateRuntimeWarningTarget,
+    run: DelegatedRun,
+    elapsedMs: number,
+    warningAfterMs: number,
+  ) => void;
   /** Injectable bounded backoff seam for deterministic recovery tests. */
   waitForRetry?: typeof waitForRetry;
 }
@@ -316,6 +324,7 @@ export function restoreHostedDelegateAttempt(
       `Workflow attempt "${identity}" has no valid local nonterminal hosted link.`,
     );
   }
+  const persistedAttempt = options.coordinator.get(link.identity);
   const session = resolveTrustedDelegateSession(
     link.sessionId,
     options.parentSessionId,
@@ -416,7 +425,22 @@ export function restoreHostedDelegateAttempt(
       continuation: session.token,
       resuming: true,
       scope: session.scope,
-      timeoutMs: 0,
+      warningAfterMs: dependencies.warningAfterMs ?? 0,
+      startedAt: persistedAttempt?.startedAt,
+      onRuntimeWarning: dependencies.onRuntimeWarning
+        ? (run, elapsedMs) =>
+            dependencies.onRuntimeWarning?.(
+              link.ownerBranchId,
+              {
+                identity: link.identity,
+                logicalId: link.logicalId,
+                route: persistedAttempt?.route ?? 'unknown',
+              },
+              run,
+              elapsedMs,
+              dependencies.warningAfterMs ?? 0,
+            )
+        : undefined,
       maxConcurrency: 1,
       signal,
       detachSignal,

@@ -6,7 +6,6 @@ import { BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES } from '@pi-agent/background-j
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   buildDelegateChildEnvironment,
-  checkpointLeadMs,
   effectiveDelegateHome,
   MAX_JSON_LINE_BYTES,
   MAX_STDERR_BYTES,
@@ -191,12 +190,6 @@ async function withHostedCase<T>(
 }
 
 describe('delegate child environment', () => {
-  test('scales the checkpoint window without moving the hard deadline', () => {
-    expect(checkpointLeadMs(10_000)).toBe(2_000);
-    expect(checkpointLeadMs(10 * 60_000)).toBe(30_000);
-    expect(checkpointLeadMs(0)).toBe(0);
-  });
-
   test('forwards a set parent HOME and keeps the existing allowlist bounded', () => {
     vi.stubEnv('HOME', '/tmp/parent-home');
     vi.stubEnv('DELEGATE_SECRET', 'must-not-forward');
@@ -225,23 +218,17 @@ describe('delegate child environment', () => {
     expect(buildDelegateChildEnvironment({}).HOME).toBe(fallback);
   });
 
-  test('requests a checkpoint before hard timeout and still terminates an idle child', async () => {
-    const checkpoint = vi.fn();
-    const run = createRun('checkpoint');
+  test('lets a local child continue beyond the old runtime deadline', async () => {
+    const run = createRun('long-running child');
     const result = await spawnDelegateChild(run, {
       command: process.execPath,
-      args: ['-e', 'setInterval(() => {}, 1_000)'],
+      args: ['-e', 'setTimeout(() => process.exit(0), 150)'],
       cwd: process.cwd(),
       env: {},
-      timeoutMs: 250,
-      checkpointLeadMs: 100,
-      killGraceMs: 100,
-      onCheckpoint: checkpoint,
       onLine: vi.fn(),
     });
 
-    expect(checkpoint).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({ timedOut: true, exitCode: 124 });
+    expect(result).toMatchObject({ timedOut: false, exitCode: 0 });
   });
 
   test('parses JSON-mode control acknowledgements from stderr', async () => {
@@ -260,7 +247,6 @@ describe('delegate child environment', () => {
       args: ['-e', script],
       cwd: process.cwd(),
       env: {},
-      timeoutMs: 5_000,
       onControlAck: acknowledge,
       onLine: vi.fn(),
     });
@@ -290,7 +276,6 @@ describe('delegate child environment', () => {
       args: ['-e', script],
       cwd: process.cwd(),
       env: {},
-      timeoutMs: 5_000,
       onControlAck: acknowledge,
       onLine: update,
     });
@@ -312,7 +297,7 @@ describe('delegate child environment', () => {
     expect(run.stderr).not.toContain('�');
   });
 
-  test('ignores stderr acknowledgements after timeout termination begins', async () => {
+  test('continues processing control acknowledgements during a long run', async () => {
     const acknowledge = vi.fn();
     const run = createRun('late stderr acknowledgement');
     const control = JSON.stringify({
@@ -321,21 +306,19 @@ describe('delegate child environment', () => {
       controlKind: 'pause',
       controlGeneration: 3,
     });
-    const script = `setTimeout(() => process.stderr.write(${JSON.stringify(`${control}\n`)}), 80); setInterval(() => {}, 1000);`;
+    const script = `setTimeout(() => process.stderr.write(${JSON.stringify(`${control}\n`)}), 80); setTimeout(() => process.exit(0), 120);`;
 
     const result = await spawnDelegateChild(run, {
       command: process.execPath,
       args: ['-e', script],
       cwd: process.cwd(),
       env: {},
-      timeoutMs: 50,
-      killGraceMs: 100,
       onControlAck: acknowledge,
       onLine: vi.fn(),
     });
 
-    expect(result).toMatchObject({ timedOut: true, exitCode: 124 });
-    expect(acknowledge).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ timedOut: false, exitCode: 0 });
+    expect(acknowledge).toHaveBeenCalledWith('late-pause', 'pause', 3);
     expect(run.stderr).not.toContain('delegate_control_ack');
   });
 
@@ -363,7 +346,6 @@ describe('delegate child environment', () => {
       args: ['-e', script],
       cwd: process.cwd(),
       env: {},
-      timeoutMs: 5_000,
       onLine: vi.fn(),
     });
 
@@ -426,7 +408,6 @@ describe('delegate child environment', () => {
       args: ['-e', script],
       cwd: process.cwd(),
       env: {},
-      timeoutMs: 15_000,
       onLine: vi.fn(),
     });
 
@@ -520,7 +501,6 @@ describe('delegate child environment', () => {
           env: {},
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
-          timeoutMs: 100,
           onControlAck: (id) => acknowledgements.push(id),
           onLine: vi.fn(),
         });
@@ -536,6 +516,7 @@ describe('delegate child environment', () => {
           argv: ['pi', '--mode', 'json'],
           exactEnv: true,
         });
+        expect(startInput()).not.toHaveProperty('timeoutMs');
         expect(acknowledgements).toEqual(['checkpoint-1']);
         expect(run.messages).toHaveLength(1);
         expect(result).toMatchObject({
@@ -578,7 +559,6 @@ describe('delegate child environment', () => {
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
           observeExisting: true,
-          timeoutMs: 100,
           onLine: vi.fn(),
         });
         expect(calls).toEqual([
@@ -607,7 +587,6 @@ describe('delegate child environment', () => {
       ownerSession: 'parent-session',
       processJobId: hostedJobId,
       observeExisting: true,
-      timeoutMs: 100,
       onLine: vi.fn(),
     });
     expect(result).toMatchObject({ retryable: true, exitCode: 1 });
@@ -628,7 +607,6 @@ describe('delegate child environment', () => {
             ownerSession: 'parent-session',
             processJobId: hostedJobId,
             observeExisting: true,
-            timeoutMs: 100,
             onLine: vi.fn(),
           }),
         ).rejects.toThrow('Unknown hosted process job');
@@ -652,7 +630,6 @@ describe('delegate child environment', () => {
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
           observeExisting: true,
-          timeoutMs: 100,
           onLine: vi.fn(),
         });
         expect(calls).not.toContain('start');
@@ -681,7 +658,6 @@ describe('delegate child environment', () => {
           env: {},
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
-          timeoutMs: 100,
           onLine: vi.fn(),
         }),
       ).rejects.toThrow();
@@ -703,7 +679,6 @@ describe('delegate child environment', () => {
           env: {},
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
-          timeoutMs: 100,
           onLine: vi.fn(),
         });
         expect(result).toMatchObject({ exitCode: 1, timedOut: false });
@@ -723,7 +698,6 @@ describe('delegate child environment', () => {
         env: {},
         ownerSession: 'parent-session',
         processJobId: 'legacy-pid-42',
-        timeoutMs: 100,
         onLine: vi.fn(),
       }),
     ).rejects.toThrow('canonical UUID');
@@ -740,7 +714,6 @@ describe('delegate child environment', () => {
         env: {},
         ownerSession: 'parent-session',
         processJobId: hostedJobId,
-        timeoutMs: 100,
         signal: controller.signal,
         onLine: vi.fn(),
       });
@@ -770,7 +743,6 @@ describe('delegate child environment', () => {
           env: {},
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
-          timeoutMs: 100,
           signal: controller.signal,
           onLine: vi.fn(),
         });
@@ -803,7 +775,6 @@ describe('delegate child environment', () => {
             env: {},
             ownerSession: 'parent-session',
             processJobId: hostedJobId,
-            timeoutMs: 100,
             signal: controller.signal,
             detachSignal: detach.signal,
             onLine: vi.fn(),
@@ -842,7 +813,6 @@ describe('delegate child environment', () => {
             env: {},
             ownerSession: 'parent-session',
             processJobId: hostedJobId,
-            timeoutMs: 100,
             detachSignal: detach.signal,
             onLine: vi.fn(),
           },
@@ -886,7 +856,6 @@ describe('delegate child environment', () => {
           env: {},
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
-          timeoutMs: 100,
           signal: controller.signal,
           detachSignal: detach.signal,
           onLine: vi.fn(),
@@ -918,7 +887,6 @@ describe('delegate child environment', () => {
           env: {},
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
-          timeoutMs: 100,
           detachSignal: detach.signal,
           onLine: vi.fn(),
         });
@@ -969,7 +937,6 @@ describe('delegate child environment', () => {
             env: {},
             ownerSession: 'parent-session',
             processJobId: hostedJobId,
-            timeoutMs: 100,
             onLine: vi.fn(),
           });
           expect(result.exitCode).toBe(0);
@@ -1031,7 +998,6 @@ describe('delegate child environment', () => {
           env: {},
           ownerSession: 'parent-session',
           processJobId: hostedJobId,
-          timeoutMs: 100,
           onLine: vi.fn(),
         });
         expect(calls).toEqual([
@@ -1062,7 +1028,6 @@ describe('delegate child environment', () => {
         args: ['-e', script],
         cwd: testHome,
         env: { HOME: path.join(testHome, 'ignored-by-parent-policy') },
-        timeoutMs: 5_000,
         onLine: vi.fn(),
       });
       const resolution = JSON.parse(readFileSync(marker, 'utf8')) as {

@@ -60,6 +60,16 @@ import {
   type RestoredDelegateDependencies,
   reconcileRestoredHostedAttempts,
 } from './restore';
+import {
+  DELEGATE_RUNTIME_WARNING_ENTRY_TYPE,
+  DELEGATE_RUNTIME_WARNING_MESSAGE_TYPE,
+  type DelegateRuntimeWarningDetails,
+  type DelegateRuntimeWarningRecord,
+  type DelegateRuntimeWarningTarget,
+  foldDelegateRuntimeWarnings,
+  formatDelegateRuntimeWarning,
+  registerDelegateRuntimeWarningRenderer,
+} from './runtime-warning';
 import { serializeDelegateRunForPublic } from './serialize';
 import { archiveOldSessionFiles, pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
@@ -159,6 +169,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   };
   const wakeBranches = new Map<string, WakeBranch>();
   let activeWake: WakeBranch | undefined;
+  let runtimeWarningOwner: string | undefined;
+  let runtimeWarnings = new Map<string, DelegateRuntimeWarningRecord>();
+  const deferredRuntimeWarnings = new Map<
+    string,
+    Map<string, DelegateRuntimeWarningRecord>
+  >();
   const syncWorkflowSurface = (mapActiveLeaf = true) => {
     if (!statuses) return;
     if (workflow) statuses.updateWorkflow(workflow.list());
@@ -353,6 +369,183 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     eagerDeliveryTimer.unref?.();
   }
 
+  const runtimeWarningDeliveryKey = (ownerBranchId: string, identity: string) =>
+    `delegate-runtime-warning:${createHash('sha256')
+      .update(`${ownerBranchId}\\0${identity}`)
+      .digest('hex')}`;
+
+  const activeAttemptIsRunning = (
+    ownerBranchId: string,
+    identity: string,
+  ): boolean => {
+    if (activeRuntime?.branchId !== ownerBranchId) return false;
+    const attempt = activeRuntime.workflow.get(identity);
+    return (
+      attempt?.ownerBranchId === ownerBranchId && attempt.state === 'running'
+    );
+  };
+
+  const persistRuntimeWarning = (
+    record: DelegateRuntimeWarningRecord,
+  ): void => {
+    if (!runtimeActive || activeRuntime?.branchId !== record.ownerBranchId)
+      throw new Error('Runtime warning owner branch is inactive.');
+    pi.appendEntry(DELEGATE_RUNTIME_WARNING_ENTRY_TYPE, record);
+    runtimeWarnings.set(record.warning.identity, record);
+  };
+
+  const publishRuntimeWarning = (
+    record: DelegateRuntimeWarningRecord,
+  ): void => {
+    if (record.state !== 'pending') return;
+    const attempt =
+      activeRuntime?.branchId === record.ownerBranchId
+        ? activeRuntime.workflow.get(record.warning.identity)
+        : undefined;
+    if (attempt?.state !== 'running') {
+      if (!attempt || !['scheduled', 'queued'].includes(attempt.state))
+        settleRuntimeWarning(record.ownerBranchId, record.warning.identity);
+      return;
+    }
+    getScopedServices(scopeId).backgroundDeliveries.publish({
+      key: runtimeWarningDeliveryKey(
+        record.ownerBranchId,
+        record.warning.identity,
+      ),
+      message: {
+        customType: DELEGATE_RUNTIME_WARNING_MESSAGE_TYPE,
+        content: formatDelegateRuntimeWarning(record.warning),
+        display: true,
+        details: record.warning,
+      },
+    });
+  };
+
+  const settleRuntimeWarning = (
+    ownerBranchId: string,
+    identity: string,
+    state: 'delivered' | 'settled' = 'settled',
+  ): void => {
+    if (ownerBranchId !== runtimeWarningOwner) return;
+    const previous = runtimeWarnings.get(identity);
+    if (previous?.state !== 'pending') return;
+    const next: DelegateRuntimeWarningRecord = { ...previous, state };
+    try {
+      persistRuntimeWarning(next);
+    } catch {
+      return;
+    }
+    if (state === 'settled')
+      getScopedServices(scopeId).backgroundDeliveries.cancel(
+        runtimeWarningDeliveryKey(ownerBranchId, identity),
+      );
+  };
+
+  const queueRuntimeWarning = (
+    ownerBranchId: string | undefined,
+    target: DelegateRuntimeWarningTarget,
+    run: DelegatedRun,
+    elapsedMs: number,
+    warningAfterMs: number,
+  ): void => {
+    if (!ownerBranchId || run.state !== 'running') return;
+    const warning: DelegateRuntimeWarningDetails = {
+      ...target,
+      startedAt: run.startedAt ?? Date.now(),
+      elapsedMs: Math.max(0, Math.floor(elapsedMs)),
+      warningAfterMs,
+      status: 'warning',
+    };
+    const record: DelegateRuntimeWarningRecord = {
+      version: 1,
+      ownerBranchId,
+      state: 'pending',
+      warning,
+    };
+    if (ownerBranchId !== runtimeWarningOwner) {
+      const pending = deferredRuntimeWarnings.get(ownerBranchId) ?? new Map();
+      if (!pending.has(target.identity)) pending.set(target.identity, record);
+      deferredRuntimeWarnings.set(ownerBranchId, pending);
+      return;
+    }
+    if (runtimeWarnings.has(target.identity)) return;
+    try {
+      persistRuntimeWarning(record);
+    } catch {
+      const pending = deferredRuntimeWarnings.get(ownerBranchId) ?? new Map();
+      pending.set(target.identity, record);
+      deferredRuntimeWarnings.set(ownerBranchId, pending);
+      return;
+    }
+    publishRuntimeWarning(record);
+  };
+
+  const activateRuntimeWarnings = (
+    ctx: ExtensionContext,
+    ownerBranchId: string,
+  ): void => {
+    getScopedServices(scopeId).backgroundDeliveries.cancelPrefix(
+      'delegate-runtime-warning:',
+    );
+    runtimeWarningOwner = ownerBranchId;
+    runtimeWarnings = foldDelegateRuntimeWarnings(
+      ctx.sessionManager.getBranch(),
+      ownerBranchId,
+    );
+    const deferred = deferredRuntimeWarnings.get(ownerBranchId);
+    if (deferred) {
+      for (const [identity, record] of deferred) {
+        if (runtimeWarnings.has(identity)) continue;
+        try {
+          persistRuntimeWarning(record);
+        } catch {}
+      }
+      deferredRuntimeWarnings.delete(ownerBranchId);
+    }
+    for (const record of runtimeWarnings.values()) {
+      if (record.state === 'pending') publishRuntimeWarning(record);
+    }
+  };
+
+  const filterRuntimeWarningMessages = <T>(messages: readonly T[]): T[] =>
+    messages.filter((message) => {
+      if (!message || typeof message !== 'object') return true;
+      const candidate = message as {
+        customType?: unknown;
+        details?: { identity?: unknown };
+      };
+      if (candidate.customType !== DELEGATE_RUNTIME_WARNING_MESSAGE_TYPE)
+        return true;
+      const identity = candidate.details?.identity;
+      if (typeof identity !== 'string') return false;
+      const record = runtimeWarnings.get(identity);
+      if (!record || record.ownerBranchId !== runtimeWarningOwner) return false;
+      if (record.state === 'delivered') return true;
+      if (record.state !== 'pending') return false;
+      if (!activeAttemptIsRunning(record.ownerBranchId, identity)) {
+        settleRuntimeWarning(record.ownerBranchId, identity);
+        return false;
+      }
+      return true;
+    });
+
+  const acknowledgeRuntimeWarnings = (messages: readonly unknown[]): void => {
+    for (const message of messages) {
+      if (!message || typeof message !== 'object') continue;
+      const candidate = message as {
+        customType?: unknown;
+        details?: { identity?: unknown };
+      };
+      const identity = candidate.details?.identity;
+      if (
+        candidate.customType === DELEGATE_RUNTIME_WARNING_MESSAGE_TYPE &&
+        typeof identity === 'string' &&
+        activeAttemptIsRunning(runtimeWarningOwner ?? '', identity)
+      )
+        settleRuntimeWarning(runtimeWarningOwner ?? '', identity, 'delivered');
+    }
+  };
+
   const allocateForkOwnerId = (): string => {
     let ownerId: string;
     do ownerId = `branch-${randomUUID()}`;
@@ -396,7 +589,18 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       ownerBranchId: branchId,
       onChange: syncWorkflowSurface,
     });
-    nextWorkflow.subscribeTerminal(() => reconcileEagerDelivery());
+    nextWorkflow.subscribeTerminal(() => {
+      reconcileEagerDelivery();
+      if (activeRuntime?.branchId === branchId) {
+        for (const [identity, record] of runtimeWarnings) {
+          if (
+            record.state === 'pending' &&
+            !activeAttemptIsRunning(branchId, identity)
+          )
+            settleRuntimeWarning(branchId, identity);
+        }
+      }
+    });
     // Import only owners whose marker is in the active branch ancestry. A
     // sibling's public impl@1 is deliberately absent and can be scheduled
     // independently without colliding with this runtime.
@@ -715,6 +919,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const previousServices = getScopedServices(previousScopeId);
     previousServices.backgroundDeliveries.cancelPrefix('delegate-jobs:');
     previousServices.backgroundDeliveries.cancelPrefix('delegate-wake:');
+    previousServices.backgroundDeliveries.cancelPrefix(
+      'delegate-runtime-warning:',
+    );
     if (previousServices.delegateWorkflow)
       previousServices.delegateWorkflow = undefined;
     if (previousScopeId !== 'default') clearDelegateSurface(previousScopeId);
@@ -730,6 +937,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     sessionManagerGenerations.set(ctx.sessionManager, generation);
     clearDelegateSurface(sessionScopeId);
     const promptConfig = loadDelegateConfig(ctx.cwd);
+    deferredRuntimeWarnings.clear();
+    runtimeWarnings.clear();
+    runtimeWarningOwner = undefined;
     promptSnapshot = {
       fingerprint: fingerprintDelegateConfig(promptConfig),
       valid: !promptConfig.error,
@@ -794,6 +1004,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
             throw new Error('Delegate branch runtime unavailable.');
           ensureBranchOwner(activeRuntime, currentCtx);
         },
+        onRuntimeWarning: queueRuntimeWarning,
       },
       promptConfig,
     );
@@ -824,6 +1035,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     setDelegateToolActive(pi, 'delegate_changes', false);
     if (branchEntries.length > 0) activateBranchesTool();
     activateWakeBranch(ctx, wakeBranchKey, true);
+    activateRuntimeWarnings(ctx, initialBranchId);
     reconcileEagerDelivery();
 
     // Reattach durable hosted links only after the owner workflow/store and
@@ -839,6 +1051,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         );
         return { runs: publicRuns, retainedRuns: runs, handoff };
       },
+      warningAfterMs: promptConfig.warningAfterMs,
+      onRuntimeWarning: queueRuntimeWarning,
       onRunUpdate: (run) => {
         const identity = run.workflowAttempt?.identity;
         if (!identity) return;
@@ -991,6 +1205,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       });
     }
     activeRuntime = target;
+    activateRuntimeWarnings(ctx, target.branchId);
     workflow = target.workflow;
     statuses = target.statuses;
     wakeBranchKey = `${scopeId}:${target.branchId}`;
@@ -1000,7 +1215,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   });
   pi.on('context', (event) => {
     const currentMessages = delivery.filterContext(event.messages);
-    return { messages: wakeDelivery.filterContext(currentMessages) };
+    const warningMessages = filterRuntimeWarningMessages(currentMessages);
+    return { messages: wakeDelivery.filterContext(warningMessages) };
   });
   pi.on('context_with_system', (event) => {
     const currentMessages = delivery.filterContext(event.messages);
@@ -1009,6 +1225,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     );
     delivery.markAutomaticDeliveriesEntered(currentMessages);
     wakeDelivery.acknowledgeEntered(currentMessages);
+    acknowledgeRuntimeWarnings(currentMessages);
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component
@@ -1076,6 +1293,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const scopedServices = getScopedServices(closingScopeId);
     scopedServices.backgroundDeliveries.cancelPrefix('delegate-jobs:');
     scopedServices.backgroundDeliveries.cancelPrefix('delegate-wake:');
+    scopedServices.backgroundDeliveries.cancelPrefix(
+      'delegate-runtime-warning:',
+    );
     if (scopedServices.delegateWorkflow)
       scopedServices.delegateWorkflow = undefined;
     clearDelegateSurface(closingScopeId);
@@ -1097,6 +1317,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     },
   );
   registerWakeMessageRenderer(pi);
+  registerDelegateRuntimeWarningRenderer(pi);
 
   pi.registerCommand('delegates', {
     description: DELEGATES_COMMAND_DESCRIPTION,

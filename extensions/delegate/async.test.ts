@@ -70,7 +70,7 @@ type Handler = (...args: unknown[]) => unknown;
 let testRoot: string;
 
 const config: DelegateConfig = {
-  timeoutMs: 60_000,
+  warningAfterMs: 60_000,
   maxParallelTasks: 2,
   maxConcurrency: 2,
   provider: 'test',
@@ -291,6 +291,17 @@ async function createAsyncHarness(
     pi,
     finish,
     hasFinish: (task: string) => finishes.has(task),
+    warn(task: string) {
+      const call = vi
+        .mocked(taskLifecycle.runPreparedDelegateTask)
+        .mock.calls.find(([item]) => item.plan.task === task);
+      if (!call?.[1].onRuntimeWarning)
+        throw new Error(`No warning hook for ${task}.`);
+      const run = createRun(task);
+      run.state = 'running';
+      run.startedAt = Date.now() - (call[1].warningAfterMs ?? 0);
+      call[1].onRuntimeWarning(run, call[1].warningAfterMs ?? 0);
+    },
     handlers,
     sendMessage,
     tools,
@@ -300,6 +311,216 @@ async function createAsyncHarness(
 }
 
 describe('async delegate extension', () => {
+  test('delivers one runtime warning independently of an all gate and keeps the delegate running', async () => {
+    const f = await createAsyncHarness('runtime-warning-parent');
+    // A launch reads current settings, not the threshold cached at session start.
+    vi.mocked(configModule.loadDelegateConfig).mockReturnValue({
+      ...config,
+      warningAfterMs: 120_000,
+    });
+    await f.tools
+      .get('delegate_start')
+      ?.execute(
+        'warn-start',
+        { id: 'worker', task: 'warning task', route: 'quick' },
+        undefined,
+        undefined,
+        f.ctx,
+      );
+    await vi.waitFor(() => expect(f.hasFinish('warning task')).toBe(true));
+    const gate = await f.tools
+      .get('delegate_gate')
+      ?.execute(
+        'warn-gate',
+        { mode: 'all', delegates: ['worker'] },
+        undefined,
+        undefined,
+        f.ctx,
+      );
+    expect(gate?.details?.state).toBe('pending');
+    f.warn('warning task');
+    f.warn('warning task');
+    expect(f.sendMessage).toHaveBeenCalledOnce();
+    const control = f.sendMessage.mock.calls[0]?.[0];
+    const message = control?.details?.message;
+    expect(control?.details?.timing).toBe('steer');
+    expect(message).toMatchObject({
+      customType: 'delegate-runtime-warning',
+      display: true,
+      details: {
+        identity: 'worker@1',
+        route: 'quick',
+        elapsedMs: 120_000,
+        warningAfterMs: 120_000,
+        status: 'warning',
+      },
+    });
+    const workflow = getScopedServices(
+      'runtime-warning-parent',
+    ).delegateWorkflow;
+    expect(workflow?.get('worker@1')).toMatchObject({ state: 'running' });
+    const filtered = f.handlers.get('context')?.({ messages: [message] }) as {
+      messages: unknown[];
+    };
+    expect(filtered.messages).toEqual([message]);
+    f.handlers.get('context_with_system')?.({ messages: [message] });
+    f.warn('warning task');
+    expect(f.sendMessage).toHaveBeenCalledOnce();
+    expect(
+      f.entries
+        .filter((entry) => entry.customType === 'delegate-runtime-warning:v1')
+        .at(-1)?.data,
+    ).toMatchObject({ state: 'delivered' });
+    expect(
+      f.entries
+        .filter((entry) => entry.customType === 'delegate-wake:v1')
+        .at(-1)?.data,
+    ).toMatchObject({
+      state: { wakes: [expect.objectContaining({ state: 'pending' })] },
+    });
+    f.finish('warning task');
+    await vi.waitFor(() => expect(f.sendMessage).toHaveBeenCalledTimes(2));
+    expect(f.sendMessage.mock.calls[1]?.[0]?.details?.message.customType).toBe(
+      'delegate-wake-result',
+    );
+    await f.handlers.get('session_shutdown')?.({}, f.ctx);
+  });
+
+  test('suppresses a pending warning after settlement and retains delivered state across recreation', async () => {
+    const f = await createAsyncHarness('warning-stale-parent');
+    await f.tools
+      .get('delegate_start')
+      ?.execute(
+        'stale-start',
+        { id: 'worker', task: 'stale warning task', route: 'quick' },
+        undefined,
+        undefined,
+        f.ctx,
+      );
+    await vi.waitFor(() =>
+      expect(f.hasFinish('stale warning task')).toBe(true),
+    );
+    f.warn('stale warning task');
+    const message = f.sendMessage.mock.calls[0]?.[0]?.details?.message;
+    f.finish('stale warning task');
+    await vi.waitFor(() =>
+      expect(
+        getScopedServices('warning-stale-parent').delegateWorkflow?.get(
+          'worker@1',
+        ),
+      ).toMatchObject({ state: 'success' }),
+    );
+    expect(
+      (
+        f.handlers.get('context')?.({ messages: [message] }) as {
+          messages: unknown[];
+        }
+      ).messages,
+    ).toEqual([]);
+    expect(
+      f.entries
+        .filter((entry) => entry.customType === 'delegate-runtime-warning:v1')
+        .at(-1)?.data,
+    ).toMatchObject({ state: 'settled' });
+    await f.handlers.get('session_shutdown')?.({}, f.ctx);
+
+    const owner = (
+      f.entries.find(
+        (entry) => entry.customType === 'delegate-runtime-warning:v1',
+      )?.data as { ownerBranchId: string }
+    ).ownerBranchId;
+    const entries = f.entries.map((entry) =>
+      entry.customType === 'delegate-runtime-warning:v1'
+        ? { ...entry, data: { ...(entry.data as object), state: 'delivered' } }
+        : entry,
+    );
+    const restored = await createAsyncHarness('warning-stale-parent', {
+      entries,
+      leafId: 'warning-reloaded',
+    });
+    expect(restored.sendMessage).not.toHaveBeenCalled();
+    expect(
+      (
+        restored.handlers.get('context')?.({ messages: [message] }) as {
+          messages: unknown[];
+        }
+      ).messages,
+    ).toEqual([message]);
+    expect(
+      entries
+        .filter((entry) => entry.customType === 'delegate-runtime-warning:v1')
+        .at(-1)?.data,
+    ).toMatchObject({ ownerBranchId: owner, state: 'delivered' });
+    await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
+  });
+
+  test('defers runtime warnings while a sibling branch is active', async () => {
+    const f = await createAsyncHarness('warning-branch-parent');
+    await f.tools
+      .get('delegate_start')
+      ?.execute(
+        'branch-warning-start',
+        { id: 'worker', task: 'branch warning task', route: 'quick' },
+        undefined,
+        undefined,
+        f.ctx,
+      );
+    await vi.waitFor(() =>
+      expect(f.hasFinish('branch warning task')).toBe(true),
+    );
+    const left = f.entries;
+    const right: typeof f.entries = [];
+    let branch = 'left';
+    const manager = f.ctx.sessionManager as unknown as {
+      getLeafId(): string;
+      getBranch(): unknown[];
+      getEntries(): unknown[];
+      getChildren(): unknown[];
+    };
+    manager.getLeafId = () => branch;
+    manager.getBranch = () => (branch === 'left' ? left : right);
+    manager.getEntries = () => [...left, ...right];
+    manager.getChildren = () => [];
+    f.pi.appendEntry = (customType, data) =>
+      (branch === 'left' ? left : right).push({
+        type: 'custom',
+        customType,
+        data,
+      });
+    branch = 'right';
+    f.handlers.get('session_tree')?.(
+      { oldLeafId: 'left', newLeafId: 'right' },
+      f.ctx,
+    );
+    f.warn('branch warning task');
+    expect(f.sendMessage).not.toHaveBeenCalled();
+    expect(
+      right.some((entry) => entry.customType === 'delegate-runtime-warning:v1'),
+    ).toBe(false);
+    branch = 'left';
+    f.handlers.get('session_tree')?.(
+      { oldLeafId: 'right', newLeafId: 'left' },
+      f.ctx,
+    );
+    expect(f.sendMessage).toHaveBeenCalledOnce();
+    const message = f.sendMessage.mock.calls[0]?.[0]?.details?.message;
+    expect(message?.details?.identity).toBe('worker@1');
+    branch = 'right';
+    f.handlers.get('session_tree')?.(
+      { oldLeafId: 'left', newLeafId: 'right' },
+      f.ctx,
+    );
+    expect(
+      (
+        f.handlers.get('context')?.({ messages: [message] }) as {
+          messages: unknown[];
+        }
+      ).messages,
+    ).toEqual([]);
+    f.finish('branch warning task');
+    await f.handlers.get('session_shutdown')?.({}, f.ctx);
+  });
+
   test('carries a model-facing relative skill through writable preparation and child argv', async () => {
     const repository = path.join(testRoot, 'repository');
     const requestedCwd = path.join(repository, 'nested');
@@ -2233,7 +2454,8 @@ describe('async delegate extension', () => {
     ]);
     const invalidConfig: DelegateConfig = {
       ...config,
-      error: 'delegate.timeoutMs must be an integer between 10000 and 3600000.',
+      error:
+        'delegate.warningAfterMs must be an integer between 10000 and 3600000.',
     };
     configLoader.mockReturnValue(invalidConfig);
     await handlers.get('session_start')?.({}, ctx);
@@ -2267,7 +2489,7 @@ describe('async delegate extension', () => {
       'Prompt guidance is current',
     );
     notify.mockClear();
-    configLoader.mockReturnValue({ ...config, timeoutMs: 120_000 });
+    configLoader.mockReturnValue({ ...config, warningAfterMs: 120_000 });
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify).toHaveBeenCalledWith(
       expect.stringContaining('Comparison: differs'),
