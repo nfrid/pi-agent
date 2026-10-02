@@ -461,6 +461,9 @@ describe('canonical prompt composition', () => {
     for (const prompt of prompts) {
       expect(prompt).toContain('<agent_instructions>\n# Working style');
       expect(prompt).toContain('\n\n# Interaction\n');
+      expect(prompt).toContain(
+        'Before sending, make a brief editing pass using the Unslop rules;',
+      );
       expect(prompt).toContain('\n\n# Unslop\n');
       expect(prompt).toContain('\n\n# Tool use\n');
       expect(prompt).toContain(
@@ -475,6 +478,12 @@ describe('canonical prompt composition', () => {
       );
       expect(prompt).toContain(
         'inspect its shape (keys, counts, or a small sample)',
+      );
+      expect(prompt).toContain(
+        'choose directories or files first and exclude generated, minified, and dependency code unless needed.',
+      );
+      expect(prompt).toContain(
+        'If output truncates, narrow the search and retry the relevant subset instead of proceeding on incomplete evidence.',
       );
       expect(prompt).toContain('Discover only when a signature is missing');
       expect(prompt).toContain('For non-trivial `bash` calls');
@@ -508,6 +517,12 @@ describe('canonical prompt composition', () => {
     );
     expect(prompt).toContain(
       'continue through routine component and validation steps without renewed approval.',
+    );
+    expect(prompt).toContain(
+      'complete all agreed in-scope items; do not stop after diagnosis or one item to propose or defer the rest.',
+    );
+    expect(prompt).toContain(
+      'Report partial completion and blockers explicitly.',
     );
     expect(prompt.match(/Keep the current work mode/g)).toHaveLength(1);
   });
