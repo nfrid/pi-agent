@@ -21,7 +21,7 @@ Read-only review lifecycle counters cover clean snapshot retirements, same-snaps
 
 ## Routing and ratios
 
-`routes` contains unique `routedTasks`: runs with both a route and recorded child usage. Each route reports tasks, turns, input/output usage, cost, and relative cost. `childTurnsPerTask` and `childCostPerTask` divide by `routedTasks`, not all delegated tasks or report copies.
+`routes` contains unique `routedTasks`: runs with a route and explicit recorded child usage. Explicit numeric zero fields count as measured usage; a route name or `relativeCost` alone does not. Current workflow journals omit child usage, so those started attempts count in `childUsageUnavailableTasks` and not in `routedTasks`. `childTurnsPerTask` and `childCostPerTask` divide by `routedTasks` and are `null` when no usage samples exist. Cohort medians for these ratios ignore sessions with unavailable values and remain `null` when no sessions have a measured value. Totals include measured samples only. `relativeCost` is retained only for legacy routed samples and is not used to estimate missing usage.
 
 Other ratios are `cacheHitRatio`, `delegateHandoffBytesPerTask`, `delegateTruncationRate`, and `delegateContinuationRate`. Cohort ratios are recomputed from summed totals, never averaged from per-session ratios.
 
@@ -33,7 +33,9 @@ Metrics describe observed cost and reporting, not correctness. Compare cohorts o
 
 ## Task outcome episodes
 
-The schema is `session-metrics/v8`. In addition to the existing metrics, every
+The schema is `session-metrics/v9`. Current `delegate-workflow:v1` snapshots and deltas are folded on active ancestry. Snapshots replace earlier journal state; deltas replace records by attempt identity. Journal attempts with `startedAt` count as executions, so scheduled, queued, and blocked-only metadata does not create child tasks. If a journal record is absent, terminal wake-source states also establish an execution; blocked and queued wake states do not. Repeated journal records do not inflate execution counts. Successful async tool receipts are not rejected calls. Each delivered `delegate-wake-result` contributes its parent-visible text bytes once, even when a delivery carries multiple sources or another wake delivers the same attempt. Wake source states do not add executions when a journal already records that attempt. Terminal journal and wake-source errors, timeouts, and aborts feed delegate failure episodes from the first observed terminal event.
+
+In addition to the existing metrics, every
 session has an aggregate `episodeCohorts` object with `all`, `byShape`, and
 `byLanguage` buckets. Shapes are only tool-pattern observations:
 `analysis-only`, `mutation-unvalidated`, `mutation-validated`, `operations`,

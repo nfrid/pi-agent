@@ -614,6 +614,177 @@ describe('retry-aware session episode facets', () => {
     });
   });
 
+  it('correlates current journal failures with the async receipt', () => {
+    const source = transcript(({ user, tool, answer, values }) => {
+      user('Recover this work');
+      tool(
+        'delegate_start',
+        {},
+        {
+          resultDetails: {
+            workflow: { identity: 'safe-work@1', state: 'scheduled' },
+          },
+        },
+      );
+      values.push({
+        type: 'custom',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                identity: 'safe-work@1',
+                logicalId: 'safe-work',
+                attempt: 1,
+                state: 'timed-out',
+                startedAt: 2,
+                settledAt: 3,
+              },
+            ],
+          },
+        },
+        id: 'workflow-failure',
+        parentId: values.at(-1).id,
+      });
+      answer('Recovered.');
+      values.at(-1).parentId = 'workflow-failure';
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      operational: 'timed-out',
+      recovery: { delegateProviderFailures: 1, reachedSettled: false },
+    });
+  });
+
+  it('orders concurrent workflow failures by terminal observation, not start order', () => {
+    const source = transcript(({ user, tool, answer, values }) => {
+      user('Recover concurrent work');
+      const schedule = (identity) =>
+        tool(
+          'delegate_start',
+          {},
+          { resultDetails: { workflow: { identity, state: 'scheduled' } } },
+        );
+      const terminalEvent = (identity, id) => ({
+        type: 'custom',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                identity,
+                logicalId: identity.split('@')[0],
+                attempt: 1,
+                state: 'error',
+                startedAt: 2,
+                settledAt: 3,
+              },
+            ],
+          },
+        },
+        id,
+        parentId: values.at(-1).id,
+      });
+      schedule('first-start@1');
+      schedule('second-start@1');
+      values.push(terminalEvent('second-start@1', 'second-failure'));
+      tool('read', { path: 'src/a.ts' });
+      values.at(-2).parentId = 'second-failure';
+      values.push(terminalEvent('first-start@1', 'first-failure'));
+      tool('write', { path: 'src/a.ts', content: 'change' });
+      values.at(-2).parentId = 'first-failure';
+      tool('bash', { command: 'npm test' });
+      answer('Recovered.');
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      operational: 'inferred-settled',
+      recovery: {
+        delegateProviderFailures: 2,
+        parentTurnsAfterFailure: 4,
+        parentToolCallsAfterFailure: 3,
+        reachedSettled: true,
+        reachedObservedVerification: true,
+      },
+    });
+  });
+
+  it('starts async failure recovery only at the first terminal observation', () => {
+    const source = transcript(({ user, tool, answer, values }) => {
+      user('Recover this work');
+      tool(
+        'delegate_start',
+        {},
+        {
+          resultDetails: {
+            workflow: { identity: 'safe-work@1', state: 'scheduled' },
+          },
+        },
+      );
+      tool('read', { path: 'src/a.ts' });
+      const terminal = {
+        type: 'custom',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                identity: 'safe-work@1',
+                logicalId: 'safe-work',
+                attempt: 1,
+                state: 'error',
+                startedAt: 2,
+                settledAt: 3,
+              },
+            ],
+          },
+        },
+        id: 'terminal-failure',
+        parentId: values.at(-1).id,
+      };
+      values.push(terminal);
+      tool('write', { path: 'src/a.ts', content: 'change' });
+      values.at(-2).parentId = terminal.id;
+      tool('bash', { command: 'npm test' });
+      values.push({
+        ...terminal,
+        id: 'repeated-failure-delta',
+        parentId: values.at(-1).id,
+      });
+      values.push({
+        ...terminal,
+        data: { ...terminal.data, kind: 'snapshot' },
+        id: 'repeated-failure-snapshot',
+        parentId: values.at(-1).id,
+      });
+      answer('Recovered.');
+      values.at(-1).parentId = 'repeated-failure-snapshot';
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      operational: 'inferred-settled',
+      recovery: {
+        delegateProviderFailures: 1,
+        parentTurnsAfterFailure: 3,
+        parentToolCallsAfterFailure: 2,
+        reachedSettled: true,
+        reachedObservedVerification: true,
+      },
+    });
+  });
+
   it('connects delegate/provider failure to parent recovery and verification', () => {
     const source = transcript(({ user, tool, answer }) => {
       user('Recover this work');

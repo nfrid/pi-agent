@@ -2,6 +2,10 @@ import {
   hasUnresolvedToolFailure as sharedHasUnresolvedToolFailure,
   validationKindsOf,
 } from '../../extensions/activity-groups/outcome-core.mjs';
+import {
+  currentWorkflowAttempts,
+  isCurrentDelegateReceipt,
+} from './current-events.mjs';
 
 const TODO_CUSTOM_TYPES = new Set([
   'lean-todo',
@@ -1118,7 +1122,11 @@ function delegateFacet(entries, calls, results) {
     const runs = Array.isArray(result?.message?.details?.runs)
       ? result.message.details.runs
       : [];
-    if (result?.message?.isError === true && runs.length === 0) {
+    if (
+      result?.message?.isError === true &&
+      runs.length === 0 &&
+      !isCurrentDelegateReceipt(result.message)
+    ) {
       failures.push({ index: call.entryIndex, id: call.id });
       continue;
     }
@@ -1149,6 +1157,29 @@ function delegateFacet(entries, calls, results) {
         failures.push({ index: call.entryIndex, id, run });
     });
   }
+  const callsByIdentity = new Map(
+    calls.flatMap((call) => {
+      const result = results.get(call.id);
+      const identity = result?.message?.details?.workflow?.identity;
+      return typeof identity === 'string' ? [[identity, call]] : [];
+    }),
+  );
+  for (const [identity, record] of currentWorkflowAttempts(entries)) {
+    const attempt = record.attempt;
+    if (
+      attempt.startedAt === undefined ||
+      !['error', 'timed-out', 'aborted'].includes(attempt.state)
+    )
+      continue;
+    const call = callsByIdentity.get(identity);
+    failures.push({
+      index: record.terminalIndex ?? record.index,
+      id: identity,
+      callId: call?.id,
+      terminal: true,
+      run: { state: attempt.state },
+    });
+  }
   for (const entry of entries) {
     if (entry.customType !== 'delegate-job-result') continue;
     const jobs = Array.isArray(entry.details?.jobs)
@@ -1165,6 +1196,7 @@ function delegateFacet(entries, calls, results) {
         failures.push({ index: entry.__episodeIndex, id, job });
     }
   }
+  failures.sort((left, right) => left.index - right.index);
   return { failures, seen };
 }
 
@@ -1223,12 +1255,17 @@ function deriveEpisodeRecord(entries, epoch, context) {
   const unresolved = hasUnresolvedToolFailure(
     items.filter((item) => TOOL_BASE(item.name) !== 'delegate'),
   );
-  const runStates = calls.flatMap((call) => {
-    const result = results.get(call.id);
-    return Array.isArray(result?.message?.details?.runs)
-      ? result.message.details.runs
-      : [];
-  });
+  const runStates = [
+    ...calls.flatMap((call) => {
+      const result = results.get(call.id);
+      return Array.isArray(result?.message?.details?.runs)
+        ? result.message.details.runs
+        : [];
+    }),
+    ...[...currentWorkflowAttempts(scopedEntries).values()]
+      .filter(({ attempt }) => attempt.startedAt !== undefined)
+      .map(({ attempt }) => ({ state: attempt.state })),
+  ];
   const timedOut = runStates.some(
     (run) => run?.state === 'timed-out' || run?.exitCode === 124,
   );
@@ -1256,8 +1293,13 @@ function deriveEpisodeRecord(entries, epoch, context) {
   );
   const firstFailure = delegate.failures.at(0);
   const firstFailureCall = firstFailure
-    ? calls.find((call) => call.id === firstFailure.id)
+    ? calls.find((call) => call.id === (firstFailure.callId ?? firstFailure.id))
     : undefined;
+  const failureObservedAfterCall = Boolean(
+    firstFailure?.terminal &&
+      firstFailureCall &&
+      firstFailure.index > firstFailureCall.entryIndex,
+  );
   const parentEntries = firstFailure
     ? scopedEntries.filter(
         (entry) =>
@@ -1268,9 +1310,11 @@ function deriveEpisodeRecord(entries, epoch, context) {
     : [];
   const parentToolCalls = firstFailure
     ? calls.filter((call) =>
-        firstFailureCall
-          ? callAfter(call, firstFailureCall)
-          : call.entryIndex > firstFailure.index,
+        failureObservedAfterCall
+          ? call.entryIndex > firstFailure.index
+          : firstFailureCall
+            ? callAfter(call, firstFailureCall)
+            : call.entryIndex > firstFailure.index,
       ).length
     : 0;
   // A timed-out child remains visible in recovery failures, but successful
@@ -1283,9 +1327,11 @@ function deriveEpisodeRecord(entries, epoch, context) {
         )
           return false;
         if (
-          firstFailureCall
-            ? !callAfter(call, firstFailureCall)
-            : call.entryIndex <= firstFailure.index
+          failureObservedAfterCall
+            ? call.entryIndex <= firstFailure.index
+            : firstFailureCall
+              ? !callAfter(call, firstFailureCall)
+              : call.entryIndex <= firstFailure.index
         )
           return false;
         return successfulResult(results.get(call.id));

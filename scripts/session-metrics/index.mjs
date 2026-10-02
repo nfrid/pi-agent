@@ -4,9 +4,13 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  currentWorkflowAttempts,
+  isCurrentDelegateReceipt,
+} from './current-events.mjs';
 import { aggregateEpisodeCohorts, deriveEpisodes } from './episodes.mjs';
 
-export const SCHEMA_VERSION = 'session-metrics/v8';
+export const SCHEMA_VERSION = 'session-metrics/v9';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -55,6 +59,7 @@ const METRIC_KEYS = [
   'childTurns',
   'childUsageInput',
   'childUsageOutput',
+  'childUsageUnavailableTasks',
   'childCost',
 ];
 
@@ -66,6 +71,7 @@ function ratio(numerator, denominator) {
  * Derived measurements, computed the same way for one session and for a cohort
  * so a cohort ratio is never a mean of per-session ratios.
  */
+const NULLABLE_RATIO_KEYS = new Set(['childTurnsPerTask', 'childCostPerTask']);
 const RATIO_KEYS = {
   cacheHitRatio: (m) =>
     ratio(
@@ -80,8 +86,10 @@ const RATIO_KEYS = {
     ratio(m.delegateContinuationCalls, m.delegateToolCalls),
   // Child spend is only comparable to executions whose routing record also
   // carried usage. Legacy runs and repeated report deliveries are excluded.
-  childTurnsPerTask: (m) => ratio(m.childTurns, m.routedTasks),
-  childCostPerTask: (m) => ratio(m.childCost, m.routedTasks),
+  childTurnsPerTask: (m) =>
+    m.routedTasks === 0 ? null : ratio(m.childTurns, m.routedTasks),
+  childCostPerTask: (m) =>
+    m.routedTasks === 0 ? null : ratio(m.childCost, m.routedTasks),
 };
 
 function withRatios(metrics) {
@@ -322,6 +330,7 @@ function recordDelegateResult(state, message, executionNumber, entries = []) {
   const stableCallId =
     typeof message.toolCallId === 'string' ? message.toolCallId : undefined;
   if (runs.length === 0) {
+    if (isCurrentDelegateReceipt(message)) return { runs, background: false };
     metrics.delegateRejectedCalls += 1;
     if (stableCallId)
       for (let index = 0; index < entries.length; index += 1)
@@ -416,7 +425,7 @@ function recordRunIndicators(state, run, id, outcome) {
 
 function hasRoutingUsage(usage) {
   return ['turns', 'input', 'output', 'cost'].some(
-    (key) => finiteNumber(usage?.[key]) !== 0,
+    (key) => typeof usage?.[key] === 'number' && Number.isFinite(usage[key]),
   );
 }
 
@@ -590,6 +599,7 @@ export function parseSessionJsonl(source, options = {}) {
 
   const active = activeAncestry(entries);
   const metrics = Object.fromEntries(METRIC_KEYS.map((key) => [key, 0]));
+  const workflowAttempts = currentWorkflowAttempts(active);
   const state = {
     metrics,
     routes: {},
@@ -610,6 +620,15 @@ export function parseSessionJsonl(source, options = {}) {
     const timestamp = Date.parse(entry.timestamp ?? entry.message?.timestamp);
     if (Number.isFinite(timestamp)) timestamps.push(timestamp);
     if (entry.type === 'compaction') metrics.compactions += 1;
+    if (entry.customType === 'delegate-wake-result') {
+      metrics.delegateBackgroundDeliveries += 1;
+      metrics.delegateHandoffBytes += Buffer.byteLength(
+        typeof entry.content === 'string'
+          ? entry.content
+          : resultText({ content: entry.content }),
+        'utf8',
+      );
+    }
     // A finished background job is pushed to the parent as a steering message,
     // outside the tool-result stream its `delegate` call belonged to.
     if (entry.customType === 'delegate-job-result')
@@ -684,6 +703,25 @@ export function parseSessionJsonl(source, options = {}) {
         message.details.action === 'peek' ? 'peek' : undefined,
       );
   }
+  for (const [identity, { attempt }] of workflowAttempts) {
+    if (attempt.startedAt === undefined) continue;
+    const runs = Array.isArray(attempt.result?.runs) ? attempt.result.runs : [];
+    const executions = runs.length
+      ? runs
+      : [{ state: attempt.state, allowWrites: attempt.allowWrites }];
+    const ids = executions.map((run) => run?.runId ?? identity);
+    const rawHandoff = attempt.result?.handoff?.text;
+    const handoff = typeof rawHandoff === 'string' ? rawHandoff : '';
+    recordExecution(state, executions, ids, handoff);
+    if (runs.length) {
+      recordRouting(state, runs, ids);
+      metrics.childUsageUnavailableTasks += runs.filter(
+        (run) => !hasRoutingUsage(run?.usage),
+      ).length;
+    } else {
+      metrics.childUsageUnavailableTasks += 1;
+    }
+  }
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);
 
@@ -742,7 +780,16 @@ export function aggregateSessions(sessions) {
   withRatios(totals);
   const medians = Object.fromEntries(
     [...METRIC_KEYS, ...Object.keys(RATIO_KEYS), 'malformedLines'].map(
-      (key) => [key, median(sessions.map((session) => session[key]))],
+      (key) => {
+        const values = sessions.map((session) => session[key]);
+        if (NULLABLE_RATIO_KEYS.has(key)) {
+          const measured = values.filter(
+            (value) => typeof value === 'number' && Number.isFinite(value),
+          );
+          return [key, measured.length === 0 ? null : median(measured)];
+        }
+        return [key, median(values)];
+      },
     ),
   );
   return {
@@ -802,7 +849,9 @@ function subtract(comparison, baseline) {
   return Object.fromEntries(
     Object.keys(comparison).map((key) => [
       key,
-      comparison[key] - baseline[key],
+      comparison[key] === null || baseline[key] === null
+        ? null
+        : comparison[key] - baseline[key],
     ]),
   );
 }

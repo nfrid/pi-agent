@@ -2,6 +2,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { currentWorkflowAttempts } from './current-events.mjs';
 import {
   aggregateSessions,
   compareSummaries,
@@ -122,6 +123,7 @@ function delegateFixture(exchanges) {
           customType: exchange.customType,
           content: exchange.content,
           details: exchange.details,
+          data: exchange.data,
           id,
           parentId,
           timestamp: `2026-01-01T00:03:${String(index).padStart(2, '0')}.000Z`,
@@ -255,7 +257,249 @@ describe('parseSessionJsonl', () => {
   });
 });
 
+describe('current delegate event folding', () => {
+  it('keeps a wake-before-journal terminal observation time', () => {
+    const attempts = currentWorkflowAttempts([
+      {
+        customType: 'delegate-wake-result',
+        details: {
+          presentation: {
+            sources: [{ identity: 'sample@1', state: 'error' }],
+          },
+        },
+      },
+      {
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'delta',
+          state: {
+            version: 1,
+            attempts: [{ identity: 'sample@1', state: 'error', startedAt: 1 }],
+          },
+        },
+      },
+    ]);
+    expect(attempts.get('sample@1')).toMatchObject({
+      attempt: { state: 'error', startedAt: 1 },
+      terminalIndex: 0,
+    });
+  });
+});
+
 describe('delegate measurements', () => {
+  it('counts current async attempts and wake copies once, with unavailable child usage', () => {
+    const attempt = (identity, state, startedAt = 2, result) => ({
+      identity,
+      logicalId: 'safe-task',
+      attempt: Number(identity.split('@')[1]),
+      state,
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...(startedAt === undefined ? {} : { startedAt }),
+      ...(state === 'success' || state === 'error' ? { settledAt: 3 } : {}),
+      route: 'safe-route',
+      allowWrites: false,
+      ...(result ? { result } : {}),
+    });
+    const resultFor = (identity, outcome) => ({
+      handoff: {
+        text: `Outcome: ${outcome}`,
+        bytes: Buffer.byteLength(`Outcome: ${outcome}`),
+      },
+      runs: [
+        {
+          runId: `run-${identity}`,
+          state: 'success',
+          exitCode: 0,
+          allowWrites: false,
+          worktree: { id: 'safe-worktree' },
+        },
+      ],
+    });
+    const journal = (kind, attempts) => ({
+      customType: 'delegate-workflow:v1',
+      data: { version: 1, kind, state: { version: 1, attempts } },
+    });
+    const wake = {
+      customType: 'delegate-wake-result',
+      content: 'visible report',
+      details: {
+        deliveryKey: 'delivery-1',
+        presentation: {
+          condition: 'all',
+          sources: [
+            { identity: 'safe-task@1', state: 'success' },
+            { identity: 'safe-task@2', state: 'success' },
+          ],
+        },
+      },
+    };
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          name: 'delegate_start',
+          details: {
+            workflow: { identity: 'safe-task@1', state: 'scheduled' },
+          },
+        },
+        journal('delta', [
+          attempt(
+            'safe-task@1',
+            'success',
+            2,
+            resultFor('safe-task@1', 'done'),
+          ),
+        ]),
+        {
+          name: 'delegate_continue',
+          details: {
+            workflow: { identity: 'safe-task@2', state: 'scheduled' },
+          },
+        },
+        journal('delta', [
+          attempt(
+            'safe-task@1',
+            'success',
+            2,
+            resultFor('safe-task@1', 'done'),
+          ),
+          attempt(
+            'safe-task@2',
+            'success',
+            2,
+            resultFor('safe-task@2', 'partial'),
+          ),
+        ]),
+        journal('delta', [
+          attempt(
+            'safe-task@1',
+            'success',
+            2,
+            resultFor('safe-task@1', 'done'),
+          ),
+          attempt(
+            'safe-task@2',
+            'success',
+            2,
+            resultFor('safe-task@2', 'partial'),
+          ),
+        ]),
+        wake,
+        { ...wake, details: { ...wake.details, deliveryKey: 'delivery-2' } },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateRejectedCalls: 0,
+      delegatedTasks: 2,
+      delegateOutcomeDone: 1,
+      delegateOutcomePartial: 1,
+      delegateWorktreeReturns: 2,
+      delegateHandoffBytes: Buffer.byteLength('visible report') * 2,
+      childUsageUnavailableTasks: 2,
+      routedTasks: 0,
+    });
+    expect(result.childCostPerTask).toBeNull();
+  });
+
+  it('uses terminal wake sources as deduplicated execution evidence without a journal', () => {
+    const wake = {
+      customType: 'delegate-wake-result',
+      content: 'gate report',
+      details: {
+        presentation: {
+          sources: [
+            { identity: 'completed@1', state: 'success' },
+            { identity: 'timed-out@1', state: 'timed-out' },
+            { identity: 'blocked@1', state: 'blocked' },
+          ],
+        },
+      },
+    };
+    const result = parseSessionJsonl(
+      delegateFixture([wake, { ...wake, content: 'repeat report' }]),
+    );
+    expect(result).toMatchObject({
+      delegatedTasks: 2,
+      delegateOutcomeUnreported: 2,
+      delegateOutcomeFailed: 0,
+      delegateProcessTimeouts: 1,
+      childUsageUnavailableTasks: 2,
+      delegateHandoffBytes:
+        Buffer.byteLength('gate report') + Buffer.byteLength('repeat report'),
+    });
+  });
+
+  it('does not accept an errored workflow-shaped receipt', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          name: 'delegate_start',
+          details: { workflow: { identity: 'invalid@1', state: 'scheduled' } },
+          isError: true,
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateRejectedCalls: 1,
+      delegatedTasks: 0,
+    });
+  });
+
+  it('counts only started journal attempts and terminal workflow failures', () => {
+    const attempt = (identity, state, startedAt) => ({
+      identity,
+      logicalId: identity.split('@')[0],
+      attempt: 1,
+      state,
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...(startedAt === undefined ? {} : { startedAt }),
+      ...(state === 'error' ? { settledAt: 3 } : {}),
+      allowWrites: true,
+    });
+    const event = (kind, attempts) => ({
+      customType: 'delegate-workflow:v1',
+      data: { version: 1, kind, state: { version: 1, attempts } },
+    });
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          name: 'delegate_start',
+          details: { workflow: { identity: 'queued@1', state: 'scheduled' } },
+        },
+        event('snapshot', [
+          attempt('queued@1', 'queued'),
+          attempt('blocked@1', 'blocked'),
+        ]),
+        event('delta', [attempt('failed@1', 'error', 2)]),
+        event('delta', [attempt('failed@1', 'error', 2)]),
+        {
+          customType: 'delegate-wake-result',
+          content: 'one gate report',
+          details: {
+            presentation: {
+              condition: 'all',
+              sources: [{ identity: 'failed@1', state: 'error' }],
+            },
+          },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateRejectedCalls: 0,
+      delegatedTasks: 1,
+      delegateOutcomeUnreported: 1,
+      delegateProcessErrors: 1,
+      childUsageUnavailableTasks: 1,
+      delegateHandoffBytes: Buffer.byteLength('one gate report'),
+    });
+  });
+
   it('recognizes fresh and continue delegate tools while retaining legacy delegate metrics', () => {
     const result = parseSessionJsonl(
       delegateFixture([
@@ -325,6 +569,35 @@ describe('delegate measurements', () => {
       delegatedTasks: 1,
       delegateHandoffBytes: 2,
       delegateHandoffBytesPerTask: 2,
+    });
+  });
+
+  it('keeps explicit zero child usage as a measured sample', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'zero',
+          details: {
+            runs: [
+              {
+                routing: { route: 'safe-route' },
+                usage: { turns: 0, input: 0, output: 0, cost: 0 },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegatedTasks: 1,
+      routedTasks: 1,
+      childUsageUnavailableTasks: 0,
+      childTurns: 0,
+      childUsageInput: 0,
+      childUsageOutput: 0,
+      childCost: 0,
+      childTurnsPerTask: 0,
+      childCostPerTask: 0,
     });
   });
 
@@ -1246,6 +1519,38 @@ describe('cohorts', () => {
     expect(result.cohort.totals.delegateWritableTasks).toBe(2);
   });
 
+  it('keeps nullable usage-ratio medians missing when samples are unavailable', () => {
+    const unavailable = parseSessionJsonl(delegateFixture([]));
+    const measured = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Outcome: done',
+          details: {
+            runs: [
+              {
+                routing: { route: 'safe-route' },
+                usage: { turns: 2, input: 4, output: 1, cost: 6 },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const unknownCohort = aggregateSessions([unavailable, unavailable]);
+    expect(unknownCohort.medians.childCostPerTask).toBeNull();
+    expect(unknownCohort.medians.childTurnsPerTask).toBeNull();
+
+    const mixedCohort = aggregateSessions([unavailable, measured]);
+    expect(mixedCohort.medians.childCostPerTask).toBe(6);
+    expect(mixedCohort.medians.childTurnsPerTask).toBe(2);
+    const comparison = compareSummaries(
+      { cohort: unknownCohort },
+      { cohort: mixedCohort },
+    );
+    expect(comparison.deltas.totals.childCostPerTask).toBeNull();
+    expect(comparison.deltas.medians.childCostPerTask).toBeNull();
+  });
+
   it('computes weighted totals, medians, and comparison deltas', () => {
     const baselineSessions = [
       parseSessionJsonl(fixture({ input: 10, cacheRead: 30 })),
@@ -1267,5 +1572,6 @@ describe('cohorts', () => {
     expect(comparison.deltas.totals.cacheHitRatio).toBeCloseTo(
       100 / 130 - 40 / 90,
     );
+    expect(comparison.deltas.totals.childCostPerTask).toBeNull();
   });
 });
