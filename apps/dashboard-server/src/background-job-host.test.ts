@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -441,16 +441,20 @@ describe('background process host', () => {
     }
   });
 
-  it('marks clipped event lines explicitly', async () => {
+  it('keeps exact multibyte bytes for a clipped line in the owner event journal', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'background-event-line-'),
     );
+    const prefix = Buffer.from('{"type":"message_end","text":"🙂');
+    const suffix = Buffer.from(`${'x'.repeat(70_000)}"}`);
+    const bytes = Buffer.concat([prefix, Buffer.from([0xff, 0xfe]), suffix]);
     try {
       const host = await createHost(root);
       const client = new BackgroundJobsClient(host.socketPath, 'session');
+      const script = `const bytes=Buffer.concat([Buffer.from('{"type":"message_end","text":"🙂'),Buffer.from([255,254]),Buffer.from('x'.repeat(70000)+'"}')]); const split=bytes.indexOf(Buffer.from('🙂'))+2; process.stdout.write(bytes.subarray(0,split)); setTimeout(()=>{process.stdout.write(bytes.subarray(split)); process.stdout.write('\\r\\n')},10)`;
       await client.start({
         id,
-        command: `node -e ${JSON.stringify(`process.stdout.write('x'.repeat(${BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES + 1}) + '\\n')`)}`,
+        command: `node -e ${JSON.stringify(script)}`,
         title: 'line bound',
         cwd: repositoryRoot,
         events: true,
@@ -461,6 +465,47 @@ describe('background process host', () => {
       expect(Buffer.byteLength(event?.text ?? '')).toBeLessThanOrEqual(
         BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
       );
+      expect(event?.overflow?.bytes).toBe(bytes.byteLength);
+      const artifactPath = event?.overflow?.artifactPath;
+      expect(artifactPath).toBeDefined();
+      if (!artifactPath) throw new Error('Missing overflow artifact path.');
+      expect(await readFile(artifactPath)).toEqual(bytes);
+      expect((await stat(artifactPath)).mode & 0o777).toBe(0o600);
+      await expect(
+        new BackgroundJobsClient(host.socketPath, 'other-session').events(
+          id,
+          0,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('captures exact lines clipped by the encoded event-record bound', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-event-record-overflow-'),
+    );
+    const bytes = Buffer.alloc(BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES, 0);
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'session');
+      const script = `process.stdout.write(Buffer.alloc(${bytes.byteLength},0)); process.stdout.write('\\n')`;
+      await client.start({
+        id,
+        command: `node -e ${JSON.stringify(script)}`,
+        title: 'record bound',
+        cwd: repositoryRoot,
+        events: true,
+      });
+      await client.wait(id, 2_000);
+      const [event] = (await client.events(id, 0)).events;
+      expect(event?.truncated).toBe(true);
+      expect(event?.overflow?.bytes).toBe(bytes.byteLength);
+      const artifactPath = event?.overflow?.artifactPath;
+      expect(artifactPath).toBeDefined();
+      if (!artifactPath) throw new Error('Missing overflow artifact path.');
+      expect(await readFile(artifactPath)).toEqual(bytes);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

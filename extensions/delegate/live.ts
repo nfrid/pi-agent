@@ -422,6 +422,41 @@ function statusSnapshot(
                   },
                 }
               : {}),
+            ...(status.lifecycle.eventOverflow
+              ? {
+                  eventOverflow: {
+                    eventCount: status.lifecycle.eventOverflow.eventCount,
+                    totalBytes: status.lifecycle.eventOverflow.totalBytes,
+                    capturedEvents:
+                      status.lifecycle.eventOverflow.capturedEvents,
+                    capturedBytes: status.lifecycle.eventOverflow.capturedBytes,
+                    unavailableEvents:
+                      status.lifecycle.eventOverflow.unavailableEvents,
+                    ...(status.lifecycle.eventOverflow.unavailableReason
+                      ? {
+                          unavailableReason:
+                            status.lifecycle.eventOverflow.unavailableReason,
+                        }
+                      : {}),
+                    ...(status.lifecycle.eventOverflow.artifactPublicationFailed
+                      ? { artifactPublicationFailed: true }
+                      : {}),
+                    ...(typeof status.lifecycle.eventOverflow.artifactFile
+                      ?.path === 'string'
+                      ? {
+                          artifactFile: {
+                            path: text(
+                              status.lifecycle.eventOverflow.artifactFile.path,
+                              4096,
+                            ),
+                            size: status.lifecycle.eventOverflow.artifactFile
+                              .size,
+                          },
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
             continuationUsable: status.lifecycle.continuationUsable,
             writableBranchRetained: status.lifecycle.writableBranchRetained,
             readOnlySnapshotRetained: status.lifecycle.readOnlySnapshotRetained,

@@ -117,6 +117,7 @@ const DelegateLifecycleReasonSchema = Type.Union([
   Type.Literal('queued-cancellation'),
   Type.Literal('timeout'),
   Type.Literal('child-nonzero-exit'),
+  Type.Literal('event-overflow'),
   Type.Literal('provider-runner-error'),
   Type.Literal('setup-failure'),
   Type.Literal('lifecycle-cleanup-failure'),
@@ -134,6 +135,33 @@ const DelegateLifecycleSchema = Type.Object(
         path: Type.String({ minLength: 1, maxLength: 4096 }),
         size: Type.Integer({ minimum: 0 }),
       }),
+    ),
+    eventOverflow: Type.Optional(
+      Type.Object(
+        {
+          eventCount: Type.Integer({ minimum: 1 }),
+          totalBytes: Type.Integer({ minimum: 0 }),
+          capturedEvents: Type.Integer({ minimum: 0 }),
+          capturedBytes: Type.Integer({ minimum: 0 }),
+          unavailableEvents: Type.Integer({ minimum: 0 }),
+          unavailableReason: Type.Optional(
+            Type.Union([
+              Type.Literal('capture-limit'),
+              Type.Literal('host-publication-failed'),
+              Type.Literal('legacy-host'),
+              Type.Literal('artifact-read-failed'),
+            ]),
+          ),
+          artifactFile: Type.Optional(
+            Type.Object({
+              path: Type.String({ minLength: 1, maxLength: 4096 }),
+              size: Type.Integer({ minimum: 0 }),
+            }),
+          ),
+          artifactPublicationFailed: Type.Optional(Type.Boolean()),
+        },
+        { additionalProperties: false },
+      ),
     ),
     continuationUsable: Type.Boolean(),
     writableBranchRetained: Type.Boolean(),

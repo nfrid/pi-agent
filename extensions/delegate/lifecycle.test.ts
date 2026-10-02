@@ -1,11 +1,17 @@
+import { BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES } from '@pi-agent/background-jobs';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import * as delegateChild from './delegate-child';
+import { processJsonLine } from './events';
 import {
+  cloneDelegateLifecycle,
+  copyDelegateLifecycle,
   getDelegateLifecycle,
   getDelegateLifecycleDiagnostic,
   LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
   LIFECYCLE_PUBLIC_FALLBACK_MARKER,
+  recordDelegateEventOverflow,
   setDelegateLifecycle,
+  setDelegateLifecycleText,
 } from './lifecycle';
 import { getDetails } from './render-utils';
 import { runDelegate } from './runner';
@@ -141,6 +147,203 @@ describe('delegate lifecycle failure projection', () => {
       mode: 'single',
     });
     expect(getDelegateLifecycle(run)?.reason).toBe(reason);
+  });
+
+  test('marks successful-exit runs with truncated events as failures and publishes exact recovery evidence', async () => {
+    const malformed = Buffer.concat([
+      Buffer.from('private malformed event marker'),
+      Buffer.from([0xff]),
+      Buffer.alloc(70_000, 0x78),
+    ]);
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (run) => {
+        processJsonLine(
+          JSON.stringify({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'validated final result' }],
+              usage: {
+                input: 0,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 1,
+              },
+              timestamp: 1,
+            },
+          }),
+          run,
+        );
+        recordDelegateEventOverflow(run, malformed.byteLength, malformed);
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      },
+    );
+
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'overflow classification',
+      context: 'fresh',
+      sessionPath: '/tmp/lifecycle-overflow-test.jsonl',
+      isolation: 'shared',
+      timeoutMs: 5_000,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+    expect(run.state).toBe('error');
+    expect(run.exitCode).toBe(0);
+    expect(getDelegateLifecycle(run)).toMatchObject({
+      reason: 'event-overflow',
+      eventOverflow: { eventCount: 1, capturedEvents: 1 },
+    });
+
+    const published: Array<{ bytes: Buffer; extension: string }> = [];
+    const handoff = await buildOutputFileHandoff(
+      [run],
+      async (bytes, extension) => {
+        const content = Buffer.from(bytes);
+        published.push({ bytes: content, extension });
+        return {
+          path: `/tmp/pi/files/recovery${extension}`,
+          size: content.byteLength,
+        };
+      },
+    );
+    expect(
+      published.find(({ extension }) => extension === '.jsonl')?.bytes,
+    ).toEqual(malformed);
+    expect(handoff).toContain('/tmp/pi/files/recovery.jsonl');
+    expect(handoff).toContain('Event overflow:');
+    expect(handoff).not.toContain('private malformed event marker');
+
+    const publicRun = serializeDelegateRunForPublic(run);
+    expect(publicRun.lifecycle?.eventOverflow?.artifactFile?.path).toBe(
+      '/tmp/pi/files/recovery.jsonl',
+    );
+    expect(JSON.stringify(publicRun)).not.toContain(
+      'private malformed event marker',
+    );
+    const withoutFiles = cloneDelegateLifecycle(publicRun.lifecycle, {
+      includeFile: false,
+    });
+    expect(
+      Object.hasOwn(withoutFiles?.eventOverflow ?? {}, 'artifactFile'),
+    ).toBe(false);
+    const clonedRun = createRun('cross-owner clone');
+    copyDelegateLifecycle(run, clonedRun, { includeFile: false });
+    expect(
+      Object.hasOwn(
+        getDelegateLifecycle(clonedRun)?.eventOverflow ?? {},
+        'artifactFile',
+      ),
+    ).toBe(false);
+  });
+
+  test.each([
+    [
+      'cancellation',
+      { exitCode: 130, wasAborted: true, timedOut: false },
+      'user-cancellation',
+      'aborted',
+    ],
+    [
+      'timeout',
+      { exitCode: 124, wasAborted: false, timedOut: true },
+      'timeout',
+      'timed-out',
+    ],
+  ] as const)('keeps %s lifecycle precedence when event capture also overflows', async (_label, result, reason, state) => {
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (run) => {
+        recordDelegateEventOverflow(run, 1);
+        return result;
+      },
+    );
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: `overflow ${_label}`,
+      context: 'fresh',
+      sessionPath: `/tmp/lifecycle-overflow-${_label}.jsonl`,
+      isolation: 'shared',
+      timeoutMs: 5_000,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+    expect(run.state).toBe(state);
+    expect(getDelegateLifecycle(run)).toMatchObject({
+      reason,
+      eventOverflow: { eventCount: 1 },
+    });
+  });
+
+  test('counts every separator when enforcing the event artifact byte cap', async () => {
+    const first = Buffer.alloc(3, 0x61);
+    const second = Buffer.alloc(3, 0x62);
+    const third = Buffer.alloc(
+      BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES -
+        first.length -
+        second.length -
+        1,
+      0x63,
+    );
+    expect(first.length + second.length + third.length).toBe(
+      BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES - 1,
+    );
+    const run = createRun('overflow artifact separators');
+    recordDelegateEventOverflow(run, first.length, first);
+    recordDelegateEventOverflow(run, second.length, second);
+    recordDelegateEventOverflow(run, third.length, third);
+    run.state = 'error';
+    setDelegateLifecycleText(
+      run,
+      'event-overflow',
+      'Truncated child events were not validated.',
+    );
+
+    let artifact = Buffer.alloc(0);
+    await buildOutputFileHandoff([run], async (bytes) => {
+      artifact = Buffer.from(bytes);
+      return { path: '/tmp/pi/files/separated.jsonl', size: artifact.length };
+    });
+
+    expect(artifact).toEqual(Buffer.concat([first, Buffer.from('\n'), second]));
+    expect(artifact.byteLength).toBeLessThanOrEqual(
+      BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES,
+    );
+    expect(getDelegateLifecycle(run)?.eventOverflow).toMatchObject({
+      capturedEvents: 2,
+      capturedBytes: first.length + second.length,
+      unavailableEvents: 1,
+      unavailableReason: 'capture-limit',
+      artifactFile: { path: '/tmp/pi/files/separated.jsonl' },
+    });
+  });
+
+  test('reports overflow artifact publication failure without exposing payload bytes', async () => {
+    const raw = Buffer.from('private publication marker');
+    const run = createRun('overflow publication failure');
+    recordDelegateEventOverflow(run, raw.byteLength, raw);
+    run.state = 'error';
+    setDelegateLifecycleText(
+      run,
+      'event-overflow',
+      'Truncated child event was not validated.',
+    );
+    const handoff = await buildOutputFileHandoff([run], async () => {
+      throw new Error('cache unavailable');
+    });
+    expect(getDelegateLifecycle(run)).toMatchObject({
+      reason: 'event-overflow',
+      eventOverflow: {
+        capturedEvents: 1,
+        artifactPublicationFailed: true,
+      },
+    });
+    expect(
+      getDelegateLifecycle(run)?.eventOverflow?.artifactFile,
+    ).toBeUndefined();
+    expect(handoff).toContain('Oversized event artifact publication failed.');
+    expect(handoff).not.toContain('private publication marker');
   });
 
   test('reports an acknowledged pre-timeout checkpoint with retained partial status', async () => {

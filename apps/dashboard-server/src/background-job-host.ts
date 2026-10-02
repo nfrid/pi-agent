@@ -7,12 +7,14 @@ import {
   type Socket,
 } from 'node:net';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import {
   BACKGROUND_JOBS_LIST_COMMAND_BYTES,
   BACKGROUND_JOBS_LIST_CWD_BYTES,
   BACKGROUND_JOBS_LIST_ERROR_BYTES,
   BACKGROUND_JOBS_LIST_OWNER_BYTES,
   BACKGROUND_JOBS_LIST_TITLE_BYTES,
+  BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
   BACKGROUND_JOBS_MAX_LINE_BYTES,
   BACKGROUND_JOBS_MAX_OUTPUT_BYTES,
@@ -56,8 +58,14 @@ type RunningJob = {
   timeoutHandle?: NodeJS.Timeout;
   stdoutLine: string;
   stderrLine: string;
+  stdoutLineDecoder: StringDecoder;
+  stderrLineDecoder: StringDecoder;
   stdoutLineBytes: number;
   stderrLineBytes: number;
+  stdoutLineObservedBytes: number;
+  stdoutLineEndsWithCr: boolean;
+  stdoutLineRawChunks: Buffer[];
+  stdoutLineCaptureFailed: boolean;
   stdoutLineTruncated: boolean;
   stderrLineTruncated: boolean;
   stdoutLineActive: boolean;
@@ -482,8 +490,14 @@ export class BackgroundJobHostService {
       timedOut: false,
       stdoutLine: '',
       stderrLine: '',
+      stdoutLineDecoder: new StringDecoder('utf8'),
+      stderrLineDecoder: new StringDecoder('utf8'),
       stdoutLineBytes: 0,
       stderrLineBytes: 0,
+      stdoutLineObservedBytes: 0,
+      stdoutLineEndsWithCr: false,
+      stdoutLineRawChunks: [],
+      stdoutLineCaptureFailed: false,
       stdoutLineTruncated: false,
       stderrLineTruncated: false,
       stdoutLineActive: false,
@@ -581,38 +595,103 @@ export class BackgroundJobHostService {
   private appendLinePart(
     job: RunningJob,
     stream: 'stdout' | 'stderr',
-    value: string,
+    value: Buffer,
   ): void {
     const currentBytes =
       stream === 'stdout' ? job.stdoutLineBytes : job.stderrLineBytes;
     const remaining = BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES - currentBytes;
-    if (stream === 'stdout') job.stdoutLineActive = true;
-    else job.stderrLineActive = true;
-    const retained = boundedUtf8(value, Math.max(0, remaining));
+    const decoded =
+      stream === 'stdout'
+        ? job.stdoutLineDecoder.write(value)
+        : job.stderrLineDecoder.write(value);
+    const retained = boundedUtf8(decoded, Math.max(0, remaining));
     const retainedBytes = Buffer.byteLength(retained);
     if (stream === 'stdout') {
+      job.stdoutLineActive = true;
+      job.stdoutLineObservedBytes += value.byteLength;
+      if (value.byteLength > 0)
+        job.stdoutLineEndsWithCr = value.at(-1) === 0x0d;
+      if (!job.stdoutLineCaptureFailed) {
+        if (
+          job.stdoutLineObservedBytes <=
+          BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES
+        ) {
+          job.stdoutLineRawChunks.push(Buffer.from(value));
+        } else {
+          job.stdoutLineCaptureFailed = true;
+          job.stdoutLineRawChunks = [];
+        }
+      }
       job.stdoutLine += retained;
       job.stdoutLineBytes += retainedBytes;
-      if (retainedBytes < Buffer.byteLength(value))
+      if (
+        retainedBytes < Buffer.byteLength(decoded) ||
+        job.stdoutLineObservedBytes > BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES
+      )
         job.stdoutLineTruncated = true;
     } else {
+      job.stderrLineActive = true;
       job.stderrLine += retained;
       job.stderrLineBytes += retainedBytes;
-      if (retainedBytes < Buffer.byteLength(value))
+      if (retainedBytes < Buffer.byteLength(decoded))
         job.stderrLineTruncated = true;
     }
   }
 
   private finishLine(job: RunningJob, stream: 'stdout' | 'stderr'): void {
+    const decoder =
+      stream === 'stdout' ? job.stdoutLineDecoder : job.stderrLineDecoder;
+    const finalText = decoder.end();
+    if (finalText) {
+      const currentBytes =
+        stream === 'stdout' ? job.stdoutLineBytes : job.stderrLineBytes;
+      const retained = boundedUtf8(
+        finalText,
+        Math.max(0, BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES - currentBytes),
+      );
+      if (stream === 'stdout') {
+        job.stdoutLine += retained;
+        job.stdoutLineBytes += Buffer.byteLength(retained);
+        if (retained.length !== finalText.length)
+          job.stdoutLineTruncated = true;
+      } else {
+        job.stderrLine += retained;
+        job.stderrLineBytes += Buffer.byteLength(retained);
+        if (retained.length !== finalText.length)
+          job.stderrLineTruncated = true;
+      }
+    }
     const rawText = stream === 'stdout' ? job.stdoutLine : job.stderrLine;
     const text = rawText.endsWith('\r') ? rawText.slice(0, -1) : rawText;
     const truncated =
       stream === 'stdout' ? job.stdoutLineTruncated : job.stderrLineTruncated;
     const active =
       stream === 'stdout' ? job.stdoutLineActive : job.stderrLineActive;
+    let overflowCapture: { bytes: number; content?: Buffer } | undefined;
+    if (stream === 'stdout') {
+      const lineBytes =
+        job.stdoutLineObservedBytes - (job.stdoutLineEndsWithCr ? 1 : 0);
+      let content = job.stdoutLineCaptureFailed
+        ? undefined
+        : Buffer.concat(job.stdoutLineRawChunks);
+      if (content?.at(-1) === 0x0d)
+        content = content.subarray(0, content.byteLength - 1);
+      if (
+        content?.byteLength !== lineBytes ||
+        content.byteLength > BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES
+      )
+        content = undefined;
+      overflowCapture = { bytes: lineBytes, ...(content ? { content } : {}) };
+    }
     if (active || text || truncated) {
       try {
-        this.database().appendEvent(job.id, stream, text, truncated);
+        this.database().appendEvent(
+          job.id,
+          stream,
+          text,
+          truncated,
+          overflowCapture,
+        );
       } catch {
         /* Event capture must not change process supervision. */
       }
@@ -620,11 +699,17 @@ export class BackgroundJobHostService {
     if (stream === 'stdout') {
       job.stdoutLine = '';
       job.stdoutLineBytes = 0;
+      job.stdoutLineDecoder = new StringDecoder('utf8');
+      job.stdoutLineObservedBytes = 0;
+      job.stdoutLineEndsWithCr = false;
+      job.stdoutLineRawChunks = [];
+      job.stdoutLineCaptureFailed = false;
       job.stdoutLineTruncated = false;
       job.stdoutLineActive = false;
     } else {
       job.stderrLine = '';
       job.stderrLineBytes = 0;
+      job.stderrLineDecoder = new StringDecoder('utf8');
       job.stderrLineTruncated = false;
       job.stderrLineActive = false;
     }
@@ -633,24 +718,19 @@ export class BackgroundJobHostService {
   private captureLines(
     job: RunningJob,
     stream: 'stdout' | 'stderr',
-    chunk: string,
+    chunk: Buffer,
   ): void {
     if (!job.captureEvents) return;
-    let remaining = chunk;
-    while (remaining) {
-      const newline = remaining.indexOf('\n');
-      if (newline < 0) {
-        this.appendLinePart(job, stream, remaining);
-        return;
-      }
-      this.appendLinePart(
-        job,
-        stream,
-        remaining.slice(0, newline).replace(/\r$/u, ''),
-      );
+    let start = 0;
+    let newline = chunk.indexOf(0x0a, start);
+    while (newline >= 0) {
+      this.appendLinePart(job, stream, chunk.subarray(start, newline));
       this.finishLine(job, stream);
-      remaining = remaining.slice(newline + 1);
+      start = newline + 1;
+      newline = chunk.indexOf(0x0a, start);
     }
+    if (start < chunk.byteLength)
+      this.appendLinePart(job, stream, chunk.subarray(start));
   }
 
   private flushLines(job: RunningJob, stream: 'stdout' | 'stderr'): void {
@@ -664,22 +744,40 @@ export class BackgroundJobHostService {
   }
 
   private attach(job: RunningJob): void {
-    job.child.stdout?.setEncoding('utf8');
-    job.child.stderr?.setEncoding('utf8');
-    job.child.stdout?.on('data', (chunk: string) => {
-      job.stdout.push(chunk);
-      this.matchWatches(job, 'stdout', chunk);
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+    job.child.stdout?.on('data', (chunk: Buffer) => {
+      const text = stdoutDecoder.write(chunk);
+      job.stdout.push(text);
+      this.matchWatches(job, 'stdout', text);
       this.captureLines(job, 'stdout', chunk);
       this.persistOutput(job);
     });
-    job.child.stderr?.on('data', (chunk: string) => {
-      job.stderr.push(chunk);
-      this.matchWatches(job, 'stderr', chunk);
+    job.child.stderr?.on('data', (chunk: Buffer) => {
+      const text = stderrDecoder.write(chunk);
+      job.stderr.push(text);
+      this.matchWatches(job, 'stderr', text);
       this.captureLines(job, 'stderr', chunk);
       this.persistOutput(job);
     });
-    job.child.stdout?.once('end', () => this.flushLines(job, 'stdout'));
-    job.child.stderr?.once('end', () => this.flushLines(job, 'stderr'));
+    job.child.stdout?.once('end', () => {
+      const text = stdoutDecoder.end();
+      if (text) {
+        job.stdout.push(text);
+        this.matchWatches(job, 'stdout', text);
+        this.persistOutput(job);
+      }
+      this.flushLines(job, 'stdout');
+    });
+    job.child.stderr?.once('end', () => {
+      const text = stderrDecoder.end();
+      if (text) {
+        job.stderr.push(text);
+        this.matchWatches(job, 'stderr', text);
+        this.persistOutput(job);
+      }
+      this.flushLines(job, 'stderr');
+    });
     job.child.once('error', (error) => {
       job.error = error.message;
       void this.settle(job, 'failed');

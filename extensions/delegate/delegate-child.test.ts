@@ -1,16 +1,24 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES } from '@pi-agent/background-jobs';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   buildDelegateChildEnvironment,
   checkpointLeadMs,
   effectiveDelegateHome,
+  MAX_JSON_LINE_BYTES,
   MAX_STDERR_BYTES,
   runHostedDelegateChild,
   spawnDelegateChild,
 } from './delegate-child';
+import {
+  getDelegateLifecycle,
+  hasDelegateEventOverflow,
+  setDelegateLifecycleText,
+} from './lifecycle';
+import { buildOutputFileHandoff } from './tool-result';
 import { createRun } from './types';
 
 function systemHomeWithoutEnvironment(): string {
@@ -37,6 +45,11 @@ type HostedCase = {
       stream: 'stdout' | 'stderr';
       text: string;
       truncated: boolean;
+      overflow?: {
+        bytes: number;
+        artifactPath?: string;
+        unavailableReason?: 'capture-limit' | 'publication-failed';
+      };
     }>;
     truncated: boolean;
     complete: boolean;
@@ -358,6 +371,106 @@ describe('delegate child environment', () => {
     expect(JSON.stringify(run.messages)).toContain('café');
     expect(JSON.stringify(run.messages)).not.toContain('�');
   });
+
+  test('captures oversized direct lines exactly and still parses later normal events', async () => {
+    const run = createRun('oversized direct event');
+    const repeatCount = Math.floor(
+      (BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES - 1_024) / 4,
+    );
+    const messageText = `private direct marker ${'🙂'.repeat(repeatCount)}`;
+    const oversizedEvent = {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: messageText }],
+        usage: {
+          input: 0,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 1,
+        },
+        timestamp: 1,
+      },
+    };
+    const normalEvent = {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'after overflow' }],
+        usage: {
+          input: 0,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 1,
+        },
+        timestamp: 2,
+      },
+      padding: 'n'.repeat(4_096),
+    };
+    const expected = Buffer.from(JSON.stringify(oversizedEvent));
+    expect(expected.byteLength).toBeGreaterThan(MAX_JSON_LINE_BYTES);
+    expect(expected.byteLength).toBeLessThan(
+      BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES,
+    );
+    const script = `const event=${JSON.stringify({
+      ...oversizedEvent,
+      message: {
+        ...oversizedEvent.message,
+        content: [{ type: 'text', text: 'private direct marker ' }],
+      },
+    })}; event.message.content[0].text+='🙂'.repeat(${repeatCount}); const bytes=Buffer.from(JSON.stringify(event)); const split=bytes.indexOf(Buffer.from('🙂'))+2; process.stdout.write(bytes.subarray(0,split)); setTimeout(()=>{process.stdout.write(bytes.subarray(split)); process.stdout.write('\\n'); process.stdout.write(${JSON.stringify(`${JSON.stringify(normalEvent)}\n`)})},10)`;
+    const result = await spawnDelegateChild(run, {
+      command: process.execPath,
+      args: ['-e', script],
+      cwd: process.cwd(),
+      env: {},
+      timeoutMs: 15_000,
+      onLine: vi.fn(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.stringify(run.messages)).toContain('after overflow');
+    expect(JSON.stringify(run.messages)).not.toContain('private direct marker');
+    expect(run.stderr).toContain('excluded from transcript parsing');
+    expect(run.stderr).not.toContain('private direct marker');
+    expect(hasDelegateEventOverflow(run)).toBe(true);
+    run.state = 'error';
+    setDelegateLifecycleText(
+      run,
+      'event-overflow',
+      'Truncated child event was not validated.',
+    );
+    const artifacts: Array<{ bytes: Buffer; extension: string }> = [];
+    const handoff = await buildOutputFileHandoff(
+      [run],
+      async (bytes, extension) => {
+        const content = Buffer.from(bytes);
+        artifacts.push({ bytes: content, extension });
+        return {
+          path: `/tmp/pi/files/overflow${extension}`,
+          size: content.byteLength,
+        };
+      },
+    );
+    expect(
+      artifacts.find(({ extension }) => extension === '.jsonl')?.bytes,
+    ).toEqual(expected);
+    expect(handoff).toContain('/tmp/pi/files/overflow.jsonl');
+    expect(handoff).not.toContain('private direct marker');
+    expect(JSON.stringify(getDelegateLifecycle(run))).not.toContain(
+      'private direct marker',
+    );
+    expect(getDelegateLifecycle(run)).toMatchObject({
+      reason: 'event-overflow',
+      eventOverflow: {
+        eventCount: 1,
+        capturedEvents: 1,
+        artifactFile: { path: '/tmp/pi/files/overflow.jsonl' },
+      },
+    });
+  }, 30_000);
 
   test.each([
     ['success', 'done', 0, false],
@@ -815,6 +928,81 @@ describe('delegate child environment', () => {
     );
   });
 
+  test('copies an owner-hosted truncated event into a private cache artifact', async () => {
+    const overflowDirectory = mkdtempSync(
+      path.join(tmpdir(), 'delegate-hosted-overflow-'),
+    );
+    const artifactPath = path.join(overflowDirectory, 'event.raw');
+    const exact = Buffer.from(
+      JSON.stringify({
+        type: 'message_end',
+        marker: `private hosted marker ${'🙂'.repeat(17_000)}`,
+      }),
+    );
+    writeFileSync(artifactPath, exact, { mode: 0o600 });
+    try {
+      await withHostedCase(
+        {
+          status: 'done',
+          exitCode: 0,
+          eventResponse: {
+            events: [
+              {
+                offset: 0,
+                stream: 'stdout',
+                text: exact.subarray(0, 50 * 1024).toString('utf8'),
+                truncated: true,
+                overflow: { bytes: exact.byteLength, artifactPath },
+              },
+            ],
+            truncated: false,
+            complete: true,
+            nextOffset: 1,
+          },
+        },
+        async () => {
+          const run = createRun('hosted overflow');
+          const result = await runHostedDelegateChild(run, {
+            command: 'pi',
+            args: [],
+            cwd: process.cwd(),
+            env: {},
+            ownerSession: 'parent-session',
+            processJobId: hostedJobId,
+            timeoutMs: 100,
+            onLine: vi.fn(),
+          });
+          expect(result.exitCode).toBe(0);
+          expect(run.messages).toEqual([]);
+          expect(run.stderr).not.toContain('private hosted marker');
+          expect(hasDelegateEventOverflow(run)).toBe(true);
+          run.state = 'error';
+          setDelegateLifecycleText(
+            run,
+            'event-overflow',
+            'Truncated host event was not validated.',
+          );
+          let published = Buffer.alloc(0);
+          const handoff = await buildOutputFileHandoff([run], async (bytes) => {
+            published = Buffer.from(bytes);
+            return {
+              path: '/tmp/pi/files/hosted-overflow.jsonl',
+              size: published.byteLength,
+            };
+          });
+          expect(published).toEqual(exact);
+          expect(handoff).toContain('/tmp/pi/files/hosted-overflow.jsonl');
+          expect(handoff).not.toContain('private hosted marker');
+          expect(JSON.stringify(getDelegateLifecycle(run))).not.toContain(
+            'private hosted marker',
+          );
+        },
+      );
+    } finally {
+      rmSync(overflowDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('diagnoses truncated hosted event history without treating tails as transcript', async () => {
     await withHostedCase(
       {
@@ -856,6 +1044,7 @@ describe('delegate child environment', () => {
         expect(result).toMatchObject({ exitCode: 0, timedOut: false });
         expect(run.messages).toEqual([]);
         expect(run.stderr).toContain('truncated');
+        expect(hasDelegateEventOverflow(run)).toBe(true);
       },
     );
   });

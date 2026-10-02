@@ -118,6 +118,8 @@ Blocked: the one question the parent must answer
 
 Reports that fit are delivered inline; oversized reports are written to an owner-readable Markdown file under Pi's local cache and referenced by the bounded handoff. Large supporting outputs should be ordinary files.
 
+A stdout event clipped by the delegate runner is excluded from transcript and structured-result validation. The run fails with `event-overflow` even if the child exits successfully. When exact bytes are available, Pi publishes the raw event line or lines in an owner-readable `.jsonl` cache artifact and includes its path in lifecycle metadata. Recovery capture is capped at 8 MiB per hosted job and per delegate artifact. Larger events, exhausted capture budget, or artifact write failures produce bounded unavailable metadata instead. Older process hosts only return the clipped event prefix, so the delegate fails closed and reports that the event could not be recovered. Upgrade the process host to preserve exact bytes; no event-size limit is raised.
+
 ## Operational controls
 
 `delegate_jobs` provides metadata (`list`, `status`), a bounded activity snapshot (`inspect`), corrective `feedback`, and `cancel`. Address work by logical node or exact attempt reference.

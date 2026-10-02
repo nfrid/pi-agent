@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -26,6 +27,7 @@ import type {
   StartBackgroundJobInput,
 } from '@pi-agent/background-jobs';
 import {
+  BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES,
   BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES,
@@ -54,6 +56,17 @@ export function backgroundJobEventsPath(
   id: string,
 ): string {
   return path.join(backgroundJobEventsDirectory(databasePath), `${id}.jsonl`);
+}
+
+export function backgroundJobEventOverflowDirectory(
+  databasePath: string,
+  id: string,
+): string {
+  return path.join(
+    path.dirname(databasePath),
+    'background-job-event-overflows',
+    id,
+  );
 }
 
 function numberValue(value: unknown): number | undefined {
@@ -121,6 +134,11 @@ function parseEventRecords(bytes: Buffer): StoredEvent[] {
       stream?: unknown;
       text?: unknown;
       truncated?: unknown;
+      overflow?: {
+        bytes?: unknown;
+        artifactPath?: unknown;
+        unavailableReason?: unknown;
+      };
     };
     try {
       parsed = JSON.parse(
@@ -137,7 +155,17 @@ function parseEventRecords(bytes: Buffer): StoredEvent[] {
       (parsed.stream !== 'stdout' && parsed.stream !== 'stderr') ||
       typeof parsed.text !== 'string' ||
       Buffer.byteLength(parsed.text) > BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES ||
-      typeof parsed.truncated !== 'boolean'
+      typeof parsed.truncated !== 'boolean' ||
+      (parsed.overflow !== undefined &&
+        (typeof parsed.overflow.bytes !== 'number' ||
+          !Number.isSafeInteger(parsed.overflow.bytes) ||
+          parsed.overflow.bytes <= 0 ||
+          parsed.truncated !== true ||
+          (parsed.overflow.artifactPath !== undefined &&
+            typeof parsed.overflow.artifactPath !== 'string') ||
+          (parsed.overflow.unavailableReason !== undefined &&
+            parsed.overflow.unavailableReason !== 'capture-limit' &&
+            parsed.overflow.unavailableReason !== 'publication-failed')))
     )
       throw new Error('Corrupt background job event file.');
     if (parsed.offset > Number.MAX_SAFE_INTEGER - lineBytes)
@@ -149,6 +177,20 @@ function parseEventRecords(bytes: Buffer): StoredEvent[] {
         stream: parsed.stream,
         text: parsed.text,
         truncated: parsed.truncated,
+        ...(parsed.overflow
+          ? {
+              overflow: {
+                bytes: parsed.overflow.bytes as number,
+                ...(typeof parsed.overflow.artifactPath === 'string'
+                  ? { artifactPath: parsed.overflow.artifactPath }
+                  : {}),
+                ...(parsed.overflow.unavailableReason === 'capture-limit' ||
+                parsed.overflow.unavailableReason === 'publication-failed'
+                  ? { unavailableReason: parsed.overflow.unavailableReason }
+                  : {}),
+              },
+            }
+          : {}),
       },
       endOffset,
     });
@@ -179,9 +221,10 @@ function encodeEvent(
   stream: BackgroundJobEvent['stream'],
   text: string,
   truncated: boolean,
+  overflow?: BackgroundJobEvent['overflow'],
 ): Buffer {
   return Buffer.from(
-    `${JSON.stringify({ offset, stream, text, truncated })}\n`,
+    `${JSON.stringify({ offset, stream, text, truncated, ...(overflow ? { overflow } : {}) })}\n`,
     'utf8',
   );
 }
@@ -191,8 +234,9 @@ function boundedEvent(
   stream: BackgroundJobEvent['stream'],
   text: string,
   truncated: boolean,
+  overflow?: BackgroundJobEvent['overflow'],
 ): { text: string; truncated: boolean; encoded: Buffer } {
-  let encoded = encodeEvent(offset, stream, text, truncated);
+  let encoded = encodeEvent(offset, stream, text, truncated, overflow);
   if (encoded.byteLength <= BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES)
     return { text, truncated, encoded };
   const bytes = Buffer.from(text);
@@ -202,7 +246,13 @@ function boundedEvent(
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const candidate = boundedUtf8(text, middle);
-    const candidateEncoded = encodeEvent(offset, stream, candidate, true);
+    const candidateEncoded = encodeEvent(
+      offset,
+      stream,
+      candidate,
+      true,
+      overflow,
+    );
     if (candidateEncoded.byteLength <= BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES) {
       best = candidate;
       encoded = candidateEncoded;
@@ -514,6 +564,7 @@ export class BackgroundJobStore {
     stream: BackgroundJobEvent['stream'],
     text: string,
     truncated = false,
+    overflowCapture?: { bytes: number; content?: Uint8Array },
   ): void {
     const bounded = boundedUtf8(text, BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES);
     const file = this.eventPath(id);
@@ -532,7 +583,55 @@ export class BackgroundJobStore {
       };
       this.eventWrites.set(id, state);
     }
-    const event = boundedEvent(state.nextOffset, stream, bounded, truncated);
+    let event = boundedEvent(state.nextOffset, stream, bounded, truncated);
+    if (event.truncated && overflowCapture) {
+      let overflow: BackgroundJobEvent['overflow'] = {
+        bytes: overflowCapture.bytes,
+      };
+      const directory = backgroundJobEventOverflowDirectory(
+        this.databasePath,
+        id,
+      );
+      const content = overflowCapture.content;
+      let usedBytes = 0;
+      if (existsSync(directory)) {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          if (!entry.isFile()) continue;
+          try {
+            usedBytes += statSync(path.join(directory, entry.name)).size;
+          } catch {
+            /* A concurrent cleanup must not break event publication. */
+          }
+        }
+      }
+      if (
+        !content ||
+        content.byteLength !== overflowCapture.bytes ||
+        content.byteLength > BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES ||
+        usedBytes + content.byteLength >
+          BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES
+      ) {
+        overflow = { ...overflow, unavailableReason: 'capture-limit' };
+      } else {
+        const artifactPath = path.join(directory, `${state.nextOffset}.raw`);
+        try {
+          mkdirSync(directory, { recursive: true, mode: 0o700 });
+          chmodSync(directory, 0o700);
+          writeFileSync(artifactPath, content, { mode: 0o600, flag: 'wx' });
+          chmodSync(artifactPath, 0o600);
+          overflow = { ...overflow, artifactPath };
+        } catch {
+          overflow = { ...overflow, unavailableReason: 'publication-failed' };
+        }
+      }
+      event = boundedEvent(
+        state.nextOffset,
+        stream,
+        event.text,
+        true,
+        overflow,
+      );
+    }
     const encoded = event.encoded;
     if (state.nextOffset > Number.MAX_SAFE_INTEGER - encoded.byteLength)
       throw new Error('Background job event offset exceeded its bound.');
@@ -546,9 +645,36 @@ export class BackgroundJobStore {
         complete,
         Math.floor(BACKGROUND_JOBS_MAX_EVENT_BYTES / 2),
       );
+      this.removeOrphanedEventOverflowFiles(id, retained);
       writeFileSync(file, retained, { mode: 0o600 });
       chmodSync(file, 0o600);
       state.bytes = retained.byteLength;
+    }
+  }
+
+  private removeOrphanedEventOverflowFiles(
+    id: string,
+    retainedEvents: Buffer,
+  ): void {
+    const directory = backgroundJobEventOverflowDirectory(
+      this.databasePath,
+      id,
+    );
+    if (!existsSync(directory)) return;
+    const retainedPaths = new Set(
+      parseEventRecords(retainedEvents)
+        .map((record) => record.event.overflow?.artifactPath)
+        .filter((file): file is string => typeof file === 'string'),
+    );
+    for (const name of readdirSync(directory)) {
+      const file = path.join(directory, name);
+      if (!retainedPaths.has(file)) {
+        try {
+          unlinkSync(file);
+        } catch {
+          /* Cleanup does not change event replay. */
+        }
+      }
     }
   }
 
@@ -690,6 +816,10 @@ export class BackgroundJobStore {
     } catch {
       /* A pruned row may leave no event file. */
     }
+    rmSync(backgroundJobEventOverflowDirectory(this.databasePath, input.id), {
+      recursive: true,
+      force: true,
+    });
     this.db
       .prepare(`
       INSERT INTO background_jobs
@@ -936,6 +1066,10 @@ export class BackgroundJobStore {
         } catch {
           /* The event file may not have been created. */
         }
+        rmSync(backgroundJobEventOverflowDirectory(this.databasePath, id), {
+          recursive: true,
+          force: true,
+        });
       }
     }
     this.protectFiles();

@@ -1,4 +1,4 @@
-import { chmodSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   BackgroundJobStore,
+  backgroundJobEventOverflowDirectory,
   backgroundJobEventsPath,
 } from './background-job-store.js';
 
@@ -70,6 +71,43 @@ describe('background job event store', () => {
           )
         ).mode & 0o777,
       ).toBe(0o600);
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports overflow artifact publication failure without losing bounded metadata', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'background-event-overflow-failure-'),
+    );
+    const database = path.join(root, 'jobs.sqlite');
+    const store = new BackgroundJobStore(database);
+    try {
+      store.create(input(firstId), 'overflow failure');
+      const directory = backgroundJobEventOverflowDirectory(database, firstId);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(path.join(directory, '0.raw'), 'pre-existing');
+      const exact = Buffer.alloc(
+        BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES + 1,
+        0x78,
+      );
+      store.appendEvent(firstId, 'stdout', exact.toString('utf8'), true, {
+        bytes: exact.byteLength,
+        content: exact,
+      });
+      const [event] = store.readEvents('owner', firstId, 0).events;
+      expect(event).toMatchObject({
+        truncated: true,
+        overflow: {
+          bytes: exact.byteLength,
+          unavailableReason: 'publication-failed',
+        },
+      });
+      expect(event?.overflow?.artifactPath).toBeUndefined();
+      expect(readFileSync(path.join(directory, '0.raw'), 'utf8')).toBe(
+        'pre-existing',
+      );
     } finally {
       store.close();
       await rm(root, { recursive: true, force: true });

@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
+import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
 import {
+  BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES,
   type BackgroundJobSnapshot,
   BackgroundJobsClient,
 } from '@pi-agent/background-jobs';
 import { processJsonLine } from './events';
+import { recordDelegateEventOverflow } from './lifecycle';
 import type { DelegatedRun } from './types';
 import { isCanonicalUuid } from './workflow-model';
 
@@ -267,9 +270,10 @@ export async function runHostedDelegateChild(
     while (!detached) {
       const eventBatch = await client.events(processJobId, offset);
       if (eventBatch.truncated) {
+        recordDelegateEventOverflow(run, 0, undefined, 'legacy-host');
         hostDiagnostic(
           run,
-          `Process-host event history was truncated before offset ${offset}; missing transcript events were discarded.`,
+          `Process-host event history was truncated before offset ${offset}; missing transcript events could not be recovered.`,
         );
         eventsComplete = eventBatch.complete;
       }
@@ -279,9 +283,52 @@ export async function runHostedDelegateChild(
         (left, right) => left.offset - right.offset,
       )) {
         if (event.truncated) {
+          if (event.stream === 'stderr') {
+            hostDiagnostic(
+              run,
+              `Process-host stderr event at offset ${event.offset} was truncated and excluded from diagnostics.`,
+            );
+            continue;
+          }
+          let content: Buffer | undefined;
+          let unavailableReason:
+            | 'capture-limit'
+            | 'host-publication-failed'
+            | 'legacy-host'
+            | 'artifact-read-failed' = 'legacy-host';
+          if (event.overflow) {
+            unavailableReason =
+              event.overflow.unavailableReason === 'publication-failed'
+                ? 'host-publication-failed'
+                : 'capture-limit';
+            const file = event.overflow.artifactPath;
+            if (
+              file &&
+              event.overflow.bytes <= BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES
+            ) {
+              try {
+                const size = statSync(file).size;
+                if (size === event.overflow.bytes) {
+                  content = readFileSync(file);
+                  if (content.byteLength !== size) content = undefined;
+                }
+                if (content) unavailableReason = 'capture-limit';
+                else if (!event.overflow.unavailableReason)
+                  unavailableReason = 'artifact-read-failed';
+              } catch {
+                unavailableReason = 'artifact-read-failed';
+              }
+            }
+          }
+          recordDelegateEventOverflow(
+            run,
+            event.overflow?.bytes ?? 0,
+            content,
+            content ? undefined : unavailableReason,
+          );
           hostDiagnostic(
             run,
-            `Process-host ${event.stream} event at offset ${event.offset} was truncated and discarded.`,
+            `Process-host ${event.stream} event at offset ${event.offset} was truncated and excluded from transcript parsing.`,
           );
           continue;
         }
@@ -396,11 +443,13 @@ export async function spawnDelegateChild(
       detached: !isWindows,
     });
 
-    let buffer = '';
     let stderrBuffer = '';
-    const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');
-    let discardingLongLine = false;
+    let stdoutLineChunks: Buffer[] = [];
+    let stdoutLineBytes = 0;
+    let stdoutLineEndsWithCr = false;
+    let stdoutLineCaptureFailed = false;
+    let capturedOverflowBytes = 0;
     let closed = false;
     let settled = false;
     let terminating = false;
@@ -487,34 +536,70 @@ export async function spawnDelegateChild(
       options.onLine();
     };
 
-    proc.stdout.on('data', (chunk: Buffer) => {
-      buffer += stdoutDecoder.write(chunk);
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (discardingLongLine) {
-          discardingLongLine = false;
-          continue;
-        }
-        if (Buffer.byteLength(line, 'utf8') > MAX_JSON_LINE_BYTES) {
-          run.stderr = appendTail(
-            run.stderr,
-            `\nDelegate JSON event exceeded ${MAX_JSON_LINE_BYTES} bytes and was discarded.\n`,
-            MAX_STDERR_BYTES,
-          );
-          continue;
-        }
-        processLine(line);
-      }
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_JSON_LINE_BYTES) {
-        buffer = '';
-        discardingLongLine = true;
+    const processStdoutLine = (rawLine: Buffer) => {
+      const line =
+        rawLine.at(-1) === 0x0d
+          ? rawLine.subarray(0, rawLine.byteLength - 1)
+          : rawLine;
+      const lineBytes = stdoutLineBytes - (stdoutLineEndsWithCr ? 1 : 0);
+      if (lineBytes > MAX_JSON_LINE_BYTES) {
+        let content = stdoutLineCaptureFailed
+          ? undefined
+          : Buffer.concat(stdoutLineChunks);
+        if (content?.at(-1) === 0x0d)
+          content = content.subarray(0, content.byteLength - 1);
+        if (
+          content?.byteLength === lineBytes &&
+          capturedOverflowBytes + content.byteLength <=
+            BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES
+        ) {
+          capturedOverflowBytes += content.byteLength;
+        } else content = undefined;
+        recordDelegateEventOverflow(
+          run,
+          lineBytes,
+          content,
+          content ? undefined : 'capture-limit',
+        );
         run.stderr = appendTail(
           run.stderr,
-          `\nDelegate JSON event exceeded ${MAX_JSON_LINE_BYTES} bytes and was discarded.\n`,
+          `\nDelegate JSON event exceeded ${MAX_JSON_LINE_BYTES} bytes and was excluded from transcript parsing.\n`,
           MAX_STDERR_BYTES,
         );
+      } else {
+        processLine(line.toString('utf8'));
       }
+      stdoutLineChunks = [];
+      stdoutLineBytes = 0;
+      stdoutLineEndsWithCr = false;
+      stdoutLineCaptureFailed = false;
+    };
+    const appendStdoutPart = (part: Buffer) => {
+      stdoutLineBytes += part.byteLength;
+      if (part.byteLength > 0) stdoutLineEndsWithCr = part.at(-1) === 0x0d;
+      if (!stdoutLineCaptureFailed) {
+        if (
+          stdoutLineBytes <= MAX_JSON_LINE_BYTES ||
+          capturedOverflowBytes + stdoutLineBytes <=
+            BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES
+        ) {
+          stdoutLineChunks.push(Buffer.from(part));
+        } else {
+          stdoutLineCaptureFailed = true;
+          stdoutLineChunks = [];
+        }
+      }
+    };
+    proc.stdout.on('data', (chunk: Buffer) => {
+      let start = 0;
+      let newline = chunk.indexOf(0x0a, start);
+      while (newline >= 0) {
+        appendStdoutPart(chunk.subarray(start, newline));
+        processStdoutLine(Buffer.concat(stdoutLineChunks));
+        start = newline + 1;
+        newline = chunk.indexOf(0x0a, start);
+      }
+      if (start < chunk.byteLength) appendStdoutPart(chunk.subarray(start));
     });
 
     proc.stderr.on('data', (chunk: Buffer) => {
@@ -538,8 +623,17 @@ export async function spawnDelegateChild(
     });
     proc.on('close', (code) => {
       closed = true;
-      buffer += stdoutDecoder.end();
-      if (buffer.trim() && !discardingLongLine) processLine(buffer);
+      if (stdoutLineBytes > 0) {
+        const remaining = stdoutLineCaptureFailed
+          ? Buffer.alloc(0)
+          : Buffer.concat(stdoutLineChunks);
+        if (
+          remaining.toString('utf8').trim() ||
+          stdoutLineCaptureFailed ||
+          stdoutLineBytes > MAX_JSON_LINE_BYTES
+        )
+          processStdoutLine(remaining);
+      }
       stderrBuffer += stderrDecoder.end();
       if (stderrBuffer) {
         const control = processControlAck(stderrBuffer);

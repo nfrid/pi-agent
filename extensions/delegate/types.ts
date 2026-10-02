@@ -17,6 +17,7 @@ export type DelegateLifecycleReason =
   | 'queued-cancellation'
   | 'timeout'
   | 'child-nonzero-exit'
+  | 'event-overflow'
   | 'provider-runner-error'
   | 'setup-failure'
   | 'lifecycle-cleanup-failure'
@@ -30,6 +31,21 @@ export interface DelegateLifecycleProjection {
   diagnostic?: string;
   /** Exact diagnostic file when it does not fit inline. */
   diagnosticFile?: CacheFile;
+  /** Bounded recovery metadata for clipped or missing process-host events. */
+  eventOverflow?: {
+    eventCount: number;
+    totalBytes: number;
+    capturedEvents: number;
+    capturedBytes: number;
+    unavailableEvents: number;
+    unavailableReason?:
+      | 'capture-limit'
+      | 'host-publication-failed'
+      | 'legacy-host'
+      | 'artifact-read-failed';
+    artifactFile?: CacheFile;
+    artifactPublicationFailed?: boolean;
+  };
   continuationUsable: boolean;
   writableBranchRetained: boolean;
   readOnlySnapshotRetained: boolean;

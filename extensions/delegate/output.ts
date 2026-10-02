@@ -194,6 +194,22 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
       else if (lifecycle.diagnostic)
         lines.push(`Failure: ${lifecycle.diagnostic}`);
       else lines.push('Failure: exact lifecycle diagnostic file unavailable.');
+      if (lifecycle.eventOverflow) {
+        const overflow = lifecycle.eventOverflow;
+        lines.push(
+          `Event overflow: ${overflow.eventCount} truncated event(s), ${overflow.totalBytes} known byte(s); the run was not accepted as successful.`,
+        );
+        if (overflow.artifactFile)
+          lines.push(
+            `Oversized event artifact: ${overflow.artifactFile.path} (${overflow.artifactFile.size} bytes).`,
+          );
+        if (overflow.artifactPublicationFailed)
+          lines.push('Oversized event artifact publication failed.');
+        if (overflow.unavailableEvents)
+          lines.push(
+            `${overflow.unavailableEvents} event(s) could not be retained (${overflow.unavailableReason ?? 'capture unavailable'}).`,
+          );
+      }
       if (lifecycle.continuationUsable)
         lines.push('Continuation available for recovery.');
       if (lifecycle.writableBranchRetained)

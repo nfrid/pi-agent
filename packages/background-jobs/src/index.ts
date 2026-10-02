@@ -28,6 +28,8 @@ export const BACKGROUND_JOBS_MAX_EXECUTABLE_BYTES = 4 * 1024;
 export const BACKGROUND_JOBS_MAX_ARG_BYTES = 64 * 1024;
 export const BACKGROUND_JOBS_MAX_ARGV_BYTES = 256 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_LINE_BYTES = 64 * 1024;
+/** Per-job private disk budget for exact oversized event-line recovery. */
+export const BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES = 8 * 1024 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_BYTES = 4 * 1024 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_RESPONSE_BYTES = 256 * 1024;
 export const BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES = 64 * 1024;
@@ -118,12 +120,22 @@ export class OutputTail {
 
 export type BackgroundJobEventStream = 'stdout' | 'stderr';
 
+export interface BackgroundJobEventOverflow {
+  /** Exact original line byte count, excluding its line ending. */
+  readonly bytes: number;
+  /** Private host file, returned only through the owning job's event API. */
+  readonly artifactPath?: string;
+  readonly unavailableReason?: 'capture-limit' | 'publication-failed';
+}
+
 export interface BackgroundJobEvent {
   readonly offset: number;
   readonly stream: BackgroundJobEventStream;
   readonly text: string;
   /** The retained line text was clipped at the per-line bound. */
   readonly truncated: boolean;
+  /** Exact raw line capture metadata for truncated events, when supported. */
+  readonly overflow?: BackgroundJobEventOverflow;
 }
 
 export interface BackgroundJobEventsSnapshot {
@@ -623,6 +635,35 @@ function parseOutput(value: unknown, maxBytes: number): OutputSnapshot {
 
 function parseEvent(value: unknown): BackgroundJobEvent {
   if (!record(value)) throw new Error('Invalid background job event.');
+  let overflow: BackgroundJobEventOverflow | undefined;
+  if (value.overflow !== undefined) {
+    if (
+      !record(value.overflow) ||
+      typeof value.overflow.bytes !== 'number' ||
+      !Number.isSafeInteger(value.overflow.bytes) ||
+      value.overflow.bytes <= 0 ||
+      (value.overflow.artifactPath !== undefined &&
+        (typeof value.overflow.artifactPath !== 'string' ||
+          value.overflow.artifactPath.length > 4096 ||
+          !path.isAbsolute(value.overflow.artifactPath))) ||
+      (value.overflow.unavailableReason !== undefined &&
+        value.overflow.unavailableReason !== 'capture-limit' &&
+        value.overflow.unavailableReason !== 'publication-failed') ||
+      (value.overflow.artifactPath !== undefined &&
+        value.overflow.unavailableReason !== undefined)
+    )
+      throw new Error('Invalid background job event overflow metadata.');
+    overflow = {
+      bytes: value.overflow.bytes,
+      ...(typeof value.overflow.artifactPath === 'string'
+        ? { artifactPath: value.overflow.artifactPath }
+        : {}),
+      ...(value.overflow.unavailableReason === 'capture-limit' ||
+      value.overflow.unavailableReason === 'publication-failed'
+        ? { unavailableReason: value.overflow.unavailableReason }
+        : {}),
+    };
+  }
   if (
     typeof value.offset !== 'number' ||
     !Number.isSafeInteger(value.offset) ||
@@ -635,11 +676,14 @@ function parseEvent(value: unknown): BackgroundJobEvent {
       BACKGROUND_JOBS_MAX_EVENT_RECORD_BYTES
   )
     throw new Error('Invalid background job event.');
+  if (overflow && value.truncated !== true)
+    throw new Error('Overflow metadata requires a truncated event.');
   return {
     offset: value.offset,
     stream: value.stream,
     text: value.text,
     truncated: value.truncated,
+    ...(overflow ? { overflow } : {}),
   };
 }
 

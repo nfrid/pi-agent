@@ -14,6 +14,7 @@ import {
 import {
   buildLifecycleDiagnostic,
   getDelegateLifecycle,
+  hasDelegateEventOverflow,
   setDelegateLifecycle,
   setDelegateLifecycleText,
 } from './lifecycle';
@@ -426,6 +427,15 @@ export async function runDelegate(
       run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.${checkpointStatus}`;
       setDelegateLifecycle(run, 'timeout', run.errorMessage);
       run.state = 'timed-out';
+    } else if (!spawnError && exitCode === 0 && hasDelegateEventOverflow(run)) {
+      run.stopReason = 'error';
+      run.errorMessage =
+        'The delegate emitted truncated events that were excluded from transcript validation.';
+      setDelegateLifecycleText(
+        run,
+        'event-overflow',
+        buildLifecycleDiagnostic('event-overflow', run.errorMessage),
+      );
     } else if (!spawnError && exitCode !== 0) {
       // A child error event may have populated errorMessage before close. The
       // observed nonzero exit is still the stable lifecycle cause; that text
@@ -451,6 +461,7 @@ export async function runDelegate(
         run.stopReason === 'error' ||
         run.stopReason === 'aborted' ||
         run.exitCode !== 0 ||
+        hasDelegateEventOverflow(run) ||
         !getFinalAssistantText(run.messages).trim();
       run.state = failed ? 'error' : 'success';
       if (failed && !getDelegateLifecycle(run)) {

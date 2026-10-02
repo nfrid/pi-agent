@@ -6,6 +6,7 @@ import {
   isDelegateLifecycleDiagnosticPublicationFailed,
   LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
   markDelegateLifecycleDiagnosticPublicationFailed,
+  publishDelegateEventOverflow,
   setDelegateLifecycleDiagnosticFile,
 } from './lifecycle';
 import { buildParentHandoffResult } from './output';
@@ -65,6 +66,7 @@ export async function buildOutputFileHandoff(
   runs: DelegatedRun[],
   write: CacheWriter = (bytes, extension) => writeCacheFile(bytes, extension),
 ): Promise<string> {
+  for (const run of runs) await publishDelegateEventOverflow(run, write);
   for (const run of runs) await publishLifecycleDiagnostic(run, write);
 
   let result = buildParentHandoffResult(runs);

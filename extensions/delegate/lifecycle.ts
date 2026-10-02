@@ -1,3 +1,4 @@
+import { BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES } from '@pi-agent/background-jobs';
 import type { CacheFile } from '../shared/cache-files';
 import { resolveDelegateSession } from './session';
 import {
@@ -23,15 +24,33 @@ interface LifecycleRecord {
   diagnostic?: string;
   diagnosticFile?: CacheFile;
   diagnosticPublicationFailed?: boolean;
+  eventOverflow?: DelegateLifecycleProjection['eventOverflow'];
 }
 
 const records = new WeakMap<DelegatedRun, LifecycleRecord>();
+const eventOverflows = new WeakMap<
+  DelegatedRun,
+  {
+    eventCount: number;
+    totalBytes: number;
+    capturedEvents: number;
+    capturedBytes: number;
+    unavailableEvents: number;
+    unavailableReason?: NonNullable<
+      DelegateLifecycleProjection['eventOverflow']
+    >['unavailableReason'];
+    lines: Buffer[];
+    artifactFile?: CacheFile;
+    artifactPublicationFailed?: boolean;
+  }
+>();
 const TRUSTED_LIFECYCLE = Symbol('trusted delegate lifecycle projection');
 const LIFECYCLE_REASONS: readonly DelegateLifecycleReason[] = [
   'user-cancellation',
   'queued-cancellation',
   'timeout',
   'child-nonzero-exit',
+  'event-overflow',
   'provider-runner-error',
   'setup-failure',
   'lifecycle-cleanup-failure',
@@ -122,6 +141,8 @@ export function buildLifecycleDiagnostic(
         return 'The delegate exceeded its configured runtime limit.';
       case 'child-nonzero-exit':
         return 'The child process exited unsuccessfully.';
+      case 'event-overflow':
+        return 'The child emitted truncated events that could not be validated.';
       case 'provider-runner-error':
         return 'The delegate runner failed before it could settle the child.';
       case 'setup-failure':
@@ -216,10 +237,31 @@ export function hydrateDelegateLifecycle(
       byteLength(value.diagnostic) > LIFECYCLE_DIAGNOSTIC_CAPTURE_BYTES)
   )
     return false;
+  const eventOverflow = value.eventOverflow;
+  if (
+    eventOverflow !== undefined &&
+    (!eventOverflow ||
+      !Number.isSafeInteger(eventOverflow.eventCount) ||
+      eventOverflow.eventCount < 1 ||
+      !Number.isSafeInteger(eventOverflow.totalBytes) ||
+      eventOverflow.totalBytes < 0 ||
+      !Number.isSafeInteger(eventOverflow.capturedEvents) ||
+      eventOverflow.capturedEvents < 0 ||
+      !Number.isSafeInteger(eventOverflow.capturedBytes) ||
+      eventOverflow.capturedBytes < 0 ||
+      !Number.isSafeInteger(eventOverflow.unavailableEvents) ||
+      eventOverflow.unavailableEvents < 0 ||
+      (eventOverflow.artifactFile !== undefined &&
+        (typeof eventOverflow.artifactFile.path !== 'string' ||
+          !Number.isSafeInteger(eventOverflow.artifactFile.size) ||
+          eventOverflow.artifactFile.size < 0)))
+  )
+    return false;
   const record: LifecycleRecord = {
     reason: value.reason,
     ...(value.diagnostic !== undefined ? { diagnostic: value.diagnostic } : {}),
     ...(value.diagnosticFile ? { diagnosticFile: value.diagnosticFile } : {}),
+    ...(eventOverflow ? { eventOverflow } : {}),
   };
   records.set(run, record);
   Object.defineProperty(run, TRUSTED_LIFECYCLE, {
@@ -279,6 +321,72 @@ export function setDelegateLifecycleDiagnosticFile(
   else delete record.diagnosticFile;
 }
 
+export function recordDelegateEventOverflow(
+  run: DelegatedRun,
+  bytes: number,
+  content?: Uint8Array,
+  unavailableReason?: NonNullable<
+    DelegateLifecycleProjection['eventOverflow']
+  >['unavailableReason'],
+): void {
+  let overflow = eventOverflows.get(run);
+  if (!overflow) {
+    overflow = {
+      eventCount: 0,
+      totalBytes: 0,
+      capturedEvents: 0,
+      capturedBytes: 0,
+      unavailableEvents: 0,
+      lines: [],
+    };
+    eventOverflows.set(run, overflow);
+  }
+  overflow.eventCount++;
+  overflow.totalBytes = Math.min(
+    Number.MAX_SAFE_INTEGER,
+    overflow.totalBytes +
+      (Number.isSafeInteger(bytes) && bytes > 0 ? bytes : 0),
+  );
+  const separatorBytes = overflow.capturedEvents;
+  if (
+    content &&
+    content.byteLength === bytes &&
+    overflow.capturedBytes + content.byteLength + separatorBytes <=
+      BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES
+  ) {
+    const exact = Buffer.from(content);
+    overflow.lines.push(exact);
+    overflow.capturedEvents++;
+    overflow.capturedBytes += exact.byteLength;
+  } else {
+    overflow.unavailableEvents++;
+    overflow.unavailableReason ??= unavailableReason ?? 'capture-limit';
+  }
+}
+
+export function hasDelegateEventOverflow(run: DelegatedRun): boolean {
+  return (eventOverflows.get(run)?.eventCount ?? 0) > 0;
+}
+
+export async function publishDelegateEventOverflow(
+  run: DelegatedRun,
+  write: (bytes: Uint8Array, extension: string) => Promise<CacheFile>,
+): Promise<void> {
+  const overflow = eventOverflows.get(run);
+  if (!overflow || overflow.capturedEvents === 0 || overflow.artifactFile)
+    return;
+  const parts: Buffer[] = [];
+  overflow.lines.forEach((event, index) => {
+    if (index > 0) parts.push(Buffer.from('\n'));
+    parts.push(event);
+  });
+  try {
+    overflow.artifactFile = await write(Buffer.concat(parts), '.jsonl');
+  } catch {
+    overflow.artifactPublicationFailed = true;
+  }
+}
+
 /** Ensure old persisted error details receive a truthful, conservative code. */
 export function ensureDelegateLifecycle(
   run: DelegatedRun,
@@ -292,6 +400,19 @@ export function ensureDelegateLifecycle(
       run.errorMessage || 'No harness lifecycle cause was retained.',
     );
   return getDelegateLifecycle(run);
+}
+
+function copyEventOverflow(
+  overflow: NonNullable<DelegateLifecycleProjection['eventOverflow']>,
+  includeFile: boolean,
+): NonNullable<DelegateLifecycleProjection['eventOverflow']> {
+  const { artifactFile, ...metadata } = overflow;
+  return {
+    ...metadata,
+    ...(includeFile && artifactFile
+      ? { artifactFile: { ...artifactFile } }
+      : {}),
+  };
 }
 
 export function getDelegateLifecycle(
@@ -313,6 +434,30 @@ export function getDelegateLifecycle(
           record.diagnosticPublicationFailed
         ? boundLifecyclePublicFallback(record.diagnostic)
         : undefined);
+  const overflow = eventOverflows.get(run);
+  const storedOverflow = overflow
+    ? {
+        eventCount: overflow.eventCount,
+        totalBytes: overflow.totalBytes,
+        capturedEvents: overflow.capturedEvents,
+        capturedBytes: overflow.capturedBytes,
+        unavailableEvents: overflow.unavailableEvents,
+        ...(overflow.unavailableReason
+          ? { unavailableReason: overflow.unavailableReason }
+          : {}),
+        ...(overflow.artifactPublicationFailed
+          ? { artifactPublicationFailed: true }
+          : {}),
+        ...(options.includeFile === false
+          ? {}
+          : overflow.artifactFile
+            ? { artifactFile: { ...overflow.artifactFile } }
+            : {}),
+      }
+    : record.eventOverflow;
+  const eventOverflow = storedOverflow
+    ? copyEventOverflow(storedOverflow, options.includeFile !== false)
+    : undefined;
   return {
     reason: record.reason,
     ...(inline ? { diagnostic: inline } : {}),
@@ -321,6 +466,7 @@ export function getDelegateLifecycle(
       : record.diagnosticFile
         ? { diagnosticFile: record.diagnosticFile }
         : {}),
+    ...(eventOverflow ? { eventOverflow } : {}),
     ...facts,
   };
 }
@@ -341,6 +487,14 @@ export function cloneDelegateLifecycle(
       : projection.diagnosticFile
         ? { diagnosticFile: { ...projection.diagnosticFile } }
         : {}),
+    ...(projection.eventOverflow
+      ? {
+          eventOverflow: copyEventOverflow(
+            projection.eventOverflow,
+            options.includeFile !== false,
+          ),
+        }
+      : {}),
     continuationUsable: projection.continuationUsable,
     writableBranchRetained: projection.writableBranchRetained,
     readOnlySnapshotRetained: projection.readOnlySnapshotRetained,
@@ -355,6 +509,9 @@ export function copyDelegateLifecycle(
 ): void {
   const record = records.get(source);
   if (!record) return;
+  const eventOverflow = getDelegateLifecycle(source, {
+    includeFile: options.includeFile,
+  })?.eventOverflow;
   records.set(target, {
     reason: record.reason,
     ...(record.diagnostic !== undefined
@@ -365,6 +522,7 @@ export function copyDelegateLifecycle(
       : record.diagnosticFile
         ? { diagnosticFile: { ...record.diagnosticFile } }
         : {}),
+    ...(eventOverflow ? { eventOverflow } : {}),
     ...(record.diagnosticPublicationFailed
       ? { diagnosticPublicationFailed: true }
       : {}),
