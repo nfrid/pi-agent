@@ -1143,6 +1143,59 @@ describe('tool row views and virtual transcript construction', () => {
     );
   });
 
+  it('projects delegate runtime warnings without treating them as completion', () => {
+    const content = 'The delegate is still working on the requested review.';
+    const details = {
+      identity: 'review@2',
+      logicalId: 'review',
+      route: 'luna-x',
+      startedAt: 1_800_000_000_000,
+      elapsedMs: 300_000,
+      warningAfterMs: 240_000,
+      status: 'warning',
+    };
+    const [item] = toTranscriptEntries([
+      {
+        type: 'custom_message',
+        customType: 'delegate-runtime-warning',
+        display: true,
+        content,
+        details,
+      },
+    ]);
+
+    expect(item?.entry).toMatchObject({ kind: 'other', continuesGroup: true });
+    expect(item?.event).toEqual({
+      kind: 'delegate-runtime-warning',
+      label: 'Delegate runtime warning · review@2 · luna-x · 5m',
+      status: 'warning',
+      content,
+      details,
+    });
+    expect(
+      toTranscriptEntries([
+        {
+          type: 'custom_message',
+          customType: 'delegate-runtime-warning',
+          display: false,
+          content,
+          details,
+        },
+      ]),
+    ).toHaveLength(0);
+    expect(
+      toTranscriptEntries([
+        {
+          type: 'custom_message',
+          customType: 'delegate-runtime-warning',
+          display: true,
+          content,
+          details: { ...details, status: 'success' },
+        },
+      ])[0]?.event?.kind,
+    ).toBe('custom-message');
+  });
+
   it('presents watch outcomes distinctly and summarizes coalesced completion', () => {
     const items = toTranscriptEntries([
       ...['matched', 'timed_out', 'ended'].map((status) => ({

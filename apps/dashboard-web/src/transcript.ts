@@ -48,7 +48,11 @@ export type TranscriptEvent =
       tasks: readonly TranscriptTodoTask[];
     }
   | {
-      kind: 'delegate-result' | 'background-result' | 'background-watch-result';
+      kind:
+        | 'delegate-result'
+        | 'delegate-runtime-warning'
+        | 'background-result'
+        | 'background-watch-result';
       label: string;
       status: 'success' | 'error' | 'warning' | 'neutral';
       unmatchedWatchCount?: number;
@@ -318,6 +322,7 @@ function asyncResultEvent(raw: Record<string, unknown>):
       {
         kind:
           | 'delegate-result'
+          | 'delegate-runtime-warning'
           | 'background-result'
           | 'background-watch-result';
       }
@@ -327,6 +332,31 @@ function asyncResultEvent(raw: Record<string, unknown>):
   const customType = stringField(raw, 'customType');
   const content = contentText(raw.content).trim();
   const details = record(raw.details);
+  if (customType === 'delegate-runtime-warning') {
+    if (
+      !details ||
+      typeof details.identity !== 'string' ||
+      typeof details.logicalId !== 'string' ||
+      typeof details.route !== 'string' ||
+      typeof details.startedAt !== 'number' ||
+      !Number.isFinite(details.startedAt) ||
+      typeof details.elapsedMs !== 'number' ||
+      !Number.isFinite(details.elapsedMs) ||
+      details.elapsedMs < 0 ||
+      typeof details.warningAfterMs !== 'number' ||
+      !Number.isFinite(details.warningAfterMs) ||
+      details.warningAfterMs <= 0 ||
+      details.status !== 'warning'
+    )
+      return undefined;
+    return {
+      kind: 'delegate-runtime-warning',
+      label: `Delegate runtime warning · ${details.identity} · ${details.route} · ${details.elapsedMs < 60_000 ? `${Math.floor(details.elapsedMs / 1000)}s` : `${Math.floor(details.elapsedMs / 60_000)}m`}`,
+      status: 'warning',
+      ...(content ? { content } : {}),
+      details,
+    };
+  }
   if (customType === 'delegate-wake-result') {
     const presentation = record(details?.presentation);
     const presentedSources = Array.isArray(presentation?.sources)

@@ -584,11 +584,13 @@ function TranscriptEventEntry({
             ? '↳'
             : failed
               ? '×'
-              : outcome === 'warning'
-                ? '!'
-                : outcome === 'neutral'
-                  ? '•'
-                  : '✓';
+              : event.kind === 'delegate-runtime-warning'
+                ? '⚠'
+                : outcome === 'warning'
+                  ? '!'
+                  : outcome === 'neutral'
+                    ? '•'
+                    : '✓';
   const metric =
     event.kind === 'compaction' && event.tokensBefore !== undefined
       ? `${formatCompactCount(event.tokensBefore)} tokens`
@@ -617,7 +619,9 @@ function TranscriptEventEntry({
           <pre className="background-event-output">{event.content}</pre>
         </div>
       ) : null
-    ) : event.kind === 'delegate-result' || event.kind === 'custom-message' ? (
+    ) : event.kind === 'delegate-result' ||
+      event.kind === 'delegate-runtime-warning' ||
+      event.kind === 'custom-message' ? (
       event.content ? (
         <div className="session-event-details">
           <Markdown>{event.content}</Markdown>
@@ -630,6 +634,7 @@ function TranscriptEventEntry({
     event.kind === 'branch-summary' ||
     event.kind === 'todo' ||
     ((event.kind === 'delegate-result' ||
+      event.kind === 'delegate-runtime-warning' ||
       background ||
       event.kind === 'custom-message') &&
       Boolean(event.content));

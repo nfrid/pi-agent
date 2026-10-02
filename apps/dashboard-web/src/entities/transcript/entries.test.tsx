@@ -87,6 +87,53 @@ describe('transcript entries', () => {
     expect(markup).not.toContain('opaque-process-id');
   });
 
+  it('renders delegate runtime warnings with an orange warning icon and details', () => {
+    const item = toTranscriptEntries([
+      {
+        type: 'custom_message',
+        customType: 'delegate-runtime-warning',
+        display: true,
+        content: 'The delegate is still working on the requested review.',
+        details: {
+          identity: 'review@2',
+          logicalId: 'review',
+          route: 'luna-x',
+          startedAt: 1_800_000_000_000,
+          elapsedMs: 300_000,
+          warningAfterMs: 240_000,
+          status: 'warning',
+        },
+      },
+    ])[0];
+    if (!item) throw new Error('Expected delegate runtime warning entry.');
+    const markup = renderToStaticMarkup(<TranscriptEntry item={item} />);
+
+    expect(markup).toContain('event-delegate-runtime-warning event-warning');
+    expect(markup).toContain('Delegate runtime warning');
+    expect(markup).toContain('aria-hidden="true">⚠</span>');
+    expect(markup).not.toContain('event-failed');
+    expect(markup).not.toContain('✓');
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TranscriptEntry item={item} />);
+    });
+    act(() =>
+      tree.root
+        .findByType('details')
+        .props.onToggle({ currentTarget: { open: true } }),
+    );
+    expect(
+      tree.root
+        .findAllByType('p')
+        .map((paragraph) => paragraph.props.children)
+        .join(' '),
+    ).toContain('The delegate is still working on the requested review.');
+    expect(markup).toContain('review@2 · luna-x · 5m');
+    expect(tree.root.findAllByType('pre')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('expands background evidence as literal output, not rendered Markdown', () => {
     const content = '**ready**\n![not an image](https://example.com/log.png)';
     const item: TranscriptModelItem = {
