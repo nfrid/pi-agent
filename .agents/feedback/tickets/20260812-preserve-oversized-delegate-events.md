@@ -1,7 +1,7 @@
 # HFM-20260812: Preserve oversized delegate events for recovery
 
-- **Status:** proposed
-- **Approval:** not approved
+- **Status:** evaluation-pending
+- **Approval:** approved by the user on 2026-10-02
 - **Created:** 2026-08-12
 - **Source reports:** [HF-20260809: Delegate result overflow discards the entire diagnosis](../inbox/20260809T134842Z-delegate-result-overflow-discard.md)
 
@@ -45,26 +45,34 @@ Implement option 1. On event overflow, store the exact event bytes in an owner-s
 
 ## Acceptance criteria
 
-- [ ] An event exceeding the current transport limit produces an explicit overflow reason and never disappears without a bounded diagnostic.
-- [ ] Exact overflow bytes are retained in an owner-session artifact when capture is safe, without entering parent model context inline.
-- [ ] Structured-result validation remains authoritative; overflow does not convert invalid or incomplete output into success.
-- [ ] Legacy prose and structured delegates expose consistent recovery metadata in foreground, background, single, batch, and continuation paths.
-- [ ] Artifact publication failure is reported distinctly and still leaves a bounded diagnostic.
-- [ ] Events below the limit retain current behavior and output bounds.
+- [x] An event exceeding the current transport limit produces an explicit overflow reason and never disappears without a bounded diagnostic.
+- [x] Exact overflow bytes are retained in an owner-session artifact when capture is safe, without entering parent model context inline.
+- [x] Transcript/result validation remains authoritative; overflow does not convert invalid or incomplete output into success.
+- [x] Direct and hosted runs publish the same bounded recovery projection through the shared handoff path; existing batch and continuation contracts pass. The current report contract is prose plus bounded metadata, not the historical selectable structured-result API.
+- [x] Artifact publication failure is reported distinctly and still leaves a bounded diagnostic.
+- [x] Events below the limit retain current behavior and output bounds, including normal events after overflow capture consumes its budget.
 
 ## Validation
 
-Inject just-under-limit and over-limit JSON events containing prose results, structured results, malformed data, multibyte text, and sensitive fixture markers. Verify artifact ownership and exact bytes, absence of artifact-only content from parent projections, truthful lifecycle status, continuation behavior, and publication-failure fallback. Run focused delegate event, runner, output, artifact, lifecycle, and async tests, then `pnpm run check`.
+Inject oversized direct and hosted events, including malformed UTF-8, multibyte text, CRLF, sensitive fixture markers, and events clipped by the encoded record envelope. Verify artifact ownership and exact bytes, absence of artifact-only content from parent projections, truthful lifecycle status, publication-failure fallback, capture-budget exhaustion, and normal events after overflow. Run focused delegate child/lifecycle/output tests, host/store tests, background-jobs client and contribution-schema tests, then `bun run check` for the shared protocol change.
+
+Completed 2026-10-02:
+
+- Child focused checks: 74 delegate tests, 26 host/store tests, 9 background-jobs client tests and 8 contribution tests passed. Child full check passed before the final separator-cap correction; the corrected lifecycle suite then passed all 19 tests with changed-path Biome clean.
+- Parent reviewed the full retained delta and squashed it as `fdb5e7cbcb9c`. Parent `PATH="$PATH:/usr/sbin:/sbin" bun run check` passed after the final correction, including all typecheck scopes, lint and root/workspace tests. Log: `/tmp/pi-overflow-parent-check-fdb5e7cb.log`.
+- The historical baseline is the linked observed report plus inspected discard code. No clean pre-edit baseline test run or live oversized recovery was performed; regression fixtures are not live evaluation evidence.
+- Capture is capped at 8 MiB per hosted job and delegate artifact; unavailable capture/publication is explicit. Cancellation and timeout retain precedence. No event-size limit was raised.
+- No live deployment, parent package rebuild, or process-host restart was performed. Hosted exact capture needs the new process-host build; older hosts remain diagnosable but cannot recover bytes they already discarded.
 
 ## Evaluation
 
-- **Window:** Not started; after an approved merge, the first 10 delegate overflow or near-limit fixtures/live events, including at least 3 real overflow recoveries, or 2026-10-31, whichever is later
+- **Window:** Pending live activation. After the approved change is activated, observe the first 10 delegate overflow or near-limit fixtures/live events, including at least 3 real overflow recoveries, or 2026-10-31, whichever is later. Pre-activation regression fixtures do not fill this window.
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 Compare with the baseline of two attempts and zero recoverable findings. Keep only if every overflow has a truthful bounded reason, no retained payload leaks inline or across owners, and at least 3 real overflow cases can be inspected without repeating the delegated investigation.
 
 ## Implementation and resolution
 
-- **Approved implementation:** —
-- **Merged change:** —
-- **Resolution:** pending evaluation
+- **Approved implementation:** Option 1, explicitly approved by the user on 2026-10-02. Preserve oversized delegate event bytes outside model context and expose bounded recovery metadata.
+- **Merged change:** `fdb5e7cbcb9c` — `fix(delegate): preserve oversized event recovery artifacts`.
+- **Resolution:** Source implementation and parent validation complete; live activation and post-activation evaluation remain pending. Process-host upgrade requires a separately arranged quiet window because restart terminates hosted jobs.
