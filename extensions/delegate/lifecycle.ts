@@ -1,5 +1,6 @@
 import { BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES } from '@pi-agent/background-jobs';
 import type { CacheFile } from '../shared/cache-files';
+import { recordHarnessTelemetry } from '../shared/telemetry';
 import { resolveDelegateSession } from './session';
 import {
   type DelegatedRun,
@@ -193,10 +194,25 @@ export function setDelegateLifecycleText(
   reason: DelegateLifecycleReason,
   diagnostic: string,
 ): void {
+  const previous = records.get(run);
   records.set(run, {
     reason,
     diagnostic: boundLifecycleText(diagnostic),
   });
+  if (previous?.reason !== reason)
+    recordHarnessTelemetry({
+      operation:
+        reason === 'lifecycle-cleanup-failure'
+          ? 'delegate.cleanup'
+          : 'delegate.lifecycle',
+      code: reason,
+      outcome:
+        reason === 'user-cancellation' || reason === 'queued-cancellation'
+          ? 'expected'
+          : 'failure',
+      attemptId: run.runId,
+      sessionId: run.sessionId,
+    });
   Object.defineProperty(run, TRUSTED_LIFECYCLE, {
     value: true,
     configurable: true,

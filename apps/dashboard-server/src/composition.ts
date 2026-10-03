@@ -18,6 +18,8 @@ export interface DashboardServerOptions {
   authToken?: string;
   origins?: readonly string[];
   stateDir?: string;
+  /** Shared local issue store; explicit state directories isolate embedded/test servers. */
+  telemetryDir?: string;
   sessionDir?: string;
   /** Hidden Pi child sessions addressable by ID but omitted from shell listings. */
   delegateSessionDir?: string;
@@ -50,6 +52,7 @@ export interface DashboardConfiguration {
   readonly host: string;
   port: number;
   readonly stateDir: string;
+  readonly telemetryDir: string;
   readonly token: string;
   readonly socketPath: string;
   readonly runtimeHostSocketPath: string;

@@ -26,6 +26,54 @@ afterEach(() => {
 });
 
 describe('delegate lifecycle failure projection', () => {
+  test('finishes and releases the session and launch slot when terminal status observers throw', async () => {
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const spawn = vi
+      .spyOn(delegateChild, 'spawnDelegateChild')
+      .mockImplementation(async (run) => {
+        processJsonLine(
+          JSON.stringify({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              stopReason: 'stop',
+              content: [{ type: 'text', text: 'Finished task' }],
+            },
+          }),
+          run,
+        );
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      });
+    const updates: string[] = [];
+    const options = {
+      cwd: '/tmp',
+      task: 'finish despite presentation failure',
+      context: 'fresh' as const,
+      sessionPath: '/tmp/delegate-status-observer-regression.jsonl',
+      isolation: 'shared' as const,
+      warningAfterMs: 0,
+      maxConcurrency: 1,
+      mode: 'single' as const,
+      onRunUpdate: (run: ReturnType<typeof createRun>) => {
+        if (run.state === 'success')
+          throw new Error('Delegate status surface is invalid.');
+      },
+      onUpdate: (update: import('./types').DelegateProgressUpdate) => {
+        const state = update.details?.runs[0]?.state;
+        if (state) updates.push(state);
+        if (state === 'success') throw new Error('Another failed renderer');
+      },
+    };
+    const first = await runDelegate(options);
+    const continuation = await runDelegate(options);
+    expect(first.state).toBe('success');
+    expect(continuation.state).toBe('success');
+    expect(first.finishedAt).toBeDefined();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(updates.filter((state) => state === 'success')).toHaveLength(2);
+    expect(diagnostic).toHaveBeenCalledTimes(2);
+  });
+
   test('is harness-authored and ignores a child-shaped lifecycle field', () => {
     const run = createRun('failure');
     run.state = 'error';

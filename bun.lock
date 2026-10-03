@@ -11,6 +11,7 @@
         "@mozilla/readability": "^0.6.0",
         "@pi-agent/background-jobs": "workspace:*",
         "@pi-agent/session-title": "workspace:*",
+        "@pi-agent/telemetry": "workspace:*",
         "@pi-dashboard/activity-model": "workspace:*",
         "@pi-dashboard/codex-usage": "workspace:*",
         "@pi-dashboard/extension-contributions": "workspace:*",
@@ -39,6 +40,7 @@
         "@earendil-works/pi-coding-agent": "1.0.0",
         "@pi-agent/background-jobs": "workspace:*",
         "@pi-agent/session-title": "workspace:*",
+        "@pi-agent/telemetry": "workspace:*",
         "@pi-dashboard/activity-model": "workspace:*",
         "@pi-dashboard/codex-usage": "workspace:*",
         "@pi-dashboard/domain": "workspace:*",
@@ -63,6 +65,7 @@
       "dependencies": {
         "@arkn/react-icon-picker": "1.0.1",
         "@mdxeditor/editor": "4.2.0",
+        "@pi-agent/telemetry": "workspace:*",
         "@pi-dashboard/activity-model": "workspace:*",
         "@pi-dashboard/client": "workspace:*",
         "@pi-dashboard/domain": "workspace:*",
@@ -178,6 +181,13 @@
       "version": "0.1.0",
       "dependencies": {
         "@earendil-works/pi-ai": "1.0.0",
+      },
+    },
+    "packages/telemetry": {
+      "name": "@pi-agent/telemetry",
+      "version": "0.1.0",
+      "dependencies": {
+        "@earendil-works/pi-coding-agent": "1.0.0",
       },
     },
     "packages/worktree-manager": {
@@ -607,6 +617,8 @@
     "@pi-agent/background-jobs": ["@pi-agent/background-jobs@workspace:packages/background-jobs"],
 
     "@pi-agent/session-title": ["@pi-agent/session-title@workspace:packages/session-title"],
+
+    "@pi-agent/telemetry": ["@pi-agent/telemetry@workspace:packages/telemetry"],
 
     "@pi-dashboard/activity-model": ["@pi-dashboard/activity-model@workspace:packages/activity-model"],
 

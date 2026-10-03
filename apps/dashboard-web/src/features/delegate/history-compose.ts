@@ -263,11 +263,25 @@ function augmentLiveStatus(
 ): DelegateInspectionStatus {
   const currentLive = liveCurrentRunStatus(live);
   if (!durable) return currentLive;
+  const settled =
+    durable.state !== 'queued' &&
+    durable.state !== 'running' &&
+    isActiveDelegateStatus(currentLive);
   return {
     ...durable,
     ...currentLive,
-    // The live stream is authoritative for the current state, while durable
-    // details fill the bounded fields the live surface does not carry.
+    // A terminal record for this exact attempt cannot regress to a stale
+    // queued/running surface. A different continuation is matched separately.
+    ...(settled
+      ? {
+          state: durable.state,
+          startedAt: durable.startedAt ?? currentLive.startedAt,
+          finishedAt: durable.finishedAt,
+          workflow: durable.workflow ?? currentLive.workflow,
+          pauseState: undefined,
+          pausedAt: undefined,
+        }
+      : {}),
     id: durable.id,
     transcript:
       currentLive.transcript && currentLive.transcript.length > 0
@@ -276,7 +290,9 @@ function augmentLiveStatus(
     transcriptTruncated:
       currentLive.transcriptTruncated === true ||
       durable.transcriptTruncated === true,
-    lifecycle: currentLive.lifecycle ?? durable.lifecycle,
+    lifecycle: settled
+      ? (durable.lifecycle ?? currentLive.lifecycle)
+      : (currentLive.lifecycle ?? durable.lifecycle),
     warnings: durable.warnings,
   } as DelegateInspectionStatus;
 }
@@ -489,7 +505,7 @@ function groupModel(
   const liveRow = live
     ? augmentLiveStatus(
         live,
-        liveDurableIndex >= 0 ? durableRuns[liveDurableIndex]?.row : undefined,
+        matchedLiveIndex >= 0 ? durableRuns[matchedLiveIndex]?.row : undefined,
       )
     : undefined;
   const incompleteLiveRow =

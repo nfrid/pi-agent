@@ -1895,16 +1895,32 @@ function mergeCanonicalOccurrences(
     const actualWorkflow = isRecord(actual.run.workflow)
       ? actual.run.workflow
       : undefined;
+    const actualState = occurrenceState(actual);
+    const placeholderState = occurrenceState(placeholder);
+    const settledPlaceholder =
+      (actualState === 'queued' || actualState === 'running') &&
+      placeholderState !== 'queued' &&
+      placeholderState !== 'running' &&
+      placeholderState !== 'scheduled';
     return {
       ...actual,
       run: {
         ...placeholder.run,
         ...actual.run,
+        ...(settledPlaceholder
+          ? {
+              state: placeholderState,
+              ...(placeholder.run.finishedAt === undefined
+                ? {}
+                : { finishedAt: placeholder.run.finishedAt }),
+            }
+          : {}),
         ...(placeholderWorkflow
           ? {
               workflow: {
                 ...placeholderWorkflow,
                 ...(actualWorkflow ?? {}),
+                ...(settledPlaceholder ? placeholderWorkflow : {}),
               },
             }
           : {}),

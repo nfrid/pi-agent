@@ -1,0 +1,27 @@
+{
+  "name": "@pi-agent/telemetry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./src/contracts.ts",
+      "default": "./dist/contracts.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.0"
+  },
+  "engines": {
+    "node": ">=25"
+  }
+}

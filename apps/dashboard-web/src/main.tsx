@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { UpdateAvailablePrompt } from './pwa-update';
+import { installBrowserTelemetry, reportBrowserTelemetry } from './telemetry';
 import './styles.css';
 
 class DashboardErrorBoundary extends Component<
@@ -15,6 +16,7 @@ class DashboardErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    reportBrowserTelemetry('render-error');
     console.error('Dashboard render failed', error, info.componentStack);
   }
 
@@ -34,6 +36,8 @@ class DashboardErrorBoundary extends Component<
     );
   }
 }
+
+installBrowserTelemetry();
 
 if ('serviceWorker' in navigator)
   void navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });

@@ -14,6 +14,7 @@ import { Button as AriaButton } from 'react-aria-components';
 import { rememberDraftRuntimeOptions } from '../features/model-option';
 import { reloadDashboard } from '../pwa-update';
 import { dashboardRouterInstance } from '../routes/tree';
+import { reportBrowserTelemetry } from '../telemetry';
 import { DashboardContext } from './dashboard-context';
 
 export const dashboardQueryClient = new QueryClient({
@@ -73,6 +74,21 @@ function ReloadRequiredState() {
 
 function DashboardApp() {
   const dashboard = useDashboardShell();
+  useEffect(() => {
+    if (dashboard.connectionState === 'connected')
+      reportBrowserTelemetry('connected');
+    else if (
+      dashboard.connectionState === 'error' ||
+      dashboard.connectionState === 'blocked'
+    )
+      reportBrowserTelemetry(
+        dashboard.errorKind === 'authentication'
+          ? 'authentication'
+          : dashboard.errorKind === 'protocol-mismatch'
+            ? 'protocol-mismatch'
+            : 'connection-error',
+      );
+  }, [dashboard.connectionState, dashboard.errorKind]);
   const usageQuery = useQuery(usageQueryOptions(dashboardHttpClient));
   useEffect(() => {
     if (usageQuery.data?.usage !== undefined)

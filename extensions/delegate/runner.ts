@@ -1,4 +1,8 @@
 import * as path from 'node:path';
+import {
+  recordHarnessFailure,
+  recordHarnessTelemetry,
+} from '../shared/telemetry';
 import { acquireSession, acquireSlot } from './concurrency';
 import {
   createDelegateControlChannel,
@@ -286,12 +290,37 @@ export async function runDelegate(
   let releaseSession: (() => void) | undefined;
   let runtimeWarningTimer: ReturnType<typeof setTimeout> | undefined;
 
+  let updateFailureReported = false;
+  const reportUpdateFailure = (error: unknown) => {
+    if (updateFailureReported) return;
+    updateFailureReported = true;
+    recordHarnessFailure(
+      'delegate.status',
+      'status-publication-failed',
+      error,
+      options.ownerSessionId,
+    );
+    console.error(
+      'delegate: status publication failed; execution and cleanup continue',
+      error,
+    );
+  };
   const emitUpdate = () => {
-    options.onRunUpdate?.(run);
-    options.onUpdate?.({
-      content: [{ type: 'text', text: progressText(run) }],
-      details: makeDetails(options.mode, [run]),
-    });
+    // Presentation callbacks must not interrupt execution or skip lock release.
+    // Run them independently so one failed observer cannot suppress another.
+    try {
+      options.onRunUpdate?.(run);
+    } catch (error) {
+      reportUpdateFailure(error);
+    }
+    try {
+      options.onUpdate?.({
+        content: [{ type: 'text', text: progressText(run) }],
+        details: makeDetails(options.mode, [run]),
+      });
+    } catch (error) {
+      reportUpdateFailure(error);
+    }
   };
 
   emitUpdate();
@@ -527,5 +556,16 @@ export async function runDelegate(
     else if (!(options.preserveControlOnRetry && run.retryable))
       control.close();
   }
+  if (run.state === 'success')
+    recordHarnessTelemetry({
+      operation: 'delegate.lifecycle',
+      code: 'completed',
+      outcome: 'success',
+      attemptId: run.runId,
+      sessionId: run.sessionId,
+      ...(run.startedAt && run.finishedAt
+        ? { durationMs: run.finishedAt - run.startedAt }
+        : {}),
+    });
   return run;
 }

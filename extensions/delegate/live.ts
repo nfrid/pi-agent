@@ -6,6 +6,7 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
 import type { SessionScopeId } from '../shared/runtime/scoped-services';
+import { recordHarnessFailure } from '../shared/telemetry';
 import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
 import type { DelegateLiveDetails } from './types';
 
@@ -534,11 +535,30 @@ export function delegateSurface(store: DelegateStatusStore): ExtensionSurface {
   return publisher.surface(store);
 }
 
+const publicationFailures = new WeakSet<DelegateStatusStore>();
+
 export function publishDelegateSurface(
   store: DelegateStatusStore,
   scopeId?: SessionScopeId,
 ): void {
-  publisher.publish(store, scopeId);
+  try {
+    publisher.publish(store, scopeId);
+    publicationFailures.delete(store);
+  } catch (error) {
+    if (!publicationFailures.has(store)) {
+      publicationFailures.add(store);
+      recordHarnessFailure(
+        'delegate.surface',
+        'surface-publication-failed',
+        error,
+        scopeId,
+      );
+      console.error(
+        'delegate: surface publication failed; lifecycle continues',
+        error,
+      );
+    }
+  }
 }
 
 export function clearDelegateSurface(scopeId?: SessionScopeId): void {

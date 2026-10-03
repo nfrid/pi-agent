@@ -138,6 +138,10 @@ const config = defineConfig({
   plugins: [react(), dashboardVersionPlugin()],
   resolve: {
     alias: {
+      '@pi-agent/telemetry/contracts': path.resolve(
+        __dirname,
+        '../../packages/telemetry/src/contracts.ts',
+      ),
       '@pi-dashboard/client': path.resolve(
         __dirname,
         '../../packages/dashboard-client/src/index.ts',

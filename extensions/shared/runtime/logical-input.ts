@@ -1,4 +1,5 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
+import { recordHarnessFailure } from '../telemetry';
 import { resolveHostAgentSession } from './keyed-turn-scheduler';
 import { getScopedServices } from './scoped-services';
 
@@ -149,9 +150,10 @@ export function installLogicalInputShim(): boolean {
       // _runAgentPrompt is the same SDK entry used by idle custom-result delivery.
       void (this as unknown as Session)
         ._runAgentPrompt(message)
-        .catch((error) =>
-          console.error('logical request steering failed', error),
-        );
+        .catch((error) => {
+          recordHarnessFailure('logical-input', 'steering-failed', error);
+          console.error('logical request steering failed', error);
+        });
       return;
     }
     await original.call(this, content, options);
@@ -178,9 +180,15 @@ export function releaseLogicalFollowUps(sessionId: string): void {
     if (!messages.length) return;
     void (session as unknown as Session)
       ._runAgentPrompt(messages)
-      .catch((error) =>
-        console.error('logical request follow-up failed', error),
-      );
+      .catch((error) => {
+        recordHarnessFailure(
+          'logical-input',
+          'follow-up-failed',
+          error,
+          sessionId,
+        );
+        console.error('logical request follow-up failed', error);
+      });
   }, 0);
 }
 

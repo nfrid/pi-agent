@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@arkn/react-icon-picker": "1.0.1",
+    "@pi-agent/telemetry": "workspace:*",
     "@mdxeditor/editor": "4.2.0",
     "@pi-dashboard/activity-model": "workspace:*",
     "@pi-dashboard/client": "workspace:*",

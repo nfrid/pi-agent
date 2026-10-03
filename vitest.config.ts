@@ -4,6 +4,10 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@pi-agent/telemetry/contracts': path.resolve(
+        'packages/telemetry/src/contracts.ts',
+      ),
+      '@pi-agent/telemetry': path.resolve('packages/telemetry/src/index.ts'),
       '@pi-agent/background-jobs': path.resolve(
         'packages/background-jobs/src/index.ts',
       ),

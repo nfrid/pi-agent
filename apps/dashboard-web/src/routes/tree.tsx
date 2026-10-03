@@ -4,6 +4,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 import { RouteShell } from '../app/route-shell';
+import { DiagnosticsPage } from '../features/diagnostics';
 import {
   DraftPendingThreadRoute,
   DraftRoute,
@@ -18,6 +19,11 @@ import {
 } from './components';
 
 const rootRoute = createRootRoute({ component: RouteShell });
+const diagnosticsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/diagnostics',
+  component: DiagnosticsPage,
+});
 const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
@@ -71,6 +77,7 @@ const legacyNewRoute = createRoute({
 
 export const dashboardRouteTree = rootRoute.addChildren([
   homeRoute,
+  diagnosticsRoute,
   sessionRoute,
   projectsRoute,
   projectRoute,

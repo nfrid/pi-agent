@@ -22,6 +22,7 @@ import {
   type ScopedServices,
   type SessionScopeId,
 } from '../shared/runtime/scoped-services';
+import { recordHarnessFailure } from '../shared/telemetry';
 import { BridgeClient } from './bridge-client';
 import { expandDashboardInput } from './command-adapter';
 import { dispatchDashboardCommand } from './command-dispatcher';
@@ -283,6 +284,7 @@ export function createRemoteControlRuntime(
       }
       if (nextServices && nextServicesWasCreated)
         releaseScopedServices(nextServices.scopeId, nextServices);
+      recordHarnessFailure('remote-control', 'snapshot-binding-failed', error);
       lastError = error instanceof Error ? error.message : String(error);
       if (!context) {
         queueDrafts.clear();

@@ -55,7 +55,12 @@ import {
   type DashboardDomainCode,
 } from './application/error-classification.js';
 import { FileReadError } from './file-read.js';
+import { FeedOverflowError, FeedPayloadTooLargeError } from './live-feed.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
+import {
+  type DashboardTelemetry,
+  parseBrowserTelemetryInput,
+} from './telemetry.js';
 
 export type { DashboardDomainCode } from './application/error-classification.js';
 export { DASHBOARD_DOMAIN_CODES } from './application/error-classification.js';
@@ -70,6 +75,7 @@ export const DASHBOARD_FEED_INACTIVITY_RECONNECT_MS = 5 * 60_000;
  * ID or caches a snapshot.
  */
 export interface DashboardTrpcContext {
+  readonly telemetry?: DashboardTelemetry;
   readonly serverId: () => string;
   readonly snapshot: () => BrowserSnapshot;
   /** Authoritative shell query builder. */
@@ -223,7 +229,45 @@ const protocolMiddleware = t.middleware(({ ctx, path, next }) => {
     throw toDashboardTrpcError(protocolMismatch(actual, ctx.serverId()));
   return next();
 });
-const dashboardProcedure = t.procedure.use(protocolMiddleware);
+function telemetryFailure(error: TRPCError) {
+  const domainCode = classifyDashboardError(error).code;
+  const expected =
+    !['sqlite-constraint', 'runtime-command-uncertain'].includes(
+      domainCode ?? '',
+    ) &&
+    [
+      'BAD_REQUEST',
+      'CONFLICT',
+      'NOT_FOUND',
+      'FORBIDDEN',
+      'UNAUTHORIZED',
+    ].includes(error.code);
+  return {
+    code: domainCode ?? error.code.toLowerCase().replaceAll('_', '-'),
+    outcome: expected ? ('expected' as const) : ('failure' as const),
+  };
+}
+const telemetryMiddleware = t.middleware(async ({ ctx, path, type, next }) => {
+  const started = Date.now();
+  const result = await next();
+  if (
+    path === 'telemetryOverview' ||
+    path === 'telemetryReport' ||
+    type === 'subscription'
+  )
+    return result;
+  ctx.telemetry?.record({
+    operation: `rpc.${path}`,
+    ...(result.ok
+      ? { code: 'completed', outcome: 'success' as const }
+      : telemetryFailure(result.error)),
+    durationMs: Date.now() - started,
+  });
+  return result;
+});
+const dashboardProcedure = t.procedure
+  .use(telemetryMiddleware)
+  .use(protocolMiddleware);
 
 function waitForBackgroundPoll(signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve) => {
@@ -272,6 +316,28 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
+  telemetryOverview: dashboardProcedure.query(({ ctx }) => {
+    if (!ctx.telemetry)
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Telemetry is unavailable.',
+      });
+    return ctx.telemetry.overview();
+  }),
+  telemetryReport: dashboardProcedure
+    .input((value: unknown) => {
+      try {
+        return parseBrowserTelemetryInput(value);
+      } catch {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid telemetry report.',
+        });
+      }
+    })
+    .mutation(
+      ({ ctx, input }) => ctx.telemetry?.report(input) ?? { accepted: false },
+    ),
   liveDiagnostics: dashboardProcedure
     .input((value: unknown) => parseLiveDiagnosticsRequest(value))
     .output((value: unknown) => parseLiveDiagnosticsResponse(value))
@@ -673,6 +739,25 @@ export function registerDashboardTrpc(
               ? Number(request.headers['x-dashboard-protocol-version'])
               : undefined,
         }),
+        onError: ({ error, path: procedure }) => {
+          if (
+            procedure !== 'shellSubscribe' &&
+            procedure !== 'sessionSubscribe'
+          )
+            return;
+          const failure = telemetryFailure(error);
+          const code =
+            error.cause instanceof FeedOverflowError
+              ? 'feed-overflow'
+              : error.cause instanceof FeedPayloadTooLargeError
+                ? 'feed-payload-too-large'
+                : failure.code;
+          context.telemetry?.record({
+            operation: `rpc.${procedure}`,
+            ...failure,
+            code,
+          });
+        },
         allowMethodOverride: true,
       });
     },

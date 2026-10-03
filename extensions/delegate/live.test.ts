@@ -1,13 +1,39 @@
 import { Value } from 'typebox/value';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DelegateStatusViewModelSchema } from './contribution';
 import { processJsonLine } from './events';
-import { delegateSurface } from './live';
+import { delegateSurface, publishDelegateSurface } from './live';
 import { DelegateStatusStore } from './status';
 import { makeDetails } from './tool-result';
 import { createRun } from './types';
 
 describe('delegate live surface', () => {
+  it('keeps invalid presentation publication from interrupting canonical status settlement', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const store = new DelegateStatusStore(() =>
+        publishDelegateSurface(store),
+      );
+      const run = createRun('complete the task', undefined, {
+        capabilities: ['web', 'web'],
+      });
+      const [id] = store.start([run], 'background');
+      run.state = 'success';
+      run.finishedAt = 123;
+      expect(() => store.update(id, run)).not.toThrow();
+      expect(store.list()[0]).toMatchObject({
+        state: 'success',
+        finishedAt: 123,
+      });
+      expect(error).toHaveBeenCalledOnce();
+      expect(() => delegateSurface(store)).toThrow(
+        'Delegate status surface is invalid.',
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('projects the current bounded status lineage for the renderer', () => {
     const store = new DelegateStatusStore();
     const run = createRun('inspect', undefined, {

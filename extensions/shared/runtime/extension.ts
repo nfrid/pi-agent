@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { recordHarnessFailure } from '../telemetry';
 
 export type ExtensionSetup = (pi: ExtensionAPI) => void;
 
@@ -31,7 +32,12 @@ export function defineExtension(
   const guarded: ExtensionSetup = (pi) => {
     if (registered.has(pi)) return;
     registered.add(pi);
-    setup(pi);
+    try {
+      setup(pi);
+    } catch (error) {
+      recordHarnessFailure(`extension.${name}`, 'registration-failed', error);
+      throw error;
+    }
   };
   // Preserve a useful name for stack traces and debugging.
   Object.defineProperty(guarded, 'name', { value: name, configurable: true });

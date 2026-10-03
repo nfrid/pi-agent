@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ThemeColor } from '@earendil-works/pi-coding-agent';
 import type { BackgroundDeliveryBroker } from '../shared/runtime/background-delivery';
+import { recordHarnessFailure } from '../shared/telemetry';
 import {
   type BackgroundCompletionCard,
   renderBackgroundCompletion,
@@ -254,6 +255,11 @@ export function createCompletionDelivery(options: {
       options.getStatuses()?.jobResultEntered(completed.map((job) => job.id));
     } catch (error) {
       rollbackAutomaticDelivery(completed);
+      recordHarnessFailure(
+        'delegate.delivery',
+        'completion-delivery-failed',
+        error,
+      );
       console.error('delegate: failed to deliver background completion', error);
     }
   };

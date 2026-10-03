@@ -50,6 +50,10 @@ export function DelegateHistorySurface({
 }) {
   const historyQuery = useQuery(delegateHistoryQueryOptions(client, id));
   const queryClient = useQueryClient();
+  const historySettledRunIds = useMemo(
+    () => delegateHistorySettledRunIds(historyQuery.data),
+    [historyQuery.data],
+  );
   const live = delegateSurface(runtime);
   const liveRows = live?.model.statuses ?? [];
   const [detailSelection, setDetailSelection] = useState<{
@@ -132,12 +136,14 @@ export function DelegateHistorySurface({
   }, [detailSelection, historyQuery.isFetching, id, selectedRunExists]);
   useEffect(() => {
     if (!detailSelection) return;
-    const liveActive = liveRows.some(
-      (row) =>
-        row.runId === detailSelection.liveRunId &&
-        row.lineageId === detailSelection.lineageId &&
-        isActiveDelegateState(row.state, row.pauseState),
-    );
+    const liveActive =
+      !historySettledRunIds.has(detailSelection.runId) &&
+      liveRows.some(
+        (row) =>
+          row.runId === detailSelection.liveRunId &&
+          row.lineageId === detailSelection.lineageId &&
+          isActiveDelegateState(row.state, row.pauseState),
+      );
     // Once the selected run settles and the refreshed summary confirms its
     // stable identity, hydrate durable detail without requiring another click.
     if (
@@ -157,6 +163,7 @@ export function DelegateHistorySurface({
   }, [
     detailSelection,
     historyQuery.isFetching,
+    historySettledRunIds,
     liveRows,
     selectedPersistedRunExists,
     selectionOwnerMatches,
@@ -184,9 +191,6 @@ export function DelegateHistorySurface({
     // A queued launch is already present in durable history, but it does not
     // prove that a live settlement was persisted. Only terminal history rows
     // satisfy the refresh coordinator; otherwise the launch masks retries.
-    const historySettledRunIds = delegateHistorySettledRunIds(
-      historyQuery.data,
-    );
     refreshCoordinator.observe(historySettledRunIds);
     const reconciliation = reconcileDelegateLiveRuns(
       id,
@@ -200,7 +204,7 @@ export function DelegateHistorySurface({
     refreshCoordinator.markSettled(unresolvedSettlements);
     if (reconciliation.shouldInvalidate && unresolvedSettlements.length === 0)
       refreshCoordinator.refresh();
-  }, [id, liveRows, historyQuery.data, refreshCoordinator]);
+  }, [id, liveRows, historySettledRunIds, refreshCoordinator]);
   const historyLoading = historyQuery.isPending && !historyQuery.data;
   const historyError = historyQuery.isError && !historyQuery.data;
   if (

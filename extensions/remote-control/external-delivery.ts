@@ -17,6 +17,8 @@ import {
   markLogicalSteering,
 } from '../shared/runtime/logical-input';
 
+import { recordHarnessFailure } from '../shared/telemetry';
+
 type SteeringScope = {
   deliveryId: string;
   sessionId: string;
@@ -90,11 +92,15 @@ export function installExternalSteeringShim(): boolean {
         const session = this as unknown as {
           _runAgentPrompt(message: MessageEndEvent['message']): Promise<void>;
         };
-        void session
-          ._runAgentPrompt(nativeMessage)
-          .catch((error) =>
-            console.error('external idle steering failed', error),
+        void session._runAgentPrompt(nativeMessage).catch((error) => {
+          recordHarnessFailure(
+            'remote-control',
+            'external-steering-failed',
+            error,
+            scope.sessionId,
           );
+          console.error('external idle steering failed', error);
+        });
       }
       scope.queued = true;
     } catch (error) {

@@ -59,6 +59,7 @@ import { Type } from 'typebox';
 import { classifyDashboardError } from './application/error-classification.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { allowedOrigin, authorizeRequest } from './security.js';
+import type { DashboardTelemetry } from './telemetry.js';
 import { registerDashboardTrpc } from './trpc.js';
 
 const MAX_JSON_BODY = 512 * 1024;
@@ -133,6 +134,7 @@ function parseJsonBody(
 }
 
 export interface DashboardRouteContext {
+  readonly telemetry?: DashboardTelemetry;
   readonly token: string;
   serverId(): string;
   origins(): readonly string[];
@@ -463,6 +465,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
   );
   installCorsAndAuth(app, context);
   registerDashboardTrpc(app, {
+    telemetry: context.telemetry,
     serverId: context.serverId,
     snapshot: context.snapshot,
     composerCommands: context.composerCommands,

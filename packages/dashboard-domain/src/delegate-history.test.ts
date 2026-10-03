@@ -23,6 +23,76 @@ function oldRun(overrides: Record<string, unknown> = {}) {
 }
 
 describe('delegate history adapter', () => {
+  it.each([
+    'before',
+    'after',
+  ])('settles a stale run from matching terminal workflow metadata stored %s it', (order) => {
+    const workflow = {
+      ownerBranchId: 'owner-a',
+      logicalId: 'worker',
+      attempt: 1,
+      identity: 'worker@1',
+      state: 'success',
+      dependencies: [],
+      waitingFor: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      startedAt: 2,
+      settledAt: 4,
+    };
+    const journal = {
+      type: 'custom',
+      id: 'terminal-workflow',
+      customType: 'delegate-workflow:v1',
+      data: {
+        version: 1,
+        kind: 'snapshot',
+        state: { version: 1, attempts: [workflow] },
+      },
+    };
+    const stale = {
+      type: 'message',
+      id: 'old-running-result',
+      message: {
+        role: 'toolResult',
+        toolName: 'delegate',
+        details: {
+          runs: [
+            oldRun({
+              runId: 'real-run',
+              lineageId: 'real-lineage',
+              state: 'running',
+              exitCode: -1,
+              task: 'keep real task detail',
+              startedAt: 2,
+              workflow: { ...workflow, state: 'running', settledAt: undefined },
+            }),
+          ],
+        },
+      },
+    };
+    const branch = [
+      { type: 'session', id: 'parent' },
+      ...(order === 'before' ? [journal, stale] : [stale, journal]),
+    ];
+    const response = delegateHistoryFromBranch('parent', branch);
+    expect(response.groups).toHaveLength(1);
+    expect(response.groups[0]).toMatchObject({
+      runId: 'real-run',
+      state: 'success',
+      finishedAt: 4,
+      runs: [
+        {
+          runId: 'real-run',
+          task: 'keep real task detail',
+          state: 'success',
+          finishedAt: 4,
+          workflow: { identity: 'worker@1', state: 'success', settledAt: 4 },
+        },
+      ],
+    });
+  });
+
   it('projects bounded delegate usage and omits empty legacy usage', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },

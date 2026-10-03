@@ -356,9 +356,15 @@ describe('command palette', () => {
       'New thread',
       'Dashboard',
     ]);
-    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(439);
-    expect(items[3]?.id).toBe('session:session-436');
-    expect(items.at(-1)?.id).toBe('session:session-0');
+    expect(items.find((item) => item.id === 'diagnostics')).toMatchObject({
+      kind: 'navigate',
+      title: 'Diagnostics',
+      path: '/diagnostics',
+    });
+    const threads = items.filter((item) => item.id.startsWith('session:'));
+    expect(threads).toHaveLength(437);
+    expect(threads[0]?.id).toBe('session:session-436');
+    expect(threads.at(-1)?.id).toBe('session:session-0');
     expect(searchPaletteItems(items, 'session-436')[0]?.item.id).toBe(
       'session:session-436',
     );

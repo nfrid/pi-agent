@@ -87,6 +87,69 @@ const liveRun3 = {
 };
 
 describe('delegate history composition', () => {
+  it('does not let stale running or paused rows override terminal history for the same run', () => {
+    const model = composeDelegateHistory(history, [
+      {
+        ...liveRun3,
+        runId: 'run-2',
+        state: 'running',
+        pauseState: 'paused',
+        pausedAt: 10,
+      },
+    ]);
+    expect(model.groups[0]?.row).toMatchObject({
+      state: 'success',
+      finishedAt: 4,
+    });
+    expect(model.groups[0]?.row.pauseState).toBeUndefined();
+    expect(model.groups[0]?.section).toBe('recent');
+    expect(
+      model.sections.find((section) => section.id === 'active')?.groups,
+    ).toHaveLength(0);
+    expect(model.groups[0]?.runs.at(-1)?.row.state).toBe('success');
+  });
+
+  it('uses terminal workflow evidence for a matching live attempt with a synthetic history run ID', () => {
+    const workflow = {
+      logicalId: 'worker',
+      attempt: 2,
+      identity: 'worker@2',
+      state: 'success' as const,
+      dependencies: [],
+      createdAt: 1,
+      scheduledAt: 1,
+      startedAt: 2,
+      settledAt: 4,
+    };
+    const run = {
+      ...history.groups[0].runs[1],
+      runId: 'workflow-placeholder',
+      workflow,
+    };
+    const durable = {
+      ...history,
+      groups: [{ ...history.groups[0], workflow, runs: [run], runCount: 1 }],
+    } as DelegateHistoryResponse;
+    const model = composeDelegateHistory(durable, [
+      {
+        ...liveRun3,
+        runId: 'actual-run',
+        workflow: { ...workflow, state: 'running', settledAt: undefined },
+      },
+    ]);
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0]?.row).toMatchObject({
+      runId: 'actual-run',
+      state: 'success',
+      finishedAt: 4,
+      workflow: { identity: 'worker@2', state: 'success', settledAt: 4 },
+    });
+    expect(model.groups[0]?.row.runs).toEqual([
+      { state: 'success', startedAt: 2, finishedAt: 4 },
+    ]);
+    expect(model.groups[0]?.section).toBe('recent');
+  });
+
   it('adapts durable details to the existing transcript inspector shape', () => {
     const row = delegateHistoryInvocationToStatus(history.groups[0].runs[0]);
     expect(row.runId).toBe('run-1');

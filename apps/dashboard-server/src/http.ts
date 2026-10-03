@@ -61,6 +61,7 @@ import {
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
+import { DashboardTelemetry } from './telemetry.js';
 
 /** Keep session deltas comfortably below the authoritative frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
@@ -195,6 +196,7 @@ export class DashboardServerImpl implements DashboardServer {
   private readonly host: string;
   private readonly origins: string[];
   private readonly stateDir: string;
+  private readonly telemetry: DashboardTelemetry;
   private readonly configuration: DashboardDependencies['configuration'];
   private readonly metadata: DashboardDependencies['metadata'];
   private readonly sessions: DashboardDependencies['sessions'];
@@ -237,6 +239,7 @@ export class DashboardServerImpl implements DashboardServer {
     this.host = config.host;
     this.port = config.port;
     this.stateDir = config.stateDir;
+    this.telemetry = new DashboardTelemetry(config.telemetryDir);
     this.configuration = config;
     this.token = config.token;
     this.socketPath = config.socketPath;
@@ -286,6 +289,26 @@ export class DashboardServerImpl implements DashboardServer {
       // properties at the HTTP boundary.
       ajv: { customOptions: { removeAdditional: false } },
     });
+    this.app.addHook('onResponse', async (request, reply) => {
+      const route = request.routeOptions.url;
+      if (
+        !route ||
+        route.startsWith('/trpc/') ||
+        route === '/api/health' ||
+        request.headers['x-dashboard-token'] !== this.token
+      )
+        return;
+      this.telemetry.record({
+        operation: `http.${route.replace(/[^a-zA-Z0-9]/g, '.').slice(0, 85)}`,
+        code: `http-${reply.statusCode}`,
+        outcome:
+          reply.statusCode >= 500
+            ? 'failure'
+            : reply.statusCode >= 400
+              ? 'expected'
+              : 'success',
+      });
+    });
     this.app.register(dashboardRoutes, { context: this.routeContext() });
     this.http = this.app.server;
   }
@@ -314,6 +337,7 @@ export class DashboardServerImpl implements DashboardServer {
   private routeContext(): DashboardRouteContext {
     return {
       token: this.token,
+      telemetry: this.telemetry,
       serverId: () => this.serverId,
       origins: () => this.origins,
       snapshot: () =>
@@ -931,6 +955,11 @@ export class DashboardServerImpl implements DashboardServer {
       try {
         await operation();
       } catch (error) {
+        this.telemetry.record({
+          operation: 'shutdown',
+          code: 'cleanup-failed',
+          outcome: 'failure',
+        });
         failures.push(
           error instanceof Error
             ? new Error(`${label}: ${error.message}`, { cause: error })
@@ -976,6 +1005,7 @@ export class DashboardServerImpl implements DashboardServer {
     if (final) {
       await attempt('push sender', () => this.push.close?.());
       await attempt('metadata store', () => this.metadata.close());
+      this.telemetry.close();
     }
 
     if (failures.length > 0)

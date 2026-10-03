@@ -8,6 +8,7 @@ test-results/
 playwright-report/
 /dashboard/
 /dashboard-v2/
+/telemetry/
 .env.dashboard
 pi-accept-*
 auth.json

@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+vi.mock('../telemetry', () => ({ reportBrowserTelemetry: vi.fn() }));
 
 const snapshot = {
   serverId: 'server-compatible',

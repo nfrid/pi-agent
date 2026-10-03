@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { defaultTelemetryDirectory } from '@pi-agent/telemetry';
 import { DashboardApplication } from './application/dashboard-application.js';
 import { OrchestrationService } from './application/orchestration-service.js';
 import { SessionUsageService } from './application/session-usage-service.js';
@@ -92,6 +93,12 @@ function configuration(
     host,
     port,
     stateDir,
+    telemetryDir:
+      options.telemetryDir ??
+      process.env.PI_TELEMETRY_DIR ??
+      (options.stateDir
+        ? path.join(stateDir, 'telemetry')
+        : defaultTelemetryDirectory()),
     token,
     socketPath,
     runtimeHostSocketPath,

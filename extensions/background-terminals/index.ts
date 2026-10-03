@@ -11,6 +11,7 @@ import {
   type ScopedServices,
   type SessionScopeId,
 } from '../shared/runtime/scoped-services';
+import { recordHarnessFailure } from '../shared/telemetry';
 import { createManagedWidget } from '../shared/ui/widget';
 import { registerBackgroundCommands } from './commands';
 import {
@@ -55,11 +56,18 @@ export default defineExtension(
           theme.fg('accent', '/ps');
         return [truncateToWidth(line, width, '…')];
       },
-      onError: (error) =>
+      onError: (error) => {
+        recordHarnessFailure(
+          'background.widget',
+          'widget-update-failed',
+          error,
+          scopeId,
+        );
         console.error(
           'background-terminals: failed to update the status widget',
           error,
-        ),
+        );
+      },
     });
 
     const completionKey = (id: string) => `background-process:${id}`;
@@ -102,6 +110,12 @@ export default defineExtension(
         });
         return true;
       } catch (error) {
+        recordHarnessFailure(
+          'background.delivery',
+          'completion-delivery-failed',
+          error,
+          scopeId,
+        );
         console.error(
           'background-terminals: failed to deliver completion',
           error,
@@ -147,6 +161,12 @@ export default defineExtension(
         });
         return true;
       } catch (error) {
+        recordHarnessFailure(
+          'background.delivery',
+          'watch-delivery-failed',
+          error,
+          scopeId,
+        );
         console.error(
           'background-terminals: failed to deliver output watch',
           error,
@@ -231,7 +251,17 @@ export default defineExtension(
       scopedServices = undefined;
       widget.detach();
       ui = undefined;
-      await closing?.dispose();
+      try {
+        await closing?.dispose();
+      } catch (error) {
+        recordHarnessFailure(
+          'background.cleanup',
+          'dispose-failed',
+          error,
+          closingScope,
+        );
+        throw error;
+      }
       if (closingScope) releaseScopedServices(closingScope, closingServices);
     });
 

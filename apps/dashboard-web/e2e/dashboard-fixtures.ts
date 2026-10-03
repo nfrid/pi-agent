@@ -111,6 +111,12 @@ export async function installDashboardBootstrap(
       ),
     }),
   );
+  await page.route('**/trpc/telemetryReport', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: trpcData({ accepted: true }),
+    }),
+  );
   await page.route('**/trpc/usage*', async (route) =>
     route.fulfill({
       contentType: 'application/json',

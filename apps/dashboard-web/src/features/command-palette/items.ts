@@ -147,6 +147,16 @@ export function paletteItems(
       icon: '◇',
       path: '/projects',
     },
+    {
+      kind: 'navigate',
+      id: 'diagnostics',
+      group: 'Navigation',
+      title: 'Diagnostics',
+      description: 'Review local failures and report a quirk',
+      keywords: ['telemetry', 'errors', 'failures', 'bugs', 'report'],
+      icon: '!',
+      path: '/diagnostics',
+    },
   ];
   const actions = snapshotActions(snapshot).map(
     ({ runtime, action }): PaletteItem => ({

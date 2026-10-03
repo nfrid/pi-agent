@@ -59,6 +59,11 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
             +
           </button>
         )}
+        {(pathname === '/' || pathname === '/diagnostics') && (
+          <button type="button" onClick={() => go('/diagnostics')}>
+            Diagnostics
+          </button>
+        )}
         <CommandPaletteTrigger disabled={paletteDisabled} />
       </div>
     </header>
