@@ -13,7 +13,7 @@ Use `background_start` for non-interactive Bash commands that should outlive the
 
 A `task` belongs to the current logical request. The request stays open until the process reaches a terminal state and its result enters provider context. Each watch created during the request is also a required outcome. A task still waits for process exit if one of its watches matches first.
 
-A `service` is passive and never keeps a request open because the process is running. Each watch created during the request keeps it open only until that watch outcome enters provider context. A later service exit updates activity and does not reopen a closed request.
+A `service` is passive and never keeps a request open because the process is running. Each watch created during the request keeps it open only until that watch outcome enters provider context. A later service exit updates activity and does not reopen a closed request. The process host and background-terminal manager do not impose a hard process-count admission cap; the separate bound of eight watches per process still applies.
 
 A watch added by `background_watch` belongs to the request that added it. Match, timeout, process end, unwatch, stop, and cancel outcomes count only after the result or control receipt enters provider context. Starting a stop or unwatch action does not clear a dependency before its result is acknowledged.
 

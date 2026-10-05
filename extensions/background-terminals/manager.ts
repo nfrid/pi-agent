@@ -13,7 +13,6 @@ import {
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
 import type { SessionScopeId } from '../shared/runtime/scoped-services';
 
-export const MAX_RUNNING = 8;
 export const MAX_SETTLED = 32;
 export const MAX_WATCHES = BACKGROUND_JOBS_MAX_WATCHES;
 export const STDOUT_RETAINED_BYTES = 256 * 1024;
@@ -190,7 +189,6 @@ export class BackgroundManager {
     this.assertLive();
     const generation = this.generation;
     await this.refresh(true, generation);
-    this.assertAccepting();
     validateWatches(options.watch);
     if (options.watch?.length) await this.assertWatchSupport();
     this.assertLive();
@@ -460,14 +458,6 @@ export class BackgroundManager {
 
   private assertLive(): void {
     if (this.disposed) throw new Error('Background manager is shut down.');
-  }
-
-  private assertAccepting(): void {
-    this.assertLive();
-    if (this.runningCount >= MAX_RUNNING)
-      throw new Error(
-        `At most ${MAX_RUNNING} background processes may run at once.`,
-      );
   }
 
   private async assertWatchSupport(): Promise<void> {

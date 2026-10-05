@@ -777,15 +777,6 @@ export class BackgroundJobStore {
       .map(snapshot);
   }
 
-  activeCount(ownerSession: string): number {
-    const row = this.db
-      .prepare(
-        "SELECT COUNT(*) AS count FROM background_jobs WHERE owner_session = ? AND status = 'running'",
-      )
-      .get(ownerSession);
-    return Number(row?.count ?? 0);
-  }
-
   create(
     input: StartBackgroundJobInput,
     _fingerprint: string,

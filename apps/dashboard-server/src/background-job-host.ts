@@ -35,7 +35,6 @@ import {
   type BackgroundJobStoreRow,
 } from './background-job-store.js';
 
-const MAX_RUNNING_PER_OWNER = 8;
 const TERM_GRACE_MS = 2_000;
 const KILL_GRACE_MS = 500;
 
@@ -408,12 +407,6 @@ export class BackgroundJobHostService {
           );
         return existing;
       }
-      if (
-        this.database().activeCount(input.ownerSession) >= MAX_RUNNING_PER_OWNER
-      )
-        throw new Error(
-          `At most ${MAX_RUNNING_PER_OWNER} background jobs may run at once.`,
-        );
       const row = this.database().create(input, fingerprint(input));
       let child: ChildProcess;
       try {

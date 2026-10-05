@@ -88,6 +88,26 @@ afterAll(async () => {
 });
 
 describe('BackgroundManager', () => {
+  it('starts 17 simultaneous jobs for one owner', async () => {
+    await withManager(async (manager) => {
+      const jobs = [];
+      for (let index = 0; index < 17; index++) {
+        jobs.push(
+          await manager.start({
+            command: 'sleep 60',
+            title: 'concurrent job',
+            cwd: process.cwd(),
+          }),
+        );
+      }
+      expect(jobs).toHaveLength(17);
+      expect(jobs.every((job) => job.status === 'running')).toBe(true);
+      const stopped = await manager.stop(jobs.map((job) => job.id));
+      expect(stopped).toHaveLength(17);
+      expect(stopped.every((job) => job.status !== 'running')).toBe(true);
+    });
+  });
+
   it('broadcasts pending-process changes when a job starts and stops', async () => {
     const onChange = vi.fn();
     const manager = new BackgroundManager({

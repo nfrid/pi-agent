@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,6 +56,31 @@ describe('background process host', () => {
         exactEnv: true,
         outputWatches: true,
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('starts 17 simultaneous jobs for one owner', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'background-many-'));
+    try {
+      const host = await createHost(root);
+      const client = new BackgroundJobsClient(host.socketPath, 'one-owner');
+      const jobs = await Promise.all(
+        Array.from({ length: 17 }, () =>
+          client.start({
+            id: randomUUID(),
+            command: 'sleep 60',
+            title: 'concurrent job',
+            cwd: process.cwd(),
+          }),
+        ),
+      );
+      expect(jobs).toHaveLength(17);
+      expect(jobs.every((job) => job.status === 'running')).toBe(true);
+      const stopped = await client.stop(jobs.map((job) => job.id));
+      expect(stopped).toHaveLength(17);
+      expect(stopped.every((job) => job.status !== 'running')).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
