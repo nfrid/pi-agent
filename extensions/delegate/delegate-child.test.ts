@@ -896,17 +896,116 @@ describe('delegate child environment', () => {
     );
   });
 
-  test('copies an owner-hosted truncated event into a private cache artifact', async () => {
+  test('replays complete recovered hosted events through normal processing', async () => {
+    const overflowDirectory = mkdtempSync(
+      path.join(tmpdir(), 'delegate-hosted-recovery-'),
+    );
+    const messagePath = path.join(overflowDirectory, 'message.raw');
+    const ackPath = path.join(overflowDirectory, 'ack.raw');
+    const message = Buffer.from(
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: `recovered final ${'🙂'.repeat(17_000)}` },
+          ],
+        },
+      }),
+    );
+    const ack = Buffer.from(
+      JSON.stringify({
+        type: 'delegate_control_ack',
+        controlId: 'recovered-pause',
+        controlKind: 'pause',
+        controlGeneration: 9,
+      }),
+    );
+    writeFileSync(messagePath, message, { mode: 0o600 });
+    writeFileSync(ackPath, ack, { mode: 0o600 });
+    try {
+      await withHostedCase(
+        {
+          status: 'done',
+          exitCode: 0,
+          eventResponse: {
+            events: [
+              {
+                offset: 0,
+                stream: 'stdout',
+                text: message.subarray(0, 50 * 1024).toString('utf8'),
+                truncated: true,
+                overflow: {
+                  bytes: message.byteLength,
+                  artifactPath: messagePath,
+                },
+              },
+              {
+                offset: 1,
+                stream: 'stdout',
+                text: '{"type":"delegate_control_ack"',
+                truncated: true,
+                overflow: { bytes: ack.byteLength, artifactPath: ackPath },
+              },
+            ],
+            truncated: false,
+            complete: true,
+            nextOffset: 2,
+          },
+        },
+        async () => {
+          const run = createRun('hosted recovery');
+          const onLine = vi.fn();
+          const onControlAck = vi.fn();
+          const result = await runHostedDelegateChild(run, {
+            command: 'pi',
+            args: [],
+            cwd: process.cwd(),
+            env: {},
+            ownerSession: 'parent-session',
+            processJobId: hostedJobId,
+            onControlAck,
+            onLine,
+          });
+          expect(result.exitCode).toBe(0);
+          expect(run.messages).toHaveLength(1);
+          expect(JSON.stringify(run.messages)).toContain('recovered final');
+          expect(onControlAck).toHaveBeenCalledWith(
+            'recovered-pause',
+            'pause',
+            9,
+          );
+          expect(onLine).toHaveBeenCalledTimes(2);
+          expect(hasDelegateEventOverflow(run)).toBe(false);
+        },
+      );
+    } finally {
+      rmSync(overflowDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    [
+      'malformed JSON',
+      Buffer.from(
+        `{"type":"message_end", broken: private hosted marker ${'🙂'.repeat(17_000)}`,
+      ),
+    ],
+    [
+      'invalid UTF-8 that would decode as valid JSON with replacement',
+      Buffer.concat([
+        Buffer.from('{"type":"message_end","text":"'),
+        Buffer.from([0xff]),
+        Buffer.from('"}'),
+      ]),
+    ],
+    ['JSON array', Buffer.from('[]')],
+    ['JSON primitive', Buffer.from('7')],
+  ])('retains evidence for invalid hosted artifact: %s', async (_label, exact) => {
     const overflowDirectory = mkdtempSync(
       path.join(tmpdir(), 'delegate-hosted-overflow-'),
     );
     const artifactPath = path.join(overflowDirectory, 'event.raw');
-    const exact = Buffer.from(
-      JSON.stringify({
-        type: 'message_end',
-        marker: `private hosted marker ${'🙂'.repeat(17_000)}`,
-      }),
-    );
     writeFileSync(artifactPath, exact, { mode: 0o600 });
     try {
       await withHostedCase(
@@ -930,6 +1029,8 @@ describe('delegate child environment', () => {
         },
         async () => {
           const run = createRun('hosted overflow');
+          const onControlAck = vi.fn();
+          const onLine = vi.fn();
           const result = await runHostedDelegateChild(run, {
             command: 'pi',
             args: [],
@@ -937,10 +1038,13 @@ describe('delegate child environment', () => {
             env: {},
             ownerSession: 'parent-session',
             processJobId: hostedJobId,
-            onLine: vi.fn(),
+            onControlAck,
+            onLine,
           });
           expect(result.exitCode).toBe(0);
           expect(run.messages).toEqual([]);
+          expect(onControlAck).not.toHaveBeenCalled();
+          expect(onLine).not.toHaveBeenCalled();
           expect(run.stderr).not.toContain('private hosted marker');
           expect(hasDelegateEventOverflow(run)).toBe(true);
           run.state = 'error';
@@ -963,6 +1067,62 @@ describe('delegate child environment', () => {
           expect(JSON.stringify(getDelegateLifecycle(run))).not.toContain(
             'private hosted marker',
           );
+        },
+      );
+    } finally {
+      rmSync(overflowDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps byte-mismatched hosted artifacts failed closed', async () => {
+    const overflowDirectory = mkdtempSync(
+      path.join(tmpdir(), 'delegate-hosted-mismatch-'),
+    );
+    const artifactPath = path.join(overflowDirectory, 'event.raw');
+    const exact = Buffer.from(
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'must not replay' }],
+        },
+      }),
+    );
+    writeFileSync(artifactPath, exact, { mode: 0o600 });
+    try {
+      await withHostedCase(
+        {
+          status: 'done',
+          exitCode: 0,
+          eventResponse: {
+            events: [
+              {
+                offset: 0,
+                stream: 'stdout',
+                text: '{"type":"message_end"',
+                truncated: true,
+                overflow: { bytes: exact.byteLength + 1, artifactPath },
+              },
+            ],
+            truncated: false,
+            complete: true,
+            nextOffset: 1,
+          },
+        },
+        async () => {
+          const run = createRun('hosted byte mismatch');
+          await runHostedDelegateChild(run, {
+            command: 'pi',
+            args: [],
+            cwd: process.cwd(),
+            env: {},
+            ownerSession: 'parent-session',
+            processJobId: hostedJobId,
+            onLine: vi.fn(),
+          });
+          expect(run.messages).toEqual([]);
+          expect(hasDelegateEventOverflow(run)).toBe(true);
+          expect(run.stderr).toContain('excluded from transcript parsing');
         },
       );
     } finally {

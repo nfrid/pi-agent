@@ -243,6 +243,33 @@ export async function runHostedDelegateChild(
       }
       // The host journal is offset ordered; sort defensively before replay so
       // a malformed adapter response cannot reorder transcript state.
+      const processEventLine = (line: string, stream: 'stdout' | 'stderr') => {
+        let parsed: Record<string, unknown> | undefined;
+        try {
+          const value: unknown = JSON.parse(line);
+          if (value && typeof value === 'object' && !Array.isArray(value))
+            parsed = value as Record<string, unknown>;
+        } catch {
+          // Non-JSON stderr is retained as bounded diagnostics below.
+        }
+        if (
+          parsed?.type === 'delegate_control_ack' &&
+          typeof parsed.controlId === 'string' &&
+          typeof parsed.controlKind === 'string'
+        ) {
+          options.onControlAck?.(
+            parsed.controlId,
+            parsed.controlKind,
+            typeof parsed.controlGeneration === 'number'
+              ? parsed.controlGeneration
+              : undefined,
+          );
+          processJsonLine(line, run);
+        } else if (!processJsonLine(line, run) && stream === 'stderr') {
+          hostDiagnostic(run, line);
+        }
+        options.onLine();
+      };
       for (const event of [...eventBatch.events].sort(
         (left, right) => left.offset - right.offset,
       )) {
@@ -284,6 +311,25 @@ export async function runHostedDelegateChild(
               }
             }
           }
+          let recoveredLine: string | undefined;
+          if (content) {
+            try {
+              recoveredLine = new TextDecoder('utf-8', { fatal: true }).decode(
+                content,
+              );
+              if (recoveredLine.endsWith('\r'))
+                recoveredLine = recoveredLine.slice(0, -1);
+              const value: unknown = JSON.parse(recoveredLine);
+              if (!value || typeof value !== 'object' || Array.isArray(value))
+                recoveredLine = undefined;
+            } catch {
+              recoveredLine = undefined;
+            }
+          }
+          if (recoveredLine !== undefined) {
+            processEventLine(recoveredLine, event.stream);
+            continue;
+          }
           recordDelegateEventOverflow(
             run,
             event.overflow?.bytes ?? 0,
@@ -297,31 +343,7 @@ export async function runHostedDelegateChild(
           continue;
         }
         const line = event.text;
-        let parsed: Record<string, unknown> | undefined;
-        try {
-          const value: unknown = JSON.parse(line);
-          if (value && typeof value === 'object' && !Array.isArray(value))
-            parsed = value as Record<string, unknown>;
-        } catch {
-          // Non-JSON stderr is retained as bounded diagnostics below.
-        }
-        if (
-          parsed?.type === 'delegate_control_ack' &&
-          typeof parsed.controlId === 'string' &&
-          typeof parsed.controlKind === 'string'
-        ) {
-          options.onControlAck?.(
-            parsed.controlId,
-            parsed.controlKind,
-            typeof parsed.controlGeneration === 'number'
-              ? parsed.controlGeneration
-              : undefined,
-          );
-          processJsonLine(line, run);
-        } else if (!processJsonLine(line, run) && event.stream === 'stderr') {
-          hostDiagnostic(run, line);
-        }
-        options.onLine();
+        processEventLine(line, event.stream);
       }
       offset = Math.max(offset, eventBatch.nextOffset);
       eventsComplete = eventsComplete || eventBatch.complete;
