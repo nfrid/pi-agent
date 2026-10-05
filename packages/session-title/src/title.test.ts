@@ -191,6 +191,30 @@ describe('session title generation', () => {
     ).toBeUndefined();
   });
 
+  it('preserves generated titles longer than the configured guidance limit', async () => {
+    const title = 'Update [API] titles: café / 東京 sessions';
+    const client = {
+      find: vi.fn(() => ({
+        provider: 'openai',
+        id: 'title-model',
+        api: 'openai-responses',
+        reasoning: true,
+      })),
+      streamSimple: vi.fn(() => ({
+        result: async () => ({ content: [{ type: 'text', text: title }] }),
+      })),
+    } as unknown as SessionTitleModelClient;
+
+    await expect(
+      generateSessionTitle(
+        client,
+        'Update titles',
+        new AbortController().signal,
+        { ...TEST_CONFIG, maxLength: 10 },
+      ),
+    ).resolves.toBe(title);
+  });
+
   it('uses a history-specific prompt for regeneration', async () => {
     const streamSimple = vi.fn(
       (_model: unknown, _request: unknown, _options: unknown) => ({
@@ -278,16 +302,17 @@ describe('session title generation', () => {
     );
   });
 
-  it('normalizes model output and rejects empty titles', () => {
+  it('normalizes model output without truncating titles and rejects empty titles', () => {
     expect(sanitizeSessionTitle('  `Fix   title generation!`  ')).toBe(
       'Fix title generation',
     );
     expect(sanitizeSessionTitle('- - - Finance sync')).toBe('Finance sync');
     expect(sanitizeSessionTitle('  \n  ')).toBeUndefined();
-    expect(
-      sanitizeSessionTitle(
-        'Reconnect failures after restart because the session state does not recover',
-      ),
-    ).toBe('Reconnect failures after restart because the se...');
+    const longTitle =
+      'Reconnect failures after restart because the session state does not recover';
+    expect(sanitizeSessionTitle(longTitle)).toBe(longTitle);
+    expect(sanitizeSessionTitle('保存するタイトルを変更する')).toBe(
+      '保存するタイトルを変更する',
+    );
   });
 });

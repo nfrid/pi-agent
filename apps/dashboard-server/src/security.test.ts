@@ -95,11 +95,27 @@ describe('dashboard security boundary', () => {
     ).toMatchObject({ status: 403 });
   });
 
-  it('preserves Unicode names without turning them into command strings', () => {
-    expect(sanitizeDisplayName('Переезд завершён за 15 000 ₽')).toBe(
-      'Переезд завершён за 15 000 ₽',
+  it('preserves punctuation and Unicode in display names', () => {
+    expect(sanitizeDisplayName('x; rm -rf / [draft] — v2!')).toBe(
+      'x; rm -rf / [draft] — v2!',
     );
-    expect(sanitizeDisplayName('x; rm -rf /')).not.toContain(';');
-    expect(sanitizeDisplayName('')).toBe('pi-agent');
+    expect(sanitizeDisplayName('保存するタイトルを変更する')).toBe(
+      '保存するタイトルを変更する',
+    );
+    expect(sanitizeDisplayName('ＡＢＣ')).toBe('ＡＢＣ');
+    const longName = `Charge: ${'¥😀'.repeat(40)}`;
+    expect(longName.length).toBeGreaterThan(64);
+    expect(sanitizeDisplayName(longName)).toBe(longName);
+  });
+
+  it('cleans accidental whitespace and control characters and uses the fallback', () => {
+    expect(sanitizeDisplayName('alpha\nbeta\tgamma')).toBe('alpha beta gamma');
+    expect(sanitizeDisplayName('  alpha\n\t beta\u0000\r gamma  ')).toBe(
+      'alpha beta gamma',
+    );
+    expect(sanitizeDisplayName(' \n\u0000 ')).toBe('pi-agent');
+    expect(sanitizeDisplayName(undefined, 'custom fallback')).toBe(
+      'custom fallback',
+    );
   });
 });

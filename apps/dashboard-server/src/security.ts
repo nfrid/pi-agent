@@ -65,9 +65,9 @@ export function sanitizeDisplayName(
   value: string | undefined,
   fallback = 'pi-agent',
 ): string {
-  const normalized = (value ?? fallback)
-    .normalize('NFKC')
-    .replace(/[^\p{L}\p{N}\p{Sc}._ -]+/gu, '-')
+  const normalized = (value ?? '')
+    .replace(/\s+/gu, ' ')
+    .replace(/[\p{Cc}]/gu, '')
     .trim();
-  return [...normalized].slice(0, 64).join('') || fallback;
+  return normalized || fallback;
 }

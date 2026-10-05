@@ -45,10 +45,7 @@ export interface SessionTitleModelClient {
   ): { result(): Promise<AssistantMessage> };
 }
 
-export function sanitizeSessionTitle(
-  raw: string,
-  maxLength = 50,
-): string | undefined {
+export function sanitizeSessionTitle(raw: string): string | undefined {
   const normalized = raw
     .trim()
     .split(/\r?\n/u)[0]
@@ -59,12 +56,7 @@ export function sanitizeSessionTitle(
     .replace(/[.!?]+$/gu, '')
     .trim();
 
-  if (!normalized) return undefined;
-  if ([...normalized].length <= maxLength) return normalized;
-  return `${[...normalized]
-    .slice(0, maxLength - 3)
-    .join('')
-    .trimEnd()}...`;
+  return normalized || undefined;
 }
 
 function visibleMessage(
@@ -167,17 +159,14 @@ function requiresCyrillicTitle(text: string): boolean {
   return cyrillic > 0 && cyrillic > countLetters(text, 'Latin');
 }
 
-function responseTitle(
-  response: AssistantMessage,
-  maxLength: number,
-): string | undefined {
+function responseTitle(response: AssistantMessage): string | undefined {
   const text = response.content
     .filter(
       (part): part is { type: 'text'; text: string } => part.type === 'text',
     )
     .map((part) => part.text)
     .join(' ');
-  return sanitizeSessionTitle(text, maxLength);
+  return sanitizeSessionTitle(text);
 }
 
 async function completeSessionTitle(
@@ -216,7 +205,7 @@ async function completeSessionTitle(
   const response = await client
     .streamSimple(model, { systemPrompt, messages: [message] }, options)
     .result();
-  const title = responseTitle(response, config.maxLength);
+  const title = responseTitle(response);
   if (!requiresCyrillic || (title && /\p{Script=Cyrillic}/u.test(title)))
     return title;
 
@@ -233,7 +222,6 @@ async function completeSessionTitle(
     await client
       .streamSimple(model, { systemPrompt, messages: [retryMessage] }, options)
       .result(),
-    config.maxLength,
   );
   return retry && /\p{Script=Cyrillic}/u.test(retry) ? retry : undefined;
 }
